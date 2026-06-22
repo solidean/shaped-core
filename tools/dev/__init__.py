@@ -1,0 +1,40 @@
+"""Reusable developer tooling for CMake-based projects.
+
+Plain functions over plain data — orchestration (argument parsing, command
+dispatch, project-specific policy) lives in the project's dev.py; this package
+only provides helpers. Everything is collection-oriented: configure/build/test
+operate on lists of presets and targets.
+"""
+
+from __future__ import annotations
+
+from .build import build
+from .cmake import remove_build_dir
+from .configure import configure, ensure_configured
+from .doctor import doctor
+from .logs import merge_junit
+from .models import Preset, StepResult, Target, TestSummary
+from .presets import PresetError, load_presets, resolve_presets
+from .targets import NotConfiguredError, discover_targets, executables, write_query
+from .test import test
+
+__all__ = [
+    "build",
+    "configure",
+    "ensure_configured",
+    "doctor",
+    "merge_junit",
+    "remove_build_dir",
+    "Preset",
+    "Target",
+    "StepResult",
+    "TestSummary",
+    "load_presets",
+    "resolve_presets",
+    "PresetError",
+    "discover_targets",
+    "executables",
+    "write_query",
+    "NotConfiguredError",
+    "test",
+]
