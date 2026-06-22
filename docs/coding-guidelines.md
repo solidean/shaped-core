@@ -1,7 +1,13 @@
 # Coding Guidelines
 
-This document defines the coding standards and design principles for the clean-core library.
-These guidelines prioritize correctness, performance, maintainability, and readability for a foundational C++ library.
+This document defines the coding standards and design principles for the shaped-core libraries.
+These guidelines prioritize correctness, performance, maintainability, and readability for
+foundational C++ libraries. Most examples use `clean-core` (`cc::`) since it is the shared
+foundation every other library builds on.
+
+> [.clang-format](../.clang-format) is authoritative for formatting. Where this document and the
+> format config disagree, **the config wins** — fix the doc, not the code. [.clang-tidy](../.clang-tidy)
+> is still being calibrated; treat its warnings as advisory guidance, not gospel.
 
 ---
 
@@ -10,7 +16,7 @@ These guidelines prioritize correctness, performance, maintainability, and reada
 **C++ Standard:** C++23 minimum
 
 **Supported Platforms:**
-- 64-bit only (Windows, Linux, macOS)
+- 64-bit only (Windows, Linux, macOS; Android NDK)
 - Architectures: x64 and ARM64
 
 **Compiler Support:**
@@ -21,9 +27,15 @@ These guidelines prioritize correctness, performance, maintainability, and reada
 
 ## Repository Structure
 
-- **`docs/`** — Documentation (prefer Markdown)
-- **`src/clean-core/`** — Library implementation (`.hh` and `.cc` files colocated)
-- **`tests/`** — Test code using nexus (separate build target)
+The repo is a growing collection of libraries under `libs/<category>/<lib>` (today
+`libs/base/clean-core` and `libs/base/nexus`; more will follow). Each library is laid out
+consistently:
+
+- **`src/<lib>/`** — Library implementation (`.hh` and `.cc` files colocated)
+- **`tests/`** — Test code using nexus (separate build target named `<lib>-test`)
+- **`docs/`** — Optional library-local documentation (prefer Markdown)
+
+Cross-library and repo-wide docs live in [docs/](_index.md).
 
 ---
 
@@ -35,7 +47,7 @@ These guidelines prioritize correctness, performance, maintainability, and reada
 | Functions                                     | `snake_case`  | `to_string()`, `get_size()`        |
 | Variables                                     | `snake_case`  | `buffer_size`, `input_data`        |
 | Enum values                                   | `snake_case`  | `error_none`, `format_utf8`        |
-| Namespaces                                    | `snake_case`  | `cc`, `detail`                     |
+| Namespaces                                    | `snake_case`  | `cc`, `cc::impl`                   |
 | Template parameters                           | `UpperCase`   | `template <class T, int Size>`     |
 | Private members                               | `_snake_case` | `_internal_state`, `_cached_value` |
 | Macros                                        | `UPPER_CASE`  | `CC_ASSERT`, `CC_FORCE_INLINE`     |
@@ -48,9 +60,13 @@ These guidelines prioritize correctness, performance, maintainability, and reada
 
 ### General Principles
 
-- **clang-format is mandatory** (currently version 21.1.7). Source files must not change under clang-format execution. Use trailing `//` comments to steer formatting locally when necessary. Header include order is also handled by clang-format.
+- **clang-format is mandatory** (requires clang-format >= 21). Source files must not change under
+  clang-format execution. Use trailing `//` comments to steer formatting locally when necessary.
+  Header include order is also handled by clang-format.
+- **Brace style: Allman** (opening brace on its own line) — clang-format-enforced. Short *inline*
+  function bodies may stay on one line.
+- **Column limit: 120.** Keep lines within it; clang-format wraps the rest.
 - One declaration per line. Never `int a, b;`
-- Line length should be reasonable for diffs (~100 chars recommended).
 - Prefer short, tight sections optimized for skimming.
 - **Comparison direction consistency:** When chaining comparisons with `&&`, maintain consistent direction.
   ```cpp
@@ -71,6 +87,9 @@ T const x = ...;
 span<T const> data;
 cc::string const& name;
 ```
+
+**Pointers and references bind left** (`PointerAlignment: Left`); combined with east const this reads
+as `T const* p` and `T const& r`.
 
 **Prefer almost-always-auto style:**
 ```cpp
@@ -93,7 +112,8 @@ T x;                       // fine if initialized later
   This works when the declaration already exists.
 - Use `impl` nested namespaces for implementation details that must be visible (e.g., due to inlining requirements):
   ```cpp
-  namespace cc::impl {
+  namespace cc::impl
+  {
       // implementation details here
   }
   ```
@@ -124,7 +144,8 @@ Non-performance-critical functions can live in `.cc` files to reduce compile tim
 - Non-trivial ADL usage must always be explicitly marked.
 - Use C++23 deducing `this` when it provides clearer or more efficient code:
   ```cpp
-  struct example {
+  struct example
+  {
       template <class Self>
       auto&& get_value(this Self&& self) { return std::forward<Self>(self)._value; }
   };
@@ -141,7 +162,8 @@ When accepting templated callables (predicates, functors, callbacks), choose the
 **Example with optional index:**
 ```cpp
 template <class Pred>
-void remove_all_where(Pred&& pred) {
+void remove_all_where(Pred&& pred)
+{
     // ...
     if (cc::invoke_with_optional_idx(idx, pred, elem))  // supports pred(elem) and pred(idx, elem)
         // ...
@@ -156,7 +178,8 @@ vec.remove_all_where(&T::is_empty);     // pointer-to-member-function works too
 **Example with fixed signature:**
 ```cpp
 template <class EqPred>
-bool strip_matching_prefix_with(string_view s, EqPred&& eq) {
+bool strip_matching_prefix_with(string_view s, EqPred&& eq)
+{
     // ...
     if (eq(c0, c1))  // direct call: only eq(char, char) makes sense
         // ...
@@ -181,7 +204,8 @@ Avoid non-trivial constructors. Prefer static factory methods instead:
 
 ```cpp
 // Good: default constructible with factory methods
-struct texture {
+struct texture
+{
     [[nodiscard]] static cc::result<texture> create_from_file(cc::string_view path);
     [[nodiscard]] static texture create_with_dimensions(int width, int height);
 
@@ -194,7 +218,8 @@ private:
 };
 
 // Avoid: complex ctor that can fail
-struct texture {
+struct texture
+{
     texture(cc::string_view path);  // what if file doesn't exist?
 };
 ```
@@ -319,7 +344,8 @@ Thread-safe types typically include `atomic_` in their name.
 
 Use **hidden friends** for operator overloading where possible:
 ```cpp
-struct vec3 {
+struct vec3
+{
     friend vec3 operator+(vec3 a, vec3 b) { return { a.x + b.x, ... }; }
 };
 ```
@@ -333,7 +359,8 @@ Use **redundant visibility modifiers** to logically group APIs.
 Place group comments above the modifier, preserving space for individual documentation comments:
 
 ```cpp
-class foo {
+class foo
+{
     // construction
 public:
     foo() = default;
@@ -368,7 +395,7 @@ Use `///` for documentation. **No doc tags, no XML.**
 
 - Write plain, natural language that describes everything important.
 - Insert blank lines every few lines to break up walls of text and improve skimmability.
-- Keep line length reasonable for diffs.
+- Keep lines within the 120-column limit.
 - **Include at least one usage example** (~2-10 lines) in doc comments for each major struct/data type.
 
 ```cpp
@@ -448,6 +475,10 @@ TEST("feature group")
 - **Performance testing** — Measure execution characteristics
 - **Benchmarking** — Compare performance across implementations
 
+See [nexus' Catch2-runner compatibility](../libs/base/nexus/docs/catch2-runner-compat.md) for how the
+test binaries are discovered and filtered, and [building-and-testing](guides/building-and-testing.md)
+for how to run them.
+
 ---
 
 ## Common Design Pitfalls
@@ -471,13 +502,16 @@ Simple `this != &other` checks do **not** protect against this.
 **Example of the problem:**
 
 ```cpp
-struct container {
+struct container
+{
     int* _data = nullptr;
 
     // BROKEN: not subobject-safe
-    container& operator=(container&& rhs) {
-        if (this != &rhs) {
-            delete[] _data;  // destroys _data
+    container& operator=(container&& rhs)
+    {
+        if (this != &rhs)
+        {
+            delete[] _data;     // destroys _data
             _data = rhs._data;  // but rhs._data might have been inside _data!
             rhs._data = nullptr;
         }
@@ -494,7 +528,7 @@ container* inner = reinterpret_cast<container*>(outer._data);
 
 **Design guideline:**
 
-Components in this library should aim to provide subobject-safe move assignment, or clearly document when they do not.
+Components in these libraries should aim to provide subobject-safe move assignment, or clearly document when they do not.
 
 This property is essential for composability: if a type `T` is subobject-safe move-assignable, then wrappers and aggregates (e.g., `optional<T>`, containers, resource owners) should preserve that guarantee rather than weakening it through additional side effects on the source object.
 
@@ -502,8 +536,10 @@ This property is essential for composability: if a type `T` is subobject-safe mo
 
 ```cpp
 // Safe: read all data from rhs before modifying this
-container& operator=(container&& rhs) {
-    if (this != &rhs) {
+container& operator=(container&& rhs)
+{
+    if (this != &rhs)
+    {
         auto* old_data = _data;
         auto* new_data = rhs._data;
 
@@ -520,9 +556,9 @@ container& operator=(container&& rhs) {
 
 ## Stability & Evolution
 
-**API Stability:** High priority. This is a foundational library. We reserve the right to make breaking changes where they significantly improve the library.
+**API Stability:** High priority. These are foundational libraries. We reserve the right to make breaking changes where they significantly improve a library.
 
-**ABI Stability:** Low priority. Expect to build clean-core from source in most environments.
+**ABI Stability:** Low priority. Expect to build from source in most environments.
 
 **Evolution strategy:** Prefer monotonic extension over replacement. When superseding types, aim for "this type remains useful in scenario X, though the newer Y fits most use cases better" rather than "do not use this type anymore."
 
@@ -536,7 +572,7 @@ container& operator=(container&& rhs) {
 
 - [ ] East const (`T const`)
 - [ ] Almost-always-auto style
-- [ ] clang-format applied (version 21.1.7)
+- [ ] clang-format applied (120 cols, Allman, clang-format >= 21)
 - [ ] Headers compile standalone
 - [ ] Designated initializers where possible
 - [ ] Non-trivial logic uses static factory methods, not constructors
