@@ -8,6 +8,7 @@ operate on lists of presets and targets.
 
 from __future__ import annotations
 
+from . import clangd
 from .build import build
 from .cmake import remove_build_dir
 from .configure import configure, ensure_configured
@@ -20,6 +21,7 @@ from .test import test
 
 __all__ = [
     "build",
+    "clangd",
     "configure",
     "ensure_configured",
     "doctor",

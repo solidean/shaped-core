@@ -2,10 +2,13 @@
 # This file enables clang-tidy integration and configures diagnostics
 
 #
-# CompileFlags: Point clangd at the compile_commands.json from the active preset
+# CompileFlags: Point clangd at the directory holding compile_commands.json.
+# This is a DIRECTORY, not a file — clangd looks for compile_commands.json
+# inside it. `dev.py configure` publishes the active preset's database to
+# build/compile_commands.json, so point at build/.
 #
 CompileFlags:
-  CompilationDatabase: build/compile_commands.json
+  CompilationDatabase: build
 
 #
 # Index: Configure background indexing for code navigation

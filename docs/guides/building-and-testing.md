@@ -21,7 +21,8 @@ uv run dev.py <command> [options]
 | `build`        | Build (auto-configures first if inputs changed). `-t/--target` to scope.      |
 | `test`         | Build, then run test binaries (`*-test`). Optional name/binary filter.        |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
-| `doctor`       | Read-only toolchain sanity check (cmake, ninja, compiler, presets).           |
+| `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
+| `doctor`       | Read-only toolchain sanity check (cmake, ninja, compiler, presets, clangd).   |
 | `list-presets` | List available build presets.                                                |
 | `list-targets` | List discovered CMake targets for a preset.                                   |
 
@@ -93,6 +94,40 @@ These read the artifacts dev.py already emitted — far better than scrolling ra
 
 **Don't pipe dev.py into `tail`/`head`/`grep`.** The output is already terse, and
 `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
+
+## clangd / IDE code intelligence
+
+The presets set `CMAKE_EXPORT_COMPILE_COMMANDS`, so every configure emits a
+`compile_commands.json` into the per-preset build dir (`build/<preset>/`). `configure`
+**publishes** the active preset's database to `build/compile_commands.json` after a successful run,
+and [.clangd](../../.clangd) points clangd's `CompilationDatabase` at the `build` **directory** so
+it picks that file up. Two things matter here and are easy to get wrong:
+
+- `CompilationDatabase` is a **directory**, not a file path. Pointing it at
+  `build/compile_commands.json` makes clangd silently fall back to bare flags (no includes,
+  wrong language standard) and flag every line.
+- The published file is what makes clangd work regardless of whether you configured through
+  `dev.py` or the VSCode CMake Tools extension. With multiple presets, the last one configured
+  wins that single published database.
+
+If clangd reports errors in the editor that don't match reality, reproduce them from the CLI:
+
+```bash
+uv run dev.py diagnose clangd libs/base/nexus/src/nexus/run.cc
+uv run dev.py diagnose clangd <file> --preset debug-clang   # force a specific preset's database
+```
+
+This runs `clangd --check` and prints every diagnostic as `file:line: severity: message [code]`
+(exit 1 if any are errors). By **default it uses clangd's own discovery** (`.clangd` + upward
+search) — i.e. exactly what the editor does — so a misconfigured `.clangd` shows up here too rather
+than being masked; it warns loudly when clangd falls back to generic flags. Pass `--preset` to
+force that preset's per-preset database instead. Note that `clangd --check` also self-tests
+refactor tweaks and inflates its own "N errors" summary with those failures — `diagnose clangd`
+ignores that noise and reports only real code diagnostics. `doctor` runs the same discovery-based
+check on a sample file to confirm clangd is wired up end-to-end.
+
+A common first move when the editor looks wrong: reload the clangd language server (the published
+database, or a just-edited `.clangd`, can be stale relative to the running server).
 
 ## Tests (nexus)
 

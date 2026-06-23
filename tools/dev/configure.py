@@ -11,6 +11,7 @@ current (or `force` is set).
 
 from __future__ import annotations
 
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,23 @@ from . import cmake, fingerprint, targets
 from .logs import step_fields, write_sidecar
 from .models import Preset, StepResult
 from .process import msvc_env, run_step
+
+
+def _publish_compile_commands(preset: Preset) -> None:
+    """Copy the preset's compile_commands.json up to build/compile_commands.json.
+
+    All presets set CMAKE_EXPORT_COMPILE_COMMANDS, so the generator emits the
+    database into the per-preset build dir (build/<preset>/). clangd is pointed
+    at build/compile_commands.json (see .clangd), so we publish the active
+    preset's database there. This mirrors what the VSCode CMake Tools extension's
+    cmake.copyCompileCommands does, but works for any configure path. With
+    multiple presets the last one configured wins, which matches clangd's single
+    compilation database.
+    """
+    src = preset.build_dir / "compile_commands.json"
+    if not src.exists():
+        return
+    shutil.copyfile(src, preset.build_dir.parent / "compile_commands.json")
 
 
 def _configure_one(
@@ -40,6 +58,7 @@ def _configure_one(
     fp = ""
     if result.ok:
         fp = fingerprint.save(preset.build_dir, root)
+        _publish_compile_commands(preset)
     write_sidecar(
         preset.build_dir,
         "configure.json",
