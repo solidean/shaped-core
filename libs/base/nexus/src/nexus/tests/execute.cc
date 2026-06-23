@@ -1,10 +1,9 @@
 #include "execute.hh"
 
+#include <clean-core/common/assert-handler.hh>
+#include <clean-core/common/assert.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/section.hh>
-
-#include <clean-core/assert-handler.hh>
-#include <clean-core/assert.hh>
 
 #include <chrono>
 #include <iomanip>

@@ -1,8 +1,7 @@
-#include <clean-core/char_predicates.hh>
-#include <clean-core/string.hh>
-#include <clean-core/string_view.hh>
-#include <clean-core/utility.hh>
-
+#include <clean-core/common/utility.hh>
+#include <clean-core/string/char_predicates.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
 #include <string>

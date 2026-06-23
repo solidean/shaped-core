@@ -1,5 +1,4 @@
-#include <clean-core/macros.hh>
-
+#include <clean-core/common/macros.hh>
 #include <nexus/test.hh>
 
 #include <cstring>

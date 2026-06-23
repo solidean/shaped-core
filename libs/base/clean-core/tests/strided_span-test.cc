@@ -1,7 +1,6 @@
-#include <clean-core/strided_span.hh>
-#include <clean-core/utility.hh>
-#include <clean-core/vector.hh>
-
+#include <clean-core/common/utility.hh>
+#include <clean-core/container/strided_span.hh>
+#include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 
 // static assertions for triviality

@@ -1,7 +1,6 @@
-#include <clean-core/fixed_array.hh>
-#include <clean-core/span.hh>
-#include <clean-core/utility.hh>
-
+#include <clean-core/common/utility.hh>
+#include <clean-core/container/fixed_array.hh>
+#include <clean-core/container/span.hh>
 #include <nexus/test.hh>
 
 #include <type_traits>

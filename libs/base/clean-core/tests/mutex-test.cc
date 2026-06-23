@@ -1,8 +1,7 @@
-#include <clean-core/mutex.hh>
-#include <clean-core/string.hh>
-#include <clean-core/to_string.hh>
-#include <clean-core/vector.hh>
-
+#include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/to_string.hh>
+#include <clean-core/thread/mutex.hh>
 #include <nexus/test.hh>
 
 

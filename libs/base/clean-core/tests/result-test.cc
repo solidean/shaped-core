@@ -1,5 +1,4 @@
-#include <clean-core/result.hh>
-
+#include <clean-core/error/result.hh>
 #include <nexus/test.hh>
 
 #include <memory>

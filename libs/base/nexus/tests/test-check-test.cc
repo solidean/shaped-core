@@ -1,9 +1,8 @@
+#include <clean-core/string/to_debug_string.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
-
-#include <clean-core/to_debug_string.hh>
 
 #include <string>
 

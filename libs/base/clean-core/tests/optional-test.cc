@@ -1,5 +1,4 @@
-#include <clean-core/optional.hh>
-
+#include <clean-core/error/optional.hh>
 #include <nexus/test.hh>
 
 #include <memory>

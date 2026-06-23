@@ -1,9 +1,9 @@
 #pragma once
 
-#include <clean-core/assert-handler.hh>
-#include <clean-core/assert.hh>
-#include <clean-core/string.hh>
-#include <clean-core/to_debug_string.hh>
+#include <clean-core/common/assert-handler.hh>
+#include <clean-core/common/assert.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/to_debug_string.hh>
 
 #include <format>
 #include <source_location>

@@ -1,8 +1,7 @@
 #include "junit.hh"
 
+#include <clean-core/common/assert.hh>
 #include <nexus/tests/export/xml.hh>
-
-#include <clean-core/assert.hh>
 
 #include <ostream>
 #include <string>
