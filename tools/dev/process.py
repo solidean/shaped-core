@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -106,27 +107,33 @@ def _pump(src, log_file, mirror_to) -> None:
 def run_step(
     cmd: list[str],
     *,
-    label: str,
-    step: int,
+    step_type: str,
+    name: str | None = None,
     build_dir: Path,
     cwd: Path,
     env: dict[str, str] | None = None,
     timeout: float | None = None,
     mirror: bool = False,
     verbose: bool = False,
+    summary_extra: Callable[[StepResult], str] | None = None,
 ) -> StepResult:
     """Run a subprocess as a named step and return a StepResult.
 
-    Prints a one-line start banner, captures both streams to per-step log files
-    under build_dir/run-logs/ (mirrored live when `mirror`), then prints capture
-    pointers and a pass/fail summary. On timeout the process is killed and the
+    `step_type` is the kind of step ("configure"/"build"/"test") and `name` the
+    specific thing it acts on (a target, "all", or a test binary). Prints a
+    one-line `[ts] [step_type] name` banner, captures both streams to per-step
+    log files under build_dir/run-logs/ (mirrored live when `mirror`), then
+    prints capture pointers and a pass/fail summary. `summary_extra`, when given,
+    is called with the finished StepResult and its return value is appended to
+    the summary line (e.g. build/test stats); it is skipped on timeout and any
+    exception it raises is swallowed. On timeout the process is killed and the
     step reports returncode 124 (conventional timeout code).
     """
-    print(f"[{_ts()}] {label}", file=sys.stderr)
+    print(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else ""), file=sys.stderr)
     if verbose:
         print(f"  $ {' '.join(cmd)}", file=sys.stderr)
 
-    stdout_path, stderr_path = step_log_paths(build_dir, step, label)
+    stdout_path, stderr_path = step_log_paths(build_dir, step_type, name)
 
     start = time.perf_counter()
     timed_out = False
@@ -152,21 +159,16 @@ def run_step(
         for t in threads:
             t.join()
         if timed_out:
-            err_f.write(f"\n[dev.py] TIMEOUT: '{label}' exceeded {timeout:.0f}s and was killed.\n")
+            err_f.write(f"\n[dev.py] TIMEOUT: '{name or step_type}' exceeded {timeout:.0f}s and was killed.\n")
     duration_s = time.perf_counter() - start
 
     report_capture(stdout_path)
     report_capture(stderr_path)
 
     returncode = 124 if timed_out else proc.returncode
-    if timed_out:
-        print(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms", file=sys.stderr)
-    else:
-        ok = returncode == 0
-        print(f"  {label} {'succeeded' if ok else 'failed'} in {duration_s * 1000:.0f} ms", file=sys.stderr)
-
-    return StepResult(
-        label=label,
+    result = StepResult(
+        step_type=step_type,
+        name=name or step_type,
         command=cmd,
         returncode=returncode,
         duration_s=duration_s,
@@ -174,3 +176,18 @@ def run_step(
         stderr_log=stderr_path,
         timed_out=timed_out,
     )
+
+    label = name or step_type
+    if timed_out:
+        print(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms", file=sys.stderr)
+    else:
+        extra = ""
+        if summary_extra is not None:
+            try:
+                extra = summary_extra(result) or ""
+            except Exception:
+                extra = ""
+        verb = "succeeded" if result.ok else "failed"
+        print(f"  {label} {verb}{extra} in {duration_s * 1000:.0f} ms", file=sys.stderr)
+
+    return result

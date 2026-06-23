@@ -15,9 +15,15 @@ from pathlib import Path
 
 from . import cmake
 from .configure import ensure_configured
-from .logs import step_fields, write_sidecar
+from .logs import ninja_built_count, step_fields, write_sidecar
 from .models import Preset, StepResult
 from .process import msvc_env, run_step
+
+
+def _build_extra(result: StepResult) -> str:
+    """Summary suffix for a build step: how many files ninja (re)built."""
+    n = ninja_built_count(result.stdout_log)
+    return f" ({n} file{'s' if n != 1 else ''})" if n else " (up to date)"
 
 
 def build(
@@ -47,16 +53,16 @@ def build(
         to_build = targets if targets else [None]
         preset_results: list[StepResult] = []
         for target in to_build:
-            label = f"build-{target}" if target else "build"
             result = run_step(
                 cmake.build_command(preset.name, target),
-                label=label,
-                step=2,
+                step_type="build",
+                name=target or "all",
                 build_dir=preset.build_dir,
                 cwd=root,
                 env=env,
                 mirror=mirror,
                 verbose=verbose,
+                summary_extra=_build_extra,
             )
             preset_results.append(result)
             if not result.ok:
@@ -69,7 +75,10 @@ def build(
             {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "targets": targets if targets else "all",
-                "steps": [step_fields(r, preset.build_dir) for r in preset_results],
+                "steps": [
+                    {**step_fields(r, preset.build_dir), "built": ninja_built_count(r.stdout_log)}
+                    for r in preset_results
+                ],
             },
         )
 

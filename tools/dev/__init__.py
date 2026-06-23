@@ -13,7 +13,7 @@ from .build import build
 from .cmake import remove_build_dir
 from .configure import configure, ensure_configured
 from .doctor import doctor
-from .logs import merge_junit
+from .logs import merge_junit, ninja_built_count
 from .models import Preset, StepResult, Target, TestSummary
 from .presets import PresetError, load_presets, resolve_presets
 from .targets import NotConfiguredError, discover_targets, executables, write_query
@@ -26,6 +26,7 @@ __all__ = [
     "ensure_configured",
     "doctor",
     "merge_junit",
+    "ninja_built_count",
     "remove_build_dir",
     "Preset",
     "Target",

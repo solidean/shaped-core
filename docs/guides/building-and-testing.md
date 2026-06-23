@@ -75,7 +75,7 @@ the assertions-on branch.
 
 dev.py does **not** stream child output. For each step it:
 
-- captures stdout/stderr to `build/<preset>/run-logs/run-log-<NN>-<step>.{stdout,stderr}.txt`,
+- captures stdout/stderr to `build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt`,
 - writes a JSON sidecar in the build dir (`configure.json` / `build.json` / `test.json`),
 - writes a per-binary JUnit `*.results.xml` next to each test binary,
 

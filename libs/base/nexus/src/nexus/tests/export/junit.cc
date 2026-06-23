@@ -27,6 +27,7 @@ void nx::write_junit_xml(std::ostream& out, std::string_view suite_name, nx::tes
 {
     int const total_tests = execution.count_total_tests();
     int const failed_tests = execution.count_failed_tests();
+    int const total_checks = execution.count_total_checks();
 
     double total_time = 0.0;
     for (auto const& exec : execution.executions)
@@ -34,12 +35,15 @@ void nx::write_junit_xml(std::ostream& out, std::string_view suite_name, nx::tes
 
     std::string const suite = xml_escape(suite_name);
 
+    // `assertions` (total checks evaluated) is not part of the base JUnit schema
+    // but is widely understood; the dev.py runner reads it to report check counts.
     auto emit_suite_attrs = [&](std::ostream& os)
     {
         os << "name=\"" << suite << "\" "
            << "tests=\"" << total_tests << "\" "
            << "failures=\"" << failed_tests << "\" "
            << "errors=\"0\" skipped=\"0\" "
+           << "assertions=\"" << total_checks << "\" "
            << "time=\"" << total_time << "\"";
     };
 
