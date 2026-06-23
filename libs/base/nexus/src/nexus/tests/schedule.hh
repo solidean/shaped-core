@@ -21,6 +21,10 @@ struct test_schedule_config
     bool report_catch2_xml_results = false;
     bool verbose = false;
 
+    // When non-empty, run() writes a JUnit XML report to this file path (in
+    // addition to the normal console output). Set via --junit-xml <file>.
+    std::string junit_xml_file;
+
     static test_schedule_config create_from_args(int argc, char** argv);
 };
 

@@ -10,7 +10,7 @@ TestMate identifies a test binary as Catch2-compatible by running it with `--hel
 Compatible with Catch2 v3.11.0 in some args
 ```
 
-([run.cc:38](../src/nexus/run.cc))
+([run.cc, `print_help`](../src/nexus/run.cc))
 
 That line is the hook. Everything else flows from it.
 
@@ -24,6 +24,7 @@ Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc:7](.
 | `--reporter <type>` | Sets internal `has_xml_reporter` flag; the reporter value is consumed and otherwise ignored |
 | `--verbosity <level>` | Consumed and ignored (accepted so invocations don't error) |
 | `--durations <yes/no>` | Consumed and ignored |
+| `--junit-xml <file>` | Writes a JUnit XML report to `<file>` (additive — see [JUnit XML output](#junit-xml-output)) |
 | `-v` | Enables verbose schedule printing |
 | `-c <name>` | Adds a section filter |
 | Any other arg | Treated as a test name filter (see below) |
@@ -69,7 +70,7 @@ TestMate calls the binary with `--list-tests --reporter xml [filters]` to enumer
 
 `<ClassName/>` and `<Tags></Tags>` are always empty — nexus has no class or tag concepts but the elements are required for schema conformance. All text content is XML-escaped.
 
-([run.cc:44–63](../src/nexus/run.cc))
+([export/catch2.cc, `write_catch2_discovery_xml`](../src/nexus/tests/export/catch2.cc))
 
 ## Results mode
 
@@ -99,17 +100,50 @@ Sections are emitted recursively — a section may contain `<Expression>` elemen
 
 Two implementation details worth knowing:
 
-- **Minimum-1-failure rule.** If a section is marked as failing (`is_considered_failing`) but has zero recorded failed checks — e.g. it threw an exception before any `CHECK` ran — nexus reports `failures="1"` instead of `failures="0"`. Without this, TestMate would display the section as green despite the test being red. ([run.cc:108](../src/nexus/run.cc))
+- **Minimum-1-failure rule.** If a section is marked as failing (`is_considered_failing`) but has zero recorded failed checks — e.g. it threw an exception before any `CHECK` ran — nexus reports `failures="1"` instead of `failures="0"`. Without this, TestMate would display the section as green despite the test being red.
 
-- **Error cap.** At most 50 `<Expression>` elements are emitted per test case to keep the XML output bounded. ([run.cc:145](../src/nexus/run.cc))
+- **Error cap.** At most 50 `<Expression>` elements are emitted per test case to keep the XML output bounded.
 
 Exit code is 0 if all tests passed, 1 if any failed.
 
-([run.cc:119–156, 205–209](../src/nexus/run.cc))
+([export/catch2.cc, `write_catch2_results_xml`](../src/nexus/tests/export/catch2.cc))
+
+## JUnit XML output
+
+Independently of the Catch2 compat modes, passing `--junit-xml <file>` writes a
+[JUnit](https://github.com/testmoapp/junitxml)-style report to `<file>`. This is
+**additive**: tests run normally and the usual human-readable summary still goes
+to the console — the file is just an extra side-output.
+
+The report models each nexus test as one `<testcase>` under a single
+`<testsuite>` (named after the binary). Failing tests carry a `<failure>` element
+whose body lists the failed expressions and their source locations:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nexus-test" tests="2" failures="1" errors="0" skipped="0" time="0.0031">
+  <testsuite name="nexus-test" tests="2" failures="1" errors="0" skipped="0" time="0.0031">
+    <testcase classname="nexus-test" name="my passing test" time="0.0009"/>
+    <testcase classname="nexus-test" name="my failing test" time="0.0022">
+      <failure message="src/tests/foo.cc:58">a == b =&gt; 1 == 2 at src/tests/foo.cc:58
+</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+```
+
+The aggregate `<testsuite>`/`<testsuites>` attributes (`tests`, `failures`,
+`time`, …) match the schema the `dev.py` tooling parses ([tools/dev/logs.py](../../../../tools/dev/logs.py)
+`parse_junit`/`merge_junit`). The build/test driver passes `--junit-xml` to each
+nexus binary and prefers this native report — one case per test — over its own
+synthesized single-case sidecar, so `test_diag` and CI see individual test
+results rather than just a per-binary pass/fail.
+
+([export/junit.cc, `write_junit_xml`](../src/nexus/tests/export/junit.cc))
 
 ## Known gaps
 
-The following Catch2 XML features are not yet implemented (tracked in `run.cc` TODO comment):
+The following Catch2 XML features are not yet implemented (tracked in the `export/catch2.cc` TODO comment):
 
 - `<StdOut>` / `<StdErr>` capture inside test cases
 - `INFO` / `CAPTURE` contextual messages

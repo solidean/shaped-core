@@ -4,33 +4,16 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <clean-core/assert.hh>
+#include <nexus/tests/export/catch2.hh>
+#include <nexus/tests/export/junit.hh>
 
+#include <fstream>
 #include <iostream>
+#include <string>
+#include <string_view>
 
 namespace
 {
-std::string xml_escape(std::string_view str)
-{
-    std::string result;
-    result.reserve(str.size());
-
-    for (auto c : str)
-    {
-        switch (c)
-        {
-        case '<': result += "&lt;"; break;
-        case '>': result += "&gt;"; break;
-        case '&': result += "&amp;"; break;
-        case '"': result += "&quot;"; break;
-        case '\'': result += "&apos;"; break;
-        default: result += c; break;
-        }
-    }
-
-    return result;
-}
-
 void print_help()
 {
     std::cout << "nexus - Unified test, fuzz, benchmark, and app runner for modern C++\n\n";
@@ -41,118 +24,23 @@ void print_help()
     std::cout << "For more information, see the nexus documentation.\n";
 }
 
-void print_catch2_xml_discovery(nx::test_registry const& registry)
+// Derives a JUnit suite name from argv[0]: the basename without a directory or a
+// trailing .exe extension (e.g. "build/bin/nexus-test.exe" -> "nexus-test").
+std::string program_name(char const* argv0)
 {
-    std::cout << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    std::cout << "<MatchingTests>\n";
+    std::string_view name = argv0 != nullptr ? argv0 : "nexus";
 
-    for (auto const& decl : registry.declarations)
+    if (auto const slash = name.find_last_of("/\\"); slash != std::string_view::npos)
+        name = name.substr(slash + 1);
+
+    if (name.size() > 4)
     {
-        std::cout << "  <TestCase>\n";
-        std::cout << "    <Name>" << xml_escape(decl.name) << "</Name>\n";
-        std::cout << "    <ClassName/>\n";
-        std::cout << "    <Tags></Tags>\n";
-        std::cout << "    <SourceInfo>\n";
-        std::cout << "      <File>" << xml_escape(decl.location.file_name()) << "</File>\n";
-        std::cout << "      <Line>" << decl.location.line() << "</Line>\n";
-        std::cout << "    </SourceInfo>\n";
-        std::cout << "  </TestCase>\n";
+        auto const ext = name.substr(name.size() - 4);
+        if (ext == ".exe" || ext == ".EXE")
+            name = name.substr(0, name.size() - 4);
     }
 
-    std::cout << "</MatchingTests>\n";
-}
-
-void print_section_expressions(nx::test_execution::section const& sec,
-                               std::string const& indent,
-                               int& error_count,
-                               int max_errors)
-{
-    // Print errors/expressions for this section
-    for (auto const& error : sec.errors)
-    {
-        if (error_count >= max_errors)
-            return;
-
-        std::cout << indent << "<Expression success=\"false\" ";
-        std::cout << "filename=\"" << xml_escape(error.location.file_name()) << "\" ";
-        std::cout << "line=\"" << error.location.line() << "\">\n";
-        std::cout << indent << "  <Original>" << xml_escape(error.expr) << "</Original>\n";
-        std::cout << indent << "  <Expanded>" << xml_escape(error.expanded) << "</Expanded>\n";
-        std::cout << indent << "</Expression>\n";
-
-        ++error_count;
-    }
-}
-
-void print_section_recursive(nx::test_execution::section const& sec,
-                             std::string const& indent,
-                             int& error_count,
-                             int max_errors)
-{
-    // Print expressions for this section (top-level section errors appear before subsections)
-    print_section_expressions(sec, indent, error_count, max_errors);
-
-    // Print subsections
-    for (auto const& subsec : sec.subsections)
-    {
-        std::cout << indent << "<Section name=\"" << xml_escape(subsec.name) << "\" ";
-        std::cout << "filename=\"" << xml_escape(subsec.location.file_name()) << "\" ";
-        std::cout << "line=\"" << subsec.location.line() << "\">\n";
-
-        // Recursively print subsection content
-        print_section_recursive(subsec, indent + "  ", error_count, max_errors);
-
-        // Print section summary
-        // If the section is considered failing but has 0 failed checks (e.g., missing CHECK),
-        // report at least 1 failure so C++ TestMate interprets it correctly
-        auto const failures = subsec.is_considered_failing ? std::max(subsec.failed_checks, 1) : subsec.failed_checks;
-        std::cout << indent << "  <OverallResults ";
-        std::cout << "successes=\"" << (subsec.executed_checks - subsec.failed_checks) << "\" ";
-        std::cout << "failures=\"" << failures << "\" ";
-        std::cout << "expectedFailures=\"0\" ";
-        std::cout << "durationInSeconds=\"" << subsec.duration_seconds << "\"/>\n";
-
-        std::cout << indent << "</Section>\n";
-    }
-}
-
-void print_catch2_execute_result(nx::test_schedule_execution const& execution)
-{
-    // TODO(catch2-xml):
-    // - Emit captured StdOut / StdErr elements (useful for failure diagnostics and hung tests).
-    // - Support INFO/CAPTURE-style contextual messages in XML, not just failed expressions.
-    // - Model partial test-case runs (SECTION re-entry / partNumber) instead of only a merged section tree.
-    // - Add benchmark result reporting hooks (even if unimplemented for now).
-    // - Include run metadata (run name, RNG seed) for reproducibility/debugging.
-    // - Track and emit expectedFailures properly instead of hardcoding 0.
-    // - Fill discovery <Tags> from declarations (tag filtering is a core Catch2 feature).
-    // - Consider emitting explicit “test/section started” progress lines (stderr) for live IDE feedback.
-
-    std::cout << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    std::cout << "<TestRun>\n";
-
-    for (auto const& exec : execution.executions)
-    {
-        CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
-        auto const& decl = *exec.instance.declaration;
-        bool const success = !exec.is_considered_failing();
-
-        std::cout << "  <TestCase name=\"" << xml_escape(decl.name) << "\" ";
-        std::cout << "filename=\"" << xml_escape(decl.location.file_name()) << "\" ";
-        std::cout << "line=\"" << decl.location.line() << "\">\n";
-
-        // Print all sections and expressions recursively (capped at max_errors)
-        int const max_errors = 50;
-        int error_count = 0;
-        print_section_recursive(exec.root, "    ", error_count, max_errors);
-
-        // Print test case summary
-        std::cout << "    <OverallResult success=\"" << (success ? "true" : "false") << "\" ";
-        std::cout << "durationInSeconds=\"" << exec.root.duration_seconds << "\"/>\n";
-        std::cout << "  </TestCase>\n";
-    }
-
-    std::cout << "</TestRun>\n";
+    return std::string(name);
 }
 } // namespace
 
@@ -174,7 +62,7 @@ int nx::run(int argc, char** argv)
     // Handle Catch2 XML discovery mode for TestMate integration
     if (config.is_catch2_xml_discovery)
     {
-        print_catch2_xml_discovery(registry);
+        write_catch2_discovery_xml(std::cout, registry);
         return 0;
     }
 
@@ -201,10 +89,21 @@ int nx::run(int argc, char** argv)
     // Execute the scheduled tests
     auto execution = execute_tests(schedule, config);
 
+    // Write a JUnit XML report if requested. This is additive: the normal
+    // console output below still runs regardless of the reporting mode.
+    if (!config.junit_xml_file.empty())
+    {
+        std::ofstream out(config.junit_xml_file);
+        if (out)
+            write_junit_xml(out, program_name(argv[0]), execution);
+        else
+            std::cerr << "Error: could not open JUnit XML file: " << config.junit_xml_file << "\n";
+    }
+
     // Handle Catch2 XML results reporting for TestMate integration
     if (config.report_catch2_xml_results)
     {
-        print_catch2_execute_result(execution);
+        write_catch2_results_xml(std::cout, execution);
         return execution.count_failed_tests() > 0 ? 1 : 0;
     }
 

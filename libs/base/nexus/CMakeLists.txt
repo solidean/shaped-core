@@ -10,6 +10,9 @@ add_library(nexus
     src/nexus/tests/execute.cc
     src/nexus/tests/registry.cc
     src/nexus/tests/schedule.cc
+    src/nexus/tests/export/xml.cc
+    src/nexus/tests/export/catch2.cc
+    src/nexus/tests/export/junit.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -28,6 +31,9 @@ target_sources(nexus
     src/nexus/tests/execute.hh
     src/nexus/tests/registry.hh
     src/nexus/tests/schedule.hh
+    src/nexus/tests/export/xml.hh
+    src/nexus/tests/export/catch2.hh
+    src/nexus/tests/export/junit.hh
 )
 
 # Libraries should not set a global C++ standard here.
@@ -54,6 +60,7 @@ add_executable(nexus-test
     tests/main.cc
     tests/test-api-test.cc
     tests/test-check-test.cc
+    tests/test-export-test.cc
     tests/test-registry-test.cc
     tests/test-section-test.cc
 )
