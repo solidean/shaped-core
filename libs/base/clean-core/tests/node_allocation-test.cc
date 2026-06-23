@@ -1,6 +1,5 @@
-#include <clean-core/node_allocation.hh>
-#include <clean-core/vector.hh>
-
+#include <clean-core/container/vector.hh>
+#include <clean-core/memory/node_allocation.hh>
 #include <nexus/test.hh>
 
 #include <array>

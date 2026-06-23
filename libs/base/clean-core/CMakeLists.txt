@@ -8,16 +8,16 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Define the library and its sources
 add_library(clean-core
-    src/clean-core/allocation.cc
-    src/clean-core/assert.cc
-    src/clean-core/hash.cc
-    src/clean-core/native.cc
-    src/clean-core/node_allocation.cc
-    src/clean-core/result.cc
-    src/clean-core/to_string.cc
-    src/clean-core/string.cc
-    src/clean-core/string_view.cc
-    src/clean-core/vector.cc
+    src/clean-core/common/assert.cc
+    src/clean-core/common/hash.cc
+    src/clean-core/platform/native.cc
+    src/clean-core/memory/allocation.cc
+    src/clean-core/memory/node_allocation.cc
+    src/clean-core/error/result.cc
+    src/clean-core/string/to_string.cc
+    src/clean-core/string/string.cc
+    src/clean-core/string/string_view.cc
+    src/clean-core/container/vector.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -28,49 +28,61 @@ target_sources(clean-core
     TYPE HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
-    src/clean-core/array.hh
-    src/clean-core/unique_array.hh
-    src/clean-core/fixed_array.hh
-    src/clean-core/allocation.hh
-    src/clean-core/assert.hh
-    src/clean-core/asserts.hh
-    src/clean-core/assertf.hh
-    src/clean-core/assert-handler.hh
-    src/clean-core/bit.hh
-    src/clean-core/bitset.hh
-    src/clean-core/char_predicates.hh
-    src/clean-core/disjoint_set.hh
-    src/clean-core/fixed_bitset.hh
-    src/clean-core/flags.hh
-    src/clean-core/function_ref.hh
     src/clean-core/fwd.hh
-    src/clean-core/hash.hh
-    src/clean-core/macros.hh
-    src/clean-core/map.hh
-    src/clean-core/mutex.hh
-    src/clean-core/node_allocation.hh
-    src/clean-core/optional.hh
-    src/clean-core/pair.hh
-    src/clean-core/result.hh
-    src/clean-core/ringbuffer.hh
-    src/clean-core/set.hh
-    src/clean-core/source_location.hh
-    src/clean-core/span.hh
-    src/clean-core/stacktrace.hh
-    src/clean-core/strided_span.hh
-    src/clean-core/to_string.hh
-    src/clean-core/to_debug_string.hh
-    src/clean-core/string.hh
-    src/clean-core/string_view.hh
-    src/clean-core/tuple.hh
-    src/clean-core/unique_function.hh
-    src/clean-core/utility.hh
-    src/clean-core/variant.hh
-    src/clean-core/vector.hh
-    src/clean-core/unique_vector.hh
-    src/clean-core/fixed_vector.hh
-    src/clean-core/impl/allocating_container.hh
-    src/clean-core/impl/object_lifetime_util.hh
+
+    src/clean-core/common/macros.hh
+    src/clean-core/common/utility.hh
+    src/clean-core/common/flags.hh
+    src/clean-core/common/hash.hh
+    src/clean-core/common/assert.hh
+    src/clean-core/common/assert-handler.hh
+    src/clean-core/common/assertf.hh
+    src/clean-core/common/asserts.hh
+
+    src/clean-core/platform/native.hh
+    src/clean-core/platform/source_location.hh
+    src/clean-core/platform/stacktrace.hh
+
+    src/clean-core/math/bit.hh
+
+    src/clean-core/memory/allocation.hh
+    src/clean-core/memory/node_allocation.hh
+    src/clean-core/memory/impl/object_lifetime_util.hh
+
+    src/clean-core/container/array.hh
+    src/clean-core/container/fixed_array.hh
+    src/clean-core/container/unique_array.hh
+    src/clean-core/container/vector.hh
+    src/clean-core/container/fixed_vector.hh
+    src/clean-core/container/unique_vector.hh
+    src/clean-core/container/map.hh
+    src/clean-core/container/set.hh
+    src/clean-core/container/ringbuffer.hh
+    src/clean-core/container/bitset.hh
+    src/clean-core/container/fixed_bitset.hh
+    src/clean-core/container/disjoint_set.hh
+    src/clean-core/container/pair.hh
+    src/clean-core/container/tuple.hh
+    src/clean-core/container/variant.hh
+    src/clean-core/container/span.hh
+    src/clean-core/container/strided_span.hh
+    src/clean-core/container/impl/allocating_container.hh
+
+    src/clean-core/sequence/sequence.hh
+
+    src/clean-core/string/string.hh
+    src/clean-core/string/string_view.hh
+    src/clean-core/string/char_predicates.hh
+    src/clean-core/string/to_string.hh
+    src/clean-core/string/to_debug_string.hh
+
+    src/clean-core/function/function_ref.hh
+    src/clean-core/function/unique_function.hh
+
+    src/clean-core/error/result.hh
+    src/clean-core/error/optional.hh
+
+    src/clean-core/thread/mutex.hh
 )
 
 # Libraries should not set a global C++ standard here.

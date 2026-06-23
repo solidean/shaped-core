@@ -1,8 +1,7 @@
 #include "catch2.hh"
 
+#include <clean-core/common/assert.hh>
 #include <nexus/tests/export/xml.hh>
-
-#include <clean-core/assert.hh>
 
 #include <algorithm>
 #include <ostream>

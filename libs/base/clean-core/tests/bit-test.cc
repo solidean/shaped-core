@@ -1,5 +1,4 @@
-#include <clean-core/bit.hh>
-
+#include <clean-core/math/bit.hh>
 #include <nexus/test.hh>
 
 #include <iostream>

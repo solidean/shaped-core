@@ -1,6 +1,6 @@
 #include "schedule.hh"
 
-#include <clean-core/assert.hh>
+#include <clean-core/common/assert.hh>
 
 #include <iostream>
 

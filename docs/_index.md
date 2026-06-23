@@ -5,6 +5,8 @@ The entry point for repo-wide documentation. (Library-local docs live next to th
 
 ## Top-level
 
+- [libraries.md](libraries.md) — catalog of the shaped-core libraries: what each is, its
+  namespace, and the dependency order.
 - [coding-guidelines.md](coding-guidelines.md) — coding standards and design principles for the
   shaped-core libraries. `.clang-format` / `.clang-tidy` / `.clangd` are authoritative for
   formatting.
@@ -19,7 +21,8 @@ See [guides/_index.md](guides/_index.md) for the full list. Most useful:
 
 ## Per-library docs
 
-- [clean-core](../libs/base/clean-core/docs/) — clean-core's own notes.
+- [clean-core](../libs/base/clean-core/readme.md) — the `cc` foundational library; deeper notes
+  in its [docs hub](../libs/base/clean-core/docs/_index.md).
 - [nexus catch2-runner-compat](../libs/base/nexus/docs/catch2-runner-compat.md) — how nexus test
   binaries are discovered and filtered.
 

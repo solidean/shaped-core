@@ -1,5 +1,4 @@
-#include <clean-core/function_ref.hh>
-
+#include <clean-core/function/function_ref.hh>
 #include <nexus/test.hh>
 
 #include <memory>

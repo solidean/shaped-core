@@ -1,7 +1,6 @@
-#include <clean-core/string.hh>
-#include <clean-core/unique_function.hh>
-#include <clean-core/vector.hh>
-
+#include <clean-core/container/vector.hh>
+#include <clean-core/function/unique_function.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
 #include <memory>

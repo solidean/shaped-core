@@ -1,6 +1,5 @@
-#include <clean-core/assert-handler.hh>
-#include <clean-core/utility.hh>
-
+#include <clean-core/common/assert-handler.hh>
+#include <clean-core/common/utility.hh>
 #include <nexus/test.hh>
 
 #include <cstdint>

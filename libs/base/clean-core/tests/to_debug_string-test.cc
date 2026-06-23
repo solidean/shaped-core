@@ -1,9 +1,8 @@
-#include <clean-core/array.hh>
-#include <clean-core/optional.hh>
-#include <clean-core/string.hh>
-#include <clean-core/to_debug_string.hh>
-#include <clean-core/vector.hh>
-
+#include <clean-core/container/array.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/to_debug_string.hh>
 #include <nexus/test.hh>
 
 #include <array>
@@ -743,7 +742,7 @@ TEST("to_debug_string - char ensures visibility in collections")
 TEST("to_debug_string - non-null terminated char const* does not crash")
 {
     // Create a non-null terminated char buffer
-    const std::vector<char> v = {'h', 'i'};
+    std::vector<char> const v = {'h', 'i'};
 
     // This should not crash even though the buffer is not null-terminated
     auto result = cc::to_debug_string(v.data());
