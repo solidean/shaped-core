@@ -5,9 +5,11 @@ captures its streams via the standard step machinery, and judges pass/fail by
 exit code. A positional argument is passed through to the binary as a test-name
 filter — a convention most runners (including the in-repo nexus) honor.
 
-Because the test binaries do not emit JUnit themselves, we synthesize a JUnit
-sidecar per binary so downstream tooling (e.g. test_diag) and CI have a
-machine-readable result to parse.
+The in-repo nexus runner emits a native JUnit report (one case per test) when
+passed `--junit-xml <file>`; we prefer that. For any binary that writes nothing
+(a non-nexus runner, or a crash/timeout before flush) we synthesize a single-
+case JUnit sidecar instead, so downstream tooling (e.g. test_diag) and CI always
+have a machine-readable result to parse.
 
 Public API:
     test(presets, binary_names, ...) -> list[dict]   (per-binary run records)
@@ -19,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import targets as targets_mod
-from .logs import step_fields, write_sidecar, write_step_junit
+from .logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from .models import Preset
 from .process import run_step
 
@@ -54,8 +56,10 @@ def test(
     executables are tests). For each preset the names are resolved to that
     preset's built artifacts. When `test_name` is set, a binary that reports no
     matching tests is skipped rather than counted as a failure. Each binary gets
-    a synthesized JUnit XML next to it unless `write_xml` is False; a test.json
-    sidecar is written per preset. Returns one record per executed binary.
+    a JUnit XML next to it unless `write_xml` is False — the binary's own native
+    report when it wrote one, otherwise a synthesized single-case sidecar; a
+    test.json sidecar is written per preset. Returns one record per executed
+    binary.
     """
     extra_args = list(extra_args or [])
     all_records: list[dict] = []
@@ -70,9 +74,17 @@ def test(
             target = by_name.get(name)
             if target is None or target.artifact is None:
                 continue
+            xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
+
             cmd = [str(target.artifact)]
             if test_name:
                 cmd.append(test_name)
+            # nexus writes a native per-test JUnit report here; non-nexus or
+            # crashed binaries simply won't, and we fall back to synthesis below.
+            # Clear any stale report first so a crashed run can't be read as fresh.
+            if write_xml:
+                xml_path.unlink(missing_ok=True)
+                cmd += ["--junit-xml", str(xml_path)]
             cmd += extra_args
 
             result = run_step(
@@ -95,8 +107,13 @@ def test(
 
             summary = None
             if write_xml:
-                xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
-                summary = write_step_junit(xml_path, name=name, result=result)
+                # Prefer the binary's own native report (one case per nexus test);
+                # fall back to synthesizing a single-case sidecar when it wrote
+                # nothing (non-nexus runner, crash, or timeout before flush).
+                native = None
+                if xml_path.is_file() and xml_path.stat().st_size > 0:
+                    native = parse_junit(xml_path)
+                summary = native or write_step_junit(xml_path, name=name, result=result)
 
             record = {
                 "name": name,

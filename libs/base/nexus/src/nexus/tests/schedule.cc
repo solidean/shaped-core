@@ -66,6 +66,13 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
                 ++i;
             continue;
         }
+        // JUnit XML report file (consumed here so the path is not misread as a filter)
+        else if (arg == "--junit-xml")
+        {
+            if (i + 1 < argc)
+                config.junit_xml_file = argv[++i];
+            continue;
+        }
 
         // Regular filter argument - split by comma for Catch2 compatibility
         size_t start = 0;
