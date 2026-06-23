@@ -121,8 +121,8 @@ whose body lists the failed expressions and their source locations:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="nexus-test" tests="2" failures="1" errors="0" skipped="0" time="0.0031">
-  <testsuite name="nexus-test" tests="2" failures="1" errors="0" skipped="0" time="0.0031">
+<testsuites name="nexus-test" tests="2" failures="1" errors="0" skipped="0" assertions="5" time="0.0031">
+  <testsuite name="nexus-test" tests="2" failures="1" errors="0" skipped="0" assertions="5" time="0.0031">
     <testcase classname="nexus-test" name="my passing test" time="0.0009"/>
     <testcase classname="nexus-test" name="my failing test" time="0.0022">
       <failure message="src/tests/foo.cc:58">a == b =&gt; 1 == 2 at src/tests/foo.cc:58
@@ -134,7 +134,9 @@ whose body lists the failed expressions and their source locations:
 
 The aggregate `<testsuite>`/`<testsuites>` attributes (`tests`, `failures`,
 `time`, …) match the schema the `dev.py` tooling parses ([tools/dev/logs.py](../../../../tools/dev/logs.py)
-`parse_junit`/`merge_junit`). The build/test driver passes `--junit-xml` to each
+`parse_junit`/`merge_junit`). `assertions` (total checks evaluated) is outside the
+base JUnit schema but understood by common tooling; `dev.py` reads it to report
+check counts in its per-step and summary lines. The build/test driver passes `--junit-xml` to each
 nexus binary and prefers this native report — one case per test — over its own
 synthesized single-case sidecar, so `test_diag` and CI see individual test
 results rather than just a per-binary pass/fail.

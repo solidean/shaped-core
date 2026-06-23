@@ -37,6 +37,18 @@ def _selected_no_tests(stderr_log: Path) -> bool:
         return False
 
 
+def _test_extra(xml_path: Path) -> str:
+    """Summary suffix for a test step: test cases run and checks evaluated.
+
+    Reads the JUnit XML the binary just wrote; empty when there is none yet
+    (--no-xml, or a crash/timeout before the report was flushed).
+    """
+    summary = parse_junit(xml_path)
+    if summary is None:
+        return ""
+    return f" ({summary.tests} tests, {summary.assertions} checks)"
+
+
 def test(
     presets: list[Preset],
     binary_names: list[str],
@@ -89,14 +101,15 @@ def test(
 
             result = run_step(
                 cmd,
-                label=name,
-                step=3,
+                step_type="test",
+                name=name,
                 build_dir=preset.build_dir,
                 cwd=root,
                 env=env,
                 timeout=timeout,
                 mirror=mirror,
                 verbose=verbose,
+                summary_extra=(lambda r, xp=xml_path: _test_extra(xp)) if write_xml else None,
             )
 
             # With a name filter, "no matching tests in this binary" isn't a failure.
@@ -124,6 +137,7 @@ def test(
                         "failures": summary.failures,
                         "errors": summary.errors,
                         "skipped": summary.skipped,
+                        "assertions": summary.assertions,
                         "time_s": round(summary.time_s, 3),
                     }
                     if summary

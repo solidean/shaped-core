@@ -47,8 +47,7 @@ def _configure_one(
     env = msvc_env()
     result = run_step(
         cmake.configure_command(preset.configure_preset),
-        label="configure",
-        step=1,
+        step_type="configure",
         build_dir=preset.build_dir,
         cwd=root,
         env=env,

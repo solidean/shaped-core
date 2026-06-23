@@ -33,6 +33,8 @@ def step_fields(result: StepResult, build_dir: Path) -> dict:
             return str(p)
 
     return {
+        "step_type": result.step_type,
+        "name": result.name,
         "command": result.command,
         "returncode": result.returncode,
         "duration_s": round(result.duration_s, 3),
@@ -47,17 +49,35 @@ def _slug(label: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", label)
 
 
-def step_log_paths(build_dir: Path, step: int, label: str) -> tuple[Path, Path]:
+def step_log_paths(build_dir: Path, step_type: str, name: str | None) -> tuple[Path, Path]:
     """Return (stdout_path, stderr_path) for a step, creating the run-logs dir.
 
-    `step` is a stable, fixed number per kind of step (configure=1, build=2,
-    test=3) so file names are predictable across runs; many test binaries share
-    step 3 and stay distinct via their <label>.
+    The file stem is the logical step name (`run-log-<name>`), falling back to
+    `step_type` when a step has no specific name (e.g. configure). Names are
+    distinct per step within a preset's build dir, so no numeric prefix is
+    needed to keep them apart.
     """
     log_dir = build_dir / "run-logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"run-log-{step:02d}-{_slug(label)}"
+    stem = f"run-log-{_slug(name or step_type)}"
     return log_dir / f"{stem}.stdout.txt", log_dir / f"{stem}.stderr.txt"
+
+
+_NINJA_EDGE_RE = re.compile(r"^\[\d+/\d+\]")
+
+
+def ninja_built_count(stdout_log: Path) -> int:
+    """Count the build edges ninja executed, from a captured build stdout.
+
+    Ninja prints one `[done/total] <action>` line per edge it runs, so the
+    number of such lines is how many files/actions were (re)built. Returns 0
+    when nothing was rebuilt ("ninja: no work to do.") or the log is missing.
+    """
+    try:
+        text = stdout_log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    return sum(1 for line in text.splitlines() if _NINJA_EDGE_RE.match(line))
 
 
 def report_capture(path: Path) -> None:
@@ -146,7 +166,7 @@ def write_step_junit(
     tree.write(str(path), encoding="unicode", xml_declaration=True)
 
     return TestSummary(
-        binary=name, tests=1, failures=failures, errors=0, skipped=0, time_s=result.duration_s
+        binary=name, tests=1, failures=failures, errors=0, skipped=0, time_s=result.duration_s, assertions=0
     )
 
 
@@ -158,7 +178,7 @@ def parse_junit(path: Path) -> TestSummary | None:
         tree = ET.parse(path)
     except ET.ParseError:
         return None
-    totals = dict(tests=0, failures=0, errors=0, skipped=0)
+    totals = dict(tests=0, failures=0, errors=0, skipped=0, assertions=0)
     time_s = 0.0
     for suite in tree.getroot().iter("testsuite"):
         for attr in totals:
@@ -171,6 +191,7 @@ def parse_junit(path: Path) -> TestSummary | None:
         errors=totals["errors"],
         skipped=totals["skipped"],
         time_s=time_s,
+        assertions=totals["assertions"],
     )
 
 
@@ -212,4 +233,5 @@ def merge_junit(xml_paths: list[Path], output: Path) -> TestSummary:
         errors=totals["errors"],
         skipped=totals["skipped"],
         time_s=time_s,
+        assertions=totals["assertions"],
     )

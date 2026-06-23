@@ -28,7 +28,7 @@ The default preset is chosen by platform but can be overridden with --preset.
 (fingerprinted); pass --no-configure to skip.
 
 dev.py is quiet by default: child stdout/stderr is captured to
-build/<preset>/run-logs/run-log-<NN>-<step>.{stdout,stderr}.txt rather than
+build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt rather than
 mirrored to the terminal — pass --mirror-output to stream it live. Each command
 also writes a machine-readable sidecar (configure.json / build.json / test.json)
 next to the build directory.
@@ -179,12 +179,17 @@ def cmd_build(args: argparse.Namespace) -> None:
         mirror=args.mirror_output,
         verbose=args.verbose,
     )
-    build_steps = [r for r in results if r.label.startswith("build")]
+    build_steps = [r for r in results if r.step_type == "build"]
     total_s = sum(r.duration_s for r in build_steps)
     if not all(r.ok for r in results):
         print(f"\nbuild failed - {_build_diag_hint(presets)}", file=sys.stderr)
         sys.exit(1)
-    print(f"\nBuilt {len(build_steps)} target(s) in {_fmt_dur(total_s)}.", file=sys.stderr)
+    files = sum(dev.ninja_built_count(r.stdout_log) for r in build_steps)
+    print(
+        f"\nBuilt {files} file(s) across {len(build_steps)} target(s), "
+        f"{len(presets)} preset(s) in {_fmt_dur(total_s)}.",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 
@@ -248,11 +253,20 @@ def cmd_test(args: argparse.Namespace) -> None:
 
     total_s = sum(r["duration_s"] for r in records)
     failed = sum(1 for r in records if r["returncode"] != 0)
+    tests = sum(r["junit"]["tests"] for r in records if r["junit"])
+    checks = sum(r["junit"]["assertions"] for r in records if r["junit"])
+    stats = f"{tests} tests, {checks} checks"
     if failed:
-        print(f"\n{failed} of {len(records)} test run(s) failed in {_fmt_dur(total_s)}", file=sys.stderr)
+        print(
+            f"\n{failed} of {len(records)} test run(s) failed ({stats}) in {_fmt_dur(total_s)}",
+            file=sys.stderr,
+        )
         print(f"tests failed - {_test_diag_hint(presets)}", file=sys.stderr)
         sys.exit(1)
-    print(f"\nAll {len(records)} test run(s) passed in {_fmt_dur(total_s)}.", file=sys.stderr)
+    print(
+        f"\nAll {len(records)} test run(s) passed: {stats} in {_fmt_dur(total_s)}.",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 

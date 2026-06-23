@@ -38,9 +38,15 @@ class Target:
 
 @dataclass(frozen=True)
 class StepResult:
-    """Outcome of a single captured subprocess step."""
+    """Outcome of a single captured subprocess step.
 
-    label: str
+    `step_type` is the kind of step ("configure"/"build"/"test"); `name` is the
+    specific thing it acted on (a target, "all", or a test binary). Together they
+    drive the banner and the log-file name.
+    """
+
+    step_type: str
+    name: str
     command: list[str]
     returncode: int
     duration_s: float
@@ -55,7 +61,11 @@ class StepResult:
 
 @dataclass(frozen=True)
 class TestSummary:
-    """Parsed totals from a JUnit XML report."""
+    """Parsed totals from a JUnit XML report.
+
+    `assertions` is the total number of checks evaluated (the nexus runner emits
+    it; synthesized single-case sidecars report 0).
+    """
 
     binary: str
     tests: int
@@ -63,3 +73,4 @@ class TestSummary:
     errors: int
     skipped: int
     time_s: float
+    assertions: int = 0

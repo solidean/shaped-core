@@ -41,11 +41,12 @@ TEST("export - junit report has correct aggregate attributes and per-test cases"
     nx::write_junit_xml(out, "my-suite", exec);
     auto const xml = out.str();
 
-    // Suite-level aggregates: 2 tests, 1 failure, named after the suite.
+    // Suite-level aggregates: 2 tests, 1 failure, 2 checks, named after the suite.
     CHECK(contains(xml, "<testsuites "));
     CHECK(contains(xml, "name=\"my-suite\""));
     CHECK(contains(xml, "tests=\"2\""));
     CHECK(contains(xml, "failures=\"1\""));
+    CHECK(contains(xml, "assertions=\"2\""));
 
     // Both tests appear as cases; the passing one carries no <failure>.
     CHECK(contains(xml, "name=\"T_pass\""));
