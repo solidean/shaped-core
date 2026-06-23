@@ -12,6 +12,7 @@ Usage:
     uv run dev.py build [--target T]        Build (optionally specific targets)
     uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
     uv run dev.py clean [--all]             Remove build artifacts
+    uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
     uv run dev.py doctor                    Sanity-check the toolchain
     uv run dev.py list-presets              List available build presets
     uv run dev.py list-targets              List discovered targets
@@ -38,6 +39,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -269,6 +271,71 @@ def cmd_clean(args: argparse.Namespace) -> None:
         print("  nothing to remove (already clean)", file=sys.stderr)
 
 
+def cmd_diagnose(args: argparse.Namespace) -> None:
+    if args.diagnose_target == "clangd":
+        cmd_diagnose_clangd(args)
+    else:  # argparse 'required=True' should prevent this.
+        die(f"unknown diagnose target {args.diagnose_target!r}")
+
+
+def cmd_diagnose_clangd(args: argparse.Namespace) -> None:
+    file = Path(args.file)
+    if not file.is_absolute():
+        file = Path.cwd() / file
+    file = file.resolve()
+    if not file.is_file():
+        die(f"no such file: {args.file}")
+
+    clangd_bin = dev.clangd.find_clangd()
+    if clangd_bin is None:
+        die("clangd not found on PATH. Install LLVM/clangd or add it to PATH.")
+
+    # Default: reproduce the editor exactly — let clangd discover the database the
+    # same way it does in the IDE (via .clangd's CompilationDatabase and its own
+    # upward search). That way a misconfigured .clangd shows up here too, instead
+    # of being masked. With --preset, force that preset's per-preset database.
+    if args.preset:
+        preset = resolve_presets(args.preset)[0]
+        cc_dir = preset.build_dir
+        label = f"{preset.name} ({_rel(cc_dir)})"
+        if not (cc_dir / "compile_commands.json").is_file():
+            die(f"no compile_commands.json at {_rel(cc_dir)} - run: uv run dev.py configure --preset {preset.name}")
+    else:
+        cc_dir = None
+        label = "clangd auto-discovery (.clangd)"
+
+    print(f"clangd: checking {_rel(file)} against {label}", file=sys.stderr)
+    try:
+        result = dev.clangd.check_file(clangd_bin, file, compile_commands_dir=cc_dir, timeout=120)
+    except subprocess.TimeoutExpired:
+        die("clangd --check timed out")
+
+    if not result.found_database:
+        print(
+            f"WARNING: clangd found no compilation database for {_rel(file)} and used generic "
+            f"fallback flags (no project includes), so diagnostics below are unreliable. This is "
+            f"the same failure the editor hits. Check .clangd's CompilationDatabase points at the "
+            f"build/ directory, and run: uv run dev.py configure",
+            file=sys.stderr,
+        )
+
+    if args.verbose:
+        print(result.log, file=sys.stderr)
+
+    rel = _rel(file)
+    for d in result.diagnostics:
+        print(f"{rel}:{d.line}: {d.severity}: {d.message} [{d.code}]")
+    sys.stdout.flush()  # keep diagnostics (stdout) ahead of the summary (stderr)
+
+    errors = len(result.errors)
+    warnings = len(result.warnings)
+    if not result.diagnostics:
+        print("\nNo diagnostics.", file=sys.stderr)
+    else:
+        print(f"\n{errors} error(s), {warnings} warning(s)", file=sys.stderr)
+    sys.exit(1 if errors else 0)
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     checks = dev.doctor(ROOT, default_preset=DEFAULT_BUILD_PRESETS.get(platform.system()))
     all_ok = True
@@ -345,6 +412,16 @@ def main() -> None:
     clean_p.add_argument("--all", action="store_true", help="Remove every preset's build directory")
     clean_p.add_argument("--dry-run", action="store_true", help="Print what would be removed")
 
+    diag_p = sub.add_parser("diagnose", help="Diagnose tooling (e.g. clangd) for a file")
+    diag_sub = diag_p.add_subparsers(dest="diagnose_target", required=True)
+    clangd_p = diag_sub.add_parser(
+        "clangd", help="Show clangd diagnostics for a file (uses build/compile_commands.json)"
+    )
+    _add_preset_arg(clangd_p)
+    clangd_p.add_argument(
+        "file", help="Source file to check (its compile flags come from the compilation database)"
+    )
+
     sub.add_parser("doctor", help="Sanity-check the toolchain")
 
     lp = sub.add_parser("list-presets", help="List available build presets")
@@ -363,6 +440,8 @@ def main() -> None:
             cmd_test(args)
         case "clean":
             cmd_clean(args)
+        case "diagnose":
+            cmd_diagnose(args)
         case "doctor":
             cmd_doctor(args)
         case "list-presets":
