@@ -88,6 +88,21 @@ def _build_diag_hint(presets: list[dev.Preset]) -> str:
     return "diagnose with: build_diag"
 
 
+def _fail_build(results: list[dev.StepResult], presets: list[dev.Preset]) -> None:
+    """Report a failed build phase with the right diagnosis hint, then exit(1).
+
+    A configure failure leaves no per-translation-unit sidecars, so the
+    build_diag hint would point at an empty scan. Point at the captured configure
+    log instead; only genuine compile/link failures get the build_diag hint.
+    """
+    cfg_fail = next((r for r in results if not r.ok and r.step_type == "configure"), None)
+    if cfg_fail is not None:
+        print(f"\nconfigure failed - see {_rel(cfg_fail.stderr_log)}", file=sys.stderr)
+    else:
+        print(f"\nbuild failed - {_build_diag_hint(presets)}", file=sys.stderr)
+    sys.exit(1)
+
+
 def _test_diag_hint(presets: list[dev.Preset]) -> str:
     if len(presets) == 1:
         sel = f"{_rel(presets[0].build_dir)}/**/*.results.xml"
@@ -182,8 +197,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     build_steps = [r for r in results if r.step_type == "build"]
     total_s = sum(r.duration_s for r in build_steps)
     if not all(r.ok for r in results):
-        print(f"\nbuild failed - {_build_diag_hint(presets)}", file=sys.stderr)
-        sys.exit(1)
+        _fail_build(results, presets)
     files = sum(dev.ninja_built_count(r.stdout_log) for r in build_steps)
     print(
         f"\nBuilt {files} file(s) across {len(build_steps)} target(s), "
@@ -206,8 +220,7 @@ def cmd_test(args: argparse.Namespace) -> None:
             mirror=args.mirror_output, verbose=args.verbose,
         )
         if not all(r.ok for r in results):
-            print(f"\nbuild failed - {_build_diag_hint(presets)}", file=sys.stderr)
-            sys.exit(1)
+            _fail_build(results, presets)
 
     # Determine which test binaries to run and the optional test-name filter.
     all_targets = _discover(primary)

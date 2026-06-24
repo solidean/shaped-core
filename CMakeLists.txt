@@ -1,3 +1,4 @@
+# Minimum versions and the rationale: docs/requirements.md
 cmake_minimum_required(VERSION 3.28)
 project(shaped-core LANGUAGES CXX)
 

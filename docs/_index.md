@@ -5,6 +5,8 @@ The entry point for repo-wide documentation. (Library-local docs live next to th
 
 ## Top-level
 
+- [requirements.md](requirements.md) — the toolchain shaped-core assumes (compilers, CMake/Ninja,
+  versions) and the rationale behind the minimums; `dev.py doctor` checks the core ones.
 - [libraries.md](libraries.md) — catalog of the shaped-core libraries: what each is, its
   namespace, and the dependency order.
 - [coding-guidelines.md](coding-guidelines.md) — coding standards and design principles for the

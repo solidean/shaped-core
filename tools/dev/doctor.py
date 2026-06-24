@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +16,58 @@ from pathlib import Path
 from . import clangd
 from .presets import PresetError, load_presets
 from .process import msvc_env
+
+
+def _parse_version(text: str) -> tuple[int, ...] | None:
+    """Extract the first dotted version number (e.g. '3.27.7') from text."""
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text)
+    if m is None:
+        return None
+    return tuple(int(g) for g in m.groups() if g is not None)
+
+
+def required_cmake_version(root: Path) -> tuple[int, ...] | None:
+    """The minimum CMake declared by the top-level CMakeLists.txt.
+
+    Single source of truth: parses `cmake_minimum_required(VERSION X.Y[...])`
+    so doctor enforces exactly what configure will require, with no second
+    constant to keep in sync.
+    """
+    cml = root / "CMakeLists.txt"
+    try:
+        text = cml.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"cmake_minimum_required\s*\(\s*VERSION\s+([0-9.]+)", text, re.IGNORECASE)
+    return _parse_version(m.group(1)) if m else None
+
+
+def _cmake_check(root: Path) -> tuple[str, bool, str]:
+    """Verify cmake is present and new enough to configure this project.
+
+    Reporting cmake as merely 'found' is not enough: a too-old cmake fails
+    configure with a cryptic 'CMake X required' error that the bare version
+    check never surfaced. Compare against the declared minimum here instead.
+    """
+    exe = shutil.which("cmake")
+    if exe is None:
+        return ("cmake", False, "not found on PATH")
+    try:
+        out = subprocess.run(["cmake", "--version"], capture_output=True, text=True, timeout=15)
+        first = out.stdout.splitlines()[0].strip() if out.stdout else exe
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return ("cmake", False, f"failed to run ({e})")
+
+    have = _parse_version(first)
+    need = required_cmake_version(root)
+    if have is not None and need is not None and have < need:
+        need_str = ".".join(str(p) for p in need)
+        return (
+            "cmake",
+            False,
+            f"{first} too old - this project needs >= {need_str}; upgrade CMake (docs/requirements.md)",
+        )
+    return ("cmake", True, first)
 
 
 def _clangd_checks(root: Path) -> list[tuple[str, bool, str]]:
@@ -90,8 +143,7 @@ def doctor(root: Path, default_preset: str | None = None) -> list[tuple[str, boo
     """Run sanity checks and return (label, ok, detail) for each."""
     checks: list[tuple[str, bool, str]] = []
 
-    ok, detail = _tool_version("cmake")
-    checks.append(("cmake", ok, detail))
+    checks.append(_cmake_check(root))
 
     ok, detail = _tool_version("ninja")
     checks.append(("ninja", ok, detail))
