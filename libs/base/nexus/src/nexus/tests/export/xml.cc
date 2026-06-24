@@ -1,10 +1,8 @@
 #include "xml.hh"
 
-std::string nx::impl::xml_escape(std::string_view str)
+cc::string nx::impl::xml_escape(cc::string_view str)
 {
-    std::string result;
-    result.reserve(str.size());
-
+    cc::string result;
     for (auto c : str)
     {
         switch (c)
@@ -17,6 +15,5 @@ std::string nx::impl::xml_escape(std::string_view str)
         default: result += c; break;
         }
     }
-
     return result;
 }

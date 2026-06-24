@@ -2,15 +2,16 @@
 
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
+#include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/platform/source_location.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <clean-core/string/to_debug_string.hh>
 
-#include <format>
-#include <source_location>
+#include <format>      // std::format: no cc::format yet
+#include <string_view> // std::string_view: portable std::format arg for the dump label
 #include <type_traits>
-
-// TODO: remove once cc is far enough again
-#include <memory>
 
 namespace nx::impl
 {
@@ -131,7 +132,7 @@ struct binary_expr_capture
 struct check_handle final
 {
     struct impl_context;
-    std::unique_ptr<impl_context> ctx;
+    cc::unique_ptr<impl_context> ctx;
     bool passed = false;
 
     check_handle() = default;
@@ -151,11 +152,14 @@ struct check_handle final
     check_handle succeed_note(cc::string msg) &&;
 
     template <class T>
-    check_handle dump(std::string_view label, T const& value) &&
+    check_handle dump(cc::string_view label, T const& value) &&
     {
         // TODO: move to cc::format
-        return std::move(*this).add_extra_line(
-            passed ? "" : std::format("{}: {}", label, cc::to_debug_string(value).c_str_materialize()));
+        // std::format the label as a std::string_view (cc::string_view is not portably formattable).
+        return cc::move(*this).add_extra_line(passed ? ""
+                                                     : std::format("{}: {}",
+                                                                   std::string_view(label.data(), size_t(label.size())),
+                                                                   cc::to_debug_string(value).c_str_materialize()));
     }
 
     // 2 dumps is used for CHECK(lhs op rhs)
@@ -164,10 +168,10 @@ struct check_handle final
     check_handle dump(T const& value) &&
     {
         // TODO: move to cc::format
-        return std::move(*this).add_extra_line(passed ? "" : cc::to_debug_string(value).c_str_materialize());
+        return cc::move(*this).add_extra_line(passed ? "" : cc::to_debug_string(value).c_str_materialize());
     }
 
-    static check_handle make(check_kind kind, cmp_op op, char const* expr_text, bool passed, std::source_location loc);
+    static check_handle make(check_kind kind, cmp_op op, char const* expr_text, bool passed, cc::source_location loc);
 
 private:
     check_handle add_extra_line(cc::string line) &&;
@@ -178,7 +182,7 @@ template <class L, class R>
 check_handle make_check_handle(check_kind kind,
                                char const* expr_text,
                                binary_expr_capture<L, R> const& expr,
-                               std::source_location loc)
+                               cc::source_location loc)
 {
     return check_handle::make(kind, expr.op, expr_text, expr.passed, loc) //
         .dump(expr.lhs)                                                   //
@@ -186,7 +190,7 @@ check_handle make_check_handle(check_kind kind,
 }
 
 template <class T>
-check_handle make_check_handle(check_kind kind, char const* expr_text, lhs_holder<T> const& expr, std::source_location loc)
+check_handle make_check_handle(check_kind kind, char const* expr_text, lhs_holder<T> const& expr, cc::source_location loc)
 {
     static_assert(requires(T const& v) { bool(v); }, "type must be castable to bool in CHECK/REQUIRE(v)");
 
@@ -195,7 +199,7 @@ check_handle make_check_handle(check_kind kind, char const* expr_text, lhs_holde
 
 // Helper for exception checking (any exception)
 template <class F>
-check_handle make_check_handle_throws(check_kind kind, char const* expr_text, F&& func, std::source_location loc)
+check_handle make_check_handle_throws(check_kind kind, char const* expr_text, F&& func, cc::source_location loc)
 {
     bool threw_exception = false;
     cc::string exception_info;
@@ -219,7 +223,7 @@ check_handle make_check_handle_throws_as(check_kind kind,
                                          char const* expr_text, // NOLINT
                                          char const* exception_type_text,
                                          F&& func,
-                                         std::source_location loc)
+                                         cc::source_location loc)
 {
     bool threw_correct_type = false;
     cc::string exception_info;
@@ -247,7 +251,7 @@ check_handle make_check_handle_throws_as(check_kind kind,
 // If an assertion fires, we catch it and report success
 // If no assertion fires (or if assertions are disabled), we report failure (unless assertions are disabled)
 template <class F>
-check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F&& func, std::source_location loc)
+check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F&& func, cc::source_location loc)
 {
 #if CC_ASSERT_ENABLED
     bool assertion_fired = false;
@@ -290,7 +294,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   CHECK(result).note("expected truthy result").dump("result", result);
 #define CHECK(Expr)                                                                                      \
     ::nx::impl::make_check_handle(::nx::impl::check_kind::check, #Expr, ::nx::impl::lhs_grab{} <=> Expr, \
-                                  std::source_location::current())
+                                  cc::source_location::current())
 
 // REQUIRE macro: hard assertion that stops test execution on failure
 // Supports boolean expressions and comparisons, preserving lhs/rhs values for diagnostics
@@ -302,7 +306,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   REQUIRE(ptr != nullptr).context("initialization phase");
 #define REQUIRE(Expr)                                                                                      \
     ::nx::impl::make_check_handle(::nx::impl::check_kind::require, #Expr, ::nx::impl::lhs_grab{} <=> Expr, \
-                                  std::source_location::current())
+                                  cc::source_location::current())
 
 // FAIL macro: unconditional hard failure (like REQUIRE(false))
 // Optionally takes a message argument
@@ -314,7 +318,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   FAIL("invalid state").context("cleanup phase");
 #define FAIL(...)                                                                                            \
     ::nx::impl::check_handle::make(::nx::impl::check_kind::require, ::nx::impl::cmp_op::none, "FAIL", false, \
-                                   std::source_location::current())                                          \
+                                   cc::source_location::current())                                           \
         .fail_note(__VA_ARGS__)
 
 // SUCCEED macro: unconditional soft success (like CHECK(true))
@@ -327,7 +331,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   SUCCEED("validation passed").dump("data", validated_data);
 #define SUCCEED(...)                                                                                         \
     ::nx::impl::check_handle::make(::nx::impl::check_kind::check, ::nx::impl::cmp_op::none, "SUCCEED", true, \
-                                   std::source_location::current())                                          \
+                                   cc::source_location::current())                                           \
         .succeed_note(__VA_ARGS__)
 
 // SKIP macro: skips the current test (like SUCCEED but aborts execution)
@@ -341,7 +345,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 // TODO: currently doesn't interact with SECTION properly
 #define SKIP(...)                                                                                         \
     ::nx::impl::check_handle::make(::nx::impl::check_kind::check, ::nx::impl::cmp_op::skip, "SKIP", true, \
-                                   std::source_location::current())                                       \
+                                   cc::source_location::current())                                        \
         .succeed_note(__VA_ARGS__)
 
 // CHECK_THROWS macro: soft assertion that expression throws any exception
@@ -352,7 +356,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   CHECK_THROWS(risky_operation()).context("testing error handling");
 #define CHECK_THROWS(Expr)                \
     ::nx::impl::make_check_handle_throws( \
-        ::nx::impl::check_kind::check, #Expr, [&] { (void)(Expr); }, std::source_location::current())
+        ::nx::impl::check_kind::check, #Expr, [&] { (void)(Expr); }, cc::source_location::current())
 
 // CHECK_THROWS_AS macro: soft assertion that expression throws specific exception type
 // Returns check_handle that can be chained with .note(), .context(), etc.
@@ -362,7 +366,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   CHECK_THROWS_AS(parse("bad"), ParseException).context("validation");
 #define CHECK_THROWS_AS(Expr, ExceptionType)                \
     ::nx::impl::make_check_handle_throws_as<ExceptionType>( \
-        ::nx::impl::check_kind::check, #Expr, #ExceptionType, [&] { (void)(Expr); }, std::source_location::current())
+        ::nx::impl::check_kind::check, #Expr, #ExceptionType, [&] { (void)(Expr); }, cc::source_location::current())
 
 // REQUIRE_THROWS macro: hard assertion that expression throws any exception
 // Returns check_handle that can be chained with .note(), .context(), etc.
@@ -372,7 +376,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   REQUIRE_THROWS(must_fail()).context("precondition check");
 #define REQUIRE_THROWS(Expr)              \
     ::nx::impl::make_check_handle_throws( \
-        ::nx::impl::check_kind::require, #Expr, [&] { (void)(Expr); }, std::source_location::current())
+        ::nx::impl::check_kind::require, #Expr, [&] { (void)(Expr); }, cc::source_location::current())
 
 // REQUIRE_THROWS_AS macro: hard assertion that expression throws specific exception type
 // Returns check_handle that can be chained with .note(), .context(), etc.
@@ -382,7 +386,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   REQUIRE_THROWS_AS(connect("bad"), ConnectionException).note("setup phase");
 #define REQUIRE_THROWS_AS(Expr, ExceptionType)              \
     ::nx::impl::make_check_handle_throws_as<ExceptionType>( \
-        ::nx::impl::check_kind::require, #Expr, #ExceptionType, [&] { (void)(Expr); }, std::source_location::current())
+        ::nx::impl::check_kind::require, #Expr, #ExceptionType, [&] { (void)(Expr); }, cc::source_location::current())
 
 // CHECK_ASSERTS macro: soft assertion that expression triggers a CC_ASSERT
 // Returns check_handle that can be chained with .note(), .context(), etc.
@@ -395,7 +399,7 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   CHECK_ASSERTS(invalid_operation()).context("testing precondition");
 #define CHECK_ASSERTS(Expr)                \
     ::nx::impl::make_check_handle_asserts( \
-        ::nx::impl::check_kind::check, #Expr, [&] { (void)(Expr); }, std::source_location::current())
+        ::nx::impl::check_kind::check, #Expr, [&] { (void)(Expr); }, cc::source_location::current())
 
 // REQUIRE_ASSERTS macro: hard assertion that expression triggers a CC_ASSERT
 // Returns check_handle that can be chained with .note(), .context(), etc.
@@ -408,4 +412,4 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
 //   REQUIRE_ASSERTS(out_of_bounds_access()).note("boundary check");
 #define REQUIRE_ASSERTS(Expr)              \
     ::nx::impl::make_check_handle_asserts( \
-        ::nx::impl::check_kind::require, #Expr, [&] { (void)(Expr); }, std::source_location::current())
+        ::nx::impl::check_kind::require, #Expr, [&] { (void)(Expr); }, cc::source_location::current())

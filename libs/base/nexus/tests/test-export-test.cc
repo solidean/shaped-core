@@ -1,21 +1,10 @@
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
-
-#include <sstream>
-#include <string>
-#include <string_view>
-
-namespace
-{
-bool contains(std::string const& haystack, std::string_view needle)
-{
-    return haystack.find(needle) != std::string::npos;
-}
-} // namespace
 
 TEST("export - xml_escape replaces the five predefined entities")
 {
@@ -35,21 +24,19 @@ TEST("export - junit report has correct aggregate attributes and per-test cases"
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
 
-    std::ostringstream out;
-    nx::write_junit_xml(out, "my-suite", exec);
-    auto const xml = out.str();
+    cc::string const xml = nx::write_junit_xml("my-suite", exec);
 
     // Suite-level aggregates: 2 tests, 1 failure, 2 checks, named after the suite.
-    CHECK(contains(xml, "<testsuites "));
-    CHECK(contains(xml, "name=\"my-suite\""));
-    CHECK(contains(xml, "tests=\"2\""));
-    CHECK(contains(xml, "failures=\"1\""));
-    CHECK(contains(xml, "assertions=\"2\""));
+    CHECK(xml.contains("<testsuites "));
+    CHECK(xml.contains("name=\"my-suite\""));
+    CHECK(xml.contains("tests=\"2\""));
+    CHECK(xml.contains("failures=\"1\""));
+    CHECK(xml.contains("assertions=\"2\""));
 
     // Both tests appear as cases; the passing one carries no <failure>.
-    CHECK(contains(xml, "name=\"T_pass\""));
-    CHECK(contains(xml, "name=\"T_fail\""));
-    CHECK(contains(xml, "<failure message="));
+    CHECK(xml.contains("name=\"T_pass\""));
+    CHECK(xml.contains("name=\"T_fail\""));
+    CHECK(xml.contains("<failure message="));
 }
 
 TEST("export - junit report for an all-pass run has no failure elements")
@@ -61,11 +48,9 @@ TEST("export - junit report for an all-pass run has no failure elements")
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
 
-    std::ostringstream out;
-    nx::write_junit_xml(out, "all-pass", exec);
-    auto const xml = out.str();
+    cc::string const xml = nx::write_junit_xml("all-pass", exec);
 
-    CHECK(contains(xml, "tests=\"2\""));
-    CHECK(contains(xml, "failures=\"0\""));
-    CHECK(!contains(xml, "<failure"));
+    CHECK(xml.contains("tests=\"2\""));
+    CHECK(xml.contains("failures=\"0\""));
+    CHECK(!xml.contains("<failure"));
 }

@@ -1,11 +1,9 @@
 #include "junit.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/string/to_string.hh>
 #include <nexus/tests/export/xml.hh>
-
-#include <ostream>
-#include <string>
-#include <vector>
 
 using nx::impl::xml_escape;
 
@@ -13,7 +11,7 @@ namespace
 {
 // Collects all failed expressions across the (recursive) section tree of a test,
 // flattened in execution order. Pointers stay valid for the lifetime of `exec`.
-void collect_errors(nx::test_execution::section const& sec, std::vector<nx::test_error const*>& out)
+void collect_errors(nx::test_execution::section const& sec, cc::vector<nx::test_error const*>& out)
 {
     for (auto const& error : sec.errors)
         out.push_back(&error);
@@ -23,7 +21,7 @@ void collect_errors(nx::test_execution::section const& sec, std::vector<nx::test
 }
 } // namespace
 
-void nx::write_junit_xml(std::ostream& out, std::string_view suite_name, nx::test_schedule_execution const& execution)
+cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_execution const& execution)
 {
     int const total_tests = execution.count_total_tests();
     int const failed_tests = execution.count_failed_tests();
@@ -33,61 +31,82 @@ void nx::write_junit_xml(std::ostream& out, std::string_view suite_name, nx::tes
     for (auto const& exec : execution.executions)
         total_time += exec.root.duration_seconds;
 
-    std::string const suite = xml_escape(suite_name);
+    cc::string const suite = xml_escape(suite_name);
 
     // `assertions` (total checks evaluated) is not part of the base JUnit schema
     // but is widely understood; the dev.py runner reads it to report check counts.
-    auto emit_suite_attrs = [&](std::ostream& os)
+    auto emit_suite_attrs = [&](cc::string& os)
     {
-        os << "name=\"" << suite << "\" "
-           << "tests=\"" << total_tests << "\" "
-           << "failures=\"" << failed_tests << "\" "
-           << "errors=\"0\" skipped=\"0\" "
-           << "assertions=\"" << total_checks << "\" "
-           << "time=\"" << total_time << "\"";
+        os += "name=\"";
+        os += suite;
+        os += "\" ";
+        os += "tests=\"";
+        os += cc::to_string(total_tests);
+        os += "\" ";
+        os += "failures=\"";
+        os += cc::to_string(failed_tests);
+        os += "\" ";
+        os += "errors=\"0\" skipped=\"0\" ";
+        os += "assertions=\"";
+        os += cc::to_string(total_checks);
+        os += "\" ";
+        os += "time=\"";
+        os += cc::to_string(total_time);
+        os += "\"";
     };
 
-    out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    out << "<testsuites ";
+    cc::string out;
+    out += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    out += "<testsuites ";
     emit_suite_attrs(out);
-    out << ">\n";
-    out << "  <testsuite ";
+    out += ">\n";
+    out += "  <testsuite ";
     emit_suite_attrs(out);
-    out << ">\n";
+    out += ">\n";
 
     for (auto const& exec : execution.executions)
     {
         CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
         auto const& decl = *exec.instance.declaration;
 
-        out << "    <testcase classname=\"" << suite << "\" "
-            << "name=\"" << xml_escape(decl.name) << "\" "
-            << "time=\"" << exec.root.duration_seconds << "\"";
+        out += "    <testcase classname=\"";
+        out += suite;
+        out += "\" ";
+        out += "name=\"";
+        out += xml_escape(decl.name);
+        out += "\" ";
+        out += "time=\"";
+        out += cc::to_string(exec.root.duration_seconds);
+        out += "\"";
 
         if (!exec.is_considered_failing())
         {
-            out << "/>\n";
+            out += "/>\n";
             continue;
         }
 
-        out << ">\n";
+        out += ">\n";
 
-        std::vector<test_error const*> errors;
+        cc::vector<test_error const*> errors;
         collect_errors(exec.root, errors);
 
         // The message attribute points at the first failing location, or the
         // test's own declaration when a test fails without a specific check
         // (e.g. a test that ran no checks at all).
         auto const& msg_loc = errors.empty() ? decl.location : errors.front()->location;
-        out << "      <failure message=\"" << xml_escape(msg_loc.file_name()) << ":" << msg_loc.line() << "\">";
+        out += "      <failure message=\"";
+        out += xml_escape(msg_loc.file_name());
+        out += ":";
+        out += cc::to_string(msg_loc.line());
+        out += "\">";
 
         if (errors.empty())
         {
-            out << xml_escape("test failed without a reported check");
+            out += xml_escape("test failed without a reported check");
         }
         else
         {
-            std::string body;
+            cc::string body;
             for (auto const* error : errors)
             {
                 body += error->expr;
@@ -99,16 +118,17 @@ void nx::write_junit_xml(std::ostream& out, std::string_view suite_name, nx::tes
                 body += " at ";
                 body += error->location.file_name();
                 body += ":";
-                body += std::to_string(error->location.line());
+                body += cc::to_string(error->location.line());
                 body += "\n";
             }
-            out << xml_escape(body);
+            out += xml_escape(body);
         }
 
-        out << "</failure>\n";
-        out << "    </testcase>\n";
+        out += "</failure>\n";
+        out += "    </testcase>\n";
     }
 
-    out << "  </testsuite>\n";
-    out << "</testsuites>\n";
+    out += "  </testsuite>\n";
+    out += "</testsuites>\n";
+    return out;
 }
