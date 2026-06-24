@@ -22,8 +22,6 @@ Each site is also flagged with a short `// std::… : …` comment at the use si
 |---|---|---|---|
 | `std::format` | [check.hh](../src/nexus/tests/check.hh) (`dump`), [check.cc](../src/nexus/tests/check.cc) (`note`/`fail_note`/`succeed_note`), [section.hh](../src/nexus/tests/section.hh) (`SECTION`), [execute.cc](../src/nexus/tests/execute.cc) (failure / exception messages) | `cc::format` | In progress. Removing it also removes the format-arg bridging below. |
 | `std::unordered_map` | [execute.cc](../src/nexus/tests/execute.cc) — the executor's section tree | `cc::map` | `cc::map` is a `// TODO` stub today. |
-| `std::string` (`find` / `substr` / `replace`) | [schedule.cc](../src/nexus/tests/schedule.cc) — Catch2 filter parsing & the `\[` → `[` normalization | `cc::string` text ops | `cc::string_view` already has `find`/`rfind`/`subview`/`contains` (used for the read-only matching). The gap is **in-place `replace`** and `find`/`substr` on the owning `cc::string`. |
-| `std::span::subspan` | [execute.cc](../src/nexus/tests/execute.cc) — `is_section_allowed` (replaced with index arithmetic) | `cc::span::subspan` | Listed as a TODO in [span.hh](../../clean-core/src/clean-core/container/span.hh). Design under review (possible footgun), hence the manual indexing for now. |
 | `std::chrono` | [execute.cc](../src/nexus/tests/execute.cc) — per-section wall-clock timing | a `cc` clock / duration | No clean-core timing API yet. |
 
 Also wanted, even though there is no `std::` left at the call site because it was
@@ -76,3 +74,11 @@ For reference, the pieces that moved fully onto clean-core: `cc::string` /
 `cc::source_location`, and `cc::unique_function<void()>` for the registered test
 body (a single handle — no `unique_ptr<move_only_function>` wrapper). The XML
 exporters return a `cc::string` instead of writing to a `std::ostream`.
+
+- **`cc::span::subspan`** now exists, so `is_section_allowed` in
+  [execute.cc](../src/nexus/tests/execute.cc) uses `curr_section.subspan(1)` instead of
+  manual `index + 1` arithmetic.
+- **`cc::string` text ops** (`find` / `rfind` / `subview` / `replace_all`) replaced the
+  `std::string` round-trips in [schedule.cc](../src/nexus/tests/schedule.cc) — Catch2 filter
+  parsing now splits with `cc::string_view`, and the `\[` → `[` normalization uses
+  `cc::string::replace_all`.
