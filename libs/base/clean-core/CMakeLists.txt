@@ -47,6 +47,7 @@ target_sources(clean-core
 
     src/clean-core/memory/allocation.hh
     src/clean-core/memory/node_allocation.hh
+    src/clean-core/memory/unique_ptr.hh
     src/clean-core/memory/impl/object_lifetime_util.hh
 
     src/clean-core/container/array.hh
@@ -152,6 +153,7 @@ add_executable(clean-core-test
     tests/string_view-test.cc
     tests/to_debug_string-test.cc
     tests/unique_function-test.cc
+    tests/unique_ptr-test.cc
     tests/utility-test.cc
     tests/vector-test.cc
 )

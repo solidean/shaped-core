@@ -169,6 +169,10 @@ cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator
 #include <clean-core/memory/node_allocation.hh>   // cc::node_allocation<T> — move-only single-object slab handle
 auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args...);
 *na;  na->member;  na.is_valid();
+
+#include <clean-core/memory/unique_ptr.hh>        // cc::unique_ptr<T> — move-only single-object owner (wraps node_allocation)
+auto p = cc::make_unique<T>(args...);              // *p; p->member; p.get(); p.is_valid(); if (p) ...
+p = nullptr;                                       // destroys + clears (no reset()); ==/!= vs ptr/nullptr; hidden-friend hash
 ```
 
 ## Utility & bit
