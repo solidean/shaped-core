@@ -1,11 +1,10 @@
 #include "run.hh"
 
 #include <nexus/tests/execute.hh>
-#include <nexus/tests/registry.hh>
-#include <nexus/tests/schedule.hh>
-
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
+#include <nexus/tests/registry.hh>
+#include <nexus/tests/schedule.hh>
 
 #include <fstream>
 #include <iostream>

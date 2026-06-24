@@ -8,7 +8,10 @@ test_registry& get_static_test_registry()
     return registry;
 }
 
-void test_registry::add_declaration(std::string name, config::cfg test_config, std::move_only_function<void()> function, std::source_location loc)
+void test_registry::add_declaration(std::string name,
+                                    config::cfg test_config,
+                                    std::move_only_function<void()> function,
+                                    std::source_location loc)
 {
     declarations.push_back(test_declaration{
         .name = std::move(name),
