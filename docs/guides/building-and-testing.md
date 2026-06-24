@@ -20,6 +20,7 @@ uv run dev.py <command> [options]
 | `configure`    | Configure the CMake project for the selected preset(s).                       |
 | `build`        | Build (auto-configures first if inputs changed). `-t/--target` to scope.      |
 | `test`         | Build, then run test binaries (`*-test`). Optional name/binary filter.        |
+| `format`       | clang-format `libs/` sources in place (see below).                            |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `doctor`       | Read-only toolchain sanity check (cmake, ninja, compiler, presets, clangd).   |
@@ -94,6 +95,30 @@ These read the artifacts dev.py already emitted — far better than scrolling ra
 
 **Don't pipe dev.py into `tail`/`head`/`grep`.** The output is already terse, and
 `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
+
+## Formatting
+
+`uv run dev.py format` runs clang-format over the project's `.cc`/`.hh` sources
+(scoped to `libs/` for now), with [.clang-format](../../.clang-format) as the
+authoritative style:
+
+```bash
+uv run dev.py format                         # format every libs/ source in place
+uv run dev.py format --dirty-only            # only git-dirty/untracked files — the pre-commit move
+uv run dev.py format --dirty-only --check-only   # verify without rewriting (exit 1 if any differ)
+```
+
+`--check-only` rewrites nothing; it lists the non-conforming files and exits
+non-zero, so it works as a CI / pre-commit gate. `--dirty-only` restricts the
+set to what's part of your next commit (modified, staged, or untracked) — pair
+the two before committing.
+
+clang-format output is not stable across major versions, so the command pins to
+the major version declared by `.clang-format`'s `Requires: clang-format >= N`
+header and **errors** if the installed clang-format's major differs. Pass
+`--allow-different-version` to downgrade that to a warning and proceed anyway.
+Like every other step, the clang-format run is captured under
+`build/run-logs/`.
 
 ## clangd / IDE code intelligence
 

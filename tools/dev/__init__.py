@@ -13,6 +13,14 @@ from .build import build
 from .cmake import remove_build_dir
 from .configure import configure, ensure_configured
 from .doctor import doctor
+from .format import (
+    clang_format_version,
+    discover_files,
+    find_clang_format,
+    format_sources,
+    required_major,
+    violating_files,
+)
 from .logs import merge_junit, ninja_built_count
 from .models import Preset, StepResult, Target, TestSummary
 from .presets import PresetError, load_presets, resolve_presets
@@ -25,6 +33,12 @@ __all__ = [
     "configure",
     "ensure_configured",
     "doctor",
+    "clang_format_version",
+    "discover_files",
+    "find_clang_format",
+    "format_sources",
+    "required_major",
+    "violating_files",
     "merge_junit",
     "ninja_built_count",
     "remove_build_dir",

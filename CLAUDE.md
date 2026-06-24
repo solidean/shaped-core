@@ -79,8 +79,15 @@ clean-core
 uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 uv run dev.py test               # build + run the full suite
 uv run dev.py build [-t <target>]
+uv run dev.py format             # clang-format all libs/ .cc/.hh in place
 uv run dev.py doctor             # sanity-check the toolchain
 ```
+
+**Before committing, run `uv run dev.py format --dirty-only`** to format exactly
+the files in your next commit (use `--check-only` to verify without rewriting).
+`.clang-format` is authoritative, and the command pins to its declared
+clang-format major version — pass `--allow-different-version` to proceed with a
+different one (warning instead of error).
 
 `dev.py` is quiet by default: it captures each step to
 `build/<preset>/run-logs/`, writes JSON sidecars
@@ -245,6 +252,7 @@ how to write one (keep it current when public API changes).
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
+| Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |

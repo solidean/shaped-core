@@ -11,6 +11,7 @@ Usage:
     uv run dev.py configure                 Configure the CMake project
     uv run dev.py build [--target T]        Build (optionally specific targets)
     uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
+    uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
     uv run dev.py clean [--all]             Remove build artifacts
     uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
     uv run dev.py doctor                    Sanity-check the toolchain
@@ -298,6 +299,63 @@ def cmd_clean(args: argparse.Namespace) -> None:
         print("  nothing to remove (already clean)", file=sys.stderr)
 
 
+def cmd_format(args: argparse.Namespace) -> None:
+    clang_format = dev.find_clang_format()
+    if clang_format is None:
+        die("clang-format not found on PATH. Install LLVM/clang-format (>= 21) or add it to PATH.")
+
+    # clang-format output is not stable across major versions, so enforce the
+    # major declared by .clang-format. --allow-different-version downgrades the
+    # mismatch to a warning instead of failing.
+    have = dev.clang_format_version(clang_format)
+    need = dev.required_major(ROOT)
+    if have is None:
+        die(f"could not determine clang-format version from {clang_format!r}")
+    if have[0] != need:
+        have_str = ".".join(str(p) for p in have)
+        msg = (f"clang-format major version {have[0]} != required {need} "
+               f"(found {have_str}); formatting may differ from the pinned style")
+        if args.allow_different_version:
+            print(f"WARNING: {msg}", file=sys.stderr)
+        else:
+            die(f"{msg}. Install clang-format {need}.x, or pass --allow-different-version to proceed anyway.")
+
+    files = dev.discover_files(ROOT, dirty_only=args.dirty_only)
+    if not files:
+        scope = "dirty libs/ sources" if args.dirty_only else "libs/ sources"
+        print(f"No {scope} to format.", file=sys.stderr)
+        sys.exit(0)
+
+    result = dev.format_sources(
+        files, root=ROOT, clang_format=clang_format,
+        check=args.check_only, mirror=args.mirror_output, verbose=args.verbose,
+    )
+
+    if args.check_only:
+        if result.ok:
+            print(f"\n{len(files)} file(s) already formatted.", file=sys.stderr)
+            sys.exit(0)
+        offenders = dev.violating_files(result, ROOT)
+        for f in offenders:
+            print(_rel(f))
+        sys.stdout.flush()
+        print(
+            f"\n{len(offenders)} of {len(files)} file(s) need formatting "
+            f"- run: uv run dev.py format" + (" --dirty-only" if args.dirty_only else ""),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not result.ok:
+        print(f"\nformat failed - see {_rel(result.stderr_log)}", file=sys.stderr)
+        sys.exit(1)
+    print(
+        f"\nFormatted {len(files)} file(s) in {_fmt_dur(result.duration_s)}.",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+
 def cmd_diagnose(args: argparse.Namespace) -> None:
     if args.diagnose_target == "clangd":
         cmd_diagnose_clangd(args)
@@ -434,6 +492,14 @@ def main() -> None:
     test_p.add_argument("test_name", nargs="?",
                         help="Specific test name or binary to run (auto-discovers the binary)")
 
+    fmt_p = sub.add_parser("format", help="Format C++ sources with clang-format")
+    fmt_p.add_argument("--check-only", action="store_true",
+                       help="Report non-conforming files and exit non-zero; do not rewrite")
+    fmt_p.add_argument("--dirty-only", action="store_true",
+                       help="Only format git-dirty/untracked libs/ sources (good pre-commit check)")
+    fmt_p.add_argument("--allow-different-version", action="store_true",
+                       help="Downgrade a clang-format version mismatch from error to warning")
+
     clean_p = sub.add_parser("clean", help="Remove build artifacts")
     _add_preset_arg(clean_p)
     clean_p.add_argument("--all", action="store_true", help="Remove every preset's build directory")
@@ -465,6 +531,8 @@ def main() -> None:
             cmd_build(args)
         case "test":
             cmd_test(args)
+        case "format":
+            cmd_format(args)
         case "clean":
             cmd_clean(args)
         case "diagnose":
