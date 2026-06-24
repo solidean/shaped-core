@@ -4,6 +4,8 @@ Task-oriented how-tos for working in shaped-core. (Back to [docs/_index.md](../_
 
 - [building-and-testing.md](building-and-testing.md) — drive `dev.py` (build / test / doctor /
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
+- [cheat-sheets.md](cheat-sheets.md) — what a library cheat sheet is, its format, and where the
+  colocated per-library sheets live (start with clean-core and nexus).
 - [postmortem.md](postmortem.md) — the end-of-session friction review behind the `/postmortem`
   skill: where momentum was lost, not a bug report.
 

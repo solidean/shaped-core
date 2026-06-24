@@ -1,5 +1,8 @@
 # Catch2 Runner Compatibility
 
+> For the day-to-day test-writing API (`TEST` / `CHECK` / `SECTION`), see the
+> [nexus cheat-sheet](../cheat-sheet.md). This doc covers the CLI/discovery layer.
+
 Nexus implements a subset of the Catch2 v3 CLI protocol so that Catch2-aware IDE extensions — in particular [C++ TestMate](https://github.com/matepek/vscode-catch2-test-adapter) — can discover, run, and display nexus tests without any special configuration.
 
 ## How detection works

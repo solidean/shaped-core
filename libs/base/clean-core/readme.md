@@ -52,6 +52,7 @@ full workflow.
 
 ## More
 
+- [cheat-sheet.md](cheat-sheet.md) — the public API at a glance (symbols, signatures, gotchas).
 - [docs/_index.md](docs/_index.md) — clean-core's documentation hub.
 - [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all
   shaped-core code follows (`.clang-format` is authoritative for formatting).

@@ -197,6 +197,27 @@ separator-insensitive, so `string_view` also finds `STRING_VIEW`); use
 
 ---
 
+## Cheat sheets
+
+Each library has a fast-recall API cheat sheet colocated with its `readme.md`
+(`libs/<category>/<lib>/cheat-sheet.md`) — every important symbol with a
+one-line return-type/intuition comment, plus the common gotchas. **Before doing
+any code work, skim the cheat sheet for the library you're touching and its most
+important dependencies.**
+
+In practice that almost always includes the two foundational sheets:
+
+* [clean-core](libs/base/clean-core/cheat-sheet.md) — it replaces most `std::`
+  usage (`cc::vector`, `cc::string`, `cc::optional`, `cc::result`, …), so it's
+  relevant to nearly any C++ change.
+* [nexus](libs/base/nexus/cheat-sheet.md) — how we write tests; this repo is
+  strongly test-driven, so you'll reach for it whenever you add or change tests.
+
+See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format and
+how to write one (keep it current when public API changes).
+
+---
+
 ## Git workflow
 
 * **`main` is the integration branch.** Feature branches are **mandatory** and
@@ -227,6 +248,7 @@ separator-insensitive, so `string_view` also finds `STRING_VIEW`); use
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |
-| Write a test (nexus)             | [libs/base/nexus/docs/catch2-runner-compat.md](libs/base/nexus/docs/catch2-runner-compat.md) |
+| Recall a library's API fast      | its `cheat-sheet.md` (e.g. [clean-core](libs/base/clean-core/cheat-sheet.md), [nexus](libs/base/nexus/cheat-sheet.md)) |
+| Write a test (nexus)             | [libs/base/nexus/cheat-sheet.md](libs/base/nexus/cheat-sheet.md) + [catch2-runner-compat.md](libs/base/nexus/docs/catch2-runner-compat.md) |
 | Explore the repo                 | `repo_tools` MCP (`repo_search` / `repo_structure`)              |
 | All docs                         | [docs/_index.md](docs/_index.md)                                 |

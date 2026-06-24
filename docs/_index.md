@@ -19,13 +19,18 @@ See [guides/_index.md](guides/_index.md) for the full list. Most useful:
 
 - [guides/building-and-testing.md](guides/building-and-testing.md) — how to drive `dev.py` and the
   `repo_tools` diagnostics.
+- [guides/cheat-sheets.md](guides/cheat-sheets.md) — the per-library API cheat-sheet format and
+  where the sheets live.
 - [guides/postmortem.md](guides/postmortem.md) — the session friction review (`/postmortem`).
 
 ## Per-library docs
 
-- [clean-core](../libs/base/clean-core/readme.md) — the `cc` foundational library; deeper notes
-  in its [docs hub](../libs/base/clean-core/docs/_index.md).
-- [nexus catch2-runner-compat](../libs/base/nexus/docs/catch2-runner-compat.md) — how nexus test
+- [clean-core](../libs/base/clean-core/readme.md) — the `cc` foundational library;
+  [cheat-sheet](../libs/base/clean-core/cheat-sheet.md) for the API at a glance, deeper notes in
+  its [docs hub](../libs/base/clean-core/docs/_index.md).
+- [nexus](../libs/base/nexus/cheat-sheet.md) — the `nx` test framework; the
+  [cheat-sheet](../libs/base/nexus/cheat-sheet.md) covers `TEST`/`CHECK`/`SECTION`, and
+  [catch2-runner-compat](../libs/base/nexus/docs/catch2-runner-compat.md) covers how nexus test
   binaries are discovered and filtered.
 
 > Place new repo-wide docs here (kebab-case names), in the matching subfolder. See
