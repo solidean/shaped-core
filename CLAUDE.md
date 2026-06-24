@@ -152,7 +152,15 @@ Comments — plain prose only:
   tags** (`@param`, `\return`, `<summary>`, …) — API docs aren't generated here.
 * A good `///` says what a thing is *for* and calls out edge cases (zero
   handling, ownership, threading, which `result` it can fail with,
-  laziness/caching).
+  laziness/caching). Describe resulting state, ownership, lifetime, and
+  invariants — not implementation steps.
+* Favor *why* over *how*; the code already shows how. Don't restate code —
+  prefer comments that answer "what would surprise a competent reader here?"
+  Inline comments justify unusual operations, hidden dependencies, or
+  correctness constraints; delete ones that merely narrate the action.
+* **Be concise.** Readable without stress, but not chatty — a long, flowing
+  narration style is actively problematic. Split a comment that mixes unrelated
+  concerns, or move rationale to higher-level docs.
 * No comments on trivial getters / one-liners. No references to the current
   task / PR / issue — that belongs in the commit message.
 
