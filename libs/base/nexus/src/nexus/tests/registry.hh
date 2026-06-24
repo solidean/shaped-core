@@ -23,7 +23,10 @@ struct test_registry
 {
     std::vector<test_declaration> declarations;
 
-    void add_declaration(std::string name, config::cfg test_config, std::move_only_function<void()> function, std::source_location loc = std::source_location::current());
+    void add_declaration(std::string name,
+                         config::cfg test_config,
+                         std::move_only_function<void()> function,
+                         std::source_location loc = std::source_location::current());
 };
 
 test_registry& get_static_test_registry();

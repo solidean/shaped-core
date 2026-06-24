@@ -11,4 +11,4 @@ using namespace cc::primitive_defines;
 
 // TODO
 
-}
+} // namespace nx

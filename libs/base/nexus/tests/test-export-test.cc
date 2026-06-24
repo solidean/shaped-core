@@ -1,11 +1,9 @@
 #include <nexus/test.hh>
-
 #include <nexus/tests/execute.hh>
-#include <nexus/tests/registry.hh>
-#include <nexus/tests/schedule.hh>
-
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/xml.hh>
+#include <nexus/tests/registry.hh>
+#include <nexus/tests/schedule.hh>
 
 #include <sstream>
 #include <string>
