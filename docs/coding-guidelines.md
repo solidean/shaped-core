@@ -383,9 +383,19 @@ public:
 
 ### Code Comments
 
-- Explain **rationale** and **why**, not just what.
-- Use comments to provide grouping and structure.
-- Skimming the comments of a longer function should reveal its logical flow.
+- Explain invariants, assumptions, and non-obvious design decisions. Favor **why**
+  over **how** — the code already shows how.
+- Do not restate code. Prefer comments that answer "what would surprise a competent
+  reader here?"
+- Inline comments justify unusual operations, hidden dependencies, representation
+  choices, or correctness constraints. Delete comments that merely describe the action
+  being performed — unless they serve the grouping rule below.
+- Use comments to provide grouping and structure. Skimming the comments of a longer
+  function should reveal its logical flow.
+
+**Be concise.** Aim for comments that read without stress — not maximally terse, but a
+long, flowing, chatty style is actively problematic. If a comment explains multiple
+unrelated concerns, split it or move the rationale to higher-level documentation.
 
 ### Documentation Comments
 
@@ -393,7 +403,10 @@ Use `///` for documentation. **No doc tags, no XML.**
 
 **Design philosophy:** Comments are most often read directly in source code, so they must read naturally without rich formatting tools.
 
-- Write plain, natural language that describes everything important.
+- Write plain, natural language. Describe what matters concisely — resulting state,
+  ownership, lifetime, and invariants of a function, not its implementation steps.
+- Call out edge cases (zero handling, threading, which `result` it can fail with,
+  laziness/caching).
 - Insert blank lines every few lines to break up walls of text and improve skimmability.
 - Keep lines within the 120-column limit.
 - **Include at least one usage example** (~2-10 lines) in doc comments for each major struct/data type.

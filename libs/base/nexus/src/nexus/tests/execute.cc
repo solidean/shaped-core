@@ -145,8 +145,6 @@ struct test_duplicate_section
 
 thread_local cc::vector<test_context> g_context_stack;
 
-// cc::span has no subspan() yet, so the section path (everything past the root at
-// index 0) is addressed directly via index + 1 into curr_section.
 bool is_section_allowed(cc::span<test_section* const> curr_section,
                         cc::string_view section_name,
                         nx::test_schedule_config const* config)
@@ -157,22 +155,20 @@ bool is_section_allowed(cc::span<test_section* const> curr_section,
 
     auto const& filter = config->section_filters;
 
-    // Current section path length (excluding root at index 0)
-    auto const path_size = curr_section.size() - 1;
+    // index 0 is the root, which carries no filterable name
+    auto const path = curr_section.subspan(1);
 
-    // Check existing path elements against filter
-    auto const check_size = cc::min(path_size, filter.size());
+    auto const check_size = cc::min(path.size(), filter.size());
     for (cc::isize i = 0; i < check_size; ++i)
     {
-        if (curr_section[i + 1]->name != filter[i])
+        if (path[i]->name != filter[i])
             return false;
     }
 
-    // If we've checked all existing sections, the new section should match the
-    // next filter element.
-    if (path_size < filter.size())
+    // sections past the current path must match the next filter element
+    if (path.size() < filter.size())
     {
-        if (section_name != filter[path_size])
+        if (section_name != filter[path.size()])
             return false;
     }
 

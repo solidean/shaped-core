@@ -1003,6 +1003,32 @@ template <class T, size_t N>
     return array + N;
 }
 
+// =========================================================================================================
+// Named range arguments
+// =========================================================================================================
+
+/// Named range argument: an offset plus a count, both in container-index units (isize).
+/// Intended as a "named arg" for range-taking APIs (e.g. span::subspan, string::subview/replace).
+/// Has no default member initializers on purpose, so designated initializers must name both fields.
+/// Usage (designated initializers):
+///   auto s = span.subspan({.offset = 2, .size = 3});
+struct offset_size
+{
+    isize offset;
+    isize size;
+};
+
+/// Named range argument: a half-open [start, end) index range, in container-index units (isize).
+/// Intended as a "named arg" for range-taking APIs (e.g. span::subspan, string::subview/replace).
+/// Has no default member initializers on purpose, so designated initializers must name both fields.
+/// Usage (designated initializers):
+///   auto s = span.subspan({.start = 2, .end = 5});
+struct start_end
+{
+    isize start;
+    isize end;
+};
+
 } // namespace cc
 
 // =========================================================================================================

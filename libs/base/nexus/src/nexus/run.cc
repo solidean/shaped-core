@@ -45,7 +45,7 @@ cc::string program_name(char const* argv0)
     {
         auto const ext = name.subview(name.size() - 4);
         if (ext == ".exe" || ext == ".EXE")
-            name = name.subview(0, name.size() - 4);
+            name = name.subview({.offset = 0, .size = name.size() - 4});
     }
 
     return cc::string(name);

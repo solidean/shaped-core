@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/pair.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/string/char_predicates.hh>
@@ -142,21 +143,30 @@ public:
 
     // substring operations
 public:
-    /// Returns a subview starting at offset with the specified size.
-    /// Precondition: offset <= size() && offset + size <= size().
-    [[nodiscard]] constexpr string_view subview(isize offset, isize size) const
-    {
-        CC_ASSERT(offset <= _size, "subview offset out of range");
-        CC_ASSERT(offset + size <= _size, "subview range out of bounds");
-        return string_view(_data + offset, size);
-    }
-
     /// Returns a subview starting at offset to the end of the string.
     /// Precondition: offset <= size().
     [[nodiscard]] constexpr string_view subview(isize offset) const
     {
         CC_ASSERT(offset <= _size, "subview offset out of range");
         return string_view(_data + offset, _size - offset);
+    }
+
+    /// Returns the subview [r.offset, r.offset + r.size).
+    /// Precondition: r.size >= 0 && r.offset >= 0 && r.offset + r.size <= size().
+    [[nodiscard]] constexpr string_view subview(offset_size r) const
+    {
+        CC_ASSERT(r.size >= 0, "subview size must be non-negative");
+        CC_ASSERT(r.offset >= 0 && r.offset + r.size <= _size, "subview range out of bounds");
+        return string_view(_data + r.offset, r.size);
+    }
+
+    /// Returns the subview [r.start, r.end).
+    /// Precondition: r.end >= r.start && r.start >= 0 && r.end <= size().
+    [[nodiscard]] constexpr string_view subview(start_end r) const
+    {
+        CC_ASSERT(r.end >= r.start, "subview end must not precede start");
+        CC_ASSERT(r.start >= 0 && r.end <= _size, "subview range out of bounds");
+        return string_view(_data + r.start, r.end - r.start);
     }
 
     /// Returns a subview starting at offset with the specified size, clamped to valid bounds.

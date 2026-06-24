@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
 #include <initializer_list>
@@ -9,7 +10,7 @@
 
 // TODO:
 // - reinterpret_as / as_bytes / as_mutable_bytes
-// - subspan api (first + last as well)
+// - first + last
 // - size_bytes
 
 /// Non-owning view over a contiguous sequence of T, similar to std::span.
@@ -119,6 +120,79 @@ public:
     [[nodiscard]] constexpr isize size() const { return _size; }
     /// Returns true if size() == 0.
     [[nodiscard]] constexpr bool empty() const { return _size == 0; }
+
+    /// Returns true if offset designates a valid suffix subspan, i.e. 0 <= offset <= size().
+    /// If this returns true, subspan(offset) will not trip its range assertion.
+    [[nodiscard]] constexpr bool is_subspan(isize offset) const { return 0 <= offset && offset <= _size; }
+
+    /// Returns true if r designates a valid subspan, i.e. r.offset >= 0 && r.offset + r.size <= size().
+    /// Precondition (asserted even here): r.size >= 0.
+    [[nodiscard]] constexpr bool is_subspan(offset_size r) const
+    {
+        CC_ASSERT(r.size >= 0, "subspan size must be non-negative");
+        return r.offset >= 0 && r.offset + r.size <= _size;
+    }
+
+    /// Returns true if r designates a valid subspan, i.e. r.start >= 0 && r.end <= size().
+    /// Precondition (asserted even here): r.end >= r.start.
+    [[nodiscard]] constexpr bool is_subspan(start_end r) const
+    {
+        CC_ASSERT(r.end >= r.start, "subspan end must not precede start");
+        return r.start >= 0 && r.end <= _size;
+    }
+
+    // subspans
+public:
+    /// Returns the subspan [offset, size()).
+    /// Precondition: 0 <= offset <= size() (see is_subspan).
+    [[nodiscard]] constexpr span subspan(isize offset) const
+    {
+        CC_ASSERT(is_subspan(offset), "subspan offset out of range");
+        return span(_data + offset, _size - offset);
+    }
+
+    /// Returns the subspan [r.offset, r.offset + r.size).
+    /// Precondition: r.size >= 0 && is_subspan(r).
+    [[nodiscard]] constexpr span subspan(offset_size r) const
+    {
+        CC_ASSERT(is_subspan(r), "subspan range out of bounds");
+        return span(_data + r.offset, r.size);
+    }
+
+    /// Returns the subspan [r.start, r.end).
+    /// Precondition: r.end >= r.start && is_subspan(r).
+    [[nodiscard]] constexpr span subspan(start_end r) const
+    {
+        CC_ASSERT(is_subspan(r), "subspan range out of bounds");
+        return span(_data + r.start, r.end - r.start);
+    }
+
+    /// Like subspan(offset) but clamps offset into [0, size()] instead of asserting.
+    [[nodiscard]] constexpr span subspan_clamped(isize offset) const
+    {
+        offset = cc::clamp(offset, isize(0), _size);
+        return span(_data + offset, _size - offset);
+    }
+
+    /// Like subspan(offset_size) but clamps the range into [0, size()] instead of asserting.
+    /// Precondition (asserted even here): r.size >= 0.
+    [[nodiscard]] constexpr span subspan_clamped(offset_size r) const
+    {
+        CC_ASSERT(r.size >= 0, "subspan size must be non-negative");
+        auto const offset = cc::clamp(r.offset, isize(0), _size);
+        auto const size = cc::min(r.size, _size - offset);
+        return span(_data + offset, size);
+    }
+
+    /// Like subspan(start_end) but clamps the range into [0, size()] instead of asserting.
+    /// Precondition (asserted even here): r.end >= r.start.
+    [[nodiscard]] constexpr span subspan_clamped(start_end r) const
+    {
+        CC_ASSERT(r.end >= r.start, "subspan end must not precede start");
+        auto const start = cc::clamp(r.start, isize(0), _size);
+        auto const end = cc::clamp(r.end, start, _size);
+        return span(_data + start, end - start);
+    }
 
     // members
 private:

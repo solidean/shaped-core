@@ -4,7 +4,6 @@
 #include <clean-core/string/string_view.hh>
 
 #include <iostream>    // std::cout: console output
-#include <string>      // std::string: CLI parsing needs find/substr/replace (not yet on cc::string)
 #include <string_view> // std::string_view: streams a cc::string into std::ostream
 
 namespace
@@ -29,7 +28,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     // Parse command line arguments
     for (int i = 1; i < argc; ++i)
     {
-        std::string const arg = argv[i];
+        cc::string_view const arg = argv[i];
 
         // Check for simple verbose flag
         if (arg == "-v")
@@ -87,19 +86,14 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         }
 
         // Regular filter argument - split by comma for Catch2 compatibility
-        size_t start = 0;
-        size_t end = arg.find(',');
-        while (end != std::string::npos)
+        cc::isize start = 0;
+        for (cc::isize end = arg.find(','); end >= 0; end = arg.find(',', start))
         {
-            std::string const filter = arg.substr(start, end - start);
-            if (!filter.empty())
+            if (auto const filter = arg.subview({.start = start, .end = end}); !filter.empty())
                 config.filters.emplace_back(filter);
             start = end + 1;
-            end = arg.find(',', start);
         }
-        // Add the last (or only) filter
-        std::string const filter = arg.substr(start);
-        if (!filter.empty())
+        if (auto const filter = arg.subview(start); !filter.empty())
             config.filters.emplace_back(filter);
     }
 
@@ -114,16 +108,8 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     {
         for (auto& filter : config.filters)
         {
-            // Replace \[ with [ (Catch2 escapes square brackets).
-            // cc::string has no in-place find/replace yet, so normalize via std::string.
-            std::string f(filter.data(), filter.size());
-            size_t pos = 0;
-            while ((pos = f.find("\\[", pos)) != std::string::npos)
-            {
-                f.replace(pos, 2, "[");
-                pos += 1;
-            }
-            filter = cc::string(f);
+            // Catch2 escapes square brackets as \[; undo that.
+            filter.replace_all("\\[", "[");
         }
     }
 

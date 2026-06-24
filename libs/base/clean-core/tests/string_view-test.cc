@@ -201,14 +201,6 @@ TEST("string_view - iterators")
 
 TEST("string_view - substring operations")
 {
-    SECTION("subview with offset and size")
-    {
-        auto const sv = cc::string_view{"hello world"};
-        auto const sub = sv.subview(6, 5);
-        CHECK(sub.size() == 5);
-        CHECK(sub == cc::string_view{"world"});
-    }
-
     SECTION("subview with offset to end")
     {
         auto const sv = cc::string_view{"hello world"};
@@ -220,9 +212,25 @@ TEST("string_view - substring operations")
     SECTION("subview at boundaries")
     {
         auto const sv = cc::string_view{"test"};
-        CHECK(sv.subview(0, 4) == sv);
-        CHECK(sv.subview(4, 0).empty());
-        CHECK(sv.subview(0, 0).empty());
+        CHECK(sv.subview({.offset = 0, .size = 4}) == sv);
+        CHECK(sv.subview({.offset = 4, .size = 0}).empty());
+        CHECK(sv.subview({.offset = 0, .size = 0}).empty());
+    }
+
+    SECTION("subview with offset_size")
+    {
+        auto const sv = cc::string_view{"hello world"};
+        CHECK(sv.subview({.offset = 6, .size = 5}) == cc::string_view{"world"});
+        CHECK(sv.subview({.offset = 0, .size = 5}) == cc::string_view{"hello"});
+        CHECK(sv.subview({.offset = 11, .size = 0}).empty());
+    }
+
+    SECTION("subview with start_end")
+    {
+        auto const sv = cc::string_view{"hello world"};
+        CHECK(sv.subview({.start = 6, .end = 11}) == cc::string_view{"world"});
+        CHECK(sv.subview({.start = 0, .end = 5}) == cc::string_view{"hello"});
+        CHECK(sv.subview({.start = 3, .end = 3}).empty());
     }
 
     SECTION("subview_clamped - normal range")

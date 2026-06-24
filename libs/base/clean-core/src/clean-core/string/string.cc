@@ -27,6 +27,113 @@ void cc::string::initialize_heap_from_data(char const* str, isize const len, mem
     _data.heap = data_heap::create_from_allocation(cc::move(alloc));
 }
 
+cc::isize cc::string::replace_all(char const from, char const to)
+{
+    auto* const d = data();
+    auto const n = size();
+    isize count = 0;
+    for (isize i = 0; i < n; ++i)
+    {
+        if (d[i] == from)
+        {
+            d[i] = to;
+            ++count;
+        }
+    }
+    return count;
+}
+
+cc::isize cc::string::replace_all(string_view const from, string_view const to)
+{
+    if (from.empty())
+        return 0;
+
+    string_view const self(*this);
+    isize at = self.find(from);
+    if (at < 0)
+        return 0;
+
+    // self references the current buffer; the rebuilt result is a separate allocation,
+    // so it is safe even if `to` aliases this string (we only move at the very end).
+    auto result = create_with_capacity(size(), resource());
+    isize pos = 0;
+    isize count = 0;
+    while (at >= 0)
+    {
+        result.append(self.subview({.start = pos, .end = at}));
+        result.append(to);
+        pos = at + from.size();
+        ++count;
+        at = self.find(from, pos);
+    }
+    result.append(self.subview(pos));
+
+    *this = cc::move(result);
+    return count;
+}
+
+bool cc::string::replace_first(char const from, char const to)
+{
+    auto const i = find(from);
+    if (i < 0)
+        return false;
+    data()[i] = to;
+    return true;
+}
+
+bool cc::string::replace_first(string_view const from, string_view const to)
+{
+    if (from.empty())
+        return false;
+    auto const i = find(from);
+    if (i < 0)
+        return false;
+    replace(offset_size{.offset = i, .size = from.size()}, to);
+    return true;
+}
+
+bool cc::string::replace_last(char const from, char const to)
+{
+    auto const i = rfind(from);
+    if (i < 0)
+        return false;
+    data()[i] = to;
+    return true;
+}
+
+bool cc::string::replace_last(string_view const from, string_view const to)
+{
+    if (from.empty())
+        return false;
+    auto const i = rfind(from);
+    if (i < 0)
+        return false;
+    replace(offset_size{.offset = i, .size = from.size()}, to);
+    return true;
+}
+
+void cc::string::replace(offset_size const r, string_view const with)
+{
+    CC_ASSERT(r.size >= 0, "replace size must be non-negative");
+    CC_ASSERT(r.offset >= 0 && r.offset + r.size <= size(), "replace range out of bounds");
+
+    // self and `with` may reference this string's buffer; the rebuilt result is a
+    // separate allocation and we only move into *this at the end, so aliasing is safe.
+    string_view const self(*this);
+    auto result = create_with_capacity(size() - r.size + with.size(), resource());
+    result.append(self.subview({.start = isize(0), .end = r.offset}));
+    result.append(with);
+    result.append(self.subview(r.offset + r.size));
+
+    *this = cc::move(result);
+}
+
+void cc::string::replace(start_end const r, string_view const with)
+{
+    CC_ASSERT(r.end >= r.start, "replace end must not precede start");
+    replace(offset_size{.offset = r.start, .size = r.end - r.start}, with);
+}
+
 void cc::string::materialize_heap(isize const min_back_capacity)
 {
     CC_ASSERT(is_small(), "already heap");

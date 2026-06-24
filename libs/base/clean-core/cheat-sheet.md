@@ -86,6 +86,9 @@ auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), 
 cc::span<int> s(ptr, n);                  // also span(begin,end), span(c_array), span(container)
 cc::span<int const> cs = {1, 2, 3};       // init-list ctor ONLY for const T, ONLY as a temporary arg
 s[i];  s.front();  s.back();  s.data();  s.begin();  s.end();  s.size();  s.empty();
+s.subspan(off);  s.subspan({.offset=o,.size=n});  s.subspan({.start=a,.end=b});   // asserts valid range
+s.is_subspan(off / {.offset,.size} / {.start,.end});   // -> bool; true => matching subspan won't assert
+s.subspan_clamped(...);                   // same 3 overloads, clamps range into [0,size()] instead of asserting
 cc::fixed_span<int, 3> fs(ptr);           // compile-time size N; adds get<I>() tuple protocol
 
 #include <clean-core/container/strided_span.hh>   // cc::strided_span<T> — view with a byte stride
@@ -104,13 +107,20 @@ auto s2 = cc::string::create_filled(n, 'x');   // also create_copy_of(sv), creat
                                                //       create_with_capacity(n), create_copy_c_str_materialized(sv)
 str.push_back('!');  str.append(sv);  str += other;  auto j = str + "x";   // mutate / concat
 str.size();  str.empty();  str[i];  str.data();   // data() is NOT null-terminated
+str.front();  str.back();  str.compare(o);  str.find(x,pos=0);  str.rfind(x,pos=-1);   // string_view reads forwarded
+str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (invalidated by mutation)
+str.substring(off / {.offset,.size} / {.start,.end}); // -> owning cc::string copy
+str.replace_all(from, to);                        // -> isize count; char/char or sv/sv (empty from = no-op)
+str.replace_first(from, to);  str.replace_last(from, to);   // -> bool; char/char or sv/sv
+str.replace({.offset,.size} / {.start,.end}, with);         // replace a range with a string_view
 str.is_small();                                   // -> bool (currently in SSO mode)
 str.c_str_materialize();                          // -> char const* '\0'-terminated (valid until next mutation)
 str.c_str_if_terminated();                        // -> char const* or nullptr if not terminated
 
 #include <clean-core/string/string_view.hh>   // cc::string_view — non-owning; implicitly from cc::string
 cc::string_view sv = "abc";               // ctors: (ptr,size), (begin,end), c-string, literal, container
-sv.subview(off, len);  sv.subview(off);  sv.subview_clamped(off, len);
+sv.subview(off);  sv.subview({.offset=o,.size=n});  sv.subview({.start=a,.end=b});   // named-range (cc::offset_size/start_end)
+sv.subview_clamped(off, len);
 sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
@@ -184,6 +194,7 @@ cc::min(a, b);  cc::max(a, b);  cc::clamp(v, lo, hi);  cc::min({a, b, c});
 cc::is_power_of_two(x);  cc::align_up(v, align);  cc::align_down(v, align);  cc::is_aligned(v, align);
 cc::int_div_round_up(n, d);  cc::wrapped_increment(pos, max);
 cc::invoke(f, args...);                   // calls callables AND member pointers uniformly
+cc::offset_size{.offset=o, .size=n};  cc::start_end{.start=a, .end=b};   // named-range args (span/string subview/replace)
 CC_DEFER { cleanup(); };                  // run at scope exit — CAPTURES BY REFERENCE
 cc::overloaded{ [](int){}, [](float){} }; // combine callables into one overload set (for visit)
 

@@ -1315,3 +1315,20 @@ TEST("utility - begin/end constexpr")
         SUCCEED();
     }
 }
+
+TEST("utility - named range structs")
+{
+    SECTION("offset_size designated init")
+    {
+        cc::offset_size const r{.offset = 2, .size = 3};
+        CHECK(r.offset == 2);
+        CHECK(r.size == 3);
+    }
+
+    SECTION("start_end designated init")
+    {
+        cc::start_end const r{.start = 1, .end = 5};
+        CHECK(r.start == 1);
+        CHECK(r.end == 5);
+    }
+}

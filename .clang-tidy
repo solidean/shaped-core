@@ -16,6 +16,7 @@ Checks: >-
   -bugprone-sizeof-container,
   -bugprone-sizeof-expression,
   -bugprone-lambda-function-name,
+  -bugprone-easily-swappable-parameters,
   readability-*,
   -readability-identifier-length,
   -readability-braces-around-statements,
@@ -44,6 +45,7 @@ Checks: >-
 # Disabled checks rationale:
 # -bugprone-chained-comparison: Triggers on Catch2 CHECK macro, re-enable after updating
 # -bugprone-macro-parentheses: Incompatible with CHECK/REQUIRE macros using spaceship operator
+# -bugprone-easily-swappable-parameters: Too eager; natural same-type APIs (e.g. replace(from, to)) are intentional, we want manual control
 # -readability-redundant-access-specifiers: We use these intentionally for grouping
 # -misc-non-private-member-variables-in-classes: clang-tidy 21 confuses structs and classes; we want public members in structs
 # -cppcoreguidelines-avoid-magic-numbers: Too strict, flags obvious constants
