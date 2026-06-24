@@ -1,10 +1,9 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
+#include <clean-core/platform/source_location.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/tests/schedule.hh>
-
-#include <source_location>
-#include <string>
-#include <vector>
 
 
 // Forward declaration for impl namespace
@@ -18,10 +17,10 @@ namespace nx
 {
 struct test_error
 {
-    std::string expr; // usually not shown in editor (assumed to be part of source already)
-    std::source_location location;
-    std::vector<std::string> extra_lines;
-    std::string expanded; // shown inline next to the code at location (important for VSCode DX)
+    cc::string expr; // usually not shown in editor (assumed to be part of source already)
+    cc::source_location location;
+    cc::vector<cc::string> extra_lines;
+    cc::string expanded; // shown inline next to the code at location (important for VSCode DX)
     // NOTE: if expr == expanded, C++ TestMate just shows "failed" instead of anything useful, so make sure they are always different
 };
 
@@ -31,12 +30,12 @@ struct test_execution
 
     struct section
     {
-        std::string name;
-        std::source_location location;
-        std::vector<section> subsections;
+        cc::string name;
+        cc::source_location location;
+        cc::vector<section> subsections;
 
         // NOTE: only valid for leaf sections
-        std::vector<test_error> errors;
+        cc::vector<test_error> errors;
 
         // stats
         int executed_checks = 0;
@@ -55,7 +54,7 @@ struct test_execution
 
 struct test_schedule_execution
 {
-    std::vector<test_execution> executions;
+    cc::vector<test_execution> executions;
 
     [[nodiscard]] int count_total_tests() const;
     [[nodiscard]] int count_failed_tests() const;
@@ -71,8 +70,8 @@ namespace nx::impl
 {
 void report_check_result(check_kind kind,
                          cmp_op op,
-                         std::string expr,
+                         cc::string expr,
                          bool passed,
-                         std::vector<std::string> extra_lines,
-                         std::source_location location);
+                         cc::vector<cc::string> extra_lines,
+                         cc::source_location location);
 }

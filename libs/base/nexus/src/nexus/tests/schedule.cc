@@ -1,8 +1,20 @@
 #include "schedule.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/string/string_view.hh>
 
-#include <iostream>
+#include <iostream>    // std::cout: console output
+#include <string>      // std::string: CLI parsing needs find/substr/replace (not yet on cc::string)
+#include <string_view> // std::string_view: streams a cc::string into std::ostream
+
+namespace
+{
+// cc::string is not std::ostream-streamable, so view it as a std::string_view.
+std::string_view as_sv(cc::string_view s)
+{
+    return std::string_view(s.data(), size_t(s.size()));
+}
+} // namespace
 
 nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, char** argv)
 {
@@ -102,13 +114,16 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     {
         for (auto& filter : config.filters)
         {
-            // Replace \[ with [ (Catch2 escapes square brackets)
+            // Replace \[ with [ (Catch2 escapes square brackets).
+            // cc::string has no in-place find/replace yet, so normalize via std::string.
+            std::string f(filter.data(), filter.size());
             size_t pos = 0;
-            while ((pos = filter.find("\\[", pos)) != std::string::npos)
+            while ((pos = f.find("\\[", pos)) != std::string::npos)
             {
-                filter.replace(pos, 2, "[");
+                f.replace(pos, 2, "[");
                 pos += 1;
             }
+            filter = cc::string(f);
         }
     }
 
@@ -118,7 +133,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         for (auto const& filter : config.filters)
         {
             // Non-wildcard match (no * character) enables disabled tests
-            if (filter.find('*') == std::string::npos)
+            if (!filter.contains('*'))
             {
                 config.run_disabled_tests = true;
                 break;
@@ -135,7 +150,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
 
     for (auto const& decl : registry.declarations)
     {
-        CC_ASSERT(decl.function != nullptr, "invalid test decl");
+        CC_ASSERT(decl.function.is_valid(), "invalid test decl");
 
         // Skip disabled tests unless explicitly requested
         if (!decl.test_config.enabled && !config.run_disabled_tests)
@@ -151,7 +166,7 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
                     continue;
 
                 // Simple substring match for now
-                if (std::string(decl.name).find(filter) != std::string::npos)
+                if (decl.name.contains(filter))
                 {
                     matches = true;
                     break;
@@ -176,6 +191,6 @@ void nx::test_schedule::print() const
     std::cout << "test schedule:\n";
     for (auto const& instance : instances)
     {
-        std::cout << "  - \"" << instance.declaration->name << "\"\n";
+        std::cout << "  - \"" << as_sv(instance.declaration->name) << "\"\n";
     }
 }

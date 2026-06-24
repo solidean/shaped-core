@@ -1,18 +1,26 @@
 #include "run.hh"
 
+#include <clean-core/common/utility.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <string_view>
+#include <fstream>     // std::ofstream: JUnit report file output
+#include <iostream>    // std::cout / std::cerr: console output
+#include <string_view> // std::string_view: streams a cc::string into std::ostream (no operator<<)
 
 namespace
 {
+// cc::string is not std::ostream-streamable, so view it as a std::string_view.
+std::string_view as_sv(cc::string_view s)
+{
+    return std::string_view(s.data(), size_t(s.size()));
+}
+
 void print_help()
 {
     std::cout << "nexus - Unified test, fuzz, benchmark, and app runner for modern C++\n\n";
@@ -25,28 +33,35 @@ void print_help()
 
 // Derives a JUnit suite name from argv[0]: the basename without a directory or a
 // trailing .exe extension (e.g. "build/bin/nexus-test.exe" -> "nexus-test").
-std::string program_name(char const* argv0)
+cc::string program_name(char const* argv0)
 {
-    std::string_view name = argv0 != nullptr ? argv0 : "nexus";
+    cc::string_view name = argv0 != nullptr ? argv0 : "nexus";
 
-    if (auto const slash = name.find_last_of("/\\"); slash != std::string_view::npos)
-        name = name.substr(slash + 1);
+    // strip the directory (cc::string_view has no find_last_of, so rfind each separator)
+    if (auto const slash = cc::max(name.rfind('/'), name.rfind('\\')); slash >= 0)
+        name = name.subview(slash + 1);
 
     if (name.size() > 4)
     {
-        auto const ext = name.substr(name.size() - 4);
+        auto const ext = name.subview(name.size() - 4);
         if (ext == ".exe" || ext == ".EXE")
-            name = name.substr(0, name.size() - 4);
+            name = name.subview(0, name.size() - 4);
     }
 
-    return std::string(name);
+    return cc::string(name);
+}
+
+// Writes a cc::string to an std::ostream by bytes (cc::string has no operator<<).
+void write_to(std::ostream& os, cc::string_view s)
+{
+    os.write(s.data(), s.size());
 }
 } // namespace
 
 int nx::run(int argc, char** argv)
 {
     // Handle --help flag
-    if (argc == 2 && std::string_view(argv[1]) == "--help")
+    if (argc == 2 && cc::string_view(argv[1]) == "--help")
     {
         print_help();
         return 0;
@@ -61,7 +76,7 @@ int nx::run(int argc, char** argv)
     // Handle Catch2 XML discovery mode for TestMate integration
     if (config.is_catch2_xml_discovery)
     {
-        write_catch2_discovery_xml(std::cout, registry);
+        write_to(std::cout, write_catch2_discovery_xml(registry));
         return 0;
     }
 
@@ -92,17 +107,17 @@ int nx::run(int argc, char** argv)
     // console output below still runs regardless of the reporting mode.
     if (!config.junit_xml_file.empty())
     {
-        std::ofstream out(config.junit_xml_file);
+        std::ofstream out(config.junit_xml_file.c_str_materialize());
         if (out)
-            write_junit_xml(out, program_name(argv[0]), execution);
+            write_to(out, write_junit_xml(program_name(argv[0]), execution));
         else
-            std::cerr << "Error: could not open JUnit XML file: " << config.junit_xml_file << "\n";
+            std::cerr << "Error: could not open JUnit XML file: " << as_sv(config.junit_xml_file) << "\n";
     }
 
     // Handle Catch2 XML results reporting for TestMate integration
     if (config.report_catch2_xml_results)
     {
-        write_catch2_results_xml(std::cout, execution);
+        write_to(std::cout, write_catch2_results_xml(execution));
         return execution.count_failed_tests() > 0 ? 1 : 0;
     }
 
@@ -123,7 +138,7 @@ int nx::run(int argc, char** argv)
                 auto const& decl = exec.instance.declaration;
                 if (decl)
                 {
-                    std::cerr << "  " << decl->name << " at " << decl->location.file_name() << ":"
+                    std::cerr << "  " << as_sv(decl->name) << " at " << decl->location.file_name() << ":"
                               << decl->location.line() << "\n";
                 }
             }

@@ -2,37 +2,50 @@
 
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/section.hh>
 
-#include <chrono>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <span>
-#include <string>
-#include <unordered_map>
+#include <chrono>        // std::chrono: no cc timing yet
+#include <format>        // std::format: no cc::format yet
+#include <iomanip>       // std::setprecision: console formatting
+#include <iostream>      // std::cout: console output
+#include <string>        // std::string: key type for the std::unordered_map below
+#include <string_view>   // std::string_view: bridges cc::string into std::format / std::ostream
+#include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
 
 namespace nx
 {
 namespace
 {
+// cc::string is neither std::format-able nor std::ostream-streamable (no
+// std::formatter / operator<< specialization), so view it as a std::string_view
+// for the std-side diagnostics below. const-safe, unlike c_str_materialize().
+std::string_view as_sv(cc::string const& s)
+{
+    return std::string_view(s.data(), size_t(s.size()));
+}
+
 struct test_section
 {
-    std::unordered_map<std::string, std::unique_ptr<test_section>> subsections;
-    std::vector<test_section*> subsections_ordered;
+    std::unordered_map<std::string, cc::unique_ptr<test_section>> subsections;
+    cc::vector<test_section*> subsections_ordered;
 
     test_section* next_open_section = nullptr;
     bool is_done = false;
     int last_visited_in_exec = -1;
-    std::source_location location;
-    std::string name;
+    cc::source_location location;
+    cc::string name;
 
     // associated stats
     int executed_checks = 0;
     int failed_checks = 0;
-    std::vector<test_error> errors;
+    cc::vector<test_error> errors;
     double duration_seconds = 0.0;
 
     // accumulates stats for non-leaf sections
@@ -70,7 +83,8 @@ struct test_section
                     .expr = "unreachable section",
                     .location = subsec->location,
                     .extra_lines = {},
-                    .expanded = std::format("section \"{}\" was discovered but unreachable from parent", subsec->name),
+                    .expanded
+                    = std::format("section \"{}\" was discovered but unreachable from parent", as_sv(subsec->name)),
                 });
                 sec.is_considered_failing = true;
             }
@@ -98,13 +112,13 @@ struct test_context
 {
     nx::test_execution* execution = nullptr;
     nx::test_schedule_config const* config = nullptr;
-    std::unique_ptr<test_section> root_section;
-    std::vector<test_section*> curr_section;
+    cc::unique_ptr<test_section> root_section;
+    cc::vector<test_section*> curr_section;
 
     // current stats
     int executed_checks = 0;
     int failed_checks = 0;
-    std::vector<test_error> errors;
+    cc::vector<test_error> errors;
 
     // the first section we close becomes the current "leaf" section
     // after a run, all checks & errors are associated to the current leaf
@@ -125,14 +139,16 @@ struct test_skipped
 
 struct test_duplicate_section
 {
-    std::string name;
-    std::source_location location;
+    cc::string name;
+    cc::source_location location;
 };
 
-thread_local std::vector<test_context> g_context_stack;
+thread_local cc::vector<test_context> g_context_stack;
 
-bool is_section_allowed(std::span<test_section* const> curr_section,
-                        std::string const& section_name,
+// cc::span has no subspan() yet, so the section path (everything past the root at
+// index 0) is addressed directly via index + 1 into curr_section.
+bool is_section_allowed(cc::span<test_section* const> curr_section,
+                        cc::string_view section_name,
                         nx::test_schedule_config const* config)
 {
     // No filter means all sections are allowed
@@ -141,22 +157,22 @@ bool is_section_allowed(std::span<test_section* const> curr_section,
 
     auto const& filter = config->section_filters;
 
-    // Current section path (excluding root at index 0)
-    auto const section_path = curr_section.subspan(1);
+    // Current section path length (excluding root at index 0)
+    auto const path_size = curr_section.size() - 1;
 
     // Check existing path elements against filter
-    size_t const check_size = std::min(section_path.size(), filter.size());
-    for (size_t i = 0; i < check_size; ++i)
+    auto const check_size = cc::min(path_size, filter.size());
+    for (cc::isize i = 0; i < check_size; ++i)
     {
-        if (section_path[i]->name != filter[i])
+        if (curr_section[i + 1]->name != filter[i])
             return false;
     }
 
-    // If we've checked all existing sections, check the new section name
-    if (section_path.size() < filter.size())
+    // If we've checked all existing sections, the new section should match the
+    // next filter element.
+    if (path_size < filter.size())
     {
-        // The new section should match the next filter element
-        if (section_path.size() < filter.size() && section_name != filter[section_path.size()])
+        if (section_name != filter[path_size])
             return false;
     }
 
@@ -168,7 +184,7 @@ void test_execute_begin(nx::test_execution& execution, nx::test_schedule_config 
     g_context_stack.push_back(test_context{
         .execution = &execution,
         .config = &config,
-        .root_section = std::make_unique<test_section>(),
+        .root_section = cc::make_unique<test_section>(),
     });
     g_context_stack.back().root_section->location = execution.instance.declaration->location;
     g_context_stack.back().curr_section.push_back(g_context_stack.back().root_section.get());
@@ -183,7 +199,7 @@ void test_execute_end()
 
     ctx.root_section->finalize_section_to(ctx.execution->root);
 
-    g_context_stack.pop_back();
+    g_context_stack.remove_back();
 }
 
 // Operator to string conversion
@@ -211,7 +227,7 @@ char const* op_to_string(impl::cmp_op op)
 } // namespace nx
 
 
-nx::impl::raii_section_opener nx::impl::test_open_section(std::string name, std::source_location location)
+nx::impl::raii_section_opener nx::impl::test_open_section(cc::string name, cc::source_location location)
 {
     auto& ctx = g_context_stack.back();
 
@@ -224,11 +240,11 @@ nx::impl::raii_section_opener nx::impl::test_open_section(std::string name, std:
         return raii_section_opener(false);
     }
 
-    // new subsection?
-    auto& subsec = curr_sec.subsections[name];
+    // new subsection? (std::unordered_map is keyed by std::string, so bridge the name)
+    auto& subsec = curr_sec.subsections[std::string(name.data(), name.size())];
     if (subsec == nullptr)
     {
-        subsec = std::make_unique<test_section>();
+        subsec = cc::make_unique<test_section>();
         subsec->name = name;
         subsec->location = location;
         curr_sec.subsections_ordered.push_back(subsec.get());
@@ -237,7 +253,7 @@ nx::impl::raii_section_opener nx::impl::test_open_section(std::string name, std:
     // section opened twice in the same run
     if (subsec->last_visited_in_exec == ctx.exec_count)
         throw test_duplicate_section{
-            .name = std::move(name),
+            .name = cc::move(name),
             .location = location,
         };
     subsec->last_visited_in_exec = ctx.exec_count;
@@ -288,16 +304,16 @@ nx::impl::raii_section_opener::~raii_section_opener()
             ctx.curr_section[ctx.curr_section.size() - 2]->next_open_section = subsec.next_open_section;
         }
 
-        ctx.curr_section.pop_back();
+        ctx.curr_section.remove_back();
     }
 }
 
 void nx::impl::report_check_result(check_kind kind,
                                    cmp_op op,
-                                   std::string expr,
+                                   cc::string expr,
                                    bool passed,
-                                   std::vector<std::string> extra_lines,
-                                   std::source_location location)
+                                   cc::vector<cc::string> extra_lines,
+                                   cc::source_location location)
 {
     if (g_context_stack.empty())
         return; // No active test context
@@ -316,10 +332,10 @@ void nx::impl::report_check_result(check_kind kind,
     {
         ++ctx.failed_checks;
 
-        std::string expanded;
+        cc::string expanded;
         switch (op)
         {
-        case cmp_op::none: expanded = std::format("'{}' failed", expr); break;
+        case cmp_op::none: expanded = std::format("'{}' failed", as_sv(expr)); break;
 
         case cmp_op::less:
         case cmp_op::less_equal:
@@ -328,7 +344,7 @@ void nx::impl::report_check_result(check_kind kind,
         case cmp_op::equal:
         case cmp_op::not_equal:
             if (extra_lines.size() >= 2)
-                expanded = std::format("{} {} {}", extra_lines[0], op_to_string(op), extra_lines[1]);
+                expanded = std::format("{} {} {}", as_sv(extra_lines[0]), op_to_string(op), as_sv(extra_lines[1]));
             else
                 expanded = "(could not capture expressions)";
             break;
@@ -429,7 +445,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     for (auto const& instance : schedule.instances)
     {
         CC_ASSERT(instance.declaration != nullptr, "instances must be valid");
-        CC_ASSERT(instance.declaration->function != nullptr, "instances must be valid");
+        CC_ASSERT(instance.declaration->function.is_valid(), "instances must be valid");
         test_execution execution;
         execution.instance = instance;
 
@@ -452,9 +468,10 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             if (config.verbose)
             {
                 if (section_num == 0)
-                    std::cout << "  - start \"" << instance.declaration->name << "\"\n" << std::flush;
+                    std::cout << "  - start \"" << as_sv(instance.declaration->name) << "\"\n" << std::flush;
                 else
-                    std::cout << "  - start \"" << instance.declaration->name << "\" section " << section_num << '\n'
+                    std::cout << "  - start \"" << as_sv(instance.declaration->name) << "\" section " << section_num
+                              << '\n'
                               << std::flush;
             }
             section_num++;
@@ -470,7 +487,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                                                       info.expression, false, {info.message}, info.location);
                     });
 
-                (*instance.declaration->function)();
+                instance.declaration->function();
             }
             catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
             {
@@ -485,10 +502,10 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             catch (test_duplicate_section const& e)
             {
                 g_context_stack.back().errors.push_back(test_error{
-                    .expr = std::format("duplicate section: \"{}\"", e.name),
+                    .expr = std::format("duplicate section: \"{}\"", as_sv(e.name)),
                     .location = e.location,
                     .extra_lines = {},
-                    .expanded = std::format("duplicate section: \"{}\"", e.name),
+                    .expanded = std::format("duplicate section: \"{}\"", as_sv(e.name)),
                 });
                 should_continue = false; // wrong use of test framework
             }
@@ -550,7 +567,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                       << std::flush;
         }
 
-        result.executions.push_back(std::move(execution));
+        result.executions.push_back(cc::move(execution));
     }
 
     return result;
