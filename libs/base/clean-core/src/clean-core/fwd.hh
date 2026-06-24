@@ -78,6 +78,8 @@ template <class T>
 struct node_allocation;
 template <class T, class NodeTraits>
 struct poly_node_allocation;
+template <class T>
+struct unique_ptr;
 
 
 //
