@@ -622,3 +622,115 @@ TEST("fixed_span - braced init list construction")
         check_span(cc::fixed_span<int const, 3>{1, 2, 3});
     }
 }
+
+TEST("span - subspan")
+{
+    int data[] = {0, 1, 2, 3, 4, 5};
+    auto const s = cc::span<int>{data, 6};
+
+    SECTION("subspan(offset)")
+    {
+        auto const sub = s.subspan(2);
+        CHECK(sub.size() == 4);
+        CHECK(sub[0] == 2);
+        CHECK(sub[3] == 5);
+
+        CHECK(s.subspan(0).size() == 6);
+        CHECK(s.subspan(6).empty());
+    }
+
+    SECTION("subspan(offset_size)")
+    {
+        auto const sub = s.subspan({.offset = 1, .size = 3});
+        CHECK(sub.size() == 3);
+        CHECK(sub[0] == 1);
+        CHECK(sub[2] == 3);
+
+        CHECK(s.subspan({.offset = 6, .size = 0}).empty());
+        CHECK(s.subspan({.offset = 0, .size = 6}).size() == 6);
+    }
+
+    SECTION("subspan(start_end)")
+    {
+        auto const sub = s.subspan({.start = 2, .end = 5});
+        CHECK(sub.size() == 3);
+        CHECK(sub[0] == 2);
+        CHECK(sub[2] == 4);
+
+        CHECK(s.subspan({.start = 3, .end = 3}).empty());
+        CHECK(s.subspan({.start = 0, .end = 6}).size() == 6);
+    }
+}
+
+TEST("span - is_subspan")
+{
+    int data[] = {0, 1, 2, 3};
+    auto const s = cc::span<int>{data, 4};
+
+    SECTION("offset")
+    {
+        CHECK(s.is_subspan(0));
+        CHECK(s.is_subspan(4));
+        CHECK(!s.is_subspan(5));
+        CHECK(!s.is_subspan(-1));
+    }
+
+    SECTION("offset_size")
+    {
+        CHECK(s.is_subspan(cc::offset_size{.offset = 1, .size = 3}));
+        CHECK(s.is_subspan(cc::offset_size{.offset = 4, .size = 0}));
+        CHECK(!s.is_subspan(cc::offset_size{.offset = 2, .size = 3}));
+        CHECK(!s.is_subspan(cc::offset_size{.offset = -1, .size = 1}));
+    }
+
+    SECTION("start_end")
+    {
+        CHECK(s.is_subspan(cc::start_end{.start = 1, .end = 3}));
+        CHECK(s.is_subspan(cc::start_end{.start = 0, .end = 4}));
+        CHECK(!s.is_subspan(cc::start_end{.start = 2, .end = 5}));
+        CHECK(!s.is_subspan(cc::start_end{.start = -1, .end = 2}));
+    }
+}
+
+TEST("span - subspan_clamped")
+{
+    int data[] = {0, 1, 2, 3, 4};
+    auto const s = cc::span<int>{data, 5};
+
+    SECTION("offset")
+    {
+        CHECK(s.subspan_clamped(2).size() == 3);
+        CHECK(s.subspan_clamped(-3).size() == 5); // clamped to 0
+        CHECK(s.subspan_clamped(10).empty());     // clamped to size
+    }
+
+    SECTION("offset_size")
+    {
+        CHECK(s.subspan_clamped({.offset = 1, .size = 2}).size() == 2);
+        CHECK(s.subspan_clamped({.offset = 3, .size = 10}).size() == 2); // size truncated
+        CHECK(s.subspan_clamped({.offset = 10, .size = 3}).empty());     // offset clamped
+        CHECK(s.subspan_clamped({.offset = -2, .size = 3}).size() == 3); // offset clamped to 0
+    }
+
+    SECTION("start_end")
+    {
+        CHECK(s.subspan_clamped({.start = 1, .end = 3}).size() == 2);
+        CHECK(s.subspan_clamped({.start = 2, .end = 99}).size() == 3); // end clamped
+        CHECK(s.subspan_clamped({.start = -5, .end = 2}).size() == 2); // start clamped to 0
+        CHECK(s.subspan_clamped({.start = 99, .end = 99}).empty());    // both clamped to size
+    }
+}
+
+// constexpr smoke test
+static_assert(
+    []
+    {
+        int data[] = {0, 1, 2, 3};
+        auto const s = cc::span<int>{data, 4};
+        return s.subspan(1).size() == 3                        //
+            && s.subspan({.offset = 1, .size = 2}).size() == 2 //
+            && s.subspan({.start = 1, .end = 3}).size() == 2   //
+            && s.is_subspan(2)                                 //
+            && s.subspan_clamped(10).empty();
+    }(),
+    "span subspan should be usable in constexpr");

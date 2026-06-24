@@ -793,3 +793,224 @@ TEST("string - special cases")
         }
     }
 }
+
+TEST("string - string_view read forwarding")
+{
+    cc::string const s = cc::string("hello world");
+
+    SECTION("front / back")
+    {
+        CHECK(s.front() == 'h');
+        CHECK(s.back() == 'd');
+    }
+
+    SECTION("compare")
+    {
+        CHECK(s.compare("hello world") == 0);
+        CHECK(s.compare("hello") > 0);
+        CHECK(s.compare("z") < 0);
+    }
+
+    SECTION("find")
+    {
+        CHECK(s.find("world") == 6);
+        CHECK(s.find('o') == 4);
+        CHECK(s.find('o', 5) == 7);
+        CHECK(s.find("xyz") == -1);
+    }
+
+    SECTION("rfind")
+    {
+        CHECK(s.rfind('o') == 7);
+        CHECK(s.rfind("o") == 7);
+        CHECK(s.rfind("l") == 9);
+        CHECK(s.rfind("xyz") == -1);
+    }
+}
+
+TEST("string - subview and substring")
+{
+    SECTION("subview aliases the string")
+    {
+        cc::string const s = cc::string("hello world");
+        auto const v = s.subview({.offset = 6, .size = 5});
+        CHECK(v == cc::string_view{"world"});
+        CHECK(v.data() == s.data() + 6);
+
+        CHECK(s.subview(6) == cc::string_view{"world"});
+        CHECK(s.subview({.start = 0, .end = 5}) == cc::string_view{"hello"});
+    }
+
+    SECTION("substring is an owning copy (SSO)")
+    {
+        cc::string const s = cc::string("hello world");
+        auto const sub = s.substring({.offset = 0, .size = 5});
+        CHECK(sub == cc::string_view{"hello"});
+        CHECK(sub.data() != s.data());
+
+        CHECK(s.substring(6) == cc::string_view{"world"});
+        CHECK(s.substring({.start = 6, .end = 11}) == cc::string_view{"world"});
+    }
+
+    SECTION("substring of a heap string")
+    {
+        cc::string const s = cc::string("the quick brown fox jumps over the lazy dog");
+        CHECK(s.size() > 39);
+        CHECK(s.substring({.start = 4, .end = 9}) == cc::string_view{"quick"});
+        CHECK(s.substring(40) == cc::string_view{"dog"});
+    }
+}
+
+TEST("string - replace_all char")
+{
+    SECTION("replaces every occurrence in place")
+    {
+        cc::string s = cc::string("a.b.c.d");
+        auto const n = s.replace_all('.', '/');
+        CHECK(n == 3);
+        CHECK(s == cc::string_view{"a/b/c/d"});
+    }
+
+    SECTION("no match")
+    {
+        cc::string s = cc::string("abc");
+        CHECK(s.replace_all('x', 'y') == 0);
+        CHECK(s == cc::string_view{"abc"});
+    }
+}
+
+TEST("string - replace_all string_view")
+{
+    SECTION("equal-size replacement")
+    {
+        cc::string s = cc::string("a.b.c");
+        auto const n = s.replace_all(".", "-");
+        CHECK(n == 2);
+        CHECK(s == cc::string_view{"a-b-c"});
+    }
+
+    SECTION("growing replacement")
+    {
+        cc::string s = cc::string("a.b.c");
+        auto const n = s.replace_all(".", "<>");
+        CHECK(n == 2);
+        CHECK(s == cc::string_view{"a<>b<>c"});
+    }
+
+    SECTION("shrinking replacement")
+    {
+        cc::string s = cc::string("aXXbXXc");
+        auto const n = s.replace_all("XX", "-");
+        CHECK(n == 2);
+        CHECK(s == cc::string_view{"a-b-c"});
+    }
+
+    SECTION("growing into heap")
+    {
+        cc::string s = cc::string("x.x.x.x.x.x.x.x.x.x");
+        auto const n = s.replace_all(".", "____");
+        CHECK(n == 9);
+        CHECK(s.size() > 39);
+        CHECK(s == cc::string_view{"x____x____x____x____x____x____x____x____x____x"});
+    }
+
+    SECTION("non-overlapping matches")
+    {
+        cc::string s = cc::string("aaaa");
+        auto const n = s.replace_all("aa", "b");
+        CHECK(n == 2);
+        CHECK(s == cc::string_view{"bb"});
+    }
+
+    SECTION("no match leaves string unchanged")
+    {
+        cc::string s = cc::string("hello");
+        CHECK(s.replace_all("xyz", "abc") == 0);
+        CHECK(s == cc::string_view{"hello"});
+    }
+
+    SECTION("empty from is a no-op")
+    {
+        cc::string s = cc::string("hello");
+        CHECK(s.replace_all("", "x") == 0);
+        CHECK(s == cc::string_view{"hello"});
+    }
+
+    SECTION("deletion via empty to")
+    {
+        cc::string s = cc::string("a.b.c");
+        auto const n = s.replace_all(".", "");
+        CHECK(n == 2);
+        CHECK(s == cc::string_view{"abc"});
+    }
+}
+
+TEST("string - replace_first / replace_last")
+{
+    SECTION("char overloads")
+    {
+        cc::string s = cc::string("a.b.c");
+        CHECK(s.replace_first('.', '/'));
+        CHECK(s == cc::string_view{"a/b.c"});
+        CHECK(s.replace_last('.', '/'));
+        CHECK(s == cc::string_view{"a/b/c"});
+        CHECK(!s.replace_first('x', 'y'));
+    }
+
+    SECTION("string_view overloads")
+    {
+        cc::string s = cc::string("ab.ab.ab");
+        CHECK(s.replace_first("ab", "X"));
+        CHECK(s == cc::string_view{"X.ab.ab"});
+        CHECK(s.replace_last("ab", "Y"));
+        CHECK(s == cc::string_view{"X.ab.Y"});
+        CHECK(!s.replace_first("zz", "q"));
+        CHECK(!s.replace_first("", "q"));
+    }
+}
+
+TEST("string - replace range")
+{
+    SECTION("offset_size, equal size")
+    {
+        cc::string s = cc::string("hello world");
+        s.replace({.offset = 6, .size = 5}, "there");
+        CHECK(s == cc::string_view{"hello there"});
+    }
+
+    SECTION("offset_size, growing")
+    {
+        cc::string s = cc::string("hello world");
+        s.replace({.offset = 0, .size = 5}, "greetings");
+        CHECK(s == cc::string_view{"greetings world"});
+    }
+
+    SECTION("start_end, shrinking")
+    {
+        cc::string s = cc::string("hello world");
+        s.replace({.start = 0, .end = 5}, "hi");
+        CHECK(s == cc::string_view{"hi world"});
+    }
+
+    SECTION("insertion via empty range")
+    {
+        cc::string s = cc::string("ac");
+        s.replace({.offset = 1, .size = 0}, "b");
+        CHECK(s == cc::string_view{"abc"});
+    }
+
+    SECTION("growing into heap")
+    {
+        cc::string s = cc::string("short");
+        s.replace({.start = 0, .end = 5}, "this is a considerably longer replacement string");
+        CHECK(s.size() > 39);
+        CHECK(s == cc::string_view{"this is a considerably longer replacement string"});
+    }
+
+    SECTION("replace whole string")
+    {
+        cc::string s = cc::string("abc");
+        s.replace({.offset = 0, .size = 3}, "xyz");
+        CHECK(s == cc::string_view{"xyz"});
+    }
+}

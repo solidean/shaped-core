@@ -419,6 +419,59 @@ public:
         return data()[i];
     }
 
+    /// Returns the first byte. Precondition: !empty().
+    [[nodiscard]] char front() const { return string_view(*this).front(); }
+
+    /// Returns the last byte. Precondition: !empty().
+    [[nodiscard]] char back() const { return string_view(*this).back(); }
+
+    // string_view read forwarding
+public:
+    /// Lexicographically compares with another view. Returns <0, 0, or >0.
+    [[nodiscard]] int compare(string_view other) const { return string_view(*this).compare(other); }
+
+    /// Finds the first occurrence of substring at or after pos, or -1. Precondition: 0 <= pos <= size().
+    [[nodiscard]] isize find(string_view substring, isize pos = 0) const
+    {
+        return string_view(*this).find(substring, pos);
+    }
+
+    /// Finds the first occurrence of c at or after pos, or -1. Precondition: 0 <= pos <= size().
+    [[nodiscard]] isize find(char c, isize pos = 0) const { return string_view(*this).find(c, pos); }
+
+    /// Finds the last occurrence of substring at or before pos (-1 = from the end), or -1.
+    [[nodiscard]] isize rfind(string_view substring, isize pos = -1) const
+    {
+        return string_view(*this).rfind(substring, pos);
+    }
+
+    /// Finds the last occurrence of c at or before pos (-1 = from the end), or -1.
+    [[nodiscard]] isize rfind(char c, isize pos = -1) const { return string_view(*this).rfind(c, pos); }
+
+    // substring operations
+public:
+    /// Returns a non-owning view [offset, size()) into this string.
+    /// The view is invalidated by any mutation of this string.
+    /// Precondition: 0 <= offset <= size().
+    [[nodiscard]] string_view subview(isize offset) const { return string_view(*this).subview(offset); }
+
+    /// Returns a non-owning view [r.offset, r.offset + r.size) into this string.
+    /// The view is invalidated by any mutation of this string.
+    [[nodiscard]] string_view subview(offset_size r) const { return string_view(*this).subview(r); }
+
+    /// Returns a non-owning view [r.start, r.end) into this string.
+    /// The view is invalidated by any mutation of this string.
+    [[nodiscard]] string_view subview(start_end r) const { return string_view(*this).subview(r); }
+
+    /// Returns an owning copy of [offset, size()). Precondition: 0 <= offset <= size().
+    [[nodiscard]] string substring(isize offset) const { return string(subview(offset)); }
+
+    /// Returns an owning copy of [r.offset, r.offset + r.size).
+    [[nodiscard]] string substring(offset_size r) const { return string(subview(r)); }
+
+    /// Returns an owning copy of [r.start, r.end).
+    [[nodiscard]] string substring(start_end r) const { return string(subview(r)); }
+
     // C interop
 public:
     /// Materializes a null-terminated C string on demand.
@@ -600,6 +653,37 @@ public:
             _data.heap.clear();
         }
     }
+
+    /// Replaces every occurrence of from with to, in place. Returns the number of replacements.
+    /// Complexity: O(size()).
+    isize replace_all(char from, char to);
+
+    /// Replaces every non-overlapping occurrence of from with to (scanning left to right).
+    /// An empty from matches nothing and the string is left unchanged (returns 0).
+    /// Returns the number of replacements. May reallocate. Complexity: O(size() * from.size()).
+    isize replace_all(string_view from, string_view to);
+
+    /// Replaces the first occurrence of from with to. Returns true if a replacement was made.
+    bool replace_first(char from, char to);
+
+    /// Replaces the first occurrence of from with to (no-op for empty from). Returns true if replaced.
+    bool replace_first(string_view from, string_view to);
+
+    /// Replaces the last occurrence of from with to. Returns true if a replacement was made.
+    bool replace_last(char from, char to);
+
+    /// Replaces the last occurrence of from with to (no-op for empty from). Returns true if replaced.
+    bool replace_last(string_view from, string_view to);
+
+    /// Replaces the bytes [r.offset, r.offset + r.size) with the contents of with.
+    /// Precondition: r designates a valid range of this string (r.size >= 0, r.offset + r.size <= size()).
+    /// May reallocate. Complexity: O(size() + with.size()).
+    void replace(offset_size r, string_view with);
+
+    /// Replaces the bytes [r.start, r.end) with the contents of with.
+    /// Precondition: r designates a valid range of this string (r.end >= r.start, r.end <= size()).
+    /// May reallocate. Complexity: O(size() + with.size()).
+    void replace(start_end r, string_view with);
 
     // comparisons
 public:
