@@ -12,6 +12,13 @@ from . import clangd
 from .build import build
 from .cmake import remove_build_dir
 from .configure import configure, ensure_configured
+from .coverage import (
+    CoverageToolError,
+    coverage_merge,
+    coverage_report,
+    coverage_run,
+    find_tool,
+)
 from .crossrefs import CrossRefResult, check_crossrefs
 from .doctor import doctor
 from .format import (
@@ -33,6 +40,11 @@ __all__ = [
     "clangd",
     "configure",
     "ensure_configured",
+    "coverage_run",
+    "coverage_report",
+    "coverage_merge",
+    "CoverageToolError",
+    "find_tool",
     "CrossRefResult",
     "check_crossrefs",
     "doctor",

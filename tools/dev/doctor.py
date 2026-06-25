@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from . import clangd
+from .coverage import find_tool, resolve_tool
 from .presets import PresetError, load_presets
 from .process import msvc_env
 
@@ -139,6 +140,27 @@ def _tool_version(name: str) -> tuple[bool, str]:
         return False, f"failed to run ({e})"
 
 
+def _coverage_tool_check(
+    label: str, name: str, env_var: str, build_dir: Path | None
+) -> tuple[str, bool, str]:
+    """Check an llvm-* coverage tool, resolved exactly as `dev.py coverage` does.
+
+    Looks on PATH / via `env_var`, then beside the configured compiler (where
+    clang-cl ships them on Windows). Reports the version line so a mismatch with
+    the compiler — which silently corrupts `llvm-cov` mapping — is visible.
+    """
+    resolved = resolve_tool(name, env_var, build_dir) if build_dir else find_tool(name, env_var)
+    if resolved is None:
+        return (label, False,
+                f"not found (needed for `dev.py coverage`; install LLVM or set {env_var})")
+    try:
+        out = subprocess.run([resolved, "--version"], capture_output=True, text=True, timeout=15)
+        ver = next((ln.strip() for ln in out.stdout.splitlines() if "version" in ln.lower()), resolved)
+        return (label, True, ver)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return (label, False, f"failed to run ({e})")
+
+
 def doctor(root: Path, default_preset: str | None = None) -> list[tuple[str, bool, str]]:
     """Run sanity checks and return (label, ok, detail) for each."""
     checks: list[tuple[str, bool, str]] = []
@@ -158,6 +180,7 @@ def doctor(root: Path, default_preset: str | None = None) -> list[tuple[str, boo
         cxx = shutil.which("clang++") or shutil.which("g++")
         checks.append(("compiler", cxx is not None, cxx or "no clang++/g++ on PATH"))
 
+    cov_build_dir: Path | None = None
     try:
         presets = load_presets(root)
         names = [p.name for p in presets]
@@ -166,8 +189,17 @@ def doctor(root: Path, default_preset: str | None = None) -> list[tuple[str, boo
             present = default_preset in names
             detail = default_preset if present else f"{default_preset!r} not among build presets"
             checks.append(("default preset", present, detail))
+        # Any configured build dir lets us resolve the llvm tools beside the
+        # compiler, matching how `dev.py coverage` finds them.
+        cov_build_dir = next(
+            (p.build_dir for p in presets if (p.build_dir / "CMakeCache.txt").is_file()), None
+        )
     except PresetError as e:
         checks.append(("presets parse", False, str(e)))
+
+    # Coverage toolchain (llvm-profdata / llvm-cov), needed for `dev.py coverage`.
+    checks.append(_coverage_tool_check("llvm-profdata", "llvm-profdata", "LLVM_PROFDATA", cov_build_dir))
+    checks.append(_coverage_tool_check("llvm-cov", "llvm-cov", "LLVM_COV", cov_build_dir))
 
     checks.extend(_clangd_checks(root))
 

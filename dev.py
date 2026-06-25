@@ -13,6 +13,7 @@ Usage:
     uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
     uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
     uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, crossrefs, test)
+    uv run dev.py coverage run [NAME]       Collect LLVM test coverage (run/merge/report)
     uv run dev.py clean [--all]             Remove build artifacts
     uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
     uv run dev.py doctor                    Sanity-check the toolchain
@@ -69,6 +70,14 @@ DEFAULT_RELEASE_PRESETS: dict[str, str] = {
     "Windows": "release-clang",
     "Linux": "release-linux-clang",
     "Darwin": "macos-arm-llvm-release",
+}
+
+# Default coverage preset per platform (instrumented Debug build; SC_COVERAGE ON).
+# `coverage` uses these instead of DEFAULT_BUILD_PRESETS when no --preset is given.
+COVERAGE_BUILD_PRESETS: dict[str, str] = {
+    "Windows": "coverage-clang",
+    "Linux": "coverage-linux-clang",
+    "Darwin": "coverage-macos-arm-llvm",
 }
 
 
@@ -645,6 +654,159 @@ def cmd_list_targets(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Coverage
+#
+# `coverage` collects LLVM source-based coverage from the instrumented
+# *-coverage presets. Three phases map to subcommands: `run` (build + run tests
+# + merge + report), `merge` (combine several presets' merged data), and
+# `report` (re-post-process existing data without re-running). The raw
+# `llvm-cov export` JSON lands as a `.llvm-cov.json` sidecar in the build dir for
+# future tooling (a `coverage_diag` analog of build_diag/test_diag).
+# ---------------------------------------------------------------------------
+
+def default_coverage_preset_name() -> str:
+    name = COVERAGE_BUILD_PRESETS.get(platform.system())
+    if name is None:
+        die(f"No default coverage preset for {platform.system()!r}. Use --preset.")
+    return name
+
+
+def _resolve_coverage_presets(specs: list[str] | None) -> list[dev.Preset]:
+    """Resolve --preset for coverage, defaulting to the platform coverage preset."""
+    return resolve_presets(specs or [default_coverage_preset_name()])
+
+
+def _select_test_binaries(
+    preset: dev.Preset, target_specs: list[str] | None, name_arg: str | None
+) -> tuple[list[str], str | None]:
+    """Pick which test binaries to run and the optional test-name filter.
+
+    Mirrors `cmd_test`: --target selects binaries; a positional that names a
+    binary runs just that one; otherwise the positional is a name filter applied
+    across every '*-test'.
+    """
+    all_targets = _discover(preset)
+    test_targets = [t for t in all_targets if _is_test_target(t)]
+    if target_specs:
+        wanted = set(resolve_target_names(preset, target_specs) or [])
+        names = [t.name for t in dev.executables(all_targets) if t.name in wanted]
+        if not names:
+            die(f"No test binary matches --target {target_specs}")
+        return names, None
+    if name_arg:
+        named = next((t for t in dev.executables(all_targets) if t.name == name_arg), None)
+        if named is not None:
+            return [named.name], None
+        names = [t.name for t in test_targets]
+        if not names:
+            die("No test binaries found (expected '*-test' executables)")
+        return names, name_arg
+    names = [t.name for t in test_targets]
+    if not names:
+        die("No test binaries found (expected '*-test' executables)")
+    return names, None
+
+
+def _summarize_coverage(results: list[dict]) -> bool:
+    """Print the per-preset coverage tables; return True if every step succeeded."""
+    ok = True
+    for r in results:
+        if not r["ok"]:
+            ok = False
+            failed = next((s for s in r["steps"] if not s.ok), None)
+            where = f" - see {_rel(failed.stderr_log)}" if failed else ""
+            print(f"\ncoverage [{r['preset']}] FAILED{where}", file=sys.stderr)
+            continue
+
+        t = r["totals"]
+        def pct(metric: str) -> str:
+            return f"{t.get(metric, {}).get('percent', 0.0):.1f}%"
+        lines = t.get("lines", {})
+        print(
+            f"\nCoverage [{r['preset']}]: lines {pct('lines')} "
+            f"({lines.get('covered', 0)}/{lines.get('count', 0)}), "
+            f"functions {pct('functions')}, regions {pct('regions')}",
+            file=sys.stderr,
+        )
+        for lib, m in r["libraries"].items():
+            lm = m.get("lines", {})
+            print(
+                f"  {lib:<30} {lm.get('percent', 0.0):6.1f}%  "
+                f"({lm.get('covered', 0)}/{lm.get('count', 0)} lines)",
+                file=sys.stderr,
+            )
+        print(f"  JSON: {_rel(r['llvm_cov_json'])}", file=sys.stderr)
+        if r["html_dir"]:
+            print(f"  HTML: {_rel(Path(r['html_dir']) / 'index.html')}", file=sys.stderr)
+    return ok
+
+
+def cmd_coverage(args: argparse.Namespace) -> None:
+    match args.coverage_cmd:
+        case "run":
+            cmd_coverage_run(args)
+        case "merge":
+            cmd_coverage_merge(args)
+        case "report":
+            cmd_coverage_report(args)
+        case _:  # argparse 'required=True' should prevent this.
+            die(f"unknown coverage subcommand {args.coverage_cmd!r}")
+
+
+def cmd_coverage_run(args: argparse.Namespace) -> None:
+    presets = _resolve_coverage_presets(args.preset)
+    primary = presets[0]
+
+    if not args.no_build:
+        results = dev.build(
+            presets, None, root=ROOT, auto_configure=not args.no_configure,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+        if not all(r.ok for r in results):
+            _fail_build(results, presets)
+
+    binary_names, test_name = _select_test_binaries(primary, args.target, args.pattern)
+    try:
+        cov_results = dev.coverage_run(
+            presets, binary_names, root=ROOT, test_name=test_name, html=args.html,
+            timeout=args.timeout if args.timeout else None,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+    except dev.CoverageToolError as e:
+        die(str(e))
+    sys.exit(0 if _summarize_coverage(cov_results) else 1)
+
+
+def cmd_coverage_report(args: argparse.Namespace) -> None:
+    presets = _resolve_coverage_presets(args.preset)
+    binary_names = [t.name for t in _discover(presets[0]) if _is_test_target(t)]
+    try:
+        results = dev.coverage_report(
+            presets, binary_names, root=ROOT, html=args.html,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+    except (dev.CoverageToolError, FileNotFoundError) as e:
+        die(str(e))
+    sys.exit(0 if _summarize_coverage(results) else 1)
+
+
+def cmd_coverage_merge(args: argparse.Namespace) -> None:
+    if not args.preset:
+        die("coverage merge needs at least one --preset (which presets' data to combine)")
+    presets = resolve_presets(args.preset)
+    names_by_preset = {p.name: [t.name for t in _discover(p) if _is_test_target(t)] for p in presets}
+    output_dir = Path(args.output) if args.output else (ROOT / "build" / "coverage-merged")
+    try:
+        result = dev.coverage_merge(
+            presets, names_by_preset, root=ROOT, output_dir=output_dir, html=args.html,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+    except (dev.CoverageToolError, FileNotFoundError) as e:
+        die(str(e))
+    sys.exit(0 if _summarize_coverage([result]) else 1)
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -711,6 +873,31 @@ def main() -> None:
                          help="Skip the test suite (build + run); just the static checks")
     check_p.add_argument("--list", action="store_true", help="List registered checks and exit")
 
+    cov_p = sub.add_parser("coverage", help="Collect LLVM source-based test coverage")
+    cov_sub = cov_p.add_subparsers(dest="coverage_cmd", required=True)
+
+    cov_run_p = cov_sub.add_parser("run", help="Build + run instrumented tests, then merge & report")
+    _add_preset_arg(cov_run_p)
+    cov_run_p.add_argument("--target", "-t", action="append",
+                           help="Test binary target(s): comma-list, repeatable, wildcards")
+    cov_run_p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
+    cov_run_p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
+    cov_run_p.add_argument("--html", action="store_true", help="Also write an llvm-cov HTML report")
+    cov_run_p.add_argument("--timeout", type=float, default=60.0, metavar="SECS",
+                           help="Per-binary timeout in seconds (default: 60; 0 disables)")
+    cov_run_p.add_argument("pattern", nargs="?",
+                           help="Specific test name or binary to run (auto-discovers the binary)")
+
+    cov_merge_p = cov_sub.add_parser("merge", help="Combine several presets' coverage into one report")
+    _add_preset_arg(cov_merge_p)
+    cov_merge_p.add_argument("--output", "-o", metavar="DIR",
+                             help="Output directory (default: build/coverage-merged)")
+    cov_merge_p.add_argument("--html", action="store_true", help="Also write an llvm-cov HTML report")
+
+    cov_report_p = cov_sub.add_parser("report", help="Re-post-process existing coverage (no test run)")
+    _add_preset_arg(cov_report_p)
+    cov_report_p.add_argument("--html", action="store_true", help="Also write an llvm-cov HTML report")
+
     clean_p = sub.add_parser("clean", help="Remove build artifacts")
     _add_preset_arg(clean_p)
     clean_p.add_argument("--all", action="store_true", help="Remove every preset's build directory")
@@ -746,6 +933,8 @@ def main() -> None:
             cmd_format(args)
         case "check":
             cmd_check(args)
+        case "coverage":
+            cmd_coverage(args)
         case "clean":
             cmd_clean(args)
         case "diagnose":

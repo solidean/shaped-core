@@ -17,6 +17,8 @@ Public API:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -57,6 +59,7 @@ def test(
     test_name: str | None = None,
     extra_args: list[str] | None = None,
     env: dict[str, str] | None = None,
+    extra_env_for: Callable[[str], dict[str, str]] | None = None,
     timeout: float | None = None,
     write_xml: bool = True,
     mirror: bool = False,
@@ -72,6 +75,11 @@ def test(
     report when it wrote one, otherwise a synthesized single-case sidecar; a
     test.json sidecar is written per preset. Returns one record per executed
     binary.
+
+    `extra_env_for(name)` injects per-binary environment variables (merged on top
+    of the inherited process env and `env`, never replacing them). The coverage
+    runner uses it to point each binary's LLVM_PROFILE_FILE at a distinct file;
+    when None, child env is left untouched (the normal test path).
     """
     extra_args = list(extra_args or [])
     all_records: list[dict] = []
@@ -99,13 +107,19 @@ def test(
                 cmd += ["--junit-xml", str(xml_path)]
             cmd += extra_args
 
+            # Per-binary env (e.g. LLVM_PROFILE_FILE) layers onto the inherited
+            # environment so we never drop PATH/MSVC vars the child needs.
+            run_env = env
+            if extra_env_for is not None:
+                run_env = {**os.environ, **(env or {}), **extra_env_for(name)}
+
             result = run_step(
                 cmd,
                 step_type="test",
                 name=name,
                 build_dir=preset.build_dir,
                 cwd=root,
-                env=env,
+                env=run_env,
                 timeout=timeout,
                 mirror=mirror,
                 verbose=verbose,

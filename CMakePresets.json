@@ -179,6 +179,36 @@
             }
         },
         {
+            "name": "x64-windows-clang-ninja-coverage",
+            "displayName": "Coverage Clang (Ninja, Windows)",
+            "description": "RelWithDebInfo build with LLVM source-based coverage instrumentation",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_COVERAGE": "ON"
+            }
+        },
+        {
+            "name": "x64-linux-clang-ninja-coverage",
+            "displayName": "Coverage Clang (Ninja, Linux)",
+            "description": "RelWithDebInfo build with LLVM source-based coverage instrumentation",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_COVERAGE": "ON"
+            }
+        },
+        {
+            "name": "macos-arm-llvm-coverage",
+            "displayName": "Coverage Clang (macOS ARM)",
+            "description": "RelWithDebInfo build with LLVM source-based coverage instrumentation",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_COVERAGE": "ON"
+            }
+        },
+        {
             "name": "macos-arm-llvm-base",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
@@ -309,6 +339,18 @@
         {
             "name": "relwithdebinfo-linux-gcc",
             "configurePreset": "x64-linux-gcc-ninja-relwithdebinfo"
+        },
+        {
+            "name": "coverage-clang",
+            "configurePreset": "x64-windows-clang-ninja-coverage"
+        },
+        {
+            "name": "coverage-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-coverage"
+        },
+        {
+            "name": "coverage-macos-arm-llvm",
+            "configurePreset": "macos-arm-llvm-coverage"
         },
         {
             "name": "macos-arm-llvm-debug",
