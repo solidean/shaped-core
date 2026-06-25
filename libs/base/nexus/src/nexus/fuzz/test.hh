@@ -9,7 +9,6 @@
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/operation.hh>
 #include <nexus/fuzz/regression_dialect.hh>
-#include <nexus/fuzz/replay_random.hh>
 #include <nexus/fuzz/run.hh>
 #include <nexus/fuzz/value.hh>
 

@@ -24,8 +24,8 @@
 //
 // See libs/base/nexus/docs/fuzz-testing.md for the model, determinism, and regression workflow.
 
+#include <clean-core/math/random.hh>
 #include <nexus/fuzz/regression_dialect.hh>
-#include <nexus/fuzz/replay_random.hh>
 #include <nexus/fuzz/run.hh>
 #include <nexus/fuzz/test.hh>
 #include <nexus/fuzz/value.hh>

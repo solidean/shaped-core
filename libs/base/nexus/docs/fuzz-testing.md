@@ -58,9 +58,10 @@ through slots, and the reachable set grows as operations produce new values.
 The engine draws all randomness from `cc::random` (a PCG32 generator in
 clean-core), seeded per run. The same seed, the same setup, and the same build
 reproduce a run exactly — and because PCG32 uses fixed constants, runs reproduce
-across platforms and compilers too. Each step also carries its own seed; an
-operation taking a `cc::random&` is handed a generator freshly seeded from it,
-which is what makes randomized operations replayable.
+across platforms and compilers too. Each step also records a full `cc::random`
+state; an operation taking a `cc::random&` is handed a generator rebuilt from it
+via `cc::random::from_state(...)`, which is what makes randomized operations
+replayable (state/`from_state` is the blessed roundtrip).
 
 ## Randomized operations
 
@@ -72,12 +73,12 @@ test.add_op("use", [](int a, int b) { /* ... */ });
 ```
 
 The `cc::random&` argument is not drawn from a slot; it is synthesized from the
-step seed. Emitted regression code reproduces it via `nx::fuzz::replay_random`:
+step's recorded state. Emitted regression code reproduces it via
+`cc::random::from_state`:
 
 ```cpp
-nx::fuzz::replay_random random;
-auto i0 = test->eval_op("gen", random.seeded(3737));
-auto i1 = test->eval_op("gen", random.seeded(5313));
+auto i0 = test->eval_op("gen", cc::random::from_state(3737ull));
+auto i1 = test->eval_op("gen", cc::random::from_state(5313ull));
 test->eval_op("use", i1, i0);
 ```
 

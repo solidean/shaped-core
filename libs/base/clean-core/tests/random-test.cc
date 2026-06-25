@@ -42,6 +42,29 @@ TEST("random - seed() resets the stream")
     CHECK(r.next_u64() == first);
 }
 
+TEST("random - from_state round-trips the stream position")
+{
+    cc::random r(31337);
+    (void)r.next_u64(); // advance to an arbitrary mid-stream position
+    (void)r.next_u32();
+
+    u64 const snapshot = r.state();
+    auto replay = cc::random::from_state(snapshot);
+
+    // from_state(r.state()) reproduces r's subsequent draws exactly -- the blessed replay roundtrip
+    CHECK(replay.state() == snapshot);
+    for (int i = 0; i < 64; ++i)
+        CHECK(r.next_u64() == replay.next_u64());
+}
+
+TEST("random - from_state installs raw state without the seeding scramble")
+{
+    // seed() scrambles, so seeding with a value does not leave that value as the state;
+    // from_state() installs it verbatim. The two must therefore differ.
+    cc::random const seeded(4242);
+    CHECK(cc::random::from_state(4242).state() != seeded.state());
+}
+
 TEST("random - clone is independent but identical")
 {
     cc::random r(99);

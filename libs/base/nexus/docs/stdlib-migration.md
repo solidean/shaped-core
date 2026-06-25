@@ -56,10 +56,6 @@ These are not requests for new clean-core symbols — they exist only because a
 - **`std::string` map key.** [execute.cc](../src/nexus/tests/execute.cc) bridges a
   `cc::string` section name to a `std::string` key on every lookup — only because
   the map is `std::unordered_map`. Removed together with `cc::map`.
-- **`std::string` out of the assertion handler.** `cc::impl::assertion_info::message`
-  is a `std::string`, so the fuzz engine carries a failed-`CC_ASSERT` message as
-  `std::string` through `assertion_failure` ([fuzz/machine.hh](../src/nexus/fuzz/machine.hh)).
-  Goes away once clean-core's assertion info exposes a `cc::string`.
 - **Console output in the fuzzer.** [fuzz/test.cc](../src/nexus/fuzz/test.cc) prints
   findings and the reproducer via `std::cerr` + the same `as_sv()` bridge — folds into
   the `cc::println` migration above.
@@ -90,6 +86,11 @@ exporters return a `cc::string` instead of writing to a `std::ostream`.
 - **`cc::span::subspan`** now exists, so `is_section_allowed` in
   [execute.cc](../src/nexus/tests/execute.cc) uses `curr_section.subspan(1)` instead of
   manual `index + 1` arithmetic.
+- **`cc::string` out of the assertion handler.** `cc::impl::assertion_info` now exposes
+  `cc::string` fields and the handler is a `cc::unique_function`, so the fuzz engine carries
+  a failed-`CC_ASSERT` message as `cc::string` through `assertion_failure`
+  ([fuzz/machine.hh](../src/nexus/fuzz/machine.hh)) — no `<string>`/`<functional>` left in the
+  assertion path.
 - **`cc::string` text ops** (`find` / `rfind` / `subview` / `replace_all`) replaced the
   `std::string` round-trips in [schedule.cc](../src/nexus/tests/schedule.cc) — Catch2 filter
   parsing now splits with `cc::string_view`, and the `\[` → `[` normalization uses

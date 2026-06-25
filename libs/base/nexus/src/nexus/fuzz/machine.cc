@@ -32,44 +32,44 @@ fuzz_machine::fuzz_machine(cc::span<fuzz_operation* const> ops)
             oi.arg_types.push_back(intern(at));
         for (bool m : op->arg_is_mutable())
             oi.arg_is_mutable.push_back(m);
-        oi.return_type = op->returns_void() ? invalid_index : intern(op->return_type());
+        oi.return_type = op->returns_void() ? type_index::invalid : intern(op->return_type());
         _operations.push_back(cc::move(oi));
     }
 
     _random_type = index_of(std::type_index(typeid(cc::random)));
 
-    for (op_index i = 0; i < int(_operations.size()); ++i)
+    for (int i = 0; i < int(_operations.size()); ++i)
     {
         auto const& oi = _operations[i];
         if (oi.is_invariant)
         {
             if (!oi.arg_types.empty())
-                _types[oi.arg_types[0]].invariant_ops.push_back(i);
+                _types[int(oi.arg_types[0])].invariant_ops.push_back(op_index(i));
         }
-        else if (oi.return_type != invalid_index)
+        else if (oi.return_type != type_index::invalid)
         {
-            _types[oi.return_type].creating_ops.push_back(i);
+            _types[int(oi.return_type)].creating_ops.push_back(op_index(i));
         }
     }
 }
 
 type_index fuzz_machine::intern(std::type_index t)
 {
-    for (type_index i = 0; i < int(_types.size()); ++i)
+    for (int i = 0; i < int(_types.size()); ++i)
         if (_types[i].std_type == t)
-            return i;
+            return type_index(i);
     type_info ti;
     ti.std_type = t;
     _types.push_back(cc::move(ti));
-    return int(_types.size()) - 1;
+    return type_index(int(_types.size()) - 1);
 }
 
 type_index fuzz_machine::index_of(std::type_index t) const
 {
-    for (type_index i = 0; i < int(_types.size()); ++i)
+    for (int i = 0; i < int(_types.size()); ++i)
         if (_types[i].std_type == t)
-            return i;
-    return invalid_index;
+            return type_index(i);
+    return type_index::invalid;
 }
 
 bool fuzz_machine::assert_is_properly_set_up(cc::string& out_error) const
@@ -78,16 +78,16 @@ bool fuzz_machine::assert_is_properly_set_up(cc::string& out_error) const
     // then mark types used as (non-random) arguments unsatisfied, then iterate a creatability
     // fixpoint: a type becomes satisfied once some creating op has all-satisfied argument types.
     cc::vector<bool> satisfied;
-    for (type_index i = 0; i < int(_types.size()); ++i)
+    for (int i = 0; i < int(_types.size()); ++i)
         satisfied.push_back(true);
 
     for (auto const& oi : _operations)
         for (type_index at : oi.arg_types)
             if (!is_random_type(at))
-                satisfied[at] = false;
+                satisfied[int(at)] = false;
 
-    if (_random_type != invalid_index)
-        satisfied[_random_type] = true;
+    if (_random_type != type_index::invalid)
+        satisfied[int(_random_type)] = true;
 
     auto all_ok = [&]
     {
@@ -100,15 +100,15 @@ bool fuzz_machine::assert_is_properly_set_up(cc::string& out_error) const
     while (!all_ok())
     {
         bool changed = false;
-        for (type_index t = 0; t < int(_types.size()); ++t)
+        for (int t = 0; t < int(_types.size()); ++t)
         {
             if (satisfied[t])
                 continue;
             for (op_index opi : _types[t].creating_ops)
             {
                 bool can = true;
-                for (type_index at : _operations[opi].arg_types)
-                    if (!satisfied[at])
+                for (type_index at : _operations[int(opi)].arg_types)
+                    if (!satisfied[int(at)])
                     {
                         can = false;
                         break;
@@ -126,7 +126,7 @@ bool fuzz_machine::assert_is_properly_set_up(cc::string& out_error) const
         {
             out_error = "fuzz setup error: the following argument types can never be constructed: ";
             bool first = true;
-            for (type_index t = 0; t < int(_types.size()); ++t)
+            for (int t = 0; t < int(_types.size()); ++t)
                 if (!satisfied[t])
                 {
                     if (!first)
@@ -143,7 +143,7 @@ bool fuzz_machine::assert_is_properly_set_up(cc::string& out_error) const
 fuzz_machine::state fuzz_machine::make_initial_state() const
 {
     state s;
-    for (type_index i = 0; i < int(_types.size()); ++i)
+    for (int i = 0; i < int(_types.size()); ++i)
         s.values_by_type.push_back(cc::vector<fuzz_value>());
     return s;
 }
@@ -163,12 +163,12 @@ cc::span<fuzz_value*> fuzz_machine::assemble_args(state& s,
     {
         if (is_random_type(slot.type))
         {
-            synth.push_back(fuzz_value::create(cc::random(u64(exec.seed))));
+            synth.push_back(fuzz_value::create(cc::random::from_state(exec.state)));
             buf.push_back(&synth.back());
         }
         else
         {
-            buf.push_back(&s.values_by_type[slot.type][slot.value]);
+            buf.push_back(&s.values_by_type[int(slot.type)][int(slot.value)]);
         }
     }
     return cc::span<fuzz_value*>(buf);
@@ -176,7 +176,7 @@ cc::span<fuzz_value*> fuzz_machine::assemble_args(state& s,
 
 bool fuzz_machine::preconditions_fulfilled(state const& s, executed_operation const& exec) const
 {
-    auto const& oi = _operations[exec.operation];
+    auto const& oi = _operations[int(exec.operation)];
     cc::vector<fuzz_value> synth;
     cc::vector<fuzz_value*> buf;
     // assemble reads slots; the const_cast is safe because precondition evaluation never mutates.
@@ -186,7 +186,7 @@ bool fuzz_machine::preconditions_fulfilled(state const& s, executed_operation co
 
 fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_operation const& exec) const
 {
-    auto const& oi = _operations[exec.operation];
+    auto const& oi = _operations[int(exec.operation)];
 
     cc::vector<fuzz_value> synth;
     cc::vector<fuzz_value*> buf;
@@ -206,7 +206,9 @@ fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_
     }
     catch (impl::assertion_failure const& e)
     {
-        return fail("assertion failed: ", e.message.c_str());
+        cc::string msg = "assertion failed: ";
+        msg += e.message;
+        return fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
     }
     catch (std::exception const& e)
     {
@@ -230,15 +232,15 @@ fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_
         return fail("invariant violated");
 
     auto const rs = exec.return_slot;
-    if (rs.type != invalid_index && result.is_valid())
+    if (rs.type != type_index::invalid && result.is_valid())
     {
-        auto& slots = s.values_by_type[rs.type];
-        if (rs.value == int(slots.size()))
+        auto& slots = s.values_by_type[int(rs.type)];
+        if (int(rs.value) == int(slots.size()))
             slots.push_back(cc::move(result));
         else
         {
-            CC_ASSERT(rs.value >= 0 && rs.value < int(slots.size()), "return slot out of range");
-            slots[rs.value] = cc::move(result);
+            CC_ASSERT(int(rs.value) >= 0 && int(rs.value) < int(slots.size()), "return slot out of range");
+            slots[int(rs.value)] = cc::move(result);
         }
     }
 
@@ -251,21 +253,21 @@ cc::vector<executed_operation> fuzz_machine::create_invariant_executions_for(exe
 
     auto add_for_slot = [&](typed_value_index slot)
     {
-        if (slot.type == invalid_index)
+        if (slot.type == type_index::invalid)
             return;
-        for (op_index inv : _types[slot.type].invariant_ops)
+        for (op_index inv : _types[int(slot.type)].invariant_ops)
         {
             executed_operation e;
             e.operation = inv;
             e.arg_slots.push_back(slot);
-            e.result_must_be_true = !_operations[inv].op->returns_void();
+            e.result_must_be_true = !_operations[int(inv)].op->returns_void();
             result.push_back(cc::move(e));
         }
     };
 
     add_for_slot(exec.return_slot);
 
-    auto const& oi = _operations[exec.operation];
+    auto const& oi = _operations[int(exec.operation)];
     for (int i = 0; i < int(exec.arg_slots.size()); ++i)
         if (i < int(oi.arg_is_mutable.size()) && oi.arg_is_mutable[i] && !is_random_type(exec.arg_slots[i].type))
             add_for_slot(exec.arg_slots[i]);

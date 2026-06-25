@@ -5,31 +5,39 @@
 // Forward declarations and index vocabulary for the nx::fuzz API-sequence fuzzer.
 //
 // The engine models a fuzz program in SSA-like form: every value lives in a "slot" addressed by
-// (type, value) integer indices, and every step is an operation reading some slots and writing one.
-// Plain integer indices (not strong enums) keep the hot generation/minimization loops allocation-light
-// and cheap to copy; -1 is the universal "invalid / none" sentinel.
+// (type, value) indices, and every step is an operation reading some slots and writing one. The three
+// index roles are distinct strong enums so the compiler rejects mixing them up; each carries its own
+// `invalid` sentinel (used for "none", and for void returns on type_index). Crossing into the
+// underlying int for subscripting or arithmetic is an explicit `int(x)` at the use site.
 
 namespace nx::fuzz
 {
 using namespace cc::primitive_defines;
 
-/// Index into the machine's interned type table. -1 means invalid (also used for void returns).
-using type_index = int;
+/// Index into the machine's interned type table. `invalid` also denotes a void return.
+enum class type_index : int
+{
+    invalid = -1
+};
 /// Index of an operation within the machine.
-using op_index = int;
+enum class op_index : int
+{
+    invalid = -1
+};
 /// Index of a value within its type's slot vector. A value equal to the current slot count means
 /// "append a new slot" (this is how the reachable state grows during generation).
-using value_index = int;
-
-inline constexpr int invalid_index = -1;
+enum class value_index : int
+{
+    invalid = -1
+};
 
 /// Addresses one value in the state: which type, and which slot of that type.
 struct typed_value_index
 {
-    type_index type = invalid_index;
-    value_index value = invalid_index;
+    type_index type = type_index::invalid;
+    value_index value = value_index::invalid;
 
-    [[nodiscard]] bool is_valid() const { return type != invalid_index && value != invalid_index; }
+    [[nodiscard]] bool is_valid() const { return type != type_index::invalid && value != value_index::invalid; }
 };
 
 struct fuzz_value;

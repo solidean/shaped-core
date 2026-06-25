@@ -20,8 +20,8 @@ constexpr int random_producer = -1;
 
 struct logical_step
 {
-    op_index op = invalid_index;
-    int seed = 0;
+    op_index op = op_index::invalid;
+    cc::u64 state = 0;
     bool result_must_be_true = false;
     cc::vector<int> arg_producers; // random_producer or an index into the step list
 };
@@ -40,7 +40,7 @@ cc::vector<logical_step> derive_logical(fuzz_run const& run)
         auto const& op = run.operations[i];
         logical_step ls;
         ls.op = op.operation;
-        ls.seed = op.seed;
+        ls.state = op.state;
         ls.result_must_be_true = op.result_must_be_true;
 
         for (auto slot : op.arg_slots)
@@ -48,16 +48,16 @@ cc::vector<logical_step> derive_logical(fuzz_run const& run)
             if (m.is_random_type(slot.type))
                 ls.arg_producers.push_back(random_producer);
             else
-                ls.arg_producers.push_back(occupant[slot.type][slot.value]);
+                ls.arg_producers.push_back(occupant[int(slot.type)][int(slot.value)]);
         }
 
-        if (op.return_slot.type != invalid_index)
+        if (op.return_slot.type != type_index::invalid)
         {
-            auto& occ = occupant[op.return_slot.type];
-            if (op.return_slot.value == int(occ.size()))
+            auto& occ = occupant[int(op.return_slot.type)];
+            if (int(op.return_slot.value) == int(occ.size()))
                 occ.push_back(i);
             else
-                occ[op.return_slot.value] = i;
+                occ[int(op.return_slot.value)] = i;
         }
 
         steps.push_back(cc::move(ls));
@@ -84,27 +84,27 @@ fuzz_run regenerate(fuzz_machine const& m, cc::vector<logical_step> const& steps
         auto const& ls = steps[i];
         executed_operation e;
         e.operation = ls.op;
-        e.seed = ls.seed;
+        e.state = ls.state;
         e.result_must_be_true = ls.result_must_be_true;
 
         for (int p : ls.arg_producers)
         {
             if (p == random_producer)
-                e.arg_slots.push_back(typed_value_index{m.random_type(), 0});
+                e.arg_slots.push_back(typed_value_index{m.random_type(), value_index(0)});
             else
                 e.arg_slots.push_back(step_slot[p]);
         }
 
         auto const& oi = m.op(ls.op);
-        if (oi.return_type != invalid_index && !oi.is_invariant)
+        if (oi.return_type != type_index::invalid && !oi.is_invariant)
         {
-            int const slot = count[oi.return_type]++;
-            e.return_slot = typed_value_index{oi.return_type, slot};
+            int const slot = count[int(oi.return_type)]++;
+            e.return_slot = typed_value_index{oi.return_type, value_index(slot)};
             step_slot[i] = e.return_slot;
         }
         else
         {
-            e.return_slot = typed_value_index{invalid_index, invalid_index};
+            e.return_slot = typed_value_index{type_index::invalid, value_index::invalid};
         }
 
         out.operations.push_back(cc::move(e));
@@ -279,21 +279,17 @@ cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialec
 
     // assign a stable variable name to every producing step
     cc::vector<cc::string> names;
-    bool seeded = false;
     for (int i = 0; i < int(steps.size()); ++i)
     {
         names.push_back(cc::string());
         auto const& oi = m.op(steps[i].op);
-        if (oi.return_type != invalid_index && !oi.is_invariant)
+        if (oi.return_type != type_index::invalid && !oi.is_invariant)
         {
             cc::string n;
             n += name_prefix(m.type(oi.return_type).std_type);
             n += cc::to_string(i);
             names[i] = cc::move(n);
         }
-        for (int p : steps[i].arg_producers)
-            if (p == random_producer)
-                seeded = true;
     }
 
     cc::string const var = cc::string::create_copy_of(test_var);
@@ -309,9 +305,9 @@ cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialec
             first = false;
             if (p == random_producer)
             {
-                out += "random.seeded(";
-                out += cc::to_string(ls.seed);
-                out += ")";
+                out += "cc::random::from_state(";
+                out += cc::to_string(ls.state);
+                out += "ull)";
             }
             else
             {
@@ -322,8 +318,6 @@ cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialec
     };
 
     cc::string code;
-    if (seeded)
-        code += "nx::fuzz::replay_random random;\n";
 
     for (int i = 0; i < int(steps.size()); ++i)
     {
@@ -352,7 +346,7 @@ cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialec
             continue;
         }
 
-        if (oi.return_type != invalid_index && !oi.is_invariant)
+        if (oi.return_type != type_index::invalid && !oi.is_invariant)
         {
             code += "auto ";
             code += names[i];

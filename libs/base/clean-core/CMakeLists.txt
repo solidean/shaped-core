@@ -32,6 +32,7 @@ target_sources(clean-core
 
     src/clean-core/common/macros.hh
     src/clean-core/common/utility.hh
+    src/clean-core/common/traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
     src/clean-core/common/assert.hh

@@ -63,7 +63,18 @@ struct random
         (void)next_u32();
     }
 
-    /// Raw LCG state. Exposed for inspection/debugging, not a substitute for re-seeding on replay.
+    /// Reconstructs a generator directly from a raw state, bypassing the seeding scramble.
+    /// The blessed roundtrip: from_state(r.state()) reproduces r's subsequent draws exactly.
+    /// Any u64 is a valid state (the fixed odd increment makes the LCG full-period).
+    [[nodiscard]] static random from_state(u64 state)
+    {
+        random r;
+        r._state = state;
+        r._inc = _default_stream;
+        return r;
+    }
+
+    /// Raw LCG state. The replay partner of from_state(); also useful for inspection/debugging.
     [[nodiscard]] u64 state() const { return _state; }
 
     /// One PCG32 step: 32 uniform bits.

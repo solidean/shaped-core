@@ -10,14 +10,14 @@ namespace nx::fuzz
 /// analyze, and minimize.
 struct executed_operation
 {
-    /// Per-step seed, rolled for every operation. If the operation consumes a cc::random&, that
-    /// generator is freshly seeded from this value, which is what makes seeded runs replayable.
-    int seed = 0;
+    /// Per-step generator state, rolled for every operation. If the operation consumes a cc::random&,
+    /// that generator is reconstructed via cc::random::from_state(state), which makes runs replayable.
+    cc::u64 state = 0;
 
-    op_index operation = invalid_index;
+    op_index operation = op_index::invalid;
 
     /// Where each argument is read from. For a cc::random& argument the slot's type is the machine's
-    /// random type and the value index is unused (the generator is synthesized from `seed`).
+    /// random type and the value index is unused (the generator is synthesized from `state`).
     cc::vector<typed_value_index> arg_slots;
 
     /// Where the result is written. type == invalid for void operations. A value index equal to the

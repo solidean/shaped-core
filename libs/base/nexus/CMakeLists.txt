@@ -48,7 +48,6 @@ target_sources(nexus
     src/nexus/fuzz/runner.hh
     src/nexus/fuzz/run.hh
     src/nexus/fuzz/regression_dialect.hh
-    src/nexus/fuzz/replay_random.hh
     src/nexus/fuzz/test.hh
     src/nexus/fuzz/fuzz.hh
 )

@@ -28,13 +28,13 @@ struct fuzz_operation
     template <class F>
     [[nodiscard]] static cc::unique_ptr<fuzz_operation> create(cc::string name, F&& fn)
     {
-        using sig_t = impl::signature_of<F>;
+        using sig_t = cc::signature_of<F>;
         auto op = cc::make_unique<fuzz_operation>();
         op->_name = cc::move(name);
-        op->_arg_types = impl::arg_types_of(sig_t{});
-        op->_arg_is_mutable = impl::arg_is_mutable_of(sig_t{});
-        op->_returns_void = impl::returns_void(sig_t{});
-        op->_return_type = impl::return_type_of(sig_t{});
+        op->_arg_types = cc::arg_types_of(sig_t{});
+        op->_arg_is_mutable = cc::arg_is_mutable_of(sig_t{});
+        op->_returns_void = cc::returns_void(sig_t{});
+        op->_return_type = cc::return_type_of(sig_t{});
         op->_invoker = [fn = cc::forward<F>(fn)](cc::span<fuzz_value*> in) -> fuzz_value
         { return impl::invoke_operation(fn, in, sig_t{}); };
         return op;
@@ -69,7 +69,7 @@ struct fuzz_operation
     template <class F>
     fuzz_operation* when(F&& cond)
     {
-        using sig_t = impl::signature_of<F>;
+        using sig_t = cc::signature_of<F>;
         _preconditions.push_back([cond = cc::forward<F>(cond)](cc::span<fuzz_value*> in) -> bool
                                  { return impl::invoke_precondition(cond, in, sig_t{}); });
         return this;

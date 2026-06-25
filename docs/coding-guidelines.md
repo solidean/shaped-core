@@ -310,6 +310,14 @@ Clean-core uses a tiered error handling philosophy:
 - Use `int` when the size is unimportant (magnitude < millions).
 - Use explicitly sized types (`i32`, `u64`, `f32`, etc.) when bit width or precision matters.
 - Avoid "magic sentinels" like `-1` for invalid states. Prefer `optional` or `variant` unless there's a justified performance or memory reason.
+- Give each distinct index / handle / id role its own strong enum:
+  `enum class name : int { invalid = -1 };`. The compiler then rejects mixing roles
+  (passing an `op_index` where a `type_index` is wanted), and the named `invalid`
+  member replaces a bare `-1` sentinel. This is the positive form of the rule above:
+  when a raw `int` index would otherwise carry an `-1` "none", reach for a strong
+  enum instead. Crossing into the underlying integer for subscripting or arithmetic
+  is an explicit `int(x)` at the use site — keep loop counters a plain `int` and
+  construct the strong index where it is stored (e.g. `nx::fuzz::type_index`).
 
 ---
 
@@ -317,7 +325,7 @@ Clean-core uses a tiered error handling philosophy:
 
 **Avoid `std::` code.** Almost always use `cc::` equivalents instead.
 
-**Exception:** `<type_traits>` is allowed—these are thin wrappers around compiler intrinsics that we don't re-wrap.
+**Exception:** a small set of *blessed* stdlib headers is allowed where re-creating them is infeasible or pointless—`<type_traits>`, `<typeinfo>` / `<typeindex>`, `<atomic>`, `<initializer_list>`. These are thin wrappers around compiler/runtime machinery that we don't re-wrap. clean-core keeps the authoritative list (with justifications) in [libs/base/clean-core/docs/blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md); the list grows by targeted addition only.
 
 **Rationale:** Keep compiler intrinsics and `__builtin`s encapsulated in `cc::` implementations so downstream code avoids compiler and platform specifics. Provides a consistent, cohesive foundational library from a single source.
 
