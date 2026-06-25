@@ -3,8 +3,9 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
-#include <clean-core/string/format_spec.hh>
 #include <clean-core/string/formatter.hh>
+#include <clean-core/string/impl/format_backend.hh>
+#include <clean-core/string/impl/format_spec.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 
@@ -68,19 +69,6 @@ template <class... Args>
 //
 // Implementation
 //
-
-namespace impl
-{
-template <class... Args>
-void format_dispatch(format_sink const& sink, string_view fmt, Args&&... args)
-{
-    format_arg_entry const entries[] = {
-        format_arg_entry{.ptr = static_cast<void const*>(&args), .fn = &format_arg_thunk<std::remove_reference_t<Args>>}...,
-        format_arg_entry{.ptr = nullptr, .fn = nullptr}, // sentinel: keeps the array non-empty when there are no args
-    };
-    render(sink, fmt, span<format_arg_entry const>(entries, isize(sizeof...(Args))));
-}
-} // namespace impl
 
 template <class... Args>
 template <class T>

@@ -81,7 +81,8 @@ target_sources(clean-core
     src/clean-core/string/char_predicates.hh
     src/clean-core/string/to_string.hh
     src/clean-core/string/to_debug_string.hh
-    src/clean-core/string/format_spec.hh
+    src/clean-core/string/impl/format_spec.hh
+    src/clean-core/string/impl/format_backend.hh
     src/clean-core/string/formatter.hh
     src/clean-core/string/format.hh
 
