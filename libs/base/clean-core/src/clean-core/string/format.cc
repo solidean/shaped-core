@@ -107,8 +107,8 @@ void format_float_common(cc::format_sink const& sink, cc::impl::format_spec cons
             ++k;
         if (k > 0)
         {
-            cc::isize const gi
-                = group_digits(cc::span<char>(gbuf, cc::isize(sizeof gbuf)), all.subview(0, k), spec.group, 3);
+            cc::isize const gi = group_digits(cc::span<char>(gbuf, cc::isize(sizeof gbuf)),
+                                              all.subview({.offset = 0, .size = k}), spec.group, 3);
             cc::string_view const rest = all.subview(k);
             for (cc::isize i = 0; i < rest.size(); ++i)
                 gbuf[gi + i] = rest[i];
@@ -178,7 +178,7 @@ isize chars_from_ptr(span<char> buf, void const* p)
 void write_decorated_text(format_sink const& sink, format_spec const& spec, string_view body, align_t default_align)
 {
     if (spec.precision >= 0 && spec.precision < body.size())
-        body = body.subview(0, spec.precision);
+        body = body.subview({.offset = 0, .size = spec.precision});
 
     align_t const a = spec.align == align_t::none ? default_align : spec.align;
     isize const pad = spec.width > body.size() ? spec.width - body.size() : 0;
@@ -354,14 +354,14 @@ void render(format_sink const& sink, string_view fmt, span<format_arg_entry cons
         {
             if (pos + 1 < n && fmt[pos + 1] == '{') // "{{" -> emit literal up to and including one '{'
             {
-                sink.put(fmt.subview(lit_start, pos + 1 - lit_start));
+                sink.put(fmt.subview({.offset = lit_start, .size = pos + 1 - lit_start}));
                 pos += 2;
                 lit_start = pos;
                 continue;
             }
 
             if (pos > lit_start)
-                sink.put(fmt.subview(lit_start, pos - lit_start));
+                sink.put(fmt.subview({.offset = lit_start, .size = pos - lit_start}));
 
             field const f = parse_field(fmt, pos, ix);
             isize const idx = f.arg_index;
@@ -377,7 +377,7 @@ void render(format_sink const& sink, string_view fmt, span<format_arg_entry cons
         {
             if (pos + 1 < n && fmt[pos + 1] == '}') // "}}" -> emit literal up to and including one '}'
             {
-                sink.put(fmt.subview(lit_start, pos + 1 - lit_start));
+                sink.put(fmt.subview({.offset = lit_start, .size = pos + 1 - lit_start}));
                 pos += 2;
                 lit_start = pos;
                 continue;
@@ -391,7 +391,7 @@ void render(format_sink const& sink, string_view fmt, span<format_arg_entry cons
     }
 
     if (pos > lit_start)
-        sink.put(fmt.subview(lit_start, pos - lit_start));
+        sink.put(fmt.subview({.offset = lit_start, .size = pos - lit_start}));
 }
 } // namespace cc::impl
 

@@ -279,7 +279,7 @@ constexpr field parse_field(string_view fmt, isize open, index_state& ix)
             p += 1;
         if (p >= n)
             format_error("unterminated replacement field (missing '}')");
-        f.spec_text = fmt.subview(spec_start, p - spec_start);
+        f.spec_text = fmt.subview({.offset = spec_start, .size = p - spec_start});
     }
 
     if (p >= n || fmt[p] != '}')
