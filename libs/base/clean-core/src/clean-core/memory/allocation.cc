@@ -109,18 +109,15 @@ cc::isize system_try_resize_bytes_in_place(cc::byte* p,
     return -1;
 }
 
-/// System memory resource instance stored in the data segment.
-/// This is the default fallback when cc::allocation<T>::custom_resource is nullptr.
-/// Stored in the data segment (not on heap) so it remains valid during static initialization,
-/// making cc::default_memory_resource safe to use in global/static constructors.
-constinit cc::memory_resource const system_memory_resource = {
+} // namespace
+
+/// Platform malloc/free resource, stored in the data segment (not on heap) so it remains valid
+/// during static initialization. The mimalloc-backed default lives in mimalloc_resource.cc; this
+/// is the explicit opt-out, reachable as a custom resource. See allocation.hh for usage.
+constinit cc::memory_resource const cc::system_memory_resource = {
     .allocate_bytes = system_allocate_bytes,
     .try_allocate_bytes = system_try_allocate_bytes,
     .deallocate_bytes = system_deallocate_bytes,
     .try_resize_bytes_in_place = system_try_resize_bytes_in_place,
     .userdata = nullptr,
 };
-
-} // namespace
-
-constinit cc::memory_resource const* const cc::default_memory_resource = &system_memory_resource;
