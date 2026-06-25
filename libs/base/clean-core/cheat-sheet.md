@@ -129,6 +129,15 @@ sv.compare(o);  sv == o;  sv < o;                       // lexicographic
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
 // to_debug_string: quotes strings/chars, recurses into ranges [..] and tuples (..); best-effort, non-semantic.
+
+#include <clean-core/string/format.hh>           // cc::format — std::format/fmtlib-style, COMPILE-TIME-checked
+cc::format("{} + {} = {}", 1, 2, 3);             // -> cc::string "1 + 2 = 3"   (bad fmt/args = compile error)
+cc::format("{:#06x}  {:>8.2f}", 255, 3.14159);   // "0x00ff      3.14"  — fill/align/sign/#/0/width/.prec/type
+cc::format_append(str, "x={}", 7);               // append into an existing cc::string (no temporary)
+cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; return > n means truncated
+// Placeholders: {} auto-index, {N} positional (don't mix), {{ }} escape braces. Types: d/x/X/o/b/c ints,
+// f/F/e/E/g/G floats, s string/bool, p pointer. Customize: specialize cc::formatter<T> (spec-aware) or
+// add a member T::to_string() (plain "{}"). No ADL on arguments. Numbers go via std::to_chars (one seam).
 ```
 
 ## Optional & result (fallibility)

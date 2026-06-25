@@ -17,6 +17,7 @@ add_library(clean-core
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
     src/clean-core/string/to_string.cc
+    src/clean-core/string/format.cc
     src/clean-core/string/string.cc
     src/clean-core/string/string_view.cc
     src/clean-core/container/vector.cc
@@ -80,6 +81,9 @@ target_sources(clean-core
     src/clean-core/string/char_predicates.hh
     src/clean-core/string/to_string.hh
     src/clean-core/string/to_debug_string.hh
+    src/clean-core/string/format_spec.hh
+    src/clean-core/string/formatter.hh
+    src/clean-core/string/format.hh
 
     src/clean-core/function/function_ref.hh
     src/clean-core/function/unique_function.hh
@@ -162,6 +166,7 @@ add_executable(clean-core-test
     tests/string-test.cc
     tests/string_view-test.cc
     tests/to_debug_string-test.cc
+    tests/format-test.cc
     tests/unique_function-test.cc
     tests/unique_ptr-test.cc
     tests/utility-test.cc
