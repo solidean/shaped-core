@@ -173,4 +173,11 @@ template <class... Args>
     cc::impl::format_dispatch(sink, fmt.view(), cc::forward<Args>(args)...);
     return state.total;
 }
+
+// out-of-line definition of cc::string::appendf (declared in string.hh; needs the format machinery)
+template <class... Args>
+void string::appendf(format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
+{
+    format_append(*this, fmt, cc::forward<Args>(args)...);
+}
 } // namespace cc

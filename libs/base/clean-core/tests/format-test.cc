@@ -240,6 +240,15 @@ TEST("format - format_append")
     CHECK(s == "x=42, y=7");
 }
 
+TEST("format - string::appendf")
+{
+    cc::string s = "x=";
+    s.appendf("{}", 42);
+    CHECK(s == "x=42");
+    s.appendf(", {:.2f}", 3.14159);
+    CHECK(s == "x=42, 3.14");
+}
+
 TEST("format - format_to (non-allocating)")
 {
     char buf[16];
