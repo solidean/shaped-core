@@ -145,7 +145,7 @@ Registered checks:
 |-------------|--------------------------------------------------------------------------------|----------|
 | `format`    | clang-format `libs/` sources. Dirty-only by default; `--all` for the whole tree. | yes (rewrites in place) |
 | `crossrefs` | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
-| `test`      | Build + run the full suite on the default **and** a release preset.             | no (report only) |
+| `test`      | Build + run the full suite on the debug, default, release **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
 `crossrefs` scans markdown links (`[text](path#L42)`, including line/heading
 anchors) and `//`-comment doc references (`docs/...md`) across `libs/`, `docs/`,
@@ -156,12 +156,15 @@ reports each offender as `file:line: reason`.
 
 `test` is the slow tail and runs **only after the static checks pass** (no point
 building a tree that already fails a cheap lint), and `--no-test` skips it. It
-builds and runs the suite on the platform default (relwithdebinfo, `CC_ASSERT`
-on) **and** its release sibling (`CC_ASSERT` off), so both assertion modes are
-covered every commit. Builds are warm at commit time — code you didn't compile,
-you didn't test — so the real cost is the test run (well under a second);
-expect a one-time cold build of the release preset the first time. On failure it
-prints the `test_diag` selector, same as `dev.py test`.
+builds and runs the suite across build variants: **debug** (`-O0` plus mimalloc's
+`MI_DEBUG` heap, `CC_ASSERT` on), the platform default **relwithdebinfo**
+(`CC_ASSERT` on), the **release** sibling (`CC_ASSERT` off), and — on **Linux and
+macOS** — a **sanitizer** preset (ASan+UBSan). So assertion modes, the debug
+allocator, and undefined behavior are all covered every commit. Builds are warm at
+commit time — code you didn't compile, you didn't test — so the real cost is the
+test run (well under a second); expect a one-time cold build of the extra presets.
+On failure it prints the `test_diag` selector, same as `dev.py test`. See
+[Sanitizers](#sanitizers) for why Windows is excluded.
 
 New gates plug into the check registry in [dev.py](../../dev.py) without changing
 the command surface.
@@ -212,6 +215,26 @@ happened.
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and
 result recording stay consistent.
+
+## Sanitizers
+
+The `sanitize-*` presets are Debug builds with AddressSanitizer + UndefinedBehaviorSanitizer
+(`SANITIZE=address,undefined`, wired in the root [CMakeLists.txt](../../CMakeLists.txt)):
+
+```bash
+uv run dev.py test --preset sanitize-linux-clang   # Linux
+uv run dev.py test --preset sanitize-macos-arm-llvm # macOS
+uv run dev.py test --preset sanitize-clang          # Windows (see caveat)
+```
+
+On **Linux and macOS** the clang driver links the sanitizer runtime itself, and these presets
+are part of the `check` test gate. On **Windows (clang-cl)** the build is wired to link the
+dynamic ASan runtime manually (CMake drives `lld-link` directly, bypassing the driver) and dev.py
+puts that runtime on `PATH` when launching the binaries — but **clang-cl's ASan is broken with
+C++ exceptions**: any `throw`/`catch` faults during exception dispatch (a toolchain bug,
+reproducible with a two-line program). Since nexus catches test exceptions, the suite can't be
+green under ASan on Windows, so `sanitize-clang` is **excluded from the `check` gate** there. It
+remains available for manually ASan-checking exception-free code paths.
 
 ## Useful flags
 

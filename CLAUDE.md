@@ -86,7 +86,7 @@ uv run dev.py doctor             # sanity-check the toolchain
 
 **Before committing, run `uv run dev.py check --fix`.** It runs the pre-commit
 gates — clang-format (dirty-only), a repo-wide cross-reference check, and the
-full test suite on the default **and** a release preset (asserts on *and* off) —
+full test suite on the debug, default, release **and** (Linux/macOS) sanitizer presets (asserts on *and* off) —
 auto-applies every unambiguous fix (currently clang-format), and reports one
 green/red verdict. The test tail runs only once the static checks are green;
 `--no-test` skips it (handy for a docs-only re-check). `check crossrefs` /
@@ -269,6 +269,7 @@ how to write one (keep it current when public API changes).
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
+| Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |

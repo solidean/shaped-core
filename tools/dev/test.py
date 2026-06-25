@@ -17,6 +17,8 @@ Public API:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +37,30 @@ def _selected_no_tests(stderr_log: Path) -> bool:
         return _NO_TESTS_SENTINEL in stderr_log.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
+
+
+def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
+    """PATH override so a Windows ASan binary finds its dynamic runtime DLL.
+
+    clang-cl links the ASan runtime dynamically, so the instrumented test exe
+    needs clang_rt.asan_dynamic-*.dll at launch. configure records the runtime
+    directory in the cache (SC_ASAN_RUNTIME_DIR); prepend it to PATH so the loader
+    resolves the DLL without copying it next to each binary. Empty for any build
+    that didn't record it (the common case).
+    """
+    cache = build_dir / "CMakeCache.txt"
+    rtdir = ""
+    try:
+        for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("SC_ASAN_RUNTIME_DIR:"):
+                rtdir = line.partition("=")[2].strip()
+                break
+    except OSError:
+        return {}
+    if not rtdir:
+        return {}
+    existing = os.environ.get("PATH", "")
+    return {"PATH": rtdir + os.pathsep + existing if existing else rtdir}
 
 
 def _test_extra(xml_path: Path) -> str:
@@ -57,6 +83,7 @@ def test(
     test_name: str | None = None,
     extra_args: list[str] | None = None,
     env: dict[str, str] | None = None,
+    extra_env_for: Callable[[str], dict[str, str]] | None = None,
     timeout: float | None = None,
     write_xml: bool = True,
     mirror: bool = False,
@@ -72,6 +99,11 @@ def test(
     report when it wrote one, otherwise a synthesized single-case sidecar; a
     test.json sidecar is written per preset. Returns one record per executed
     binary.
+
+    `extra_env_for(name)` injects per-binary environment variables (merged on top
+    of the inherited process env and `env`, never replacing them). The coverage
+    runner uses it to point each binary's LLVM_PROFILE_FILE at a distinct file;
+    when None, child env is left untouched (the normal test path).
     """
     extra_args = list(extra_args or [])
     all_records: list[dict] = []
@@ -81,6 +113,9 @@ def test(
             t.name: t
             for t in targets_mod.discover_targets(preset.build_dir, preset.build_type)
         }
+        # Per-preset env additions that apply to every binary (e.g. the Windows
+        # ASan runtime dir on PATH). Empty for ordinary builds.
+        preset_env = _sanitizer_path_env(preset.build_dir)
         records: list[dict] = []
         for name in binary_names:
             target = by_name.get(name)
@@ -99,13 +134,21 @@ def test(
                 cmd += ["--junit-xml", str(xml_path)]
             cmd += extra_args
 
+            # Per-binary env (e.g. LLVM_PROFILE_FILE) and per-preset env (e.g. the
+            # ASan runtime PATH) layer onto the inherited environment so we never
+            # drop PATH/MSVC vars the child needs.
+            run_env = env
+            layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
+            if layered:
+                run_env = {**os.environ, **(env or {}), **layered}
+
             result = run_step(
                 cmd,
                 step_type="test",
                 name=name,
                 build_dir=preset.build_dir,
                 cwd=root,
-                env=env,
+                env=run_env,
                 timeout=timeout,
                 mirror=mirror,
                 verbose=verbose,
