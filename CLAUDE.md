@@ -80,12 +80,19 @@ uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 uv run dev.py test               # build + run the full suite
 uv run dev.py build [-t <target>]
 uv run dev.py format             # clang-format all libs/ .cc/.hh in place
+uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's safe
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
-**Before committing, run `uv run dev.py format --dirty-only`** to format exactly
-the files in your next commit (use `--check-only` to verify without rewriting).
-`.clang-format` is authoritative, and the command pins to its declared
+**Before committing, run `uv run dev.py check --fix`.** It runs the pre-commit
+gates — clang-format (dirty-only), a repo-wide cross-reference check, and the
+full test suite on the default **and** a release preset (asserts on *and* off) —
+auto-applies every unambiguous fix (currently clang-format), and reports one
+green/red verdict. The test tail runs only once the static checks are green;
+`--no-test` skips it (handy for a docs-only re-check). `check crossrefs` /
+`check format` run a single gate; `check --list` lists them. Cross-references rot
+easily (rename a file and links in *other* files silently break), so that check
+is always full-repo. The format check pins to `.clang-format`'s declared
 clang-format major version — pass `--allow-different-version` to proceed with a
 different one (warning instead of error).
 
@@ -243,6 +250,8 @@ how to write one (keep it current when public API changes).
   the factual order parallel work landed in. On conflicts, resolve and commit
   the merge (default message is fine).
 * **No force-push to `main`.**
+* **Before committing, run `uv run dev.py check --fix`** (format + cross-reference
+  + test gates, auto-fixing what's safe). Not a git hook — run it manually.
 * **Commit attribution.** For largely Claude-generated commits, add
   `Assisted-By: Claude Code <model-id>` (e.g. `claude-opus-4-8`) — **not**
   `Co-Authored-By`. Skip for human-written or trivial agent edits.
@@ -261,6 +270,7 @@ how to write one (keep it current when public API changes).
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
+| Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |

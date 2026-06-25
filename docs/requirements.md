@@ -87,7 +87,7 @@ avoid format churn and stale diagnostics.
 ### diag-launcher
 
 Builds wrap the compiler and linker with
-[tools/bin/diag-launcher.exe](../tools/bin) (set as
+[tools/bin/diag-launcher.exe](../tools/bin/diag-launcher.exe) (set as
 `CMAKE_<LANG>_COMPILER_LAUNCHER` / `..._LINKER_LAUNCHER` in the presets). It
 captures per-invocation diagnostics into `.diag.json` sidecars that the
 `repo_tools` `build_diag` MCP tool reads. It is checked into the repo, so no

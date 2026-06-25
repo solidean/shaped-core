@@ -12,6 +12,7 @@ Usage:
     uv run dev.py build [--target T]        Build (optionally specific targets)
     uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
     uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
+    uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, crossrefs, test)
     uv run dev.py clean [--all]             Remove build artifacts
     uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
     uv run dev.py doctor                    Sanity-check the toolchain
@@ -42,6 +43,8 @@ import fnmatch
 import platform
 import subprocess
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -58,6 +61,14 @@ DEFAULT_BUILD_PRESETS: dict[str, str] = {
     "Windows": "relwithdebinfo-clang",
     "Linux": "relwithdebinfo-linux-clang",
     "Darwin": "macos-arm-llvm-relwithdebinfo",
+}
+
+# Release sibling of each default preset, run alongside it by the `test` check so
+# precommit exercises both CC_ASSERT on (relwithdebinfo) and off (release).
+DEFAULT_RELEASE_PRESETS: dict[str, str] = {
+    "Windows": "release-clang",
+    "Linux": "release-linux-clang",
+    "Darwin": "macos-arm-llvm-release",
 }
 
 
@@ -89,8 +100,8 @@ def _build_diag_hint(presets: list[dev.Preset]) -> str:
     return "diagnose with: build_diag"
 
 
-def _fail_build(results: list[dev.StepResult], presets: list[dev.Preset]) -> None:
-    """Report a failed build phase with the right diagnosis hint, then exit(1).
+def _print_build_failure(results: list[dev.StepResult], presets: list[dev.Preset]) -> None:
+    """Report a failed build phase with the right diagnosis hint.
 
     A configure failure leaves no per-translation-unit sidecars, so the
     build_diag hint would point at an empty scan. Point at the captured configure
@@ -101,6 +112,11 @@ def _fail_build(results: list[dev.StepResult], presets: list[dev.Preset]) -> Non
         print(f"\nconfigure failed - see {_rel(cfg_fail.stderr_log)}", file=sys.stderr)
     else:
         print(f"\nbuild failed - {_build_diag_hint(presets)}", file=sys.stderr)
+
+
+def _fail_build(results: list[dev.StepResult], presets: list[dev.Preset]) -> None:
+    """Report a failed build phase and exit(1) (for the build/test commands)."""
+    _print_build_failure(results, presets)
     sys.exit(1)
 
 
@@ -265,6 +281,12 @@ def cmd_test(args: argparse.Namespace) -> None:
         parts = [Path(r["artifact"]).parent / f"{Path(r['artifact']).name}.results.xml" for r in records]
         dev.merge_junit(parts, Path(args.merged_xml_report))
 
+    sys.exit(0 if _summarize_tests(records, presets) else 1)
+
+
+def _summarize_tests(records: list[dict], presets: list[dev.Preset]) -> bool:
+    """Print the pass/fail summary for a set of test runs; return True if all
+    passed. Shared by the `test` command and the `test` check."""
     total_s = sum(r["duration_s"] for r in records)
     failed = sum(1 for r in records if r["returncode"] != 0)
     tests = sum(r["junit"]["tests"] for r in records if r["junit"])
@@ -276,12 +298,12 @@ def cmd_test(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         print(f"tests failed - {_test_diag_hint(presets)}", file=sys.stderr)
-        sys.exit(1)
+        return False
     print(
         f"\nAll {len(records)} test run(s) passed: {stats} in {_fmt_dur(total_s)}.",
         file=sys.stderr,
     )
-    sys.exit(0)
+    return True
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
@@ -299,13 +321,28 @@ def cmd_clean(args: argparse.Namespace) -> None:
         print("  nothing to remove (already clean)", file=sys.stderr)
 
 
-def cmd_format(args: argparse.Namespace) -> None:
+def _run_format(
+    *,
+    check: bool,
+    dirty_only: bool,
+    allow_different_version: bool,
+    mirror: bool,
+    verbose: bool,
+) -> bool:
+    """Run clang-format over the selected libs/ sources; return True on success.
+
+    In check mode reports non-conforming files and returns False if any differ;
+    otherwise rewrites in place. "Nothing to format" counts as success. Exits the
+    process on unrecoverable setup errors (clang-format missing, or a version
+    mismatch without allow_different_version) — those can't be reported per-file.
+    Shared by `cmd_format` and the `format` check.
+    """
     clang_format = dev.find_clang_format()
     if clang_format is None:
         die("clang-format not found on PATH. Install LLVM/clang-format (>= 21) or add it to PATH.")
 
     # clang-format output is not stable across major versions, so enforce the
-    # major declared by .clang-format. --allow-different-version downgrades the
+    # major declared by .clang-format. allow_different_version downgrades the
     # mismatch to a warning instead of failing.
     have = dev.clang_format_version(clang_format)
     need = dev.required_major(ROOT)
@@ -315,44 +352,208 @@ def cmd_format(args: argparse.Namespace) -> None:
         have_str = ".".join(str(p) for p in have)
         msg = (f"clang-format major version {have[0]} != required {need} "
                f"(found {have_str}); formatting may differ from the pinned style")
-        if args.allow_different_version:
+        if allow_different_version:
             print(f"WARNING: {msg}", file=sys.stderr)
         else:
             die(f"{msg}. Install clang-format {need}.x, or pass --allow-different-version to proceed anyway.")
 
-    files = dev.discover_files(ROOT, dirty_only=args.dirty_only)
+    files = dev.discover_files(ROOT, dirty_only=dirty_only)
     if not files:
-        scope = "dirty libs/ sources" if args.dirty_only else "libs/ sources"
+        scope = "dirty libs/ sources" if dirty_only else "libs/ sources"
         print(f"No {scope} to format.", file=sys.stderr)
-        sys.exit(0)
+        return True
 
     result = dev.format_sources(
         files, root=ROOT, clang_format=clang_format,
-        check=args.check_only, mirror=args.mirror_output, verbose=args.verbose,
+        check=check, mirror=mirror, verbose=verbose,
     )
 
-    if args.check_only:
+    if check:
         if result.ok:
             print(f"\n{len(files)} file(s) already formatted.", file=sys.stderr)
-            sys.exit(0)
+            return True
         offenders = dev.violating_files(result, ROOT)
         for f in offenders:
             print(_rel(f))
         sys.stdout.flush()
         print(
             f"\n{len(offenders)} of {len(files)} file(s) need formatting "
-            f"- run: uv run dev.py format" + (" --dirty-only" if args.dirty_only else ""),
+            f"- run: uv run dev.py format" + (" --dirty-only" if dirty_only else ""),
             file=sys.stderr,
         )
-        sys.exit(1)
+        return False
 
     if not result.ok:
         print(f"\nformat failed - see {_rel(result.stderr_log)}", file=sys.stderr)
-        sys.exit(1)
+        return False
     print(
         f"\nFormatted {len(files)} file(s) in {_fmt_dur(result.duration_s)}.",
         file=sys.stderr,
     )
+    return True
+
+
+def cmd_format(args: argparse.Namespace) -> None:
+    ok = _run_format(
+        check=args.check_only,
+        dirty_only=args.dirty_only,
+        allow_different_version=args.allow_different_version,
+        mirror=args.mirror_output,
+        verbose=args.verbose,
+    )
+    sys.exit(0 if ok else 1)
+
+
+# ---------------------------------------------------------------------------
+# Pre-commit checks
+#
+# Each registered Check is a named gate `dev.py check` can run. `dev.py check`
+# with no name runs them all (the pre-commit aggregator); `dev.py check <name>`
+# runs a subset. A check's `run` prints its own banner/summary and returns
+# ok: bool. Checks that support `--fix` apply unambiguous fixes (clang-format);
+# others ignore it and only report. A `requires_green` check (the test suite)
+# is the slow tail: it runs only after every static check passed — there's no
+# point building and testing a tree that already fails a cheap lint — and
+# `--no-test` skips it outright (handy for a docs-only re-check). The registry
+# is the growth point — new gates plug in here without touching the command
+# surface.
+# ---------------------------------------------------------------------------
+
+def _check_format(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    # Pre-commit default is dirty-only (just the next commit's files); --all
+    # widens to the whole tree. --fix rewrites in place, else check-only.
+    return _run_format(
+        check=not fix,
+        dirty_only=not all_scope,
+        allow_different_version=False,
+        mirror=mirror,
+        verbose=verbose,
+    )
+
+
+def _check_crossrefs(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    # Always full-repo: a moved file breaks links in other, untouched files, so a
+    # dirty-only scan would miss exactly the breakage this guards against. Not
+    # fixable, so fix/all_scope are ignored.
+    result = dev.check_crossrefs(ROOT)
+    files = result.md_files + result.src_files
+    if not result.ok:
+        for offender in result.offenders:
+            print(offender)
+        sys.stdout.flush()
+        print(
+            f"\n{len(result.offenders)} stale or broken cross-reference(s) across {files} file(s)",
+            file=sys.stderr,
+        )
+        return False
+    total = result.md_links + result.src_refs
+    print(
+        f"\nOK: {total} cross-references valid across {files} files "
+        f"({result.md_links} md links, {result.src_refs} source refs)",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _check_tests(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+    # Build + run the full suite on the default preset and its release sibling, so
+    # both CC_ASSERT on (relwithdebinfo) and off (release) are exercised. Warm
+    # builds are the norm at commit time — uncompiled code couldn't have been
+    # tested — so the real cost is the test run. Not fixable; fix/all_scope ignored.
+    specs = [default_preset_name()]
+    release = DEFAULT_RELEASE_PRESETS.get(platform.system())
+    if release:
+        specs.append(release)
+    presets = resolve_presets(specs)
+
+    results = dev.build(presets, None, root=ROOT, auto_configure=True, mirror=mirror, verbose=verbose)
+    if not all(r.ok for r in results):
+        _print_build_failure(results, presets)
+        return False
+
+    test_targets = [t for t in _discover(presets[0]) if _is_test_target(t)]
+    if not test_targets:
+        print("No test binaries found (expected '*-test' executables)", file=sys.stderr)
+        return False
+
+    records = dev.test(
+        presets, [t.name for t in test_targets], root=ROOT,
+        test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+    )
+    return _summarize_tests(records, presets)
+
+
+@dataclass
+class Check:
+    name: str
+    description: str
+    supports_fix: bool
+    run: Callable[..., bool]
+    # The slow tail: run only after every static check is green (see cmd_check).
+    requires_green: bool = False
+
+
+CHECKS: list[Check] = [
+    Check("format", "clang-format libs/ sources (dirty-only; --all for the whole tree)",
+          True, _check_format),
+    Check("crossrefs", "validate doc<->code cross-references repo-wide", False, _check_crossrefs),
+    Check("test", "build + run the full suite on the default and a release preset",
+          False, _check_tests, requires_green=True),
+]
+
+
+def cmd_check(args: argparse.Namespace) -> None:
+    if args.list:
+        for c in CHECKS:
+            tags = []
+            if c.supports_fix:
+                tags.append("--fix")
+            if c.requires_green:
+                tags.append("needs-green")
+            suffix = f"  [{', '.join(tags)}]" if tags else ""
+            print(f"{c.name}{suffix}  {c.description}")
+        sys.exit(0)
+
+    by_name = {c.name: c for c in CHECKS}
+    if args.names:
+        selected: list[Check] = []
+        seen: set[str] = set()
+        for name in args.names:
+            if name not in by_name:
+                die(f"unknown check {name!r}. Available: {', '.join(by_name)}")
+            if name not in seen:
+                seen.add(name)
+                selected.append(by_name[name])
+    else:
+        selected = list(CHECKS)
+
+    def run_one(c: Check) -> None:
+        print(f"\n--- running {c.name} ---", file=sys.stderr)
+        if not c.run(fix=args.fix, all_scope=args.all, mirror=args.mirror_output, verbose=args.verbose):
+            failed.append(c.name)
+
+    # Static checks first; the slow `requires_green` tail (the test suite) runs
+    # only if they all passed and --no-test wasn't given.
+    failed: list[str] = []
+    for c in selected:
+        if not c.requires_green:
+            run_one(c)
+    for c in selected:
+        if not c.requires_green:
+            continue
+        if args.no_test:
+            print(f"\n--- skipped {c.name} (--no-test) ---", file=sys.stderr)
+        elif failed:
+            print(f"\n--- skipped {c.name} (static checks failed) ---", file=sys.stderr)
+        else:
+            run_one(c)
+
+    if failed:
+        print("\ncheck: FAIL", file=sys.stderr)
+        for name in failed:
+            print(f"  - {name}", file=sys.stderr)
+        sys.exit(1)
+    print("\ncheck: OK", file=sys.stderr)
     sys.exit(0)
 
 
@@ -500,6 +701,16 @@ def main() -> None:
     fmt_p.add_argument("--allow-different-version", action="store_true",
                        help="Downgrade a clang-format version mismatch from error to warning")
 
+    check_p = sub.add_parser("check", help="Run pre-commit checks (format, crossrefs, ...)")
+    check_p.add_argument("names", nargs="*", help="Specific check(s) to run (default: all)")
+    check_p.add_argument("--fix", action="store_true",
+                         help="Let fixable checks apply unambiguous fixes (e.g. clang-format -i)")
+    check_p.add_argument("--all", action="store_true",
+                         help="Widen the format check from dirty-only to the whole tree")
+    check_p.add_argument("--no-test", action="store_true",
+                         help="Skip the test suite (build + run); just the static checks")
+    check_p.add_argument("--list", action="store_true", help="List registered checks and exit")
+
     clean_p = sub.add_parser("clean", help="Remove build artifacts")
     _add_preset_arg(clean_p)
     clean_p.add_argument("--all", action="store_true", help="Remove every preset's build directory")
@@ -533,6 +744,8 @@ def main() -> None:
             cmd_test(args)
         case "format":
             cmd_format(args)
+        case "check":
+            cmd_check(args)
         case "clean":
             cmd_clean(args)
         case "diagnose":
