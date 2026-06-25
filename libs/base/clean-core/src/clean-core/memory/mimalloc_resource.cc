@@ -79,15 +79,19 @@ cc::isize mi_try_resize_bytes_in_place(cc::byte* p,
     CC_ASSERT(old_bytes > 0, "old_bytes must be positive");
     CC_ASSERT(1 <= min_bytes && min_bytes <= max_bytes, "must have 1 <= min_bytes <= max_bytes");
 
-    // mi_expand never moves the block: it returns p if min_bytes still fits the
-    // block's size class, otherwise nullptr. This lets contiguous containers grow
-    // (or shrink) without invalidating pointers into the allocation.
-    if (mi_expand(p, static_cast<size_t>(min_bytes)) == nullptr)
+    // An in-place resize succeeds iff min_bytes still fits the block's usable
+    // size; the block never moves, so pointers into the allocation stay valid.
+    // We query mi_usable_size directly rather than via mi_expand: mi_expand is a
+    // documented no-op (always fails) under mimalloc's padding/guard debug modes
+    // (MI_DEBUG/MI_SECURE), which would make every resize fail there. mi_usable_size
+    // excludes the padding region, so reporting capacity up to it keeps writes
+    // inside the user block and leaves mimalloc's overflow canary intact. This
+    // matches mi_expand's release semantics exactly while also working in debug.
+    cc::isize const usable = static_cast<cc::isize>(mi_usable_size(p));
+    if (min_bytes > usable)
     {
         return -1;
     }
-
-    cc::isize const usable = static_cast<cc::isize>(mi_usable_size(p));
     return usable < max_bytes ? usable : max_bytes;
 }
 
