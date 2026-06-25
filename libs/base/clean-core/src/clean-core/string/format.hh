@@ -18,6 +18,7 @@
 //   cc::string s = cc::format("{} + {} = {}", 1, 2, 3);   // "1 + 2 = 3"
 //   cc::format("{:#06x}", 255);                            // "0x00ff"
 //   cc::format("{:>8.2f}", 3.14159);                       // "    3.14"
+//   cc::format("{:'}", 1232453254);                        // "1'232'453'254"  (digit grouping)
 //
 // The format string is checked at compile time: brace matching, argument indices, and spec-vs-argument-type
 // compatibility are all verified by the consteval format_string constructor. A malformed call does not

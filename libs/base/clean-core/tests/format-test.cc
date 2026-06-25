@@ -35,6 +35,10 @@ static_assert(test_parse("*^7").align == cc::impl::align_t::center);
 static_assert(test_parse("*^7").width == 7);
 static_assert(test_parse("+").sign == cc::impl::sign_t::plus);
 static_assert(test_parse(">10").align == cc::impl::align_t::right);
+static_assert(test_parse("'").group == '\'');
+static_assert(test_parse(",").group == ',');
+static_assert(test_parse("8'").width == 8 && test_parse("8'").group == '\'');
+static_assert(test_parse("'.2f").group == '\'' && test_parse("'.2f").precision == 2);
 
 // field index resolution
 static_assert(first_field_index("{}") == 0);
@@ -122,6 +126,31 @@ TEST("format - integer sign and zero-padding")
     CHECK(cc::format("{:05}", 42) == "00042");
     CHECK(cc::format("{:05}", -42) == "-0042");
     CHECK(cc::format("{:+05}", 42) == "+0042");
+}
+
+TEST("format - digit grouping")
+{
+    // decimal groups by 3, with a customizable separator
+    CHECK(cc::format("{:'}", 1232453254) == "1'232'453'254");
+    CHECK(cc::format("{:,}", 1232453254) == "1,232,453,254");
+    CHECK(cc::format("{:_}", 1232453254) == "1_232_453_254");
+    CHECK(cc::format("{:'}", 100) == "100");
+    CHECK(cc::format("{:'}", 1000) == "1'000");
+    CHECK(cc::format("{:'}", -1234567) == "-1'234'567");
+
+    // composes with sign, width/align, and zero-padding
+    CHECK(cc::format("{:+'}", 1234567) == "+1'234'567");
+    CHECK(cc::format("{:>12'}", 1234567) == "   1'234'567");
+
+    // binary/hex/octal group by 4
+    CHECK(cc::format("{:'x}", 0xDEADBEEF) == "dead'beef");
+    CHECK(cc::format("{:'X}", 0xDEADBEEF) == "DEAD'BEEF");
+    CHECK(cc::format("{:#'x}", 0xDEADBEEF) == "0xdead'beef");
+    CHECK(cc::format("{:'b}", 0xFF) == "1111'1111");
+
+    // floats: only the integer part is grouped (by 3)
+    CHECK(cc::format("{:'.2f}", 1234567.5) == "1'234'567.50");
+    CHECK(cc::format("{:'}", 1234567.0) == "1'234'567");
 }
 
 TEST("format - alignment and width")

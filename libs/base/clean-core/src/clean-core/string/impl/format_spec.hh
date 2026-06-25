@@ -24,8 +24,10 @@ struct formatter;
 //
 // The placeholder syntax follows Python / std::format / fmtlib:
 //   replacement_field ::= '{' [arg_index] [':' format_spec] '}'
-//   format_spec       ::= [[fill] align] [sign] ['#'] ['0'] [width] ['.' precision] [type]
+//   format_spec       ::= [[fill] align] [sign] ['#'] ['0'] [width] [grouping] ['.' precision] [type]
 //   align ::= '<' | '>' | '^'      sign ::= '+' | '-' | ' '
+//   grouping ::= one digit-group separator (any non-alphanumeric char except '.'); decimal groups by 3,
+//                binary/hex/octal by 4. Numbers only. e.g. {:'} -> 1'234'567, {:,} -> 1,234,567
 //   type  ::= d|x|X|o|b|B|c (ints) | f|F|e|E|g|G (floats) | s (string/bool) | p (ptr)
 //   escapes: '{{' and '}}' produce a single literal brace.
 // =========================================================================================================
@@ -89,6 +91,7 @@ struct format_spec
     bool alternate = false;   // '#'
     bool zero_pad = false;    // '0'
     isize width = -1;         // -1 = unset
+    char group = '\0';        // digit-group separator; '\0' = no grouping (e.g. '\'' -> 1'234'567)
     isize precision = -1;     // -1 = unset
     char presentation = '\0'; // type char; '\0' = default
 };
@@ -205,6 +208,14 @@ constexpr format_spec parse_spec(string_view body)
         spec.width = w;
     }
 
+    // [grouping] — one digit-group separator: any non-alphanumeric char except '.' (precision) and braces.
+    // Decimal groups by 3, binary/hex/octal by 4 (see format.cc). Letters stay the type; '.' stays precision.
+    if (p < n && !is_alphanumeric(body[p]) && body[p] != '.' && body[p] != '{' && body[p] != '}')
+    {
+        spec.group = body[p];
+        p += 1;
+    }
+
     // ['.' precision]
     if (p < n && body[p] == '.')
     {
@@ -295,7 +306,8 @@ constexpr char const* spec_error_for_type(format_spec const& s, type_tag tag)
     if (tag == type_tag::other_user)
     {
         bool const is_default = s.fill == ' ' && s.align == align_t::none && s.sign == sign_t::minus && !s.alternate
-                             && !s.zero_pad && s.width == -1 && s.precision == -1 && s.presentation == '\0';
+                             && !s.zero_pad && s.width == -1 && s.group == '\0' && s.precision == -1
+                             && s.presentation == '\0';
         if (!is_default)
             return "user-defined types accept only '{}' (specialize cc::formatter<T> for custom specs)";
         return nullptr;
@@ -316,12 +328,16 @@ constexpr char const* spec_error_for_type(format_spec const& s, type_tag tag)
             return "invalid presentation type for char (use c/d/b/B/o/x/X)";
         if (s.precision != -1)
             return "precision is not allowed for char";
+        if (s.group != '\0')
+            return "digit grouping is not allowed for char";
         break;
     case type_tag::boolean:
         if (!(p == '\0' || p == 's' || p == 'd' || p == 'b' || p == 'B' || p == 'o' || p == 'x' || p == 'X'))
             return "invalid presentation type for bool (use s/d/b/B/o/x/X)";
         if (s.precision != -1)
             return "precision is not allowed for bool";
+        if (s.group != '\0')
+            return "digit grouping is not allowed for bool";
         break;
     case type_tag::floating:
         if (!(p == '\0' || p == 'f' || p == 'F' || p == 'e' || p == 'E' || p == 'g' || p == 'G'))
@@ -330,14 +346,14 @@ constexpr char const* spec_error_for_type(format_spec const& s, type_tag tag)
     case type_tag::string_like:
         if (!(p == '\0' || p == 's'))
             return "invalid presentation type for string (use s)";
-        if (s.sign != sign_t::minus || s.alternate || s.zero_pad)
-            return "sign / '#' / '0' are not allowed for strings";
+        if (s.sign != sign_t::minus || s.alternate || s.zero_pad || s.group != '\0')
+            return "sign / '#' / '0' / grouping are not allowed for strings";
         break;
     case type_tag::pointer:
         if (!(p == '\0' || p == 'p'))
             return "invalid presentation type for pointer (use p)";
-        if (s.sign != sign_t::minus || s.alternate || s.zero_pad || s.precision != -1)
-            return "sign / '#' / '0' / precision are not allowed for pointers";
+        if (s.sign != sign_t::minus || s.alternate || s.zero_pad || s.precision != -1 || s.group != '\0')
+            return "sign / '#' / '0' / precision / grouping are not allowed for pointers";
         break;
     default:
         break;

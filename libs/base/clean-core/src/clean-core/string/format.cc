@@ -56,6 +56,30 @@ cc::isize float_precision_of(char mode, cc::isize precision)
     return precision;
 }
 
+// inserts `sep` every `group` digits (counting from the right) into `digits`, writing the result to `out`.
+// returns the grouped length. e.g. group_digits(out, "1232453", '\'', 3) -> "1'232'453" (length 9)
+cc::isize group_digits(cc::span<char> out, cc::string_view digits, char sep, int group)
+{
+    cc::isize const dn = digits.size();
+    cc::isize const seps = dn > 0 ? (dn - 1) / group : 0;
+    cc::isize const total = dn + seps;
+    CC_ASSERT(total <= out.size(), "cc::format: grouping buffer too small");
+
+    cc::isize oi = total;
+    int count = 0;
+    for (cc::isize i = dn; i-- > 0;)
+    {
+        if (count == group)
+        {
+            out[--oi] = sep;
+            count = 0;
+        }
+        out[--oi] = digits[i];
+        ++count;
+    }
+    return total;
+}
+
 // shared float rendering for both float and double; `n` is the seam-produced length in `buf`
 void format_float_common(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, char* buf, cc::isize n)
 {
@@ -73,6 +97,25 @@ void format_float_common(cc::impl::format_sink const& sink, cc::impl::format_spe
         neg = true;
         all = all.subview(1);
     }
+
+    // optional digit grouping of the integer part only (the run of leading digits), e.g. 1'234'567.5
+    char gbuf[cc::impl::chars_float_max * 2];
+    if (spec.group != '\0')
+    {
+        cc::isize k = 0;
+        while (k < all.size() && cc::is_digit(all[k]))
+            ++k;
+        if (k > 0)
+        {
+            cc::isize const gi
+                = group_digits(cc::span<char>(gbuf, cc::isize(sizeof gbuf)), all.subview(0, k), spec.group, 3);
+            cc::string_view const rest = all.subview(k);
+            for (cc::isize i = 0; i < rest.size(); ++i)
+                gbuf[gi + i] = rest[i];
+            all = cc::string_view(gbuf, gi + rest.size());
+        }
+    }
+
     write_decorated_number(sink, spec, neg, cc::string_view(), all);
 }
 } // namespace
@@ -279,7 +322,18 @@ void format_integer(format_sink const& sink, format_spec const& spec, bool negat
 
     char buf[chars_int_max];
     isize const n = chars_from_u64(cc::span<char>(buf, chars_int_max), magnitude, base, upper);
-    write_decorated_number(sink, spec, negative, prefix, cc::string_view(buf, n));
+    string_view digits = cc::string_view(buf, n);
+
+    // optional digit grouping: decimal by 3, binary/hex/octal by 4
+    char grouped[chars_int_max * 2];
+    if (spec.group != '\0')
+    {
+        int const grp = base == 10 ? 3 : 4;
+        isize const gn = group_digits(cc::span<char>(grouped, isize(sizeof grouped)), digits, spec.group, grp);
+        digits = cc::string_view(grouped, gn);
+    }
+
+    write_decorated_number(sink, spec, negative, prefix, digits);
 }
 
 // -----------------------------------------------------------------------------------------------------
