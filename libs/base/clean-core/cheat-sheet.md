@@ -143,6 +143,11 @@ cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; re
 //   static void format(cc::format_sink, cc::string_view spec, T const&) + static consteval void validate(spec).
 //   Delegate to the standard grammar via cc::format_value(sink, spec, v) / cc::validate_format_spec(spec).
 //   (Or just give T a member to_string() for the plain "{}" case.)
+
+#include <clean-core/string/print.hh>            // print/println -> stdout, eprint/eprintln -> stderr (via fwrite)
+cc::print(sv);  cc::println("done");             // raw string_view (braces NOT interpreted); println() = just '\n'
+cc::println("{} + {} = {}", 1, 2, 3);            // cc::format string + args (>=1 arg picks the format overload)
+cc::eprint("oops: {}", err);  cc::eprintln();    // stderr variants
 ```
 
 ## Optional & result (fallibility)
