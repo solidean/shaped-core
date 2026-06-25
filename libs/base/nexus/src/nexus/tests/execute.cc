@@ -208,18 +208,30 @@ char const* op_to_string(impl::cmp_op op)
     using namespace impl;
     switch (op)
     {
-    case cmp_op::none: return "";
-    case cmp_op::less: return "<";
-    case cmp_op::less_equal: return "<=";
-    case cmp_op::greater: return ">";
-    case cmp_op::greater_equal: return ">=";
-    case cmp_op::equal: return "==";
-    case cmp_op::not_equal: return "!=";
-    case cmp_op::throws: return "throws";
-    case cmp_op::throws_as: return "throws_as";
-    case cmp_op::assert_fail: return "assert_fail";
-    case cmp_op::asserts: return "asserts";
-    case cmp_op::skip: return "skip";
+    case cmp_op::none:
+        return "";
+    case cmp_op::less:
+        return "<";
+    case cmp_op::less_equal:
+        return "<=";
+    case cmp_op::greater:
+        return ">";
+    case cmp_op::greater_equal:
+        return ">=";
+    case cmp_op::equal:
+        return "==";
+    case cmp_op::not_equal:
+        return "!=";
+    case cmp_op::throws:
+        return "throws";
+    case cmp_op::throws_as:
+        return "throws_as";
+    case cmp_op::assert_fail:
+        return "assert_fail";
+    case cmp_op::asserts:
+        return "asserts";
+    case cmp_op::skip:
+        return "skip";
     }
     return "?";
 }
@@ -377,7 +389,9 @@ void nx::impl::report_check_result(check_kind kind,
         cc::string expanded;
         switch (op)
         {
-        case cmp_op::none: expanded = std::format("'{}' failed", as_sv(expr)); break;
+        case cmp_op::none:
+            expanded = std::format("'{}' failed", as_sv(expr));
+            break;
 
         case cmp_op::less:
         case cmp_op::less_equal:
@@ -419,7 +433,8 @@ void nx::impl::report_check_result(check_kind kind,
                 expanded = "assertion should have failed (but did not)";
             break;
 
-        case cmp_op::skip: CC_UNREACHABLE("skip should not produce a test error");
+        case cmp_op::skip:
+            CC_UNREACHABLE("skip should not produce a test error");
         }
 
         // Add test error

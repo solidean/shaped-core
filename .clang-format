@@ -1,8 +1,10 @@
 # Style file for clang-format ( http://clang.llvm.org/docs/ClangFormatStyleOptions.html )
-# Current style version: 2026-06-22
+# Current style version: 2026-06-24
 # Requires: clang-format >= 21 (config uses modern, non-deprecated option spellings)
 
 # Changelog:
+#   2026-06-24 - AllowShortCaseLabelsOnASingleLine off (case statement on its own
+#                line); IndentCaseBlocks made explicit (brace at the `case` level)
 #   2026-06-22 - custom brace wrapping, ReflowComments off, explicit BinPackArguments,
 #                InsertNewlineAtEOF, modernized deprecated option spellings, require v21
 #   2025-12-13 - column limit 120, penalty 10
@@ -27,7 +29,7 @@ IndentWidth: 4
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: InlineOnly
-AllowShortCaseLabelsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: false
 AllowAllArgumentsOnNextLine: false # if args on next line, all multiline
 AllowAllParametersOfDeclarationOnNextLine: false
 AlwaysBreakBeforeMultilineStrings: false
@@ -39,6 +41,9 @@ BreakConstructorInitializers: BeforeColon
 PackConstructorInitializers: NextLine
 Cpp11BracedListStyle: true
 IndentCaseLabels: false
+# Non-trivial cases (with a `{}` block) keep the brace at the `case` level, not
+# indented one step further. Combined with BraceWrapping.AfterCaseLabel below.
+IndentCaseBlocks: false
 RequiresClausePosition: OwnLine
 
 # Allman braces, but spelled out as Custom so individual cases are tweakable.
