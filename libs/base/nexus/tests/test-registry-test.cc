@@ -4,6 +4,8 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
+#include <stdexcept>
+
 
 TEST("test registry - basics")
 {

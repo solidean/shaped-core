@@ -3,7 +3,6 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <format>
 #include <stdexcept>
 #include <string>
 #include <utility>

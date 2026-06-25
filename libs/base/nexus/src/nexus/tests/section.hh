@@ -1,9 +1,8 @@
 #pragma once
 
 #include <clean-core/platform/source_location.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
-
-#include <format> // NOLINT(unused-includes) - std::format in SECTION macro; no cc::format yet
 
 namespace nx::impl
 {
@@ -34,4 +33,4 @@ raii_section_opener test_open_section(cc::string name, cc::source_location locat
 //   }
 #define SECTION(name, ...)    \
     if (auto _nx_raii_section \
-        = ::nx::impl::test_open_section(std::format(name __VA_OPT__(, ) __VA_ARGS__), cc::source_location::current()))
+        = ::nx::impl::test_open_section(::cc::format(name __VA_OPT__(, ) __VA_ARGS__), cc::source_location::current()))

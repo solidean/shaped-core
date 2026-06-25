@@ -2,15 +2,13 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/string/to_string.hh>
 
+#include <iterator> // for std::begin / std::end (iterable detection); TODO: replace with a cc:: equivalent
 #include <type_traits>
 #include <utility> // for tuple_size
-
-// remove me once we have it
-#include <format>
-#include <string_view>
 
 namespace cc
 {
@@ -91,7 +89,7 @@ template <class T>
             return "<nullptr>";
 
         // print address, not contents
-        return cc::string(std::format("ptr(0x{:X})", (uintptr_t)v));
+        return cc::format("ptr(0x{:X})", (uintptr_t)v);
     }
     else if constexpr (requires { cc::string_view(v); })
     {
@@ -127,7 +125,7 @@ template <class T>
         else if (v == '\'')
             s += "\\'";
         else if (v < 32 || v == 127) // Other control characters
-            s += std::format("\\x{:02X}", static_cast<unsigned char>(v));
+            s += cc::format("\\x{:02X}", static_cast<unsigned char>(v));
         else // Printable characters (including space)
             s += v;
 
@@ -195,7 +193,7 @@ template <class T>
         {
             if (i > 0 && i % align == 0)
                 s += "_";
-            s += std::format("{:02X}", p_v[i]);
+            s += cc::format("{:02X}", p_v[i]);
         }
         s += ")";
         return s;

@@ -1,10 +1,9 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/execute.hh>
-
-#include <format> // std::format: no cc::format yet
 
 struct nx::impl::check_handle::impl_context
 {
@@ -57,7 +56,7 @@ nx::impl::check_handle nx::impl::check_handle::context(cc::string msg) &&
 
 nx::impl::check_handle nx::impl::check_handle::note(cc::string msg) &&
 {
-    return cc::move(*this).add_extra_line(std::format("note: {}", msg.c_str_materialize()));
+    return cc::move(*this).add_extra_line(cc::format("note: {}", msg));
 }
 
 nx::impl::check_handle nx::impl::check_handle::fail_note() &&
@@ -67,7 +66,7 @@ nx::impl::check_handle nx::impl::check_handle::fail_note() &&
 
 nx::impl::check_handle nx::impl::check_handle::fail_note(cc::string msg) &&
 {
-    return cc::move(*this).add_extra_line(std::format("note: {}", msg.c_str_materialize()));
+    return cc::move(*this).add_extra_line(cc::format("note: {}", msg));
 }
 
 nx::impl::check_handle nx::impl::check_handle::succeed_note() &&
@@ -77,5 +76,5 @@ nx::impl::check_handle nx::impl::check_handle::succeed_note() &&
 
 nx::impl::check_handle nx::impl::check_handle::succeed_note(cc::string msg) &&
 {
-    return cc::move(*this).add_extra_line(std::format("note: {}", msg.c_str_materialize()));
+    return cc::move(*this).add_extra_line(cc::format("note: {}", msg));
 }

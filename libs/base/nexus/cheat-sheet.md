@@ -68,7 +68,7 @@ TEST("string ops")
         CHECK(to_upper("hi") == "HI");
         SECTION("idempotent") { /* ... */ }
     }
-    SECTION("iter {}", i)                // std::format-style args allowed in the name
+    SECTION("iter {}", i)                // cc::format-style args allowed in the name
     { /* ... */ }
 }
 ```

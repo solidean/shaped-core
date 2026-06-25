@@ -1,14 +1,14 @@
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assertf.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
-
-#include <optional>
-#include <vector>
 
 
 TEST("assertions - failing assertion calls handler with correct payload")
 {
-    std::optional<cc::impl::assertion_info> captured;
+    cc::optional<cc::impl::assertion_info> captured;
     // CAREFUL: this is a bit brittle wrt. formatting but it should be fine
     int const test_line = __LINE__ + 11; // line where CC_ASSERT_ALWAYS is called
 
@@ -31,21 +31,21 @@ TEST("assertions - failing assertion calls handler with correct payload")
     REQUIRE(captured.has_value());
 
     // Expression: should contain the stringified condition
-    CHECK(!captured->expression.empty());
-    CHECK(captured->expression.find("false") != std::string::npos);
+    CHECK(!captured.value().expression.empty());
+    CHECK(captured.value().expression.contains("false"));
 
     // Message: should be formatted correctly
-    CHECK(captured->message == "hello 42");
+    CHECK(captured.value().message == "hello 42");
 
     // Location: file name should end with this test file
-    auto file_name = std::string(captured->location.file_name());
+    auto file_name = cc::string(captured.value().location.file_name());
     CHECK(file_name.ends_with("assert-test.cc"));
 
     // Location: line should be exact
-    CHECK(captured->location.line() == test_line);
+    CHECK(captured.value().location.line() == test_line);
 
     // Location: function name should be non-empty
-    CHECK(!std::string(captured->location.function_name()).empty());
+    CHECK(!cc::string(captured.value().location.function_name()).empty());
 }
 
 TEST("assertions - passing assertion does not call handler")
@@ -71,7 +71,7 @@ TEST("assertions - passing assertion does not call handler")
 
 TEST("assertions - handler stack is LIFO and nesting works")
 {
-    std::vector<int> events;
+    cc::vector<int> events;
 
     auto handler_a = cc::impl::scoped_assertion_handler(
         [&](cc::impl::assertion_info const&)
@@ -115,7 +115,7 @@ TEST("assertions - handler stack is LIFO and nesting works")
 
 TEST("assertions - scoped_assertion_handler pops on scope exit even when handler throws")
 {
-    std::vector<int> events;
+    cc::vector<int> events;
     bool outer_handler_works = false;
 
     auto outer = cc::impl::scoped_assertion_handler(
@@ -168,7 +168,7 @@ TEST("assertions - scoped_assertion_handler pops on scope exit even when handler
 
 TEST("assertions - multiple failures produce independent reports")
 {
-    std::vector<cc::impl::assertion_info> captures;
+    cc::vector<cc::impl::assertion_info> captures;
     int const line1 = __LINE__ + 12;
     int const line2 = __LINE__ + 18;
 
@@ -198,14 +198,14 @@ TEST("assertions - multiple failures produce independent reports")
     REQUIRE(captures.size() == 2);
 
     // First failure
-    CHECK(captures[0].expression.find("false") != std::string::npos);
+    CHECK(captures[0].expression.contains("false"));
     CHECK(captures[0].message == "first message");
     CHECK(captures[0].location.line() >= line1 - 1);
     CHECK(captures[0].location.line() <= line1 + 1);
 
     // Second failure
-    CHECK(captures[1].expression.find("1") != std::string::npos);
-    CHECK(captures[1].expression.find("2") != std::string::npos);
+    CHECK(captures[1].expression.contains("1"));
+    CHECK(captures[1].expression.contains("2"));
     CHECK(captures[1].message == "second message");
     CHECK(captures[1].location.line() >= line2 - 1);
     CHECK(captures[1].location.line() <= line2 + 1);

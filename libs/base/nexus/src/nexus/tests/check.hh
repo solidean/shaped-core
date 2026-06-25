@@ -5,12 +5,11 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/source_location.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/string/to_debug_string.hh>
 
-#include <format>      // std::format: no cc::format yet
-#include <string_view> // std::string_view: portable std::format arg for the dump label
 #include <type_traits>
 
 namespace nx::impl
@@ -178,12 +177,8 @@ struct check_handle final
     template <class T>
     check_handle dump(cc::string_view label, T const& value) &&
     {
-        // TODO: move to cc::format
-        // std::format the label as a std::string_view (cc::string_view is not portably formattable).
-        return cc::move(*this).add_extra_line(passed ? ""
-                                                     : std::format("{}: {}",
-                                                                   std::string_view(label.data(), size_t(label.size())),
-                                                                   cc::to_debug_string(value).c_str_materialize()));
+        return cc::move(*this).add_extra_line(passed ? cc::string()
+                                                     : cc::format("{}: {}", label, cc::to_debug_string(value)));
     }
 
     // 2 dumps is used for CHECK(lhs op rhs)
@@ -191,8 +186,7 @@ struct check_handle final
     template <class T>
     check_handle dump(T const& value) &&
     {
-        // TODO: move to cc::format
-        return cc::move(*this).add_extra_line(passed ? "" : cc::to_debug_string(value).c_str_materialize());
+        return cc::move(*this).add_extra_line(passed ? cc::string() : cc::to_debug_string(value));
     }
 
     static check_handle make(check_kind kind, cmp_op op, char const* expr_text, bool passed, cc::source_location loc);

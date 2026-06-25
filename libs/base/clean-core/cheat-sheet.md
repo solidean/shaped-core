@@ -43,7 +43,7 @@ CC_DEBUG_BREAK();                        // break if a debugger is attached, els
 #include <clean-core/common/asserts.hh>  // runtime cc::string_view message
 CC_ASSERTS(cond, sv);  CC_ASSERTS_ALWAYS(cond, sv);
 
-#include <clean-core/common/assertf.hh>  // std::format message (pulls in <format>)
+#include <clean-core/common/assertf.hh>  // cc::format message (compile-time-checked; pulls in cc::format)
 CC_ASSERTF(idx < n, "index {} out of range {}", idx, n);
 CC_ASSERTF_ALWAYS(cond, "fmt {}", x);
 // Enabled in debug + relwithdebinfo, stripped in release (unless CC_ENABLE_ASSERT_IN_RELEASE).
@@ -135,6 +135,7 @@ cc::format("{} + {} = {}", 1, 2, 3);             // -> cc::string "1 + 2 = 3"   
 cc::format("{:#06x}  {:>8.2f}", 255, 3.14159);   // "0x00ff      3.14"  — fill/align/sign/#/0/width/group/.prec/type
 cc::format("{:'}", 1232453254);                  // "1'232'453'254"  — digit grouping (sep = ' , _ … ; 3 dec / 4 hex)
 cc::format_append(str, "x={}", 7);               // append into an existing cc::string (no temporary)
+str.appendf("x={}", 7);                          // same, as a cc::string member (needs <clean-core/string/format.hh>)
 cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; return > n means truncated
 // Placeholders: {} auto-index, {N} positional (don't mix), {{ }} escape braces. Types: d/x/X/o/b/c ints,
 // f/F/e/E/g/G floats, s string/bool, p pointer. Numbers go via std::to_chars (one seam). No ADL on args.

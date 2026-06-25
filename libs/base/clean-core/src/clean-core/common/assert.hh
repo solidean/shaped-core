@@ -1,7 +1,7 @@
 #pragma once
 
 // This is a very lean header with minimal dependencies - easy to include everywhere and low cost.
-// For formatted assertions with std::format support, use <clean-core/common/assertf.hh> instead.
+// For formatted assertions with cc::format support, use <clean-core/common/assertf.hh> instead.
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/source_location.hh>
 
