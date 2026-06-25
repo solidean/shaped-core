@@ -203,6 +203,14 @@ cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
 cc::atomic_add(v, x);                     // also atomic_sub/and/or/xor (via std::atomic_ref) -> old value
+
+#include <clean-core/math/random.hh>
+cc::random rng(seed);                     // deterministic PCG32; MOVE-ONLY (use .clone() to duplicate a stream)
+rng.next_u32();  rng.next_u64();          // raw uniform bits
+rng.uniform(a, b);                        // integer in [a,b] (unbiased) OR float/double in [a,b)
+rng.uniform_bool();                       // fair coin
+rng.uniform_in(range);  rng.shuffle(range); // pick element / in-place permute (indexable range)
+rng.clone();                              // independent generator at the same stream position
 ```
 
 ## Sequence (lazy ranges — emerging API)

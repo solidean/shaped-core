@@ -32,6 +32,7 @@ target_sources(clean-core
 
     src/clean-core/common/macros.hh
     src/clean-core/common/utility.hh
+    src/clean-core/common/traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
     src/clean-core/common/assert.hh
@@ -44,6 +45,7 @@ target_sources(clean-core
     src/clean-core/platform/stacktrace.hh
 
     src/clean-core/math/bit.hh
+    src/clean-core/math/random.hh
 
     src/clean-core/memory/allocation.hh
     src/clean-core/memory/node_allocation.hh
@@ -146,6 +148,7 @@ add_executable(clean-core-test
     tests/mutex-test.cc
     tests/node_allocation-test.cc
     tests/optional-test.cc
+    tests/random-test.cc
     tests/result-test.cc
     tests/span-test.cc
     tests/strided_span-test.cc

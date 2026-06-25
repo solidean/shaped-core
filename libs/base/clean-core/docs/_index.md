@@ -28,8 +28,11 @@ clean-core/
 
 ## Topics
 
-No deep-dive docs yet — add them here as kebab-case `.md` files and link them from
-this list.
+- [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers
+  clean-core is allowed to depend on directly, and why.
+
+Add further deep-dive docs here as kebab-case `.md` files and link them from this
+list.
 
 ## Conventions
 

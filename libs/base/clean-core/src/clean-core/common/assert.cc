@@ -2,6 +2,8 @@
 
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/asserts.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -9,8 +11,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <string>
-#include <vector>
 
 #ifdef CC_COMPILER_MSVC
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent() noexcept;
@@ -26,13 +26,17 @@ namespace
 {
 // Global stack of assertion handlers
 // NOTE: This is not thread-safe and must be externally synchronized
-std::vector<std::move_only_function<void(cc::impl::assertion_info const&)>> g_assertion_handlers;
+cc::vector<cc::unique_function<void(cc::impl::assertion_info const&)>> g_assertion_handlers;
 
 // Default assertion handler implementation
 void default_assert_handler(cc::impl::assertion_info const& info)
 {
-    std::cerr << "Assertion failed: " << info.expression << '\n';
-    std::cerr << "  Message: " << info.message << '\n';
+    auto const write_str = [](cc::string const& s) { std::cerr.write(s.data(), std::streamsize(s.size())); };
+    std::cerr << "Assertion failed: ";
+    write_str(info.expression);
+    std::cerr << "\n  Message: ";
+    write_str(info.message);
+    std::cerr << '\n';
     std::cerr << "  Location: " << info.location.file_name() << ':' << info.location.line() << ':'
               << info.location.column() << " (" << info.location.function_name() << ")\n";
 
@@ -43,20 +47,20 @@ void default_assert_handler(cc::impl::assertion_info const& info)
 }
 } // namespace
 
-void cc::impl::push_assertion_handler(std::move_only_function<void(assertion_info const&)> handler)
+void cc::impl::push_assertion_handler(cc::unique_function<void(assertion_info const&)> handler)
 {
-    g_assertion_handlers.push_back(std::move(handler));
+    g_assertion_handlers.push_back(cc::move(handler));
 }
 
 void cc::impl::pop_assertion_handler()
 {
     if (!g_assertion_handlers.empty())
-        g_assertion_handlers.pop_back();
+        g_assertion_handlers.remove_back();
 }
 
-cc::impl::scoped_assertion_handler::scoped_assertion_handler(std::move_only_function<void(assertion_info const&)> handler)
+cc::impl::scoped_assertion_handler::scoped_assertion_handler(cc::unique_function<void(assertion_info const&)> handler)
 {
-    push_assertion_handler(std::move(handler));
+    push_assertion_handler(cc::move(handler));
 }
 
 cc::impl::scoped_assertion_handler::~scoped_assertion_handler()
@@ -70,8 +74,8 @@ CC_COLD_FUNC void cc::impl::handle_assert_failure_sv(char const* expression,
                                                      cc::source_location location)
 {
     assertion_info const info{
-        .expression = std::string(expression),
-        .message = std::string(message.data(), static_cast<size_t>(message.size())),
+        .expression = cc::string(expression),
+        .message = cc::string(message),
         .location = location,
     };
 

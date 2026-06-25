@@ -13,6 +13,10 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
+    src/nexus/fuzz/machine.cc
+    src/nexus/fuzz/runner.cc
+    src/nexus/fuzz/run.cc
+    src/nexus/fuzz/test.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -34,6 +38,18 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
+
+    src/nexus/fuzz/fwd.hh
+    src/nexus/fuzz/value.hh
+    src/nexus/fuzz/signature.hh
+    src/nexus/fuzz/operation.hh
+    src/nexus/fuzz/executed_operation.hh
+    src/nexus/fuzz/machine.hh
+    src/nexus/fuzz/runner.hh
+    src/nexus/fuzz/run.hh
+    src/nexus/fuzz/regression_dialect.hh
+    src/nexus/fuzz/test.hh
+    src/nexus/fuzz/fuzz.hh
 )
 
 # Libraries should not set a global C++ standard here.
@@ -63,6 +79,10 @@ add_executable(nexus-test
     tests/test-export-test.cc
     tests/test-registry-test.cc
     tests/test-section-test.cc
+    tests/fuzz-value-test.cc
+    tests/fuzz-engine-test.cc
+    tests/fuzz-minimize-test.cc
+    tests/fuzz-regression-test.cc
 )
 
 target_link_libraries(nexus-test

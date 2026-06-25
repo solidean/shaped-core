@@ -1,10 +1,9 @@
 #pragma once
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/platform/source_location.hh>
-
-#include <functional>
-#include <string>
+#include <clean-core/string/string.hh>
 
 namespace cc::impl
 {
@@ -24,8 +23,8 @@ namespace cc::impl
 
 struct assertion_info
 {
-    std::string expression;
-    std::string message;
+    cc::string expression;
+    cc::string message;
     cc::source_location location;
 };
 
@@ -34,7 +33,7 @@ struct assertion_info
 // Handlers are allowed to throw exceptions as a way to unwind to some recovery point
 // This can turn assertion failures into less serious issues in production
 // (while this should never be the default in dev, it is valid in production)
-void push_assertion_handler(std::move_only_function<void(assertion_info const&)> handler);
+void push_assertion_handler(cc::unique_function<void(assertion_info const&)> handler);
 
 // Pop the topmost assertion handler from the stack
 // NOTE: Be careful with this when using throwing handlers for recovery
@@ -45,7 +44,7 @@ void pop_assertion_handler();
 // RAII wrapper for pushing/popping assertion handlers
 struct scoped_assertion_handler
 {
-    explicit scoped_assertion_handler(std::move_only_function<void(assertion_info const&)> handler);
+    explicit scoped_assertion_handler(cc::unique_function<void(assertion_info const&)> handler);
     ~scoped_assertion_handler();
 
     scoped_assertion_handler(scoped_assertion_handler const&) = delete;
