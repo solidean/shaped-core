@@ -21,6 +21,7 @@ uv run dev.py <command> [options]
 | `build`        | Build (auto-configures first if inputs changed). `-t/--target` to scope.      |
 | `test`         | Build, then run test binaries (`*-test`). Optional name/binary filter.        |
 | `format`       | clang-format `libs/` sources in place (see below).                            |
+| `check`        | Run pre-commit checks (format, crossrefs, test) and report one green/red verdict. |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `doctor`       | Read-only toolchain sanity check (cmake, ninja, compiler, presets, clangd).   |
@@ -118,7 +119,52 @@ the major version declared by `.clang-format`'s `Requires: clang-format >= N`
 header and **errors** if the installed clang-format's major differs. Pass
 `--allow-different-version` to downgrade that to a warning and proceed anyway.
 Like every other step, the clang-format run is captured under
-`build/run-logs/`.
+`build/run-logs/`. Before committing, prefer `uv run dev.py check --fix`, which
+runs this format check (and the others) in one shot — see
+[Pre-commit checks](#pre-commit-checks).
+
+## Pre-commit checks
+
+`uv run dev.py check` runs the project's pre-commit gates and reports a single
+green/red verdict — the "everything green" gate. **`uv run dev.py check --fix`
+is the recommended move before committing**: it auto-applies every unambiguous
+fix it can (currently clang-format), runs the rest, and tells you what's left.
+
+```bash
+uv run dev.py check            # run every check -> one verdict
+uv run dev.py check --fix      # apply fixable checks (clang-format -i), then report
+uv run dev.py check --no-test  # static checks only — skip the build+test tail (docs-only re-check)
+uv run dev.py check --all      # widen the format check from dirty-only to the whole tree
+uv run dev.py check crossrefs  # run just one (or several) checks by name
+uv run dev.py check --list     # list the registered checks
+```
+
+Registered checks:
+
+| Check       | What it does                                                                   | `--fix`? |
+|-------------|--------------------------------------------------------------------------------|----------|
+| `format`    | clang-format `libs/` sources. Dirty-only by default; `--all` for the whole tree. | yes (rewrites in place) |
+| `crossrefs` | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
+| `test`      | Build + run the full suite on the default **and** a release preset.             | no (report only) |
+
+`crossrefs` scans markdown links (`[text](path#L42)`, including line/heading
+anchors) and `//`-comment doc references (`docs/...md`) across `libs/`, `docs/`,
+`.claude/`, and the root meta docs, and flags any that no longer resolve. These
+rot silently — a moved file breaks links in *other*, untouched files — so the
+scan is always full-repo, not dirty-only, and `--all` does not affect it. It
+reports each offender as `file:line: reason`.
+
+`test` is the slow tail and runs **only after the static checks pass** (no point
+building a tree that already fails a cheap lint), and `--no-test` skips it. It
+builds and runs the suite on the platform default (relwithdebinfo, `CC_ASSERT`
+on) **and** its release sibling (`CC_ASSERT` off), so both assertion modes are
+covered every commit. Builds are warm at commit time — code you didn't compile,
+you didn't test — so the real cost is the test run (well under a second);
+expect a one-time cold build of the release preset the first time. On failure it
+prints the `test_diag` selector, same as `dev.py test`.
+
+New gates plug into the check registry in [dev.py](../../dev.py) without changing
+the command surface.
 
 ## clangd / IDE code intelligence
 

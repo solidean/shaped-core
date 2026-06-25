@@ -12,8 +12,8 @@ Libraries live under `libs/<category>/<lib>`:
 
 | Library                       | What it is                                                                                  |
 |-------------------------------|---------------------------------------------------------------------------------------------|
-| [clean-core](libs/base/clean-core) | Foundational C++ data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, …). Namespace `cc`. |
-| [nexus](libs/base/nexus)      | Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML). Namespace `nx`. |
+| [clean-core](libs/base/clean-core/) | Foundational C++ data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, …). Namespace `cc`. |
+| [nexus](libs/base/nexus/)      | Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML). Namespace `nx`. |
 
 See [docs/libraries.md](docs/libraries.md) for the full catalog.
 

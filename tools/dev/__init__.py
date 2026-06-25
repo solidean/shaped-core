@@ -12,6 +12,7 @@ from . import clangd
 from .build import build
 from .cmake import remove_build_dir
 from .configure import configure, ensure_configured
+from .crossrefs import CrossRefResult, check_crossrefs
 from .doctor import doctor
 from .format import (
     clang_format_version,
@@ -32,6 +33,8 @@ __all__ = [
     "clangd",
     "configure",
     "ensure_configured",
+    "CrossRefResult",
+    "check_crossrefs",
     "doctor",
     "clang_format_version",
     "discover_files",
