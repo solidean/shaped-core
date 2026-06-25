@@ -64,12 +64,32 @@ DEFAULT_BUILD_PRESETS: dict[str, str] = {
     "Darwin": "macos-arm-llvm-relwithdebinfo",
 }
 
+# Debug sibling of each default preset. Run by the `test` check alongside the
+# others: -O0 plus mimalloc's debug heap (MI_DEBUG) catch bugs the optimized
+# presets miss.
+DEFAULT_DEBUG_PRESETS: dict[str, str] = {
+    "Windows": "debug-clang",
+    "Linux": "debug-linux-clang",
+    "Darwin": "macos-arm-llvm-debug",
+}
+
 # Release sibling of each default preset, run alongside it by the `test` check so
-# precommit exercises both CC_ASSERT on (relwithdebinfo) and off (release).
+# precommit exercises both CC_ASSERT on (debug/relwithdebinfo) and off (release).
 DEFAULT_RELEASE_PRESETS: dict[str, str] = {
     "Windows": "release-clang",
     "Linux": "release-linux-clang",
     "Darwin": "macos-arm-llvm-release",
+}
+
+# Sanitizer (ASan+UBSan) preset per platform, run by the `test` check as an extra
+# defensive pass. Windows is intentionally absent: clang-cl's ASan is broken with
+# C++ exceptions (any throw/catch faults during EH dispatch — a toolchain bug, not
+# ours), and nexus catches test exceptions, so it can never be green there. The
+# sanitize-clang preset still exists for manual non-throwing runs; see
+# docs/guides/building-and-testing.md.
+DEFAULT_SANITIZE_PRESETS: dict[str, str] = {
+    "Linux": "sanitize-linux-clang",
+    "Darwin": "sanitize-macos-arm-llvm",
 }
 
 # Default coverage preset per platform (instrumented Debug build; SC_COVERAGE ON).
@@ -465,14 +485,22 @@ def _check_crossrefs(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool)
 
 
 def _check_tests(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
-    # Build + run the full suite on the default preset and its release sibling, so
-    # both CC_ASSERT on (relwithdebinfo) and off (release) are exercised. Warm
-    # builds are the norm at commit time — uncompiled code couldn't have been
-    # tested — so the real cost is the test run. Not fixable; fix/all_scope ignored.
+    # Build + run the full suite across build variants: debug (-O0 + mimalloc's
+    # MI_DEBUG heap) and relwithdebinfo exercise CC_ASSERT on, release exercises
+    # it off, and — where supported — a sanitizer (ASan+UBSan) preset adds a
+    # memory/UB pass. Together they catch allocator misuse, assert regressions,
+    # and undefined behavior the optimized presets miss. Warm builds are the norm
+    # at commit time — uncompiled code couldn't have been tested — so the real
+    # cost is the test run. Not fixable; fix/all_scope ignored.
+    system = platform.system()
     specs = [default_preset_name()]
-    release = DEFAULT_RELEASE_PRESETS.get(platform.system())
-    if release:
-        specs.append(release)
+    for sibling in (
+        DEFAULT_DEBUG_PRESETS.get(system),
+        DEFAULT_RELEASE_PRESETS.get(system),
+        DEFAULT_SANITIZE_PRESETS.get(system),
+    ):
+        if sibling:
+            specs.append(sibling)
     presets = resolve_presets(specs)
 
     results = dev.build(presets, None, root=ROOT, auto_configure=True, mirror=mirror, verbose=verbose)
@@ -506,7 +534,7 @@ CHECKS: list[Check] = [
     Check("format", "clang-format libs/ sources (dirty-only; --all for the whole tree)",
           True, _check_format),
     Check("crossrefs", "validate doc<->code cross-references repo-wide", False, _check_crossrefs),
-    Check("test", "build + run the full suite on the default and a release preset",
+    Check("test", "build + run the full suite on the debug, default, release (and where supported, sanitizer) presets",
           False, _check_tests, requires_green=True),
 ]
 
