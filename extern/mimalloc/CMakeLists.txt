@@ -22,8 +22,13 @@ target_compile_definitions(mimalloc PRIVATE
 )
 
 # OS libraries the static build links against (from upstream's CMakeLists).
+# mimalloc builds for WebAssembly via its emscripten/wasi prim backends (src/prim/{emscripten,wasi}).
+# Single-threaded wasm has no pthreads to find, so skip the Threads dependency there; once we add the
+# multithreaded wasm preset it will compile with -pthread and emscripten provides the threading runtime.
 if (WIN32)
     target_link_libraries(mimalloc PUBLIC psapi shell32 user32 advapi32 bcrypt)
+elseif (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "WASI")
+    # no OS threading library to link against
 else()
     find_package(Threads REQUIRED)
     target_link_libraries(mimalloc PUBLIC Threads::Threads)

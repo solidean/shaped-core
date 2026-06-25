@@ -101,7 +101,7 @@ ss.reversed();                            // negated-stride view
 ## Strings (UTF-8)
 
 ```cpp
-#include <clean-core/string/string.hh>    // cc::string — owning, SSO (<= 39 bytes inline), deep-copyable
+#include <clean-core/string/string.hh>    // cc::string — owning, SSO (<= 39 bytes inline on 64-bit), deep-copyable
 cc::string str = "shaped";                // ctors: char, (ptr,size), (begin,end), c-string, container
 auto s2 = cc::string::create_filled(n, 'x');   // also create_copy_of(sv), create_uninitialized(n),
                                                //       create_with_capacity(n), create_copy_c_str_materialized(sv)
@@ -243,7 +243,7 @@ m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then op
   underflow. `find`/`rfind` return **`-1`** (not a huge unsigned) on no-match.
 - **`string` / `string_view` are NOT null-terminated.** `data()` is not a C
   string — use `str.c_str_materialize()` (valid only until the next mutation).
-- **`string` SSO holds ≤ 39 bytes inline** before it heap-allocates.
+- **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
 - **`optional` has no `operator*` / `operator->`.** Use `value()`, which
   *asserts* when empty rather than throwing.
 - **Return errors with `cc::error(...)`** — never an implicit conversion.

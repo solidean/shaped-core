@@ -19,7 +19,7 @@ from pathlib import Path
 from . import cmake, fingerprint, targets
 from .logs import step_fields, write_sidecar
 from .models import Preset, StepResult
-from .process import msvc_env, run_step
+from .process import env_for_preset, run_step
 
 
 def _publish_compile_commands(preset: Preset) -> None:
@@ -40,11 +40,11 @@ def _publish_compile_commands(preset: Preset) -> None:
 
 
 def _configure_one(
-    preset: Preset, *, root: Path, mirror: bool, verbose: bool
+    preset: Preset, *, root: Path, mirror: bool, verbose: bool, emsdk_path: str | None = None
 ) -> StepResult:
     # Request a File API codemodel so target discovery works after configure.
     targets.write_query(preset.build_dir)
-    env = msvc_env()
+    env = env_for_preset(preset, emsdk_path)
     result = run_step(
         cmake.configure_command(preset.configure_preset),
         step_type="configure",
@@ -79,11 +79,13 @@ def configure(
     force: bool = False,
     mirror: bool = False,
     verbose: bool = False,
+    emsdk_path: str | None = None,
 ) -> list[StepResult]:
     """Configure each preset. Returns one StepResult per preset that ran.
 
     When `force` is False and a preset's fingerprint is already current, the
-    configure is skipped (no StepResult is produced for it).
+    configure is skipped (no StepResult is produced for it). `emsdk_path` points
+    Emscripten presets at an emsdk install (see process.emsdk_env).
     """
     results: list[StepResult] = []
     for preset in presets:
@@ -93,15 +95,16 @@ def configure(
                 file=sys.stderr,
             )
             continue
-        results.append(_configure_one(preset, root=root, mirror=mirror, verbose=verbose))
+        results.append(_configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path))
     return results
 
 
 def ensure_configured(
-    preset: Preset, *, root: Path, mirror: bool = False, verbose: bool = False
+    preset: Preset, *, root: Path, mirror: bool = False, verbose: bool = False,
+    emsdk_path: str | None = None,
 ) -> StepResult | None:
     """Configure `preset` only if its fingerprint is stale. Returns the result, or
     None if the configure was skipped."""
     if fingerprint.is_current(preset.build_dir, root):
         return None
-    return _configure_one(preset, root=root, mirror=mirror, verbose=verbose)
+    return _configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path)

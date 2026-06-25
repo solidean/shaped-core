@@ -52,6 +52,25 @@ targets it; older versions may work but are untested.
 | Linux    | `g++` / `gcc`       | `*-gcc-*` presets. GCC **13+** for `std::stacktrace`.        |
 | macOS    | Homebrew LLVM       | Expects `/opt/homebrew/opt/llvm/bin/clang++` (arm64).        |
 | Android  | NDK r27c            | Expects `C:/Android/android-ndk-r27c` (see preset).          |
+| WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
+
+See the [platform-support table in the README](../README.md#platform-support) for the full tier
+matrix (which platforms are actively tested vs supported vs planned).
+
+### Emscripten / WASM
+
+WebAssembly builds use the [emsdk](https://github.com/emscripten-core/emsdk), which bundles `emcc`,
+the CMake toolchain file, and its own Node.js (so no separate Node install is needed). The
+`wasm-emscripten-*` configure presets reference the toolchain file via `$env{EMSDK}`.
+
+You do **not** need to permanently/`--system` activate emsdk: `dev.py` locates it and applies its
+environment to each configure/build/test subprocess. Resolution order is `--emsdk-path` → the
+`SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH`. Tests run under Node
+(`-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and
+`-s EXIT_RUNTIME=1` propagates the pass/fail exit code). Only the single-threaded, no-WebGPU,
+`-fexceptions` combination is wired today; the `SC_WASM_THREADS` / `SC_WASM_WEBGPU` /
+`SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear "not yet supported"
+message (Tier 3).
 
 ### `std::stacktrace`
 
@@ -62,8 +81,11 @@ detected at configure time ([DetectStacktraceLib.cmake](../libs/base/clean-core/
 * GCC 14+ libstdc++ — `-lstdc++exp`.
 * GCC 13 libstdc++ — `-lstdc++_libbacktrace`.
 
-If none links, configure fails with a clear `FATAL_ERROR`. This makes **GCC 13**
-the practical floor on the GCC path.
+On the GCC path this makes **GCC 13** the practical floor. Where `<stacktrace>` is unavailable
+altogether — notably Emscripten / WASI libc++ — the build does **not** fail: `clean-core`'s
+[stacktrace.hh](../libs/base/clean-core/src/clean-core/platform/stacktrace.hh) detects this via
+`__has_include` and falls back to an empty `cc::stacktrace` stub (`CC_HAS_STACKTRACE 0`), and the
+configure-time detection downgrades to a status message instead of an error.
 
 ### Linkers
 
@@ -103,5 +125,12 @@ uv run dev.py doctor
 Checks, in order: **cmake** (present *and* >= the declared minimum), **ninja**,
 a usable **compiler** (MSVC env / `clang-cl` on Windows, `clang++`/`g++`
 elsewhere), that **presets parse** and the platform **default preset** exists,
-and **clangd** (found, a published `compile_commands.json` exists, and it parses
-a real file cleanly). A red line names the fix.
+the **coverage** tools, the **emscripten** toolchain, and **clangd** (found, a
+published `compile_commands.json` exists, and it parses a real file cleanly). A
+red line names the fix.
+
+The emscripten check is advisory: with no emsdk signal (`--emsdk-path` /
+`SC_EMSDK_PATH` / `EMSDK` / `emcc` on `PATH`) it reports a passing "not configured
+(optional)" line, so a native-only setup stays green. Once any signal is present
+it validates strictly — emsdk located, `emcc` runnable, toolchain file present,
+and emsdk's `node` reachable.

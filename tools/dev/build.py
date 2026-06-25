@@ -17,7 +17,7 @@ from . import cmake
 from .configure import ensure_configured
 from .logs import ninja_built_count, step_fields, write_sidecar
 from .models import Preset, StepResult
-from .process import msvc_env, run_step
+from .process import env_for_preset, run_step
 
 
 def _build_extra(result: StepResult) -> str:
@@ -34,18 +34,21 @@ def build(
     auto_configure: bool = True,
     mirror: bool = False,
     verbose: bool = False,
+    emsdk_path: str | None = None,
 ) -> list[StepResult]:
     """Build `targets` (or everything when None/empty) across all presets.
 
     Returns every StepResult produced, in order. A failed step does not stop the
     remaining presets/targets — the caller inspects the results for failures.
+    `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env).
     """
-    env = msvc_env()
     results: list[StepResult] = []
 
     for preset in presets:
+        # Per-preset environment: emsdk for Emscripten presets, MSVC env otherwise.
+        env = env_for_preset(preset, emsdk_path)
         if auto_configure:
-            cfg = ensure_configured(preset, root=root, mirror=mirror, verbose=verbose)
+            cfg = ensure_configured(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path)
             if cfg is not None and not cfg.ok:
                 results.append(cfg)
                 continue  # configure failed — skip building this preset

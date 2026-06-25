@@ -123,12 +123,15 @@ target_compile_definitions(clean-core
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
 )
 
-# Detect and link the correct library for std::stacktrace support
+# Detect and link the correct library for std::stacktrace support.
+# When no working <stacktrace> is found (e.g. Emscripten / WASI libc++ ships no such header), this is not
+# fatal: clean-core/platform/stacktrace.hh detects the same condition via __has_include and falls back to
+# an empty stub (CC_HAS_STACKTRACE 0). Only the GCC paths need an explicit link library.
 include(DetectStacktraceLib)
 cc_detect_stacktrace_link(_CC_STACKTRACE_LIB)
 
 if(_CC_STACKTRACE_LIB STREQUAL "NOTFOUND")
-    message(FATAL_ERROR "std::stacktrace: no working link library found")
+    message(STATUS "[clean-core] std::stacktrace unavailable — building with the empty stacktrace stub")
 elseif(NOT _CC_STACKTRACE_LIB STREQUAL "")
     target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
 endif()
@@ -173,6 +176,9 @@ target_link_libraries(clean-core-test
     clean-core
     nexus
 )
+
+# Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
+sc_add_nexus_web_runner(clean-core-test)
 
 # Coverage
 option(CC_COVERAGE_MSVC "Enable MSVC native coverage" OFF)
