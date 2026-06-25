@@ -145,6 +145,10 @@ struct test_duplicate_section
 
 thread_local cc::vector<test_context> g_context_stack;
 
+// When non-null, check results are tallied here instead of being recorded on the active test
+// (see nx::impl::scoped_check_capture). Only the innermost installed sink is active.
+thread_local nx::impl::check_capture_sink* g_check_capture = nullptr;
+
 bool is_section_allowed(cc::span<test_section* const> curr_section,
                         cc::string_view section_name,
                         nx::test_schedule_config const* config)
@@ -304,6 +308,19 @@ nx::impl::raii_section_opener::~raii_section_opener()
     }
 }
 
+nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
+{
+    // nested captures are allowed; the innermost sink wins. We do not chain on purpose:
+    // the fuzz engine never nests captures, and a flat pointer keeps the hot path cheap.
+    CC_ASSERT(g_check_capture == nullptr, "nested check captures are not supported");
+    g_check_capture = &sink;
+}
+
+nx::impl::scoped_check_capture::~scoped_check_capture()
+{
+    g_check_capture = nullptr;
+}
+
 void nx::impl::report_check_result(check_kind kind,
                                    cmp_op op,
                                    cc::string expr,
@@ -311,6 +328,35 @@ void nx::impl::report_check_result(check_kind kind,
                                    cc::vector<cc::string> extra_lines,
                                    cc::source_location location)
 {
+    // Capture mode: a tool (e.g. the fuzz engine) is driving user code that is expected to fail
+    // often. Tally the outcome and suppress both the host-test side effects and the control-flow
+    // throws (REQUIRE/SKIP), so a single failing operation does not abort or pollute the host test.
+    if (g_check_capture != nullptr)
+    {
+        auto& sink = *g_check_capture;
+        ++sink.executed;
+        if (op == cmp_op::skip)
+            return;
+        if (!passed)
+        {
+            ++sink.failed;
+            if (kind == check_kind::require || op == cmp_op::assert_fail)
+                sink.require_failed = true;
+            if (sink.first_message.empty())
+            {
+                cc::string msg = expr;
+                for (auto const& line : extra_lines)
+                    if (!line.empty())
+                    {
+                        msg += " | ";
+                        msg += line;
+                    }
+                sink.first_message = cc::move(msg);
+            }
+        }
+        return;
+    }
+
     if (g_context_stack.empty())
         return; // No active test context
 

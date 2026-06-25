@@ -44,6 +44,30 @@ struct expected_assertion_exception
 {
 };
 
+// Sink that collects check outcomes instead of recording them on the active test.
+// Used by tools (e.g. the fuzz engine) that drive user code which is expected to fail often:
+// while a sink is installed, CHECK/REQUIRE failures are tallied here, no test error is recorded,
+// and REQUIRE/SKIP no longer throw to abort. The first failure message is kept for diagnostics.
+struct check_capture_sink
+{
+    int executed = 0;
+    int failed = 0;
+    bool require_failed = false; // a REQUIRE (or assertion) failed -> the run must stop
+    cc::string first_message;    // expanded message of the first failure, if any
+};
+
+// RAII installer for a capture sink (thread-local, one active at a time).
+struct scoped_check_capture
+{
+    explicit scoped_check_capture(check_capture_sink& sink);
+    ~scoped_check_capture();
+
+    scoped_check_capture(scoped_check_capture const&) = delete;
+    scoped_check_capture& operator=(scoped_check_capture const&) = delete;
+    scoped_check_capture(scoped_check_capture&&) = delete;
+    scoped_check_capture& operator=(scoped_check_capture&&) = delete;
+};
+
 // Forward declarations
 struct check_handle;
 template <class L>

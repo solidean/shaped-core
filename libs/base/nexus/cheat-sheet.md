@@ -88,6 +88,37 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 ```
 
+## Fuzz testing (`nx::fuzz`)
+
+API-sequence fuzzing: declare typed *operations*, seed *values*, and *invariants*;
+the engine composes random type-correct programs, finds a failure, shrinks it, and
+prints copy-pasteable regression code. See [docs/fuzz-testing.md](docs/fuzz-testing.md).
+
+```cpp
+#include <nexus/fuzz/fuzz.hh>
+
+TEST("add1 never reaches 7")                 // ordinary TEST: build setup once, drive it from SECTIONs
+{
+    auto test = nx::fuzz::test::create();
+    test->add_value("3", 3);                 // seed value (copyable); produced on demand
+    test->add_op("add1", [](int a){ return a + 1; });   // operation: any callable, args sourced from slots
+    test->add_invariant("is-not-7", [](int i){ return i != 7; }); // checked after each int is produced/mutated
+
+    SECTION("fuzz") { CHECK(test->execute_fuzz_test()); }          // generate + shrink + print a reproducer
+    SECTION("regression") { /* paste the emitted SECTION body here */ }
+}
+
+// builder (chainable):   ->execute_at_least(n) / ->execute_at_most(n) / ->execute_once()
+//                        ->when(pred)   // precondition: nullary, single-arg (per matching input), or exact-arity
+// invariant flavors:     return bool (must be true)  OR  return void and CHECK(...) inside
+// rng-driven ops:        add_op("gen", [](cc::random& r){ return r.uniform(0,10); });  // seeded + replayable
+
+// eval (what emitted regression SECTIONs call; chain results to mutate/feed forward):
+test->eval_op_to<int>("add1", 41);          // == 42  (also eval_op -> fuzz_value, eval_op_bool -> bool)
+auto res = test->execute_fuzzer(seed);      // one deterministic run; res.failing_run on a finding
+auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regression("test", dialect)
+```
+
 ## Gotchas
 
 - **Never run the `*-test` binary directly** — `uv run dev.py test` configures,
