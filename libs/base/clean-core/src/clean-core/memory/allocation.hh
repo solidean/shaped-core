@@ -40,9 +40,15 @@
 namespace cc
 {
 /// Default memory resource used when allocation::custom_resource == nullptr.
-/// This is a system allocator stored in the data segment, making the pointer valid even during
-/// static initialization in other translation units (safe for use in global/static constructors).
+/// Backed by mimalloc (see memory/mimalloc_resource.cc), our fast general-purpose allocator.
+/// Stored in the data segment, making the pointer valid even during static initialization in
+/// other translation units (safe for use in global/static constructors).
 extern cc::memory_resource const* const default_memory_resource;
+
+/// The platform malloc/free resource (_aligned_malloc/posix_memalign + free).
+/// Exposed as an explicit opt-out from the mimalloc-backed default: pass &cc::system_memory_resource
+/// as a custom resource to bypass mimalloc for a specific allocation. Also data-segment resident.
+extern cc::memory_resource const system_memory_resource;
 } // namespace cc
 
 /// Polymorphic memory resource interface powering cc::allocation<T>.

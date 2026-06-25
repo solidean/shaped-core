@@ -349,3 +349,38 @@ TEST("allocation - alignment stored correctly")
     CHECK(alloc.alignment == 64);
     CHECK(cc::is_aligned(alloc.alloc_start, 64));
 }
+
+TEST("memory_resource - system resource is a distinct opt-out")
+{
+    // The default is mimalloc-backed; the system resource is the explicit malloc/free opt-out.
+    CHECK(cc::default_memory_resource != &cc::system_memory_resource);
+
+    // Allocating through the system resource as a custom resource round-trips cleanly.
+    auto alloc = cc::allocation<int>::create_empty(8, alignof(int), &cc::system_memory_resource);
+    CHECK(alloc.is_valid());
+    CHECK(alloc.custom_resource == &cc::system_memory_resource);
+    CHECK(&alloc.resource() == &cc::system_memory_resource);
+}
+
+TEST("memory_resource - mimalloc default supports in-place resize")
+{
+    auto const& res = *cc::default_memory_resource;
+    REQUIRE(res.try_resize_bytes_in_place != nullptr);
+
+    // Allocate with a generous max so the reported size reveals mimalloc's usable capacity.
+    cc::byte* p = nullptr;
+    cc::isize const usable = res.allocate_bytes(&p, 64, cc::isize(1) << 20, 16, res.userdata);
+    REQUIRE(p != nullptr);
+    CHECK(usable >= 64);
+
+    // Resizing to exactly the usable size must stay in place (the previous malloc-based stub
+    // always failed with -1). Both grow-into-slack and shrink succeed without moving.
+    cc::isize const grown = res.try_resize_bytes_in_place(p, 64, usable, usable, 16, res.userdata);
+    CHECK(grown == usable);
+
+    cc::isize const shrunk = res.try_resize_bytes_in_place(p, usable, 1, 8, 16, res.userdata);
+    CHECK(shrunk >= 1);
+    CHECK(shrunk <= 8);
+
+    res.deallocate_bytes(p, usable, 16, res.userdata);
+}

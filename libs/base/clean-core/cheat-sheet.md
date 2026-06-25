@@ -174,7 +174,8 @@ uf();  uf.is_valid();                     // backed by cc::node_allocation (very
 #include <clean-core/memory/allocation.hh>        // cc::allocation<T> — move-only owning block + live range
 auto al = cc::allocation<int>::create_defaulted(n, res);  // create_empty/_filled/_uninitialized/_copy_of
 al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
-cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface
+cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
+cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
 
 #include <clean-core/memory/node_allocation.hh>   // cc::node_allocation<T> — move-only single-object slab handle
 auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args...);

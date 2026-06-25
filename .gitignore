@@ -53,6 +53,9 @@ Cargo.lock
 __pycache__/
 *.pyc
 
+# ─── Vendored dependencies ──────────────────────────────────
+.clone/                    # transient shallow clone made by extern/*/vendor-*.py
+
 # ─── Misc ───────────────────────────────────────────────────
 imgui.ini                  # workdir spam
 *.DS_Store                 # macos

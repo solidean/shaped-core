@@ -4,7 +4,8 @@ project(clean-core LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # dependencies
-# - clean core has no dependencies
+# - mimalloc (private): backs the default general memory resource; see
+#   src/clean-core/memory/mimalloc_resource.cc. Header stays private to that .cc.
 
 # Define the library and its sources
 add_library(clean-core
@@ -12,6 +13,7 @@ add_library(clean-core
     src/clean-core/common/hash.cc
     src/clean-core/platform/native.cc
     src/clean-core/memory/allocation.cc
+    src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
     src/clean-core/string/to_string.cc
@@ -101,6 +103,11 @@ target_include_directories(clean-core
     PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+
+# mimalloc backs the default general memory resource. PRIVATE: only
+# mimalloc_resource.cc includes <mimalloc.h>; CMake still propagates the static
+# lib to consumers' final link.
+target_link_libraries(clean-core PRIVATE mimalloc)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(clean-core
