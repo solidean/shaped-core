@@ -16,8 +16,12 @@ foundation every other library builds on.
 **C++ Standard:** C++23 minimum
 
 **Supported Platforms:**
-- 64-bit only (Windows, Linux, macOS; Android NDK)
-- Architectures: x64 and ARM64
+- **64-bit only** — no 32-bit targets are planned (WASM's `wasm32` is a 64-bit register
+  target with a 32-bit address space, and counts as 64-bit here).
+- Architectures: x64, ARM64, wasm32.
+- Tiered: Windows/Linux (Tier 1), macOS/iOS/Android/Emscripten single-threaded (Tier 2),
+  the other WASM combinations, WASI, and consoles (Tier 3, planned). See the
+  [platform-support table](../README.md#platform-support) for the full matrix.
 
 **Compiler Support:**
 - **First-class:** Clang and MSVC *(TODO: minimum versions)*

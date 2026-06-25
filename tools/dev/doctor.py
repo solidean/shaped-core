@@ -7,6 +7,7 @@ and what exit code to use. No side effects.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
@@ -16,7 +17,7 @@ from pathlib import Path
 from . import clangd
 from .coverage import find_tool, resolve_tool
 from .presets import PresetError, load_presets
-from .process import msvc_env
+from .process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
 
 
 def _parse_version(text: str) -> tuple[int, ...] | None:
@@ -71,6 +72,30 @@ def _cmake_check(root: Path) -> tuple[str, bool, str]:
     return ("cmake", True, first)
 
 
+def _pick_sample_source(entries: list[dict]) -> Path | None:
+    """Pick a representative first-party TU for the clangd smoke test.
+
+    Prefers a clean-core source over vendored/extern code (e.g. mimalloc's
+    static.c): clangd diagnostics on third-party translation units aren't ours to
+    fix, so they must not drive the toolchain verdict. Falls back to any libs/
+    source, then anything in the database.
+    """
+    files = [Path(e["file"]) for e in entries if "file" in e]
+
+    def score(p: Path) -> int:
+        s = p.as_posix().lower()
+        if "/extern/" in s:
+            return 3  # vendored — avoid
+        if "/libs/base/clean-core/" in s and p.suffix == ".cc":
+            return 0
+        if "/libs/" in s and p.suffix == ".cc":
+            return 1
+        return 2
+
+    files.sort(key=score)
+    return files[0] if files else None
+
+
 def _clangd_checks(root: Path) -> list[tuple[str, bool, str]]:
     """Check that clangd is installed and can parse the project.
 
@@ -98,7 +123,7 @@ def _clangd_checks(root: Path) -> list[tuple[str, bool, str]]:
     # Pick a real file from the database and confirm clangd parses it cleanly.
     try:
         entries = json.loads(cc_file.read_text(encoding="utf-8"))
-        sample = Path(entries[0]["file"]) if entries else None
+        sample = _pick_sample_source(entries)
     except (OSError, ValueError, KeyError, IndexError):
         sample = None
     if sample is None or not sample.is_file():
@@ -161,9 +186,64 @@ def _coverage_tool_check(
         return (label, False, f"failed to run ({e})")
 
 
-def doctor(root: Path, default_preset: str | None = None) -> list[tuple[str, bool, str]]:
-    """Run sanity checks and return (label, ok, detail) for each."""
-    checks: list[tuple[str, bool, str]] = []
+def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, str]]:
+    """Validate the Emscripten/emsdk toolchain used by the wasm-emscripten-* presets.
+
+    Emscripten is an optional (Tier 2) target, so this stays advisory: when nothing
+    signals intent to use it (no --emsdk-path, no SC_EMSDK_PATH/EMSDK, no emcc on
+    PATH) it reports a single passing "not configured" line rather than failing a
+    native-only developer's doctor run. Once any of those signals is present it
+    validates strictly: emsdk located, emcc runnable, toolchain file present, and
+    emsdk's node reachable — the things a WASM configure/build/test actually needs.
+    """
+    intent = bool(emsdk_path) or bool(os.environ.get("SC_EMSDK_PATH")) \
+        or bool(os.environ.get("EMSDK")) or shutil.which("emcc") is not None
+    if not intent:
+        return [("emscripten", None,
+                 "not configured (optional) - install emsdk and pass --emsdk-path for WASM presets")]
+
+    root = find_emsdk_root(emsdk_path)
+    if root is None:
+        return [("emscripten", False,
+                 "emsdk requested but not located - check --emsdk-path / SC_EMSDK_PATH / EMSDK "
+                 "(expected an emsdk dir with emsdk_env)")]
+
+    checks: list[tuple[str, bool | None, str]] = [("emsdk", True, str(root))]
+
+    toolchain = emsdk_toolchain_file(root)
+    checks.append(
+        ("emsdk toolchain", toolchain.is_file(),
+         str(toolchain) if toolchain.is_file() else f"missing {toolchain} - run: emsdk install latest")
+    )
+
+    # Resolve emcc/node through the emsdk environment (not just the ambient PATH),
+    # so an un-activated but present emsdk still validates green.
+    env = emsdk_env(emsdk_path)
+    search_path = env.get("PATH") if env else None
+    for tool, hint in (("emcc", "emsdk install/activate latest"), ("node", "bundled with emsdk")):
+        exe = shutil.which(tool, path=search_path)
+        if exe is None:
+            checks.append((f"emscripten {tool}", False, f"not reachable via emsdk env ({hint})"))
+            continue
+        try:
+            out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=30)
+            first = out.stdout.splitlines()[0].strip() if out.stdout else exe
+            checks.append((f"emscripten {tool}", True, first))
+        except (OSError, subprocess.TimeoutExpired) as e:
+            checks.append((f"emscripten {tool}", False, f"failed to run ({e})"))
+
+    return checks
+
+
+def doctor(
+    root: Path, default_preset: str | None = None, emsdk_path: str | None = None
+) -> list[tuple[str, bool | None, str]]:
+    """Run sanity checks and return (label, ok, detail) for each.
+
+    `ok` is True (pass), False (fail), or None for an advisory check that neither
+    passes nor fails — e.g. an optional toolchain that simply isn't configured.
+    """
+    checks: list[tuple[str, bool | None, str]] = []
 
     checks.append(_cmake_check(root))
 
@@ -200,6 +280,9 @@ def doctor(root: Path, default_preset: str | None = None) -> list[tuple[str, boo
     # Coverage toolchain (llvm-profdata / llvm-cov), needed for `dev.py coverage`.
     checks.append(_coverage_tool_check("llvm-profdata", "llvm-profdata", "LLVM_PROFDATA", cov_build_dir))
     checks.append(_coverage_tool_check("llvm-cov", "llvm-cov", "LLVM_COV", cov_build_dir))
+
+    # Emscripten/WASM toolchain (optional; advisory unless emsdk is signalled).
+    checks.extend(_emscripten_checks(emsdk_path))
 
     checks.extend(_clangd_checks(root))
 

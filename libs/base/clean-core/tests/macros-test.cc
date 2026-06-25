@@ -24,9 +24,23 @@
 #endif
 #endif
 
-// Test: Exactly-one OS is selected
-#if defined(CC_OS_WINDOWS) + defined(CC_OS_LINUX) + defined(CC_OS_APPLE) + defined(CC_OS_BSD) != 1
+// Test: Exactly-one OS is selected. The specific OS macros are mutually exclusive; CC_OS_WASM is a
+// derived umbrella over the WebAssembly OSes (Emscripten / WASI) and is checked separately below.
+#if defined(CC_OS_WINDOWS) + defined(CC_OS_LINUX) + defined(CC_OS_APPLE) + defined(CC_OS_BSD) \
+        + defined(CC_OS_EMSCRIPTEN) + defined(CC_OS_WASI)                                     \
+    != 1
 #error "Expected exactly one OS macro to be defined"
+#endif
+
+// Test: CC_OS_WASM is the umbrella for the WebAssembly OSes, set iff one of them is.
+#if defined(CC_OS_WASM)
+#if !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_WASI)
+#error "CC_OS_WASM defined but no wasm OS (CC_OS_EMSCRIPTEN / CC_OS_WASI) detected"
+#endif
+#else
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)
+#error "wasm OS detected but CC_OS_WASM umbrella not defined"
+#endif
 #endif
 
 // Test: Exactly-one build configuration is selected
@@ -119,7 +133,8 @@ TEST("macros - compiler detection")
 
 TEST("macros - OS detection")
 {
-    // Verify that exactly one OS is selected (already checked at compile-time)
+    // Verify that exactly one OS is selected (already checked at compile-time). CC_OS_WASM is a derived
+    // umbrella over the wasm OSes, so it is not counted here.
     int os_count = 0;
 #ifdef CC_OS_WINDOWS
     os_count++;
@@ -133,8 +148,26 @@ TEST("macros - OS detection")
 #ifdef CC_OS_BSD
     os_count++;
 #endif
+#ifdef CC_OS_EMSCRIPTEN
+    os_count++;
+#endif
+#ifdef CC_OS_WASI
+    os_count++;
+#endif
 
     CHECK(os_count == 1);
+
+    // CC_OS_WASM is set exactly when a wasm OS is.
+#if defined(CC_OS_WASM)
+    bool const wasm_umbrella = true;
+#else
+    bool const wasm_umbrella = false;
+#endif
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)
+    CHECK(wasm_umbrella);
+#else
+    CHECK(!wasm_umbrella);
+#endif
 }
 
 TEST("macros - build configuration detection")

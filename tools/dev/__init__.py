@@ -32,6 +32,7 @@ from .format import (
 from .logs import merge_junit, ninja_built_count
 from .models import Preset, StepResult, Target, TestSummary
 from .presets import PresetError, load_presets, resolve_presets
+from .process import emsdk_env, find_emsdk_root
 from .targets import NotConfiguredError, discover_targets, executables, write_query
 from .test import test
 
@@ -63,6 +64,8 @@ __all__ = [
     "TestSummary",
     "load_presets",
     "resolve_presets",
+    "emsdk_env",
+    "find_emsdk_root",
     "PresetError",
     "discover_targets",
     "executables",
