@@ -1,34 +1,74 @@
 #pragma once
 
+#include <clean-core/fwd.hh>
+#include <clean-core/string/string_view.hh>
+
 // =========================================================================================================
-// cc::formatter<T> — the customization point for making a type formattable with cc::format.
+// cc::custom::formatter<T> — the customization point for making a type formattable with cc::format.
 //
-// Specialize it for your type with a static
-//     static void format(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, T const& v);
-// to make a custom type formattable (and spec-aware). Types with a member v.to_string() also work out of
-// the box for the plain "{}" spec. No argument-dependent lookup is performed.
+// Customization points live in the cc::custom namespace; specialize cc::custom::formatter<T> there to opt a
+// type in. A specialization provides two static members:
 //
-// The output sink, the value→text seam, the built-in specializations, and the dispatch all live in
-// <clean-core/string/impl/format_backend.hh>.
+//   static void format(cc::format_sink out, cc::string_view spec, T const& v);   // runtime: write v
+//   static consteval void validate(cc::string_view spec);                        // compile-time: check spec
+//
+// The raw spec text (everything after ':') is passed through verbatim, so each type may define its own
+// spec language. To reuse the standard grammar instead, delegate to cc::format_value (runtime) and
+// cc::validate_format_spec (compile-time) from <clean-core/string/format.hh>.
+//
+// validate() is optional: if present it is called by the consteval format_string constructor (reach an
+// error there — e.g. throw — to turn a bad spec into a compile error); if absent, no compile-time spec
+// checking is performed for the type. Built-in types (arithmetic, char, bool, byte, pointers, strings) are
+// handled internally and do not use this customization point.
 // =========================================================================================================
 
 namespace cc
 {
+/// A minimal, trivially-copyable output target for formatting: a context pointer plus a write function.
+/// This is what a cc::custom::formatter writes into; call put() to append bytes. No allocation is implied —
+/// the same sink backs both the allocating cc::format and the non-allocating cc::format_to.
+struct format_sink
+{
+    void* ctx = nullptr;
+    void (*write)(void* ctx, char const* data, isize size) = nullptr;
+
+    /// Appends the bytes of s to the output.
+    void put(string_view s) const { write(ctx, s.data(), s.size()); }
+
+    /// Appends count copies of c to the output.
+    void put_repeat(char c, isize count) const
+    {
+        for (isize i = 0; i < count; ++i)
+            write(ctx, &c, 1);
+    }
+};
+
+namespace custom
+{
 /// Customization point for formatting a type with cc::format.
 ///
-/// The primary template is intentionally incomplete: specialize it for your type to opt in. Built-in
-/// specializations exist for the arithmetic types, char, bool, byte and raw pointers (string types are
-/// handled directly by the dispatch, honoring width/precision).
+/// The primary template is intentionally incomplete: specialize it for your type to opt in. See the header
+/// comment for the required members.
 ///
 /// Usage:
 ///   template <>
-///   struct cc::formatter<my_vec2>
+///   struct cc::custom::formatter<my_vec2>
 ///   {
-///       static void format(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, my_vec2 const& v)
+///       static consteval void validate(cc::string_view spec)
 ///       {
-///           // e.g. delegate to the built-ins via cc::impl helpers, or write text directly
+///           if (!spec.empty())
+///               throw "my_vec2 takes no format spec";
+///       }
+///       static void format(cc::format_sink out, cc::string_view /*spec*/, my_vec2 const& v)
+///       {
+///           out.put("(");
+///           cc::format_value(out, "", v.x); // delegate the components to the standard formatting
+///           out.put(", ");
+///           cc::format_value(out, "", v.y);
+///           out.put(")");
 ///       }
 ///   };
 template <class T>
 struct formatter;
+} // namespace custom
 } // namespace cc

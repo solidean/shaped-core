@@ -81,7 +81,7 @@ cc::isize group_digits(cc::span<char> out, cc::string_view digits, char sep, int
 }
 
 // shared float rendering for both float and double; `n` is the seam-produced length in `buf`
-void format_float_common(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, char* buf, cc::isize n)
+void format_float_common(cc::format_sink const& sink, cc::impl::format_spec const& spec, char* buf, cc::isize n)
 {
     using namespace cc::impl;
 
@@ -366,7 +366,7 @@ void render(format_sink const& sink, string_view fmt, span<format_arg_entry cons
             field const f = parse_field(fmt, pos, ix);
             isize const idx = f.arg_index;
             if (idx >= 0 && idx < entries.size() && entries[idx].fn != nullptr)
-                entries[idx].fn(sink, f.spec, entries[idx].ptr);
+                entries[idx].fn(sink, f.spec_text, entries[idx].ptr);
             else
                 format_error("argument index out of range");
 
@@ -396,26 +396,26 @@ void render(format_sink const& sink, string_view fmt, span<format_arg_entry cons
 } // namespace cc::impl
 
 // -----------------------------------------------------------------------------------------------------
-// float formatters (need the seam, so defined here rather than in the header)
+// float rendering (needs the seam, so defined here rather than in the header)
 // -----------------------------------------------------------------------------------------------------
 
-namespace cc
+namespace cc::impl
 {
-void formatter<float>::format(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, float v)
+void format_f32(format_sink const& sink, format_spec const& spec, float v)
 {
     char const mode = float_mode_of(spec.presentation);
-    cc::isize const prec = float_precision_of(mode, spec.precision);
-    char buf[cc::impl::chars_float_max];
-    cc::isize const n = cc::impl::chars_from_f32(cc::span<char>(buf, cc::impl::chars_float_max), v, mode, prec);
+    isize const prec = float_precision_of(mode, spec.precision);
+    char buf[chars_float_max];
+    isize const n = chars_from_f32(cc::span<char>(buf, chars_float_max), v, mode, prec);
     format_float_common(sink, spec, buf, n);
 }
 
-void formatter<double>::format(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, double v)
+void format_f64(format_sink const& sink, format_spec const& spec, double v)
 {
     char const mode = float_mode_of(spec.presentation);
-    cc::isize const prec = float_precision_of(mode, spec.precision);
-    char buf[cc::impl::chars_float_max];
-    cc::isize const n = cc::impl::chars_from_f64(cc::span<char>(buf, cc::impl::chars_float_max), v, mode, prec);
+    isize const prec = float_precision_of(mode, spec.precision);
+    char buf[chars_float_max];
+    isize const n = chars_from_f64(cc::span<char>(buf, chars_float_max), v, mode, prec);
     format_float_common(sink, spec, buf, n);
 }
-} // namespace cc
+} // namespace cc::impl

@@ -7,14 +7,6 @@
 
 #include <type_traits>
 
-namespace cc
-{
-// forward-declared here so the validator can detect a cc::formatter<T> specialization; the actual
-// declaration and built-in specializations live in formatter.hh (a higher layer).
-template <class T>
-struct formatter;
-} // namespace cc
-
 // =========================================================================================================
 // Compile-time format-string grammar: spec struct, scanner, and parser.
 //
@@ -71,7 +63,7 @@ enum class sign_t : char
 /// Classifies an argument type so the validator can check spec-vs-type compatibility at compile time.
 enum class type_tag : char
 {
-    other_user,  // user type: only the empty '{}' spec is accepted (unless it specializes cc::formatter)
+    other_user,  // user type: only the empty '{}' spec is accepted (unless it has a cc::custom::formatter)
     sint,        // signed integer
     uint,        // unsigned integer
     floating,    // float / double
@@ -79,7 +71,6 @@ enum class type_tag : char
     boolean,     // bool
     string_like, // anything convertible to cc::string_view (incl. char const*)
     pointer,     // T* / nullptr_t (excluding char pointers, which are string_like)
-    custom,      // user type with a cc::formatter<T> specialization: spec is the formatter's business
 };
 
 /// A fully parsed format specification (the part after ':').
@@ -97,11 +88,14 @@ struct format_spec
 };
 
 /// A parsed replacement field.
+///
+/// The spec is kept as the raw text between ':' and '}' (not parsed): built-in types parse it with the
+/// standard grammar (parse_spec), while a cc::custom::formatter<T> may interpret it however it likes.
 struct field
 {
-    isize arg_index = -1; // resolved (auto or explicit) argument index
-    format_spec spec;
-    isize next_pos = 0; // position right after the closing '}'
+    isize arg_index = -1;  // resolved (auto or explicit) argument index
+    string_view spec_text; // raw spec text between ':' and '}' (empty if there was no ':')
+    isize next_pos = 0;    // position right after the closing '}'
 };
 
 /// Tracks automatic-vs-explicit indexing across a single format string.
@@ -122,7 +116,7 @@ consteval type_tag type_tag_of()
     else if constexpr (std::is_same_v<U, char>)
         return type_tag::character;
     else if constexpr (std::is_same_v<U, byte>)
-        return type_tag::uint; // formatted as hex by cc::formatter<byte>, but spec-compatible with unsigned
+        return type_tag::uint; // formatted as hex by format_value, but spec-compatible with unsigned
     else if constexpr (std::is_integral_v<U>)
         return std::is_signed_v<U> ? type_tag::sint : type_tag::uint;
     else if constexpr (std::is_floating_point_v<U>)
@@ -131,8 +125,6 @@ consteval type_tag type_tag_of()
         return type_tag::string_like;
     else if constexpr (std::is_pointer_v<U> || std::is_same_v<U, nullptr_t>)
         return type_tag::pointer;
-    else if constexpr (requires { sizeof(cc::formatter<U>); }) // a complete cc::formatter<U> specialization exists
-        return type_tag::custom;
     else
         return type_tag::other_user; // e.g. a member to_string(); the empty '{}' spec only
 }
@@ -278,7 +270,7 @@ constexpr field parse_field(string_view fmt, isize open, index_state& ix)
     if (ix.saw_auto && ix.saw_explicit)
         format_error("cannot mix automatic and explicit argument indexing");
 
-    // [':' spec]
+    // [':' spec] — captured as raw text; interpreted later (parse_spec for built-ins, or a custom formatter)
     if (p < n && fmt[p] == ':')
     {
         p += 1;
@@ -287,7 +279,7 @@ constexpr field parse_field(string_view fmt, isize open, index_state& ix)
             p += 1;
         if (p >= n)
             format_error("unterminated replacement field (missing '}')");
-        f.spec = parse_spec(fmt.subview(spec_start, p - spec_start));
+        f.spec_text = fmt.subview(spec_start, p - spec_start);
     }
 
     if (p >= n || fmt[p] != '}')
@@ -359,5 +351,45 @@ constexpr char const* spec_error_for_type(format_spec const& s, type_tag tag)
         break;
     }
     return nullptr;
+}
+
+/// Validates the structure of a format string at compile time, independent of argument types:
+/// brace matching, '{{'/'}}' escapes, argument-index range, and no mixing of automatic/explicit indexing.
+/// Per-type spec validation is done separately (see format.hh, which delegates to each argument's formatter).
+constexpr void validate_structure(string_view fmt, isize arg_count)
+{
+    isize const n = fmt.size();
+    isize pos = 0;
+    index_state ix;
+
+    while (pos < n)
+    {
+        char const c = fmt[pos];
+        if (c == '{')
+        {
+            if (pos + 1 < n && fmt[pos + 1] == '{') // "{{" escape
+            {
+                pos += 2;
+                continue;
+            }
+            field const f = parse_field(fmt, pos, ix);
+            if (f.arg_index < 0 || f.arg_index >= arg_count)
+                format_error("argument index out of range");
+            pos = f.next_pos;
+        }
+        else if (c == '}')
+        {
+            if (pos + 1 < n && fmt[pos + 1] == '}') // "}}" escape
+            {
+                pos += 2;
+                continue;
+            }
+            format_error("single '}' in format string (use '}}' for a literal brace)");
+        }
+        else
+        {
+            pos += 1;
+        }
+    }
 }
 } // namespace cc::impl

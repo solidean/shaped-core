@@ -55,7 +55,8 @@ static_assert(cc::impl::type_tag_of<char const*>() == cc::impl::type_tag::string
 static_assert(cc::impl::type_tag_of<cc::string>() == cc::impl::type_tag::string_like);
 
 // =========================================================================================================
-// Custom types: a cc::formatter specialization (spec-aware) and a member to_string() (plain "{}").
+// Custom types: a cc::custom::formatter that takes no spec, one that delegates the standard spec to its
+// inner value, and a type with a member to_string() (plain "{}").
 // =========================================================================================================
 
 namespace
@@ -66,19 +67,46 @@ struct vec2
     int y;
 };
 
+// formats its temperature value with the given (standard) spec, then appends "C"
+struct celsius
+{
+    double value;
+};
+
 struct greeting
 {
     cc::string to_string() const { return "hi!"; }
 };
 } // namespace
 
+// vec2 defines its own (empty) spec language and validation
 template <>
-struct cc::formatter<vec2>
+struct cc::custom::formatter<vec2>
 {
-    static void format(cc::impl::format_sink const& sink, cc::impl::format_spec const& spec, vec2 const& v)
+    static consteval void validate(cc::string_view spec)
     {
-        cc::string const inner = cc::format("({}, {})", v.x, v.y);
-        cc::impl::write_decorated_text(sink, spec, cc::string_view(inner), cc::impl::align_t::left);
+        if (!spec.empty())
+            throw "vec2 takes no format spec";
+    }
+    static void format(cc::format_sink out, cc::string_view /*spec*/, vec2 const& v)
+    {
+        out.put("(");
+        cc::format_value(out, "", v.x); // delegate the components to the standard formatting
+        out.put(", ");
+        cc::format_value(out, "", v.y);
+        out.put(")");
+    }
+};
+
+// celsius delegates both validation and formatting to the standard grammar
+template <>
+struct cc::custom::formatter<celsius>
+{
+    static consteval void validate(cc::string_view spec) { cc::validate_format_spec(spec); }
+    static void format(cc::format_sink out, cc::string_view spec, celsius const& c)
+    {
+        cc::format_value(out, spec, c.value);
+        out.put("C");
     }
 };
 
@@ -228,8 +256,15 @@ TEST("format - format_to (non-allocating)")
 
 TEST("format - custom types")
 {
+    // vec2: its own (empty) spec language, delegating components to the standard formatting
     CHECK(cc::format("{}", vec2{1, 2}) == "(1, 2)");
-    CHECK(cc::format("{:>10}", vec2{1, 2}) == "    (1, 2)");
+
+    // celsius: delegates the standard spec to its inner value
+    CHECK(cc::format("{}", celsius{36.5}) == "36.5C");
+    CHECK(cc::format("{:.1f}", celsius{36.567}) == "36.6C");
+    CHECK(cc::format("{:+.1f}", celsius{36.567}) == "+36.6C");
+
+    // member to_string()
     CHECK(cc::format("{}", greeting{}) == "hi!");
 }
 
@@ -243,11 +278,12 @@ TEST("format - custom types")
 #if defined(CC_FORMAT_COMPILE_FAIL_TESTS)
 TEST("format - compile failures (manual)")
 {
-    (void)cc::format("{}");           // error: argument index out of range (no args)
-    (void)cc::format("{2}", 1);       // error: argument index out of range
-    (void)cc::format("{} {0}", 1, 2); // error: cannot mix automatic and explicit indexing
-    (void)cc::format("{:f}", 42);     // error: invalid presentation type for integer
-    (void)cc::format("{", 1);         // error: unterminated replacement field
-    (void)cc::format("}", 1);         // error: single '}' in format string
+    (void)cc::format("{}");                // error: argument index out of range (no args)
+    (void)cc::format("{2}", 1);            // error: argument index out of range
+    (void)cc::format("{} {0}", 1, 2);      // error: cannot mix automatic and explicit indexing
+    (void)cc::format("{:f}", 42);          // error: invalid presentation type for integer
+    (void)cc::format("{", 1);              // error: unterminated replacement field
+    (void)cc::format("}", 1);              // error: single '}' in format string
+    (void)cc::format("{:>5}", vec2{1, 2}); // error: vec2 takes no format spec (its own validate hook)
 }
 #endif

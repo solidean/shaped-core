@@ -137,8 +137,11 @@ cc::format("{:'}", 1232453254);                  // "1'232'453'254"  — digit g
 cc::format_append(str, "x={}", 7);               // append into an existing cc::string (no temporary)
 cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; return > n means truncated
 // Placeholders: {} auto-index, {N} positional (don't mix), {{ }} escape braces. Types: d/x/X/o/b/c ints,
-// f/F/e/E/g/G floats, s string/bool, p pointer. Customize: specialize cc::formatter<T> (spec-aware) or
-// add a member T::to_string() (plain "{}"). No ADL on arguments. Numbers go via std::to_chars (one seam).
+// f/F/e/E/g/G floats, s string/bool, p pointer. Numbers go via std::to_chars (one seam). No ADL on args.
+// Customize: specialize cc::custom::formatter<T> — gets the raw spec string_view; provide
+//   static void format(cc::format_sink, cc::string_view spec, T const&) + static consteval void validate(spec).
+//   Delegate to the standard grammar via cc::format_value(sink, spec, v) / cc::validate_format_spec(spec).
+//   (Or just give T a member to_string() for the plain "{}" case.)
 ```
 
 ## Optional & result (fallibility)

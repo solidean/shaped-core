@@ -10,6 +10,7 @@
 #include <clean-core/string/string_view.hh>
 
 #include <type_traits>
+#include <utility>
 
 // =========================================================================================================
 // cc::format — a std::format / fmtlib-style formatter with Pythonic placeholders and compile-time-validated
@@ -24,8 +25,9 @@
 // compatibility are all verified by the consteval format_string constructor. A malformed call does not
 // compile. Numeric formatting currently goes through std::to_chars behind the seam in format.cc.
 //
-// Customization: specialize cc::formatter<T> (spec-aware) or provide a member T::to_string() (plain "{}").
-// See formatter.hh. No ADL is performed on arguments.
+// Customization: specialize cc::custom::formatter<T> (it gets the raw spec string and owns its own runtime
+// formatting + consteval validation) or provide a member T::to_string() (the plain "{}" spec). See
+// formatter.hh. No ADL is performed on arguments.
 // =========================================================================================================
 
 namespace cc
@@ -71,53 +73,80 @@ template <class... Args>
 // Implementation
 //
 
-template <class... Args>
-template <class T>
-    requires std::convertible_to<T const&, string_view>
-consteval format_string<Args...>::format_string(T const& s) : _str(string_view(s))
+namespace impl
 {
-    using namespace cc::impl;
+/// Validates one field's spec text against argument type T at compile time: a cc::custom::formatter<T> owns
+/// its validation (via an optional validate hook); otherwise the standard grammar + type rules apply.
+template <class T>
+consteval void validate_spec_for(string_view spec)
+{
+    using U = std::remove_cvref_t<T>;
+    if constexpr (requires { sizeof(cc::custom::formatter<U>); }) // a cc::custom::formatter<U> exists
+    {
+        if constexpr (requires { cc::custom::formatter<U>::validate(spec); })
+            cc::custom::formatter<U>::validate(spec);
+        // else: the type opts out of compile-time spec validation; format() handles the spec at runtime
+    }
+    else
+    {
+        format_spec const parsed = parse_spec(spec); // syntax errors -> compile error
+        if (char const* err = spec_error_for_type(parsed, type_tag_of<U>()))
+            format_error(err);
+    }
+}
 
-    // one tag per argument (plus a sentinel so the array is never zero-sized)
-    constexpr type_tag tags[] = {type_tag_of<Args>()..., type_tag::other_user};
-    constexpr isize arg_count = isize(sizeof...(Args));
-
-    isize const n = _str.size();
+/// Walks the format string, replaying argument indexing, and validates the spec of every field that resolves
+/// to argument `target` against type T. Structural errors are reported separately by validate_structure.
+template <class T>
+consteval void validate_arg_fields(string_view fmt, isize target)
+{
+    isize const n = fmt.size();
     isize pos = 0;
     index_state ix;
 
     while (pos < n)
     {
-        char const c = _str[pos];
+        char const c = fmt[pos];
         if (c == '{')
         {
-            if (pos + 1 < n && _str[pos + 1] == '{') // "{{" escape
+            if (pos + 1 < n && fmt[pos + 1] == '{') // "{{" escape
             {
                 pos += 2;
                 continue;
             }
-
-            field const f = parse_field(_str, pos, ix);
-            if (f.arg_index < 0 || f.arg_index >= arg_count)
-                format_error("argument index out of range");
-            if (char const* err = spec_error_for_type(f.spec, tags[f.arg_index]))
-                format_error(err);
+            field const f = parse_field(fmt, pos, ix);
+            if (f.arg_index == target)
+                validate_spec_for<T>(f.spec_text);
             pos = f.next_pos;
         }
         else if (c == '}')
         {
-            if (pos + 1 < n && _str[pos + 1] == '}') // "}}" escape
+            if (pos + 1 < n && fmt[pos + 1] == '}') // "}}" escape
             {
                 pos += 2;
                 continue;
             }
-            format_error("single '}' in format string (use '}}' for a literal brace)");
+            break; // structural error; already reported by validate_structure
         }
         else
         {
             pos += 1;
         }
     }
+}
+} // namespace impl
+
+template <class... Args>
+template <class T>
+    requires std::convertible_to<T const&, string_view>
+consteval format_string<Args...>::format_string(T const& s) : _str(string_view(s))
+{
+    // pass 1: structural validation (braces, escapes, index range, no auto/explicit mixing)
+    cc::impl::validate_structure(_str, isize(sizeof...(Args)));
+
+    // pass 2: validate each field's spec against the type of the argument it references
+    [&]<std::size_t... Is>(std::index_sequence<Is...>)
+    { (cc::impl::validate_arg_fields<Args>(_str, isize(Is)), ...); }(std::make_index_sequence<sizeof...(Args)>{});
 }
 
 template <class... Args>

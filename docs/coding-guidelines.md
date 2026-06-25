@@ -118,6 +118,20 @@ T x;                       // fine if initialized later
   }
   ```
   **Note:** The previous convention of using `detail` does not apply anymore.
+- Use a `custom` nested namespace for **customization points that users specialize** (class-template
+  specialization). Declare the primary template in `<lib>::custom` and have users add their specializations
+  there; this keeps the extension surface separate from `impl` (private) and from the library's own API:
+  ```cpp
+  namespace cc::custom
+  {
+      template <class T>
+      struct formatter; // users specialize cc::custom::formatter<MyType>
+  }
+  ```
+  Such a customization point must not require users to name `impl` types: pass public types across the
+  boundary, and offer public helpers to delegate back to the standard behavior where useful (e.g.
+  `cc::format_value` / `cc::validate_format_spec` for `cc::custom::formatter`). For simple, non-specialization
+  extension points, prefer a hidden-friend or member function (e.g. `to_string()`) instead.
 
 ### Performance-Critical Code
 
@@ -613,6 +627,7 @@ container& operator=(container&& rhs)
 - [ ] Macros are justified
 - [ ] Tests written in nexus
 - [ ] Use `impl` namespace (not `detail`) for implementation details
+- [ ] Specialization-based customization points live in the `custom` namespace and don't expose `impl` types
 - [ ] Consider C++23 deducing `this` where appropriate
 - [ ] Move assignment is subobject-safe (or documented otherwise)
 - [ ] Avoid `std::`—use `cc::` equivalents (exception: `<type_traits>`)
