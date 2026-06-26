@@ -1,8 +1,10 @@
 # Customization points
 
-How a clean-core operation (hashing today; formatting / `to_string` soon) lets a
-type opt into custom behavior. The mechanism is uniform across operations so that
-once you learn it for one, you know it for all. (Hub: [_index.md](_index.md).)
+How a clean-core operation (hashing and formatting today; more soon) lets a
+type opt into custom behavior. The mechanism is centered on the `cc::custom::`
+namespace and is broadly uniform across operations, so once you learn it for one,
+you mostly know it for all — with small per-operation variations (see the note
+under "The tiers"). (Hub: [_index.md](_index.md).)
 
 ## The tiers
 
@@ -19,6 +21,16 @@ order**:
 
 The first tier that matches wins. A type should provide **exactly one**
 implementation.
+
+> **Naming and tier set are conventions, not rules.** What actually binds a
+> customization point is the **`cc::custom::` namespace**; the `<op>_trait` suffix
+> and the full trait→friend→member tier set are conventions that fit ADL-dispatched
+> operations like hashing. An operation may use a differently-named template and a
+> different subset of tiers when that suits it better. For example, formatting's
+> point is **`cc::custom::formatter<T>`** (a specialization with a static `format`
+> plus a consteval `validate`) and it intentionally **omits the ADL tier**
+> (`cc::custom::formatter<T>` → member `to_string()` only) to avoid triggering ADL
+> over every argument on each `cc::format` call.
 
 ### Why this order
 
@@ -79,8 +91,11 @@ clean-core ships `cc::custom::hash_trait` specializations for the fundamentals
 
 ## Adding a new customizable operation
 
-Name the trait `cc::custom::<op>_trait<T>` with a static `<op>` member, and have
-the entry point dispatch trait → (friend) → (member) with `if constexpr (requires
-{ ... })`, trait first. Mirror the [hash.hh](../src/clean-core/common/hash.hh)
+Put the customization template in `cc::custom::` — that namespace is the binding
+part. Naming it `cc::custom::<op>_trait<T>` with a static `<op>` member is the
+convention for ADL-dispatched ops and is *not* strongly enforced (see the note
+above); pick what reads best for the operation. Then have the entry point dispatch
+trait → (friend) → (member) with `if constexpr (requires { ... })`, trait first
+(dropping tiers that don't apply). Mirror the [hash.hh](../src/clean-core/common/hash.hh)
 `detail::hash_one` dispatch. Document the type's expected contract (for hashing:
 `make_hash` is composable and must not finalize).
