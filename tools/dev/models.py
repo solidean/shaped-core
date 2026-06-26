@@ -26,6 +26,17 @@ class Preset:
     build_dir: Path
     build_type: str  # CMAKE_BUILD_TYPE, e.g. "RelWithDebInfo"
 
+    @property
+    def is_emscripten(self) -> bool:
+        """Whether this preset cross-compiles to WebAssembly via Emscripten.
+
+        Such presets need the emsdk environment (emcc on PATH for configure/build,
+        node to run the resulting .js/.wasm test artifacts); see process.emsdk_env.
+        Keyed off the wasm-emscripten-* configure preset / emscripten-* build preset
+        naming so no extra metadata has to be threaded through.
+        """
+        return "emscripten" in self.configure_preset or self.name.startswith("emscripten-")
+
 
 @dataclass(frozen=True)
 class Target:

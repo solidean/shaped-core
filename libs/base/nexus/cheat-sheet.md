@@ -22,6 +22,8 @@ TEST("group - what it does")             // registered at static-init; name is m
 
 TEST("slow thing", nx::config::disabled) // trailing configs (variadic):
 { /* ... */ }                            //   nx::config::disabled  — skipped unless explicitly named
+TEST("bench x", nx::config::manual)      //   nx::config::manual    — never swept automatically; run via an
+{ /* prints, no CHECK */ }               //     exact name or `--manual` (may have zero CHECKs, e.g. benchmarks)
 TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RNG seed
 // Multiple configs compose: TEST("x", nx::config::disabled, nx::config::seed(7)) { }
 ```

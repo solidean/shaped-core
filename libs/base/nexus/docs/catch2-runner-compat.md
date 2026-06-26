@@ -30,13 +30,23 @@ Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc:7](.
 | `--junit-xml <file>` | Writes a JUnit XML report to `<file>` (additive — see [JUnit XML output](#junit-xml-output)) |
 | `-v` | Enables verbose schedule printing |
 | `-c <name>` | Adds a section filter |
+| `--manual` | Manual mode: restricts the eligible set to *manual* tests (see below). Not a Catch2 flag |
 | Any other arg | Treated as a test name filter (see below) |
 
 ### Test name filters
 
 Unrecognized positional args are treated as test name filters. Filters are matched by substring against test names. Multiple filters can be passed as a single comma-separated argument — nexus splits on `,` before storing them, matching the Catch2 convention.
 
-When any filter contains no `*` wildcard, nexus also enables `run_disabled_tests` so that explicitly targeted disabled tests can be run.
+When any filter contains no `*` wildcard, nexus also enables `run_disabled_tests` and `run_manual_tests` so that an explicitly named disabled *or* manual test can be run.
+
+### Disabled vs manual tests
+
+Two kinds of test opt out of automatic sweeps, via `nx::config::disabled` and `nx::config::manual`:
+
+- **Disabled** (`enabled = false`) — run only when explicitly targeted (a non-wildcard filter naming it), or when a bulk "run disabled too" request sets `run_disabled_tests`.
+- **Manual** (`manual = true`) — for benchmarks and tests that open windows or are otherwise incompatible with unattended runs. Run only when explicitly targeted (same exact-match path as disabled, via `run_manual_tests`) **or** under `--manual`. A bulk `run_disabled_tests` request deliberately does *not* sweep them in. Manual tests are also exempt from the "no CHECK/REQUIRE is a failure" rule, so a benchmark that only prints still passes.
+
+`--manual` puts the runner in manual mode (`only_manual_tests`): the eligible set becomes *only* the manual tests, so a wildcard filter selects among them — e.g. `--manual bench` runs every manual test whose name contains `bench`, while `bench` without `--manual` matches none of them. Disabled tests stay excluded in this mode.
 
 In Catch2 XML compat modes (discovery or results), filter strings are also unescaped: `\[` → `[`. Catch2 uses `\[` to escape square brackets in tag-filter syntax; since nexus doesn't have tags, it strips the backslash so the literal `[` can still match test names.
 

@@ -317,6 +317,46 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
+        },
+        {
+            "name": "wasm-emscripten-base",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SC_WASM_EXCEPTIONS": "fexceptions",
+                "SC_WASM_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "OFF"
+            },
+            "hidden": true
+        },
+        {
+            "name": "wasm-emscripten-debug",
+            "displayName": "Debug Emscripten (WASM, single-threaded)",
+            "description": "Debug WebAssembly build via Emscripten; single-threaded, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "wasm-emscripten-release",
+            "displayName": "Release Emscripten (WASM, single-threaded)",
+            "description": "Optimized WebAssembly build via Emscripten; single-threaded, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "wasm-emscripten-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, single-threaded)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; single-threaded, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
         }
     ],
     "buildPresets": [
@@ -407,6 +447,18 @@
         {
             "name": "android-ndk-arm64-relwithdebinfo",
             "configurePreset": "android-ndk-arm64-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-debug",
+            "configurePreset": "wasm-emscripten-debug"
+        },
+        {
+            "name": "emscripten-release",
+            "configurePreset": "wasm-emscripten-release"
+        },
+        {
+            "name": "emscripten-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-relwithdebinfo"
         }
     ]
 }

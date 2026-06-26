@@ -30,6 +30,15 @@ clean-core/
 
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers
   clean-core is allowed to depend on directly, and why.
+- [customization-points](customization-points.md) — the `cc::custom::` trait +
+  hidden-friend protocol that operations like hashing use to let types opt in.
+- [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) — XXH3 vs
+  hand-rolled short-string hashers across a length sweep (the small-key cost in hash maps).
+- [benchmarks/hash-benchmark](benchmarks/hash-benchmark.md) — raw xxHash 64/128 vs the
+  wrappers; the `clang-cl /Ob1` inlining trap that crippled short-key hashing in dev builds, and
+  the `CC_PURE` attribute that frees the wrapper.
+- [benchmarks/allocation-benchmark](benchmarks/allocation-benchmark.md) — mimalloc vs the
+  system allocator across sizes; mimalloc leads at every size and is only mildly `/Ob1`-sensitive.
 
 Add further deep-dive docs here as kebab-case `.md` files and link them from this
 list.

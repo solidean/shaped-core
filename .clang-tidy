@@ -32,6 +32,7 @@ Checks: >-
   -readability-use-anyofallof,
   -readability-qualified-auto,
   -readability-math-missing-parentheses,
+  -readability-use-concise-preprocessor-directives,
   modernize-*,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
@@ -54,6 +55,7 @@ Checks: >-
 # -bugprone-narrowing-conversions: False positives in loops (e.g. unsigned to int)
 # -cppcoreguidelines-narrowing-conversions: False positives in loops (e.g. unsigned to int)
 # -readability-simplify-boolean-expr: False positives inside assert macros
+# -readability-use-concise-preprocessor-directives: We prefer explicit `#if defined(X)` / `#elif defined(X)`; it reads consistently and extends to compound conditions, unlike #ifdef/#elifdef
 # -readability-use-anyofallof: We don't use std::ranges (overhead)
 # -modernize-avoid-c-arrays: Too much overhead for simple local arrays
 # -cppcoreguidelines-macro-usage: Allow TEST() and other testing framework macros

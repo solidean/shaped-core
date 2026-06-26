@@ -6,11 +6,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # dependencies
 # - mimalloc (private): backs the default general memory resource; see
 #   src/clean-core/memory/mimalloc_resource.cc. Header stays private to that .cc.
+# - xxhash (private): backs cc::hash128 (XXH3 128-bit); see
+#   src/clean-core/common/hash128.cc. Header stays private to that .cc.
 
 # Define the library and its sources
 add_library(clean-core
     src/clean-core/common/assert.cc
     src/clean-core/common/hash.cc
+    src/clean-core/common/hash128.cc
     src/clean-core/platform/native.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
@@ -38,6 +41,7 @@ target_sources(clean-core
     src/clean-core/common/traits.hh
     src/clean-core/common/flags.hh
     src/clean-core/common/hash.hh
+    src/clean-core/common/hash128.hh
     src/clean-core/common/assert.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
@@ -49,6 +53,7 @@ target_sources(clean-core
 
     src/clean-core/math/bit.hh
     src/clean-core/math/random.hh
+    src/clean-core/math/wide_arith.hh
 
     src/clean-core/memory/allocation.hh
     src/clean-core/memory/node_allocation.hh
@@ -110,10 +115,10 @@ target_include_directories(clean-core
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# mimalloc backs the default general memory resource. PRIVATE: only
-# mimalloc_resource.cc includes <mimalloc.h>; CMake still propagates the static
-# lib to consumers' final link.
-target_link_libraries(clean-core PRIVATE mimalloc)
+# mimalloc backs the default general memory resource; xxhash backs cc::hash128.
+# PRIVATE: only mimalloc_resource.cc / hash128.cc include the respective headers;
+# CMake still propagates the static libs to consumers' final link.
+target_link_libraries(clean-core PRIVATE mimalloc xxhash)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(clean-core
@@ -129,12 +134,15 @@ target_compile_definitions(clean-core
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
 )
 
-# Detect and link the correct library for std::stacktrace support
+# Detect and link the correct library for std::stacktrace support.
+# When no working <stacktrace> is found (e.g. Emscripten / WASI libc++ ships no such header), this is not
+# fatal: clean-core/platform/stacktrace.hh detects the same condition via __has_include and falls back to
+# an empty stub (CC_HAS_STACKTRACE 0). Only the GCC paths need an explicit link library.
 include(DetectStacktraceLib)
 cc_detect_stacktrace_link(_CC_STACKTRACE_LIB)
 
 if(_CC_STACKTRACE_LIB STREQUAL "NOTFOUND")
-    message(FATAL_ERROR "std::stacktrace: no working link library found")
+    message(STATUS "[clean-core] std::stacktrace unavailable — building with the empty stacktrace stub")
 elseif(NOT _CC_STACKTRACE_LIB STREQUAL "")
     target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
 endif()
@@ -150,12 +158,18 @@ endif()
 # Test executable
 add_executable(clean-core-test
     tests/main.cc
+    tests/benchmarks/string-hash-bench.cc
+    tests/benchmarks/hash-benchmark.cc
+    tests/benchmarks/allocation-benchmark.cc
     tests/allocation-test.cc
     tests/array-test.cc
     tests/assert-test.cc
     tests/bit-test.cc
     tests/fixed-array-test.cc
     tests/function_ref-test.cc
+    tests/hash-test.cc
+    tests/hash-types-test.cc
+    tests/hash128-test.cc
     tests/invocable-test.cc
     tests/macros-test.cc
     tests/mutex-test.cc
@@ -174,13 +188,18 @@ add_executable(clean-core-test
     tests/unique_ptr-test.cc
     tests/utility-test.cc
     tests/vector-test.cc
+    tests/wide_arith-test.cc
 )
 
 target_link_libraries(clean-core-test
     PRIVATE
     clean-core
     nexus
+    xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
 )
+
+# Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
+sc_add_nexus_web_runner(clean-core-test)
 
 # Coverage
 option(CC_COVERAGE_MSVC "Enable MSVC native coverage" OFF)

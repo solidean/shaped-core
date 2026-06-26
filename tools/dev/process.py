@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import threading
@@ -18,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .logs import report_capture, step_log_paths
-from .models import StepResult
+from .models import Preset, StepResult
 
 
 def _ts() -> str:
@@ -88,6 +89,114 @@ def msvc_env() -> dict[str, str] | None:
             k, _, v = line.partition("=")
             env[k] = v
     return env
+
+
+# ---------------------------------------------------------------------------
+# Emscripten / emsdk environment setup
+# ---------------------------------------------------------------------------
+
+def find_emsdk_root(emsdk_path: str | None = None) -> Path | None:
+    """Locate an emsdk installation directory, or None if none is found.
+
+    Resolution order (the first that points at a real emsdk wins): the explicit
+    `emsdk_path` (e.g. --emsdk-path), the `SC_EMSDK_PATH` env var, an already
+    activated `EMSDK`, then deriving the root from `emcc` on PATH. This lets a
+    developer use a bare emsdk checkout without permanently/system-activating it.
+    """
+    env_script = "emsdk_env.bat" if platform.system() == "Windows" else "emsdk_env.sh"
+
+    candidates: list[Path] = []
+    if emsdk_path:
+        candidates.append(Path(emsdk_path))
+    for var in ("SC_EMSDK_PATH", "EMSDK"):
+        if os.environ.get(var):
+            candidates.append(Path(os.environ[var]))
+    emcc = shutil.which("emcc")
+    if emcc:
+        # Standard layout: <emsdk>/upstream/emscripten/emcc — the root is three levels up.
+        parents = Path(emcc).resolve().parents
+        if len(parents) >= 3:
+            candidates.append(parents[2])
+
+    for c in candidates:
+        if (c / env_script).is_file():
+            return c
+    return None
+
+
+def emsdk_toolchain_file(root: Path) -> Path:
+    """Path to Emscripten's CMake toolchain file under an emsdk root."""
+    return root / "upstream" / "emscripten" / "cmake" / "Modules" / "Platform" / "Emscripten.cmake"
+
+
+def _emsdk_path_additions(root: Path) -> list[Path]:
+    """Directories emsdk prepends to PATH: the SDK root, the emscripten tools
+    (where emcc/em++ live), and emsdk's bundled node/python when present."""
+    dirs = [root, root / "upstream" / "emscripten"]
+    node_bins = sorted((root / "node").glob("*/bin"))
+    if node_bins:
+        dirs.append(node_bins[-1])  # newest installed node
+    pythons = sorted((root / "python").glob("*"))
+    if pythons:
+        dirs.append(pythons[-1])
+    return [d for d in dirs if d.is_dir()]
+
+
+def _first_glob(root: Path, *patterns: str) -> Path | None:
+    for pat in patterns:
+        hits = sorted(root.glob(pat))
+        if hits:
+            return hits[-1]
+    return None
+
+
+def emsdk_env(emsdk_path: str | None = None) -> dict[str, str] | None:
+    """Return a full environment dict with the Emscripten toolchain active, or None.
+
+    The overlay is derived deterministically from the emsdk layout rather than by
+    capturing emsdk's own activation script: that script emits shell-specific
+    output (it detects bash vs cmd and may print `export ...` instead of mutating
+    the cmd session), so capturing it via `set` silently dropped emsdk's PATH
+    entries. Here we prepend the SDK dirs (including upstream/emscripten, where
+    emcc lives) onto the inherited PATH and set EMSDK / EMSDK_NODE / EMSDK_PYTHON /
+    EM_CONFIG ourselves, so a bare emsdk checkout works with no permanent or
+    --system activation. Returns None when emsdk cannot be located.
+    """
+    root = find_emsdk_root(emsdk_path)
+    if root is None:
+        return None
+
+    env = dict(os.environ)
+    # Windows uses 'Path'; normalize onto whatever key the inherited env actually has.
+    path_key = next((k for k in env if k.upper() == "PATH"), "PATH")
+    additions = [str(d) for d in _emsdk_path_additions(root)]
+    existing = env.get(path_key, "")
+    env[path_key] = os.pathsep.join(additions + ([existing] if existing else []))
+
+    env["EMSDK"] = str(root)
+    node_exe = _first_glob(root, "node/*/bin/node.exe", "node/*/bin/node")
+    if node_exe:
+        env["EMSDK_NODE"] = str(node_exe)
+    python_exe = _first_glob(root, "python/*/python.exe", "python/*/bin/python3", "python/*/python")
+    if python_exe:
+        env["EMSDK_PYTHON"] = str(python_exe)
+    em_config = root / ".emscripten"
+    if em_config.is_file():
+        env["EM_CONFIG"] = str(em_config)
+    return env
+
+
+def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, str] | None:
+    """Pick the subprocess environment a preset's commands need.
+
+    Emscripten presets get the emsdk environment (emcc/node on PATH); every other
+    preset falls back to the MSVC environment on Windows (None elsewhere, meaning
+    "inherit the parent env unchanged"). Returned dicts are full environments, so
+    callers pass them straight to run_step.
+    """
+    if preset.is_emscripten:
+        return emsdk_env(emsdk_path)
+    return msvc_env()
 
 
 # ---------------------------------------------------------------------------

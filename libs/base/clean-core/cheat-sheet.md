@@ -101,7 +101,7 @@ ss.reversed();                            // negated-stride view
 ## Strings (UTF-8)
 
 ```cpp
-#include <clean-core/string/string.hh>    // cc::string — owning, SSO (<= 39 bytes inline), deep-copyable
+#include <clean-core/string/string.hh>    // cc::string — owning, SSO (<= 39 bytes inline on 64-bit), deep-copyable
 cc::string str = "shaped";                // ctors: char, (ptr,size), (begin,end), c-string, container
 auto s2 = cc::string::create_filled(n, 'x');   // also create_copy_of(sv), create_uninitialized(n),
                                                //       create_with_capacity(n), create_copy_c_str_materialized(sv)
@@ -225,6 +225,10 @@ cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
 cc::atomic_add(v, x);                     // also atomic_sub/and/or/xor (via std::atomic_ref) -> old value
 
+#include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
+cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
+cc::add_with_carry(a, b, carry_in=0);            // -> {value, carry}; sub_with_borrow -> {value, borrow}
+
 #include <clean-core/math/random.hh>
 cc::random rng(seed);                     // deterministic PCG32; MOVE-ONLY (use .clone() to duplicate a stream)
 rng.next_u32();  rng.next_u64();          // raw uniform bits
@@ -232,6 +236,27 @@ rng.uniform(a, b);                        // integer in [a,b] (unbiased) OR floa
 rng.uniform_bool();                       // fair coin
 rng.uniform_in(range);  rng.shuffle(range); // pick element / in-place permute (indexable range)
 rng.clone();                              // independent generator at the same stream position
+```
+
+## Hashing
+
+```cpp
+#include <clean-core/common/hash.hh>
+cc::make_hash(a, b, ...);                  // u64, COMPOSABLE (not finalized); ordered combine_hash fold
+cc::make_hash_finalized(a, ...);           // u64, make_hash + one avalanche; what hash tables consume
+cc::combine_hash(a, b);                    // u64 ordered 2->1 join (wyhash mul-fold); a,b are u64 hashes
+cc::combine_hash_unordered(a, b);          // u64 = a + b; commutative; inputs MUST be make_hash_finalized
+cc::hash_finalize(x);                      // u64 bijective avalanche (moremur)
+cc::make_hash_of_bytes(bytes, seed=0);     // u64 XXH3-64 of a span<byte const>
+cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold over a range (ordered / set-like)
+// customize a type: 'friend u64 hash(T const&)' (common) OR specialize cc::custom::hash_trait<T> (override; rare)
+// built-in: string/string_view (bytes, equal across both); vector/array/span/fixed_array/pair/optional (structural);
+//           unique_* containers structural; unique_ptr by pointer identity
+
+#include <clean-core/common/hash128.hh>
+cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
+cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const> + u64 seed (content-addr IDs)
+hash(h128);                                // hidden-friend customization point -> low limb (u64)
 ```
 
 ## Sequence (lazy ranges — emerging API)
@@ -263,7 +288,7 @@ m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then op
   underflow. `find`/`rfind` return **`-1`** (not a huge unsigned) on no-match.
 - **`string` / `string_view` are NOT null-terminated.** `data()` is not a C
   string — use `str.c_str_materialize()` (valid only until the next mutation).
-- **`string` SSO holds ≤ 39 bytes inline** before it heap-allocates.
+- **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
 - **`optional` has no `operator*` / `operator->`.** Use `value()`, which
   *asserts* when empty rather than throwing.
 - **Return errors with `cc::error(...)`** — never an implicit conversion.

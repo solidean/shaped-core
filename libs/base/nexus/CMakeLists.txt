@@ -18,6 +18,9 @@ add_library(nexus
     src/nexus/fuzz/run.cc
     src/nexus/fuzz/test.cc
 )
+# Note: src/nexus/web/web_runner.cc is intentionally NOT a library source. It is Emscripten-only and is
+# compiled directly into each `*-test-web` runner (see cmake/NexusWebRunner.cmake) so the linker can't
+# prune its EMSCRIPTEN_KEEPALIVE exports as unreferenced archive members.
 
 # Public headers live co-located in src/ for better editor experience.
 # FILE_SET models the public API explicitly (install/export, IDEs, etc.).
@@ -89,3 +92,6 @@ target_link_libraries(nexus-test
     PRIVATE
     nexus
 )
+
+# Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
+sc_add_nexus_web_runner(nexus-test)

@@ -18,6 +18,7 @@ Public API:
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +26,11 @@ from pathlib import Path
 from . import targets as targets_mod
 from .logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from .models import Preset
-from .process import run_step
+from .process import emsdk_env, run_step
+
+# Artifact suffixes that are not directly runnable and must be launched via node
+# (Emscripten emits a `<name>.js` loader next to the `.wasm`).
+_WASM_LAUNCH_SUFFIXES = {".js", ".mjs", ".wasm"}
 
 # nexus prints this when a name filter matches no tests in a binary; with a
 # filter active we treat that as "nothing to run here", not a failure.
@@ -88,6 +93,7 @@ def test(
     write_xml: bool = True,
     mirror: bool = False,
     verbose: bool = False,
+    emsdk_path: str | None = None,
 ) -> list[dict]:
     """Run the named test binaries, optionally filtered by `test_name`.
 
@@ -116,6 +122,23 @@ def test(
         # Per-preset env additions that apply to every binary (e.g. the Windows
         # ASan runtime dir on PATH). Empty for ordinary builds.
         preset_env = _sanitizer_path_env(preset.build_dir)
+
+        # Emscripten test artifacts are .js/.wasm that run under node, which the
+        # emsdk environment puts on PATH; inject it as the base env for this preset.
+        # Native presets keep the inherited environment (preset_base_env = env).
+        preset_base_env = env
+        if preset.is_emscripten:
+            wasm_env = emsdk_env(emsdk_path)
+            if wasm_env is None:
+                print(
+                    f"WARNING: emsdk not found for preset {preset.name!r}; "
+                    f"running with the inherited environment (node may be missing). "
+                    f"Pass --emsdk-path or activate emsdk.",
+                    file=sys.stderr,
+                )
+            else:
+                preset_base_env = wasm_env
+
         records: list[dict] = []
         for name in binary_names:
             target = by_name.get(name)
@@ -123,7 +146,13 @@ def test(
                 continue
             xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
 
-            cmd = [str(target.artifact)]
+            # Emscripten emits a non-executable .js/.wasm artifact; launch it via node.
+            launcher = (
+                ["node"]
+                if preset.is_emscripten or target.artifact.suffix.lower() in _WASM_LAUNCH_SUFFIXES
+                else []
+            )
+            cmd = [*launcher, str(target.artifact)]
             if test_name:
                 cmd.append(test_name)
             # nexus writes a native per-test JUnit report here; non-nexus or
@@ -137,10 +166,10 @@ def test(
             # Per-binary env (e.g. LLVM_PROFILE_FILE) and per-preset env (e.g. the
             # ASan runtime PATH) layer onto the inherited environment so we never
             # drop PATH/MSVC vars the child needs.
-            run_env = env
+            run_env = preset_base_env
             layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
             if layered:
-                run_env = {**os.environ, **(env or {}), **layered}
+                run_env = {**os.environ, **(preset_base_env or {}), **layered}
 
             result = run_step(
                 cmd,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
@@ -297,6 +298,14 @@ public:
     [[nodiscard]] bool operator==(bool) const
         requires(!std::is_same_v<T, bool>)
     = delete;
+
+    // hashing
+public:
+    /// Structural hash: combines the engaged flag with the value's hash (empty and engaged stay distinct).
+    [[nodiscard]] friend u64 hash(optional const& o)
+    {
+        return o._has_value ? cc::make_hash(true, o._storage.value) : cc::make_hash(false);
+    }
 
     // members
 private:

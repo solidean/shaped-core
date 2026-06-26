@@ -62,9 +62,20 @@
 // =========================================================================================================
 // Operating system detection
 // =========================================================================================================
-// Conditionally defined: CC_OS_WINDOWS, CC_OS_LINUX, CC_OS_APPLE, CC_OS_BSD
+// Conditionally defined: CC_OS_WINDOWS, CC_OS_LINUX, CC_OS_APPLE, CC_OS_BSD, CC_OS_EMSCRIPTEN, CC_OS_WASI
+// CC_OS_WASM is an umbrella set for any WebAssembly "OS" (Emscripten or WASI); branch on it for behavior
+// shared across the wasm family, and on the specific macro where they differ.
+//
+// The wasm branches come first: Emscripten reports neither _WIN32 nor __linux__, but it (and some wasi
+// toolchains) can leak unix-ish predefines, so detecting __EMSCRIPTEN__/__wasi__ up front avoids misclassification.
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32)
+#if defined(__EMSCRIPTEN__)
+#define CC_OS_EMSCRIPTEN
+#define CC_OS_WASM
+#elif defined(__wasi__) || defined(__wasm__)
+#define CC_OS_WASI
+#define CC_OS_WASM
+#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32)
 #define CC_OS_WINDOWS
 #elif defined(__APPLE__) || defined(__MACH__) || defined(macintosh)
 #define CC_OS_APPLE
@@ -80,7 +91,12 @@
 // Target platform detection
 // =========================================================================================================
 // Conditionally defined: CC_TARGET_PC, CC_TARGET_XBOX, CC_TARGET_MACOS, CC_TARGET_IOS, CC_TARGET_TVOS,
-//                        CC_TARGET_ANDROID, CC_TARGET_ORBIS, CC_TARGET_NX, CC_TARGET_MOBILE, CC_TARGET_CONSOLE
+//                        CC_TARGET_ANDROID, CC_TARGET_ORBIS, CC_TARGET_NX, CC_TARGET_WEB, CC_TARGET_MOBILE,
+//                        CC_TARGET_CONSOLE
+
+#if defined(CC_OS_WASM)
+#define CC_TARGET_WEB
+#endif
 
 #if defined(CC_OS_WINDOWS)
 #if defined(_DURANGO)
@@ -124,6 +140,25 @@
 #endif
 
 // =========================================================================================================
+// Threading availability
+// =========================================================================================================
+// CC_HAS_THREADS - whether real OS threads are available (0 or 1).
+// Native platforms always have them. On WebAssembly threads are opt-in: Emscripten only enables pthreads
+// (and SharedArrayBuffer-backed std::thread) when built with -pthread, which predefines
+// __EMSCRIPTEN_PTHREADS__. Single-threaded wasm still compiles <mutex>/<thread>/thread_local fine — they
+// degrade to no-ops — so this flag gates behavior, not compilation.
+
+#if defined(CC_OS_WASM)
+#if defined(__EMSCRIPTEN_PTHREADS__)
+#define CC_HAS_THREADS 1
+#else
+#define CC_HAS_THREADS 0
+#endif
+#else
+#define CC_HAS_THREADS 1
+#endif
+
+// =========================================================================================================
 // Public macros
 // =========================================================================================================
 
@@ -146,6 +181,14 @@
 // CC_HOT_FUNC - Mark function as frequently executed (hot path optimization)
 // Usage: CC_HOT_FUNC void process_frame() { ... }
 #define CC_HOT_FUNC CC_IMPL_HOT_FUNC
+
+// CC_PURE - Function has no side effects and its result depends only on its arguments and the memory it
+// reads. Lets the compiler elide redundant calls (only across code that cannot have changed the read memory)
+// and pipeline calls across a loop, so an out-of-line wrapper over a pure callee is not pessimized relative
+// to the callee. Use ONLY for genuinely pure functions: no writes, no hidden/global state, deterministic —
+// e.g. a hash of its byte input. Misuse (marking a function with side effects pure) causes miscompiles.
+// Usage: [[nodiscard]] CC_PURE u64 hash_of(span<byte const> data);
+#define CC_PURE CC_IMPL_PURE
 
 // CC_BUILTIN_UNREACHABLE - Mark code path as unreachable (UB if reached)
 // Usage: default: CC_BUILTIN_UNREACHABLE;
@@ -226,6 +269,15 @@
 
 #else
 #error "Unknown compiler"
+#endif
+
+// CC_IMPL_PURE keys on the actual compiler builtins, not CC_COMPILER_MSVC: clang-cl defines _MSC_VER (so it
+// buckets as MSVC above) yet fully supports GNU attributes, and we want the attribute there. Empty only on
+// genuine MSVC, which has no equivalent.
+#if defined(__GNUC__) || defined(__clang__)
+#define CC_IMPL_PURE [[gnu::pure]] // C++ spelling: unambiguous in a leading attribute-seq (vs __attribute__)
+#else
+#define CC_IMPL_PURE
 #endif
 
 #define CC_IMPL_MACRO_JOIN(arg1, arg2) arg1##arg2

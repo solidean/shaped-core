@@ -16,6 +16,12 @@ struct test_schedule_config
     cc::vector<cc::string> filters;
     cc::vector<cc::string> section_filters;
     bool run_disabled_tests = false;
+
+    // run_manual_tests: manual tests become eligible (set by a non-wildcard filter, same as disabled, or by
+    // --manual). only_manual_tests: --manual mode — the eligible set is *restricted* to manual tests, so
+    // wildcard filters select among manual tests only and disabled tests stay excluded.
+    bool run_manual_tests = false;
+    bool only_manual_tests = false;
     bool is_catch2_xml_discovery = false;
     bool report_catch2_xml_results = false;
     bool verbose = false;

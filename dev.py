@@ -11,6 +11,7 @@ Usage:
     uv run dev.py configure                 Configure the CMake project
     uv run dev.py build [--target T]        Build (optionally specific targets)
     uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
+    uv run dev.py test-web [LIBRARY]        Open the browser test runner (Emscripten; all libs, or one)
     uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
     uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, crossrefs, test)
     uv run dev.py coverage run [NAME]       Collect LLVM test coverage (run/merge/report)
@@ -42,6 +43,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import platform
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -99,6 +101,9 @@ COVERAGE_BUILD_PRESETS: dict[str, str] = {
     "Linux": "coverage-linux-clang",
     "Darwin": "coverage-macos-arm-llvm",
 }
+
+# Default preset for `test-web` (the browser runner is Emscripten-only, regardless of host platform).
+DEFAULT_WEB_PRESET = "emscripten-relwithdebinfo"
 
 
 def _is_test_target(target: dev.Target) -> bool:
@@ -175,18 +180,20 @@ def resolve_presets(specs: list[str] | None) -> list[dev.Preset]:
         die(str(e))
 
 
-def _discover(preset: dev.Preset) -> list[dev.Target]:
+def _discover(preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
     """Discover targets for a preset, auto-configuring if needed."""
     try:
         return dev.discover_targets(preset.build_dir, preset.build_type)
     except dev.NotConfiguredError:
-        result = dev.ensure_configured(preset, root=ROOT)
+        result = dev.ensure_configured(preset, root=ROOT, emsdk_path=emsdk_path)
         if result is not None and not result.ok:
             die(f"Configure failed for {preset.name!r}")
         return dev.discover_targets(preset.build_dir, preset.build_type)
 
 
-def resolve_target_names(preset: dev.Preset, specs: list[str] | None) -> list[str] | None:
+def resolve_target_names(
+    preset: dev.Preset, specs: list[str] | None, emsdk_path: str | None = None
+) -> list[str] | None:
     """Expand --target specs into concrete target names against a preset.
 
     Returns None when no specs were given (meaning 'build everything').
@@ -197,7 +204,7 @@ def resolve_target_names(preset: dev.Preset, specs: list[str] | None) -> list[st
     if not patterns:
         return None
 
-    available = _discover(preset)
+    available = _discover(preset, emsdk_path)
     names = [t.name for t in available]
     selected: list[str] = []
     seen: set[str] = set()
@@ -219,7 +226,8 @@ def resolve_target_names(preset: dev.Preset, specs: list[str] | None) -> list[st
 def cmd_configure(args: argparse.Namespace) -> None:
     presets = resolve_presets(args.preset)
     results = dev.configure(
-        presets, root=ROOT, force=True, mirror=args.mirror_output, verbose=args.verbose
+        presets, root=ROOT, force=True, mirror=args.mirror_output, verbose=args.verbose,
+        emsdk_path=args.emsdk_path,
     )
     sys.exit(0 if all(r.ok for r in results) else 1)
 
@@ -227,7 +235,10 @@ def cmd_configure(args: argparse.Namespace) -> None:
 def cmd_build(args: argparse.Namespace) -> None:
     presets = resolve_presets(args.preset)
     # Targets are resolved against the first preset (target sets match across presets).
-    target_names = resolve_target_names(presets[0], args.target) if not args.no_configure else None
+    target_names = (
+        resolve_target_names(presets[0], args.target, args.emsdk_path)
+        if not args.no_configure else None
+    )
     if target_names is None and args.target:
         # --no-configure: can't discover, pass the literal names through to cmake.
         target_names = [s.strip() for spec in args.target for s in spec.split(",") if s.strip()]
@@ -239,6 +250,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         auto_configure=not args.no_configure,
         mirror=args.mirror_output,
         verbose=args.verbose,
+        emsdk_path=args.emsdk_path,
     )
     build_steps = [r for r in results if r.step_type == "build"]
     total_s = sum(r.duration_s for r in build_steps)
@@ -259,22 +271,26 @@ def cmd_test(args: argparse.Namespace) -> None:
 
     # Optionally build first (incremental — fast when nothing changed).
     if not args.no_build:
-        target_names = resolve_target_names(primary, args.target) if not args.no_configure else None
+        target_names = (
+            resolve_target_names(primary, args.target, args.emsdk_path)
+            if not args.no_configure else None
+        )
         results = dev.build(
             presets, target_names, root=ROOT,
             auto_configure=not args.no_configure,
             mirror=args.mirror_output, verbose=args.verbose,
+            emsdk_path=args.emsdk_path,
         )
         if not all(r.ok for r in results):
             _fail_build(results, presets)
 
     # Determine which test binaries to run and the optional test-name filter.
-    all_targets = _discover(primary)
+    all_targets = _discover(primary, args.emsdk_path)
     test_targets = [t for t in all_targets if _is_test_target(t)]
     test_name: str | None = args.test_name
 
     if args.target:
-        wanted = set(resolve_target_names(primary, args.target) or [])
+        wanted = set(resolve_target_names(primary, args.target, args.emsdk_path) or [])
         binary_names = [t.name for t in dev.executables(all_targets) if t.name in wanted]
         if not binary_names:
             die(f"No test binary matches --target {args.target}")
@@ -304,6 +320,7 @@ def cmd_test(args: argparse.Namespace) -> None:
         write_xml=not args.no_xml_reports,
         mirror=args.mirror_output,
         verbose=args.verbose,
+        emsdk_path=args.emsdk_path,
     )
 
     if args.merged_xml_report:
@@ -333,6 +350,52 @@ def _summarize_tests(records: list[dict], presets: list[dev.Preset]) -> bool:
         file=sys.stderr,
     )
     return True
+
+
+def cmd_test_web(args: argparse.Namespace) -> None:
+    # The browser test runner is Emscripten-only. No library arg -> the aggregate page (all libraries);
+    # a library arg -> just that library's page. Either way we build the module(s), then serve+open the
+    # page with emrun (the page loads its wasm test module(s) and runs them one per animation frame).
+    presets = resolve_presets(args.preset or [DEFAULT_WEB_PRESET])
+    preset = presets[0]
+    if not preset.is_emscripten:
+        die(f"test-web needs an Emscripten preset (got {preset.name!r}); e.g. --preset {DEFAULT_WEB_PRESET}")
+
+    if args.library:
+        # Accept "clean-core", "clean-core-test", or "clean-core-test-web" — all name the same runner.
+        lib = args.library.removesuffix("-web").removesuffix("-test")
+        target: str | None = f"{lib}-test-web"
+        page = f"{lib}-web.html"
+    else:
+        target = None  # build everything so all modules + the aggregate page are present
+        page = "tests-web.html"
+
+    if not args.no_build:
+        results = dev.build(
+            presets, [target] if target else None, root=ROOT,
+            mirror=args.mirror_output, verbose=args.verbose, emsdk_path=args.emsdk_path,
+        )
+        if not all(r.ok for r in results):
+            _fail_build(results, presets)
+
+    page_path = preset.build_dir / page
+    if not page_path.is_file():
+        die(f"no page at {_rel(page_path)} - "
+            + (f"library {args.library!r} has no web runner?" if args.library else "build may have failed"))
+
+    env = dev.emsdk_env(args.emsdk_path)
+    if env is None:
+        die("emsdk not found - pass --emsdk-path or activate emsdk (see: uv run dev.py doctor)")
+    emrun = shutil.which("emrun", path=env.get("PATH"))
+    if emrun is None:
+        die("emrun not found in the emsdk environment")
+
+    # emrun serves the page's directory (the build root) so the page can reach its libs/ modules, and
+    # opens the default browser. It runs in the foreground until you stop it (Ctrl-C). .bat needs cmd.
+    launch = ["cmd", "/c", emrun] if emrun.lower().endswith((".bat", ".cmd")) else [emrun]
+    print(f"serving {_rel(page_path)} via emrun (Ctrl-C to stop)...", file=sys.stderr)
+    result = subprocess.run([*launch, str(page_path)], env=env, cwd=str(preset.build_dir))
+    sys.exit(result.returncode)
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
@@ -660,11 +723,19 @@ def cmd_diagnose_clangd(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
-    checks = dev.doctor(ROOT, default_preset=DEFAULT_BUILD_PRESETS.get(platform.system()))
+    checks = dev.doctor(
+        ROOT, default_preset=DEFAULT_BUILD_PRESETS.get(platform.system()), emsdk_path=args.emsdk_path
+    )
     all_ok = True
     for label, ok, detail in checks:
-        mark = "OK  " if ok else "FAIL"
-        all_ok &= ok
+        # ok is True (pass), False (fail), or None for an advisory (neither).
+        if ok is None:
+            mark = "SKIP"
+        elif ok:
+            mark = "OK  "
+        else:
+            mark = "FAIL"
+            all_ok = False
         print(f"  [{mark}] {label}: {detail}")
     sys.exit(0 if all_ok else 1)
 
@@ -676,7 +747,7 @@ def cmd_list_presets(args: argparse.Namespace) -> None:
 
 def cmd_list_targets(args: argparse.Namespace) -> None:
     presets = resolve_presets(args.preset)
-    for t in _discover(presets[0]):
+    for t in _discover(presets[0], args.emsdk_path):
         artifact = f"  -> {t.artifact}" if t.artifact else ""
         print(f"{t.name}  [{t.kind}]{artifact}")
 
@@ -846,6 +917,15 @@ def _add_preset_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_emsdk_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--emsdk-path", metavar="DIR", default=None,
+        help="Path to an emsdk install for the WASM (Emscripten) presets; dev.py applies its "
+             "environment itself, so no permanent/--system activation is needed. Falls back to "
+             "SC_EMSDK_PATH / EMSDK / emcc-on-PATH.",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="shaped-core build & test CLI",
@@ -859,15 +939,18 @@ def main() -> None:
 
     cfg_p = sub.add_parser("configure", help="Configure the CMake project")
     _add_preset_arg(cfg_p)
+    _add_emsdk_arg(cfg_p)
 
     build_p = sub.add_parser("build", help="Build the project")
     _add_preset_arg(build_p)
+    _add_emsdk_arg(build_p)
     build_p.add_argument("--target", "-t", action="append",
                          help="Target(s) to build: comma-list, repeatable, wildcards")
     build_p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
 
     test_p = sub.add_parser("test", help="Run tests")
     _add_preset_arg(test_p)
+    _add_emsdk_arg(test_p)
     test_p.add_argument("--target", "-t", action="append",
                         help="Test binary target(s): comma-list, repeatable, wildcards")
     test_p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
@@ -882,6 +965,13 @@ def main() -> None:
                            help="Do not write any JUnit XML result files (per-binary XML is on by default)")
     test_p.add_argument("test_name", nargs="?",
                         help="Specific test name or binary to run (auto-discovers the binary)")
+
+    web_p = sub.add_parser("test-web", help="Open the browser test runner (Emscripten); serves + opens via emrun")
+    _add_preset_arg(web_p)
+    _add_emsdk_arg(web_p)
+    web_p.add_argument("library", nargs="?",
+                       help="Library to show alone (e.g. clean-core); omit for the combined page of all libraries")
+    web_p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
 
     fmt_p = sub.add_parser("format", help="Format C++ sources with clang-format")
     fmt_p.add_argument("--check-only", action="store_true",
@@ -941,12 +1031,14 @@ def main() -> None:
         "file", help="Source file to check (its compile flags come from the compilation database)"
     )
 
-    sub.add_parser("doctor", help="Sanity-check the toolchain")
+    doctor_p = sub.add_parser("doctor", help="Sanity-check the toolchain")
+    _add_emsdk_arg(doctor_p)
 
     lp = sub.add_parser("list-presets", help="List available build presets")
     _add_preset_arg(lp)
     lt = sub.add_parser("list-targets", help="List discovered targets")
     _add_preset_arg(lt)
+    _add_emsdk_arg(lt)
 
     args = parser.parse_args()
 
@@ -957,6 +1049,8 @@ def main() -> None:
             cmd_build(args)
         case "test":
             cmd_test(args)
+        case "test-web":
+            cmd_test_web(args)
         case "format":
             cmd_format(args)
         case "check":

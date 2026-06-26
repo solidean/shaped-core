@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
@@ -194,6 +195,11 @@ public:
         return span(_data + start, end - start);
     }
 
+    // hashing
+public:
+    /// Structural, order-dependent hash over the viewed elements (by content, not pointer/extent identity).
+    [[nodiscard]] friend constexpr u64 hash(span const& s) { return cc::make_hash_range(s); }
+
     // members
 private:
     T* _data = nullptr;
@@ -332,6 +338,11 @@ public:
         static_assert(0 <= I && I < N, "index out of bounds");
         return _data[I];
     }
+
+    // hashing
+public:
+    /// Structural, order-dependent hash over the N viewed elements (by content).
+    [[nodiscard]] friend constexpr u64 hash(fixed_span const& s) { return cc::make_hash_range(s); }
 
     // members
 private:

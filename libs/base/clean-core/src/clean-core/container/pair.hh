@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
@@ -16,6 +17,9 @@ struct cc::pair
 
     [[nodiscard]] friend constexpr bool operator==(pair const&, pair const&) = default;
     [[nodiscard]] friend constexpr auto operator<=>(pair const&, pair const&) = default;
+
+    /// Structural hash of (first, second).
+    [[nodiscard]] friend constexpr u64 hash(pair const& p) { return cc::make_hash(p.first, p.second); }
 
     T first;
     U second;

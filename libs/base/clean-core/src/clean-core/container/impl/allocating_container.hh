@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/hash.hh> // derived containers define structural-hash hidden friends
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/allocation.hh>
 

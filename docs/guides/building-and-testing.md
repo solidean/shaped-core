@@ -50,8 +50,8 @@ otherwise it is treated as a **test-name substring filter** applied across every
 ## Presets
 
 Presets live in [CMakePresets.json](../../CMakePresets.json), one per platform × compiler ×
-build type (MSVC / Clang / GCC across Windows / Linux / macOS / Android NDK). The default is
-chosen by platform:
+build type (MSVC / Clang / GCC across Windows / Linux / macOS / Android NDK / Emscripten). The
+default is chosen by platform:
 
 | Platform | Default preset                       | Assertions (`CC_ASSERT`) |
 |----------|--------------------------------------|--------------------------|
@@ -60,9 +60,10 @@ chosen by platform:
 | macOS    | `macos-arm-llvm-relwithdebinfo`      | on                       |
 
 Override with `--preset`. **It is a per-subcommand flag — it goes *after* the subcommand**
-(`uv run dev.py test --preset release-clang`). Only `--verbose` and `--mirror-output` are global
-(before the subcommand). Presets accept comma-lists, repeated flags, and shell-style wildcards,
-and dev.py operates on all that match:
+(`uv run dev.py test --preset release-clang`). `--emsdk-path` (for WASM) is likewise
+per-subcommand. Only `--verbose` and `--mirror-output` are global (before the subcommand).
+Presets accept comma-lists, repeated flags, and shell-style wildcards, and dev.py operates on
+all that match:
 
 ```bash
 uv run dev.py build --preset debug-clang,release-clang
@@ -72,6 +73,44 @@ uv run dev.py test  --preset "x64-linux-*"
 `relwithdebinfo-*` presets have `CC_ASSERT` **on**; `release-*` presets have them **off**. When
 you touch assertion-gated code, build a `release-*` preset too — the default build only exercises
 the assertions-on branch.
+
+### WebAssembly (Emscripten)
+
+The `emscripten-{debug,relwithdebinfo,release}` presets cross-compile to WASM (single-threaded).
+They need the [emsdk](https://github.com/emscripten-core/emsdk); point dev.py at it with the
+`--emsdk-path` flag (or `SC_EMSDK_PATH` / an activated `EMSDK`) — dev.py applies the emsdk
+environment itself, so no permanent activation is required:
+
+```bash
+uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
+```
+
+The test binaries are `.wasm` + a `.js` loader; dev.py runs them under emsdk's Node and parses the
+same JUnit report as native runs. `uv run dev.py doctor` validates the toolchain. See
+[requirements.md](../requirements.md#emscripten--wasm) for the full setup and the feature knobs.
+
+**Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module
+(`*-test-web.js` + `.wasm`), and CMake generates HTML pages at the build root: one per library
+(`<library>-web.html`) plus an aggregate **`tests-web.html`** that loads every library's module and
+shows them grouped with a grand total. Each page runs its tests **one per animation frame**, rendering
+a live table of per-test timing, assertion counts, and pass/fail. Open them with:
+
+```bash
+uv run dev.py test-web                 # combined page: all libraries
+uv run dev.py test-web clean-core      # just one library
+```
+
+`test-web` builds the module(s) and serves the page with emsdk's **emrun** (a dev-only static server +
+browser launcher; Ctrl-C to stop). It defaults to the `emscripten-relwithdebinfo` preset and takes the
+same `--emsdk-path` as the other commands. The pages are plain static files — to host them, serve the
+build root over HTTP from any static server (not `file://`); emrun is not needed in deployment.
+
+The pages are built by the normal `dev.py build` too (they're regular targets) and are not run by
+`dev.py test` (only `*-test`, not `*-test-web`, is a node test). The implementation is in nexus:
+[web_runner.cc](../../libs/base/nexus/src/nexus/web/web_runner.cc) (the `nx_web_*` C ABI), the shared
+renderer [nexus-web-driver.js](../../libs/base/nexus/web/nexus-web-driver.js), the page template
+[nexus-web-page.html.in](../../libs/base/nexus/web/nexus-web-page.html.in), and the build glue
+[NexusWebRunner.cmake](../../libs/base/nexus/cmake/NexusWebRunner.cmake).
 
 ## Quiet by default, and how to diagnose
 

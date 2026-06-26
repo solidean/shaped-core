@@ -9,7 +9,8 @@
 #include <type_traits>
 
 /// Owning UTF-8 byte string with small-string optimization (SSO).
-/// Stores up to 39 bytes inline without allocation; longer strings use heap storage via cc::allocation<char>.
+/// Stores up to small_capacity bytes inline without allocation (39 on 64-bit platforms; fewer where
+/// pointers are smaller, e.g. wasm32); longer strings use heap storage via cc::allocation<char>.
 /// size() counts bytes, not codepoints; embedded '\0' bytes are allowed.
 /// data() returns contiguous bytes but is NOT null-terminated.
 ///
@@ -21,7 +22,7 @@
 /// between SSO and heap. Mutating operations may invalidate pointers and references, as with std::string.
 ///
 /// Performance characteristics:
-/// SSO fast paths (≤39 bytes) avoid allocation and branch on size checks.
+/// SSO fast paths (small strings, up to small_capacity bytes) avoid allocation and branch on size checks.
 /// For data-intensive or SIMD-heavy workloads, prefer string_view/span over repeated string operations.
 ///
 /// Non-goal: Full Unicode semantics (grapheme clusters, codepoint iteration).
@@ -31,8 +32,11 @@ struct cc::string
     // constants
 private:
     /// Maximum number of bytes that can be stored inline without heap allocation.
-    /// Computed as 39 bytes (5 * 8 - 1), leaving room for size byte and tagged resource pointer.
-    static constexpr isize small_capacity = sizeof(u64) * 5 - 1; // 39 bytes
+    /// Derived from the heap layout rather than hardcoded: the inline buffer fills the space before the
+    /// custom_resource pointer (which data_small must alias for the SSO tag bit), minus one byte for the
+    /// size tag. This tracks the pointer size automatically — 39 bytes on 64-bit, fewer where pointers are
+    /// smaller (e.g. wasm32, which has 32-bit pointers).
+    static constexpr isize small_capacity = isize(offsetof(allocation<char>, custom_resource)) - 1;
 
     // factories
 public:
@@ -715,6 +719,10 @@ public:
     /// Complexity: O(size()).
     [[nodiscard]] bool operator==(string const& rhs) const { return string_view(*this) == string_view(rhs); }
 
+    /// Structural hash over the bytes; delegates to string_view so equal content hashes equally
+    /// regardless of SSO vs heap storage (and matches a string_view of the same content).
+    [[nodiscard]] friend u64 hash(string const& s) { return hash(string_view(s)); }
+
     /// Checks if this string starts with the given prefix.
     /// Returns true if the string begins with the prefix.
     /// Complexity: O(prefix.size()).
@@ -789,16 +797,21 @@ private:
         friend struct cc::string;
     };
 
-    struct data_small
+    // data_small overlays data_heap: its custom_resource must alias the heap allocation's custom_resource
+    // (so the SSO tag bit lives in the same word), and alignas(data_heap) pads it to data_heap's size and
+    // alignment so the three union members stay congruent on any pointer size.
+    struct alignas(data_heap) data_small
     {
         char data[small_capacity];
         u8 size;
         memory_resource const* custom_resource;
     };
 
+    // Raw u64 view of the union for whole-object bit-copies; sized to the union (= data_heap), not hardcoded.
+    static_assert(sizeof(data_heap) % sizeof(u64) == 0, "data_heap must be a whole number of u64 blocks");
     struct data_blocks
     {
-        u64 blocks[6];
+        u64 blocks[sizeof(data_heap) / sizeof(u64)];
     };
 
     static_assert(sizeof(data_heap) == sizeof(data_small), "inconsistent data layout");

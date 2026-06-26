@@ -196,6 +196,13 @@ struct mutex;
 
 
 //
+// Hashing
+//
+
+struct hash128;
+
+
+//
 // Utilities
 //
 

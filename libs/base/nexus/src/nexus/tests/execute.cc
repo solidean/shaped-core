@@ -51,7 +51,10 @@ struct test_section
     // adds errors for "no checks" and "unreachable subsections"
     // computes "in_considered_failing"
     // populates the result with that
-    void finalize_section_to(test_execution::section& sec) const
+    // require_checks: whether an empty section (no CHECK/REQUIRE anywhere below it) is treated as a failure.
+    // True for normal tests — a test with no assertions is almost always a bug. False for manual tests
+    // (benchmarks and the like), which legitimately only print.
+    void finalize_section_to(test_execution::section& sec, bool require_checks) const
     {
         sec.name = name;
         sec.location = location;
@@ -65,7 +68,7 @@ struct test_section
         for (auto subsec : subsections_ordered)
         {
             auto& ssec = sec.subsections.emplace_back();
-            subsec->finalize_section_to(ssec);
+            subsec->finalize_section_to(ssec, require_checks);
 
             // accumulate
             sec.executed_checks += ssec.executed_checks;
@@ -89,7 +92,7 @@ struct test_section
         }
 
         // we record missing CHECK/REQUIRE for _all_ sections, even intermediate ones
-        if (sec.executed_checks == 0)
+        if (require_checks && sec.executed_checks == 0)
         {
             sec.errors.push_back(test_error{
                 .expr = "no CHECK/REQUIRE",
@@ -195,7 +198,9 @@ void test_execute_end()
     auto& ctx = g_context_stack.back();
     CC_ASSERT(ctx.execution != nullptr, "should always have a valid execution");
 
-    ctx.root_section->finalize_section_to(ctx.execution->root);
+    // Manual tests (benchmarks etc.) may legitimately contain no CHECK/REQUIRE — don't flag that as failure.
+    bool const require_checks = !ctx.execution->instance.declaration->test_config.manual;
+    ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
 
     g_context_stack.remove_back();
 }

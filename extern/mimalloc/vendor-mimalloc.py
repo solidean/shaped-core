@@ -8,7 +8,7 @@
 shaped-core builds offline and reproducibly, so third-party dependencies live
 in-tree rather than as submodules or fetched-at-configure-time packages. mimalloc
 is shaped-core's first such vendored dependency (see the SC_USE_VENDORED_MIMALLOC
-option in the root CMakeLists.txt). This script regenerates the vendored copy from
+option in extern/CMakeLists.txt). This script regenerates the vendored copy from
 a pinned upstream commit: it shallow-clones the tag into a transient `.clone/` dir,
 asserts the tag resolves to the pinned hash (the hash is the authority; the tag is
 a human-readable convenience), copies the minimal subset we actually build
