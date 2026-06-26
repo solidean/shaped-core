@@ -21,6 +21,7 @@ add_library(clean-core
     src/clean-core/error/result.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
+    src/clean-core/string/print.cc
     src/clean-core/string/string.cc
     src/clean-core/string/string_view.cc
     src/clean-core/container/vector.cc
