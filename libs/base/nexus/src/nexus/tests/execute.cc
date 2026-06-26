@@ -7,15 +7,13 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/section.hh>
 
 #include <chrono>        // std::chrono: no cc timing yet
-#include <iomanip>       // std::setprecision: console formatting
-#include <iostream>      // std::cout: console output
 #include <string>        // std::string: key type for the std::unordered_map below
-#include <string_view>   // std::string_view: bridges cc::string into std::ostream
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
 
@@ -23,13 +21,6 @@ namespace nx
 {
 namespace
 {
-// cc::string is not std::ostream-streamable (no operator<< specialization), so view it as a
-// std::string_view for the std::cout diagnostics below. const-safe, unlike c_str_materialize().
-std::string_view as_sv(cc::string const& s)
-{
-    return std::string_view(s.data(), size_t(s.size()));
-}
-
 struct test_section
 {
     std::unordered_map<std::string, cc::unique_ptr<test_section>> subsections;
@@ -499,7 +490,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
 
     if (config.verbose)
     {
-        std::cout << "executing " << schedule.instances.size() << " tests\n" << std::flush;
+        cc::println("executing {} tests", schedule.instances.size());
     }
 
     for (auto const& instance : schedule.instances)
@@ -528,11 +519,9 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             if (config.verbose)
             {
                 if (section_num == 0)
-                    std::cout << "  - start \"" << as_sv(instance.declaration->name) << "\"\n" << std::flush;
+                    cc::println("  - start \"{}\"", instance.declaration->name);
                 else
-                    std::cout << "  - start \"" << as_sv(instance.declaration->name) << "\" section " << section_num
-                              << '\n'
-                              << std::flush;
+                    cc::println("  - start \"{}\" section {}", instance.declaration->name, section_num);
             }
             section_num++;
             auto const t_section_start = std::chrono::high_resolution_clock::now();
@@ -620,11 +609,8 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         if (config.verbose)
         {
             double const duration_ms = execution.root.duration_seconds * 1000.0;
-            std::cout << "    ... in " << std::fixed << std::setprecision(2) << duration_ms << " ms ("
-                      << execution.root.executed_checks << " checks, "      //
-                      << execution.root.failed_checks << " failed checks, " //
-                      << execution.root.errors.size() << " errors)\n"
-                      << std::flush;
+            cc::println("    ... in {:.2f} ms ({} checks, {} failed checks, {} errors)", duration_ms,
+                        execution.root.executed_checks, execution.root.failed_checks, execution.root.errors.size());
         }
 
         result.executions.push_back(cc::move(execution));
