@@ -10,6 +10,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import console
+
 
 def configure_command(configure_preset: str) -> list[str]:
     return ["cmake", "--preset", configure_preset]
@@ -30,8 +32,8 @@ def remove_build_dir(build_dir: Path, *, dry_run: bool = False) -> bool:
     if not build_dir.exists():
         return False
     if dry_run:
-        print(f"  would remove {build_dir}", file=sys.stderr)
+        print(console.dim(f"  would remove {build_dir}"), file=sys.stderr)
         return True
     shutil.rmtree(build_dir)
-    print(f"  removed {build_dir}", file=sys.stderr)
+    print(console.dim(f"  removed {build_dir}"), file=sys.stderr)
     return True

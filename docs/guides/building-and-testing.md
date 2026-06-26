@@ -61,7 +61,7 @@ default is chosen by platform:
 
 Override with `--preset`. **It is a per-subcommand flag — it goes *after* the subcommand**
 (`uv run dev.py test --preset release-clang`). `--emsdk-path` (for WASM) is likewise
-per-subcommand. Only `--verbose` and `--mirror-output` are global (before the subcommand).
+per-subcommand. Only `--verbose`, `--mirror-output`, and `--colored` / `--plain` are global (before the subcommand).
 Presets accept comma-lists, repeated flags, and shell-style wildcards, and dev.py operates on
 all that match:
 
@@ -278,6 +278,9 @@ remains available for manually ASan-checking exception-free code paths.
 ## Useful flags
 
 - `--mirror-output` / `--verbose` — global (before the subcommand); stream child output / be chatty.
+- `--colored` / `--plain` — global; force or disable colored output. The default auto-detects:
+  colored when stdout and stderr are both a terminal, plain when either is piped (e.g. run by an
+  agent). In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.
 - `--no-configure`, `--no-build` — skip the automatic steps.
 - `--timeout SECS` (on `test`) — per-binary timeout (default 60; `0` disables). A binary that
   exceeds it is killed and reported as failed.

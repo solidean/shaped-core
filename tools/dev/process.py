@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from . import console
 from .logs import report_capture, step_log_paths
 from .models import Preset, StepResult
 
@@ -73,7 +74,7 @@ def msvc_env() -> dict[str, str] | None:
 
     vsdevcmd = _find_vsdevcmd()
     if vsdevcmd is None:
-        print("WARNING: Could not find VsDevCmd.bat. MSVC builds may fail.", file=sys.stderr)
+        print(console.yellow("WARNING: Could not find VsDevCmd.bat. MSVC builds may fail."), file=sys.stderr)
         return None
 
     result = subprocess.run(
@@ -238,9 +239,9 @@ def run_step(
     exception it raises is swallowed. On timeout the process is killed and the
     step reports returncode 124 (conventional timeout code).
     """
-    print(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else ""), file=sys.stderr)
+    print(console.dim(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else "")), file=sys.stderr)
     if verbose:
-        print(f"  $ {' '.join(cmd)}", file=sys.stderr)
+        print(console.dim(f"  $ {' '.join(cmd)}"), file=sys.stderr)
 
     stdout_path, stderr_path = step_log_paths(build_dir, step_type, name)
 
@@ -288,7 +289,10 @@ def run_step(
 
     label = name or step_type
     if timed_out:
-        print(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms", file=sys.stderr)
+        print(
+            console.red(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms"),
+            file=sys.stderr,
+        )
     else:
         extra = ""
         if summary_extra is not None:
@@ -297,6 +301,7 @@ def run_step(
             except Exception:
                 extra = ""
         verb = "succeeded" if result.ok else "failed"
-        print(f"  {label} {verb}{extra} in {duration_s * 1000:.0f} ms", file=sys.stderr)
+        tint = console.green if result.ok else console.red
+        print(tint(f"  {label} {verb}{extra} in {duration_s * 1000:.0f} ms"), file=sys.stderr)
 
     return result

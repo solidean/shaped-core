@@ -13,6 +13,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from . import console
 from .models import StepResult, TestSummary
 
 
@@ -90,7 +91,7 @@ def report_capture(path: Path) -> None:
         return
     lines = len(data.splitlines())
     kb = len(data) / 1024
-    print(f"  -> {path}  [{lines} lines, {kb:.1f} kB]", file=sys.stderr)
+    print(console.dim(f"  -> {path}  [{lines} lines, {kb:.1f} kB]"), file=sys.stderr)
 
 
 _BRACKET_LOG_RE = re.compile(r"^\[[^\]]*\]\[[^\]]*\]")
