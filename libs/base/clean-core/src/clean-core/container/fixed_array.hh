@@ -82,6 +82,11 @@ public:
         static_assert(0 <= I && I < N, "index out of bounds");
         return _data[I];
     }
+
+    // hashing
+public:
+    /// Structural, order-dependent hash over the N elements.
+    [[nodiscard]] friend constexpr u64 hash(fixed_array const& v) { return cc::make_hash_range(v); }
 };
 
 /// Specialization for N == 0 (empty array).
@@ -130,6 +135,11 @@ public:
     [[nodiscard]] constexpr isize size() const { return 0; }
     /// Returns true.
     [[nodiscard]] constexpr bool empty() const { return true; }
+
+    // hashing
+public:
+    /// Structural hash of the empty array (a fixed constant, matching make_hash_range over no elements).
+    [[nodiscard]] friend constexpr u64 hash(fixed_array const& v) { return cc::make_hash_range(v); }
 };
 
 /// Specialization of std::tuple_size for fixed_array to enable structured bindings.

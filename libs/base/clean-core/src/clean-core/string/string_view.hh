@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/pair.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/string/char_predicates.hh>
 
@@ -521,6 +523,15 @@ public:
 
     /// Greater-than-or-equal comparison between two string_views.
     [[nodiscard]] friend constexpr bool operator>=(string_view lhs, string_view rhs) { return lhs.compare(rhs) >= 0; }
+
+    // hashing
+public:
+    /// Structural hash over the viewed bytes (XXH3-64). Equal content hashes equally to cc::string, so a
+    /// string_view can be used for heterogeneous lookup in a string-keyed map.
+    [[nodiscard]] friend u64 hash(string_view v)
+    {
+        return cc::make_hash_of_bytes(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(v.data()), v.size()));
+    }
 
     // members
 private:

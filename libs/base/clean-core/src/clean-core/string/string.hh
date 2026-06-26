@@ -706,6 +706,10 @@ public:
     /// Complexity: O(size()).
     [[nodiscard]] bool operator==(string const& rhs) const { return string_view(*this) == string_view(rhs); }
 
+    /// Structural hash over the bytes; delegates to string_view so equal content hashes equally
+    /// regardless of SSO vs heap storage (and matches a string_view of the same content).
+    [[nodiscard]] friend u64 hash(string const& s) { return hash(string_view(s)); }
+
     /// Checks if this string starts with the given prefix.
     /// Returns true if the string begins with the prefix.
     /// Complexity: O(prefix.size()).

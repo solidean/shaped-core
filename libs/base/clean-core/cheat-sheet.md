@@ -228,7 +228,10 @@ cc::combine_hash(a, b);                    // u64 ordered 2->1 join (wyhash mul-
 cc::combine_hash_unordered(a, b);          // u64 = a + b; commutative; inputs MUST be make_hash_finalized
 cc::hash_finalize(x);                      // u64 bijective avalanche (moremur)
 cc::make_hash_of_bytes(bytes, seed=0);     // u64 XXH3-64 of a span<byte const>
+cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold over a range (ordered / set-like)
 // customize a type: 'friend u64 hash(T const&)' (common) OR specialize cc::custom::hash_trait<T> (override; rare)
+// built-in: string/string_view (bytes, equal across both); vector/array/span/fixed_array/pair/optional (structural);
+//           unique_* containers structural; unique_ptr by pointer identity
 
 #include <clean-core/common/hash128.hh>
 cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)

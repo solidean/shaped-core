@@ -1,7 +1,6 @@
 #pragma once
 
-#include <clean-core/container/span.hh>
-#include <clean-core/fwd.hh>
+#include <clean-core/fwd.hh> // cc::span is used only by-declaration below; span.hh would cycle (it hashes)
 #include <clean-core/math/bit.hh>
 #include <clean-core/math/wide_arith.hh>
 
@@ -173,4 +172,36 @@ inline constexpr detail::make_hash_fn make_hash{};
 
 /// Finalized hash = hash_finalize(make_hash(...)). Use for stand-alone keys and container hashes.
 inline constexpr detail::make_hash_finalized_fn make_hash_finalized{};
+
+/// Structural, ORDER-dependent hash of a range (the building block for sequence containers: vector,
+/// array, span, …). Folds each element's make_hash through combine_hash and mixes in the element count so
+/// different lengths — and the empty range — stay distinct. Composable (not finalized).
+template <class Range>
+[[nodiscard]] constexpr u64 make_hash_range(Range const& range)
+{
+    u64 h = 0;
+    u64 n = 0;
+    for (auto const& e : range)
+    {
+        h = cc::combine_hash(h, cc::make_hash(e));
+        ++n;
+    }
+    return cc::combine_hash(h, n);
+}
+
+/// Structural, ORDER-INDEPENDENT hash of a range (for content-keyed containers: set, map). Sums each
+/// element's finalized hash — commutative, so iteration order does not matter — then mixes in the count.
+/// Elements are finalized first because addition is linear (raw hashes would cancel). Composable.
+template <class Range>
+[[nodiscard]] constexpr u64 make_hash_range_unordered(Range const& range)
+{
+    u64 acc = 0;
+    u64 n = 0;
+    for (auto const& e : range)
+    {
+        acc = cc::combine_hash_unordered(acc, cc::make_hash_finalized(e));
+        ++n;
+    }
+    return cc::combine_hash(acc, n);
+}
 } // namespace cc

@@ -67,6 +67,9 @@ public:
     array(array const&) = default;
     array& operator=(array const&) = default;
 
+    /// Structural, order-dependent hash over the elements (independent of capacity / memory resource).
+    [[nodiscard]] friend u64 hash(array const& v) { return cc::make_hash_range(v); }
+
     friend base;
 
 private:

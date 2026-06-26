@@ -159,6 +159,7 @@ add_executable(clean-core-test
     tests/fixed-array-test.cc
     tests/function_ref-test.cc
     tests/hash-test.cc
+    tests/hash-types-test.cc
     tests/hash128-test.cc
     tests/invocable-test.cc
     tests/macros-test.cc
