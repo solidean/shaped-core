@@ -23,6 +23,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from . import console
 from . import targets as targets_mod
 from .logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from .models import Preset
@@ -131,9 +132,11 @@ def test(
             wasm_env = emsdk_env(emsdk_path)
             if wasm_env is None:
                 print(
-                    f"WARNING: emsdk not found for preset {preset.name!r}; "
-                    f"running with the inherited environment (node may be missing). "
-                    f"Pass --emsdk-path or activate emsdk.",
+                    console.yellow(
+                        f"WARNING: emsdk not found for preset {preset.name!r}; "
+                        f"running with the inherited environment (node may be missing). "
+                        f"Pass --emsdk-path or activate emsdk."
+                    ),
                     file=sys.stderr,
                 )
             else:
@@ -187,7 +190,7 @@ def test(
             # With a name filter, "no matching tests in this binary" isn't a failure.
             if test_name and not result.ok and _selected_no_tests(result.stderr_log):
                 if verbose:
-                    print(f"  {name}: no tests match {test_name!r}, skipping")
+                    print(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
                 continue
 
             summary = None

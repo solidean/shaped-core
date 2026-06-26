@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import cmake, fingerprint, targets
+from . import cmake, console, fingerprint, targets
 from .logs import step_fields, write_sidecar
 from .models import Preset, StepResult
 from .process import env_for_preset, run_step
@@ -91,7 +91,7 @@ def configure(
     for preset in presets:
         if not force and fingerprint.is_current(preset.build_dir, root):
             print(
-                f"configure: fingerprint unchanged for {preset.name!r}, skipping",
+                console.dim(f"configure: fingerprint unchanged for {preset.name!r}, skipping"),
                 file=sys.stderr,
             )
             continue

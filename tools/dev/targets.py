@@ -10,6 +10,7 @@ authoritative source for "what got built and where".
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from .models import Target
@@ -117,3 +118,45 @@ def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
 def executables(targets: list[Target]) -> list[Target]:
     """Filter to executable targets only."""
     return [t for t in targets if t.kind == "EXECUTABLE"]
+
+
+def select_test_binaries(
+    all_targets: list[Target],
+    *,
+    is_test: Callable[[Target], bool],
+    wanted_names: list[str] | None = None,
+    name_arg: str | None = None,
+    target_label: object = None,
+) -> tuple[list[str], str | None, str | None]:
+    """Pick which test binaries to run and the optional test-name filter.
+
+    Three modes, in order: `wanted_names` (from --target) selects matching
+    executables, keeping `name_arg` as a test-name filter across them; a
+    `name_arg` that names a binary runs just that one; otherwise `name_arg` is a
+    name filter applied across every `is_test` binary. Returns
+    `(binary_names, test_name, error)` — `error` is a message string when nothing
+    matched (the caller decides how to surface it), else None.
+    """
+    test_targets = [t for t in all_targets if is_test(t)]
+    exes = executables(all_targets)
+
+    if wanted_names is not None:
+        wanted = set(wanted_names)
+        names = [t.name for t in exes if t.name in wanted]
+        if not names:
+            return [], None, f"No test binary matches --target {target_label}"
+        return names, name_arg, None
+
+    if name_arg:
+        named = next((t for t in exes if t.name == name_arg), None)
+        if named is not None:
+            return [named.name], None, None
+        names = [t.name for t in test_targets]
+        if not names:
+            return [], None, "No test binaries found (expected '*-test' executables)"
+        return names, name_arg, None
+
+    names = [t.name for t in test_targets]
+    if not names:
+        return [], None, "No test binaries found (expected '*-test' executables)"
+    return names, None, None
