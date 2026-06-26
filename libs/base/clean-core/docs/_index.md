@@ -30,6 +30,8 @@ clean-core/
 
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers
   clean-core is allowed to depend on directly, and why.
+- [customization-points](customization-points.md) — the `cc::custom::` trait +
+  hidden-friend protocol that operations like hashing use to let types opt in.
 
 Add further deep-dive docs here as kebab-case `.md` files and link them from this
 list.

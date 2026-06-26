@@ -52,6 +52,7 @@ target_sources(clean-core
 
     src/clean-core/math/bit.hh
     src/clean-core/math/random.hh
+    src/clean-core/math/wide_arith.hh
 
     src/clean-core/memory/allocation.hh
     src/clean-core/memory/node_allocation.hh
@@ -157,6 +158,7 @@ add_executable(clean-core-test
     tests/bit-test.cc
     tests/fixed-array-test.cc
     tests/function_ref-test.cc
+    tests/hash-test.cc
     tests/hash128-test.cc
     tests/invocable-test.cc
     tests/macros-test.cc
@@ -174,6 +176,7 @@ add_executable(clean-core-test
     tests/unique_ptr-test.cc
     tests/utility-test.cc
     tests/vector-test.cc
+    tests/wide_arith-test.cc
 )
 
 target_link_libraries(clean-core-test
