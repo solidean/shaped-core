@@ -5,6 +5,7 @@ namespace nx::config
 struct cfg
 {
     bool enabled = true;
+    bool manual = false;
     int seed = 0;
 };
 
@@ -12,6 +13,15 @@ constexpr struct
 {
     void apply(cfg& result) const { result.enabled = false; }
 } disabled;
+
+// A manual test never runs as part of an automatic sweep — not by default, and not via a "run disabled too"
+// bulk request either. It runs only when explicitly targeted (a non-wildcard filter that names it) or when
+// the runner is put in manual mode via --manual. Intended for benchmarks and tests that open windows or are
+// otherwise incompatible with unattended execution.
+constexpr struct
+{
+    void apply(cfg& result) const { result.manual = true; }
+} manual;
 
 constexpr auto seed(int value)
 {

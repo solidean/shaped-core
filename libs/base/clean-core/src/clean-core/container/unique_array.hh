@@ -62,6 +62,9 @@ public:
     unique_array(unique_array const&) = delete;
     unique_array& operator=(unique_array const&) = delete;
 
+    /// Structural, order-dependent hash over the elements (it's unique_ for ownership, not identity).
+    [[nodiscard]] friend u64 hash(unique_array const& v) { return cc::make_hash_range(v); }
+
     friend base;
 
 private:

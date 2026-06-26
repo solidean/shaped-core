@@ -35,6 +35,8 @@ else()
 endif()
 
 # Third-party code: silence its warnings, hide its symbols (statically absorbed).
+# (RelWithDebInfo /Ob2 is applied project-wide in the root CMakeLists; mimalloc measured ~1.6x faster on
+# small allocations with it, vs xxHash's ~11x — see libs/base/clean-core/docs/benchmarks/.)
 if (MSVC)
     target_compile_options(mimalloc PRIVATE /W0 /Zc:__cplusplus)
 else()

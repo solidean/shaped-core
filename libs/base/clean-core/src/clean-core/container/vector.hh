@@ -149,6 +149,9 @@ public:
 
     using base::extract_allocation; // extract underlying allocation
 
+    /// Structural, order-dependent hash over the elements (independent of capacity / memory resource).
+    [[nodiscard]] friend u64 hash(vector const& v) { return cc::make_hash_range(v); }
+
     friend base;
 
 private:

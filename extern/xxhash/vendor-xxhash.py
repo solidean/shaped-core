@@ -3,24 +3,26 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""Vendor mimalloc in-tree at a pinned commit.
+"""Vendor xxHash in-tree at a pinned commit.
 
 shaped-core builds offline and reproducibly, so third-party dependencies live
-in-tree rather than as submodules or fetched-at-configure-time packages. mimalloc
-is shaped-core's first such vendored dependency (see the SC_USE_VENDORED_MIMALLOC
-option in extern/CMakeLists.txt). This script regenerates the vendored copy from
-a pinned upstream commit: it shallow-clones the tag into a transient `.clone/` dir,
-asserts the tag resolves to the pinned hash (the hash is the authority; the tag is
-a human-readable convenience), copies the minimal subset we actually build
-(LICENSE + include/ + src/), and deletes the clone.
+in-tree rather than as submodules or fetched-at-configure-time packages. xxHash
+backs cc::hash128 (the XXH3 128-bit hash; see the SC_USE_VENDORED_XXHASH option
+in extern/CMakeLists.txt). This script regenerates the vendored copy from a
+pinned upstream commit: it shallow-clones the tag into a transient `.clone/`
+dir, asserts the tag resolves to the pinned hash (the hash is the authority; the
+tag is a human-readable convenience), copies the minimal subset we actually
+build, and deletes the clone.
 
-Only `src/static.c` is compiled by our CMake (a single translation unit that
-`#include`s the other `.c` files), but the whole `src/` tree must be on disk for
-those includes to resolve — see the CMakeLists.txt next to this script.
+xxHash keeps its sources flat at the repo root, but we mirror the mimalloc
+layout (include/ + src/) for consistency: xxhash.h -> include/xxhash.h and
+xxhash.c -> src/xxhash.c. Our CMake compiles the single src/xxhash.c TU, which
+only `#include "xxhash.h"`, resolved via the include/ dir.
 
-Re-running is idempotent: the previously vendored files are wiped first, so files
-dropped upstream do not linger. The vendored payload (include/, src/, LICENSE) is
-committed to the repo; this script is only needed to bump or re-vet the version.
+Re-running is idempotent: the previously vendored files are wiped first, so
+files dropped upstream do not linger. The vendored payload (include/, src/,
+LICENSE) is committed to the repo; this script is only needed to bump or re-vet
+the version.
 """
 
 import os
@@ -33,27 +35,27 @@ from pathlib import Path
 # Pinned upstream. The tag is for humans; PIN_HASH is the authority — the clone is
 # rejected unless the tag resolves to exactly this commit. Bump PIN_TAG and PIN_HASH
 # together, only after vetting the new commit.
-REPO_URL = "https://github.com/microsoft/mimalloc"
-PIN_TAG = "v3.3.2"
-PIN_HASH = "30b2d9d89099bee08e9f67a1ffb3e12e7ba45227"
+REPO_URL = "https://github.com/Cyan4973/xxHash"
+PIN_TAG = "v0.8.3"
+PIN_HASH = "e626a72bc2321cd320e953a0ccf1584cad60f363"
 
-# This script lives in extern/mimalloc/ and vendors alongside itself.
+# This script lives in extern/xxhash/ and vendors alongside itself.
 DEST = Path(__file__).resolve().parent
 CLONE = DEST / ".clone"
 
-# What we keep from the upstream tree. Everything else (test/, cmake/, bin/, doc/,
-# ide/, .github/, packaging, ...) is intentionally dropped — we build static.c with
-# our own CMake and never use mimalloc's build/install machinery.
-COPY_FILES = ["LICENSE"]
-COPY_DIRS = ["include", "src"]
+# Upstream-relative source -> vendored destination (relative to DEST). xxHash's
+# sources sit at the repo root; we remap them into include/ + src/ to match the
+# mimalloc layout. Everything else (cli/, tests/, build machinery, docs, the
+# x86 dispatch variant, ...) is intentionally dropped.
+COPY_MAP = {
+    "xxhash.h": "include/xxhash.h",
+    "xxhash.c": "src/xxhash.c",
+    "LICENSE": "LICENSE",
+}
 
-# Within the copied dirs, drop non-source cruft that sweeps in (readme/docs, the
-# Windows ETW manifest + tracing profile). We compile only C/C++ sources.
-EXCLUDE_SUFFIXES = {".md", ".man", ".wprp"}
-
-
-def _ignore_cruft(_dir: str, names: list[str]) -> set[str]:
-    return {n for n in names if Path(n).suffix.lower() in EXCLUDE_SUFFIXES}
+# Everything we own under DEST that a re-vendor must wipe first (so a file dropped
+# upstream does not linger). The script, CMakeLists.txt, and this list itself stay.
+WIPE = ["include", "src", "LICENSE"]
 
 
 def _force_rmtree(path: Path) -> None:
@@ -93,7 +95,7 @@ def main() -> int:
         )
 
     # Wipe the previously vendored payload so dropped-upstream files do not linger.
-    for name in COPY_FILES + COPY_DIRS:
+    for name in WIPE:
         target = DEST / name
         if target.is_dir():
             shutil.rmtree(target)
@@ -101,10 +103,10 @@ def main() -> int:
             target.unlink()
 
     # Copy the minimal subset we build.
-    for name in COPY_DIRS:
-        shutil.copytree(CLONE / name, DEST / name, ignore=_ignore_cruft)
-    for name in COPY_FILES:
-        shutil.copy2(CLONE / name, DEST / name)
+    for src, dst in COPY_MAP.items():
+        dest_path = DEST / dst
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(CLONE / src, dest_path)
 
     _force_rmtree(CLONE)
 
@@ -114,12 +116,8 @@ def main() -> int:
         if p.is_file() and ".clone" not in p.parts
     )
 
-    print(f"\nvendored mimalloc {PIN_TAG} ({PIN_HASH[:12]}): {len(vendored)} files")
+    print(f"\nvendored xxHash {PIN_TAG} ({PIN_HASH[:12]}): {len(vendored)} files")
     print(f"into {DEST.as_posix()}")
-    print(
-        "\nremember: our CMakeLists.txt compiles only src/static.c, but the whole\n"
-        "src/ tree must be committed for its #includes to resolve."
-    )
 
     return 0
 
