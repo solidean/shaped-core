@@ -148,6 +148,7 @@ cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; re
 cc::print(sv);  cc::println("done");             // raw string_view (braces NOT interpreted); println() = just '\n'
 cc::println("{} + {} = {}", 1, 2, 3);            // cc::format string + args (>=1 arg picks the format overload)
 cc::eprint("oops: {}", err);  cc::eprintln();    // stderr variants
+// println/eprintln ALWAYS flush; print/eprint stay buffered (append your own '\n', or call cc::flush()).
 ```
 
 ## Optional & result (fallibility)

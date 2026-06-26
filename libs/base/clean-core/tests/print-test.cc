@@ -32,5 +32,9 @@ TEST("print - overloads resolve and run")
     cc::string const s = "y";
     cc::eprintln(s);
 
+    // flushing
+    cc::flush();
+    cc::eflush();
+
     SUCCEED("all print/println/eprint/eprintln overloads compiled, resolved, and executed");
 }
