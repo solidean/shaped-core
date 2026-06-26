@@ -144,6 +144,58 @@ def summarize_coverage(results: list[dict], root: Path) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# PGO / perf metrics
+# ---------------------------------------------------------------------------
+
+def summarize_perf(metrics: list[dict]) -> None:
+    """Print a baseline -> PGO delta table (per metric, oriented % change).
+
+    ASCII-only: dev.py output is captured/redisplayed through Windows consoles
+    (cp1252), where arrow/dot glyphs turn to mojibake. The signed % and the
+    green/red coloring carry the direction.
+    """
+    if not metrics:
+        print(console.yellow("  no comparable metrics (did the guide benchmarks record any?)"), file=sys.stderr)
+        return
+
+    name_w = max((len(f"{m['test']} | {m['name']}") for m in metrics), default=10)
+    for m in metrics:
+        label = f"{m['test']} | {m['name']}"
+        delta = m["delta_pct"]
+        color = console.green if delta > 0 else (console.red if delta < 0 else console.dim)
+        line = (
+            f"  {label:<{name_w}}  {m['baseline']:>10.2f} -> {m['pgo']:>10.2f} {m['unit']:<8} "
+            f"{delta:+.1f}%"
+        )
+        print(color(line), file=sys.stderr)
+
+
+def summarize_pgo(result: dict, root: Path) -> bool:
+    """Print the PGO outcome (and, when present, the measure delta table). True if ok."""
+    if not result.get("ok"):
+        stage = result.get("stage", "?")
+        print(console.red(f"\nPGO FAILED at stage: {stage}"), file=sys.stderr)
+        return False
+
+    train = result.get("train")
+    if train:
+        print(
+            console.green(f"\nPGO profile built from {train['profraw_count']} profraw file(s): "
+                          f"{rel(Path(train['profile']), root)}"),
+            file=sys.stderr,
+        )
+
+    measure = result.get("measure")
+    if measure is not None:
+        print(
+            console.bold(f"\nPGO speedup [{measure['baseline_preset']} -> {measure['pgo_preset']}]:"),
+            file=sys.stderr,
+        )
+        summarize_perf(measure["metrics"])
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 

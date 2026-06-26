@@ -26,16 +26,25 @@ Public API:
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
 
 from . import targets as targets_mod
+from .llvm_tools import find_tool, resolve_tool
 from .logs import step_fields, write_sidecar
 from .models import Preset, StepResult
 from .process import run_step
 from .test import test as run_tests
+
+__all__ = [
+    "CoverageToolError",
+    "coverage_merge",
+    "coverage_report",
+    "coverage_run",
+    "find_tool",
+    "resolve_tool",
+]
 
 # llvm-cov regex matching files to drop from the report. Separator-agnostic so it
 # works with Windows backslash paths too: we measure library sources, not the
@@ -47,50 +56,8 @@ _METRICS = ("lines", "functions", "regions", "branches")
 
 
 # ---------------------------------------------------------------------------
-# Tool resolution
+# Tool resolution (find_tool / resolve_tool live in llvm_tools, shared with pgo)
 # ---------------------------------------------------------------------------
-
-def find_tool(name: str, env_var: str) -> str | None:
-    """Locate an llvm-* tool by env override then PATH (no build dir needed).
-
-    `env_var` (e.g. LLVM_COV) wins if set, so a user can pin a specific install;
-    otherwise PATH is searched. Returns the resolved path/command or None.
-    """
-    override = os.environ.get(env_var)
-    if override:
-        return override
-    return shutil.which(name)
-
-
-def _compiler_from_cache(build_dir: Path) -> str | None:
-    cache = build_dir / "CMakeCache.txt"
-    try:
-        for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("CMAKE_CXX_COMPILER:"):
-                return line.partition("=")[2].strip()
-    except OSError:
-        return None
-    return None
-
-
-def resolve_tool(name: str, env_var: str, build_dir: Path) -> str | None:
-    """Like find_tool, but also looks beside the configured compiler.
-
-    On Windows clang-cl and llvm-cov/llvm-profdata ship in the same LLVM bin/
-    that often isn't on PATH; falling back to the compiler's directory keeps the
-    versions matched (llvm-cov must match the clang that built the binaries).
-    """
-    found = find_tool(name, env_var)
-    if found:
-        return found
-    cxx = _compiler_from_cache(build_dir)
-    if cxx:
-        exe = name + (".exe" if os.name == "nt" else "")
-        cand = Path(cxx).parent / exe
-        if cand.is_file():
-            return str(cand)
-    return None
-
 
 class CoverageToolError(Exception):
     """Raised when llvm-profdata / llvm-cov cannot be located."""

@@ -15,6 +15,7 @@ Usage:
     uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
     uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, crossrefs, test)
     uv run dev.py coverage run [NAME]       Collect LLVM test coverage (run/merge/report)
+    uv run dev.py pgo run                    Profile-guided optimization (instrument/train/optimize/measure)
     uv run dev.py clean [--all]             Remove build artifacts
     uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
     uv run dev.py doctor                    Sanity-check the toolchain
@@ -103,6 +104,25 @@ COVERAGE_BUILD_PRESETS: dict[str, str] = {
     "Windows": "coverage-clang",
     "Linux": "coverage-linux-clang",
     "Darwin": "coverage-macos-arm-llvm",
+}
+
+# PGO presets per platform: the instrumented (-fprofile-generate) and optimized
+# (-fprofile-use) Release builds, plus the clean Release baseline the speedup is
+# measured against. `pgo` uses these when no --preset is given.
+PGO_GENERATE_PRESETS: dict[str, str] = {
+    "Windows": "pgo-generate-clang",
+    "Linux": "pgo-generate-linux-clang",
+    "Darwin": "pgo-generate-macos-arm-llvm",
+}
+PGO_USE_PRESETS: dict[str, str] = {
+    "Windows": "pgo-use-clang",
+    "Linux": "pgo-use-linux-clang",
+    "Darwin": "pgo-use-macos-arm-llvm",
+}
+PGO_BASELINE_PRESETS: dict[str, str] = {
+    "Windows": "release-clang",
+    "Linux": "release-linux-clang",
+    "Darwin": "macos-arm-llvm-release",
 }
 
 # Default preset for `test-web` (the browser runner is Emscripten-only, regardless of host platform).
@@ -662,6 +682,112 @@ def cmd_coverage_merge(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# PGO (profile-guided optimization)
+# ---------------------------------------------------------------------------
+
+def _platform_preset(table: dict[str, str], what: str) -> dev.Preset:
+    name = table.get(platform.system())
+    if name is None:
+        die(f"No default {what} preset for {platform.system()!r}. Use --preset.")
+    return resolve_presets([name])[0]
+
+
+def _pgo_presets(args: argparse.Namespace) -> tuple[dev.Preset, dev.Preset, dev.Preset]:
+    """Resolve (generate, use, baseline) presets. --preset overrides the generate/use pair."""
+    if args.preset:
+        gen = resolve_presets(args.preset)[0]
+        # Derive the matching use preset from the generate name (…-generate… → …-use…).
+        use = resolve_presets([gen.name.replace("generate", "use")])[0]
+    else:
+        gen = _platform_preset(PGO_GENERATE_PRESETS, "pgo-generate")
+        use = _platform_preset(PGO_USE_PRESETS, "pgo-use")
+    baseline = _platform_preset(PGO_BASELINE_PRESETS, "pgo baseline")
+    return gen, use, baseline
+
+
+def _pgo_binary_names(preset: dev.Preset) -> list[str]:
+    """Test binaries to drive (every *-test); guide-benchmark-less ones simply no-op."""
+    return [t.name for t in _discover(preset) if _is_test_target(t)]
+
+
+def cmd_pgo(args: argparse.Namespace) -> None:
+    match args.pgo_cmd:
+        case "run":
+            cmd_pgo_run(args)
+        case "instrument":
+            cmd_pgo_instrument(args)
+        case "train":
+            cmd_pgo_train(args)
+        case "optimize":
+            cmd_pgo_optimize(args)
+        case "measure":
+            cmd_pgo_measure(args)
+        case _:  # argparse 'required=True' should prevent this.
+            die(f"unknown pgo subcommand {args.pgo_cmd!r}")
+
+
+def cmd_pgo_instrument(args: argparse.Namespace) -> None:
+    gen, _use, _base = _pgo_presets(args)
+    results = dev.pgo_instrument(gen, root=ROOT, mirror=args.mirror_output, verbose=args.verbose)
+    if not all(r.ok for r in results):
+        _fail_build(results, [gen])
+    print(console.green(f"Instrumented build ready: {gen.name}"), file=sys.stderr)
+    sys.exit(0)
+
+
+def cmd_pgo_train(args: argparse.Namespace) -> None:
+    gen, _use, _base = _pgo_presets(args)
+    binaries = _pgo_binary_names(gen)
+    try:
+        result = dev.pgo_train(
+            gen, binaries, root=ROOT, timeout=args.timeout if args.timeout else None,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+    except dev.PgoError as e:
+        die(str(e))
+    sys.exit(0 if dev.report.summarize_pgo({"ok": result["ok"], "train": result, "measure": None}, ROOT) else 1)
+
+
+def cmd_pgo_optimize(args: argparse.Namespace) -> None:
+    _gen, use, _base = _pgo_presets(args)
+    try:
+        results = dev.pgo_optimize(use, root=ROOT, mirror=args.mirror_output, verbose=args.verbose)
+    except dev.PgoError as e:
+        die(str(e))
+    if not all(r.ok for r in results):
+        _fail_build(results, [use])
+    print(console.green(f"Optimized (PGO) build ready: {use.name}"), file=sys.stderr)
+    sys.exit(0)
+
+
+def cmd_pgo_measure(args: argparse.Namespace) -> None:
+    _gen, use, baseline = _pgo_presets(args)
+    binaries = _pgo_binary_names(use)
+    try:
+        result = dev.pgo_measure(
+            baseline, use, binaries, root=ROOT, timeout=args.timeout if args.timeout else None,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+    except dev.PgoError as e:
+        die(str(e))
+    sys.exit(0 if dev.report.summarize_pgo({"ok": True, "train": None, "measure": result}, ROOT) else 1)
+
+
+def cmd_pgo_run(args: argparse.Namespace) -> None:
+    gen, use, baseline = _pgo_presets(args)
+    binaries = _pgo_binary_names(gen)
+    try:
+        result = dev.pgo_run(
+            gen, use, baseline, binaries, root=ROOT, measure=not args.no_measure,
+            timeout=args.timeout if args.timeout else None,
+            mirror=args.mirror_output, verbose=args.verbose,
+        )
+    except dev.PgoError as e:
+        die(str(e))
+    sys.exit(0 if dev.report.summarize_pgo(result, ROOT) else 1)
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -777,6 +903,33 @@ def main() -> None:
     _add_preset_arg(cov_report_p)
     cov_report_p.add_argument("--html", action="store_true", help="Also write an llvm-cov HTML report")
 
+    pgo_p = sub.add_parser("pgo", help="Profile-guided optimization (instrument/train/optimize/measure)")
+    pgo_sub = pgo_p.add_subparsers(dest="pgo_cmd", required=True)
+
+    def _add_pgo_timeout(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--timeout", type=float, default=0.0, metavar="SECS",
+                       help="Per-binary timeout in seconds (default: 0 = disabled; benchmarks run long)")
+
+    pgo_run_p = pgo_sub.add_parser("run", help="Full pipeline: instrument -> train -> optimize -> measure")
+    _add_preset_arg(pgo_run_p)
+    _add_pgo_timeout(pgo_run_p)
+    pgo_run_p.add_argument("--no-measure", action="store_true",
+                           help="Stop after the optimized build; skip the baseline-vs-PGO measurement")
+
+    pgo_inst_p = pgo_sub.add_parser("instrument", help="Build the instrumented (-fprofile-generate) preset")
+    _add_preset_arg(pgo_inst_p)
+
+    pgo_train_p = pgo_sub.add_parser("train", help="Run guide benchmarks on the instrumented build, merge profile")
+    _add_preset_arg(pgo_train_p)
+    _add_pgo_timeout(pgo_train_p)
+
+    pgo_opt_p = pgo_sub.add_parser("optimize", help="Build the optimized (-fprofile-use) preset from the profile")
+    _add_preset_arg(pgo_opt_p)
+
+    pgo_meas_p = pgo_sub.add_parser("measure", help="Run guide benchmarks on baseline + PGO and diff metrics")
+    _add_preset_arg(pgo_meas_p)
+    _add_pgo_timeout(pgo_meas_p)
+
     clean_p = sub.add_parser("clean", help="Remove build artifacts")
     _add_preset_arg(clean_p)
     clean_p.add_argument("--all", action="store_true", help="Remove every preset's build directory")
@@ -819,6 +972,8 @@ def main() -> None:
             cmd_check(args)
         case "coverage":
             cmd_coverage(args)
+        case "pgo":
+            cmd_pgo(args)
         case "clean":
             cmd_clean(args)
         case "diagnose":

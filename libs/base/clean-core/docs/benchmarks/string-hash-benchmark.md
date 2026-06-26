@@ -36,10 +36,17 @@ decimals.
 
 ## Reproducing
 
+These full tables are the manual `bench-string-hash (… full sweep)` benchmarks. Lean `GUIDE_BENCHMARK`s of the
+same base names record just the representative points (≈8 B and ≈64 KiB) via `nx::guide` for `dev.py pgo` —
+the full sweep regenerates a multi-MB corpus per length, so it is far slower. Both are excluded from normal
+sweeps; the `"bench-string-hash"` filter matches both — name them explicitly:
+
 ```bash
 uv run dev.py test "bench-string-hash" --target clean-core-test --preset release-clang --timeout 0
 uv run dev.py test "bench-string-hash" --target clean-core-test --preset relwithdebinfo-clang --timeout 0
 ```
+
+See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Hashers
 

@@ -25,6 +25,10 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     bool has_xml_reporter = false;
     bool has_durations = false;
 
+    // Set by --manual / --guide-benchmarks. When a bucket is chosen explicitly, a non-wildcard filter narrows
+    // within that bucket rather than crossing into other buckets.
+    bool explicit_bucket = false;
+
     // Parse command line arguments
     for (int i = 1; i < argc; ++i)
     {
@@ -36,12 +40,19 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             config.verbose = true;
             continue;
         }
-        // Manual mode: restrict the eligible set to manual tests, so wildcard filters can select among them
-        // (e.g. `--manual bench` runs every manual test whose name contains "bench"). Disabled tests stay out.
+        // Manual mode: select the manual bucket, so wildcard filters can select among manual tests (e.g.
+        // `--manual bench` runs every manual test whose name contains "bench"). Disabled tests stay out.
         else if (arg == "--manual")
         {
-            config.only_manual_tests = true;
-            config.run_manual_tests = true;
+            config.selected_bucket = config::test_bucket::manual;
+            explicit_bucket = true;
+            continue;
+        }
+        // Guide-benchmark mode: select the guide_benchmark bucket (the tests that report metrics via nx::guide).
+        else if (arg == "--guide-benchmarks")
+        {
+            config.selected_bucket = config::test_bucket::guide_benchmark;
+            explicit_bucket = true;
             continue;
         }
         // Check for section filter flag
@@ -92,6 +103,13 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
                 config.junit_xml_file = argv[++i];
             continue;
         }
+        // Perf-metrics JSON sidecar (consumed here so the path is not misread as a filter)
+        else if (arg == "--perf-json")
+        {
+            if (i + 1 < argc)
+                config.perf_json_file = argv[++i];
+            continue;
+        }
 
         // Regular filter argument - split by comma for Catch2 compatibility
         cc::isize start = 0;
@@ -122,7 +140,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     }
 
     // A non-wildcard filter names a single test explicitly, which is enough to pull in an otherwise
-    // non-automatic test — both disabled and manual ones (manual mirrors disabled here, see schedule create).
+    // non-automatic test — disabled ones, and (unless a bucket was selected explicitly) tests of any bucket.
     if (!config.filters.empty())
     {
         for (auto const& filter : config.filters)
@@ -130,7 +148,8 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             if (!filter.contains('*'))
             {
                 config.run_disabled_tests = true;
-                config.run_manual_tests = true;
+                if (!explicit_bucket)
+                    config.match_any_bucket = true;
                 break;
             }
         }
@@ -149,27 +168,15 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
 
         auto const& tc = decl.test_config;
 
-        // Eligibility by test status (filters are applied afterwards):
-        //  - --manual: only manual tests are eligible, everything else is excluded.
-        //  - manual tests otherwise run only when explicitly requested (a non-wildcard filter, via run_manual_tests).
-        //  - disabled tests run only when explicitly requested (a non-wildcard filter, via run_disabled_tests).
-        // A bulk "run disabled too" request sets run_disabled_tests but not run_manual_tests, so it never
-        // sweeps manual tests into an automatic run.
-        if (config.only_manual_tests)
-        {
-            if (!tc.manual)
-                continue;
-        }
-        else if (tc.manual)
-        {
-            if (!config.run_manual_tests)
-                continue;
-        }
-        else if (!tc.enabled)
-        {
-            if (!config.run_disabled_tests)
-                continue;
-        }
+        // Eligibility by bucket + disabled status (filters are applied afterwards):
+        //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket is excluded unless
+        //    match_any_bucket is set (a non-wildcard filter without an explicit bucket flag names a test directly).
+        //  - disabled is orthogonal: a disabled test runs only when explicitly requested (run_disabled_tests).
+        if (!config.match_any_bucket && tc.bucket != config.selected_bucket)
+            continue;
+
+        if (!tc.enabled && !config.run_disabled_tests)
+            continue;
 
         // Apply filters if any are provided
         if (!config.filters.empty())

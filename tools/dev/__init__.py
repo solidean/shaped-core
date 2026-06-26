@@ -33,8 +33,19 @@ from .format import (
     run_format,
     violating_files,
 )
+from .llvm_tools import resolve_tool
 from .logs import merge_junit, ninja_built_count
 from .models import Preset, StepResult, Target, TestSummary
+from .perf import run_and_collect as perf_run_and_collect
+from .pgo import (
+    PgoError,
+    pgo_instrument,
+    pgo_measure,
+    pgo_optimize,
+    pgo_run,
+    pgo_train,
+    profile_path,
+)
 from .presets import PresetError, load_presets, resolve_presets
 from .process import emsdk_env, find_emsdk_root
 from .targets import (
@@ -61,6 +72,15 @@ __all__ = [
     "coverage_merge",
     "CoverageToolError",
     "find_tool",
+    "resolve_tool",
+    "PgoError",
+    "pgo_instrument",
+    "pgo_train",
+    "pgo_optimize",
+    "pgo_measure",
+    "pgo_run",
+    "profile_path",
+    "perf_run_and_collect",
     "CrossRefResult",
     "check_crossrefs",
     "doctor",

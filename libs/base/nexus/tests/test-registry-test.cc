@@ -415,7 +415,7 @@ TEST("test registry - manual tests are excluded from automatic and run_disabled 
                             ++counter_normal;
                             SUCCEED();
                         });
-    reg.add_declaration("T_manual", nx::config::cfg{.manual = true},
+    reg.add_declaration("T_manual", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
                         [&]
                         {
                             ++counter_manual;
@@ -438,17 +438,17 @@ TEST("test registry - manual tests are excluded from automatic and run_disabled 
         CHECK(exec.count_total_tests() == 1);
     }
 
-    // run_manual_tests pulls them in (this is what a non-wildcard filter sets).
+    // match_any_bucket pulls them in (this is what a non-wildcard filter sets).
     counter_normal = counter_manual = 0;
     {
-        auto exec = nx::execute_tests(nx::test_schedule::create({.run_manual_tests = true}, reg), {});
+        auto exec = nx::execute_tests(nx::test_schedule::create({.match_any_bucket = true}, reg), {});
         CHECK(counter_normal == 1);
         CHECK(counter_manual == 1);
         CHECK(exec.count_total_tests() == 2);
     }
 }
 
-TEST("test registry - only_manual_tests restricts the eligible set to manual tests")
+TEST("test registry - selected_bucket restricts the eligible set to that bucket")
 {
     nx::test_registry reg;
 
@@ -468,15 +468,16 @@ TEST("test registry - only_manual_tests restricts the eligible set to manual tes
                             ++counter_disabled;
                             SUCCEED();
                         });
-    reg.add_declaration("T_manual", nx::config::cfg{.manual = true},
+    reg.add_declaration("T_manual", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
                         [&]
                         {
                             ++counter_manual;
                             SUCCEED();
                         });
 
-    // --manual mode: only manual tests, even disabled ones stay out.
-    auto exec = nx::execute_tests(nx::test_schedule::create({.only_manual_tests = true}, reg), {});
+    // --manual mode: only the manual bucket, even disabled (normal-bucket) ones stay out.
+    auto exec
+        = nx::execute_tests(nx::test_schedule::create({.selected_bucket = nx::config::test_bucket::manual}, reg), {});
 
     CHECK(counter_normal == 0);
     CHECK(counter_disabled == 0);
@@ -485,52 +486,123 @@ TEST("test registry - only_manual_tests restricts the eligible set to manual tes
     CHECK(exec.count_failed_tests() == 0);
 }
 
+TEST("test registry - guide-benchmark bucket is swept only when selected")
+{
+    nx::test_registry reg;
+
+    int counter_normal = 0;
+    int counter_manual = 0;
+    int counter_guide = 0;
+
+    reg.add_declaration("T_normal", {},
+                        [&]
+                        {
+                            ++counter_normal;
+                            SUCCEED();
+                        });
+    reg.add_declaration("T_manual", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
+                        [&]
+                        {
+                            ++counter_manual;
+                            SUCCEED();
+                        });
+    reg.add_declaration("T_guide", nx::config::cfg{.bucket = nx::config::test_bucket::guide_benchmark},
+                        [&]
+                        {
+                            ++counter_guide; /* no checks: allowed */
+                        });
+
+    // Default sweep: neither manual nor guide benchmarks run.
+    {
+        auto exec = nx::execute_tests(nx::test_schedule::create({}, reg), {});
+        CHECK(counter_normal == 1);
+        CHECK(counter_manual == 0);
+        CHECK(counter_guide == 0);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // --guide-benchmarks mode: only the guide_benchmark bucket, and an empty-CHECK guide benchmark passes.
+    counter_normal = counter_manual = counter_guide = 0;
+    {
+        auto exec = nx::execute_tests(
+            nx::test_schedule::create({.selected_bucket = nx::config::test_bucket::guide_benchmark}, reg), {});
+        CHECK(counter_normal == 0);
+        CHECK(counter_manual == 0);
+        CHECK(counter_guide == 1);
+        CHECK(exec.count_total_tests() == 1);
+        CHECK(exec.count_failed_tests() == 0);
+    }
+}
+
 TEST("test registry - manual test without any CHECK is not a failure")
 {
     nx::test_registry reg;
 
     // A benchmark-style manual test that only "prints" — no CHECK/REQUIRE at all.
-    reg.add_declaration("T_manual_bench", nx::config::cfg{.manual = true}, [] { /* no checks */ });
+    reg.add_declaration("T_manual_bench", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
+                        [] { /* no checks */ });
 
-    auto exec = nx::execute_tests(nx::test_schedule::create({.run_manual_tests = true}, reg), {});
+    auto exec = nx::execute_tests(nx::test_schedule::create({.match_any_bucket = true}, reg), {});
 
     CHECK(exec.count_total_tests() == 1);
     CHECK(exec.count_failed_tests() == 0); // empty manual test is allowed, unlike a normal empty test
 }
 
-TEST("test schedule config - --manual flag and non-wildcard filters")
+TEST("test schedule config - bucket flags and non-wildcard filters")
 {
-    // --manual enables manual mode (eligible set = manual tests).
+    // --manual selects the manual bucket.
     {
         char a0[] = "prog";
         char a1[] = "--manual";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
-        CHECK(cfg.only_manual_tests);
-        CHECK(cfg.run_manual_tests);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::manual);
+        CHECK(!cfg.match_any_bucket);
         CHECK(!cfg.run_disabled_tests);
         CHECK(cfg.filters.empty());
     }
 
-    // A wildcard-only filter does not pull in disabled or manual tests.
+    // --guide-benchmarks selects the guide_benchmark bucket.
+    {
+        char a0[] = "prog";
+        char a1[] = "--guide-benchmarks";
+        char* argv[] = {a0, a1};
+        auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::guide_benchmark);
+        CHECK(!cfg.match_any_bucket);
+    }
+
+    // A wildcard-only filter stays in the normal bucket and does not pull in disabled tests.
     {
         char a0[] = "prog";
         char a1[] = "bench*";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
         CHECK(!cfg.run_disabled_tests);
-        CHECK(!cfg.run_manual_tests);
-        CHECK(!cfg.only_manual_tests);
+        CHECK(!cfg.match_any_bucket);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::normal);
     }
 
-    // A non-wildcard (exact) filter names a single test, enabling both disabled and manual.
+    // A non-wildcard (exact) filter names a single test, matching any bucket and enabling disabled.
     {
         char a0[] = "prog";
         char a1[] = "T_manual_bench";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
         CHECK(cfg.run_disabled_tests);
-        CHECK(cfg.run_manual_tests);
-        CHECK(!cfg.only_manual_tests);
+        CHECK(cfg.match_any_bucket);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::normal);
+    }
+
+    // A non-wildcard filter with an explicit bucket flag stays restricted to that bucket.
+    {
+        char a0[] = "prog";
+        char a1[] = "--manual";
+        char a2[] = "T_manual_bench";
+        char* argv[] = {a0, a1, a2};
+        auto const cfg = nx::test_schedule_config::create_from_args(3, argv);
+        CHECK(cfg.selected_bucket == nx::config::test_bucket::manual);
+        CHECK(!cfg.match_any_bucket);
+        CHECK(cfg.run_disabled_tests);
     }
 }

@@ -6,6 +6,7 @@
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
+#include <nexus/tests/export/perf_json.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
@@ -86,6 +87,14 @@ int nx::run(int argc, char** argv)
     // Check if any tests were scheduled
     if (schedule.instances.empty())
     {
+        // A guide-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
+        // --guide-benchmarks across every test binary, and most contain no guide benchmarks.
+        if (config.selected_bucket == nx::config::test_bucket::guide_benchmark)
+        {
+            std::cout << "No guide benchmarks in this binary\n";
+            return 0;
+        }
+
         std::cerr << "Error: The current schedule did not select any tests\n";
         for (int i = 0; i < argc; ++i)
         {
@@ -114,11 +123,44 @@ int nx::run(int argc, char** argv)
             std::cerr << "Error: could not open JUnit XML file: " << as_sv(config.junit_xml_file) << "\n";
     }
 
+    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::guide). Also additive.
+    if (!config.perf_json_file.empty())
+    {
+        std::ofstream out(config.perf_json_file.c_str_materialize());
+        if (out)
+            write_to(out, write_perf_json(program_name(argv[0]), execution));
+        else
+            std::cerr << "Error: could not open perf JSON file: " << as_sv(config.perf_json_file) << "\n";
+    }
+
     // Handle Catch2 XML results reporting for TestMate integration
     if (config.report_catch2_xml_results)
     {
         write_to(std::cout, write_catch2_results_xml(execution));
         return execution.count_failed_tests() > 0 ? 1 : 0;
+    }
+
+    // Print any metrics recorded via nx::guide (guide benchmarks). Console-only mirror of the perf JSON sidecar.
+    {
+        bool has_metrics = false;
+        for (auto const& exec : execution.executions)
+            if (!exec.metrics.empty())
+            {
+                has_metrics = true;
+                break;
+            }
+
+        if (has_metrics)
+        {
+            std::cout << "\nRecorded metrics:\n";
+            for (auto const& exec : execution.executions)
+                for (auto const& metric : exec.metrics)
+                {
+                    char const* const dir = metric.higher_is_better ? "(higher is better)" : "(lower is better)";
+                    std::cout << "  " << as_sv(exec.instance.declaration->name) << " | " << as_sv(metric.name) << " = "
+                              << metric.value << " " << as_sv(metric.unit) << " " << dir << "\n";
+                }
+        }
     }
 
     // Check for failures

@@ -189,8 +189,9 @@ void test_execute_end()
     auto& ctx = g_context_stack.back();
     CC_ASSERT(ctx.execution != nullptr, "should always have a valid execution");
 
-    // Manual tests (benchmarks etc.) may legitimately contain no CHECK/REQUIRE — don't flag that as failure.
-    bool const require_checks = !ctx.execution->instance.declaration->test_config.manual;
+    // Only normal tests must contain a CHECK/REQUIRE; manual tests and guide benchmarks may legitimately
+    // have none — don't flag that as failure.
+    bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal;
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
 
     g_context_stack.remove_back();
@@ -325,6 +326,18 @@ nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
 nx::impl::scoped_check_capture::~scoped_check_capture()
 {
     g_check_capture = nullptr;
+}
+
+void nx::impl::record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better)
+{
+    if (g_context_stack.empty())
+        return; // no active test — recording is a no-op outside a test body
+
+    auto* const execution = g_context_stack.back().execution;
+    if (execution == nullptr)
+        return;
+
+    execution->metrics.push_back(nx::recorded_metric{cc::string(name), value, cc::string(unit), higher_is_better});
 }
 
 void nx::impl::report_check_result(check_kind kind,

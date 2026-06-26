@@ -17,7 +17,8 @@
 // `as_bytes` is force-inlined so the only difference between the wrapper and raw columns is the wrapper's own
 // out-of-line call, not benchmark plumbing (under /Ob1 an unmarked helper would itself stay out-of-line).
 //
-// Manual test (nx::config::manual): prints only, no CHECK. Run e.g.
+// Guide benchmark (GUIDE_BENCHMARK): prints a full table, and records a few representative throughput points
+// (≈8 B and ≈64 KiB) via nx::guide for the PGO speedup report. Run e.g.
 //   uv run dev.py test "bench-hash" --target clean-core-test --preset release-clang --timeout 0
 
 #include "bench_util.hh"
@@ -29,6 +30,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/string/string.hh>
+#include <nexus/guide.hh>
 #include <nexus/test.hh>
 #include <xxhash.h>
 
@@ -43,14 +46,28 @@ CC_FORCE_INLINE cc::span<cc::byte const> as_bytes(char const* p, size_t n)
     return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(p), isize(n));
 }
 
-void run()
+// Sweeps `lengths`, printing one throughput row each. When `record`, the points nearest 8 B and 64 KiB are
+// also reported as guide metrics — pass the representative-only lengths for a fast guide benchmark, or the
+// full sweep (record=false) for the human analysis table.
+void run(cc::span<isize const> lengths, bool record)
 {
-    auto const lengths = bench::hash_lengths();
     cc::random rng(0xABCDEFu);
 
     std::printf("\n=== byte hash throughput (GB/s) — distinct keys ===\n");
     std::printf("%8s %12s %12s %12s %12s\n", "length", "hob64", "hash128", "xxh64", "xxh128");
     std::printf("%8s %12s %12s %12s %12s\n", "------", "-----", "-------", "-----", "------");
+
+    // Track the sweep point nearest each target length so the recorded metrics are stable regardless of the
+    // exact sweep membership. Values are filled in below and reported after the loop.
+    struct rep_point
+    {
+        isize target;
+        char const* label;
+        isize best_len = -1;
+        double hob = 0, h128 = 0, x64 = 0, x128 = 0;
+    };
+    rep_point reps[] = {{8, "8B"}, {64 * 1024, "64KiB"}};
+    auto const dist = [](isize a, isize b) { return a > b ? a - b : b - a; };
 
     for (isize const length : lengths)
     {
@@ -93,12 +110,36 @@ void run()
             });
 
         std::printf("%8lld %12.2f %12.2f %12.2f %12.2f\n", (long long)length, g_hob, g_h128, g_x64, g_x128);
+
+        for (auto& r : reps)
+            if (r.best_len < 0 || dist(length, r.target) < dist(r.best_len, r.target))
+                r = {r.target, r.label, length, g_hob, g_h128, g_x64, g_x128};
     }
     std::fflush(stdout);
+
+    if (record)
+        for (auto const& r : reps)
+        {
+            nx::guide::report_raw(cc::string("hob64@") + r.label, r.hob, "GB/s", true);
+            nx::guide::report_raw(cc::string("hash128@") + r.label, r.h128, "GB/s", true);
+            nx::guide::report_raw(cc::string("xxh64@") + r.label, r.x64, "GB/s", true);
+            nx::guide::report_raw(cc::string("xxh128@") + r.label, r.x128, "GB/s", true);
+        }
 }
+
+// The representative lengths the guide benchmark sweeps: one short key (8 B) and one long (64 KiB), matching
+// the points reported as metrics. Far faster than the full sweep while still exercising both hash code paths.
+constexpr isize guide_lengths[] = {8, 64 * 1024};
 } // namespace
 
-TEST("bench-hash (xxh3 64/128, raw vs wrapper)", nx::config::manual)
+// Lean guide benchmark: just the representative lengths, recorded for the PGO speedup report.
+GUIDE_BENCHMARK("bench-hash (xxh3 64/128, raw vs wrapper)")
 {
-    run();
+    run(guide_lengths, /*record*/ true);
+}
+
+// Full human-facing sweep (manual): the complete length table the docs analyze. Run by exact name.
+TEST("bench-hash (xxh3 64/128, raw vs wrapper, full sweep)", nx::config::manual)
+{
+    run(bench::hash_lengths(), /*record*/ false);
 }
