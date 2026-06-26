@@ -70,12 +70,16 @@ decimals.
 
 ## Reproducing
 
-Manual tests (`nx::config::manual`), excluded from normal sweeps — name them explicitly:
+This full table is the manual `bench-hash (… full sweep)` benchmark. A lean `GUIDE_BENCHMARK` of the same
+base name records just the representative points (≈8 B and ≈64 KiB) via `nx::guide` for `dev.py pgo`. Both are
+excluded from normal sweeps; the `"bench-hash"` filter matches both — name them explicitly:
 
 ```bash
 uv run dev.py test "bench-hash" --target clean-core-test --preset release-clang --timeout 0
 uv run dev.py test "bench-hash" --target clean-core-test --preset relwithdebinfo-clang --timeout 0
 ```
+
+See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Results
 

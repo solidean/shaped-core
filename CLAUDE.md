@@ -270,6 +270,8 @@ how to write one (keep it current when public API changes).
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
+| Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
+| Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |

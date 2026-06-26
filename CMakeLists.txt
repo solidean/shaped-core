@@ -14,6 +14,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 # instrumented. Each is a no-op unless its driving option/preset is active.
 include(Coverage)     # SC_COVERAGE  — LLVM source-based test coverage
 include(Sanitizers)   # SANITIZE     — ASan/UBSan wiring (clang only)
+include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (clang only)
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1

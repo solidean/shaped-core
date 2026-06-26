@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 from . import clangd
-from .coverage import find_tool, resolve_tool
+from .llvm_tools import find_tool, resolve_tool
 from .presets import PresetError, load_presets
 from .process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
 
@@ -177,7 +177,7 @@ def _coverage_tool_check(
     resolved = resolve_tool(name, env_var, build_dir) if build_dir else find_tool(name, env_var)
     if resolved is None:
         return (label, False,
-                f"not found (needed for `dev.py coverage`; install LLVM or set {env_var})")
+                f"not found (needed for `dev.py coverage` / `dev.py pgo`; install LLVM or set {env_var})")
     try:
         out = subprocess.run([resolved, "--version"], capture_output=True, text=True, timeout=15)
         ver = next((ln.strip() for ln in out.stdout.splitlines() if "version" in ln.lower()), resolved)
@@ -277,7 +277,7 @@ def doctor(
     except PresetError as e:
         checks.append(("presets parse", False, str(e)))
 
-    # Coverage toolchain (llvm-profdata / llvm-cov), needed for `dev.py coverage`.
+    # LLVM toolchain (llvm-profdata / llvm-cov), needed for `dev.py coverage` and `dev.py pgo`.
     checks.append(_coverage_tool_check("llvm-profdata", "llvm-profdata", "LLVM_PROFDATA", cov_build_dir))
     checks.append(_coverage_tool_check("llvm-cov", "llvm-cov", "LLVM_COV", cov_build_dir))
 

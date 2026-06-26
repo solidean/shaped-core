@@ -209,6 +209,66 @@
             }
         },
         {
+            "name": "x64-windows-clang-ninja-pgo-generate",
+            "displayName": "PGO Generate Clang (Ninja, Windows)",
+            "description": "Release build instrumented for PGO profile generation",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_PGO_GENERATE": "ON"
+            }
+        },
+        {
+            "name": "x64-windows-clang-ninja-pgo-use",
+            "displayName": "PGO Use Clang (Ninja, Windows)",
+            "description": "Release build optimized with a collected PGO profile",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_PGO_USE": "ON"
+            }
+        },
+        {
+            "name": "x64-linux-clang-ninja-pgo-generate",
+            "displayName": "PGO Generate Clang (Ninja, Linux)",
+            "description": "Release build instrumented for PGO profile generation",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_PGO_GENERATE": "ON"
+            }
+        },
+        {
+            "name": "x64-linux-clang-ninja-pgo-use",
+            "displayName": "PGO Use Clang (Ninja, Linux)",
+            "description": "Release build optimized with a collected PGO profile",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_PGO_USE": "ON"
+            }
+        },
+        {
+            "name": "macos-arm-llvm-pgo-generate",
+            "displayName": "PGO Generate Clang (macOS ARM)",
+            "description": "Release build instrumented for PGO profile generation",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_PGO_GENERATE": "ON"
+            }
+        },
+        {
+            "name": "macos-arm-llvm-pgo-use",
+            "displayName": "PGO Use Clang (macOS ARM)",
+            "description": "Release build optimized with a collected PGO profile",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_PGO_USE": "ON"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-sanitize-address-undefined",
             "displayName": "Sanitize Address+Undefined Clang (Ninja, Windows)",
             "description": "Debug build with address and undefined behavior sanitizers",
@@ -411,6 +471,30 @@
         {
             "name": "coverage-macos-arm-llvm",
             "configurePreset": "macos-arm-llvm-coverage"
+        },
+        {
+            "name": "pgo-generate-clang",
+            "configurePreset": "x64-windows-clang-ninja-pgo-generate"
+        },
+        {
+            "name": "pgo-use-clang",
+            "configurePreset": "x64-windows-clang-ninja-pgo-use"
+        },
+        {
+            "name": "pgo-generate-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-pgo-generate"
+        },
+        {
+            "name": "pgo-use-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-pgo-use"
+        },
+        {
+            "name": "pgo-generate-macos-arm-llvm",
+            "configurePreset": "macos-arm-llvm-pgo-generate"
+        },
+        {
+            "name": "pgo-use-macos-arm-llvm",
+            "configurePreset": "macos-arm-llvm-pgo-use"
         },
         {
             "name": "sanitize-clang",

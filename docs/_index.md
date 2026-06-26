@@ -21,6 +21,8 @@ See [guides/_index.md](guides/_index.md) for the full list. Most useful:
   `repo_tools` diagnostics.
 - [guides/cheat-sheets.md](guides/cheat-sheets.md) — the per-library API cheat-sheet format and
   where the sheets live.
+- [guides/pgo.md](guides/pgo.md) — profile-guided optimization (`dev.py pgo`) and
+  [guides/perf-results.md](guides/perf-results.md) — guide benchmarks + the `.perf.json` contract.
 - [guides/postmortem.md](guides/postmortem.md) — the session friction review (`/postmortem`).
 
 ## Per-library docs

@@ -10,12 +10,16 @@
 // hot malloc/free are force-inlined upstream. The project-wide /Ob2 promotion (root CMakeLists) covers it.
 // See libs/base/clean-core/docs/benchmarks/allocation-benchmark.md.
 //
-// Manual test (nx::config::manual): prints only, no CHECK.
+// Guide benchmark (GUIDE_BENCHMARK): prints the table and records mimalloc/system throughput at 64 B and
+// 4 KiB via nx::guide for the PGO speedup report.
 
 #include "bench_util.hh"
 
+#include <clean-core/container/span.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/string/string.hh>
+#include <nexus/guide.hh>
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -61,9 +65,11 @@ double mops(cc::memory_resource const& res, isize size, isize align)
     return ops_per_sec / 1e6;
 }
 
-void run()
+// Sweeps `sizes`, printing one mimalloc/system row each. When `record`, the 64 B and 4 KiB points are also
+// reported as guide metrics — pass the representative-only sizes for a fast guide benchmark, or the full set
+// (record=false) for the human analysis table.
+void run(cc::span<isize const> sizes, bool record)
 {
-    isize const sizes[] = {16, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536};
     isize const align = 16; // typical malloc alignment; both resources honor it
 
     std::printf("\n=== allocation throughput (M alloc+free / s) — 64 live, churn ===\n");
@@ -74,12 +80,30 @@ void run()
         double const mi = mops(*cc::default_memory_resource, size, align);
         double const sys = mops(cc::system_memory_resource, size, align);
         std::printf("%10lld %14.1f %14.1f\n", (long long)size, mi, sys);
+
+        if (record && (size == 64 || size == 4096))
+        {
+            char const* const label = size == 64 ? "64B" : "4KiB";
+            nx::guide::report_raw(cc::string("mimalloc@") + label, mi, "M ops/s", true);
+            nx::guide::report_raw(cc::string("system@") + label, sys, "M ops/s", true);
+        }
     }
     std::fflush(stdout);
 }
+
+// The representative sizes the guide benchmark sweeps: one small block (64 B) and one page-sized (4 KiB).
+constexpr isize guide_sizes[] = {64, 4096};
+isize const full_sizes[] = {16, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536};
 } // namespace
 
-TEST("bench-alloc (mimalloc vs system)", nx::config::manual)
+// Lean guide benchmark: just the representative sizes, recorded for the PGO speedup report.
+GUIDE_BENCHMARK("bench-alloc (mimalloc vs system)")
 {
-    run();
+    run(guide_sizes, /*record*/ true);
+}
+
+// Full human-facing sweep (manual): the complete size table the docs analyze. Run by exact name.
+TEST("bench-alloc (mimalloc vs system, full sweep)", nx::config::manual)
+{
+    run(full_sizes, /*record*/ false);
 }

@@ -2,13 +2,25 @@
 
 namespace nx::config
 {
+// Which selection bucket a test belongs to. A test lives in exactly one bucket; an automatic sweep selects a
+// single bucket (normal by default, manual via --manual, guide_benchmark via --guide-benchmarks). Naming a
+// test by an exact (non-wildcard) filter runs it regardless of its bucket. The set is intentionally extensible.
+enum class test_bucket
+{
+    normal,
+    manual,
+    guide_benchmark,
+};
+
 struct cfg
 {
     bool enabled = true;
-    bool manual = false;
+    test_bucket bucket = test_bucket::normal;
     int seed = 0;
 };
 
+// Orthogonal to buckets: a disabled test is skipped by a sweep of any bucket and only runs when explicitly
+// named (or via a bulk "run disabled too" request).
 constexpr struct
 {
     void apply(cfg& result) const { result.enabled = false; }
@@ -16,12 +28,19 @@ constexpr struct
 
 // A manual test never runs as part of an automatic sweep — not by default, and not via a "run disabled too"
 // bulk request either. It runs only when explicitly targeted (a non-wildcard filter that names it) or when
-// the runner is put in manual mode via --manual. Intended for benchmarks and tests that open windows or are
-// otherwise incompatible with unattended execution.
+// the runner is put in manual mode via --manual. Intended for tests that open windows or are otherwise
+// incompatible with unattended execution.
 constexpr struct
 {
-    void apply(cfg& result) const { result.manual = true; }
+    void apply(cfg& result) const { result.bucket = test_bucket::manual; }
 } manual;
+
+// A guide benchmark records performance metrics via nx::guide and is swept only via --guide-benchmarks (or
+// named explicitly). Like manual tests it stays out of automatic runs. See GUIDE_BENCHMARK in test.hh.
+constexpr struct
+{
+    void apply(cfg& result) const { result.bucket = test_bucket::guide_benchmark; }
+} guide_benchmark;
 
 constexpr auto seed(int value)
 {

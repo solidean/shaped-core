@@ -26,6 +26,24 @@ TEST("bench x", nx::config::manual)      //   nx::config::manual    — never sw
 { /* prints, no CHECK */ }               //     exact name or `--manual` (may have zero CHECKs, e.g. benchmarks)
 TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RNG seed
 // Multiple configs compose: TEST("x", nx::config::disabled, nx::config::seed(7)) { }
+
+// Buckets: every test is in one bucket — normal (default), manual, or guide_benchmark. A sweep selects one
+// bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket.
+```
+
+## Guide benchmarks (perf metrics)
+
+```cpp
+#include <nexus/guide.hh>
+
+GUIDE_BENCHMARK("hash - throughput")     // a test in the guide_benchmark bucket (implies no-CHECK is fine);
+{                                        //   swept only via `--guide-benchmarks`, or run by exact name
+    double gbps = measure(...);
+    nx::guide::report_raw("xxh3@8B", gbps, "GB/s", /*higher_is_better=*/true);  // free-form unit + orientation
+    nx::guide::report_elements_per_sec("keys", n_per_s);  // unit "1/s",  higher is better
+    nx::guide::report_time_for("op", seconds);            // unit "s",    lower  is better
+}
+// Recorded metrics print as a table and, with `--perf-json <file>`, write a sidecar consumed by `dev.py pgo`.
 ```
 
 ## Checks
@@ -88,6 +106,8 @@ uv run dev.py test                       # build + run the whole suite
 #include <nexus/run.hh>                  // test main is just: int main(int c, char** v){ return nx::run(c, v); }
 // Catch2-compatible CLI (for IDEs/tooling, not daily use): --list-tests, --reporter xml,
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
+// Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
+// --perf-json <file> (write recorded-metric sidecar).
 ```
 
 ## Fuzz testing (`nx::fuzz`)
@@ -134,7 +154,7 @@ auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regressi
 - **The `_AS` exception checks match subclasses too** (a `std::runtime_error`
   satisfies `..._THROWS_AS(expr, std::exception)`).
 - **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
-- **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, generators, benchmarks.
+- **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, generators. (Benchmarks: use `GUIDE_BENCHMARK` + `nx::guide`.)
   Use `.context()` / `.note()` / `.dump()` for messages.
 
 See [docs/catch2-runner-compat.md](docs/catch2-runner-compat.md) for the exact

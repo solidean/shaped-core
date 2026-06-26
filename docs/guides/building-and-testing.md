@@ -40,6 +40,8 @@ uv run dev.py test "<pattern>"      # run just tests whose name matches (or a wh
 uv run dev.py test -t clean-core-test
 uv run dev.py build                 # build everything
 uv run dev.py build -t nexus        # build one target
+uv run dev.py coverage run          # LLVM test coverage (see guides/coverage.md)
+uv run dev.py pgo run               # profile-guided optimization (see guides/pgo.md)
 uv run dev.py doctor
 ```
 

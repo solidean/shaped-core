@@ -5,6 +5,7 @@ project(nexus LANGUAGES CXX)
 add_library(nexus
     src/nexus/run.cc
     src/nexus/test.cc
+    src/nexus/guide.cc
     src/nexus/tests/check.cc
     src/nexus/tests/config.cc
     src/nexus/tests/execute.cc
@@ -13,6 +14,7 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
+    src/nexus/tests/export/perf_json.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/runner.cc
     src/nexus/fuzz/run.cc
@@ -33,6 +35,7 @@ target_sources(nexus
     src/nexus/fwd.hh
     src/nexus/run.hh
     src/nexus/test.hh
+    src/nexus/guide.hh
     src/nexus/tests/check.hh
     src/nexus/tests/config.hh
     src/nexus/tests/execute.hh
@@ -41,6 +44,7 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
+    src/nexus/tests/export/perf_json.hh
 
     src/nexus/fuzz/fwd.hh
     src/nexus/fuzz/value.hh

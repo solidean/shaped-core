@@ -5,8 +5,9 @@
 
 #include <chrono>
 
-// Shared helpers for the ad-hoc clean-core micro-benchmarks under tests/benchmarks/. These are manual
-// (nx::config::manual) tests that only print timing tables; see libs/base/clean-core/docs/benchmarks/.
+// Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/. These are guide benchmarks
+// (GUIDE_BENCHMARK) that print timing tables and record representative points via nx::guide; see
+// libs/base/clean-core/docs/benchmarks/ and docs/guides/perf-results.md.
 
 namespace bench
 {

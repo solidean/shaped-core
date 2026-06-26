@@ -27,10 +27,17 @@ decimals.
 
 ## Reproducing
 
+This full table is the manual `bench-alloc (… full sweep)` benchmark. A lean `GUIDE_BENCHMARK` of the same
+base name records just the representative points (mimalloc/system at 64 B and 4 KiB) via `nx::guide` for
+`dev.py pgo`. Both are excluded from normal sweeps; the `"bench-alloc"` filter matches both — name them
+explicitly:
+
 ```bash
 uv run dev.py test "bench-alloc" --target clean-core-test --preset release-clang --timeout 0
 uv run dev.py test "bench-alloc" --target clean-core-test --preset relwithdebinfo-clang --timeout 0
 ```
+
+See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Results
 

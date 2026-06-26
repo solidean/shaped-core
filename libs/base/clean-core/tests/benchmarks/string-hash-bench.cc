@@ -10,9 +10,9 @@
 // cc::string corpus are measured: cc::string stores <= 39 bytes inline (SSO), so for short keys it also
 // exercises the small-string layout an actual map would hold.
 //
-// These are manual tests (nx::config::manual): they only print, they never CHECK, and timing is noisy. Run
-// them explicitly, e.g. `uv run dev.py test --preset release-clang "bench-string-hash"` (an exact name), or
-// put the runner in manual mode and sweep: `<binary> --manual bench`.
+// These are guide benchmarks (GUIDE_BENCHMARK): they print, never CHECK, and additionally record a few
+// representative throughput points via nx::guide for the PGO speedup report. Run them explicitly, e.g.
+// `uv run dev.py test --preset release-clang "bench-string-hash"`, or sweep: `<binary> --guide-benchmarks`.
 
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
@@ -21,6 +21,7 @@
 #include <clean-core/math/random.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/guide.hh>
 #include <nexus/test.hh>
 
 #include <chrono>
@@ -192,14 +193,28 @@ double measure_gbps(Keys const& keys, Hasher hasher)
     return total_bytes / seconds / 1e9;
 }
 
-void run_sweep(char const* corpus_kind, bool use_strings)
+// Sweeps `lengths`, printing one xxh3/fnv1a/mul row each. When `record`, the points nearest 8 B and 64 KiB
+// are reported as guide metrics — pass the representative-only lengths for a fast guide benchmark, or the full
+// sweep (record=false) for the human analysis table. Each length regenerates a multi-MB corpus, so a full
+// sweep is expensive; the guide path deliberately visits only the two recorded lengths.
+void run_sweep(char const* corpus_kind, bool use_strings, cc::span<isize const> lengths, bool record)
 {
-    auto const lengths = make_lengths();
     cc::random rng(0xC0FFEEu);
 
     std::printf("\n=== string hash throughput (GB/s) — %s corpus ===\n", corpus_kind);
     std::printf("%8s %12s %12s %12s\n", "length", "xxh3", "fnv1a", "mul");
     std::printf("%8s %12s %12s %12s\n", "------", "------", "------", "------");
+
+    // Track the sweep point nearest each target length so recorded metrics are stable across sweep changes.
+    struct rep_point
+    {
+        isize target;
+        char const* label;
+        isize best_len = -1;
+        double xxh3 = 0, fnv1a = 0, mul = 0;
+    };
+    rep_point reps[] = {{8, "8B"}, {64 * 1024, "64KiB"}};
+    auto const dist = [](isize a, isize b) { return a > b ? a - b : b - a; };
 
     for (isize const length : lengths)
     {
@@ -220,17 +235,45 @@ void run_sweep(char const* corpus_kind, bool use_strings)
         }
 
         std::printf("%8lld %12.2f %12.2f %12.2f\n", (long long)length, gbps_xxh3, gbps_fnv1a, gbps_mul);
+
+        for (auto& r : reps)
+            if (r.best_len < 0 || dist(length, r.target) < dist(r.best_len, r.target))
+                r = {r.target, r.label, length, gbps_xxh3, gbps_fnv1a, gbps_mul};
     }
     std::fflush(stdout);
+
+    if (record)
+        for (auto const& r : reps)
+        {
+            cc::string const suffix = cc::string("@") + r.label + " (" + corpus_kind + ")";
+            nx::guide::report_raw(cc::string("xxh3") + suffix, r.xxh3, "GB/s", true);
+            nx::guide::report_raw(cc::string("fnv1a") + suffix, r.fnv1a, "GB/s", true);
+            nx::guide::report_raw(cc::string("mul") + suffix, r.mul, "GB/s", true);
+        }
 }
+
+// The representative lengths the guide benchmarks sweep: one short key (8 B) and one long (64 KiB).
+constexpr isize guide_lengths[] = {8, 64 * 1024};
 } // namespace
 
-TEST("bench-string-hash (string_view)", nx::config::manual)
+// Lean guide benchmarks: just the representative lengths, recorded for the PGO speedup report.
+GUIDE_BENCHMARK("bench-string-hash (string_view)")
 {
-    run_sweep("string_view", false);
+    run_sweep("string_view", false, guide_lengths, /*record*/ true);
 }
 
-TEST("bench-string-hash (string)", nx::config::manual)
+GUIDE_BENCHMARK("bench-string-hash (string)")
 {
-    run_sweep("string", true);
+    run_sweep("string", true, guide_lengths, /*record*/ true);
+}
+
+// Full human-facing sweeps (manual): the complete length tables the docs analyze. Run by exact name.
+TEST("bench-string-hash (string_view, full sweep)", nx::config::manual)
+{
+    run_sweep("string_view", false, make_lengths(), /*record*/ false);
+}
+
+TEST("bench-string-hash (string, full sweep)", nx::config::manual)
+{
+    run_sweep("string", true, make_lengths(), /*record*/ false);
 }
