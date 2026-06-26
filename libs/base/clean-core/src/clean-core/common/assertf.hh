@@ -1,19 +1,18 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-
-#include <format>
 
 // =========================================================================================================
 // CC_ASSERTF - Runtime assertion with formatted message
 //
 // Validates a condition at runtime and triggers a debugger break + abort on failure.
-// This is the formatted version of CC_ASSERT, supporting std::format-style arguments.
+// This is the formatted version of CC_ASSERT, supporting cc::format-style arguments.
 //
 // Features:
-//   - Formatted error messages using std::format
+//   - Formatted error messages using cc::format (compile-time-checked format string)
 //   - Automatic source location capture (file, line, function)
 //   - Debugger integration: breaks into debugger when attached, otherwise aborts
 //   - Expression stringification for clear error reporting
@@ -85,15 +84,15 @@
 // =========================================================================================================
 
 // CC_ASSERTF_ALWAYS implementation - always enabled regardless of build configuration
-#define CC_IMPL_ASSERTF_ALWAYS(cond, msg, ...)                                                            \
-    do                                                                                                    \
-    {                                                                                                     \
-        if (!(cond)) [[unlikely]]                                                                         \
-        {                                                                                                 \
-            ::cc::impl::handle_assert_failure(#cond, std::format(msg __VA_OPT__(, ) __VA_ARGS__).c_str(), \
-                                              ::cc::source_location::current());                          \
-            CC_BREAK_AND_ABORT();                                                                         \
-        }                                                                                                 \
+#define CC_IMPL_ASSERTF_ALWAYS(cond, msg, ...)                                                                         \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(cond)) [[unlikely]]                                                                                      \
+        {                                                                                                              \
+            ::cc::impl::handle_assert_failure(#cond, ::cc::format(msg __VA_OPT__(, ) __VA_ARGS__).c_str_materialize(), \
+                                              ::cc::source_location::current());                                       \
+            CC_BREAK_AND_ABORT();                                                                                      \
+        }                                                                                                              \
     } while (false)
 
 // Assertf implementation - enabled in debug/relwithdebinfo, optionally in release
@@ -107,11 +106,11 @@
 
 // In release builds without CC_ENABLE_ASSERT_IN_RELEASE, assertions are stripped
 // We still use the format string to ensure it compiles correctly
-#define CC_IMPL_ASSERTF(cond, msg, ...)                         \
-    do                                                          \
-    {                                                           \
-        CC_UNUSED(cond);                                        \
-        CC_UNUSED(std::format(msg __VA_OPT__(, ) __VA_ARGS__)); \
+#define CC_IMPL_ASSERTF(cond, msg, ...)                          \
+    do                                                           \
+    {                                                            \
+        CC_UNUSED(cond);                                         \
+        CC_UNUSED(::cc::format(msg __VA_OPT__(, ) __VA_ARGS__)); \
     } while (false)
 
 #endif

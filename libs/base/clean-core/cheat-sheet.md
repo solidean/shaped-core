@@ -43,7 +43,7 @@ CC_DEBUG_BREAK();                        // break if a debugger is attached, els
 #include <clean-core/common/asserts.hh>  // runtime cc::string_view message
 CC_ASSERTS(cond, sv);  CC_ASSERTS_ALWAYS(cond, sv);
 
-#include <clean-core/common/assertf.hh>  // std::format message (pulls in <format>)
+#include <clean-core/common/assertf.hh>  // cc::format message (compile-time-checked; pulls in cc::format)
 CC_ASSERTF(idx < n, "index {} out of range {}", idx, n);
 CC_ASSERTF_ALWAYS(cond, "fmt {}", x);
 // Enabled in debug + relwithdebinfo, stripped in release (unless CC_ENABLE_ASSERT_IN_RELEASE).
@@ -129,6 +129,26 @@ sv.compare(o);  sv == o;  sv < o;                       // lexicographic
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
 // to_debug_string: quotes strings/chars, recurses into ranges [..] and tuples (..); best-effort, non-semantic.
+
+#include <clean-core/string/format.hh>           // cc::format — std::format/fmtlib-style, COMPILE-TIME-checked
+cc::format("{} + {} = {}", 1, 2, 3);             // -> cc::string "1 + 2 = 3"   (bad fmt/args = compile error)
+cc::format("{:#06x}  {:>8.2f}", 255, 3.14159);   // "0x00ff      3.14"  — fill/align/sign/#/0/width/group/.prec/type
+cc::format("{:'}", 1232453254);                  // "1'232'453'254"  — digit grouping (sep = ' , _ … ; 3 dec / 4 hex)
+cc::format_append(str, "x={}", 7);               // append into an existing cc::string (no temporary)
+str.appendf("x={}", 7);                          // same, as a cc::string member (needs <clean-core/string/format.hh>)
+cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; return > n means truncated
+// Placeholders: {} auto-index, {N} positional (don't mix), {{ }} escape braces. Types: d/x/X/o/b/c ints,
+// f/F/e/E/g/G floats, s string/bool, p pointer. Numbers go via std::to_chars (one seam). No ADL on args.
+// Customize: specialize cc::custom::formatter<T> — gets the raw spec string_view; provide
+//   static void format(cc::format_sink, cc::string_view spec, T const&) + static consteval void validate(spec).
+//   Delegate to the standard grammar via cc::format_value(sink, spec, v) / cc::validate_format_spec(spec).
+//   (Or just give T a member to_string() for the plain "{}" case.)
+
+#include <clean-core/string/print.hh>            // print/println -> stdout, eprint/eprintln -> stderr (via fwrite)
+cc::print(sv);  cc::println("done");             // raw string_view (braces NOT interpreted); println() = just '\n'
+cc::println("{} + {} = {}", 1, 2, 3);            // cc::format string + args (>=1 arg picks the format overload)
+cc::eprint("oops: {}", err);  cc::eprintln();    // stderr variants
+// println/eprintln ALWAYS flush; print/eprint stay buffered (append your own '\n', or call cc::flush()).
 ```
 
 ## Optional & result (fallibility)

@@ -122,6 +122,15 @@ T x;                       // fine if initialized later
   }
   ```
   **Note:** The previous convention of using `detail` does not apply anymore.
+  A single `impl` namespace is **shared across the whole library**, so be mindful of name collisions: give
+  implementation symbols a component-specific prefix when their bare names would be generic enough to clash
+  with other components (e.g. `format_parse_spec` / `format_field`, not `parse_spec` / `field`).
+- Use a `custom` nested namespace for **customization points that users specialize** (class-template
+  specialization): declare the primary template in `<lib>::custom`, have users add their specializations
+  there, and never require them to name `impl` types (pass public types across the boundary; offer public
+  delegation helpers where useful). The resolution order and naming details live in
+  [clean-core/docs/customization-points.md](../libs/base/clean-core/docs/customization-points.md). For
+  simple, non-specialization extension points, prefer a hidden-friend or member function (e.g. `to_string()`).
 
 ### Performance-Critical Code
 
@@ -617,6 +626,7 @@ container& operator=(container&& rhs)
 - [ ] Macros are justified
 - [ ] Tests written in nexus
 - [ ] Use `impl` namespace (not `detail`) for implementation details
+- [ ] Specialization-based customization points live in the `custom` namespace and don't expose `impl` types
 - [ ] Consider C++23 deducing `this` where appropriate
 - [ ] Move assignment is subobject-safe (or documented otherwise)
 - [ ] Avoid `std::`—use `cc::` equivalents (exception: `<type_traits>`)

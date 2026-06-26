@@ -6,6 +6,7 @@
 #include <clean-core/string/string_view.hh>
 
 #include <cstring>
+#include <type_traits>
 
 /// Owning UTF-8 byte string with small-string optimization (SSO).
 /// Stores up to small_capacity bytes inline without allocation (39 on 64-bit platforms; fewer where
@@ -621,6 +622,18 @@ public:
         append(c);
         return *this;
     }
+
+    /// Appends formatted output to this string, equivalent to cc::format_append(*this, fmt, args...).
+    /// The format string is validated against the argument types at compile time.
+    ///
+    /// IMPORTANT: only declared here; the definition lives in <clean-core/string/format.hh>. You must
+    /// include that header to call this (string.hh deliberately does not pull in the format machinery).
+    ///
+    /// Usage:
+    ///   #include <clean-core/string/format.hh>
+    ///   str.appendf("{} = {}", key, value);
+    template <class... Args>
+    void appendf(format_string<std::type_identity_t<Args>...> fmt, Args&&... args);
 
     /// Concatenates a string and a string_view.
     /// Takes the left-hand string by value and appends the right-hand view.

@@ -6,16 +6,14 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/section.hh>
 
 #include <chrono>        // std::chrono: no cc timing yet
-#include <format>        // std::format: no cc::format yet
-#include <iomanip>       // std::setprecision: console formatting
-#include <iostream>      // std::cout: console output
 #include <string>        // std::string: key type for the std::unordered_map below
-#include <string_view>   // std::string_view: bridges cc::string into std::format / std::ostream
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
 
@@ -23,14 +21,6 @@ namespace nx
 {
 namespace
 {
-// cc::string is neither std::format-able nor std::ostream-streamable (no
-// std::formatter / operator<< specialization), so view it as a std::string_view
-// for the std-side diagnostics below. const-safe, unlike c_str_materialize().
-std::string_view as_sv(cc::string const& s)
-{
-    return std::string_view(s.data(), size_t(s.size()));
-}
-
 struct test_section
 {
     std::unordered_map<std::string, cc::unique_ptr<test_section>> subsections;
@@ -86,8 +76,7 @@ struct test_section
                     .expr = "unreachable section",
                     .location = subsec->location,
                     .extra_lines = {},
-                    .expanded
-                    = std::format("section \"{}\" was discovered but unreachable from parent", as_sv(subsec->name)),
+                    .expanded = cc::format("section \"{}\" was discovered but unreachable from parent", subsec->name),
                 });
                 sec.is_considered_failing = true;
             }
@@ -213,18 +202,30 @@ char const* op_to_string(impl::cmp_op op)
     using namespace impl;
     switch (op)
     {
-    case cmp_op::none: return "";
-    case cmp_op::less: return "<";
-    case cmp_op::less_equal: return "<=";
-    case cmp_op::greater: return ">";
-    case cmp_op::greater_equal: return ">=";
-    case cmp_op::equal: return "==";
-    case cmp_op::not_equal: return "!=";
-    case cmp_op::throws: return "throws";
-    case cmp_op::throws_as: return "throws_as";
-    case cmp_op::assert_fail: return "assert_fail";
-    case cmp_op::asserts: return "asserts";
-    case cmp_op::skip: return "skip";
+    case cmp_op::none:
+        return "";
+    case cmp_op::less:
+        return "<";
+    case cmp_op::less_equal:
+        return "<=";
+    case cmp_op::greater:
+        return ">";
+    case cmp_op::greater_equal:
+        return ">=";
+    case cmp_op::equal:
+        return "==";
+    case cmp_op::not_equal:
+        return "!=";
+    case cmp_op::throws:
+        return "throws";
+    case cmp_op::throws_as:
+        return "throws_as";
+    case cmp_op::assert_fail:
+        return "assert_fail";
+    case cmp_op::asserts:
+        return "asserts";
+    case cmp_op::skip:
+        return "skip";
     }
     return "?";
 }
@@ -382,7 +383,9 @@ void nx::impl::report_check_result(check_kind kind,
         cc::string expanded;
         switch (op)
         {
-        case cmp_op::none: expanded = std::format("'{}' failed", as_sv(expr)); break;
+        case cmp_op::none:
+            expanded = cc::format("'{}' failed", expr);
+            break;
 
         case cmp_op::less:
         case cmp_op::less_equal:
@@ -391,7 +394,7 @@ void nx::impl::report_check_result(check_kind kind,
         case cmp_op::equal:
         case cmp_op::not_equal:
             if (extra_lines.size() >= 2)
-                expanded = std::format("{} {} {}", as_sv(extra_lines[0]), op_to_string(op), as_sv(extra_lines[1]));
+                expanded = cc::format("{} {} {}", extra_lines[0], op_to_string(op), extra_lines[1]);
             else
                 expanded = "(could not capture expressions)";
             break;
@@ -424,7 +427,8 @@ void nx::impl::report_check_result(check_kind kind,
                 expanded = "assertion should have failed (but did not)";
             break;
 
-        case cmp_op::skip: CC_UNREACHABLE("skip should not produce a test error");
+        case cmp_op::skip:
+            CC_UNREACHABLE("skip should not produce a test error");
         }
 
         // Add test error
@@ -486,7 +490,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
 
     if (config.verbose)
     {
-        std::cout << "executing " << schedule.instances.size() << " tests\n" << std::flush;
+        cc::println("executing {} tests", schedule.instances.size());
     }
 
     for (auto const& instance : schedule.instances)
@@ -515,11 +519,9 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             if (config.verbose)
             {
                 if (section_num == 0)
-                    std::cout << "  - start \"" << as_sv(instance.declaration->name) << "\"\n" << std::flush;
+                    cc::println("  - start \"{}\"", instance.declaration->name);
                 else
-                    std::cout << "  - start \"" << as_sv(instance.declaration->name) << "\" section " << section_num
-                              << '\n'
-                              << std::flush;
+                    cc::println("  - start \"{}\" section {}", instance.declaration->name, section_num);
             }
             section_num++;
             auto const t_section_start = std::chrono::high_resolution_clock::now();
@@ -549,20 +551,20 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             catch (test_duplicate_section const& e)
             {
                 g_context_stack.back().errors.push_back(test_error{
-                    .expr = std::format("duplicate section: \"{}\"", as_sv(e.name)),
+                    .expr = cc::format("duplicate section: \"{}\"", e.name),
                     .location = e.location,
                     .extra_lines = {},
-                    .expanded = std::format("duplicate section: \"{}\"", as_sv(e.name)),
+                    .expanded = cc::format("duplicate section: \"{}\"", e.name),
                 });
                 should_continue = false; // wrong use of test framework
             }
             catch (std::exception const& e)
             {
                 g_context_stack.back().errors.push_back(test_error{
-                    .expr = std::format("uncaught exception: {}", e.what()),
+                    .expr = cc::format("uncaught exception: {}", e.what()),
                     .location = instance.declaration->location,
                     .extra_lines = {},
-                    .expanded = std::format("uncaught exception: {}", e.what()),
+                    .expanded = cc::format("uncaught exception: {}", e.what()),
                 });
             }
             catch (...)
@@ -607,11 +609,8 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         if (config.verbose)
         {
             double const duration_ms = execution.root.duration_seconds * 1000.0;
-            std::cout << "    ... in " << std::fixed << std::setprecision(2) << duration_ms << " ms ("
-                      << execution.root.executed_checks << " checks, "      //
-                      << execution.root.failed_checks << " failed checks, " //
-                      << execution.root.errors.size() << " errors)\n"
-                      << std::flush;
+            cc::println("    ... in {:.2f} ms ({} checks, {} failed checks, {} errors)", duration_ms,
+                        execution.root.executed_checks, execution.root.failed_checks, execution.root.errors.size());
         }
 
         result.executions.push_back(cc::move(execution));

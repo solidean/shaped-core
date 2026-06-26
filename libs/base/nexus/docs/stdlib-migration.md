@@ -20,7 +20,6 @@ Each site is also flagged with a short `// std::… : …` comment at the use si
 
 | `std` in use | Where | Wanted `cc` symbol | Notes |
 |---|---|---|---|
-| `std::format` | [check.hh](../src/nexus/tests/check.hh) (`dump`), [check.cc](../src/nexus/tests/check.cc) (`note`/`fail_note`/`succeed_note`), [section.hh](../src/nexus/tests/section.hh) (`SECTION`), [execute.cc](../src/nexus/tests/execute.cc) (failure / exception messages) | `cc::format` | In progress. Removing it also removes the format-arg bridging below. |
 | `std::unordered_map` | [execute.cc](../src/nexus/tests/execute.cc) — the executor's section tree | `cc::map` | `cc::map` is a `// TODO` stub today. |
 | `std::chrono` | [execute.cc](../src/nexus/tests/execute.cc) — per-section wall-clock timing | a `cc` clock / duration | No clean-core timing API yet. |
 | `std::type_index` / `typeid` (`<typeindex>`) | `nx::fuzz` — [value.hh](../src/nexus/fuzz/value.hh), [signature.hh](../src/nexus/fuzz/signature.hh), [machine.hh](../src/nexus/fuzz/machine.hh) / [machine.cc](../src/nexus/fuzz/machine.cc), [run.cc](../src/nexus/fuzz/run.cc) — runtime type identity for the type-erased value box and operation/type tables | `cc::type_id` (identity + name) | clean-core has no non-RTTI type identity. Names come from `cc::demangle_symbol(typeid(T).name())`. The single biggest gap the fuzzer hit. |
@@ -48,11 +47,6 @@ These are not requests for new clean-core symbols — they exist only because a
 - **JUnit file output via `std::ofstream`.** [run.cc](../src/nexus/run.cc). Needs a
   clean-core file-write path (e.g. `cc::println` to a file sink); no concrete
   target yet.
-- **`std::format` argument bridging.** Because `std::formatter<cc::string>` is
-  deliberately deleted, every `cc::string` fed into `std::format` goes in as a
-  `std::string_view` (or `.c_str_materialize()`): [execute.cc](../src/nexus/tests/execute.cc)
-  (`as_sv`), [check.hh](../src/nexus/tests/check.hh) (`dump` label). This is moot
-  once `cc::format` replaces `std::format`.
 - **`std::string` map key.** [execute.cc](../src/nexus/tests/execute.cc) bridges a
   `cc::string` section name to a `std::string` key on every lookup — only because
   the map is `std::unordered_map`. Removed together with `cc::map`.
@@ -95,3 +89,9 @@ exporters return a `cc::string` instead of writing to a `std::ostream`.
   `std::string` round-trips in [schedule.cc](../src/nexus/tests/schedule.cc) — Catch2 filter
   parsing now splits with `cc::string_view`, and the `\[` → `[` normalization uses
   `cc::string::replace_all`.
+- **`cc::format` replaced `std::format`** in `dump` ([check.hh](../src/nexus/tests/check.hh)),
+  `note`/`fail_note`/`succeed_note` ([check.cc](../src/nexus/tests/check.cc)), `SECTION`
+  ([section.hh](../src/nexus/tests/section.hh)), and the failure / exception messages
+  ([execute.cc](../src/nexus/tests/execute.cc)). `cc::format` formats `cc::string` /
+  `cc::string_view` directly, so the format-arg `std::string_view` bridging is gone (the
+  remaining `as_sv` exists only for `std::cout`).

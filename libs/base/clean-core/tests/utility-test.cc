@@ -3,6 +3,8 @@
 #include <nexus/test.hh>
 
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 
 
 // =========================================================================================================

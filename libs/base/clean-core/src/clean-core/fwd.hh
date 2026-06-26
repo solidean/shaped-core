@@ -88,6 +88,8 @@ struct unique_ptr;
 
 struct string;
 struct string_view;
+template <class... Args>
+struct format_string;
 
 
 //

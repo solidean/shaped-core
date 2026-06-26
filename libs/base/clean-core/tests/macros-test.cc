@@ -334,9 +334,12 @@ int test_unreachable_switch(int value)
 {
     switch (value)
     {
-    case 1: return 10;
-    case 2: return 20;
-    default: CC_BUILTIN_UNREACHABLE;
+    case 1:
+        return 10;
+    case 2:
+        return 20;
+    default:
+        CC_BUILTIN_UNREACHABLE;
     }
 }
 
