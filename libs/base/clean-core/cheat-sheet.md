@@ -214,6 +214,15 @@ rng.uniform_in(range);  rng.shuffle(range); // pick element / in-place permute (
 rng.clone();                              // independent generator at the same stream position
 ```
 
+## Hashing
+
+```cpp
+#include <clean-core/common/hash128.hh>
+cc::hash128{.low=lo, .high=hi};            // 128-bit value, two u64 limbs; ==, <=> (lex by low,high)
+cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const> + u64 seed (seed 0 = unseeded)
+hash(h128);                                // hidden-friend customization point -> low limb (u64)
+```
+
 ## Sequence (lazy ranges — emerging API)
 
 ```cpp
