@@ -36,6 +36,14 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
             config.verbose = true;
             continue;
         }
+        // Manual mode: restrict the eligible set to manual tests, so wildcard filters can select among them
+        // (e.g. `--manual bench` runs every manual test whose name contains "bench"). Disabled tests stay out.
+        else if (arg == "--manual")
+        {
+            config.only_manual_tests = true;
+            config.run_manual_tests = true;
+            continue;
+        }
         // Check for section filter flag
         else if (arg == "-c")
         {
@@ -113,15 +121,16 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         }
     }
 
-    // If filters are provided with non-wildcard matches, enable running disabled tests
+    // A non-wildcard filter names a single test explicitly, which is enough to pull in an otherwise
+    // non-automatic test — both disabled and manual ones (manual mirrors disabled here, see schedule create).
     if (!config.filters.empty())
     {
         for (auto const& filter : config.filters)
         {
-            // Non-wildcard match (no * character) enables disabled tests
             if (!filter.contains('*'))
             {
                 config.run_disabled_tests = true;
+                config.run_manual_tests = true;
                 break;
             }
         }
@@ -138,9 +147,29 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
     {
         CC_ASSERT(decl.function.is_valid(), "invalid test decl");
 
-        // Skip disabled tests unless explicitly requested
-        if (!decl.test_config.enabled && !config.run_disabled_tests)
-            continue;
+        auto const& tc = decl.test_config;
+
+        // Eligibility by test status (filters are applied afterwards):
+        //  - --manual: only manual tests are eligible, everything else is excluded.
+        //  - manual tests otherwise run only when explicitly requested (a non-wildcard filter, via run_manual_tests).
+        //  - disabled tests run only when explicitly requested (a non-wildcard filter, via run_disabled_tests).
+        // A bulk "run disabled too" request sets run_disabled_tests but not run_manual_tests, so it never
+        // sweeps manual tests into an automatic run.
+        if (config.only_manual_tests)
+        {
+            if (!tc.manual)
+                continue;
+        }
+        else if (tc.manual)
+        {
+            if (!config.run_manual_tests)
+                continue;
+        }
+        else if (!tc.enabled)
+        {
+            if (!config.run_disabled_tests)
+                continue;
+        }
 
         // Apply filters if any are provided
         if (!config.filters.empty())
