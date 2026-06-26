@@ -10,7 +10,7 @@ namespace
 // span-backed sink write: copy what fits, but always count the would-be length (snprintf semantics)
 void span_sink_write(void* ctx, char const* data, cc::isize size)
 {
-    auto& st = *static_cast<cc::impl::span_sink_state*>(ctx);
+    auto& st = *static_cast<cc::impl::format_span_sink_state*>(ctx);
     cc::isize const room = st.total < st.capacity ? st.capacity - st.total : 0;
     cc::isize const n = size < room ? size : room;
     for (cc::isize i = 0; i < n; ++i)
@@ -26,7 +26,7 @@ void string_sink_write(void* ctx, char const* data, cc::isize size)
 }
 
 // shared float text production via std::to_chars; mode is 's' (shortest), 'f', 'e', or 'g'
-cc::isize chars_from_float_impl(char* first, char* last, char mode, double v, float vf, bool is_double, cc::isize precision)
+cc::isize format_chars_from_float_impl(char* first, char* last, char mode, double v, float vf, bool is_double, cc::isize precision)
 {
     std::to_chars_result r;
     if (mode == 's') // shortest round-trip
@@ -99,7 +99,7 @@ void format_float_common(cc::format_sink const& sink, cc::impl::format_spec cons
     }
 
     // optional digit grouping of the integer part only (the run of leading digits), e.g. 1'234'567.5
-    char gbuf[cc::impl::chars_float_max * 2];
+    char gbuf[cc::impl::format_chars_float_max * 2];
     if (spec.group != '\0')
     {
         cc::isize k = 0;
@@ -116,18 +116,18 @@ void format_float_common(cc::format_sink const& sink, cc::impl::format_spec cons
         }
     }
 
-    write_decorated_number(sink, spec, neg, cc::string_view(), all);
+    format_write_decorated_number(sink, spec, neg, cc::string_view(), all);
 }
 } // namespace
 
 namespace cc::impl
 {
-format_sink make_string_sink(cc::string& out)
+format_sink format_make_string_sink(cc::string& out)
 {
     return format_sink{.ctx = static_cast<void*>(&out), .write = &string_sink_write};
 }
 
-format_sink make_span_sink(span_sink_state& state)
+format_sink format_make_span_sink(format_span_sink_state& state)
 {
     return format_sink{.ctx = static_cast<void*>(&state), .write = &span_sink_write};
 }
@@ -136,7 +136,7 @@ format_sink make_span_sink(span_sink_state& state)
 // value → raw text seam (std::to_chars)
 // -----------------------------------------------------------------------------------------------------
 
-isize chars_from_u64(span<char> buf, u64 v, int base, bool upper)
+isize format_chars_from_u64(span<char> buf, u64 v, int base, bool upper)
 {
     char* const first = buf.data();
     char* const last = first + buf.size();
@@ -149,17 +149,19 @@ isize chars_from_u64(span<char> buf, u64 v, int base, bool upper)
     return n;
 }
 
-isize chars_from_f32(span<char> buf, float v, char mode, isize precision)
+isize format_chars_from_f32(span<char> buf, float v, char mode, isize precision)
 {
-    return chars_from_float_impl(buf.data(), buf.data() + buf.size(), mode, 0.0, v, /*is_double*/ false, precision);
+    return format_chars_from_float_impl(buf.data(), buf.data() + buf.size(), mode, 0.0, v, /*is_double*/ false,
+                                        precision);
 }
 
-isize chars_from_f64(span<char> buf, double v, char mode, isize precision)
+isize format_chars_from_f64(span<char> buf, double v, char mode, isize precision)
 {
-    return chars_from_float_impl(buf.data(), buf.data() + buf.size(), mode, v, 0.0f, /*is_double*/ true, precision);
+    return format_chars_from_float_impl(buf.data(), buf.data() + buf.size(), mode, v, 0.0f, /*is_double*/ true,
+                                        precision);
 }
 
-isize chars_from_ptr(span<char> buf, void const* p)
+isize format_chars_from_ptr(span<char> buf, void const* p)
 {
     CC_ASSERT(buf.size() >= 2, "cc::format: pointer buffer too small");
     buf[0] = '0';
@@ -175,12 +177,15 @@ isize chars_from_ptr(span<char> buf, void const* p)
 // decoration
 // -----------------------------------------------------------------------------------------------------
 
-void write_decorated_text(format_sink const& sink, format_spec const& spec, string_view body, align_t default_align)
+void format_write_decorated_text(format_sink const& sink,
+                                 format_spec const& spec,
+                                 string_view body,
+                                 format_align_t default_align)
 {
     if (spec.precision >= 0 && spec.precision < body.size())
         body = body.subview({.offset = 0, .size = spec.precision});
 
-    align_t const a = spec.align == align_t::none ? default_align : spec.align;
+    format_align_t const a = spec.align == format_align_t::none ? default_align : spec.align;
     isize const pad = spec.width > body.size() ? spec.width - body.size() : 0;
 
     if (pad == 0)
@@ -191,11 +196,11 @@ void write_decorated_text(format_sink const& sink, format_spec const& spec, stri
 
     switch (a)
     {
-    case align_t::right:
+    case format_align_t::right:
         sink.put_repeat(spec.fill, pad);
         sink.put(body);
         break;
-    case align_t::center:
+    case format_align_t::center:
     {
         isize const left = pad / 2;
         sink.put_repeat(spec.fill, left);
@@ -203,8 +208,8 @@ void write_decorated_text(format_sink const& sink, format_spec const& spec, stri
         sink.put_repeat(spec.fill, pad - left);
         break;
     }
-    case align_t::left:
-    case align_t::none:
+    case format_align_t::left:
+    case format_align_t::none:
     default:
         sink.put(body);
         sink.put_repeat(spec.fill, pad);
@@ -212,25 +217,25 @@ void write_decorated_text(format_sink const& sink, format_spec const& spec, stri
     }
 }
 
-void write_decorated_number(format_sink const& sink,
-                            format_spec const& spec,
-                            bool negative,
-                            string_view prefix,
-                            string_view digits)
+void format_write_decorated_number(format_sink const& sink,
+                                   format_spec const& spec,
+                                   bool negative,
+                                   string_view prefix,
+                                   string_view digits)
 {
     string_view sign_sv;
     if (negative)
         sign_sv = cc::string_view("-");
-    else if (spec.sign == sign_t::plus)
+    else if (spec.sign == format_sign_t::plus)
         sign_sv = cc::string_view("+");
-    else if (spec.sign == sign_t::space)
+    else if (spec.sign == format_sign_t::space)
         sign_sv = cc::string_view(" ");
 
     isize const core = sign_sv.size() + prefix.size() + digits.size();
 
     // zero-padding only applies when no explicit alignment was requested; the zeros go between the
     // prefix and the digits (e.g. "0x00ff", "-0003.14")
-    if (spec.zero_pad && spec.align == align_t::none)
+    if (spec.zero_pad && spec.align == format_align_t::none)
     {
         isize const zeros = spec.width > core ? spec.width - core : 0;
         sink.put(sign_sv);
@@ -240,7 +245,7 @@ void write_decorated_number(format_sink const& sink,
         return;
     }
 
-    align_t const a = spec.align == align_t::none ? align_t::right : spec.align;
+    format_align_t const a = spec.align == format_align_t::none ? format_align_t::right : spec.align;
     isize const pad = spec.width > core ? spec.width - core : 0;
 
     auto put_core = [&]
@@ -258,11 +263,11 @@ void write_decorated_number(format_sink const& sink,
 
     switch (a)
     {
-    case align_t::left:
+    case format_align_t::left:
         put_core();
         sink.put_repeat(spec.fill, pad);
         break;
-    case align_t::center:
+    case format_align_t::center:
     {
         isize const left = pad / 2;
         sink.put_repeat(spec.fill, left);
@@ -270,8 +275,8 @@ void write_decorated_number(format_sink const& sink,
         sink.put_repeat(spec.fill, pad - left);
         break;
     }
-    case align_t::right:
-    case align_t::none:
+    case format_align_t::right:
+    case format_align_t::none:
     default:
         sink.put_repeat(spec.fill, pad);
         put_core();
@@ -285,7 +290,7 @@ void format_integer(format_sink const& sink, format_spec const& spec, bool negat
     if (spec.presentation == 'c')
     {
         char const c = char(magnitude);
-        write_decorated_text(sink, spec, cc::string_view(&c, 1), align_t::left);
+        format_write_decorated_text(sink, spec, cc::string_view(&c, 1), format_align_t::left);
         return;
     }
 
@@ -320,12 +325,12 @@ void format_integer(format_sink const& sink, format_spec const& spec, bool negat
         break;
     }
 
-    char buf[chars_int_max];
-    isize const n = chars_from_u64(cc::span<char>(buf, chars_int_max), magnitude, base, upper);
+    char buf[format_chars_int_max];
+    isize const n = format_chars_from_u64(cc::span<char>(buf, format_chars_int_max), magnitude, base, upper);
     string_view digits = cc::string_view(buf, n);
 
     // optional digit grouping: decimal by 3, binary/hex/octal by 4
-    char grouped[chars_int_max * 2];
+    char grouped[format_chars_int_max * 2];
     if (spec.group != '\0')
     {
         int const grp = base == 10 ? 3 : 4;
@@ -333,19 +338,19 @@ void format_integer(format_sink const& sink, format_spec const& spec, bool negat
         digits = cc::string_view(grouped, gn);
     }
 
-    write_decorated_number(sink, spec, negative, prefix, digits);
+    format_write_decorated_number(sink, spec, negative, prefix, digits);
 }
 
 // -----------------------------------------------------------------------------------------------------
 // render loop (shares the grammar parser in format_spec.hh with the compile-time validator)
 // -----------------------------------------------------------------------------------------------------
 
-void render(format_sink const& sink, string_view fmt, span<format_arg_entry const> entries)
+void format_render(format_sink const& sink, string_view fmt, span<format_arg_entry const> entries)
 {
     isize const n = fmt.size();
     isize pos = 0;
     isize lit_start = 0;
-    index_state ix;
+    format_index_state ix;
 
     while (pos < n)
     {
@@ -363,7 +368,7 @@ void render(format_sink const& sink, string_view fmt, span<format_arg_entry cons
             if (pos > lit_start)
                 sink.put(fmt.subview({.offset = lit_start, .size = pos - lit_start}));
 
-            field const f = parse_field(fmt, pos, ix);
+            format_field const f = format_parse_field(fmt, pos, ix);
             isize const idx = f.arg_index;
             if (idx >= 0 && idx < entries.size() && entries[idx].fn != nullptr)
                 entries[idx].fn(sink, f.spec_text, entries[idx].ptr);
@@ -405,8 +410,8 @@ void format_f32(format_sink const& sink, format_spec const& spec, float v)
 {
     char const mode = float_mode_of(spec.presentation);
     isize const prec = float_precision_of(mode, spec.precision);
-    char buf[chars_float_max];
-    isize const n = chars_from_f32(cc::span<char>(buf, chars_float_max), v, mode, prec);
+    char buf[format_chars_float_max];
+    isize const n = format_chars_from_f32(cc::span<char>(buf, format_chars_float_max), v, mode, prec);
     format_float_common(sink, spec, buf, n);
 }
 
@@ -414,8 +419,8 @@ void format_f64(format_sink const& sink, format_spec const& spec, double v)
 {
     char const mode = float_mode_of(spec.presentation);
     isize const prec = float_precision_of(mode, spec.precision);
-    char buf[chars_float_max];
-    isize const n = chars_from_f64(cc::span<char>(buf, chars_float_max), v, mode, prec);
+    char buf[format_chars_float_max];
+    isize const n = format_chars_from_f64(cc::span<char>(buf, format_chars_float_max), v, mode, prec);
     format_float_common(sink, spec, buf, n);
 }
 } // namespace cc::impl

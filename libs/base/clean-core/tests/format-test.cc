@@ -12,13 +12,13 @@ namespace
 {
 constexpr cc::impl::format_spec test_parse(cc::string_view s)
 {
-    return cc::impl::parse_spec(s);
+    return cc::impl::format_parse_spec(s);
 }
 
 consteval cc::isize first_field_index(cc::string_view s)
 {
-    cc::impl::index_state ix;
-    return cc::impl::parse_field(s, 0, ix).arg_index;
+    cc::impl::format_index_state ix;
+    return cc::impl::format_parse_field(s, 0, ix).arg_index;
 }
 } // namespace
 
@@ -31,10 +31,10 @@ static_assert(test_parse("06x").presentation == 'x');
 static_assert(test_parse(".2f").precision == 2);
 static_assert(test_parse(".2f").presentation == 'f');
 static_assert(test_parse("*^7").fill == '*');
-static_assert(test_parse("*^7").align == cc::impl::align_t::center);
+static_assert(test_parse("*^7").align == cc::impl::format_align_t::center);
 static_assert(test_parse("*^7").width == 7);
-static_assert(test_parse("+").sign == cc::impl::sign_t::plus);
-static_assert(test_parse(">10").align == cc::impl::align_t::right);
+static_assert(test_parse("+").sign == cc::impl::format_sign_t::plus);
+static_assert(test_parse(">10").align == cc::impl::format_align_t::right);
 static_assert(test_parse("'").group == '\'');
 static_assert(test_parse(",").group == ',');
 static_assert(test_parse("8'").width == 8 && test_parse("8'").group == '\'');
@@ -46,13 +46,13 @@ static_assert(first_field_index("{3}") == 3);
 static_assert(first_field_index("{:>5}") == 0);
 
 // type classification
-static_assert(cc::impl::type_tag_of<int>() == cc::impl::type_tag::sint);
-static_assert(cc::impl::type_tag_of<unsigned>() == cc::impl::type_tag::uint);
-static_assert(cc::impl::type_tag_of<double>() == cc::impl::type_tag::floating);
-static_assert(cc::impl::type_tag_of<bool>() == cc::impl::type_tag::boolean);
-static_assert(cc::impl::type_tag_of<char>() == cc::impl::type_tag::character);
-static_assert(cc::impl::type_tag_of<char const*>() == cc::impl::type_tag::string_like);
-static_assert(cc::impl::type_tag_of<cc::string>() == cc::impl::type_tag::string_like);
+static_assert(cc::impl::format_type_tag_of<int>() == cc::impl::format_type_tag::sint);
+static_assert(cc::impl::format_type_tag_of<unsigned>() == cc::impl::format_type_tag::uint);
+static_assert(cc::impl::format_type_tag_of<double>() == cc::impl::format_type_tag::floating);
+static_assert(cc::impl::format_type_tag_of<bool>() == cc::impl::format_type_tag::boolean);
+static_assert(cc::impl::format_type_tag_of<char>() == cc::impl::format_type_tag::character);
+static_assert(cc::impl::format_type_tag_of<char const*>() == cc::impl::format_type_tag::string_like);
+static_assert(cc::impl::format_type_tag_of<cc::string>() == cc::impl::format_type_tag::string_like);
 
 // =========================================================================================================
 // Custom types: a cc::custom::formatter that takes no spec, one that delegates the standard spec to its

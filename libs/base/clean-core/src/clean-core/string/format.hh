@@ -78,7 +78,7 @@ namespace impl
 /// Validates one field's spec text against argument type T at compile time: a cc::custom::formatter<T> owns
 /// its validation (via an optional validate hook); otherwise the standard grammar + type rules apply.
 template <class T>
-consteval void validate_spec_for(string_view spec)
+consteval void format_validate_spec_for(string_view spec)
 {
     using U = std::remove_cvref_t<T>;
     if constexpr (requires { sizeof(cc::custom::formatter<U>); }) // a cc::custom::formatter<U> exists
@@ -89,20 +89,20 @@ consteval void validate_spec_for(string_view spec)
     }
     else
     {
-        format_spec const parsed = parse_spec(spec); // syntax errors -> compile error
-        if (char const* err = spec_error_for_type(parsed, type_tag_of<U>()))
+        format_spec const parsed = format_parse_spec(spec); // syntax errors -> compile error
+        if (char const* err = format_spec_error_for_type(parsed, format_type_tag_of<U>()))
             format_error(err);
     }
 }
 
 /// Walks the format string, replaying argument indexing, and validates the spec of every field that resolves
-/// to argument `target` against type T. Structural errors are reported separately by validate_structure.
+/// to argument `target` against type T. Structural errors are reported separately by format_validate_structure.
 template <class T>
-consteval void validate_arg_fields(string_view fmt, isize target)
+consteval void format_validate_arg_fields(string_view fmt, isize target)
 {
     isize const n = fmt.size();
     isize pos = 0;
-    index_state ix;
+    format_index_state ix;
 
     while (pos < n)
     {
@@ -114,9 +114,9 @@ consteval void validate_arg_fields(string_view fmt, isize target)
                 pos += 2;
                 continue;
             }
-            field const f = parse_field(fmt, pos, ix);
+            format_field const f = format_parse_field(fmt, pos, ix);
             if (f.arg_index == target)
-                validate_spec_for<T>(f.spec_text);
+                format_validate_spec_for<T>(f.spec_text);
             pos = f.next_pos;
         }
         else if (c == '}')
@@ -126,7 +126,7 @@ consteval void validate_arg_fields(string_view fmt, isize target)
                 pos += 2;
                 continue;
             }
-            break; // structural error; already reported by validate_structure
+            break; // structural error; already reported by format_validate_structure
         }
         else
         {
@@ -142,18 +142,18 @@ template <class T>
 consteval format_string<Args...>::format_string(T const& s) : _str(string_view(s))
 {
     // pass 1: structural validation (braces, escapes, index range, no auto/explicit mixing)
-    cc::impl::validate_structure(_str, isize(sizeof...(Args)));
+    cc::impl::format_validate_structure(_str, isize(sizeof...(Args)));
 
     // pass 2: validate each field's spec against the type of the argument it references
     [&]<std::size_t... Is>(std::index_sequence<Is...>)
-    { (cc::impl::validate_arg_fields<Args>(_str, isize(Is)), ...); }(std::make_index_sequence<sizeof...(Args)>{});
+    { (cc::impl::format_validate_arg_fields<Args>(_str, isize(Is)), ...); }(std::make_index_sequence<sizeof...(Args)>{});
 }
 
 template <class... Args>
 [[nodiscard]] string format(format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
 {
     string out = string::create_with_capacity(fmt.view().size() + 16);
-    auto sink = cc::impl::make_string_sink(out);
+    auto sink = cc::impl::format_make_string_sink(out);
     cc::impl::format_dispatch(sink, fmt.view(), cc::forward<Args>(args)...);
     return out;
 }
@@ -161,15 +161,15 @@ template <class... Args>
 template <class... Args>
 void format_append(string& out, format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
 {
-    auto sink = cc::impl::make_string_sink(out);
+    auto sink = cc::impl::format_make_string_sink(out);
     cc::impl::format_dispatch(sink, fmt.view(), cc::forward<Args>(args)...);
 }
 
 template <class... Args>
 [[nodiscard]] isize format_to(span<char> out, format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
 {
-    cc::impl::span_sink_state state{.data = out.data(), .capacity = out.size(), .total = 0};
-    auto sink = cc::impl::make_span_sink(state);
+    cc::impl::format_span_sink_state state{.data = out.data(), .capacity = out.size(), .total = 0};
+    auto sink = cc::impl::format_make_span_sink(state);
     cc::impl::format_dispatch(sink, fmt.view(), cc::forward<Args>(args)...);
     return state.total;
 }
@@ -178,6 +178,6 @@ template <class... Args>
 template <class... Args>
 void string::appendf(format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
 {
-    format_append(*this, fmt, cc::forward<Args>(args)...);
+    cc::format_append(*this, fmt, cc::forward<Args>(args)...);
 }
 } // namespace cc
