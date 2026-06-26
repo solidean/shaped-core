@@ -16,6 +16,15 @@ include(Coverage)     # SC_COVERAGE  — LLVM source-based test coverage
 include(Sanitizers)   # SANITIZE     — ASan/UBSan wiring (clang only)
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 
+# RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
+# (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
+# Release, but the inlining downgrade alone leaves heavily-inlined code several times slower (e.g. xxHash's
+# short-key hash path was ~5-11x slower under /Ob1). Promote to /Ob2 so RelWithDebInfo matches Release's
+# inlining; /Zi debug info and our CC_ASSERTs are untouched. Applied to every target (C and C++) defined below.
+if (MSVC)
+    add_compile_options($<$<CONFIG:RelWithDebInfo>:/Ob2>)
+endif()
+
 # Vendored third-party dependencies (mimalloc, xxHash, ...). Defined before the
 # libs so their targets exist when clean-core links them.
 add_subdirectory(extern)

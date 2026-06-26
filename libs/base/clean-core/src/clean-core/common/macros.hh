@@ -182,6 +182,14 @@
 // Usage: CC_HOT_FUNC void process_frame() { ... }
 #define CC_HOT_FUNC CC_IMPL_HOT_FUNC
 
+// CC_PURE - Function has no side effects and its result depends only on its arguments and the memory it
+// reads. Lets the compiler elide redundant calls (only across code that cannot have changed the read memory)
+// and pipeline calls across a loop, so an out-of-line wrapper over a pure callee is not pessimized relative
+// to the callee. Use ONLY for genuinely pure functions: no writes, no hidden/global state, deterministic —
+// e.g. a hash of its byte input. Misuse (marking a function with side effects pure) causes miscompiles.
+// Usage: [[nodiscard]] CC_PURE u64 hash_of(span<byte const> data);
+#define CC_PURE CC_IMPL_PURE
+
 // CC_BUILTIN_UNREACHABLE - Mark code path as unreachable (UB if reached)
 // Usage: default: CC_BUILTIN_UNREACHABLE;
 #define CC_BUILTIN_UNREACHABLE CC_IMPL_BUILTIN_UNREACHABLE
@@ -261,6 +269,15 @@
 
 #else
 #error "Unknown compiler"
+#endif
+
+// CC_IMPL_PURE keys on the actual compiler builtins, not CC_COMPILER_MSVC: clang-cl defines _MSC_VER (so it
+// buckets as MSVC above) yet fully supports GNU attributes, and we want the attribute there. Empty only on
+// genuine MSVC, which has no equivalent.
+#if defined(__GNUC__) || defined(__clang__)
+#define CC_IMPL_PURE [[gnu::pure]] // C++ spelling: unambiguous in a leading attribute-seq (vs __attribute__)
+#else
+#define CC_IMPL_PURE
 #endif
 
 #define CC_IMPL_MACRO_JOIN(arg1, arg2) arg1##arg2

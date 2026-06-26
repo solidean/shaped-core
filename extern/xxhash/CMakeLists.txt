@@ -12,6 +12,8 @@ add_library(xxhash STATIC ${XXHASH_DIR}/src/xxhash.c)
 target_include_directories(xxhash SYSTEM PUBLIC ${XXHASH_DIR}/include)
 
 # Third-party code: silence its warnings, hide its symbols (statically absorbed).
+# (Full inlining in RelWithDebInfo is handled project-wide in the root CMakeLists via /Ob2 — important here
+# because xxHash's short-key path is a chain of plain `static` helpers that only collapse under /Ob2.)
 if (MSVC)
     target_compile_options(xxhash PRIVATE /W0)
 else()

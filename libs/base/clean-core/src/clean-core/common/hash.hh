@@ -1,6 +1,7 @@
 #pragma once
 
-#include <clean-core/fwd.hh> // cc::span is used only by-declaration below; span.hh would cycle (it hashes)
+#include <clean-core/common/macros.hh> // CC_PURE on make_hash_of_bytes
+#include <clean-core/fwd.hh>           // cc::span is used only by-declaration below; span.hh would cycle (it hashes)
 #include <clean-core/math/bit.hh>
 #include <clean-core/math/wide_arith.hh>
 
@@ -121,7 +122,7 @@ namespace cc
 /// 64-bit XXH3 hash of a byte range (the 64-bit sibling of hash128::create). Stable for a given
 /// (data, seed); a seed of 0 selects XXH3's unseeded variant. The workhorse behind byte-range hashes
 /// such as strings; <xxhash.h> stays private to hash.cc.
-[[nodiscard]] u64 make_hash_of_bytes(cc::span<cc::byte const> data, u64 seed = 0);
+[[nodiscard]] CC_PURE u64 make_hash_of_bytes(cc::span<cc::byte const> data, u64 seed = 0);
 
 // --- make_hash / make_hash_finalized --------------------------------------------------------------
 

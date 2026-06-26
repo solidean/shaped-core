@@ -152,6 +152,9 @@ endif()
 # Test executable
 add_executable(clean-core-test
     tests/main.cc
+    tests/benchmarks/string-hash-bench.cc
+    tests/benchmarks/hash-benchmark.cc
+    tests/benchmarks/allocation-benchmark.cc
     tests/allocation-test.cc
     tests/array-test.cc
     tests/assert-test.cc
@@ -184,6 +187,7 @@ target_link_libraries(clean-core-test
     PRIVATE
     clean-core
     nexus
+    xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
 )
 
 # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.

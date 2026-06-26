@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/macros.hh> // CC_PURE on create
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
 
@@ -17,7 +18,7 @@ struct hash128
 
     /// Computes the XXH3 128-bit hash of `data` with the given `seed`.
     /// Empty data is valid (hashes the empty input); a seed of 0 selects XXH3's unseeded variant.
-    [[nodiscard]] static hash128 create(cc::span<cc::byte const> data, cc::u64 seed);
+    [[nodiscard]] CC_PURE static hash128 create(cc::span<cc::byte const> data, cc::u64 seed);
 
     /// ADL customization point (see common/hash.hh): a hash128 is already a hash,
     /// so we surface its low limb as the 64-bit hash.
