@@ -85,8 +85,14 @@ def _primary_artifact(target_data: dict, build_dir: Path) -> Path | None:
     return p if p.is_absolute() else (build_dir / p).resolve()
 
 
-def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
-    """Enumerate all CMake targets for the given build, with artifact paths."""
+def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
+    """Map each target name to its raw File API target JSON for the build.
+
+    This is the authoritative per-target description (compile groups, link
+    fragments, sources, artifacts). `discover_targets` is the summarized view on
+    top of it; callers that need the full detail (e.g. flag inspection) take the
+    raw dict. First definition wins on duplicate names, matching discovery.
+    """
     index = _load_index(build_dir)
     codemodel_path = _codemodel_file(build_dir, index)
     with open(codemodel_path, encoding="utf-8") as f:
@@ -95,22 +101,26 @@ def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
     config = _pick_configuration(codemodel, build_type)
     reply_dir = _reply_dir(build_dir)
 
-    targets: list[Target] = []
-    seen: set[str] = set()
+    models: dict[str, dict] = {}
     for ref in config.get("targets", []):
         with open(reply_dir / ref["jsonFile"], encoding="utf-8") as f:
             target_data = json.load(f)
         name = target_data["name"]
-        if name in seen:
-            continue
-        seen.add(name)
-        targets.append(
-            Target(
-                name=name,
-                kind=target_data.get("type", "UNKNOWN"),
-                artifact=_primary_artifact(target_data, build_dir),
-            )
+        if name not in models:
+            models[name] = target_data
+    return models
+
+
+def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
+    """Enumerate all CMake targets for the given build, with artifact paths."""
+    targets = [
+        Target(
+            name=name,
+            kind=data.get("type", "UNKNOWN"),
+            artifact=_primary_artifact(data, build_dir),
         )
+        for name, data in load_target_models(build_dir, build_type).items()
+    ]
     targets.sort(key=lambda t: t.name)
     return targets
 

@@ -12,7 +12,9 @@ from . import clangd, console, report
 from .build import build
 from .checks import Check, list_checks, run_checks
 from .cmake import remove_build_dir
+from .compdb import find_entry, load_entries, suggest_files
 from .configure import configure, ensure_configured
+from .flags import extract_flags
 from .coverage import (
     CoverageToolError,
     coverage_merge,
@@ -35,7 +37,7 @@ from .format import (
 )
 from .llvm_tools import resolve_tool
 from .logs import merge_junit, ninja_built_count
-from .models import Preset, StepResult, Target, TestSummary
+from .models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
 from .perf import run_and_collect as perf_run_and_collect
 from .pgo import (
     PgoError,
@@ -52,6 +54,7 @@ from .targets import (
     NotConfiguredError,
     discover_targets,
     executables,
+    load_target_models,
     select_test_binaries,
     write_query,
 )
@@ -96,10 +99,17 @@ __all__ = [
     "merge_junit",
     "ninja_built_count",
     "remove_build_dir",
+    "load_entries",
+    "find_entry",
+    "suggest_files",
+    "extract_flags",
     "Preset",
     "Target",
+    "CompileGroup",
+    "TargetFlags",
     "StepResult",
     "TestSummary",
+    "load_target_models",
     "load_presets",
     "resolve_presets",
     "emsdk_env",

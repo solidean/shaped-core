@@ -24,6 +24,7 @@ uv run dev.py <command> [options]
 | `check`        | Run pre-commit checks (format, crossrefs, test) and report one green/red verdict. |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
+| `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
 | `doctor`       | Read-only toolchain sanity check (cmake, ninja, compiler, presets, clangd).   |
 | `list-presets` | List available build presets.                                                |
 | `list-targets` | List discovered CMake targets for a preset.                                   |
@@ -243,6 +244,34 @@ check on a sample file to confirm clangd is wired up end-to-end.
 
 A common first move when the editor looks wrong: reload the clangd language server (the published
 database, or a just-edited `.clangd`, can be stale relative to the running server).
+
+## Inspecting build/link flags
+
+When a build misbehaves, the first question is usually *what flags is CMake actually passing?*
+`info` answers that read-only, straight from the configured preset (it auto-configures if needed —
+no build required). There are two layers:
+
+```bash
+uv run dev.py info build-flags clean-core-test    # per-target compile settings
+uv run dev.py info link-flags  clean-core-test    # per-target linker flags + link libraries
+uv run dev.py info compile-command libs/base/clean-core/src/clean-core/common/assert.cc
+```
+
+- **`build-flags` / `link-flags`** read the CMake **File API**, the same source target discovery
+  uses. `build-flags` prints defines, includes (`[sys]` marks system includes), the language
+  standard, and the raw flag fragments. Crucially, flags can **differ per translation unit** — a
+  vendored source might be built with `/W0`. CMake groups a target's sources by flag-set, so when
+  they diverge `build-flags` prints one numbered *flag set* block per group with the sources each
+  covers, rather than averaging them into one misleading line. `link-flags` prints the linker flags
+  and the resolved link libraries; a static library (which is archived, not linked) says so.
+- **`compile-command FILE`** prints the **exact** command from `compile_commands.json` — literally
+  what the compiler is invoked with for that one file (the ground truth, post-File-API). By default
+  it lists one argument per line for readability; `--raw` prints the verbatim single line. The file
+  argument matches an absolute path, a repo-relative path, or a unique bare filename.
+
+The target argument to `build-flags` / `link-flags` accepts comma-lists, repeated values, and
+shell-style wildcards (e.g. `"clean-core*"`), like `--target` elsewhere. Use `--preset` to inspect a
+specific configuration.
 
 ## Tests (nexus)
 
