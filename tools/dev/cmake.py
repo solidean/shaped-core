@@ -17,10 +17,14 @@ def configure_command(configure_preset: str) -> list[str]:
     return ["cmake", "--preset", configure_preset]
 
 
-def build_command(build_preset: str, target: str | None = None) -> list[str]:
+def build_command(build_preset: str, target: str | None = None, *, keep_going: bool = False) -> list[str]:
     cmd = ["cmake", "--build", "--preset", build_preset]
     if target:
         cmd += ["--target", target]
+    if keep_going:
+        # Pass through to the native tool (ninja): -k 0 keeps building after a
+        # failure so one run surfaces every independent error, not just the first.
+        cmd += ["--", "-k", "0"]
     return cmd
 
 

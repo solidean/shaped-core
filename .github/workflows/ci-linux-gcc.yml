@@ -38,7 +38,7 @@ jobs:
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-linux-gcc --diag-archive build/ci-diag.zip
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-linux-gcc --diag-archive build/ci-diag.zip --keep-going
 
       - name: Test
         run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-linux-gcc --merged-xml-report build/ci-test-results.xml

@@ -55,7 +55,10 @@ artifact** (see below).
   by the diag launcher (`diag-launcher.exe` on Windows, `diag_launcher.sh` →
   `diag_launcher.py` on Linux/macOS, wired in as the CMake compiler/linker
   launcher). This is the build-step analogue of the JUnit report. Produced by
-  `dev.py build --diag-archive`, even when the build fails.
+  `dev.py build --diag-archive`, even when the build fails. CI builds also pass
+  `--keep-going` (ninja `-k 0`) so a single failing run surfaces *every*
+  independent error, not just the first — otherwise each red run reveals only one
+  error and fixing portability becomes a slow one-at-a-time loop.
 - **`ci-test-results.xml`** — the merged JUnit test report
   (`dev.py test --merged-xml-report`).
 - **`ci-logs.zip`** — the raw captured run logs and step sidecars, the last

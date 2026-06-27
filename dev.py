@@ -241,6 +241,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         mirror=args.mirror_output,
         verbose=args.verbose,
         emsdk_path=args.emsdk_path,
+        keep_going=args.keep_going,
     )
     # Bundle the diag sidecars before the pass/fail gate: a failed build is
     # exactly when its per-invocation compiler errors are worth capturing.
@@ -933,6 +934,9 @@ def main() -> None:
     build_p.add_argument("--target", "-t", action="append",
                          help="Target(s) to build: comma-list, repeatable, wildcards")
     build_p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
+    build_p.add_argument("--keep-going", "-k", action="store_true",
+                         help="Keep building after the first error (ninja -k 0) so one run surfaces every "
+                              "independent failure instead of stopping at the first — pairs with --diag-archive.")
     build_p.add_argument("--diag-archive", metavar="FILE",
                          help="After building, bundle every .diag.json sidecar (one per compile/link, "
                               "written by diag-launcher) into a zip at FILE — the build-step analogue of "
