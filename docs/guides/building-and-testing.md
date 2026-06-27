@@ -97,6 +97,9 @@ msvc selects the Visual Studio instance whose `VC/Tools/MSVC` has that toolset �
 prerelease/preview installs** — and pins it with `-vcvars_ver`. A toolset that can't be found is a
 **hard error**.
 
+`uv run dev.py list-toolsets` prints what's installed per family — each Visual Studio instance with
+its MSVC toolsets (and the exact `--toolset` value for each), plus the clang/gcc drivers on `PATH`.
+
 A pinned toolset must not share a CMake cache with the default one, so the build directory is
 **auto-redirected** to `build/<preset>-<toolset>`. Two flags override where it lands:
 

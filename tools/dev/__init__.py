@@ -51,7 +51,7 @@ from .pgo import (
 )
 from .presets import PresetError, load_presets, resolve_presets
 from .process import emsdk_env, find_emsdk_root
-from .toolset import ToolsetError, apply_overrides
+from .toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
 from .targets import (
     NotConfiguredError,
     discover_targets,
@@ -117,6 +117,8 @@ __all__ = [
     "load_presets",
     "resolve_presets",
     "apply_overrides",
+    "list_toolsets",
+    "toolset_hint",
     "ToolsetError",
     "emsdk_env",
     "find_emsdk_root",

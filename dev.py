@@ -22,6 +22,7 @@ Usage:
     uv run dev.py doctor                    Sanity-check the toolchain
     uv run dev.py list-presets              List available build presets
     uv run dev.py list-targets              List discovered targets
+    uv run dev.py list-toolsets             List installed compiler toolsets (for --toolset)
 
 Presets and targets accept comma-lists, repeated flags, and shell-style
 wildcards, and operate on as many as you select:
@@ -610,6 +611,32 @@ def cmd_list_targets(args: argparse.Namespace) -> None:
         print(f"{t.name}  [{t.kind}]{artifact}")
 
 
+def cmd_list_toolsets(args: argparse.Namespace) -> None:
+    data = dev.list_toolsets()
+
+    print(console.bold("msvc"))
+    if not data["msvc"]:
+        why = "" if platform.system() == "Windows" else "  (Windows only)"
+        print(console.dim(f"  none found{why}"))
+    for inst in data["msvc"]:
+        tag = console.yellow(" [prerelease]") if inst["prerelease"] else ""
+        print(f"  {inst['name']}{tag}  {console.dim(inst['path'])}")
+        if not inst["toolsets"]:
+            print(console.dim("    (no C++ toolset installed)"))
+        for version in inst["toolsets"]:
+            print(f"    {version:<16} --toolset {dev.toolset_hint(version)}")
+
+    for family in ("clang", "gcc"):
+        print(console.bold(family))
+        entries = data[family]
+        if not entries:
+            print(console.dim("  none found on PATH"))
+        for e in entries:
+            hint = f"--toolset {e['toolset']}" if e["toolset"] else console.dim("(use an explicit path)")
+            banner = f"  {console.dim(e['version'])}" if e["version"] else ""
+            print(f"  {e['name']:<16} {hint}{banner}")
+
+
 # ---------------------------------------------------------------------------
 # Info
 #
@@ -1122,6 +1149,7 @@ def main() -> None:
     lt = sub.add_parser("list-targets", help="List discovered targets")
     _add_preset_arg(lt)
     _add_emsdk_arg(lt)
+    sub.add_parser("list-toolsets", help="List installed compiler toolsets per family (for --toolset)")
 
     args = parser.parse_args()
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
@@ -1169,6 +1197,8 @@ def main() -> None:
             cmd_list_presets(args)
         case "list-targets":
             cmd_list_targets(args)
+        case "list-toolsets":
+            cmd_list_toolsets(args)
 
 
 if __name__ == "__main__":

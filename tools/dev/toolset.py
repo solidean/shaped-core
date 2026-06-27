@@ -23,7 +23,9 @@ Public API:
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
+import platform
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -127,6 +129,129 @@ def find_msvc_instance(toolset: str) -> Path | None:
         if msvc_dir.is_dir() and any(d.name.startswith(toolset) for d in msvc_dir.iterdir()):
             return inst
     return None
+
+
+def toolset_hint(folder: str) -> str:
+    """The `--toolset` value that selects an MSVC toolset folder: its major.minor prefix.
+
+    e.g. "14.51.36231" -> "14.51" (find_msvc_instance matches by prefix, and vcvars accepts it).
+    """
+    parts = folder.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else folder
+
+
+# ---------------------------------------------------------------------------
+# Discovery (for `dev.py list-toolsets`)
+# ---------------------------------------------------------------------------
+
+def list_msvc_toolsets() -> list[dict]:
+    """Every installed Visual Studio instance and the MSVC toolsets under each.
+
+    One dict per instance: name, path, prerelease, and `toolsets` (full version folders,
+    newest first). Empty off Windows or when vswhere is unavailable. Includes prerelease
+    instances, so VS preview/insiders show up.
+    """
+    vswhere = _vswhere()
+    if vswhere is None:
+        return []
+    result = subprocess.run(
+        [str(vswhere), "-prerelease", "-all", "-format", "json", "-utf8"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    try:
+        instances = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+
+    out: list[dict] = []
+    for inst in instances:
+        path = Path(inst.get("installationPath", ""))
+        msvc_dir = path / "VC" / "Tools" / "MSVC"
+        toolsets = sorted((d.name for d in msvc_dir.iterdir() if d.is_dir()), reverse=True) \
+            if msvc_dir.is_dir() else []
+        out.append({
+            "name": inst.get("displayName") or path.name,
+            "path": str(path),
+            "prerelease": bool(inst.get("isPrerelease", False)),
+            "toolsets": toolsets,
+        })
+    out.sort(key=lambda i: i["name"])
+    return out
+
+
+def _compiler_version(exe: Path) -> str:
+    """First line of `<exe> --version`, or '' if it can't be run."""
+    try:
+        result = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    line = result.stdout.splitlines()
+    return line[0].strip() if line else ""
+
+
+def _discover_drivers(driver: str) -> list[Path]:
+    """Find `driver` and `driver-<version>` across PATH (e.g. clang++, clang++-21), PATH order.
+
+    Deduplicated by file name (not target), so a bare driver and its versioned siblings are all
+    listed even when they symlink to the same binary.
+    """
+    win = platform.system() == "Windows"
+    exe_suffix = ".exe" if win else ""
+    seen: dict[str, Path] = {}
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        d = Path(entry)
+        if not d.is_dir():
+            continue
+        candidates = [d / f"{driver}{exe_suffix}", *d.glob(f"{driver}-*")]
+        for c in candidates:
+            if not c.is_file() or (win and c.suffix.lower() != ".exe"):
+                continue
+            seen.setdefault(c.name.lower(), c)
+    return list(seen.values())
+
+
+def _version_tag(name: str, driver: str) -> str | None:
+    """The numeric --toolset value in a driver name, e.g. ('clang++-21', 'clang++') -> '21'.
+
+    None for a bare driver ('clang++') or a non-numeric suffix ('clang-cl'), where there is no
+    version to pass — the caller uses an explicit path instead.
+    """
+    stem = name[:-4] if name.lower().endswith(".exe") else name
+    if not stem.lower().startswith(driver.lower()):
+        return None
+    rest = stem[len(driver):].lstrip("-")
+    return rest if rest and rest[0].isdigit() else None
+
+
+def list_compiler_toolsets(family: str) -> list[dict]:
+    """Discover clang/gcc drivers on PATH for `family`.
+
+    One dict per driver found: name, path, version (the --version banner), and `toolset` — the
+    value to pass to --toolset (the trailing version in the name, e.g. clang++-21 -> "21"), or
+    None for an unversioned driver (use an explicit path then).
+    """
+    drivers = {"clang": ("clang++", "clang-cl"), "gcc": ("g++",)}.get(family, ())
+    out: list[dict] = []
+    for driver in drivers:
+        for exe in _discover_drivers(driver):
+            out.append({
+                "name": exe.name,
+                "path": str(exe),
+                "version": _compiler_version(exe),
+                "toolset": _version_tag(exe.name, driver),
+            })
+    return out
+
+
+def list_toolsets() -> dict[str, list[dict]]:
+    """All discoverable toolsets grouped by compiler family (for `dev.py list-toolsets`)."""
+    return {
+        "msvc": list_msvc_toolsets(),
+        "clang": list_compiler_toolsets("clang"),
+        "gcc": list_compiler_toolsets("gcc"),
+    }
 
 
 def _validate(preset: Preset) -> None:
