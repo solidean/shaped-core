@@ -1,0 +1,62 @@
+name: WASM (Emscripten)
+
+# Tier-2 wide-but-shallow gate: WebAssembly via Emscripten (single-threaded, no
+# WebGPU), RelWithDebInfo, tests run under Node. Single config; the deep
+# debug/release matrix lives in ci-linux-clang.yml. Uses the official
+# emscripten-core/setup-emsdk action pinned to a fixed Emscripten version, with
+# the emsdk cached. Everything runs through dev.py with an explicit preset.
+# See docs/guides/ci.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EMSCRIPTEN_VERSION: 5.0.1
+  EMSDK_CACHE: emsdk-cache
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache emsdk
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.EMSDK_CACHE }}
+          key: emsdk-${{ runner.os }}-${{ env.EMSCRIPTEN_VERSION }}
+
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+        with:
+          version: ${{ env.EMSCRIPTEN_VERSION }}
+          actions-cache-folder: ${{ env.EMSDK_CACHE }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # Informational only; --emsdk-path lets doctor validate the emsdk toolchain.
+      - name: Doctor (toolchain info)
+        run: uv run dev.py doctor --emsdk-path "$EMSDK"
+        continue-on-error: true
+
+      - name: Build
+        run: uv run dev.py build --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK"
+
+      - name: Test
+        run: uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK" --merged-xml-report build/ci-test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-emscripten-test-results
+          path: build/ci-test-results.xml
+          if-no-files-found: warn

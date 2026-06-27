@@ -1,9 +1,12 @@
 name: Linux Clang
 
-# Tier-1 native gate: Linux clang, RelWithDebInfo, build + tests.
-# Everything runs through dev.py with an explicit preset (no default-preset
-# reliance). Uses the ubuntu-26.04 runner's preinstalled clang/cmake/ninja, so
-# there are no toolchain-install steps. See docs/guides/ci.md.
+# Tier-1 native gate AND the deep config punch: Linux clang across
+# debug / relwithdebinfo / release, so define interactions (CC_ASSERT on with
+# debug+relwithdebinfo, off with release; optimization differences) are all
+# exercised in one workflow. Linux clang is chosen for the deep matrix because
+# it's the fastest, lowest-setup runner. Every other platform runs a single
+# relwithdebinfo config (wide but shallow). All work goes through dev.py with
+# explicit presets. See docs/guides/ci.md.
 
 on:
   push:
@@ -18,12 +21,15 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [debug-linux-clang, relwithdebinfo-linux-clang, release-linux-clang]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # ubuntu-26.04 ships clang 20/21/22 side by side; the
-      # relwithdebinfo-linux-clang preset invokes bare clang/clang++, so pin
-      # those names to the 21.x binaries (our LLVM 21 family target).
+      # ubuntu-26.04 ships clang 20/21/22 side by side; the *-linux-clang presets
+      # invoke bare clang/clang++, so pin those names to the 21.x binaries.
       - name: Select Clang 21
         run: |
           sudo ln -sf /usr/bin/clang-21 /usr/local/bin/clang
@@ -39,15 +45,15 @@ jobs:
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py build --preset relwithdebinfo-linux-clang
+        run: uv run dev.py build --preset ${{ matrix.preset }}
 
       - name: Test
-        run: uv run dev.py test --preset relwithdebinfo-linux-clang --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py test --preset ${{ matrix.preset }} --merged-xml-report build/ci-test-results.xml
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-clang-test-results
+          name: linux-clang-${{ matrix.preset }}-test-results
           path: build/ci-test-results.xml
           if-no-files-found: warn

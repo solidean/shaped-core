@@ -1,12 +1,10 @@
-name: Windows Clang
+name: Windows MSVC
 
-# Tier-1 native gate: Windows clang-cl, RelWithDebInfo, build + tests.
-# Wide-but-shallow gate (single config); the deep debug/release matrix lives in
-# ci-linux-clang.yml. Everything runs through dev.py with an explicit preset (no
-# default-preset reliance). Uses the windows-latest runner's preinstalled
-# toolchain (LLVM, CMake, Ninja); dev.py injects the MSVC environment for
-# clang-cl via vswhere, so there is no toolchain-install or MSVC-setup step.
-# See docs/guides/ci.md.
+# Tier-1 wide-but-shallow gate: Windows MSVC (cl), RelWithDebInfo, build + tests.
+# Single config; the deep debug/release matrix lives in ci-linux-clang.yml.
+# Uses windows-latest's preinstalled VS 2022 + CMake + Ninja; dev.py locates the
+# MSVC environment via vswhere, so there is no toolchain-install or MSVC-setup
+# step. Everything runs through dev.py with an explicit preset. See docs/guides/ci.md.
 
 on:
   push:
@@ -34,15 +32,15 @@ jobs:
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py build --preset relwithdebinfo-clang
+        run: uv run dev.py build --preset relwithdebinfo-msvc
 
       - name: Test
-        run: uv run dev.py test --preset relwithdebinfo-clang --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py test --preset relwithdebinfo-msvc --merged-xml-report build/ci-test-results.xml
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-clang-test-results
+          name: windows-msvc-test-results
           path: build/ci-test-results.xml
           if-no-files-found: warn

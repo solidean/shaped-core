@@ -1,12 +1,10 @@
-name: Windows Clang
+name: macOS Clang
 
-# Tier-1 native gate: Windows clang-cl, RelWithDebInfo, build + tests.
-# Wide-but-shallow gate (single config); the deep debug/release matrix lives in
-# ci-linux-clang.yml. Everything runs through dev.py with an explicit preset (no
-# default-preset reliance). Uses the windows-latest runner's preinstalled
-# toolchain (LLVM, CMake, Ninja); dev.py injects the MSVC environment for
-# clang-cl via vswhere, so there is no toolchain-install or MSVC-setup step.
-# See docs/guides/ci.md.
+# Tier-2 wide-but-shallow gate: macOS arm64, Homebrew LLVM, RelWithDebInfo.
+# Single config; the deep debug/release matrix lives in ci-linux-clang.yml.
+# The macos-arm-llvm-* presets point at /opt/homebrew/opt/llvm and link against
+# Homebrew libc++, so LLVM (and Ninja) come from brew; CMake ships on the runner.
+# Everything runs through dev.py with an explicit preset. See docs/guides/ci.md.
 
 on:
   push:
@@ -20,9 +18,12 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Install LLVM + Ninja
+        run: brew install llvm ninja
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -34,15 +35,15 @@ jobs:
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py build --preset relwithdebinfo-clang
+        run: uv run dev.py build --preset macos-arm-llvm-relwithdebinfo
 
       - name: Test
-        run: uv run dev.py test --preset relwithdebinfo-clang --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py test --preset macos-arm-llvm-relwithdebinfo --merged-xml-report build/ci-test-results.xml
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-clang-test-results
+          name: macos-clang-test-results
           path: build/ci-test-results.xml
           if-no-files-found: warn

@@ -1,0 +1,52 @@
+name: Linux GCC
+
+# Tier-1 wide-but-shallow gate: Linux GCC, RelWithDebInfo, build + tests.
+# Single config; the deep debug/release matrix lives in ci-linux-clang.yml.
+# Uses ubuntu-26.04's preinstalled GCC/CMake/Ninja. Everything runs through
+# dev.py with an explicit preset. See docs/guides/ci.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # ubuntu-26.04 ships gcc 13/14/15; the relwithdebinfo-linux-gcc preset
+      # invokes bare gcc/g++, so pin those names to gcc 14 (>= the GCC 13 floor).
+      - name: Select GCC 14
+        run: |
+          sudo ln -sf /usr/bin/gcc-14 /usr/local/bin/gcc
+          sudo ln -sf /usr/bin/g++-14 /usr/local/bin/g++
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # Informational only: doctor also probes clangd's compile DB and llvm-cov,
+      # which aren't needed for build+test and would fail a fresh runner.
+      - name: Doctor (toolchain info)
+        run: uv run dev.py doctor
+        continue-on-error: true
+
+      - name: Build
+        run: uv run dev.py build --preset relwithdebinfo-linux-gcc
+
+      - name: Test
+        run: uv run dev.py test --preset relwithdebinfo-linux-gcc --merged-xml-report build/ci-test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-gcc-test-results
+          path: build/ci-test-results.xml
+          if-no-files-found: warn
