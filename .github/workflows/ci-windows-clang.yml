@@ -3,9 +3,11 @@ name: Windows Clang
 # Tier-1 native gate: Windows clang-cl, RelWithDebInfo, build + tests.
 # Wide-but-shallow gate (single config); the deep debug/release matrix lives in
 # ci-linux-clang.yml. Everything runs through dev.py with an explicit preset (no
-# default-preset reliance). Uses the windows-latest runner's preinstalled
-# toolchain (LLVM, CMake, Ninja); dev.py injects the MSVC environment for
-# clang-cl via vswhere, so there is no toolchain-install or MSVC-setup step.
+# default-preset reliance). Uses the runner's preinstalled toolchain — clang 20
+# (LLVM), CMake, Ninja; dev.py injects the MSVC environment for clang-cl via
+# vswhere, so there is no toolchain-install or MSVC-setup step. There is no
+# --toolset pin here: clang-cl ships as a single unversioned binary, so the
+# version is whatever the base image provides (currently clang 20).
 # See docs/guides/ci.md.
 
 on:
@@ -30,7 +32,7 @@ jobs:
       # Informational only: doctor also probes clangd's compile DB and llvm-cov,
       # which aren't needed for build+test and would fail a fresh runner.
       - name: Doctor (toolchain info)
-        run: uv run dev.py doctor
+        run: uv run dev.py doctor --preset relwithdebinfo-clang
         continue-on-error: true
 
       - name: Build

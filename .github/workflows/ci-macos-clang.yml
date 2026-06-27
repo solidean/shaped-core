@@ -31,7 +31,7 @@ jobs:
       # Informational only: doctor also probes clangd's compile DB and llvm-cov,
       # which aren't needed for build+test and would fail a fresh runner.
       - name: Doctor (toolchain info)
-        run: uv run dev.py doctor
+        run: uv run dev.py doctor --preset macos-arm-llvm-relwithdebinfo
         continue-on-error: true
 
       - name: Build

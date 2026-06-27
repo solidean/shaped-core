@@ -6,7 +6,8 @@ name: Linux Clang
 # exercised in one workflow. Linux clang is chosen for the deep matrix because
 # it's the fastest, lowest-setup runner. Every other platform runs a single
 # relwithdebinfo config (wide but shallow). All work goes through dev.py with
-# explicit presets. See docs/guides/ci.md.
+# explicit presets, and --toolset 21 pins the compiler to clang 21 (a hard error
+# if absent — no symlink shimming). See docs/guides/ci.md.
 
 on:
   push:
@@ -28,27 +29,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # ubuntu-26.04 ships clang 20/21/22 side by side; the *-linux-clang presets
-      # invoke bare clang/clang++, so pin those names to the 21.x binaries.
-      - name: Select Clang 21
-        run: |
-          sudo ln -sf /usr/bin/clang-21 /usr/local/bin/clang
-          sudo ln -sf /usr/bin/clang++-21 /usr/local/bin/clang++
-
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
       # Informational only: doctor also probes clangd's compile DB and llvm-cov,
       # which aren't needed for build+test and would fail a fresh runner.
       - name: Doctor (toolchain info)
-        run: uv run dev.py doctor
+        run: uv run dev.py doctor --preset ${{ matrix.preset }} --toolset 21
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset ${{ matrix.preset }} --diag-archive build/ci-diag.zip --keep-going
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset ${{ matrix.preset }} --toolset 21 --diag-archive build/ci-diag.zip --keep-going
 
       - name: Test
-        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset ${{ matrix.preset }} --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset ${{ matrix.preset }} --toolset 21 --merged-xml-report build/ci-test-results.xml
 
       - name: Upload diagnostics
         if: always()

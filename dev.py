@@ -48,6 +48,7 @@ and plain when either is piped (e.g. run by an agent). Force it either way with
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fnmatch
 import platform
 import shlex
@@ -582,9 +583,10 @@ def cmd_diagnose_clangd(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
-    checks = dev.doctor(
-        ROOT, default_preset=DEFAULT_BUILD_PRESETS.get(platform.system()), emsdk_path=args.emsdk_path
-    )
+    # Resolve the preset (falling back to the platform default) and attach --toolset WITHOUT
+    # validating it — doctor should *report* a missing/wrong toolset, not hard-fail on it.
+    preset = dataclasses.replace(resolve_presets(args.preset)[0], toolset=args.toolset)
+    checks = dev.doctor(ROOT, preset=preset, emsdk_path=args.emsdk_path)
     all_ok = True
     for label, ok, detail in checks:
         # ok is True (pass), False (fail), or None for an advisory (neither).
@@ -1142,6 +1144,12 @@ def main() -> None:
                            help="Print the verbatim single-line command instead of one argument per line")
 
     doctor_p = sub.add_parser("doctor", help="Sanity-check the toolchain")
+    _add_preset_arg(doctor_p)
+    doctor_p.add_argument(
+        "--toolset", metavar="VERSION", default=None,
+        help="Report the compiler this toolset resolves to (same value as build/test --toolset), "
+             "instead of the preset default.",
+    )
     _add_emsdk_arg(doctor_p)
 
     lp = sub.add_parser("list-presets", help="List available build presets")

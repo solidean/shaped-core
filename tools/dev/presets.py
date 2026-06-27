@@ -56,6 +56,18 @@ def _resolve_cache_var(name: str, configs: dict[str, dict], var: str) -> str | N
     return None
 
 
+def resolve_cache_variable(root: Path, configure_preset: str, var: str) -> str | None:
+    """Resolve a configure preset's cacheVariable, walking its `inherits` chain.
+
+    Returns the first value found (parents in declared order), or None. Used by doctor to
+    report the compiler a preset actually configures (e.g. the Homebrew-LLVM path on macOS),
+    rather than whatever bare `clang++`/`g++` happens to be on PATH.
+    """
+    data = _read_presets_file(root)
+    configs = _configure_presets_by_name(data)
+    return _resolve_cache_var(configure_preset, configs, var)
+
+
 def load_presets(root: Path) -> list[Preset]:
     """Return all non-hidden build presets, in declaration order."""
     data = _read_presets_file(root)

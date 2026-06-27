@@ -44,7 +44,7 @@ jobs:
 
       # Informational only; --emsdk-path lets doctor validate the emsdk toolchain.
       - name: Doctor (toolchain info)
-        run: uv run dev.py doctor --emsdk-path "$EMSDK"
+        run: uv run dev.py doctor --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK"
         continue-on-error: true
 
       # Emscripten presets don't use the diag launcher, so --diag-archive is

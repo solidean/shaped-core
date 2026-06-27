@@ -49,7 +49,7 @@ from .pgo import (
     pgo_train,
     profile_path,
 )
-from .presets import PresetError, load_presets, resolve_presets
+from .presets import PresetError, load_presets, resolve_cache_variable, resolve_presets
 from .process import emsdk_env, find_emsdk_root
 from .toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
 from .targets import (

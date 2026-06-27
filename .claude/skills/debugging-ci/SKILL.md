@@ -36,8 +36,8 @@ keeps cloud artifacts out of your real `build/<preset>` trees, and is the agreed
 scratch location.
 
 ```bash
-gh run download <run-id> --name windows-msvc-diagnostics --dir build/.tmp/msvc
-# leaves: build/.tmp/msvc/windows-msvc-diagnostics/{ci-diag.zip,ci-logs.zip,ci-test-results.xml}
+gh run download <run-id> --name windows-msvc-vs2026-diagnostics --dir build/.tmp/msvc
+# leaves: build/.tmp/msvc/windows-msvc-vs2026-diagnostics/{ci-diag.zip,ci-logs.zip,ci-test-results.xml}
 ```
 
 (Omit `--name` to grab every artifact; `gh run view <run-id>` lists their names.)
@@ -49,10 +49,10 @@ gh run download <run-id> --name windows-msvc-diagnostics --dir build/.tmp/msvc
 
 ```text
 # build failures — grouped per-TU error tree, unique first-errors surfaced:
-build_diag base_path="build/.tmp/msvc/windows-msvc-diagnostics/ci-diag.zip" show_tags=["error"]
+build_diag base_path="build/.tmp/msvc/windows-msvc-vs2026-diagnostics/ci-diag.zip" show_tags=["error"]
 
 # test failures — failure-first results tree, green collapsed, every failure expanded:
-test_diag  base_path="build/.tmp/msvc/windows-msvc-diagnostics/ci-logs.zip" errors_only=true limit=120
+test_diag  base_path="build/.tmp/msvc/windows-msvc-vs2026-diagnostics/ci-logs.zip" errors_only=true limit=120
 ```
 
 What's in the artifact (see [docs/guides/ci.md](../../../docs/guides/ci.md) for detail):

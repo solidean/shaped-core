@@ -3,7 +3,8 @@ name: Linux GCC
 # Tier-1 wide-but-shallow gate: Linux GCC, RelWithDebInfo, build + tests.
 # Single config; the deep debug/release matrix lives in ci-linux-clang.yml.
 # Uses ubuntu-26.04's preinstalled GCC/CMake/Ninja. Everything runs through
-# dev.py with an explicit preset. See docs/guides/ci.md.
+# dev.py with an explicit preset, and --toolset 14 pins the compiler to gcc 14
+# (a hard error if absent — no symlink shimming). See docs/guides/ci.md.
 
 on:
   push:
@@ -21,27 +22,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # ubuntu-26.04 ships gcc 13/14/15; the relwithdebinfo-linux-gcc preset
-      # invokes bare gcc/g++, so pin those names to gcc 14 (>= the GCC 13 floor).
-      - name: Select GCC 14
-        run: |
-          sudo ln -sf /usr/bin/gcc-14 /usr/local/bin/gcc
-          sudo ln -sf /usr/bin/g++-14 /usr/local/bin/g++
-
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
       # Informational only: doctor also probes clangd's compile DB and llvm-cov,
       # which aren't needed for build+test and would fail a fresh runner.
       - name: Doctor (toolchain info)
-        run: uv run dev.py doctor
+        run: uv run dev.py doctor --preset relwithdebinfo-linux-gcc --toolset 14
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-linux-gcc --diag-archive build/ci-diag.zip --keep-going
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-linux-gcc --toolset 14 --diag-archive build/ci-diag.zip --keep-going
 
       - name: Test
-        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-linux-gcc --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-linux-gcc --toolset 14 --merged-xml-report build/ci-test-results.xml
 
       - name: Upload diagnostics
         if: always()
