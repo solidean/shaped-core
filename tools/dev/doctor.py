@@ -205,7 +205,7 @@ def _compiler_check(root: Path, preset: Preset) -> tuple[str, bool, str]:
     cxx: str | None = None
     if preset.toolset:
         try:
-            cxx = ts.compiler_defines(preset).get("CMAKE_CXX_COMPILER")
+            cxx = ts.compiler_defines(preset, root).get("CMAKE_CXX_COMPILER")
         except ts.ToolsetError as e:
             return ("compiler", False, str(e))
     if cxx is None:

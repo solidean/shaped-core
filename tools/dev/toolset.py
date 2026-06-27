@@ -26,12 +26,14 @@ import dataclasses
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 from .models import Preset
+from .presets import resolve_cache_variable
 
 
 class ToolsetError(Exception):
@@ -68,11 +70,26 @@ def _sibling_c_compiler(cxx: Path) -> Path:
     return cxx  # e.g. clang-cl drives both C and C++
 
 
-def compiler_defines(preset: Preset) -> dict[str, str]:
+def compiler_major(exe: str) -> int | None:
+    """Major version of a compiler given by name or path (from its --version banner), or None."""
+    if not (Path(exe).is_file() or shutil.which(exe)):
+        return None
+    try:
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"(\d+)\.\d+\.\d+", out.stdout)  # clang "... version 22.1.8"; gcc "... 14.3.0"
+    return int(m.group(1)) if m else None
+
+
+def compiler_defines(preset: Preset, root: Path | None = None) -> dict[str, str]:
     """CMAKE_{C,CXX}_COMPILER overrides for a pinned clang/gcc toolset, or {} when none applies.
 
-    MSVC pins via the vcvars environment, not cache variables, so it returns {} here.
-    Raises ToolsetError if the requested compiler cannot be found.
+    For a bare version N, prefer a versioned binary on PATH (`clang++-N` / `g++-N`) and override the
+    compiler to it. When none exists — e.g. `clang-cl` on Windows or Homebrew's unversioned `clang++`
+    on macOS — fall back to *asserting* that the preset's own compiler is major version N (no
+    override): a hard error on mismatch, so a base-image compiler bump is loud. MSVC pins via the
+    vcvars environment, not cache variables, so it returns {} here.
     """
     ts = preset.toolset
     if ts is None or preset.family not in ("clang", "gcc"):
@@ -87,13 +104,23 @@ def compiler_defines(preset: Preset) -> dict[str, str]:
 
     cxx_name, cc_name = _versioned_names(preset.family, ts)
     cxx, cc = shutil.which(cxx_name), shutil.which(cc_name)
-    if not cxx or not cc:
-        missing = cxx_name if not cxx else cc_name
-        raise ToolsetError(
-            f"--toolset {ts!r}: {missing!r} not found on PATH for the "
-            f"{preset.family} preset {preset.name!r}"
-        )
-    return {"CMAKE_CXX_COMPILER": cxx, "CMAKE_C_COMPILER": cc}
+    if cxx and cc:
+        return {"CMAKE_CXX_COMPILER": cxx, "CMAKE_C_COMPILER": cc}
+
+    # No versioned binary — assert the preset's configured compiler is itself major version `ts`.
+    preset_cxx = resolve_cache_variable(root, preset.configure_preset, "CMAKE_CXX_COMPILER") if root else None
+    if preset_cxx is not None and ts.isdigit():
+        major = compiler_major(preset_cxx)
+        if major is not None and major == int(ts):
+            return {}  # the preset compiler already is this version; nothing to override
+        if major is not None:
+            raise ToolsetError(
+                f"--toolset {ts}: the {preset.name!r} compiler {preset_cxx!r} is version {major}, not {ts}"
+            )
+    raise ToolsetError(
+        f"--toolset {ts!r}: neither {cxx_name!r} on PATH nor a version-{ts} compiler for the "
+        f"{preset.family} preset {preset.name!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -254,12 +281,12 @@ def list_toolsets() -> dict[str, list[dict]]:
     }
 
 
-def _validate(preset: Preset) -> None:
+def _validate(preset: Preset, root: Path) -> None:
     """Eagerly fail (ToolsetError) if the preset's pinned toolset can't be resolved."""
     if preset.toolset is None:
         return
     if preset.family in ("clang", "gcc"):
-        compiler_defines(preset)  # raises if not found
+        compiler_defines(preset, root)  # raises if not found / version mismatch
     elif preset.family == "msvc":
         if not _looks_like_path(preset.toolset) and find_msvc_instance(preset.toolset) is None:
             raise ToolsetError(
@@ -308,6 +335,6 @@ def apply_overrides(
             bd = preset.build_dir
 
         new = dataclasses.replace(preset, build_dir=bd, toolset=toolset)
-        _validate(new)
+        _validate(new, root)
         out.append(new)
     return out

@@ -95,7 +95,10 @@ How the value resolves depends on the family: clang/gcc swap `CMAKE_C/CXX_COMPIL
 version finds `clang++-N` / `g++-N` on `PATH`; a value with a slash is an explicit compiler path);
 msvc selects the Visual Studio instance whose `VC/Tools/MSVC` has that toolset — **including
 prerelease/preview installs** — and pins it with `-vcvars_ver`. A toolset that can't be found is a
-**hard error**.
+**hard error**. When no versioned `clang++-N` / `g++-N` exists (e.g. `clang-cl` on Windows, or
+Homebrew's unversioned `clang++` on macOS), a bare `--toolset N` instead **asserts** the preset's own
+compiler is major version N — a hard error on mismatch — so a base-image compiler bump is loud
+rather than silent.
 
 `uv run dev.py list-toolsets` prints what's installed per family — each Visual Studio instance with
 its MSVC toolsets (and the exact `--toolset` value for each), plus the clang/gcc drivers on `PATH`.

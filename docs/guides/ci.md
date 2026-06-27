@@ -34,10 +34,10 @@ One workflow per platform/compiler, so each gets its own status badge in the
 |-----------------------------------------------------------------------|------------------|------------------------------------------------------------|
 | [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang` (deep matrix), `--toolset 21` |
 | [ci-linux-gcc.yml](../../.github/workflows/ci-linux-gcc.yml)          | `ubuntu-26.04`   | `relwithdebinfo-linux-gcc`, `--toolset 14`                  |
-| [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang` (clang 20, preinstalled)            |
+| [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`, `--toolset 20` (assert clang-cl 20) |
 | [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-2025`   | `relwithdebinfo-msvc`, `--toolset 14.44` (VS 2022)         |
 | [ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml) | `windows-2025-vs2026` | `relwithdebinfo-msvc`, `--toolset 14.51` (VS 2026) |
-| [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`                            |
+| [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert clang 22) |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
 
 Every workflow shares the same shape: provision the toolchain, then `doctor` →
@@ -104,15 +104,18 @@ never shares a CMake cache with a default-toolset build. Per-platform specifics:
   ([ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml)).
   `--toolset` searches prerelease installs too, so a preview VS is reachable.
 - **Windows clang** (`windows-latest`) uses the preinstalled **LLVM (clang 20)**
-  `clang-cl`; `dev.py` injects the MSVC environment via `vswhere`. There is no
-  `--toolset` pin because `clang-cl` ships as a single unversioned binary — the
-  version is whatever the base image provides. Riding clang 20 (a touch behind
-  the 21 target) is fine because the clang-format/tidy gate runs on Linux clang
-  21, so Windows clang only needs to *compile* clean.
+  `clang-cl`; `dev.py` injects the MSVC environment via `vswhere`. `clang-cl` is a
+  single unversioned binary (no `clang++-N` to swap to), so `--toolset 20` here
+  *asserts* it is clang 20 rather than selecting it — a hard error if the base
+  image moves on. Riding clang 20 (a touch behind the 21 target) is fine because
+  the clang-format/tidy gate runs on Linux clang 21, so Windows clang only needs
+  to *compile* clean.
 - **macOS** (`macos-latest`, arm64) needs Homebrew LLVM — the `macos-arm-llvm-*`
   presets point `CMAKE_CXX_COMPILER` at `/opt/homebrew/opt/llvm/bin/clang++` and
   link Homebrew `libc++` — so it `brew install llvm ninja` (CMake ships on the
-  runner). This is a distinct toolchain from the image's system Apple clang.
+  runner; this is a distinct toolchain from the image's system Apple clang).
+  Homebrew's `clang++` is unversioned, so `--toolset 22` *asserts* it is clang 22
+  — loud if a Homebrew bump changes it — rather than selecting it.
 - **WASM** uses the official `emscripten-core/setup-emsdk` action, pinned to a
   fixed Emscripten version (`EMSCRIPTEN_VERSION`) with the emsdk cached across
   runs. `dev.py` gets `--emsdk-path "$EMSDK"` on doctor/build/test; tests run

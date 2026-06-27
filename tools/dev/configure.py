@@ -49,7 +49,7 @@ def _configure_one(
         cmake.configure_command(
             preset.configure_preset,
             build_dir=preset.build_dir,
-            defines=toolset.compiler_defines(preset),
+            defines=toolset.compiler_defines(preset, root),
         ),
         step_type="configure",
         build_dir=preset.build_dir,
