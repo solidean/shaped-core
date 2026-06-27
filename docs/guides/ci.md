@@ -1,8 +1,9 @@
 # Continuous integration
 
-GitHub Actions gates the Tier-1 native toolchains on every push to `main` and
-every pull request (and on manual `workflow_dispatch`). (Back to
-[_index.md](_index.md).)
+GitHub Actions gates the Tier-1 platforms on every push to `main` and every pull
+request (and on manual `workflow_dispatch`). This doc is about what CI actually
+does; for the support model (what *should* work, and the Tier-2/3 platforms) see
+[platforms.md](../platforms.md). (Back to [_index.md](_index.md).)
 
 ## Philosophy
 
