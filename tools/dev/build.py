@@ -35,12 +35,14 @@ def build(
     mirror: bool = False,
     verbose: bool = False,
     emsdk_path: str | None = None,
+    keep_going: bool = False,
 ) -> list[StepResult]:
     """Build `targets` (or everything when None/empty) across all presets.
 
     Returns every StepResult produced, in order. A failed step does not stop the
     remaining presets/targets — the caller inspects the results for failures.
     `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env).
+    `keep_going` passes ninja -k 0 so a build surfaces every error, not just the first.
     """
     results: list[StepResult] = []
 
@@ -57,7 +59,7 @@ def build(
         preset_results: list[StepResult] = []
         for target in to_build:
             result = run_step(
-                cmake.build_command(preset.name, target),
+                cmake.build_command(preset.name, target, keep_going=keep_going),
                 step_type="build",
                 name=target or "all",
                 build_dir=preset.build_dir,

@@ -67,6 +67,9 @@ clean-core
 * **Feature branches are mandatory** (see Git workflow) — don't commit straight
   to `main`.
 * **No force-push to `main`.**
+* **Opening a PR requires the `opening-a-pr` skill.** Before any `gh pr create`
+  (or otherwise opening a pull request), activate the `opening-a-pr` skill first
+  and follow its flow — do not hand-roll the PR.
 
 ---
 

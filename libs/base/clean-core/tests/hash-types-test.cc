@@ -68,7 +68,7 @@ TEST("hash types - pair")
 
 TEST("hash types - optional distinguishes engaged/empty/value")
 {
-    cc::optional<int> const empty;
+    cc::optional<int> const empty = {};
     cc::optional<int> const a = 5;
     cc::optional<int> const b = 5;
     cc::optional<int> const c = 6;

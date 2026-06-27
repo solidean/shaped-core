@@ -264,7 +264,7 @@
 #if defined(CC_COMPILER_CLANG)
 #define CC_IMPL_ASSUME(x) __builtin_assume(x)
 #else
-#define CC_IMPL_ASSUME(x) ((!x) ? __builtin_unreachable() : void(0))
+#define CC_IMPL_ASSUME(x) ((!(x)) ? __builtin_unreachable() : void(0))
 #endif
 
 #else

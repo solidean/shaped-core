@@ -49,14 +49,19 @@ Support tiers:
 * **Tier 2** — explicitly supported, occasionally tested. Expected to work; breakage is a bug.
 * **Tier 3** — planned. Not wired up yet and may not build.
 
-| Platform                        | Arch        | Compiler / toolchain         | Tier | Notes                                              |
+Each row with a badge is its own CI workflow (one config per badge, except Linux Clang which runs
+the deep debug/relwithdebinfo/release matrix). See [docs/guides/ci.md](docs/guides/ci.md).
+
+| Platform / CI                   | Arch        | Compiler / toolchain         | Tier | Notes                                              |
 |---------------------------------|-------------|------------------------------|------|----------------------------------------------------|
-| Windows                         | x64         | Clang (`clang-cl`), MSVC     | 1    | Default `relwithdebinfo-clang`; `*-msvc-*` for MSVC |
-| Linux                           | x64         | Clang, GCC 13+               | 1    | Default `relwithdebinfo-linux-clang`               |
-| macOS                           | arm64       | Homebrew LLVM                | 2    | `macos-arm-llvm-*` presets                         |
+| [![Windows Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml) | x64 | Clang (`clang-cl`) | 1 | `relwithdebinfo-clang` |
+| Windows (MSVC)                  | x64         | MSVC (`cl`)                  | 1    | `relwithdebinfo-msvc`; CI disabled pending a `cc::format` MSVC fix |
+| [![Linux Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml) | x64 | Clang | 1 | Deep matrix: debug / relwithdebinfo / release (`*-linux-clang`) |
+| [![Linux GCC](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml) | x64 | GCC 14 (13+) | 1 | `relwithdebinfo-linux-gcc` |
+| [![macOS Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml) | arm64 | Homebrew LLVM | 2 | `macos-arm-llvm-relwithdebinfo` |
 | iOS                             | arm64       | Apple Clang                  | 2    | First-party; no preset/CI yet                      |
 | Android                         | arm64       | NDK r27c (Clang)             | 2    | `android-ndk-arm64-*` presets                      |
-| WebAssembly — Emscripten        | wasm32      | Emscripten (Clang)           | 2    | Single-threaded, no WebGPU. `emscripten-*` presets; runs under Node |
+| [![WASM (Emscripten)](https://github.com/solidean/shaped-core/actions/workflows/ci-wasm-emscripten.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-wasm-emscripten.yml) | wasm32 | Emscripten (Clang) | 2 | Single-threaded, no WebGPU; `emscripten-relwithdebinfo`; runs under Node |
 | WebAssembly — Emscripten + threads | wasm32   | Emscripten (Clang)           | 3    | `-pthread`; planned                                |
 | WebAssembly — Emscripten + WebGPU | wasm32    | Emscripten (Clang)           | 3    | emdawnwebgpu; planned                              |
 | WebAssembly — WASI              | wasm32      | wasi-sdk (Clang)             | 3    | Planned                                            |

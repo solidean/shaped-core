@@ -241,7 +241,13 @@ def cmd_build(args: argparse.Namespace) -> None:
         mirror=args.mirror_output,
         verbose=args.verbose,
         emsdk_path=args.emsdk_path,
+        keep_going=args.keep_going,
     )
+    # Bundle the diag sidecars before the pass/fail gate: a failed build is
+    # exactly when its per-invocation compiler errors are worth capturing.
+    if args.diag_archive:
+        n = dev.archive_diag([p.build_dir for p in presets], Path(args.diag_archive), ROOT)
+        print(f"Diagnostics archive written to {args.diag_archive} ({n} sidecar(s))", file=sys.stderr)
     if not all(r.ok for r in results):
         _fail_build(results, presets)
     build_steps = [r for r in results if r.step_type == "build"]
@@ -907,6 +913,9 @@ def main() -> None:
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--mirror-output", action="store_true",
                         help="Stream child stdout/stderr live instead of only capturing it")
+    parser.add_argument("--collect-logs", metavar="FILE", default=None,
+                        help="On exit (pass or fail), bundle all captured run logs and step sidecars "
+                             "under build/ into a zip at FILE — last-resort raw diagnostics for CI.")
     color_group = parser.add_mutually_exclusive_group()
     color_group.add_argument("--colored", action="store_true",
                              help="Force colored output (default: auto-detect by terminal)")
@@ -925,6 +934,14 @@ def main() -> None:
     build_p.add_argument("--target", "-t", action="append",
                          help="Target(s) to build: comma-list, repeatable, wildcards")
     build_p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
+    build_p.add_argument("--keep-going", "-k", action="store_true",
+                         help="Keep building after the first error (ninja -k 0) so one run surfaces every "
+                              "independent failure instead of stopping at the first — pairs with --diag-archive.")
+    build_p.add_argument("--diag-archive", metavar="FILE",
+                         help="After building, bundle every .diag.json sidecar (one per compile/link, "
+                              "written by diag-launcher) into a zip at FILE — the build-step analogue of "
+                              "--merged-xml-report. Produced even when the build fails; extract at the repo "
+                              "root and inspect with build_diag.")
 
     test_p = sub.add_parser("test", help="Run tests")
     _add_preset_arg(test_p)
@@ -1069,6 +1086,20 @@ def main() -> None:
 
     args = parser.parse_args()
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
+
+    # Capture logs on the way out regardless of how the command exits (including
+    # sys.exit on a failed build/test) — atexit fires on SystemExit too.
+    if args.collect_logs:
+        import atexit
+
+        def _emit_log_archive() -> None:
+            try:
+                n = dev.archive_logs(ROOT / "build", Path(args.collect_logs), ROOT)
+                print(f"Log archive written to {args.collect_logs} ({n} file(s))", file=sys.stderr)
+            except OSError as e:
+                print(f"warning: failed to write log archive {args.collect_logs}: {e}", file=sys.stderr)
+
+        atexit.register(_emit_log_archive)
 
     match args.command:
         case "configure":
