@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/function/impl/invoke_function_thunk.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/node_allocation.hh>
 
@@ -38,10 +39,8 @@ public:
         static_assert(std::is_constructible_v<Fn, F>, "cannot copy/move into the unique_function. try direct "
                                                       "construction via create_from.");
 
-        // NOLINTBEGIN
         _payload = cc::node_allocation<Fn>::create_from(cc::default_node_allocator(), cc::forward<F>(f));
-        _thunk = [](void* p, Args... args) -> R { return cc::invoke(*static_cast<Fn*>(p), cc::forward<Args>(args)...); };
-        // NOLINTEND
+        _thunk = &cc::impl::invoke_function_thunk<Fn, R, Args...>;
     }
 
     // takes an explicit allocator
@@ -51,8 +50,7 @@ public:
     {
         unique_function uf;
         uf._payload = cc::node_allocation<F>::create_from(alloc, cc::forward<FArgs>(args)...);
-        uf._thunk
-            = [](void* p, Args... args) -> R { return cc::invoke(*static_cast<F*>(p), cc::forward<Args>(args)...); };
+        uf._thunk = &cc::impl::invoke_function_thunk<F, R, Args...>;
         return uf;
     }
 
