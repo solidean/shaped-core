@@ -59,7 +59,7 @@ def build(
         preset_results: list[StepResult] = []
         for target in to_build:
             result = run_step(
-                cmake.build_command(preset.name, target, keep_going=keep_going),
+                cmake.build_command(preset.build_dir, target, keep_going=keep_going),
                 step_type="build",
                 name=target or "all",
                 build_dir=preset.build_dir,

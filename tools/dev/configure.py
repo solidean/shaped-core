@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import cmake, console, fingerprint, targets
+from . import cmake, console, fingerprint, targets, toolset
 from .logs import step_fields, write_sidecar
 from .models import Preset, StepResult
 from .process import env_for_preset, run_step
@@ -46,7 +46,11 @@ def _configure_one(
     targets.write_query(preset.build_dir)
     env = env_for_preset(preset, emsdk_path)
     result = run_step(
-        cmake.configure_command(preset.configure_preset),
+        cmake.configure_command(
+            preset.configure_preset,
+            build_dir=preset.build_dir,
+            defines=toolset.compiler_defines(preset),
+        ),
         step_type="configure",
         build_dir=preset.build_dir,
         cwd=root,

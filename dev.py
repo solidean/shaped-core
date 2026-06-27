@@ -170,6 +170,22 @@ def resolve_presets(specs: list[str] | None) -> list[dev.Preset]:
         die(str(e))
 
 
+def resolve_build_presets(args: argparse.Namespace) -> list[dev.Preset]:
+    """Resolve --preset and apply the --toolset / --build-suffix / --build-dir overrides.
+
+    Used by the configure/build/test commands; validates a pinned toolset eagerly so an
+    unresolvable one fails fast with a clean message instead of mid-build.
+    """
+    presets = resolve_presets(args.preset)
+    try:
+        return dev.apply_overrides(
+            presets, root=ROOT,
+            toolset=args.toolset, build_suffix=args.build_suffix, build_dir=args.build_dir,
+        )
+    except dev.ToolsetError as e:
+        die(str(e))
+
+
 def _discover(preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
     """Discover targets for a preset, auto-configuring if needed."""
     try:
@@ -214,7 +230,7 @@ def resolve_target_names(
 # ---------------------------------------------------------------------------
 
 def cmd_configure(args: argparse.Namespace) -> None:
-    presets = resolve_presets(args.preset)
+    presets = resolve_build_presets(args)
     results = dev.configure(
         presets, root=ROOT, force=True, mirror=args.mirror_output, verbose=args.verbose,
         emsdk_path=args.emsdk_path,
@@ -223,7 +239,7 @@ def cmd_configure(args: argparse.Namespace) -> None:
 
 
 def cmd_build(args: argparse.Namespace) -> None:
-    presets = resolve_presets(args.preset)
+    presets = resolve_build_presets(args)
     # Targets are resolved against the first preset (target sets match across presets).
     target_names = (
         resolve_target_names(presets[0], args.target, args.emsdk_path)
@@ -257,7 +273,7 @@ def cmd_build(args: argparse.Namespace) -> None:
 
 
 def cmd_test(args: argparse.Namespace) -> None:
-    presets = resolve_presets(args.preset)
+    presets = resolve_build_presets(args)
     primary = presets[0]
 
     # Optionally build first (incremental — fast when nothing changed).
@@ -896,6 +912,26 @@ def _add_preset_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_build_override_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--toolset", metavar="VERSION", default=None,
+        help="Pin the compiler version within the preset's family: a bare version "
+             "(clang/gcc -> clang++-N/g++-N on PATH; msvc -> vcvars_ver, e.g. 14.51) or an "
+             "explicit compiler path. Not found = hard error. Auto-redirects the build dir so "
+             "toolsets don't share a CMake cache.",
+    )
+    p.add_argument(
+        "--build-suffix", metavar="TAG", default=None,
+        help="Append '-TAG' to the build folder (build/<preset>-TAG). The go-to for a "
+             "toolset matrix: one folder per toolset, side by side.",
+    )
+    p.add_argument(
+        "--build-dir", metavar="PATH", default=None,
+        help="Use this build directory instead of build/<preset> (relative to the repo root, "
+             "or absolute). For a fully custom layout; single preset only.",
+    )
+
+
 def _add_emsdk_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--emsdk-path", metavar="DIR", default=None,
@@ -926,10 +962,12 @@ def main() -> None:
 
     cfg_p = sub.add_parser("configure", help="Configure the CMake project")
     _add_preset_arg(cfg_p)
+    _add_build_override_args(cfg_p)
     _add_emsdk_arg(cfg_p)
 
     build_p = sub.add_parser("build", help="Build the project")
     _add_preset_arg(build_p)
+    _add_build_override_args(build_p)
     _add_emsdk_arg(build_p)
     build_p.add_argument("--target", "-t", action="append",
                          help="Target(s) to build: comma-list, repeatable, wildcards")
@@ -945,6 +983,7 @@ def main() -> None:
 
     test_p = sub.add_parser("test", help="Run tests")
     _add_preset_arg(test_p)
+    _add_build_override_args(test_p)
     _add_emsdk_arg(test_p)
     test_p.add_argument("--target", "-t", action="append",
                         help="Test binary target(s): comma-list, repeatable, wildcards")

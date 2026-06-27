@@ -77,6 +77,45 @@ uv run dev.py test  --preset "x64-linux-*"
 you touch assertion-gated code, build a `release-*` preset too — the default build only exercises
 the assertions-on branch.
 
+### Pinning toolset versions
+
+A preset names a compiler *family* (clang / gcc / msvc); the concrete version is otherwise
+whatever the environment defaults to. `--toolset` (a per-subcommand flag on `configure` / `build`
+/ `test`) pins a specific one, so the same dev.py can drive clang 19 / 20 / 21 — or two Visual
+Studio toolsets — on one machine:
+
+```bash
+uv run dev.py test --preset relwithdebinfo-linux-clang --toolset 21    # clang++-21 / clang-21 on PATH
+uv run dev.py test --preset relwithdebinfo-linux-gcc   --toolset 14    # g++-14 / gcc-14
+uv run dev.py test --preset relwithdebinfo-msvc        --toolset 14.51 # MSVC toolset 14.51 via vcvars
+uv run dev.py test --preset relwithdebinfo-linux-clang --toolset /opt/llvm-20/bin/clang++  # explicit path
+```
+
+How the value resolves depends on the family: clang/gcc swap `CMAKE_C/CXX_COMPILER` (a bare
+version finds `clang++-N` / `g++-N` on `PATH`; a value with a slash is an explicit compiler path);
+msvc selects the Visual Studio instance whose `VC/Tools/MSVC` has that toolset — **including
+prerelease/preview installs** — and pins it with `-vcvars_ver`. A toolset that can't be found is a
+**hard error**.
+
+A pinned toolset must not share a CMake cache with the default one, so the build directory is
+**auto-redirected** to `build/<preset>-<toolset>`. Two flags override where it lands:
+
+- **`--build-suffix <tag>`** → `build/<preset>-<tag>`. The go-to for a toolset matrix: one folder
+  per toolset, side by side, nothing clobbered.
+- **`--build-dir <path>`** → an arbitrary directory (relative to the repo root, or absolute), for
+  a fully custom layout. Single preset only.
+
+```bash
+# clang version matrix — the auto-redirect already gives each its own tree
+# (build/<preset>-19, -20, -21); no --build-suffix needed:
+for v in 19 20 21; do
+  uv run dev.py test --preset relwithdebinfo-linux-clang --toolset $v
+done
+```
+
+Reach for `--build-suffix` only when you want a name the auto-redirect wouldn't pick — e.g. two
+builds of the *same* toolset that differ some other way.
+
 ### WebAssembly (Emscripten)
 
 The `emscripten-{debug,relwithdebinfo,release}` presets cross-compile to WASM (single-threaded).
