@@ -35,7 +35,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang` (deep matrix) |
 | [ci-linux-gcc.yml](../../.github/workflows/ci-linux-gcc.yml)          | `ubuntu-26.04`   | `relwithdebinfo-linux-gcc`                                  |
 | [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`                                      |
-| [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-latest` | `relwithdebinfo-msvc`                                       |
+| [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-latest` | `relwithdebinfo-msvc` — **disabled** (`workflow_dispatch`-only; see below) |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`                            |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
 
@@ -88,12 +88,15 @@ Ninja all ship on the GitHub images — so the only provisioning is installing
   symlinking those names — clang to the **21.x** binaries (our
   [requirements.md](../requirements.md) LLVM 21 target), gcc to **14** (≥ the
   GCC 13 floor).
-- **Windows** (`windows-latest`) ships **LLVM 20** and VS 2022 with CMake +
-  Ninja; `clang-cl` / `cl` are already reachable. No MSVC-setup step is needed —
-  `dev.py` locates the MSVC environment via `vswhere` and injects it. The clang
-  job riding LLVM 20 (a touch behind the 21 target) is acceptable because the
-  clang-format/tidy gate runs on Linux (clang 21), so Windows only needs to
-  *compile* clean.
+- **Windows** (`windows-latest`) ships **LLVM 20** plus a recent Visual Studio
+  (currently VS 18 / MSVC 19.51) with CMake + Ninja; `clang-cl` / `cl` are
+  already reachable. No MSVC-setup step is needed — `dev.py` locates the MSVC
+  environment via `vswhere` and injects it. The clang job riding LLVM 20 (a touch
+  behind the 21 target) is fine because the clang-format/tidy gate runs on Linux
+  (clang 21), so Windows clang only needs to *compile* clean. The **MSVC (`cl`)
+  job is disabled** on push/PR for now: `cc::format`'s consteval validation isn't
+  accepted by `cl` yet (C3615/C7595 even on MSVC 19.51, plus a C2027 in nexus).
+  Its workflow is kept as `workflow_dispatch`-only pending a follow-up fix.
 - **macOS** (`macos-latest`, arm64) needs Homebrew LLVM — the `macos-arm-llvm-*`
   presets point at `/opt/homebrew/opt/llvm` and link Homebrew `libc++` — so it
   `brew install llvm ninja` (CMake ships on the runner).
@@ -108,26 +111,54 @@ Ninja all ship on the GitHub images — so the only provisioning is installing
 otherwise fail a fresh runner. It runs purely so the toolchain state is visible
 in the log.
 
-## Diagnosing CI failures with `gh`
+## Diagnosing CI failures
 
 The [GitHub CLI](https://cli.github.com/) reads runs without leaving the
-terminal. Scope by workflow file or branch:
+terminal. The orientation commands:
 
 ```bash
-gh run list --workflow ci-linux-clang.yml      # recent runs of one workflow
-gh run list --branch u/pt/github-ci            # all runs on a branch
-
+gh pr checks <pr>                              # pass/fail per workflow on a PR
+gh run list --branch <branch>                  # recent runs on a branch
 gh run view <run-id>                           # job/step summary
-gh run view <run-id> --log-failed              # only the failing step's log
-gh run watch <run-id>                          # follow an in-progress run live
-
-gh run download <run-id>                       # pull the JUnit XML artifact
+gh run watch <run-id> --exit-status            # follow an in-progress run live
 gh run rerun <run-id> --failed                 # retry just the failed jobs
 ```
 
-`gh run view --log-failed` is usually the fastest first look; download the
-`*-test-results` artifact when you need the per-test JUnit detail rather than
-console output.
+`gh run view <run-id> --log-failed` shows the failing step's console output —
+but remember **`dev.py` is quiet by default**: a failed build prints only
+`build failed - diagnose with: build_diag …`, *not* the compiler error. The
+errors live in the uploaded **diagnostics artifact**, not the console. So the
+real loop is download → extract → `build_diag`:
+
+```bash
+# 1. Grab the failing job's diagnostics (per workflow; matrix legs are suffixed
+#    with the preset, e.g. linux-clang-debug-linux-clang-diagnostics).
+gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp
+
+# 2. Extract ci-diag.zip at the repo root — its entries are build/<preset>/…,
+#    so this recreates the sidecar tree exactly where build_diag expects it.
+unzip -o build/.tmp/ci-diag.zip            # (or: python -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall('.')" build/.tmp/ci-diag.zip)
+
+# 3. Read the real errors via the repo_tools MCP build_diag tool:
+#    build_diag base_path="build/x64-linux-gcc-ninja-relwithdebinfo" show_tags=["error"]
+```
+
+`build_diag` groups the captured `.diag.json` sidecars into a per-translation-
+unit error tree and surfaces unique first-errors, so a single call pinpoints the
+problem — e.g. the Linux GCC job's archive immediately showed one `-fpermissive`
+error in `hash-types-test.cc` (a `const` optional needing an initializer), and
+the macOS archive showed a block-scope `extern "C"` in `assert.cc`. For **test**
+failures (build green, tests red), the artifact also carries
+`ci-test-results.xml` (the merged JUnit report) and `ci-logs.zip` (raw captured
+stdout/stderr) as the fallback.
+
+> Coming: once `build_diag` / `test_diag` can read a `.zip` directly, step 2 goes
+> away — point the tool straight at the downloaded `ci-diag.zip` /
+> `ci-test-results` artifact.
+
+Remember to clean up afterward: `rm -rf build/.tmp build/<preset>` (the extracted
+sidecar tree is gitignored under `build/`, but tidy it so a later local
+`build_diag` doesn't read stale cloud sidecars).
 
 ## Extending
 

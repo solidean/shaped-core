@@ -1,15 +1,16 @@
 name: Windows MSVC
 
 # Tier-1 wide-but-shallow gate: Windows MSVC (cl), RelWithDebInfo, build + tests.
-# Single config; the deep debug/release matrix lives in ci-linux-clang.yml.
-# Uses windows-latest's preinstalled VS 2022 + CMake + Ninja; dev.py locates the
-# MSVC environment via vswhere, so there is no toolchain-install or MSVC-setup
-# step. Everything runs through dev.py with an explicit preset. See docs/guides/ci.md.
+# Uses windows-latest's preinstalled VS + CMake + Ninja; dev.py locates the MSVC
+# environment via vswhere, so there is no toolchain-install or MSVC-setup step.
+#
+# DISABLED on push/PR for now: cc::format's consteval/immediate-function
+# validation isn't accepted by MSVC (cl) yet — even MSVC 19.51 (VS 18) emits
+# C3615/C7595, plus a C2027 incomplete-type in nexus. Left as workflow_dispatch
+# so the fix can be iterated by hand; a follow-up will fix cc::format for MSVC
+# (2022+) and restore the push/pull_request triggers. See docs/guides/ci.md.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:

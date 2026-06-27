@@ -22,6 +22,10 @@ extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent() noexcept;
 #include <cstring>
 #endif
 
+#ifdef CC_OS_APPLE
+#include <sys/sysctl.h>
+#endif
+
 namespace
 {
 // Global stack of assertion handlers
@@ -126,21 +130,14 @@ bool cc::impl::is_debugger_connected() noexcept
     }
     return false;
 #elif defined(CC_OS_APPLE)
-    // Use sysctl to check P_TRACED flag
-    extern "C" int sysctl(int*, unsigned int, void*, unsigned long*, void*, unsigned long) noexcept;
-
-    int mib[4] = {1 /* CTL_KERN */, 14 /* KERN_PROC */, 1 /* KERN_PROC_PID */, 0};
-    mib[3] = getpid();
-
-    struct kinfo_proc
-    {
-        char pad[32];
-        int p_flag;
-    } info{};
-
-    unsigned long size = sizeof(info);
+    // Ask the kernel for our own process info and test the P_TRACED flag — the
+    // canonical macOS debugger check (Apple Technical Q&A QA1361). Uses the real
+    // kinfo_proc from <sys/sysctl.h> rather than a hand-rolled layout.
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    struct kinfo_proc info = {};
+    size_t size = sizeof(info);
     if (sysctl(mib, 4, &info, &size, nullptr, 0) == 0)
-        return (info.p_flag & 0x00000800 /* P_TRACED */) != 0;
+        return (info.kp_proc.p_flag & P_TRACED) != 0;
 
     return false;
 #else

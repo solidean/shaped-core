@@ -55,7 +55,7 @@ the deep debug/relwithdebinfo/release matrix). See [docs/guides/ci.md](docs/guid
 | Platform / CI                   | Arch        | Compiler / toolchain         | Tier | Notes                                              |
 |---------------------------------|-------------|------------------------------|------|----------------------------------------------------|
 | [![Windows Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml) | x64 | Clang (`clang-cl`) | 1 | `relwithdebinfo-clang` |
-| [![Windows MSVC](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-msvc.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-msvc.yml) | x64 | MSVC (`cl`) | 1 | `relwithdebinfo-msvc` |
+| Windows (MSVC)                  | x64         | MSVC (`cl`)                  | 1    | `relwithdebinfo-msvc`; CI disabled pending a `cc::format` MSVC fix |
 | [![Linux Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml) | x64 | Clang | 1 | Deep matrix: debug / relwithdebinfo / release (`*-linux-clang`) |
 | [![Linux GCC](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml) | x64 | GCC 14 (13+) | 1 | `relwithdebinfo-linux-gcc` |
 | [![macOS Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml) | arm64 | Homebrew LLVM | 2 | `macos-arm-llvm-relwithdebinfo` |
