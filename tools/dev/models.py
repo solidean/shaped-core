@@ -48,6 +48,40 @@ class Target:
 
 
 @dataclass(frozen=True)
+class CompileGroup:
+    """One set of compile flags shared by a subset of a target's sources.
+
+    CMake emits a separate group per distinct flag-set, so more than one group
+    means the target's translation units do not all compile the same way (e.g. a
+    vendored source built with `/W0`). `sources` lists the files this group
+    covers; `flags` are the raw fragment strings as CMake passes them.
+    """
+
+    language: str | None  # "CXX", "C", ...
+    std: str | None  # language standard, e.g. "23"
+    defines: list[str]
+    includes: list[tuple[str, bool]]  # (path, is_system)
+    flags: list[str]
+    sources: list[str]
+
+
+@dataclass(frozen=True)
+class TargetFlags:
+    """Resolved compile and link flags for a target, from the CMake File API.
+
+    `compile_groups` holds one entry per distinct flag-set (see CompileGroup);
+    link info is empty for targets without a link step (static libraries are
+    archived, not linked).
+    """
+
+    name: str
+    kind: str  # "EXECUTABLE", "STATIC_LIBRARY", ...
+    compile_groups: list[CompileGroup]
+    link_flags: list[str]
+    link_libraries: list[str]
+
+
+@dataclass(frozen=True)
 class StepResult:
     """Outcome of a single captured subprocess step.
 
