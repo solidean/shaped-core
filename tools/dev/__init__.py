@@ -9,6 +9,7 @@ operate on lists of presets and targets.
 from __future__ import annotations
 
 from . import clangd, console, report
+from .archive import archive_diag, archive_logs
 from .build import build
 from .checks import Check, list_checks, run_checks
 from .cmake import remove_build_dir
@@ -61,6 +62,8 @@ from .targets import (
 from .test import test
 
 __all__ = [
+    "archive_diag",
+    "archive_logs",
     "build",
     "clangd",
     "console",

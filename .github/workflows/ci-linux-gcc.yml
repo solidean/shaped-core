@@ -38,15 +38,18 @@ jobs:
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py build --preset relwithdebinfo-linux-gcc
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-linux-gcc --diag-archive build/ci-diag.zip
 
       - name: Test
-        run: uv run dev.py test --preset relwithdebinfo-linux-gcc --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-linux-gcc --merged-xml-report build/ci-test-results.xml
 
-      - name: Upload test results
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-gcc-test-results
-          path: build/ci-test-results.xml
+          name: linux-gcc-diagnostics
+          path: |
+            build/ci-test-results.xml
+            build/ci-diag.zip
+            build/ci-logs.zip
           if-no-files-found: warn

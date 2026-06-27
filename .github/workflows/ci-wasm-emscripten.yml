@@ -47,16 +47,21 @@ jobs:
         run: uv run dev.py doctor --emsdk-path "$EMSDK"
         continue-on-error: true
 
+      # Emscripten presets don't use the diag launcher, so --diag-archive is
+      # near-empty here; the --collect-logs bundle carries the captured emcc output.
       - name: Build
-        run: uv run dev.py build --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK"
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK" --diag-archive build/ci-diag.zip
 
       - name: Test
-        run: uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK" --merged-xml-report build/ci-test-results.xml
+        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset emscripten-relwithdebinfo --emsdk-path "$EMSDK" --merged-xml-report build/ci-test-results.xml
 
-      - name: Upload test results
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wasm-emscripten-test-results
-          path: build/ci-test-results.xml
+          name: wasm-emscripten-diagnostics
+          path: |
+            build/ci-test-results.xml
+            build/ci-diag.zip
+            build/ci-logs.zip
           if-no-files-found: warn

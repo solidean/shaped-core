@@ -41,7 +41,41 @@ One workflow per platform/compiler, so each gets its own status badge in the
 
 Every workflow shares the same shape: provision the toolchain, then `doctor` →
 `build` → `test` through `dev.py`, always with an **explicit `--preset`** (CI
-never relies on the platform-default preset), and upload the merged JUnit XML.
+never relies on the platform-default preset), and upload a **diagnostics
+artifact** (see below).
+
+### Diagnostics artifacts
+
+`dev.py` is quiet by default — it captures compiler/test output to files under
+`build/<preset>/` rather than the console — so a red CI job shows only a terse
+"build failed" line, not the actual error. Each job therefore uploads a
+`<platform>-diagnostics` artifact (always, even on failure) with three things:
+
+- **`ci-diag.zip`** — every `.diag.json` sidecar, one per compile/link, written
+  by the diag launcher (`diag-launcher.exe` on Windows, `diag_launcher.sh` →
+  `diag_launcher.py` on Linux/macOS, wired in as the CMake compiler/linker
+  launcher). This is the build-step analogue of the JUnit report. Produced by
+  `dev.py build --diag-archive`, even when the build fails.
+- **`ci-test-results.xml`** — the merged JUnit test report
+  (`dev.py test --merged-xml-report`).
+- **`ci-logs.zip`** — the raw captured run logs and step sidecars, the last
+  resort when the structured sidecars don't explain it. Produced by the global
+  `dev.py --collect-logs`, which fires on exit regardless of pass/fail. It is set
+  on *both* the build and test steps so either failure mode is covered: the logs
+  under `build/<preset>/run-logs/` accumulate across configure→build→test, so the
+  test step's archive is a strict superset of the build step's, and when the
+  build fails the test step is skipped — leaving the build step's archive (with
+  the failure logs) as the uploaded one.
+
+To use them locally: `gh run download <run-id>`, then **extract `ci-diag.zip` at
+the repo root** (its entries are `build/<preset>/…`) and point `build_diag` at
+that preset:
+
+```bash
+gh run download <run-id> --name linux-gcc-diagnostics
+unzip -o ci-diag.zip            # recreates build/<preset>/**/*.diag.json
+# then, via the repo_tools MCP: build_diag base_path="build/<preset>"
+```
 
 ### Toolchains
 

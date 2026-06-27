@@ -1,0 +1,5 @@
+# Shell scripts must keep LF line endings regardless of a contributor's
+# core.autocrlf: a trailing CR on the shebang line makes the interpreter path
+# invalid under POSIX shells, which silently breaks the diag-launcher wrapper
+# used as a CMake compiler/linker launcher on Linux/macOS.
+*.sh text eol=lf
