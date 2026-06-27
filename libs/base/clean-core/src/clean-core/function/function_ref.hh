@@ -1,7 +1,6 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
-#include <clean-core/function/impl/invoke_function_thunk.hh>
 #include <clean-core/fwd.hh>
 
 #include <type_traits>
@@ -64,7 +63,9 @@ public:
         static_assert(cc::is_invocable_r<R, F&, Args...>, "F must be callable with Args... and return R");
 
         using Fn = std::remove_reference_t<F>;
-        _thunk = &cc::impl::invoke_function_thunk<Fn, R, Args...>;
+        // NOLINTBEGIN
+        _thunk = [](void* p, Args... args) -> R { return cc::invoke(*static_cast<Fn*>(p), cc::forward<Args>(args)...); };
+        // NOLINTEND
     }
 
     // copy and move (trivial, compiler-generated)
