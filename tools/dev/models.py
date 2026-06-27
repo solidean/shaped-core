@@ -39,7 +39,7 @@ class Preset:
             return "msvc"
         if "gcc" in cp:
             return "gcc"
-        if "clang" in cp:  # includes clang-cl on Windows
+        if "clang" in cp or "llvm" in cp:  # clang-cl on Windows; macos-arm-llvm uses Homebrew LLVM clang
             return "clang"
         if "emscripten" in cp:
             return "emscripten"
