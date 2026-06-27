@@ -47,15 +47,15 @@ targets it; older versions may work but are untested.
 | Platform | Compiler            | Notes                                                        |
 |----------|---------------------|-------------------------------------------------------------|
 | Windows  | `clang-cl`          | Default (`relwithdebinfo-clang`). LLVM 21 family — see below. |
-| Windows  | `cl` (MSVC)         | VS 2022 toolset; `*-msvc-*` presets.                         |
+| Windows  | `cl` (MSVC)         | VS 2022 (toolset 14.44) and VS 2026 (14.51); `*-msvc-*` presets. |
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `*-gcc-*` presets. GCC **13+** for `std::stacktrace`.        |
 | macOS    | Homebrew LLVM       | Expects `/opt/homebrew/opt/llvm/bin/clang++` (arm64).        |
 | Android  | NDK r27c            | Expects `C:/Android/android-ndk-r27c` (see preset).          |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
-See the [platform-support table in the README](../README.md#platform-support) for the full tier
-matrix (which platforms are actively tested vs supported vs planned).
+See [platforms.md](platforms.md) for the full tier matrix (which platforms are actively tested vs
+supported vs planned).
 
 ### Emscripten / WASM
 
@@ -64,13 +64,18 @@ the CMake toolchain file, and its own Node.js (so no separate Node install is ne
 `wasm-emscripten-*` configure presets reference the toolchain file via `$env{EMSDK}`.
 
 You do **not** need to permanently/`--system` activate emsdk: `dev.py` locates it and applies its
-environment to each configure/build/test subprocess. Resolution order is `--emsdk-path` → the
-`SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH`. Tests run under Node
-(`-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and
-`-s EXIT_RUNTIME=1` propagates the pass/fail exit code). Only the single-threaded, no-WebGPU,
-`-fexceptions` combination is wired today; the `SC_WASM_THREADS` / `SC_WASM_WEBGPU` /
-`SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear "not yet supported"
-message (Tier 3).
+environment to each configure/build/test subprocess — point it at a checkout with `--emsdk-path`:
+
+```bash
+uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
+```
+
+Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` →
+`emcc` on `PATH`. Tests run under Node (`-s NODERAWFS=1` gives the binaries real-filesystem access so
+the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code). Only the
+single-threaded, no-WebGPU, `-fexceptions` combination is wired today; the `SC_WASM_THREADS` /
+`SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear
+"not yet supported" message (Tier 3).
 
 ### `std::stacktrace`
 

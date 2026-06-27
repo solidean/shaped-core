@@ -40,35 +40,25 @@ under `build/<preset>/` and prints a terse summary). See
 
 ## Platform support
 
-All targets are **64-bit**; no 32-bit support is planned. (WebAssembly's `wasm32` has a 32-bit
-*address space* but is a 64-bit *register* target — it counts as part of the 64-bit family.)
+shaped-core targets **64-bit** platforms only. Every platform we build **and test in CI** is
+**Tier 1** — one CI workflow (and badge) per platform below. The full support model (tier
+definitions plus the Tier-2/3 platforms: iOS, Android, and the other WebAssembly flavors) is in
+[docs/platforms.md](docs/platforms.md); what each job actually runs is in
+[docs/guides/ci.md](docs/guides/ci.md).
 
-Support tiers:
+| CI workflow | Arch | Compiler / toolchain | Config |
+|-------------|------|----------------------|--------|
+| [![Windows Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml) | x64 | Clang (`clang-cl`) | RelWithDebInfo |
+| [![Windows MSVC (VS2022)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-msvc.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-msvc.yml) | x64 | MSVC `cl` (toolset 14.44) | RelWithDebInfo |
+| [![Windows MSVC (VS2026)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-msvc-vs2026.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-msvc-vs2026.yml) | x64 | MSVC `cl` (toolset 14.51) | RelWithDebInfo |
+| [![Linux Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml) | x64 | Clang | Debug / RelWithDebInfo / Release |
+| [![Linux GCC](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml) | x64 | GCC 14 (13+) | RelWithDebInfo |
+| [![macOS Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml) | arm64 | Homebrew LLVM | RelWithDebInfo |
+| [![WASM (Emscripten)](https://github.com/solidean/shaped-core/actions/workflows/ci-wasm-emscripten.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-wasm-emscripten.yml) | wasm32 | Emscripten (Clang) | RelWithDebInfo |
 
-* **Tier 1** — actively tested, every change. The bar for "it works".
-* **Tier 2** — explicitly supported, occasionally tested. Expected to work; breakage is a bug.
-* **Tier 3** — planned. Not wired up yet and may not build.
-
-Each row with a badge is its own CI workflow (one config per badge, except Linux Clang which runs
-the deep debug/relwithdebinfo/release matrix). See [docs/guides/ci.md](docs/guides/ci.md).
-
-| Platform / CI                   | Arch        | Compiler / toolchain         | Tier | Notes                                              |
-|---------------------------------|-------------|------------------------------|------|----------------------------------------------------|
-| [![Windows Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml) | x64 | Clang (`clang-cl`) | 1 | `relwithdebinfo-clang` |
-| Windows (MSVC)                  | x64         | MSVC (`cl`)                  | 1    | `relwithdebinfo-msvc`; CI disabled pending a `cc::format` MSVC fix |
-| [![Linux Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml) | x64 | Clang | 1 | Deep matrix: debug / relwithdebinfo / release (`*-linux-clang`) |
-| [![Linux GCC](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-gcc.yml) | x64 | GCC 14 (13+) | 1 | `relwithdebinfo-linux-gcc` |
-| [![macOS Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-macos-clang.yml) | arm64 | Homebrew LLVM | 2 | `macos-arm-llvm-relwithdebinfo` |
-| iOS                             | arm64       | Apple Clang                  | 2    | First-party; no preset/CI yet                      |
-| Android                         | arm64       | NDK r27c (Clang)             | 2    | `android-ndk-arm64-*` presets                      |
-| [![WASM (Emscripten)](https://github.com/solidean/shaped-core/actions/workflows/ci-wasm-emscripten.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-wasm-emscripten.yml) | wasm32 | Emscripten (Clang) | 2 | Single-threaded, no WebGPU; `emscripten-relwithdebinfo`; runs under Node |
-| WebAssembly — Emscripten + threads | wasm32   | Emscripten (Clang)           | 3    | `-pthread`; planned                                |
-| WebAssembly — Emscripten + WebGPU | wasm32    | Emscripten (Clang)           | 3    | emdawnwebgpu; planned                              |
-| WebAssembly — WASI              | wasm32      | wasi-sdk (Clang)             | 3    | Planned                                            |
-| Consoles                        | —           | vendor toolchains            | 3    | Planned                                            |
-
-All tiers build the standard **Debug / RelWithDebInfo / Release** types (RelWithDebInfo and Debug
-have `CC_ASSERT` on; Release off). Clang platforms additionally have sanitizer and coverage presets.
+**Debug / RelWithDebInfo / Release** should all work everywhere, but only Linux clang exercises the
+full matrix in CI; the other Tier-1 platforms are built and tested at RelWithDebInfo only. Details in
+[docs/platforms.md](docs/platforms.md).
 
 ## Build presets
 
@@ -79,18 +69,9 @@ override with `--preset` (after the subcommand). List them with:
 uv run dev.py list-presets
 ```
 
-### WebAssembly (Emscripten)
-
-WASM builds need the [emsdk](https://github.com/emscripten-core/emsdk) (it bundles `emcc`, the CMake
-toolchain file, and its own Node.js). Point `dev.py` at a checkout — no permanent activation needed:
-
-```bash
-uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
-```
-
-`dev.py` applies the emsdk environment itself and runs the test binaries under Node. It also accepts
-the `SC_EMSDK_PATH` env var, or an already-activated `EMSDK`. `uv run dev.py doctor` validates the
-toolchain. See [docs/requirements.md](docs/requirements.md) for details.
+WebAssembly builds need the [emsdk](https://github.com/emscripten-core/emsdk); point `dev.py` at a
+checkout with `--emsdk-path` (no permanent activation needed). See
+[docs/requirements.md](docs/requirements.md#emscripten--wasm) for the details.
 
 ## Layout
 
