@@ -19,6 +19,7 @@ See [guides/_index.md](guides/_index.md) for the full list. Most useful:
 
 - [guides/building-and-testing.md](guides/building-and-testing.md) — how to drive `dev.py` and the
   `repo_tools` diagnostics.
+- [guides/ci.md](guides/ci.md) — the GitHub Actions CI workflows and diagnosing failures with `gh`.
 - [guides/cheat-sheets.md](guides/cheat-sheets.md) — the per-library API cheat-sheet format and
   where the sheets live.
 - [guides/pgo.md](guides/pgo.md) — profile-guided optimization (`dev.py pgo`) and

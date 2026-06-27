@@ -40,6 +40,9 @@ under `build/<preset>/` and prints a terse summary). See
 
 ## Platform support
 
+[![Windows Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-windows-clang.yml)
+[![Linux Clang](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml/badge.svg)](https://github.com/solidean/shaped-core/actions/workflows/ci-linux-clang.yml)
+
 All targets are **64-bit**; no 32-bit support is planned. (WebAssembly's `wasm32` has a 32-bit
 *address space* but is a 64-bit *register* target — it counts as part of the 64-bit family.)
 
