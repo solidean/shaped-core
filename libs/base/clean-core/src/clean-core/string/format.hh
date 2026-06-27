@@ -134,6 +134,17 @@ consteval void format_validate_arg_fields(string_view fmt, isize target)
         }
     }
 }
+
+/// Validates every field against the type of the argument it references, assigning each argument its index
+/// in turn. A plain consteval fold rather than an immediately-invoked generic lambda: MSVC fails to evaluate
+/// immediate functions called from within such a lambda (C7595), so the validation must live in its own
+/// consteval function.
+template <class... Args>
+consteval void format_validate_args(string_view fmt)
+{
+    isize index = 0;
+    (format_validate_arg_fields<Args>(fmt, index++), ...);
+}
 } // namespace impl
 
 template <class... Args>
@@ -145,8 +156,7 @@ consteval format_string<Args...>::format_string(T const& s) : _str(string_view(s
     cc::impl::format_validate_structure(_str, isize(sizeof...(Args)));
 
     // pass 2: validate each field's spec against the type of the argument it references
-    [&]<std::size_t... Is>(std::index_sequence<Is...>)
-    { (cc::impl::format_validate_arg_fields<Args>(_str, isize(Is)), ...); }(std::make_index_sequence<sizeof...(Args)>{});
+    cc::impl::format_validate_args<Args...>(_str);
 }
 
 template <class... Args>

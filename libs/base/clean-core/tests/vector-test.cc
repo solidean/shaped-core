@@ -8,6 +8,15 @@
 
 namespace
 {
+// Recursive type whose own definition contains a cc::vector of itself: this only compiles if
+// cc::vector tolerates an incomplete element type at the point the member is declared. (MSVC in
+// particular eagerly evaluates the container's static members, so alignof(T) must stay out of them.)
+struct TreeNode
+{
+    int value = 0;
+    cc::vector<TreeNode> children;
+};
+
 // Instrumented type that tracks construction and destruction
 struct Tracked
 {
@@ -1606,4 +1615,28 @@ TEST("vector - initializer list construction")
         CHECK(v.size() == 0);
         CHECK(v.empty() == true);
     }
+}
+
+TEST("vector - recursive element type")
+{
+    // Builds a small tree where each node owns a cc::vector of nodes. Exercises that the recursive
+    // (incomplete-at-declaration) element type works at runtime, not just that it compiles.
+    TreeNode root;
+    root.value = 1;
+
+    root.children.emplace_back();
+    root.children.back().value = 2;
+    root.children.emplace_back();
+    root.children.back().value = 3;
+
+    root.children[0].children.emplace_back();
+    root.children[0].children.back().value = 4;
+
+    CHECK(root.value == 1);
+    CHECK(root.children.size() == 2);
+    CHECK(root.children[0].value == 2);
+    CHECK(root.children[1].value == 3);
+    CHECK(root.children[0].children.size() == 1);
+    CHECK(root.children[0].children[0].value == 4);
+    CHECK(root.children[1].children.empty());
 }

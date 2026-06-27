@@ -82,7 +82,16 @@ struct cc::allocating_container
     /// enough to avoid systematic cache set aliasing that can occur with larger alignments.
     /// Larger-than-necessary alignment inside a single container (e.g. multiple elements per line)
     /// remains the programmer's responsibility by design.
-    static constexpr isize alloc_alignment = cc::max(alignof(T), std::hardware_destructive_interference_size);
+    ///
+    /// Deliberately a function, not a static constexpr variable: its body uses alignof(T), so as a data
+    /// member its initializer would require a complete T. MSVC evaluates that initializer eagerly when the
+    /// container specialization is instantiated, which breaks recursive/incomplete element types (e.g. a
+    /// struct holding a cc::vector of itself). As a function, alignof(T) is only evaluated on call, by
+    /// which point T is complete.
+    static constexpr isize alloc_alignment()
+    {
+        return cc::max(alignof(T), std::hardware_destructive_interference_size);
+    }
 
     /// Maximum extra slack allowed when growing an allocation.
     ///
@@ -217,7 +226,7 @@ public:
     // cross-allocation false sharing while avoiding frequent small reallocations.
     [[nodiscard]] static constexpr isize alloc_grow_size_for(isize curr_size, isize min_size)
     {
-        return cc::align_up(cc::max(curr_size << 1, min_size), alloc_alignment);
+        return cc::align_up(cc::max(curr_size << 1, min_size), alloc_alignment());
     }
 
 private:
@@ -227,7 +236,7 @@ private:
     {
         CC_ASSERT((obj_offset + size()) * sizeof(T) <= min_bytes, "allocation too small for obj_offset + size");
 
-        auto new_allocation = cc::allocation<T>::create_empty_bytes(min_bytes, max_bytes, alloc_alignment,
+        auto new_allocation = cc::allocation<T>::create_empty_bytes(min_bytes, max_bytes, alloc_alignment(),
                                                                     _data.custom_resource, obj_offset);
 
         // Move old elements to new allocation
@@ -286,7 +295,7 @@ private:
         // otherwise we need a full new allocation
         // TODO: think about re-center logic for cc::devector
         new_allocation = cc::allocation<T>::create_empty_bytes(new_size_request_min, new_size_request_max,
-                                                               alloc_alignment, _data.custom_resource);
+                                                               alloc_alignment(), _data.custom_resource);
 
         // Construct new elements where they would be in the new allocation (after old elements)
         // The old allocation remains valid during construction phase
@@ -554,7 +563,7 @@ public:
 
         // Compute exact needed size for in-place resize
         // Preserve existing front capacity by growing from current alloc size
-        auto const inplace_size = cc::align_up(_data.alloc_size_bytes() + count * sizeof(T), alloc_alignment);
+        auto const inplace_size = cc::align_up(_data.alloc_size_bytes() + count * sizeof(T), alloc_alignment());
 
         // Try to resize in place first
         if (_data.try_resize_alloc_inplace(inplace_size, inplace_size))
@@ -565,7 +574,7 @@ public:
         auto const new_capacity_front = container_t::uses_capacity_front ? this->capacity_front() : 0;
         auto const obj_size = this->size();
 
-        auto const new_size = cc::align_up((new_capacity_front + obj_size + count) * sizeof(T), alloc_alignment);
+        auto const new_size = cc::align_up((new_capacity_front + obj_size + count) * sizeof(T), alloc_alignment());
 
         this->move_to_new_allocation(new_size, new_size, new_capacity_front);
     }
@@ -597,19 +606,19 @@ public:
 
         // Compute exact needed size, aligned
         auto const needed_bytes = _data.alloc_size_bytes() + count * sizeof(T);
-        auto const new_size = cc::align_up(needed_bytes, alloc_alignment);
+        auto const new_size = cc::align_up(needed_bytes, alloc_alignment());
 
         this->move_to_new_allocation(new_size, new_size, count);
     }
 
     /// Reduces allocation size to fit the current number of elements.
-    /// Reallocates only if the tight allocation size (aligned up to alloc_alignment) differs from current size.
+    /// Reallocates only if the tight allocation size (aligned up to alloc_alignment()) differs from current size.
     /// Idempotent: calling multiple times has the same effect as calling once.
     /// If the container is empty or already tight, this is a no-op.
     void shrink_to_fit()
     {
-        // Compute tight allocation size (align_up of size * sizeof(T) to alloc_alignment)
-        auto const tight_size = cc::align_up(this->size() * sizeof(T), alloc_alignment);
+        // Compute tight allocation size (align_up of size * sizeof(T) to alloc_alignment())
+        auto const tight_size = cc::align_up(this->size() * sizeof(T), alloc_alignment());
 
         // Only reallocate if current allocation size differs from tight size
         if (_data.alloc_size_bytes() == tight_size)
@@ -1123,8 +1132,8 @@ public:
     // initializes a new container_t with "size" many defaulted elements
     [[nodiscard]] static container_t create_defaulted(size_t size, cc::memory_resource const* resource = nullptr)
     {
-        auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment);
-        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, resource);
+        auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment());
+        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         impl::default_create_objects_to(result.obj_end, size);
         return container_t::create_from_allocation(cc::move(result));
     }
@@ -1134,8 +1143,8 @@ public:
                                                    T const& value,
                                                    cc::memory_resource const* resource = nullptr)
     {
-        auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment);
-        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, resource);
+        auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment());
+        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         impl::fill_create_objects_to(result.obj_end, size, value);
         return container_t::create_from_allocation(cc::move(result));
     }
@@ -1147,8 +1156,8 @@ public:
         static_assert(std::is_trivially_destructible_v<T>, "T must be trivially destructible for uninitialized "
                                                            "allocation");
 
-        auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment);
-        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, resource);
+        auto const byte_size = cc::align_up(size * sizeof(T), alloc_alignment());
+        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         result.obj_end = result.obj_start + size;
         return container_t::create_from_allocation(cc::move(result));
     }
@@ -1157,27 +1166,27 @@ public:
     [[nodiscard]] static container_t create_copy_of(cc::span<T const> source,
                                                     cc::memory_resource const* resource = nullptr)
     {
-        auto const byte_size = cc::align_up(source.size() * sizeof(T), alloc_alignment);
-        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, resource);
+        auto const byte_size = cc::align_up(source.size() * sizeof(T), alloc_alignment());
+        auto result = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         impl::copy_create_objects_to(result.obj_end, source.data(), source.data() + source.size());
         return container_t::create_from_allocation(cc::move(result));
     }
 
     // initializes a new container_t with reserved capacity but no live objects
     // guarantees at least "capacity" elements can be inserted without reallocation
-    // actual capacity may be larger due to cache-line alignment (alloc_alignment)
+    // actual capacity may be larger due to cache-line alignment (alloc_alignment())
     [[nodiscard]] static container_t create_with_capacity(size_t capacity, cc::memory_resource const* resource = nullptr)
     {
-        auto const byte_size = cc::align_up(capacity * sizeof(T), alloc_alignment);
+        auto const byte_size = cc::align_up(capacity * sizeof(T), alloc_alignment());
         return container_t::create_from_allocation(
-            cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, resource));
+            cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource));
     }
 
     allocating_container() = default;
     allocating_container(std::initializer_list<T> init, cc::memory_resource const* resource = nullptr)
     {
-        auto const byte_size = cc::align_up(init.size() * sizeof(T), alloc_alignment);
-        _data = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, resource);
+        auto const byte_size = cc::align_up(init.size() * sizeof(T), alloc_alignment());
+        _data = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), resource);
         cc::impl::copy_create_objects_to(_data.obj_end, init.begin(), init.end());
     }
     ~allocating_container() = default;
@@ -1190,16 +1199,16 @@ public:
     // containers that use this mix-in can simply delete their copy ctor if they do not want it
     allocating_container(allocating_container const& rhs)
     {
-        auto const byte_size = cc::align_up(rhs.size() * sizeof(T), alloc_alignment);
-        _data = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment, rhs._data.custom_resource);
+        auto const byte_size = cc::align_up(rhs.size() * sizeof(T), alloc_alignment());
+        _data = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(), rhs._data.custom_resource);
         cc::impl::copy_create_objects_to(_data.obj_end, rhs._data.obj_start, rhs._data.obj_end);
     }
     allocating_container& operator=(allocating_container const& rhs)
     {
         if (this != &rhs)
         {
-            auto const byte_size = cc::align_up(rhs.size() * sizeof(T), alloc_alignment);
-            auto new_data = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment,
+            auto const byte_size = cc::align_up(rhs.size() * sizeof(T), alloc_alignment());
+            auto new_data = cc::allocation<T>::create_empty_bytes(byte_size, byte_size, alloc_alignment(),
                                                                   _data.custom_resource); // keep lhs resource
             cc::impl::copy_create_objects_to(new_data.obj_end, rhs._data.obj_start, rhs._data.obj_end);
             _data = cc::move(new_data);

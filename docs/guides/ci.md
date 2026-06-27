@@ -35,7 +35,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-linux-clang.yml](../../.github/workflows/ci-linux-clang.yml)      | `ubuntu-26.04`   | `debug-linux-clang`, `relwithdebinfo-linux-clang`, `release-linux-clang` (deep matrix) |
 | [ci-linux-gcc.yml](../../.github/workflows/ci-linux-gcc.yml)          | `ubuntu-26.04`   | `relwithdebinfo-linux-gcc`                                  |
 | [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`                                      |
-| [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-latest` | `relwithdebinfo-msvc` — **disabled** (`workflow_dispatch`-only; see below) |
+| [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-latest` | `relwithdebinfo-msvc`                                       |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`                            |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
 
@@ -96,10 +96,8 @@ Ninja all ship on the GitHub images — so the only provisioning is installing
   already reachable. No MSVC-setup step is needed — `dev.py` locates the MSVC
   environment via `vswhere` and injects it. The clang job riding LLVM 20 (a touch
   behind the 21 target) is fine because the clang-format/tidy gate runs on Linux
-  (clang 21), so Windows clang only needs to *compile* clean. The **MSVC (`cl`)
-  job is disabled** on push/PR for now: `cc::format`'s consteval validation isn't
-  accepted by `cl` yet (C3615/C7595 even on MSVC 19.51, plus a C2027 in nexus).
-  Its workflow is kept as `workflow_dispatch`-only pending a follow-up fix.
+  (clang 21), so Windows clang only needs to *compile* clean. The MSVC (`cl`) job
+  builds and tests the `relwithdebinfo-msvc` preset on the same runner.
 - **macOS** (`macos-latest`, arm64) needs Homebrew LLVM — the `macos-arm-llvm-*`
   presets point at `/opt/homebrew/opt/llvm` and link Homebrew `libc++` — so it
   `brew install llvm ninja` (CMake ships on the runner).
