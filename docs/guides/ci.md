@@ -70,14 +70,15 @@ artifact** (see below).
   build fails the test step is skipped — leaving the build step's archive (with
   the failure logs) as the uploaded one.
 
-To use them locally: `gh run download <run-id>`, then **extract `ci-diag.zip` at
-the repo root** (its entries are `build/<preset>/…`) and point `build_diag` at
-that preset:
+To use them locally: download the artifact into `build/.tmp/<name>/` and point
+`build_diag` / `test_diag` **straight at the archive** — both tools read inside a
+`.zip` (decoded in memory, no extraction needed):
 
 ```bash
-gh run download <run-id> --name linux-gcc-diagnostics
-unzip -o ci-diag.zip            # recreates build/<preset>/**/*.diag.json
-# then, via the repo_tools MCP: build_diag base_path="build/<preset>"
+gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp/linux-gcc
+# then, via the repo_tools MCP:
+#   build_diag base_path="build/.tmp/linux-gcc/ci-diag.zip" show_tags=["error"]
+#   test_diag  base_path="build/.tmp/linux-gcc/ci-logs.zip" errors_only=true
 ```
 
 ### Toolchains
@@ -114,6 +115,10 @@ in the log.
 
 ## Diagnosing CI failures
 
+The `/debugging-ci` skill
+([.claude/skills/debugging-ci/SKILL.md](../../.claude/skills/debugging-ci/SKILL.md))
+drives this flow end to end; this section is the reference it builds on.
+
 The [GitHub CLI](https://cli.github.com/) reads runs without leaving the
 terminal. The orientation commands:
 
@@ -129,19 +134,18 @@ gh run rerun <run-id> --failed                 # retry just the failed jobs
 but remember **`dev.py` is quiet by default**: a failed build prints only
 `build failed - diagnose with: build_diag …`, *not* the compiler error. The
 errors live in the uploaded **diagnostics artifact**, not the console. So the
-real loop is download → extract → `build_diag`:
+real loop is download → `build_diag` / `test_diag` on the archive:
 
 ```bash
-# 1. Grab the failing job's diagnostics (per workflow; matrix legs are suffixed
-#    with the preset, e.g. linux-clang-debug-linux-clang-diagnostics).
-gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp
+# 1. Grab the failing job's diagnostics into build/.tmp/<name>/ (per workflow;
+#    matrix legs are suffixed with the preset, e.g.
+#    linux-clang-debug-linux-clang-diagnostics).
+gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp/linux-gcc
 
-# 2. Extract ci-diag.zip at the repo root — its entries are build/<preset>/…,
-#    so this recreates the sidecar tree exactly where build_diag expects it.
-unzip -o build/.tmp/ci-diag.zip            # (or: python -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall('.')" build/.tmp/ci-diag.zip)
-
-# 3. Read the real errors via the repo_tools MCP build_diag tool:
-#    build_diag base_path="build/x64-linux-gcc-ninja-relwithdebinfo" show_tags=["error"]
+# 2. Point the repo_tools MCP tools straight at the .zip — they decode it in
+#    memory, no extraction step:
+#    build failed → build_diag base_path="build/.tmp/linux-gcc/ci-diag.zip" show_tags=["error"]
+#    tests  failed → test_diag  base_path="build/.tmp/linux-gcc/ci-logs.zip"  errors_only=true
 ```
 
 `build_diag` groups the captured `.diag.json` sidecars into a per-translation-
@@ -149,17 +153,14 @@ unit error tree and surfaces unique first-errors, so a single call pinpoints the
 problem — e.g. the Linux GCC job's archive immediately showed one `-fpermissive`
 error in `hash-types-test.cc` (a `const` optional needing an initializer), and
 the macOS archive showed a block-scope `extern "C"` in `assert.cc`. For **test**
-failures (build green, tests red), the artifact also carries
-`ci-test-results.xml` (the merged JUnit report) and `ci-logs.zip` (raw captured
-stdout/stderr) as the fallback.
+failures (build green, tests red), point `test_diag` at `ci-logs.zip` (which
+carries the per-binary `*.results.xml`) or at the merged `ci-test-results.xml`;
+`errors_only=true` collapses the green and expands every failure — e.g. the MSVC
+job's archive pinpointed two `function_ref` / `unique_function` reference-return
+cases failing only under the runner's newer `cl` `/O2`.
 
-> Coming: once `build_diag` / `test_diag` can read a `.zip` directly, step 2 goes
-> away — point the tool straight at the downloaded `ci-diag.zip` /
-> `ci-test-results` artifact.
-
-Remember to clean up afterward: `rm -rf build/.tmp build/<preset>` (the extracted
-sidecar tree is gitignored under `build/`, but tidy it so a later local
-`build_diag` doesn't read stale cloud sidecars).
+Remember to clean up afterward: `rm -rf build/.tmp` (it's gitignored under
+`build/`, but tidy it so a later run doesn't read stale cloud artifacts).
 
 ## Extending
 
