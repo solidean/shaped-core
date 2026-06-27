@@ -15,8 +15,8 @@ void cc::string::initialize_heap_from_data(char const* str, isize const len, mem
         return;
 
     // Allocate storage aligned to cache line boundary
-    auto const byte_size = cc::align_up(len, data_heap::alloc_alignment);
-    auto alloc = cc::allocation<char>::create_empty_bytes(byte_size, byte_size, data_heap::alloc_alignment, resource);
+    auto const byte_size = cc::align_up(len, data_heap::alloc_alignment());
+    auto alloc = cc::allocation<char>::create_empty_bytes(byte_size, byte_size, data_heap::alloc_alignment(), resource);
 
     // Copy the string data into the allocation
     std::memcpy(alloc.obj_start, str, size_t(len));
@@ -147,13 +147,13 @@ void cc::string::materialize_heap(isize const min_back_capacity)
     new (cc::placement_new, &_data.heap) data_heap();
 
     // Allocate with room for small string content plus requested capacity
-    auto const byte_size = cc::align_up(small_sz + min_back_capacity, data_heap::alloc_alignment);
-    auto alloc = cc::allocation<char>::create_empty_bytes(byte_size, byte_size, data_heap::alloc_alignment, res);
+    auto const byte_size = cc::align_up(small_sz + min_back_capacity, data_heap::alloc_alignment());
+    auto alloc = cc::allocation<char>::create_empty_bytes(byte_size, byte_size, data_heap::alloc_alignment(), res);
 
     // Copy the inline small-string bytes into the fresh allocation. The destination spans at least
     // alloc_alignment (>= 64) bytes, so copying the whole inline buffer is always in bounds — and reading
     // small_capacity bytes from the saved union stays within data_blocks on any pointer size.
-    static_assert(data_heap::alloc_alignment >= 64);
+    static_assert(data_heap::alloc_alignment() >= 64);
     std::memcpy(alloc.obj_start, &data_copy, small_capacity);
     alloc.obj_end = alloc.obj_start + small_sz;
 

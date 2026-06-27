@@ -16,7 +16,8 @@ from pathlib import Path
 
 from . import clangd
 from .llvm_tools import find_tool, resolve_tool
-from .presets import PresetError, load_presets
+from .models import Preset
+from .presets import PresetError, load_presets, resolve_cache_variable
 from .process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
 
 
@@ -165,6 +166,58 @@ def _tool_version(name: str) -> tuple[bool, str]:
         return False, f"failed to run ({e})"
 
 
+def _exe_version(exe: str) -> tuple[bool, str]:
+    """`--version` banner for a compiler given by name OR absolute path (unlike _tool_version,
+    which only resolves PATH names)."""
+    if not (Path(exe).is_file() or shutil.which(exe)):
+        return False, f"not found: {exe}"
+    try:
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15)
+        first = out.stdout.splitlines()[0].strip() if out.stdout else exe
+        return True, f"{first}  [{exe}]"
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, f"failed to run {exe} ({e})"
+
+
+def _compiler_check(root: Path, preset: Preset) -> tuple[str, bool, str]:
+    """Report the compiler `preset` (plus any pinned --toolset) actually configures.
+
+    Resolves exactly what configure will use — a --toolset-pinned clang/gcc binary, the preset's
+    CMAKE_CXX_COMPILER cache variable (e.g. the Homebrew-LLVM path on macOS), or the MSVC env for
+    cl — and reports its path + --version. So a missing or wrong toolchain shows up here rather than
+    as a confusing configure failure, and the report reflects the build compiler, not whatever bare
+    clang++/g++ happens to sit on PATH.
+    """
+    from . import toolset as ts  # local import: avoids a module-load cycle
+
+    if preset.family == "msvc":
+        # A pinned toolset must resolve to a real VS install — don't let an ambient cl/clang-cl on
+        # PATH mask its absence (that's exactly the silent fall-through --toolset exists to prevent).
+        if preset.toolset and not ("/" in preset.toolset or "\\" in preset.toolset):
+            inst = ts.find_msvc_instance(preset.toolset)
+            if inst is None:
+                return ("compiler", False, f"MSVC toolset {preset.toolset} not found in any VS install")
+            return ("compiler", True, f"MSVC toolset {preset.toolset}  [{inst}]")
+        env = msvc_env(preset.toolset)
+        ok = env is not None or shutil.which("cl") is not None or shutil.which("clang-cl") is not None
+        return ("compiler", ok, "MSVC env reachable" if ok else "no MSVC/clang-cl compiler found")
+
+    cxx: str | None = None
+    if preset.toolset:
+        try:
+            cxx = ts.compiler_defines(preset, root).get("CMAKE_CXX_COMPILER")
+        except ts.ToolsetError as e:
+            return ("compiler", False, str(e))
+    if cxx is None:
+        cxx = resolve_cache_variable(root, preset.configure_preset, "CMAKE_CXX_COMPILER")
+    if cxx is None:
+        cxx = shutil.which("clang++") or shutil.which("g++")
+    if cxx is None:
+        return ("compiler", False, "no C++ compiler resolved for this preset")
+    ok, detail = _exe_version(cxx)
+    return ("compiler", ok, detail)
+
+
 def _coverage_tool_check(
     label: str, name: str, env_var: str, build_dir: Path | None
 ) -> tuple[str, bool, str]:
@@ -236,12 +289,16 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
 
 
 def doctor(
-    root: Path, default_preset: str | None = None, emsdk_path: str | None = None
+    root: Path, preset: Preset | None = None, emsdk_path: str | None = None
 ) -> list[tuple[str, bool | None, str]]:
     """Run sanity checks and return (label, ok, detail) for each.
 
     `ok` is True (pass), False (fail), or None for an advisory check that neither
     passes nor fails — e.g. an optional toolchain that simply isn't configured.
+
+    `preset` (resolved, carrying any pinned `.toolset`) drives the compiler check so it reports the
+    toolchain the build will actually use. When None, the compiler check falls back to a generic
+    PATH probe.
     """
     checks: list[tuple[str, bool | None, str]] = []
 
@@ -250,12 +307,17 @@ def doctor(
     ok, detail = _tool_version("ninja")
     checks.append(("ninja", ok, detail))
 
-    if platform.system() == "Windows":
+    if preset is not None:
+        # Emscripten's real compiler is emcc, validated by _emscripten_checks below; skip the native
+        # compiler line for it so it doesn't misreport a host clang++/g++.
+        if preset.family != "emscripten":
+            checks.append(_compiler_check(root, preset))
+    elif platform.system() == "Windows":
         env = msvc_env()
         # None means either cl.exe already on PATH (fine) or not found.
         compiler_ok = env is not None or shutil.which("cl") is not None or shutil.which("clang-cl") is not None
-        detail = "MSVC env reachable" if compiler_ok else "no MSVC/clang-cl compiler found"
-        checks.append(("compiler", compiler_ok, detail))
+        checks.append(("compiler", compiler_ok,
+                       "MSVC env reachable" if compiler_ok else "no MSVC/clang-cl compiler found"))
     else:
         cxx = shutil.which("clang++") or shutil.which("g++")
         checks.append(("compiler", cxx is not None, cxx or "no clang++/g++ on PATH"))
@@ -263,12 +325,9 @@ def doctor(
     cov_build_dir: Path | None = None
     try:
         presets = load_presets(root)
-        names = [p.name for p in presets]
-        checks.append(("presets parse", True, f"{len(names)} build preset(s)"))
-        if default_preset is not None:
-            present = default_preset in names
-            detail = default_preset if present else f"{default_preset!r} not among build presets"
-            checks.append(("default preset", present, detail))
+        checks.append(("presets parse", True, f"{len(presets)} build preset(s)"))
+        if preset is not None:
+            checks.append(("preset", True, f"{preset.name}" + (f" --toolset {preset.toolset}" if preset.toolset else "")))
         # Any configured build dir lets us resolve the llvm tools beside the
         # compiler, matching how `dev.py coverage` finds them.
         cov_build_dir = next(

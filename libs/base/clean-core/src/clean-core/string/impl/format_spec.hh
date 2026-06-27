@@ -30,19 +30,19 @@ namespace cc::impl
 {
 /// Reports an invalid format string.
 ///
-/// At compile time (inside the consteval cc::format_string ctor) the throw is not a constant expression,
-/// so reaching it turns into a compile error that surfaces the message. At runtime this path is only
-/// reachable defensively (the string was already validated), so it routes through the clean-core
-/// assertion handler instead of throwing.
-[[noreturn]] constexpr void format_error(char const* msg)
+/// Intentionally NOT constexpr: reaching it during constant evaluation (inside the consteval
+/// cc::format_string ctor) is itself the compile error — a constant expression may not call a
+/// non-constexpr function — and the bad call site is named in the diagnostic. The surrounding parser
+/// stays constexpr; a valid format string never reaches here, so it still constant-evaluates. At runtime
+/// this path is only reachable defensively (the string was already validated), so it routes through the
+/// clean-core assertion handler.
+///
+/// A constexpr function that could only ever throw or call non-constexpr code has no constant-expression
+/// path at all; MSVC rejects such a definition (C3615), so the non-constexpr form is also the portable one.
+[[noreturn]] inline void format_error(char const* msg)
 {
-    if (std::is_constant_evaluated())
-        throw "cc::format: invalid format string"; // compile error; the message is shown via the throw below too
-    else
-    {
-        cc::impl::handle_assert_failure("cc::format", msg, cc::source_location::current());
-        cc::impl::perform_abort();
-    }
+    cc::impl::handle_assert_failure("cc::format", msg, cc::source_location::current());
+    cc::impl::perform_abort();
 }
 
 /// Alignment of a value within its field width.

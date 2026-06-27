@@ -25,6 +25,25 @@ class Preset:
     configure_preset: str
     build_dir: Path
     build_type: str  # CMAKE_BUILD_TYPE, e.g. "RelWithDebInfo"
+    toolset: str | None = None  # pinned compiler version/path (--toolset); None = preset default
+
+    @property
+    def family(self) -> str:
+        """Compiler family, inferred from the configure-preset name.
+
+        Drives how a pinned --toolset is applied: clang/gcc swap the compiler binary,
+        msvc selects a Visual Studio toolset via vcvars. 'unknown' if it can't be told.
+        """
+        cp = self.configure_preset
+        if "msvc" in cp:
+            return "msvc"
+        if "gcc" in cp:
+            return "gcc"
+        if "clang" in cp or "llvm" in cp:  # clang-cl on Windows; macos-arm-llvm uses Homebrew LLVM clang
+            return "clang"
+        if "emscripten" in cp:
+            return "emscripten"
+        return "unknown"
 
     @property
     def is_emscripten(self) -> bool:

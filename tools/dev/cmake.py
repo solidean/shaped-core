@@ -13,12 +13,22 @@ from pathlib import Path
 from . import console
 
 
-def configure_command(configure_preset: str) -> list[str]:
-    return ["cmake", "--preset", configure_preset]
+def configure_command(
+    configure_preset: str, *, build_dir: Path, defines: dict[str, str] | None = None
+) -> list[str]:
+    # -B overrides the preset's binaryDir; it equals binaryDir for an un-overridden preset, so
+    # passing it always is harmless and lets --build-suffix/--build-dir redirect the output tree.
+    # -D entries override the preset's cacheVariables (e.g. a pinned CMAKE_CXX_COMPILER).
+    cmd = ["cmake", "--preset", configure_preset, "-B", str(build_dir)]
+    for key, value in (defines or {}).items():
+        cmd += ["-D", f"{key}={value}"]
+    return cmd
 
 
-def build_command(build_preset: str, target: str | None = None, *, keep_going: bool = False) -> list[str]:
-    cmd = ["cmake", "--build", "--preset", build_preset]
+def build_command(build_dir: Path, target: str | None = None, *, keep_going: bool = False) -> list[str]:
+    # Build by directory rather than by build-preset name: the build presets are thin
+    # (name + configurePreset only), so this is equivalent and follows an overridden build_dir.
+    cmd = ["cmake", "--build", str(build_dir)]
     if target:
         cmd += ["--target", target]
     if keep_going:

@@ -22,6 +22,7 @@ Usage:
     uv run dev.py doctor                    Sanity-check the toolchain
     uv run dev.py list-presets              List available build presets
     uv run dev.py list-targets              List discovered targets
+    uv run dev.py list-toolsets             List installed compiler toolsets (for --toolset)
 
 Presets and targets accept comma-lists, repeated flags, and shell-style
 wildcards, and operate on as many as you select:
@@ -47,6 +48,7 @@ and plain when either is piped (e.g. run by an agent). Force it either way with
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fnmatch
 import platform
 import shlex
@@ -170,6 +172,22 @@ def resolve_presets(specs: list[str] | None) -> list[dev.Preset]:
         die(str(e))
 
 
+def resolve_build_presets(args: argparse.Namespace) -> list[dev.Preset]:
+    """Resolve --preset and apply the --toolset / --build-suffix / --build-dir overrides.
+
+    Used by the configure/build/test commands; validates a pinned toolset eagerly so an
+    unresolvable one fails fast with a clean message instead of mid-build.
+    """
+    presets = resolve_presets(args.preset)
+    try:
+        return dev.apply_overrides(
+            presets, root=ROOT,
+            toolset=args.toolset, build_suffix=args.build_suffix, build_dir=args.build_dir,
+        )
+    except dev.ToolsetError as e:
+        die(str(e))
+
+
 def _discover(preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
     """Discover targets for a preset, auto-configuring if needed."""
     try:
@@ -214,7 +232,7 @@ def resolve_target_names(
 # ---------------------------------------------------------------------------
 
 def cmd_configure(args: argparse.Namespace) -> None:
-    presets = resolve_presets(args.preset)
+    presets = resolve_build_presets(args)
     results = dev.configure(
         presets, root=ROOT, force=True, mirror=args.mirror_output, verbose=args.verbose,
         emsdk_path=args.emsdk_path,
@@ -223,7 +241,7 @@ def cmd_configure(args: argparse.Namespace) -> None:
 
 
 def cmd_build(args: argparse.Namespace) -> None:
-    presets = resolve_presets(args.preset)
+    presets = resolve_build_presets(args)
     # Targets are resolved against the first preset (target sets match across presets).
     target_names = (
         resolve_target_names(presets[0], args.target, args.emsdk_path)
@@ -257,7 +275,7 @@ def cmd_build(args: argparse.Namespace) -> None:
 
 
 def cmd_test(args: argparse.Namespace) -> None:
-    presets = resolve_presets(args.preset)
+    presets = resolve_build_presets(args)
     primary = presets[0]
 
     # Optionally build first (incremental — fast when nothing changed).
@@ -565,9 +583,10 @@ def cmd_diagnose_clangd(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
-    checks = dev.doctor(
-        ROOT, default_preset=DEFAULT_BUILD_PRESETS.get(platform.system()), emsdk_path=args.emsdk_path
-    )
+    # Resolve the preset (falling back to the platform default) and attach --toolset WITHOUT
+    # validating it — doctor should *report* a missing/wrong toolset, not hard-fail on it.
+    preset = dataclasses.replace(resolve_presets(args.preset)[0], toolset=args.toolset)
+    checks = dev.doctor(ROOT, preset=preset, emsdk_path=args.emsdk_path)
     all_ok = True
     for label, ok, detail in checks:
         # ok is True (pass), False (fail), or None for an advisory (neither).
@@ -592,6 +611,32 @@ def cmd_list_targets(args: argparse.Namespace) -> None:
     for t in _discover(presets[0], args.emsdk_path):
         artifact = f"  -> {t.artifact}" if t.artifact else ""
         print(f"{t.name}  [{t.kind}]{artifact}")
+
+
+def cmd_list_toolsets(args: argparse.Namespace) -> None:
+    data = dev.list_toolsets()
+
+    print(console.bold("msvc"))
+    if not data["msvc"]:
+        why = "" if platform.system() == "Windows" else "  (Windows only)"
+        print(console.dim(f"  none found{why}"))
+    for inst in data["msvc"]:
+        tag = console.yellow(" [prerelease]") if inst["prerelease"] else ""
+        print(f"  {inst['name']}{tag}  {console.dim(inst['path'])}")
+        if not inst["toolsets"]:
+            print(console.dim("    (no C++ toolset installed)"))
+        for version in inst["toolsets"]:
+            print(f"    {version:<16} --toolset {dev.toolset_hint(version)}")
+
+    for family in ("clang", "gcc"):
+        print(console.bold(family))
+        entries = data[family]
+        if not entries:
+            print(console.dim("  none found on PATH"))
+        for e in entries:
+            hint = f"--toolset {e['toolset']}" if e["toolset"] else console.dim("(use an explicit path)")
+            banner = f"  {console.dim(e['version'])}" if e["version"] else ""
+            print(f"  {e['name']:<16} {hint}{banner}")
 
 
 # ---------------------------------------------------------------------------
@@ -896,6 +941,26 @@ def _add_preset_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_build_override_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--toolset", metavar="VERSION", default=None,
+        help="Pin the compiler version within the preset's family: a bare version "
+             "(clang/gcc -> clang++-N/g++-N on PATH; msvc -> vcvars_ver, e.g. 14.51) or an "
+             "explicit compiler path. Not found = hard error. Auto-redirects the build dir so "
+             "toolsets don't share a CMake cache.",
+    )
+    p.add_argument(
+        "--build-suffix", metavar="TAG", default=None,
+        help="Append '-TAG' to the build folder (build/<preset>-TAG). The go-to for a "
+             "toolset matrix: one folder per toolset, side by side.",
+    )
+    p.add_argument(
+        "--build-dir", metavar="PATH", default=None,
+        help="Use this build directory instead of build/<preset> (relative to the repo root, "
+             "or absolute). For a fully custom layout; single preset only.",
+    )
+
+
 def _add_emsdk_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--emsdk-path", metavar="DIR", default=None,
@@ -926,10 +991,12 @@ def main() -> None:
 
     cfg_p = sub.add_parser("configure", help="Configure the CMake project")
     _add_preset_arg(cfg_p)
+    _add_build_override_args(cfg_p)
     _add_emsdk_arg(cfg_p)
 
     build_p = sub.add_parser("build", help="Build the project")
     _add_preset_arg(build_p)
+    _add_build_override_args(build_p)
     _add_emsdk_arg(build_p)
     build_p.add_argument("--target", "-t", action="append",
                          help="Target(s) to build: comma-list, repeatable, wildcards")
@@ -945,6 +1012,7 @@ def main() -> None:
 
     test_p = sub.add_parser("test", help="Run tests")
     _add_preset_arg(test_p)
+    _add_build_override_args(test_p)
     _add_emsdk_arg(test_p)
     test_p.add_argument("--target", "-t", action="append",
                         help="Test binary target(s): comma-list, repeatable, wildcards")
@@ -1076,6 +1144,12 @@ def main() -> None:
                            help="Print the verbatim single-line command instead of one argument per line")
 
     doctor_p = sub.add_parser("doctor", help="Sanity-check the toolchain")
+    _add_preset_arg(doctor_p)
+    doctor_p.add_argument(
+        "--toolset", metavar="VERSION", default=None,
+        help="Report the compiler this toolset resolves to (same value as build/test --toolset), "
+             "instead of the preset default.",
+    )
     _add_emsdk_arg(doctor_p)
 
     lp = sub.add_parser("list-presets", help="List available build presets")
@@ -1083,6 +1157,7 @@ def main() -> None:
     lt = sub.add_parser("list-targets", help="List discovered targets")
     _add_preset_arg(lt)
     _add_emsdk_arg(lt)
+    sub.add_parser("list-toolsets", help="List installed compiler toolsets per family (for --toolset)")
 
     args = parser.parse_args()
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
@@ -1130,6 +1205,8 @@ def main() -> None:
             cmd_list_presets(args)
         case "list-targets":
             cmd_list_targets(args)
+        case "list-toolsets":
+            cmd_list_toolsets(args)
 
 
 if __name__ == "__main__":
