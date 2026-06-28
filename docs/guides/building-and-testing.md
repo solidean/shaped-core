@@ -47,8 +47,14 @@ uv run dev.py doctor
 ```
 
 The positional argument to `test` is smart: if it names a test binary, that whole binary runs;
-otherwise it is treated as a **test-name substring filter** applied across every `*-test` binary
-(binaries with no match are skipped, not failed).
+otherwise it is treated as a **test-name substring filter**. Before running, dev.py asks each
+`*-test` binary which tests the filter actually selects (via nexus' `--list-tests-json`) and runs
+**only the binaries that contain a match** — the others are skipped without ever emitting a
+"did not select any tests" error. If the filter matches **nothing in any binary**, the run fails
+loudly with a diagnostic — the closest test names ("did you mean …"), or, when a name matched but
+was excluded, the fix (name a disabled test exactly; pass the bucket flag for a `manual` /
+`guide_benchmark` test). A full sweep (no filter) is unchanged: every binary runs and an empty one
+is a failure.
 
 ## Presets
 

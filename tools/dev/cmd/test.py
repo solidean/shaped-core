@@ -65,6 +65,18 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if err:
         ctx.die(err)
 
+    # With a name/pattern filter, only run binaries that actually contain a matching test (queried via nexus'
+    # --list-tests-json on the primary preset). An unfiltered sweep is unchanged — every binary runs and an
+    # empty one fails loudly. A filter that matches nothing anywhere fails with a diagnostic instead of a
+    # spurious "All 0 passed". Binaries that can't answer the query are kept and run as before.
+    if test_name:
+        binary_names, diag = dev.select_eligible_binaries(
+            primary, all_targets, binary_names,
+            test_name=test_name, root=ctx.root,
+        )
+        if diag:
+            ctx.die(diag)
+
     records = dev.test(
         presets,
         binary_names,

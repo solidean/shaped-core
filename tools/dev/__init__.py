@@ -16,6 +16,7 @@ from .lib.core.process import emsdk_env, find_emsdk_root
 from .lib.pipeline.build import build
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
+from .lib.pipeline.eligibility import select_eligible_binaries
 from .lib.pipeline.test import test
 from .lib.project.compdb import find_entry, load_entries, suggest_files
 from .lib.project.flags import extract_flags
@@ -127,6 +128,7 @@ __all__ = [
     "discover_targets",
     "executables",
     "select_test_binaries",
+    "select_eligible_binaries",
     "write_query",
     "NotConfiguredError",
     "test",

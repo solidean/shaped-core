@@ -35,6 +35,22 @@ struct test_schedule_config
     // addition to console output). Set via --perf-json <file>. See nx::guide.
     cc::string perf_json_file;
 
+    // When non-empty, run() writes a JSON test listing to this path (or stdout if
+    // "-") and exits without running anything. Set via --list-tests-json <file>.
+    // The listing reports every registered test plus whether it would_run() under
+    // the rest of the parsed args, so callers can pre-select binaries to run.
+    cc::string list_tests_json_file;
+
+    // True if the test's name passes the filters alone (filters empty, or some
+    // non-empty filter is a substring of the name) — bucket and disabled status
+    // are ignored. Distinguishes "name didn't match" from "matched but excluded".
+    bool name_matches(test_declaration const& decl) const;
+
+    // True if the test would be scheduled under this config: name_matches() AND the
+    // bucket gate (match_any_bucket, or same bucket) AND the disabled gate (enabled,
+    // or run_disabled_tests). This is exactly the predicate test_schedule::create uses.
+    bool would_run(test_declaration const& decl) const;
+
     static test_schedule_config create_from_args(int argc, char** argv);
 };
 
