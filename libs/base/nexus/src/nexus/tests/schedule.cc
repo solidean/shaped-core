@@ -110,6 +110,14 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
                 config.perf_json_file = argv[++i];
             continue;
         }
+        // JSON test listing (consumed here so the path is not misread as a filter). The rest of the args still
+        // parse normally, so the listing reflects exactly the filters/bucket a real run would use.
+        else if (arg == "--list-tests-json")
+        {
+            if (i + 1 < argc)
+                config.list_tests_json_file = argv[++i];
+            continue;
+        }
 
         // Regular filter argument - split by comma for Catch2 compatibility
         cc::isize start = 0;
@@ -158,6 +166,41 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     return config;
 }
 
+bool nx::test_schedule_config::name_matches(test_declaration const& decl) const
+{
+    if (filters.empty())
+        return true;
+
+    for (auto const& filter : filters)
+    {
+        if (filter.empty())
+            continue;
+
+        // Simple substring match for now
+        if (decl.name.contains(filter))
+            return true;
+    }
+
+    return false;
+}
+
+bool nx::test_schedule_config::would_run(test_declaration const& decl) const
+{
+    auto const& tc = decl.test_config;
+
+    // Eligibility by bucket + disabled status (filters are applied afterwards):
+    //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket is excluded unless
+    //    match_any_bucket is set (a non-wildcard filter without an explicit bucket flag names a test directly).
+    //  - disabled is orthogonal: a disabled test runs only when explicitly requested (run_disabled_tests).
+    if (!match_any_bucket && tc.bucket != selected_bucket)
+        return false;
+
+    if (!tc.enabled && !run_disabled_tests)
+        return false;
+
+    return name_matches(decl);
+}
+
 nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, test_registry const& registry)
 {
     test_schedule schedule;
@@ -166,40 +209,9 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
     {
         CC_ASSERT(decl.function.is_valid(), "invalid test decl");
 
-        auto const& tc = decl.test_config;
-
-        // Eligibility by bucket + disabled status (filters are applied afterwards):
-        //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket is excluded unless
-        //    match_any_bucket is set (a non-wildcard filter without an explicit bucket flag names a test directly).
-        //  - disabled is orthogonal: a disabled test runs only when explicitly requested (run_disabled_tests).
-        if (!config.match_any_bucket && tc.bucket != config.selected_bucket)
+        if (!config.would_run(decl))
             continue;
 
-        if (!tc.enabled && !config.run_disabled_tests)
-            continue;
-
-        // Apply filters if any are provided
-        if (!config.filters.empty())
-        {
-            bool matches = false;
-            for (auto const& filter : config.filters)
-            {
-                if (filter.empty())
-                    continue;
-
-                // Simple substring match for now
-                if (decl.name.contains(filter))
-                {
-                    matches = true;
-                    break;
-                }
-            }
-
-            if (!matches)
-                continue;
-        }
-
-        // Add test instance to schedule
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
         });

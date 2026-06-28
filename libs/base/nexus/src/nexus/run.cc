@@ -6,6 +6,7 @@
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
+#include <nexus/tests/export/listing_json.hh>
 #include <nexus/tests/export/perf_json.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
@@ -78,6 +79,29 @@ int nx::run(int argc, char** argv)
     if (config.is_catch2_xml_discovery)
     {
         write_to(std::cout, write_catch2_discovery_xml(registry));
+        return 0;
+    }
+
+    // JSON test listing: a query used by `dev.py test` to pre-select which binaries actually contain a matching
+    // test. It reports every registered test plus eligibility under the parsed args; it never runs anything and
+    // always succeeds, even when nothing is eligible (the caller decides what an empty match means).
+    if (!config.list_tests_json_file.empty())
+    {
+        auto const json = write_test_listing_json(program_name(argv[0]), config, registry);
+        if (config.list_tests_json_file == "-")
+            write_to(std::cout, json);
+        else
+        {
+            std::ofstream out(config.list_tests_json_file.c_str_materialize());
+            if (out)
+                write_to(out, json);
+            else
+            {
+                std::cerr << "Error: could not open test listing JSON file: " << as_sv(config.list_tests_json_file)
+                          << "\n";
+                return 1;
+            }
+        }
         return 0;
     }
 

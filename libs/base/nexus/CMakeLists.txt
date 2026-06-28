@@ -14,7 +14,9 @@ add_library(nexus
     src/nexus/tests/export/xml.cc
     src/nexus/tests/export/catch2.cc
     src/nexus/tests/export/junit.cc
+    src/nexus/tests/export/json.cc
     src/nexus/tests/export/perf_json.cc
+    src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/runner.cc
     src/nexus/fuzz/run.cc
@@ -44,7 +46,9 @@ target_sources(nexus
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
+    src/nexus/tests/export/json.hh
     src/nexus/tests/export/perf_json.hh
+    src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
     src/nexus/fuzz/value.hh

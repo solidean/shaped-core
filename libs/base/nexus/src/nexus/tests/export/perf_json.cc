@@ -2,49 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/to_string.hh>
-
-namespace
-{
-// Escapes a string for embedding in a JSON string literal. Mirrors xml_escape's role for junit.cc, but for
-// JSON: quotes and backslashes are escaped, and control characters below 0x20 become \uXXXX escapes.
-cc::string json_escape(cc::string_view str)
-{
-    cc::string result;
-    for (auto const c : str)
-    {
-        switch (c)
-        {
-        case '"':
-            result += "\\\"";
-            break;
-        case '\\':
-            result += "\\\\";
-            break;
-        case '\n':
-            result += "\\n";
-            break;
-        case '\r':
-            result += "\\r";
-            break;
-        case '\t':
-            result += "\\t";
-            break;
-        default:
-            if (static_cast<unsigned char>(c) < 0x20)
-            {
-                char const* const hex = "0123456789abcdef";
-                result += "\\u00";
-                result += hex[(static_cast<unsigned char>(c) >> 4) & 0xF];
-                result += hex[static_cast<unsigned char>(c) & 0xF];
-            }
-            else
-                result += c;
-            break;
-        }
-    }
-    return result;
-}
-} // namespace
+#include <nexus/tests/export/json.hh>
 
 cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
 {

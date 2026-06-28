@@ -108,6 +108,9 @@ uv run dev.py test                       # build + run the whole suite
 // --junit-xml <file>, -c <section>. See docs/catch2-runner-compat.md.
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
+// --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,
+//   name_matches, eligible) under the rest of the args, then exit 0. Used by `dev.py test` to pre-select which
+//   binaries actually contain a matching test. "-" means stdout.
 ```
 
 ## Fuzz testing (`nx::fuzz`)

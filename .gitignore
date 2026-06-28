@@ -32,6 +32,8 @@ target/            # rust
 *.app
 # Prerequisites / dependency files
 *.d
+# Coverage / PGO raw profiles (LLVM)
+*.profraw
 
 # ─── CMake ──────────────────────────────────────────────────
 CMakeLists.txt.user        # qtcreator
