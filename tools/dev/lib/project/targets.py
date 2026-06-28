@@ -13,7 +13,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from .models import Target
+from ..core.models import Target
 
 
 class NotConfiguredError(Exception):

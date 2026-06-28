@@ -30,12 +30,12 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from . import targets as targets_mod
-from .llvm_tools import find_tool, resolve_tool
-from .logs import step_fields, write_sidecar
-from .models import Preset, StepResult
-from .process import run_step
-from .test import test as run_tests
+from ..core.logs import step_fields, write_sidecar
+from ..core.models import Preset, StepResult
+from ..core.process import run_step
+from ..pipeline.test import test as run_tests
+from ..project import targets as targets_mod
+from ..toolchain.llvm_tools import find_tool, resolve_tool
 
 __all__ = [
     "CoverageToolError",

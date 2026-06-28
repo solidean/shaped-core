@@ -9,7 +9,7 @@ the dict that targets.py loaded.
 
 from __future__ import annotations
 
-from .models import CompileGroup, TargetFlags
+from ..core.models import CompileGroup, TargetFlags
 
 
 def _compile_group(group: dict, sources: list[dict]) -> CompileGroup:

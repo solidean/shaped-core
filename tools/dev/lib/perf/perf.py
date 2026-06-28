@@ -18,8 +18,8 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from .models import Preset
-from .test import test as run_tests
+from ..core.models import Preset
+from ..pipeline.test import test as run_tests
 
 
 def _parse_sidecar(path: Path, binary: str) -> list[dict]:

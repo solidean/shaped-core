@@ -4,12 +4,22 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - Allman
+  - crossrefs
+  - emcc
+  - emrun
+  - emscripten
+  - Emscripten
+  - emsdk
+  - fprofile
   - GLFW
   - imgui
   - kondo
+  - libline
+  - mimalloc's
   - msvc
   - MSVC
   - noprofile
+  - precommit
   - pycache
   - qtcreator
   - relwithdebinfo
@@ -17,7 +27,11 @@ words:
   - Solidean
   - SOLIDEAN
   - stdlib
+  - toolsets
   - tweakable
+  - uncompiled
+  - vcvars
+  - venv
   - workdir
 ignoreWords: []
 import: []

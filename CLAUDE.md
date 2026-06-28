@@ -34,9 +34,9 @@ One-liner per library (more will be added over time):
 
 Supporting directories:
 
-* **`tools/`** — `dev/` (reusable Python build/test modules behind
-  [dev.py](dev.py)) and `bin/` (checked-in binaries, e.g.
-  `diag-launcher.exe`).
+* **`tools/`** — `dev/` (the Python build/test machinery behind [dev.py](dev.py);
+  structure in [docs/dev-py-driver.md](docs/dev-py-driver.md)) and `bin/`
+  (checked-in binaries, e.g. `diag-launcher.exe`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry
   points.

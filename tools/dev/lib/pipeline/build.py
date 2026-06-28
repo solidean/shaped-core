@@ -15,9 +15,9 @@ from pathlib import Path
 
 from . import cmake
 from .configure import ensure_configured
-from .logs import ninja_built_count, step_fields, write_sidecar
-from .models import Preset, StepResult
-from .process import env_for_preset, run_step
+from ..core.logs import ninja_built_count, step_fields, write_sidecar
+from ..core.models import Preset, StepResult
+from ..core.process import env_for_preset, run_step
 
 
 def _build_extra(result: StepResult) -> str:
