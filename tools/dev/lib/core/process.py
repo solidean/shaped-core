@@ -72,14 +72,15 @@ def _find_vsdevcmd(toolset: str | None = None) -> str | None:
     return None
 
 
-def msvc_env(toolset: str | None = None) -> dict[str, str] | None:
+def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | None:
     """Return an environment dict with MSVC tools on PATH, or None if not needed.
 
     Returns None on non-Windows or when VsDevCmd.bat cannot be found. With no `toolset`,
     an already-on-PATH cl.exe is taken as-is (returns None to inherit the env). When a
     `toolset` is pinned, the ambient cl is ignored: the matching Visual Studio instance is
     located and `-vcvars_ver=<toolset>` selects that exact toolset (a path-valued toolset
-    is handled by the clang/gcc compiler-override path, not here).
+    is handled by the clang/gcc compiler-override path, not here). `arch` selects the
+    vcvars target architecture (`-arch`), so an arm64 preset gets the arm64 toolchain.
     """
     if platform.system() != "Windows":
         return None
@@ -99,7 +100,7 @@ def msvc_env(toolset: str | None = None) -> dict[str, str] | None:
 
     vcvars_ver = f" -vcvars_ver={toolset}" if toolset and not ("/" in toolset or "\\" in toolset) else ""
     result = subprocess.run(
-        f'cmd /c "call \"{vsdevcmd}\" -arch=x64{vcvars_ver} >nul 2>&1 && set"',
+        f'cmd /c "call \"{vsdevcmd}\" -arch={arch}{vcvars_ver} >nul 2>&1 && set"',
         capture_output=True, text=True, shell=True,
     )
     if result.returncode != 0:
@@ -218,7 +219,7 @@ def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, s
     """
     if preset.is_emscripten:
         return emsdk_env(emsdk_path)
-    return msvc_env(preset.toolset)
+    return msvc_env(preset.toolset, preset.arch)
 
 
 # ---------------------------------------------------------------------------

@@ -46,6 +46,16 @@ class Preset:
         return "unknown"
 
     @property
+    def arch(self) -> str:
+        """Target CPU architecture, inferred from the configure-preset name.
+
+        Only matters for MSVC: it picks the vcvars `-arch` so a native arm64
+        Windows build gets the arm64 toolchain instead of x64. 'x64' unless the
+        preset name says otherwise.
+        """
+        return "arm64" if "arm64" in self.configure_preset else "x64"
+
+    @property
     def is_emscripten(self) -> bool:
         """Whether this preset cross-compiles to WebAssembly via Emscripten.
 

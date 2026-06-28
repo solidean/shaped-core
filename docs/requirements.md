@@ -51,7 +51,7 @@ targets it; older versions may work but are untested.
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `*-gcc-*` presets. GCC **13+** for `std::stacktrace`.        |
 | macOS    | Homebrew LLVM       | Expects `/opt/homebrew/opt/llvm/bin/clang++` (arm64).        |
-| Android  | NDK r27c            | Expects `C:/Android/android-ndk-r27c` (see preset).          |
+| Android  | NDK (r27+)          | `android-ndk-arm64-*` presets; NDK located via `$ANDROID_NDK_ROOT`. |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
 See [platforms.md](platforms.md) for the full tier matrix (which platforms are actively tested vs

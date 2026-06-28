@@ -1,0 +1,50 @@
+name: iOS Clang (build-only)
+
+# Tier-2 build-only gate: cross-compile to iOS arm64 (device) via Apple Clang, on
+# the macos-latest image. Build-only — the job doesn't run on-device/simulator, so
+# there is no test step (that's the build-only CI status; see docs/platforms.md).
+# The ios-arm64 preset sets CMAKE_SYSTEM_NAME=iOS with the iphoneos sysroot; Apple
+# Clang and CMake ship on the runner, Ninja comes from Homebrew. The iOS preset
+# wires no diag launcher, so ci-diag.zip is near-empty; the --collect-logs bundle
+# carries the captured compiler output. See docs/guides/ci.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # Informational only: doctor also probes clangd's compile DB and llvm-cov,
+      # which aren't needed for a build gate and would fail a fresh runner.
+      - name: Doctor (toolchain info)
+        run: uv run dev.py doctor --preset ios-arm64-relwithdebinfo
+        continue-on-error: true
+
+      - name: Build
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset ios-arm64-relwithdebinfo --diag-archive build/ci-diag.zip --keep-going
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-clang-diagnostics
+          path: |
+            build/ci-diag.zip
+            build/ci-logs.zip
+          if-no-files-found: warn
