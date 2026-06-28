@@ -180,9 +180,15 @@ bool is_debugger_connected() noexcept;
 // the _trap is technically not correct because a BREAKpoint is recoverable
 // the use in CC_ASSERT is simply to provide a cleaner debugging experience
 // and is followed by an abort anyways
-// NOTE: we don't want to pull in any posix header here, so we simply declare raise
+// NOTE: we don't want to pull in any posix header here, so we simply declare raise. Its exception
+//       specification must match the platform libc: bionic (Android) does NOT mark raise noexcept,
+//       unlike glibc/musl/Darwin, so a noexcept here would clash with bionic's <signal.h>.
 //       SIGTRAP is 5 according to https://man7.org/linux/man-pages/man7/signal.7.html
+#if defined(CC_OS_ANDROID)
+extern "C" int raise(int);
+#else
 extern "C" int raise(int) noexcept;
+#endif
 #define CC_IMPL_DEBUG_BREAK() (::cc::impl::is_debugger_connected() ? (void)::raise(5) : void(0))
 
 #endif
