@@ -62,7 +62,10 @@ dependency direction (a group only imports from groups below it):
 | `perf`       | coverage, pgo, perf                               | core, project, toolchain, pipeline |
 
 This is the same layering rule the C++ libraries follow: no upward or cyclic dependencies.
-If two groups both want something, it belongs in a lower group.
+If two groups both want something, it belongs in a lower group. (The lone exception is a
+deliberate **function-local** import — `core/process.py` reaches into `toolchain` for MSVC
+env setup only when a toolset is pinned; keeping it off the module-load path preserves the
+import-time layering.)
 
 **`tools/dev/cmd/` — the commands.** One module per command (`build.py`, `test.py`,
 `coverage.py`, …), each exposing exactly three things:

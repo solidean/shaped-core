@@ -40,7 +40,8 @@ def _find_vsdevcmd(toolset: str | None = None) -> str | None:
     the known VS 2022 install paths.
     """
     if toolset is not None and not ("/" in toolset or "\\" in toolset):
-        from .toolset import find_msvc_instance  # local import: avoids a module-load cycle
+        # Function-local: keeps msvc env setup off core's import path (toolchain sits above core).
+        from ..toolchain.toolset import find_msvc_instance
 
         inst = find_msvc_instance(toolset)
         if inst is None:
