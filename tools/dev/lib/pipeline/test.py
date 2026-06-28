@@ -23,11 +23,11 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from . import console
-from . import targets as targets_mod
-from .logs import parse_junit, step_fields, write_sidecar, write_step_junit
-from .models import Preset
-from .process import emsdk_env, run_step
+from ..core import console
+from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
+from ..core.models import Preset
+from ..core.process import emsdk_env, run_step
+from ..project import targets as targets_mod
 
 # Artifact suffixes that are not directly runnable and must be launched via node
 # (Emscripten emits a `<name>.js` loader next to the `.wasm`).

@@ -13,7 +13,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import console
+from ..core import console
 
 
 @dataclass

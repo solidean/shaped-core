@@ -152,7 +152,7 @@ whose body lists the failed expressions and their source locations:
 ```
 
 The aggregate `<testsuite>`/`<testsuites>` attributes (`tests`, `failures`,
-`time`, …) match the schema the `dev.py` tooling parses ([tools/dev/logs.py](../../../../tools/dev/logs.py)
+`time`, …) match the schema the `dev.py` tooling parses ([tools/dev/lib/core/logs.py](../../../../tools/dev/lib/core/logs.py)
 `parse_junit`/`merge_junit`). `assertions` (total checks evaluated) is outside the
 base JUnit schema but understood by common tooling; `dev.py` reads it to report
 check counts in its per-step and summary lines. The build/test driver passes `--junit-xml` to each

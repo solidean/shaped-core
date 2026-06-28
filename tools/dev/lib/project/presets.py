@@ -16,7 +16,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from .models import Preset
+from ..core.models import Preset
 
 
 class PresetError(Exception):

@@ -8,24 +8,29 @@ operate on lists of presets and targets.
 
 from __future__ import annotations
 
-from . import clangd, console, report
-from .archive import archive_diag, archive_logs
-from .build import build
-from .checks import Check, list_checks, run_checks
-from .cmake import remove_build_dir
-from .compdb import find_entry, load_entries, suggest_files
-from .configure import configure, ensure_configured
-from .flags import extract_flags
-from .coverage import (
-    CoverageToolError,
-    coverage_merge,
-    coverage_report,
-    coverage_run,
-    find_tool,
+from .lib.core import console, report
+from .lib.core.archive import archive_diag, archive_logs
+from .lib.core.logs import merge_junit, ninja_built_count
+from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
+from .lib.core.process import emsdk_env, find_emsdk_root
+from .lib.pipeline.build import build
+from .lib.pipeline.cmake import remove_build_dir
+from .lib.pipeline.configure import configure, ensure_configured
+from .lib.pipeline.test import test
+from .lib.project.compdb import find_entry, load_entries, suggest_files
+from .lib.project.flags import extract_flags
+from .lib.project.presets import PresetError, load_presets, resolve_cache_variable, resolve_presets
+from .lib.project.targets import (
+    NotConfiguredError,
+    discover_targets,
+    executables,
+    load_target_models,
+    select_test_binaries,
+    write_query,
 )
-from .crossrefs import CrossRefResult, check_crossrefs
-from .doctor import doctor
-from .format import (
+from .lib.quality.checks import Check, list_checks, run_checks
+from .lib.quality.crossrefs import CrossRefResult, check_crossrefs
+from .lib.quality.format import (
     FormatResult,
     FormatSetupError,
     clang_format_version,
@@ -36,11 +41,19 @@ from .format import (
     run_format,
     violating_files,
 )
-from .llvm_tools import resolve_tool
-from .logs import merge_junit, ninja_built_count
-from .models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
-from .perf import run_and_collect as perf_run_and_collect
-from .pgo import (
+from .lib.toolchain import clangd
+from .lib.toolchain.doctor import doctor
+from .lib.toolchain.llvm_tools import resolve_tool
+from .lib.toolchain.toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
+from .lib.perf.coverage import (
+    CoverageToolError,
+    coverage_merge,
+    coverage_report,
+    coverage_run,
+    find_tool,
+)
+from .lib.perf.perf import run_and_collect as perf_run_and_collect
+from .lib.perf.pgo import (
     PgoError,
     pgo_instrument,
     pgo_measure,
@@ -49,18 +62,6 @@ from .pgo import (
     pgo_train,
     profile_path,
 )
-from .presets import PresetError, load_presets, resolve_cache_variable, resolve_presets
-from .process import emsdk_env, find_emsdk_root
-from .toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
-from .targets import (
-    NotConfiguredError,
-    discover_targets,
-    executables,
-    load_target_models,
-    select_test_binaries,
-    write_query,
-)
-from .test import test
 
 __all__ = [
     "archive_diag",

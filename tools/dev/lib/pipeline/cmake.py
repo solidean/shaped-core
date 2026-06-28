@@ -10,7 +10,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import console
+from ..core import console
 
 
 def configure_command(

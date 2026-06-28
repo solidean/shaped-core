@@ -32,8 +32,8 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from .models import Preset
-from .presets import resolve_cache_variable
+from ..core.models import Preset
+from ..project.presets import resolve_cache_variable
 
 
 class ToolsetError(Exception):

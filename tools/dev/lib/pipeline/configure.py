@@ -16,10 +16,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import cmake, console, fingerprint, targets, toolset
-from .logs import step_fields, write_sidecar
-from .models import Preset, StepResult
-from .process import env_for_preset, run_step
+from . import cmake, fingerprint
+from ..core import console
+from ..core.logs import step_fields, write_sidecar
+from ..core.models import Preset, StepResult
+from ..core.process import env_for_preset, run_step
+from ..project import targets
+from ..toolchain import toolset
 
 
 def _publish_compile_commands(preset: Preset) -> None:

@@ -16,9 +16,9 @@ from pathlib import Path
 
 from . import clangd
 from .llvm_tools import find_tool, resolve_tool
-from .models import Preset
-from .presets import PresetError, load_presets, resolve_cache_variable
-from .process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
+from ..core.models import Preset
+from ..core.process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
+from ..project.presets import PresetError, load_presets, resolve_cache_variable
 
 
 def _parse_version(text: str) -> tuple[int, ...] | None:

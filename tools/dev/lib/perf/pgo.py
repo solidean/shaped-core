@@ -29,11 +29,11 @@ from datetime import datetime
 from pathlib import Path
 
 from . import perf
-from .build import build as run_build
-from .llvm_tools import resolve_tool
-from .logs import step_fields, write_sidecar
-from .models import Preset, StepResult
-from .process import run_step
+from ..core.logs import step_fields, write_sidecar
+from ..core.models import Preset, StepResult
+from ..core.process import run_step
+from ..pipeline.build import build as run_build
+from ..toolchain.llvm_tools import resolve_tool
 
 
 class PgoError(Exception):
