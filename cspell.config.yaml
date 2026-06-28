@@ -4,6 +4,8 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - Allman
+  - CPPRTTI
+  - CPPUNWIND
   - crossrefs
   - emcc
   - emrun
@@ -16,13 +18,17 @@ words:
   - kondo
   - libline
   - mimalloc's
+  - miscompiles
   - msvc
   - MSVC
   - noprofile
+  - ORBIS
+  - pessimized
   - precommit
   - pycache
   - qtcreator
   - relwithdebinfo
+  - rtti
   - smod
   - Solidean
   - SOLIDEAN
@@ -32,6 +38,8 @@ words:
   - uncompiled
   - vcvars
   - venv
+  - wasi
+  - WASI
   - workdir
 ignoreWords: []
 import: []

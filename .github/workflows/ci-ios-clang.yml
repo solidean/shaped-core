@@ -4,9 +4,9 @@ name: iOS Clang (build-only)
 # the macos-latest image. Build-only — the job doesn't run on-device/simulator, so
 # there is no test step (that's the build-only CI status; see docs/platforms.md).
 # The ios-arm64 preset sets CMAKE_SYSTEM_NAME=iOS with the iphoneos sysroot; Apple
-# Clang and CMake ship on the runner, Ninja comes from Homebrew. The iOS preset
-# wires no diag launcher, so ci-diag.zip is near-empty; the --collect-logs bundle
-# carries the captured compiler output. See docs/guides/ci.md.
+# Clang and CMake ship on the runner, Ninja comes from Homebrew. The preset wires
+# the POSIX diag_launcher.sh (macOS host), so ci-diag.zip carries the per-compile
+# sidecars build_diag reads. See docs/guides/ci.md.
 
 on:
   push:

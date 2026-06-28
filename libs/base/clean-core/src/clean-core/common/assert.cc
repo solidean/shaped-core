@@ -12,17 +12,17 @@
 #include <cstdlib>
 #include <iostream>
 
-#ifdef CC_COMPILER_MSVC
+#ifdef CC_OS_WINDOWS
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent() noexcept;
 #endif
 
-#ifdef CC_COMPILER_POSIX
+#ifndef CC_OS_WINDOWS
 #include <unistd.h>
 
 #include <cstring>
 #endif
 
-#ifdef CC_OS_APPLE
+#ifdef CC_ABI_DARWIN
 #include <sys/sysctl.h>
 #endif
 
@@ -109,9 +109,9 @@ CC_COLD_FUNC void cc::impl::handle_assert_failure(char const* expression, char c
 
 bool cc::impl::is_debugger_connected() noexcept
 {
-#ifdef CC_COMPILER_MSVC
+#ifdef CC_OS_WINDOWS
     return ::IsDebuggerPresent() != 0;
-#elif defined(CC_OS_LINUX)
+#elif defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
     // Check /proc/self/status for TracerPid
     if (auto* f = std::fopen("/proc/self/status", "r"))
     {
@@ -129,7 +129,7 @@ bool cc::impl::is_debugger_connected() noexcept
         std::fclose(f);
     }
     return false;
-#elif defined(CC_OS_APPLE)
+#elif defined(CC_ABI_DARWIN)
     // Ask the kernel for our own process info and test the P_TRACED flag — the
     // canonical macOS debugger check (Apple Technical Q&A QA1361). Uses the real
     // kinfo_proc from <sys/sysctl.h> rather than a hand-rolled layout.

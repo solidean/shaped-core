@@ -1,24 +1,49 @@
 #pragma once
 
 // =========================================================================================================
-// Compiler detection
+// Platform detection — the ONLY place raw toolchain predefines may be read
 // =========================================================================================================
-// Conditionally defined: CC_COMPILER_MSVC, CC_COMPILER_CLANG, CC_COMPILER_GCC, CC_COMPILER_MINGW, CC_COMPILER_POSIX
+// This header translates the compiler's raw predefined macros (_MSC_VER, __clang__, _WIN32, __APPLE__,
+// _M_X64, __aarch64__, __ANDROID__, …) into a small, orthogonal set of CC_* macros. Downstream code MUST
+// branch on these CC_* macros and MUST NOT read the raw predefines directly — that keeps the messy,
+// overlapping vendor macros (e.g. clang-cl defines _MSC_VER; Android also defines __linux__; TARGET_OS_MAC
+// is set on iOS too) confined to one audited place. The five axes are independent: query each separately.
+//
+//   Compiler: CC_COMPILER_{CLANG, MSVC, GCC}            — who is compiling (clang-cl counts as CLANG)
+//   Arch:     CC_ARCH_{X64, X86, ARM64, ARM32, WASM32}  — target CPU / instruction set
+//   OS:       CC_OS_{WINDOWS, LINUX, MACOS, IOS, TVOS, ANDROID, EMSCRIPTEN, WASI}
+//   ABI:      CC_ABI_{MSVC, SYSV, ANDROID, DARWIN, WASM} — calling convention / object format family
+//   Platform: CC_PLATFORM_{DESKTOP, MOBILE, WEB, CONSOLE} — coarse device class (orthogonal to OS: an Xbox
+//             is OS=WINDOWS, Platform=CONSOLE)
+//
+// Exactly one macro is defined per axis.
 
-#if defined(_MSC_VER)
-#define CC_COMPILER_MSVC
-#elif defined(__clang__)
+// --- Compiler ---
+// clang is checked first: clang-cl also defines _MSC_VER but is clang, and bucketing it as CLANG (not MSVC)
+// lets it take the GNU-attribute paths it supports. MinGW (defines __GNUC__) folds into GCC.
+#if defined(__clang__)
 #define CC_COMPILER_CLANG
+#elif defined(_MSC_VER)
+#define CC_COMPILER_MSVC
 #elif defined(__GNUC__)
 #define CC_COMPILER_GCC
-#elif defined(__MINGW32__) || defined(__MINGW64__)
-#define CC_COMPILER_MINGW
 #else
 #error "Unknown compiler"
 #endif
 
-#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC) || defined(CC_COMPILER_MINGW)
-#define CC_COMPILER_POSIX
+// --- Architecture ---
+#if defined(__wasm32__) || (defined(__wasm__) && !defined(__wasm64__))
+#define CC_ARCH_WASM32
+#elif defined(_M_X64) || defined(__x86_64__) || defined(__amd64__)
+#define CC_ARCH_X64
+#elif defined(_M_ARM64) || defined(__aarch64__)
+#define CC_ARCH_ARM64
+#elif defined(_M_IX86) || defined(__i386__)
+#define CC_ARCH_X86
+#elif defined(_M_ARM) || defined(__arm__)
+#define CC_ARCH_ARM32
+#else
+#error "Unknown architecture"
 #endif
 
 // =========================================================================================================
@@ -59,84 +84,57 @@
 #define CC_ASSERT_ENABLED 0
 #endif
 
-// =========================================================================================================
-// Operating system detection
-// =========================================================================================================
-// Conditionally defined: CC_OS_WINDOWS, CC_OS_LINUX, CC_OS_APPLE, CC_OS_BSD, CC_OS_EMSCRIPTEN, CC_OS_WASI
-// CC_OS_WASM is an umbrella set for any WebAssembly "OS" (Emscripten or WASI); branch on it for behavior
-// shared across the wasm family, and on the specific macro where they differ.
-//
-// The wasm branches come first: Emscripten reports neither _WIN32 nor __linux__, but it (and some wasi
-// toolchains) can leak unix-ish predefines, so detecting __EMSCRIPTEN__/__wasi__ up front avoids misclassification.
-
+// --- Operating system ---
+// Order matters: Emscripten/WASI leak unix-ish predefines, and Android also defines __linux__, so the more
+// specific OSes are matched before the generic ones. The Apple split keys off <TargetConditionals.h> and
+// checks iOS/tvOS before macOS because TARGET_OS_MAC is set on all Apple platforms.
 #if defined(__EMSCRIPTEN__)
 #define CC_OS_EMSCRIPTEN
-#define CC_OS_WASM
-#elif defined(__wasi__) || defined(__wasm__)
+#elif defined(__wasi__)
 #define CC_OS_WASI
-#define CC_OS_WASM
-#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32)
+#elif defined(_WIN32)
 #define CC_OS_WINDOWS
-#elif defined(__APPLE__) || defined(__MACH__) || defined(macintosh)
-#define CC_OS_APPLE
-#elif defined(__linux__) || defined(linux)
-#define CC_OS_LINUX
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-#define CC_OS_BSD
-#else
-#error "Unknown platform"
-#endif
-
-// =========================================================================================================
-// Target platform detection
-// =========================================================================================================
-// Conditionally defined: CC_TARGET_PC, CC_TARGET_XBOX, CC_TARGET_MACOS, CC_TARGET_IOS, CC_TARGET_TVOS,
-//                        CC_TARGET_ANDROID, CC_TARGET_ORBIS, CC_TARGET_NX, CC_TARGET_WEB, CC_TARGET_MOBILE,
-//                        CC_TARGET_CONSOLE
-
-#if defined(CC_OS_WASM)
-#define CC_TARGET_WEB
-#endif
-
-#if defined(CC_OS_WINDOWS)
-#if defined(_DURANGO)
-#define CC_TARGET_XBOX
-#else
-#define CC_TARGET_PC
-#endif
-#endif
-
-#if defined(CC_OS_APPLE)
-#include "TargetConditionals.h"
-#if TARGET_OS_MAC
-#define CC_TARGET_MACOS
-#elif TARGET_OS_IOS
-#define CC_TARGET_IOS
+#elif defined(__ANDROID__)
+#define CC_OS_ANDROID
+#elif defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IOS
+#define CC_OS_IOS
 #elif TARGET_OS_TV
-#define CC_TARGET_TVOS
+#define CC_OS_TVOS
+#elif TARGET_OS_OSX
+#define CC_OS_MACOS
 #else
 #error "Unknown Apple platform"
 #endif
+#elif defined(__linux__)
+#define CC_OS_LINUX
+#else
+#error "Unknown operating system"
 #endif
 
-#if defined(__ANDROID__)
-#define CC_TARGET_ANDROID
+// --- ABI (calling convention / object format family) ---
+#if defined(CC_OS_WINDOWS)
+#define CC_ABI_MSVC
+#elif defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+#define CC_ABI_DARWIN
+#elif defined(CC_OS_ANDROID)
+#define CC_ABI_ANDROID
+#elif defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)
+#define CC_ABI_WASM
+#else
+#define CC_ABI_SYSV
 #endif
 
-#if defined(__ORBIS__)
-#define CC_TARGET_ORBIS
-#endif
-
-#if defined(__NX__)
-#define CC_TARGET_NX
-#endif
-
-#if defined(CC_TARGET_IOS) || defined(CC_TARGET_TVOS) || defined(CC_TARGET_ANDROID)
-#define CC_TARGET_MOBILE
-#endif
-
-#if defined(CC_TARGET_ORBIS) || defined(CC_TARGET_NX) || defined(CC_TARGET_XBOX)
-#define CC_TARGET_CONSOLE
+// --- Platform (coarse device class; orthogonal to OS) ---
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)
+#define CC_PLATFORM_WEB
+#elif defined(CC_OS_IOS) || defined(CC_OS_TVOS) || defined(CC_OS_ANDROID)
+#define CC_PLATFORM_MOBILE
+#elif defined(_DURANGO) || defined(__ORBIS__) || defined(__NX__)
+#define CC_PLATFORM_CONSOLE
+#else
+#define CC_PLATFORM_DESKTOP
 #endif
 
 // =========================================================================================================
@@ -148,7 +146,7 @@
 // __EMSCRIPTEN_PTHREADS__. Single-threaded wasm still compiles <mutex>/<thread>/thread_local fine — they
 // degrade to no-ops — so this flag gates behavior, not compilation.
 
-#if defined(CC_OS_WASM)
+#if defined(CC_PLATFORM_WEB)
 #if defined(__EMSCRIPTEN_PTHREADS__)
 #define CC_HAS_THREADS 1
 #else
@@ -248,7 +246,7 @@
 #define CC_IMPL_ARRAY_COUNT_OF(arr) __crt_countof(arr)
 #define CC_IMPL_ASSUME(x) __assume(x)
 
-#elif defined(CC_COMPILER_POSIX)
+#elif defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
 
 #define CC_IMPL_PRETTY_FUNC __PRETTY_FUNCTION__
 
@@ -256,8 +254,10 @@
 #define CC_IMPL_FORCE_INLINE __attribute__((always_inline)) inline
 #define CC_IMPL_DONT_INLINE __attribute__((noinline))
 
-#define CC_IMPL_COLD_FUNC __attribute__((cold))
-#define CC_IMPL_HOT_FUNC __attribute__((hot))
+// C++ spelling ([[gnu::cold]], not __attribute__((cold))): a leading __attribute__ followed by a C++
+// attribute-seq (e.g. CC_COLD_FUNC [[nodiscard]]) is rejected by some clangs (older Apple clang).
+#define CC_IMPL_COLD_FUNC [[gnu::cold]]
+#define CC_IMPL_HOT_FUNC [[gnu::hot]]
 
 #define CC_IMPL_BUILTIN_UNREACHABLE __builtin_unreachable()
 #define CC_IMPL_ARRAY_COUNT_OF(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -271,10 +271,8 @@
 #error "Unknown compiler"
 #endif
 
-// CC_IMPL_PURE keys on the actual compiler builtins, not CC_COMPILER_MSVC: clang-cl defines _MSC_VER (so it
-// buckets as MSVC above) yet fully supports GNU attributes, and we want the attribute there. Empty only on
-// genuine MSVC, which has no equivalent.
-#if defined(__GNUC__) || defined(__clang__)
+// CC_PURE: GNU pure attribute on clang/gcc, empty on MSVC (no equivalent).
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
 #define CC_IMPL_PURE [[gnu::pure]] // C++ spelling: unambiguous in a leading attribute-seq (vs __attribute__)
 #else
 #define CC_IMPL_PURE

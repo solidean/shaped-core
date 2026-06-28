@@ -7,7 +7,7 @@
 
 
 // Platform-specific includes for symbol demangling
-#ifdef CC_COMPILER_MSVC
+#ifdef CC_OS_WINDOWS
 #include <Windows.h>
 
 // NOTE: must be _after_ windows.h
@@ -18,7 +18,7 @@
 #pragma comment(lib, "dbghelp.lib")
 #endif
 
-#ifdef CC_COMPILER_POSIX
+#ifndef CC_OS_WINDOWS
 #include <cxxabi.h>
 
 #include <cstdlib>
@@ -33,8 +33,8 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
     static std::mutex demangle_mutex;
     std::lock_guard<std::mutex> lock(demangle_mutex);
 
-#ifdef CC_COMPILER_MSVC
-    // MSVC implementation using UnDecorateSymbolName
+#ifdef CC_OS_WINDOWS
+    // Windows implementation using UnDecorateSymbolName
     // Allocate buffer for demangled name (MSVC symbols are typically < 4KB)
     constexpr DWORD buffer_size = 4096;
     char buffer[buffer_size];
@@ -62,7 +62,7 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
         return cc::string::create_copy_of(symbol);
     }
 
-#elif defined(CC_COMPILER_POSIX)
+#else
     // GCC/Clang implementation using __cxa_demangle
     // __cxa_demangle expects a null-terminated string
     cc::string symbol_nt = cc::string::create_copy_c_str_materialized(symbol);
@@ -88,9 +88,5 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
         }
         return cc::string::create_copy_of(symbol);
     }
-
-#else
-    // Unsupported platform - return original symbol unchanged
-    return cc::string::create_copy_of(symbol);
 #endif
 }

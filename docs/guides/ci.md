@@ -141,8 +141,12 @@ never shares a CMake cache with a default-toolset build. Per-platform specifics:
   (`CMAKE_SYSTEM_NAME=iOS`, `iphoneos` sysroot); Ninja comes from Homebrew.
   Android (`ubuntu-26.04`) cross-compiles via the NDK with the
   `android-ndk-arm64-*` preset, which reads the toolchain from
-  `$ANDROID_NDK_ROOT` (set by the runner image) rather than a hardcoded path.
-  Neither runs tests — the runner can't execute the produced binaries.
+  `$ANDROID_NDK_ROOT`; the job points that at the image's **NDK r29 (Clang 21)**
+  rather than the default r27 (Clang 18, too old for our C++23 — e.g.
+  `std::atomic_ref`). Both presets wire the POSIX `diag_launcher.sh` (the iOS and
+  Android hosts are macOS/Linux), so their `ci-diag.zip` carries real per-compile
+  sidecars (`build_diag`-readable). Neither runs tests — the runner can't execute
+  the produced binaries.
 
 `doctor` runs first on every job but is **informational, non-gating**
 (`continue-on-error`): it also probes clangd's compile database and

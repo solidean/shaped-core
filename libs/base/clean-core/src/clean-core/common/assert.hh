@@ -168,12 +168,12 @@ bool is_debugger_connected() noexcept;
 // Platform-specific debugger break implementation
 // The debugger should break right in the assert macro, so this cannot hide in a function call
 
-#ifdef CC_COMPILER_MSVC
+#ifdef CC_OS_WINDOWS
 
-// __debugbreak() terminates immediately without an attached debugger
+// __debugbreak() terminates immediately without an attached debugger (works on cl and clang-cl)
 #define CC_IMPL_DEBUG_BREAK() (::cc::impl::is_debugger_connected() ? __debugbreak() : void(0))
 
-#elif defined(CC_COMPILER_POSIX)
+#else
 
 // __builtin_trap() causes an illegal instruction and crashes without an attached debugger
 // we use a SIGTRAP to signal a trace/breakpoint
@@ -184,10 +184,6 @@ bool is_debugger_connected() noexcept;
 //       SIGTRAP is 5 according to https://man7.org/linux/man-pages/man7/signal.7.html
 extern "C" int raise(int) noexcept;
 #define CC_IMPL_DEBUG_BREAK() (::cc::impl::is_debugger_connected() ? (void)::raise(5) : void(0))
-
-#else
-
-#define CC_IMPL_DEBUG_BREAK() void(0)
 
 #endif
 
