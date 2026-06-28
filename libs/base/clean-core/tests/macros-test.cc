@@ -8,39 +8,32 @@
 // Preprocessor-level compile-time checks
 // =========================================================================================================
 
-// Test: Exactly-one compiler family is selected
-#if defined(CC_COMPILER_MSVC) + defined(CC_COMPILER_CLANG) + defined(CC_COMPILER_GCC) + defined(CC_COMPILER_MINGW) != 1
-#error "Expected exactly one compiler family macro to be defined"
+// Test: Exactly-one macro is selected per detection axis (compiler / arch / OS / ABI / platform).
+#if defined(CC_COMPILER_MSVC) + defined(CC_COMPILER_CLANG) + defined(CC_COMPILER_GCC) != 1
+#error "Expected exactly one compiler macro to be defined"
 #endif
 
-// Test: CC_COMPILER_POSIX iff {CLANG|GCC|MINGW}
-#if defined(CC_COMPILER_POSIX)
-#if !defined(CC_COMPILER_CLANG) && !defined(CC_COMPILER_GCC) && !defined(CC_COMPILER_MINGW)
-#error "CC_COMPILER_POSIX defined but no POSIX compiler detected"
-#endif
-#else
-#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC) || defined(CC_COMPILER_MINGW)
-#error "POSIX compiler detected but CC_COMPILER_POSIX not defined"
-#endif
+#if defined(CC_ARCH_X64) + defined(CC_ARCH_X86) + defined(CC_ARCH_ARM64) + defined(CC_ARCH_ARM32) \
+        + defined(CC_ARCH_WASM32)                                                                 \
+    != 1
+#error "Expected exactly one architecture macro to be defined"
 #endif
 
-// Test: Exactly-one OS is selected. The specific OS macros are mutually exclusive; CC_OS_WASM is a
-// derived umbrella over the WebAssembly OSes (Emscripten / WASI) and is checked separately below.
-#if defined(CC_OS_WINDOWS) + defined(CC_OS_LINUX) + defined(CC_OS_APPLE) + defined(CC_OS_BSD) \
-        + defined(CC_OS_EMSCRIPTEN) + defined(CC_OS_WASI)                                     \
+#if defined(CC_OS_WINDOWS) + defined(CC_OS_LINUX) + defined(CC_OS_MACOS) + defined(CC_OS_IOS) + defined(CC_OS_TVOS) \
+        + defined(CC_OS_ANDROID) + defined(CC_OS_EMSCRIPTEN) + defined(CC_OS_WASI)                                  \
     != 1
 #error "Expected exactly one OS macro to be defined"
 #endif
 
-// Test: CC_OS_WASM is the umbrella for the WebAssembly OSes, set iff one of them is.
-#if defined(CC_OS_WASM)
-#if !defined(CC_OS_EMSCRIPTEN) && !defined(CC_OS_WASI)
-#error "CC_OS_WASM defined but no wasm OS (CC_OS_EMSCRIPTEN / CC_OS_WASI) detected"
+#if defined(CC_ABI_MSVC) + defined(CC_ABI_SYSV) + defined(CC_ABI_ANDROID) + defined(CC_ABI_DARWIN) \
+        + defined(CC_ABI_WASM)                                                                     \
+    != 1
+#error "Expected exactly one ABI macro to be defined"
 #endif
-#else
-#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)
-#error "wasm OS detected but CC_OS_WASM umbrella not defined"
-#endif
+
+#if defined(CC_PLATFORM_DESKTOP) + defined(CC_PLATFORM_MOBILE) + defined(CC_PLATFORM_WEB) + defined(CC_PLATFORM_CONSOLE) \
+    != 1
+#error "Expected exactly one platform macro to be defined"
 #endif
 
 // Test: Exactly-one build configuration is selected
@@ -48,44 +41,34 @@
 #error "Expected exactly one build configuration macro to be defined"
 #endif
 
-// Test: Target macro consistency - Windows platforms
-#if defined(CC_OS_WINDOWS)
-#if defined(CC_TARGET_PC) + defined(CC_TARGET_XBOX) != 1
-#error "CC_OS_WINDOWS requires exactly one of CC_TARGET_PC or CC_TARGET_XBOX"
+// Test: ABI follows from the OS (the axes are derived, so they must agree).
+#if defined(CC_ABI_MSVC) != defined(CC_OS_WINDOWS)
+#error "CC_ABI_MSVC must match CC_OS_WINDOWS"
 #endif
+#if defined(CC_ABI_DARWIN) != (defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS))
+#error "CC_ABI_DARWIN must match an Apple OS"
 #endif
-
-// Test: Target macro consistency - Apple platforms
-#if defined(CC_OS_APPLE)
-#if defined(CC_TARGET_MACOS) + defined(CC_TARGET_IOS) + defined(CC_TARGET_TVOS) != 1
-#error "CC_OS_APPLE requires exactly one of CC_TARGET_MACOS, CC_TARGET_IOS, or CC_TARGET_TVOS"
+#if defined(CC_ABI_ANDROID) != defined(CC_OS_ANDROID)
+#error "CC_ABI_ANDROID must match CC_OS_ANDROID"
 #endif
-#endif
-
-// Test: CC_TARGET_MOBILE consistency
-#if defined(CC_TARGET_MOBILE)
-#if !defined(CC_TARGET_IOS) && !defined(CC_TARGET_TVOS) && !defined(CC_TARGET_ANDROID)
-#error "CC_TARGET_MOBILE defined but no mobile platform detected"
-#endif
+#if defined(CC_ABI_WASM) != (defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI))
+#error "CC_ABI_WASM must match a wasm OS"
 #endif
 
-#if defined(CC_TARGET_IOS) || defined(CC_TARGET_TVOS) || defined(CC_TARGET_ANDROID)
-#if !defined(CC_TARGET_MOBILE)
-#error "Mobile platform detected but CC_TARGET_MOBILE not defined"
+// Test: CC_PLATFORM_WEB / MOBILE follow from the OS.
+#if defined(CC_PLATFORM_WEB) != (defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI))
+#error "CC_PLATFORM_WEB must match a wasm OS"
 #endif
+#if defined(CC_PLATFORM_MOBILE) && !defined(CC_OS_IOS) && !defined(CC_OS_TVOS) && !defined(CC_OS_ANDROID)
+#error "CC_PLATFORM_MOBILE defined but no mobile OS detected"
 #endif
-
-// Test: CC_TARGET_CONSOLE consistency
-#if defined(CC_TARGET_CONSOLE)
-#if !defined(CC_TARGET_ORBIS) && !defined(CC_TARGET_NX) && !defined(CC_TARGET_XBOX)
-#error "CC_TARGET_CONSOLE defined but no console platform detected"
-#endif
+#if (defined(CC_OS_IOS) || defined(CC_OS_TVOS) || defined(CC_OS_ANDROID)) && !defined(CC_PLATFORM_MOBILE)
+#error "Mobile OS detected but CC_PLATFORM_MOBILE not defined"
 #endif
 
-#if defined(CC_TARGET_ORBIS) || defined(CC_TARGET_NX) || defined(CC_TARGET_XBOX)
-#if !defined(CC_TARGET_CONSOLE)
-#error "Console platform detected but CC_TARGET_CONSOLE not defined"
-#endif
+// Test: a wasm OS implies the wasm32 architecture.
+#if (defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)) && !defined(CC_ARCH_WASM32)
+#error "wasm OS detected but CC_ARCH_WASM32 not defined"
 #endif
 
 // =========================================================================================================
@@ -105,36 +88,36 @@ TEST("macros - compiler detection")
 #ifdef CC_COMPILER_GCC
     compiler_count++;
 #endif
-#ifdef CC_COMPILER_MINGW
-    compiler_count++;
-#endif
 
     CHECK(compiler_count == 1);
+}
 
-    // Verify POSIX is set correctly
-#if defined(CC_COMPILER_POSIX)
-    bool is_posix_compiler = true;
-#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC) || defined(CC_COMPILER_MINGW)
-    bool has_posix_compiler = true;
-#else
-    bool has_posix_compiler = false;
+TEST("macros - architecture detection")
+{
+    // Verify that exactly one architecture is selected (already checked at compile-time)
+    int arch_count = 0;
+#ifdef CC_ARCH_X64
+    arch_count++;
 #endif
-    CHECK(has_posix_compiler);
-#else
-    bool is_posix_compiler = false;
-#if defined(CC_COMPILER_MSVC)
-    bool is_msvc = true;
-#else
-    bool is_msvc = false;
+#ifdef CC_ARCH_X86
+    arch_count++;
 #endif
-    CHECK(is_msvc);
+#ifdef CC_ARCH_ARM64
+    arch_count++;
 #endif
+#ifdef CC_ARCH_ARM32
+    arch_count++;
+#endif
+#ifdef CC_ARCH_WASM32
+    arch_count++;
+#endif
+
+    CHECK(arch_count == 1);
 }
 
 TEST("macros - OS detection")
 {
-    // Verify that exactly one OS is selected (already checked at compile-time). CC_OS_WASM is a derived
-    // umbrella over the wasm OSes, so it is not counted here.
+    // Verify that exactly one OS is selected (already checked at compile-time)
     int os_count = 0;
 #ifdef CC_OS_WINDOWS
     os_count++;
@@ -142,10 +125,16 @@ TEST("macros - OS detection")
 #ifdef CC_OS_LINUX
     os_count++;
 #endif
-#ifdef CC_OS_APPLE
+#ifdef CC_OS_MACOS
     os_count++;
 #endif
-#ifdef CC_OS_BSD
+#ifdef CC_OS_IOS
+    os_count++;
+#endif
+#ifdef CC_OS_TVOS
+    os_count++;
+#endif
+#ifdef CC_OS_ANDROID
     os_count++;
 #endif
 #ifdef CC_OS_EMSCRIPTEN
@@ -156,18 +145,44 @@ TEST("macros - OS detection")
 #endif
 
     CHECK(os_count == 1);
+}
 
-    // CC_OS_WASM is set exactly when a wasm OS is.
-#if defined(CC_OS_WASM)
-    bool const wasm_umbrella = true;
-#else
-    bool const wasm_umbrella = false;
+TEST("macros - ABI and platform detection")
+{
+    int abi_count = 0;
+#ifdef CC_ABI_MSVC
+    abi_count++;
 #endif
-#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)
-    CHECK(wasm_umbrella);
-#else
-    CHECK(!wasm_umbrella);
+#ifdef CC_ABI_SYSV
+    abi_count++;
 #endif
+#ifdef CC_ABI_ANDROID
+    abi_count++;
+#endif
+#ifdef CC_ABI_DARWIN
+    abi_count++;
+#endif
+#ifdef CC_ABI_WASM
+    abi_count++;
+#endif
+
+    CHECK(abi_count == 1);
+
+    int platform_count = 0;
+#ifdef CC_PLATFORM_DESKTOP
+    platform_count++;
+#endif
+#ifdef CC_PLATFORM_MOBILE
+    platform_count++;
+#endif
+#ifdef CC_PLATFORM_WEB
+    platform_count++;
+#endif
+#ifdef CC_PLATFORM_CONSOLE
+    platform_count++;
+#endif
+
+    CHECK(platform_count == 1);
 }
 
 TEST("macros - build configuration detection")

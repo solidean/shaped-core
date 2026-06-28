@@ -198,7 +198,7 @@ def _compiler_check(root: Path, preset: Preset) -> tuple[str, bool, str]:
             if inst is None:
                 return ("compiler", False, f"MSVC toolset {preset.toolset} not found in any VS install")
             return ("compiler", True, f"MSVC toolset {preset.toolset}  [{inst}]")
-        env = msvc_env(preset.toolset)
+        env = msvc_env(preset.toolset, preset.arch)
         ok = env is not None or shutil.which("cl") is not None or shutil.which("clang-cl") is not None
         return ("compiler", ok, "MSVC env reachable" if ok else "no MSVC/clang-cl compiler found")
 

@@ -1,21 +1,21 @@
 #pragma once
 
+#include <clean-core/common/macros.hh>
 #include <clean-core/fwd.hh>
 
 // Portable extended-precision integer primitives: the 64x64 -> 128 multiplies and
 // the carry/borrow-propagating add/sub that wider arithmetic (hash mixers, bignum,
 // fixed-point) is built from. All are constexpr.
 //
-// Backend selection:
-//   * __int128 (clang, gcc, clang-cl, on every arch incl. ARM/WASM): the whole job is
-//     a builtin 128-bit op — best codegen, constexpr, and the compiler emits the native
-//     MUL/UMULH and ADC/SBB itself.
-//   * real MSVC cl.exe (no __int128): the dedicated intrinsics _umul128 / _mul128 /
-//     _addcarry_u64 / _subborrow_u64. They are not usable in a constant expression, so
-//     `if !consteval` routes constant evaluation to a plain-u64 fallback (below).
-//   * any other compiler: the plain-u64 fallback unconditionally.
+// Backend selection (clang/gcc, incl. clang-cl, are CC_COMPILER_CLANG/GCC; only real cl.exe is MSVC):
+//   * clang/gcc, every arch incl. ARM/WASM: __int128 — the whole job is a builtin 128-bit op, best codegen,
+//     constexpr, and the compiler emits the native MUL/UMULH and ADC/SBB itself.
+//   * MSVC cl.exe (no __int128): intrinsics. x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64;
+//     ARM64 has __umulh / __mulh for the multiplies but no carry intrinsic, so add/sub use the plain-u64
+//     fallback. None are usable in a constant expression, so `if !consteval` routes constant evaluation to
+//     the plain-u64 fallback (below).
 
-#if !defined(__SIZEOF_INT128__) && defined(_MSC_VER)
+#if defined(CC_COMPILER_MSVC)
 #include <intrin.h>
 #endif
 
@@ -57,9 +57,9 @@ struct borrowing_sub_result
     [[nodiscard]] friend constexpr bool operator==(borrowing_sub_result const&, borrowing_sub_result const&) = default;
 };
 
-// Plain-u64 fallbacks. Only instantiated where there is no __int128 (MSVC's consteval path
-// and the generic else); the __int128 backend never references them.
-#if !defined(__SIZEOF_INT128__)
+// Plain-u64 fallbacks. Only instantiated on MSVC (its consteval path, and the ARM64 add/sub path that has
+// no carry intrinsic); the clang/gcc __int128 backend never references them.
+#if defined(CC_COMPILER_MSVC)
 namespace detail
 {
 [[nodiscard]] constexpr u128 wide_umul128(u64 a, u64 b)
@@ -115,18 +115,21 @@ namespace detail
 /// Full 128-bit product of two unsigned 64-bit values (never overflows).
 [[nodiscard]] constexpr u128 umul128(u64 a, u64 b)
 {
-#if defined(__SIZEOF_INT128__)
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
     __uint128_t const p = static_cast<__uint128_t>(a) * b;
     return {u64(p), u64(p >> 64)};
-#elif defined(_MSC_VER)
+#else // CC_COMPILER_MSVC
     if !consteval
     {
+#if defined(CC_ARCH_ARM64)
+        // ARM64 cl.exe has no _umul128; __umulh gives the high half, the low half is the plain product.
+        return {a * b, __umulh(a, b)};
+#else
         u64 hi = 0;
         u64 const lo = _umul128(a, b, &hi);
         return {lo, hi};
+#endif
     }
-    return detail::wide_umul128(a, b);
-#else
     return detail::wide_umul128(a, b);
 #endif
 }
@@ -134,19 +137,22 @@ namespace detail
 /// Full 128-bit product of two signed 64-bit values (never overflows).
 [[nodiscard]] constexpr i128 imul128(i64 a, i64 b)
 {
-#if defined(__SIZEOF_INT128__)
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
     __int128 const p = static_cast<__int128>(a) * b;
     auto const u = static_cast<__uint128_t>(p);
     return {u64(u), i64(u >> 64)};
-#elif defined(_MSC_VER)
+#else // CC_COMPILER_MSVC
     if !consteval
     {
+#if defined(CC_ARCH_ARM64)
+        // ARM64 cl.exe has no _mul128; __mulh gives the signed high half, the low half is the raw product.
+        return {u64(a) * u64(b), __mulh(a, b)};
+#else
         __int64 hi = 0;
         __int64 const lo = _mul128(a, b, &hi);
         return {u64(lo), i64(hi)};
+#endif
     }
-    return detail::wide_imul128(a, b);
-#else
     return detail::wide_imul128(a, b);
 #endif
 }
@@ -154,10 +160,12 @@ namespace detail
 /// Computes a + b + carry_in. carry_in must be 0 or 1; the returned carry is likewise 0 or 1.
 [[nodiscard]] constexpr carrying_add_result add_with_carry(u64 a, u64 b, u64 carry_in = 0)
 {
-#if defined(__SIZEOF_INT128__)
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
     __uint128_t const s = static_cast<__uint128_t>(a) + b + carry_in;
     return {u64(s), u64(s >> 64)};
-#elif defined(_MSC_VER)
+#elif defined(CC_ARCH_ARM64) // MSVC ARM64: no _addcarry_u64 intrinsic
+    return detail::wide_add_with_carry(a, b, carry_in);
+#else                        // MSVC x64
     if !consteval
     {
         u64 out = 0;
@@ -165,27 +173,25 @@ namespace detail
         return {out, c};
     }
     return detail::wide_add_with_carry(a, b, carry_in);
-#else
-    return detail::wide_add_with_carry(a, b, carry_in);
 #endif
 }
 
 /// Computes a - b - borrow_in. borrow_in must be 0 or 1; the returned borrow is likewise 0 or 1.
 [[nodiscard]] constexpr borrowing_sub_result sub_with_borrow(u64 a, u64 b, u64 borrow_in = 0)
 {
-#if defined(__SIZEOF_INT128__)
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
     // On underflow the 128-bit difference wraps, leaving the high half all-ones; bit 0 of it is the borrow.
     __uint128_t const d = static_cast<__uint128_t>(a) - b - borrow_in;
     return {u64(d), static_cast<u64>(d >> 64) & 1u};
-#elif defined(_MSC_VER)
+#elif defined(CC_ARCH_ARM64) // MSVC ARM64: no _subborrow_u64 intrinsic
+    return detail::wide_sub_with_borrow(a, b, borrow_in);
+#else                        // MSVC x64
     if !consteval
     {
         u64 out = 0;
         unsigned char const bw = _subborrow_u64(static_cast<unsigned char>(borrow_in), a, b, &out);
         return {out, bw};
     }
-    return detail::wide_sub_with_borrow(a, b, borrow_in);
-#else
     return detail::wide_sub_with_borrow(a, b, borrow_in);
 #endif
 }

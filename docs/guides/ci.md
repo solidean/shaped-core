@@ -38,13 +38,21 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-windows-clang.yml](../../.github/workflows/ci-windows-clang.yml)  | `windows-latest` | `relwithdebinfo-clang`, `--toolset 20` (assert clang-cl 20) |
 | [ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)    | `windows-2025`   | `relwithdebinfo-msvc`, `--toolset 14.44` (VS 2022)         |
 | [ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml) | `windows-2025-vs2026` | `relwithdebinfo-msvc`, `--toolset 14.51` (VS 2026) |
+| [ci-windows-arm-msvc.yml](../../.github/workflows/ci-windows-arm-msvc.yml) | `windows-11-arm` | `relwithdebinfo-arm64-windows-msvc`, `--toolset 14.44` (VS 2022, native arm64) |
+| [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert clang 22) |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
+| [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
+| [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
 
 Every workflow shares the same shape: provision the toolchain, then `doctor` →
 `build` → `test` through `dev.py`, always with an **explicit `--preset`** (CI
 never relies on the platform-default preset), and upload a **diagnostics
-artifact** (see below).
+artifact** (see below). The two **build-only** jobs (iOS, Android) cross-compile
+targets the runner can't execute, so they stop after `build` — no `test` step,
+and their diagnostics artifact carries only `ci-diag.zip` + `ci-logs.zip` (no
+merged test report). See [platforms.md](../platforms.md) for the build-only Tier-2
+status.
 
 ### Diagnostics artifacts
 
@@ -121,6 +129,24 @@ never shares a CMake cache with a default-toolset build. Per-platform specifics:
   fixed Emscripten version (`EMSCRIPTEN_VERSION`) with the emsdk cached across
   runs. `dev.py` gets `--emsdk-path "$EMSDK"` on doctor/build/test; tests run
   under Node.
+- **Windows ARM** (`windows-11-arm`, native arm64) uses VS 2022's MSVC pinned
+  with `--toolset 14.44`, like the x64 job. The `arm64-windows-msvc-*` preset
+  sets the CMake architecture/host toolset to arm64, and `dev.py` threads the
+  preset's arch into the vcvars `-arch` (so `cl` targets arm64, not x64). The
+  checked-in `diag-launcher.exe` is x64 and runs under the image's x64 emulation.
+- **Linux ARM** (`ubuntu-26.04-arm`, native arm64) is the x64 Linux clang job's
+  twin on arm: preinstalled clang, `--toolset 21`, no toolchain-install step.
+- **iOS / Android** are **build-only** (Tier 2). iOS (`macos-latest`) cross-
+  compiles with Apple Clang via the `ios-arm64-*` preset
+  (`CMAKE_SYSTEM_NAME=iOS`, `iphoneos` sysroot); Ninja comes from Homebrew.
+  Android (`ubuntu-26.04`) cross-compiles via the NDK with the
+  `android-ndk-arm64-*` preset, which reads the toolchain from
+  `$ANDROID_NDK_ROOT`; the job points that at the image's **NDK r29 (Clang 21)**
+  rather than the default r27 (Clang 18, too old for our C++23 — e.g.
+  `std::atomic_ref`). Both presets wire the POSIX `diag_launcher.sh` (the iOS and
+  Android hosts are macOS/Linux), so their `ci-diag.zip` carries real per-compile
+  sidecars (`build_diag`-readable). Neither runs tests — the runner can't execute
+  the produced binaries.
 
 `doctor` runs first on every job but is **informational, non-gating**
 (`continue-on-error`): it also probes clangd's compile database and
@@ -179,10 +205,10 @@ Remember to clean up afterward: `rm -rf build/.tmp` (it's gitignored under
 
 ## Extending
 
-Natural next steps, each its own workflow or matrix entry: an **arm64 Linux**
-job (`runs-on: ubuntu-26.04-arm`), the **sanitizer** presets (ASan/UBSan, Linux
-clang), the remaining WASM tiers (threads, WebGPU, WASI), iOS/Android, and build
-caching (ccache/sccache).
+Natural next steps, each its own workflow or matrix entry: the **sanitizer**
+presets (ASan/UBSan, Linux clang), the remaining WASM tiers (threads, WebGPU,
+WASI), running the iOS/Android binaries on a simulator/emulator (today they are
+build-only), and build caching (ccache/sccache).
 
 **Prefer Linux for additional checks.** Linux runners spin up faster and cost
 less than Windows/macOS, and the `ubuntu-26.04` job needs no toolchain-install

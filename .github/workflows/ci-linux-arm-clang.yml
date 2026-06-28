@@ -1,0 +1,50 @@
+name: Linux ARM Clang
+
+# Tier-1 wide-but-shallow gate: Linux arm64 clang, RelWithDebInfo, build + tests,
+# on the ubuntu-26.04-arm image (native arm64 — matters for Raspberry Pi and ARM
+# notebooks). Single config; the deep debug/release matrix lives in
+# ci-linux-clang.yml. Uses the runner's preinstalled clang/CMake/Ninja;
+# --toolset 21 pins clang 21 (a hard error if absent — no symlink shimming).
+# See docs/guides/ci.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-26.04-arm
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # Informational only: doctor also probes clangd's compile DB and llvm-cov,
+      # which aren't needed for build+test and would fail a fresh runner.
+      - name: Doctor (toolchain info)
+        run: uv run dev.py doctor --preset relwithdebinfo-arm64-linux-clang --toolset 21
+        continue-on-error: true
+
+      - name: Build
+        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-arm64-linux-clang --toolset 21 --diag-archive build/ci-diag.zip --keep-going
+
+      - name: Test
+        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-arm64-linux-clang --toolset 21 --merged-xml-report build/ci-test-results.xml
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm-clang-diagnostics
+          path: |
+            build/ci-test-results.xml
+            build/ci-diag.zip
+            build/ci-logs.zip
+          if-no-files-found: warn

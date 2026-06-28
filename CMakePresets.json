@@ -65,6 +65,65 @@
             }
         },
         {
+            "name": "arm64-windows-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "architecture": {
+                "value": "arm64",
+                "strategy": "external"
+            },
+            "toolset": {
+                "value": "host=arm64",
+                "strategy": "external"
+            },
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "hidden": true
+        },
+        {
+            "name": "arm64-windows-msvc-ninja-base",
+            "inherits": "arm64-windows-base",
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "cl",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag-launcher.exe"
+            },
+            "generator": "Ninja",
+            "hidden": true
+        },
+        {
+            "name": "arm64-windows-msvc-ninja-debug",
+            "displayName": "Debug MSVC (Ninja, Windows arm64)",
+            "description": "Debug build with full symbols",
+            "inherits": "arm64-windows-msvc-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "arm64-windows-msvc-ninja-release",
+            "displayName": "Release MSVC (Ninja, Windows arm64)",
+            "description": "Optimized release build",
+            "inherits": "arm64-windows-msvc-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "arm64-windows-msvc-ninja-relwithdebinfo",
+            "displayName": "RelWithDebInfo MSVC (Ninja, Windows arm64)",
+            "description": "Optimized build with debug symbols",
+            "inherits": "arm64-windows-msvc-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-base",
             "inherits": "x64-windows-base",
             "cacheVariables": {
@@ -166,6 +225,33 @@
         {
             "name": "x64-linux-clang-ninja-relwithdebinfo",
             "displayName": "RelWithDebInfo Clang (Ninja, Linux)",
+            "description": "Optimized build with debug symbols",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "arm64-linux-clang-ninja-debug",
+            "displayName": "Debug Clang (Ninja, Linux arm64)",
+            "description": "Debug build with full symbols",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "arm64-linux-clang-ninja-release",
+            "displayName": "Release Clang (Ninja, Linux arm64)",
+            "description": "Optimized release build",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "arm64-linux-clang-ninja-relwithdebinfo",
+            "displayName": "RelWithDebInfo Clang (Ninja, Linux arm64)",
             "description": "Optimized build with debug symbols",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
@@ -346,23 +432,22 @@
             "name": "android-ndk-arm64-base",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
-            "condition": {
-                "type": "equals",
-                "lhs": "${hostSystemName}",
-                "rhs": "Windows"
-            },
             "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "C:/Android/android-ndk-r27c/build/cmake/android.toolchain.cmake",
+                "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
                 "ANDROID_ABI": "arm64-v8a",
                 "ANDROID_PLATFORM": "android-21",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh"
             },
             "hidden": true
         },
         {
             "name": "android-ndk-arm64-debug",
             "displayName": "Android NDK arm64-v8a Debug",
-            "description": "Debug build targeting Android arm64-v8a via NDK r27c",
+            "description": "Debug build targeting Android arm64-v8a; NDK from $ANDROID_NDK_ROOT",
             "inherits": "android-ndk-arm64-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
@@ -371,7 +456,7 @@
         {
             "name": "android-ndk-arm64-release",
             "displayName": "Android NDK arm64-v8a Release",
-            "description": "Optimized release build targeting Android arm64-v8a via NDK r27c",
+            "description": "Optimized release build targeting Android arm64-v8a; NDK from $ANDROID_NDK_ROOT",
             "inherits": "android-ndk-arm64-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
@@ -380,8 +465,56 @@
         {
             "name": "android-ndk-arm64-relwithdebinfo",
             "displayName": "Android NDK arm64-v8a RelWithDebInfo",
-            "description": "Optimized build with debug symbols targeting Android arm64-v8a via NDK r27c",
+            "description": "Optimized build with debug symbols targeting Android arm64-v8a; NDK from $ANDROID_NDK_ROOT",
             "inherits": "android-ndk-arm64-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "ios-arm64-base",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_OSX_SYSROOT": "iphoneos",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_C_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_C_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh",
+                "CMAKE_CXX_LINKER_LAUNCHER": "${sourceDir}/tools/bin/diag_launcher.sh"
+            },
+            "hidden": true
+        },
+        {
+            "name": "ios-arm64-debug",
+            "displayName": "iOS arm64 Debug",
+            "description": "Debug build targeting iOS arm64 (device) via Apple Clang",
+            "inherits": "ios-arm64-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "ios-arm64-release",
+            "displayName": "iOS arm64 Release",
+            "description": "Optimized release build targeting iOS arm64 (device) via Apple Clang",
+            "inherits": "ios-arm64-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "ios-arm64-relwithdebinfo",
+            "displayName": "iOS arm64 RelWithDebInfo",
+            "description": "Optimized build with debug symbols targeting iOS arm64 (device) via Apple Clang",
+            "inherits": "ios-arm64-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
@@ -469,6 +602,30 @@
             "configurePreset": "x64-linux-gcc-ninja-relwithdebinfo"
         },
         {
+            "name": "debug-arm64-linux-clang",
+            "configurePreset": "arm64-linux-clang-ninja-debug"
+        },
+        {
+            "name": "release-arm64-linux-clang",
+            "configurePreset": "arm64-linux-clang-ninja-release"
+        },
+        {
+            "name": "relwithdebinfo-arm64-linux-clang",
+            "configurePreset": "arm64-linux-clang-ninja-relwithdebinfo"
+        },
+        {
+            "name": "debug-arm64-windows-msvc",
+            "configurePreset": "arm64-windows-msvc-ninja-debug"
+        },
+        {
+            "name": "release-arm64-windows-msvc",
+            "configurePreset": "arm64-windows-msvc-ninja-release"
+        },
+        {
+            "name": "relwithdebinfo-arm64-windows-msvc",
+            "configurePreset": "arm64-windows-msvc-ninja-relwithdebinfo"
+        },
+        {
             "name": "coverage-clang",
             "configurePreset": "x64-windows-clang-ninja-coverage"
         },
@@ -539,6 +696,18 @@
         {
             "name": "android-ndk-arm64-relwithdebinfo",
             "configurePreset": "android-ndk-arm64-relwithdebinfo"
+        },
+        {
+            "name": "ios-arm64-debug",
+            "configurePreset": "ios-arm64-debug"
+        },
+        {
+            "name": "ios-arm64-release",
+            "configurePreset": "ios-arm64-release"
+        },
+        {
+            "name": "ios-arm64-relwithdebinfo",
+            "configurePreset": "ios-arm64-relwithdebinfo"
         },
         {
             "name": "emscripten-debug",
