@@ -61,6 +61,8 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
 - [docs/_index.md](docs/_index.md) — typed-geometry's documentation hub.
+- [docs/modules/](docs/modules/scalar.md) — per-module "what belongs here / why is it this way"
+  docs (e.g. the `pos + pos` translation rule, why `bivec != vec`).
 - [docs/structure.md](docs/structure.md) — the full module roadmap.
 - [docs/coding-guidelines.md](docs/coding-guidelines.md) — tg-specific conventions (scalar
   traits, `data` storage, generic-over-`D` types), on top of the repo-wide ones.

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <clean-core/container/pair.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/traits.hh>
 
 namespace tg
 {
@@ -43,6 +45,50 @@ public:
 public:
     [[nodiscard]] constexpr T radians() const { return _radians; }
     [[nodiscard]] constexpr T degree() const { return _radians * (T(180) / tg::pi<T>); }
+
+    // trigonometry (only for scalars with has_trigonometry)
+    //
+    // These mirror the free tg::sin/cos/... in scalar.hh; both forms exist so you can write either
+    // a.sin() or tg::sin(a). sec/csc/cot are the reciprocals of cos/sin/tan.
+public:
+    [[nodiscard]] T sin() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return scalar_traits<T>::sin(_radians);
+    }
+    [[nodiscard]] T cos() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return scalar_traits<T>::cos(_radians);
+    }
+    [[nodiscard]] T tan() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return scalar_traits<T>::tan(_radians);
+    }
+
+    /// both sine and cosine as a pair {sin, cos}.
+    [[nodiscard]] cc::pair<T, T> sin_cos() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return {scalar_traits<T>::sin(_radians), scalar_traits<T>::cos(_radians)};
+    }
+
+    [[nodiscard]] T sec() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return scalar_traits<T>::one() / scalar_traits<T>::cos(_radians);
+    }
+    [[nodiscard]] T csc() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return scalar_traits<T>::one() / scalar_traits<T>::sin(_radians);
+    }
+    [[nodiscard]] T cot() const
+        requires(tg::traits::has_trigonometry<T>)
+    {
+        return scalar_traits<T>::cos(_radians) / scalar_traits<T>::sin(_radians);
+    }
 
     // comparison
 public:

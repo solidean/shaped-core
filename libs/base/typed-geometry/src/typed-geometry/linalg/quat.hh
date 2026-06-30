@@ -41,26 +41,26 @@ public:
     [[nodiscard]] static quat make_rotation_axis_angle(vec<3, T> const& axis, angle<T> a)
         requires(tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians() / T(2));
+        auto const [s, c] = tg::sin_cos(a / T(2));
         return quat(axis.data[0] * s, axis.data[1] * s, axis.data[2] * s, c);
     }
 
     [[nodiscard]] static quat make_rotation_x(angle<T> a)
         requires(tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians() / T(2));
+        auto const [s, c] = tg::sin_cos(a / T(2));
         return quat(s, T{}, T{}, c);
     }
     [[nodiscard]] static quat make_rotation_y(angle<T> a)
         requires(tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians() / T(2));
+        auto const [s, c] = tg::sin_cos(a / T(2));
         return quat(T{}, s, T{}, c);
     }
     [[nodiscard]] static quat make_rotation_z(angle<T> a)
         requires(tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians() / T(2));
+        auto const [s, c] = tg::sin_cos(a / T(2));
         return quat(T{}, T{}, s, c);
     }
 
@@ -113,7 +113,7 @@ public:
         requires(tg::traits::has_sqrt<T> && tg::traits::has_trigonometry<T>)
     {
         auto const v = vec<3, T>(data[0], data[1], data[2]);
-        return tg::angle<T>::make_from_radians(T(2) * tg::atan2(v.length(), data[3]));
+        return T(2) * tg::atan2(v.length(), data[3]); // atan2 already returns an angle
     }
 
     /// the conjugate (negated vector part); the inverse rotation for a unit quaternion.

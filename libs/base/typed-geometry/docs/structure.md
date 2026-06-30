@@ -90,7 +90,7 @@ Special scalar-like types and scalar traits.
 scalar/
   traits.hh    [done]     scalar_traits<T> + tg::traits::has_sqrt/has_trigonometry/is_zero/is_one
   constants.hh [done]     tg::pi<T> (more to come)
-  scalar.hh    [done]     tg::one/sqrt/sin/cos/sin_cos/atan2, dispatched through the traits
+  scalar.hh    [done]     tg::one/sqrt + trig (sin/cos/tan/sin_cos/sec/csc/cot, asin/acos/atan/atan2)
   angle.hh     [done]     angle<T> domain newtype + _rad_/_deg_ literals
   all.hh       [done]
   complex.hh   [planned]

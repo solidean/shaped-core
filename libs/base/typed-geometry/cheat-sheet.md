@@ -110,6 +110,7 @@ tg::angle_f a;                                  // default 0; tg::angle_f / tg::
 tg::angle_f::make_from_radians(x);  tg::angle_f::make_from_degree(d);   // only ways to build
 a.radians();   a.degree();                       // read back as T
 a + b   a - b   -a   a * s   s * a   a / s        // 1D vector space; NO wrap-around; a == b
+a.sin(); a.cos(); a.tan(); a.sin_cos(); a.sec(); a.csc(); a.cot();   // trig members (has_trigonometry)
 using namespace tg::literals;  90_deg_f;  3.14_rad_d;  // _rad_f/_rad_d/_deg_f/_deg_d
 ```
 
@@ -154,8 +155,11 @@ tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
-tg::sin(x);  tg::cos(x);  tg::atan2(y,x); // T   — requires has_trigonometry<T>
-tg::sin_cos(x);                           // cc::pair<T,T> {sin, cos} — requires has_trigonometry<T>
+tg::sin(a); tg::cos(a); tg::tan(a);       // angle<T> -> T          — requires has_trigonometry<T>
+tg::sec(a); tg::csc(a); tg::cot(a);       // angle<T> -> T          — reciprocals (free == member a.sin()…)
+tg::sin_cos(a);                           // angle<T> -> cc::pair<T,T> {sin, cos}
+tg::asin(x); tg::acos(x); tg::atan(x);    // T -> angle<T>          — inverse trig
+tg::atan2(y, x);                          // (T, T) -> angle<T>     — requires has_trigonometry<T>
 tg::pi<T>;                                // inline constexpr T  (scalar/constants.hh)
 // scalars: f32/f64 have sqrt+trigonometry (via std:: — see docs/TODO.md); all integer types except
 // plain `char` get one/is_zero/is_one (signed/unsigned char count; `char` does not); bool is special.

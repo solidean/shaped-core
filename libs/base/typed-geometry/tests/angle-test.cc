@@ -3,6 +3,7 @@
 #include <nexus/test.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/scalar.hh>
 
 #include <type_traits>
 
@@ -43,6 +44,41 @@ TEST("tg angle - arithmetic")
     CHECK(tgtest::approx((a * 3.0f).degree(), 90.0f));
     CHECK(tgtest::approx((3.0f * a).degree(), 90.0f));
     CHECK(tgtest::approx((b / 2.0f).degree(), 30.0f));
+}
+
+TEST("tg angle - trigonometry")
+{
+    auto const a = tg::angle_f::make_from_degree(45);
+    auto const root_half = 0.70710678f; // sqrt(2)/2
+    auto const root_two = 1.41421356f;  // sqrt(2)
+
+    SECTION("member forms")
+    {
+        CHECK(tgtest::approx(a.sin(), root_half));
+        CHECK(tgtest::approx(a.cos(), root_half));
+        CHECK(tgtest::approx(a.tan(), 1.0f));
+        CHECK(tgtest::approx(a.sec(), root_two));
+        CHECK(tgtest::approx(a.csc(), root_two));
+        CHECK(tgtest::approx(a.cot(), 1.0f));
+
+        auto const sc = a.sin_cos();
+        CHECK(tgtest::approx(sc.first, a.sin()));
+        CHECK(tgtest::approx(sc.second, a.cos()));
+    }
+
+    SECTION("free forms agree with members")
+    {
+        CHECK(tg::sin(a) == a.sin());
+        CHECK(tg::cos(a) == a.cos());
+        CHECK(tg::tan(a) == a.tan());
+        CHECK(tg::sec(a) == a.sec());
+        CHECK(tg::csc(a) == a.csc());
+        CHECK(tg::cot(a) == a.cot());
+
+        auto const sc = tg::sin_cos(a);
+        CHECK(sc.first == a.sin());
+        CHECK(sc.second == a.cos());
+    }
 }
 
 TEST("tg angle - literals")

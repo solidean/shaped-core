@@ -33,12 +33,31 @@ TEST("tg scalar - one / is_zero / is_one")
 TEST("tg scalar - sqrt / trig / atan2")
 {
     CHECK(tg::sqrt(16.0f) == 4.0f);
-    CHECK(tgtest::approx(tg::sin(0.0f), 0.0f));
-    CHECK(tgtest::approx(tg::cos(0.0f), 1.0f));
 
-    auto const sc = tg::sin_cos(0.0);
+    // trig is angle-typed: sin/cos take an angle, atan2 returns one
+    auto const zero = tg::angle_f::make_from_radians(0.0f);
+    CHECK(tgtest::approx(tg::sin(zero), 0.0f));
+    CHECK(tgtest::approx(tg::cos(zero), 1.0f));
+
+    auto const sc = tg::sin_cos(tg::angle_d::make_from_radians(0.0));
     CHECK(tgtest::approx(sc.first, 0.0));
     CHECK(tgtest::approx(sc.second, 1.0));
 
-    CHECK(tgtest::approx(tg::atan2(1.0f, 1.0f), tg::pi<float> / 4));
+    auto const a = tg::atan2(1.0f, 1.0f); // -> angle_f
+    CHECK(tgtest::approx(a.radians(), tg::pi<float> / 4));
+    CHECK(tgtest::approx(a.degree(), 45.0f));
+}
+
+TEST("tg scalar - inverse trig returns angles")
+{
+    // asin/acos/atan take a scalar and return an angle
+    CHECK(tgtest::approx(tg::asin(1.0f).degree(), 90.0f));
+    CHECK(tgtest::approx(tg::acos(0.0f).degree(), 90.0f));
+    CHECK(tgtest::approx(tg::atan(1.0f).degree(), 45.0f));
+
+    // round-trips with the forward members
+    auto const a = tg::angle_f::make_from_degree(30);
+    CHECK(tgtest::approx(tg::asin(a.sin()).degree(), 30.0f));
+    CHECK(tgtest::approx(tg::acos(a.cos()).degree(), 30.0f));
+    CHECK(tgtest::approx(tg::atan(a.tan()).degree(), 30.0f));
 }

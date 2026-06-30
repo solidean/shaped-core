@@ -17,6 +17,17 @@ typed-geometry/
   linalg/       # vec, pos, comp (+ ops); bivec/mat/quat planned
 ```
 
+## Module docs
+
+One doc per module under [modules/](modules/), answering **"what belongs here?"** and **"why is it
+this way?"** — motivation, scope, and the load-bearing design decisions (the kind that trip people
+up), in the spirit of an ADR. Not a cheat sheet, not the roadmap. Add one when a module lands; cover
+the big rationales (small ones stay in source comments).
+
+- [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
+- [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos`
+  translation rule and the `bivec != vec` decision.
+
 ## Topics
 
 - [structure](structure.md) — the full module roadmap with per-section `[done]`/`[in

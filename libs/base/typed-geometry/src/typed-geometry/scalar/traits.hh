@@ -11,7 +11,12 @@
 /// the scalar types we want to support later (expression trees, double-double, bigint/bigrat, ...).
 /// Instead every scalar capability is routed through tg::scalar_traits<T>, a primary template that
 /// is specialized per scalar type. The tg::traits::* helpers and the free functions in scalar.hh
-/// (tg::one, tg::sqrt, tg::sin, tg::cos, tg::sin_cos, tg::atan2) are thin aliases over the entries.
+/// (tg::one, tg::sqrt, tg::sin, tg::cos, tg::sin_cos, tg::atan2) are thin wrappers over the entries.
+///
+/// IMPORTANT: the trait kernels here are the *raw numeric* layer — sin/cos/atan2 work in bare radian
+/// T values (sin/cos: T radians -> T, atan2: T,T -> T radians). The angle typing lives one layer up
+/// in scalar.hh, where the public tg::sin/tg::cos take a tg::angle and tg::atan2 returns one. Keep
+/// scalar specializations free of tg::angle so a new scalar only has to provide plain math.
 ///
 /// To teach tg about a new scalar type, specialize tg::scalar_traits for it.
 ///
@@ -36,8 +41,8 @@ struct scalar_traits
     static constexpr bool has_trigonometry = false;
 };
 
-// NOTE: std::sqrt / std::sin / std::cos / std::atan2 honor errno, which is a historic mistake and
-// produces worse codegen. We route through them for now but intend to replace them — see
+// NOTE: std::sqrt and the std trig functions honor errno, which is a historic mistake and produces
+// worse codegen. We route through them for now but intend to replace them — see
 // libs/base/typed-geometry/docs/TODO.md.
 template <>
 struct scalar_traits<f32>
@@ -51,6 +56,10 @@ struct scalar_traits<f32>
     [[nodiscard]] static f32 sqrt(f32 x) { return std::sqrt(x); }
     [[nodiscard]] static f32 sin(f32 x) { return std::sin(x); }
     [[nodiscard]] static f32 cos(f32 x) { return std::cos(x); }
+    [[nodiscard]] static f32 tan(f32 x) { return std::tan(x); }
+    [[nodiscard]] static f32 asin(f32 x) { return std::asin(x); }
+    [[nodiscard]] static f32 acos(f32 x) { return std::acos(x); }
+    [[nodiscard]] static f32 atan(f32 x) { return std::atan(x); }
     [[nodiscard]] static f32 atan2(f32 y, f32 x) { return std::atan2(y, x); }
 };
 
@@ -66,6 +75,10 @@ struct scalar_traits<f64>
     [[nodiscard]] static f64 sqrt(f64 x) { return std::sqrt(x); }
     [[nodiscard]] static f64 sin(f64 x) { return std::sin(x); }
     [[nodiscard]] static f64 cos(f64 x) { return std::cos(x); }
+    [[nodiscard]] static f64 tan(f64 x) { return std::tan(x); }
+    [[nodiscard]] static f64 asin(f64 x) { return std::asin(x); }
+    [[nodiscard]] static f64 acos(f64 x) { return std::acos(x); }
+    [[nodiscard]] static f64 atan(f64 x) { return std::atan(x); }
     [[nodiscard]] static f64 atan2(f64 y, f64 x) { return std::atan2(y, x); }
 };
 

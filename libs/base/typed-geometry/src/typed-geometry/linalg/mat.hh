@@ -55,7 +55,7 @@ public:
     [[nodiscard]] static mat make_rotation_x(angle<T> a)
         requires(C == 3 && R == 3 && tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians());
+        auto const [s, c] = tg::sin_cos(a);
         mat m;
         m[0, 0] = tg::one<T>();
         m[1, 1] = c;
@@ -68,7 +68,7 @@ public:
     [[nodiscard]] static mat make_rotation_y(angle<T> a)
         requires(C == 3 && R == 3 && tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians());
+        auto const [s, c] = tg::sin_cos(a);
         mat m;
         m[0, 0] = c;
         m[2, 0] = s;
@@ -81,7 +81,7 @@ public:
     [[nodiscard]] static mat make_rotation_z(angle<T> a)
         requires(C == 3 && R == 3 && tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians());
+        auto const [s, c] = tg::sin_cos(a);
         mat m;
         m[0, 0] = c;
         m[1, 0] = -s;
@@ -95,7 +95,7 @@ public:
     [[nodiscard]] static mat make_rotation_axis_angle(vec<3, T> const& axis, angle<T> a)
         requires(C == 3 && R == 3 && tg::traits::has_trigonometry<T>)
     {
-        auto const [s, c] = tg::sin_cos(a.radians());
+        auto const [s, c] = tg::sin_cos(a);
         T const t = tg::one<T>() - c;
         T const x = axis.data[0];
         T const y = axis.data[1];
