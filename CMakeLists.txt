@@ -37,6 +37,7 @@ include(libs/base/nexus/cmake/NexusWebRunner.cmake)
 # clean-core must come first: nexus depends on it.
 add_subdirectory(libs/base/clean-core)
 add_subdirectory(libs/base/nexus)
+add_subdirectory(libs/base/typed-geometry)
 
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
 # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.

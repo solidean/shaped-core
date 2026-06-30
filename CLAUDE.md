@@ -31,6 +31,10 @@ One-liner per library (more will be added over time):
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3
   CLI–compatible (discovery, filtering, sections, JUnit XML), so IDE test
   integration works out of the box. Namespace `nx`. Depends on clean-core.
+* **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry library
+  (`vec`/`pos`/`comp`, with `bivec`/`mat`/`quat`/transforms/geometry/mesh
+  planned). Namespace `tg`. Depends on clean-core. Early stage — see its
+  [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 
 Supporting directories:
 
@@ -45,11 +49,11 @@ Dependency direction: a library depends only on lower libraries (plus its own
 external deps). No upward or cyclic dependencies.
 
 ```text
-nexus
-  ↓
-clean-core
-  ↓
-(no dependencies)
+nexus    typed-geometry
+   ↓         ↓
+     clean-core
+        ↓
+  (no dependencies)
 ```
 
 ---
@@ -70,6 +74,31 @@ clean-core
 * **Opening a PR requires the `opening-a-pr` skill.** Before any `gh pr create`
   (or otherwise opening a pull request), activate the `opening-a-pr` skill first
   and follow its flow — do not hand-roll the PR.
+
+---
+
+## The libraries are living — surface missing pieces
+
+Every shaped-core library is **usually mid-growth**: the current API is a
+snapshot, not a finished surface, and several (e.g. typed-geometry) are early
+stage. So when a task would be most naturally served by **extending a lower
+library** — a type, function, or capability that belongs in shaped-core rather
+than bolted onto the caller — treat growing that library as a *first-class
+option*, not a detour to engineer around.
+
+* **During planning, surface it explicitly.** If a task screams for a library
+  extension (e.g. implementing culling in a rendering lib that really wants a
+  `tg::frustum` type plus its intersection logic), call it out to the user in the
+  planning phase: what's missing, which library it belongs in, and its rough
+  shape — so they can choose to grow the library now or defer.
+* **During implementation, flag what emerges.** If the need only becomes clear
+  mid-task, raise it as soon as it blocks you, or otherwise note it at the end.
+* **Workarounds are allowed but must be marked.** The user may still opt for a
+  local, throwaway workaround — that's fine — but it must be clearly commented as
+  temporary, naming the library extension that would replace it. Quietly
+  hand-rolling a local hack hides a growth opportunity and is the less healthy
+  path for shaped-core. The point is that the user gets to make the
+  grow-the-library-vs-work-around-it call deliberately, not by omission.
 
 ---
 
