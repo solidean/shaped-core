@@ -4,7 +4,9 @@ Shaped Core is a collection of foundational C++ libraries developed by Shaped Co
 Solidean, internal tools, customer projects, and experimental research efforts.
 
 The libraries are C++23, built with CMake, and share a single build & test driver
-([dev.py](dev.py)). The set is **growing** — the table below is current, not exhaustive.
+([dev.py](dev.py)). Both the **set of libraries and each library's scope are still growing** — the
+descriptions below state what each library is *for* (its intended scope), so it's clear what belongs
+where; not all of it is implemented yet.
 
 ## What's inside
 
@@ -14,6 +16,7 @@ Libraries live under `libs/<category>/<lib>`:
 |-------------------------------|---------------------------------------------------------------------------------------------|
 | [clean-core](libs/base/clean-core/) | Foundational C++ data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, …). Namespace `cc`. |
 | [nexus](libs/base/nexus/)      | Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML). Namespace `nx`. |
+| [typed-geometry](libs/base/typed-geometry/) | The repo's strongly-typed math & geometry vocabulary, where the type system encodes the geometry. Intended home for linear algebra (`vec`/`pos`/`comp`/`mat`/`quat`), transforms, geometric primitives & queries (distance, intersection, containment), curves, color, sampling, spatial acceleration structures, symbolic/exact math, and meshes. Namespace `tg`. |
 
 See [docs/libraries.md](docs/libraries.md) for the full catalog.
 
