@@ -4,6 +4,7 @@
 
 #include <typed-geometry/linalg/bivec.hh>
 #include <typed-geometry/linalg/comp.hh>
+#include <typed-geometry/linalg/comp_ops.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>

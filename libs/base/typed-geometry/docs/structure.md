@@ -123,7 +123,8 @@ linalg/
   vec_ops.hh       [done]     dot, normalize
   pos.hh           [done]     + zero
   pos_ops.hh       [done]     distance, distance_sqr
-  comp.hh          [done]     storage + access only; arithmetic is planned (see below)
+  comp.hh          [done]     storage + access + full component-wise arithmetic
+  comp_ops.hh      [done]     component-wise min/max
   bivec.hh         [done]     + zero; C(D,2) components (3D order {yz, zx, xy})
   cross.hh         [done]     cross, dual, undual (3D; the {yz,zx,xy} order makes dual the identity)
   mat.hh           [done]     col-major, zero/identity, rotations, products
@@ -158,8 +159,9 @@ expressions. All factory methods are named `make_*` (e.g. `vec::make_unit`, `mak
 `mat::make_rotation_z`).
 
 `comp` is the "semantics-free" building block in the sense that it is the raw component-wise
-type. It is therefore the eventual home of **all** component-wise arithmetic (mul, div, min/max,
-… element-wise). For now it only stores and indexes; the arithmetic is **[planned]**.
+type. It is therefore the home of **all** component-wise arithmetic: every operator is element-wise
+(including Hadamard `*`/`/`) and a scalar operand broadcasts, plus component-wise `min`/`max`. `vec`
+and `pos` deliberately omit these — they only make sense on plain components.
 
 `pos` is special: it is both a linalg and a geometric object. Geometric objects are sets of
 points, and `pos` is a singleton set — so `pos + pos -> pos` because adding translates the

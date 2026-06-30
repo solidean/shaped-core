@@ -75,14 +75,23 @@ tg::distance_sqr(p, q);                    // T  — squared distance (any scala
 tg::distance(p, q);                        // T  — requires has_sqrt<T>
 ```
 
-## comp — neutral component container
+## comp — neutral component container (raw component-wise arithmetic)
 
 ```cpp
 #include <typed-geometry/linalg/comp.hh>
 tg::comp3f c;                            // zero-init; same ctor set as vec/pos; tg::comp3f::zero
-c.data;   c[i];                           // storage + indexed access
-c == c2;                                  // component-wise
-// NOTE: comp is the future home of all raw component-wise arithmetic — not implemented yet.
+c.data;   c[i];   c == c2;                // storage + indexed access + comparison
+// fully element-wise; a scalar operand broadcasts. (vec/pos do NOT have these — comp is the home.)
+a + b   a - b   a * b   a / b   -a        // comp-comp: + - and Hadamard * /
+a + s   s + a   a - s   s - a             // scalar broadcast (both sides)
+a * s   s * a   a / s   s / a
+a += b  a -= b  a *= b  a /= b            // compound (comp or scalar rhs)
+```
+
+```cpp
+#include <typed-geometry/linalg/comp_ops.hh>
+tg::min(a, b);  tg::max(a, b);            // comp — component-wise
+tg::min(a, s);  tg::max(a, s);            // comp — against a broadcast scalar bound
 ```
 
 ## bivec — bivector + the 3D cross/dual

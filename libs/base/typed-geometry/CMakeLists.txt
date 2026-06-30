@@ -26,6 +26,7 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/all.hh
 
     src/typed-geometry/linalg/comp.hh
+    src/typed-geometry/linalg/comp_ops.hh
     src/typed-geometry/linalg/vec.hh
     src/typed-geometry/linalg/vec_ops.hh
     src/typed-geometry/linalg/pos.hh

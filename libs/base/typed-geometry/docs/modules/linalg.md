@@ -61,9 +61,11 @@ the one affine operation that yields a free vector.
 ### `comp` is the semantics-free building block
 
 `comp<D, T>` carries no geometric meaning — it is just "D components". That is exactly why it is the
-intended future home of **all raw component-wise arithmetic** (element-wise `* / min max …`): those
-operations are meaningful on plain components but *not* on a `pos` or a direction `vec`. Today `comp`
-only stores and indexes; the arithmetic is planned. `comp` must never grow geometric semantics.
+home of **all raw component-wise arithmetic**: every operator is element-wise (including Hadamard
+`*`/`/`), a scalar operand broadcasts to all components, and `comp_ops.hh` adds component-wise
+`min`/`max`. Those operations are meaningful on plain components but *not* on a `pos` or a direction
+`vec` — which is why `vec`/`pos` deliberately omit Hadamard products and scalar broadcast. `comp`
+must never grow geometric semantics in the other direction either.
 
 ### `bivec` is its own type, not an alias for `vec`
 

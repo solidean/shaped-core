@@ -1,5 +1,6 @@
 #include <nexus/test.hh>
 #include <typed-geometry/linalg/comp.hh>
+#include <typed-geometry/linalg/comp_ops.hh>
 
 #include <type_traits>
 
@@ -89,4 +90,57 @@ TEST("tg comp - access and equality")
         CHECK_ASSERTS(c[-1]);
         CHECK_ASSERTS(c[3]);
     }
+}
+
+TEST("tg comp - component-wise arithmetic")
+{
+    auto const a = tg::comp3i(1, 2, 3);
+    auto const b = tg::comp3i(10, 20, 30);
+
+    SECTION("comp-comp is element-wise (incl. Hadamard * and /)")
+    {
+        CHECK(a + b == tg::comp3i(11, 22, 33));
+        CHECK(b - a == tg::comp3i(9, 18, 27));
+        CHECK(a * b == tg::comp3i(10, 40, 90));
+        CHECK(b / a == tg::comp3i(10, 10, 10));
+        CHECK(-a == tg::comp3i(-1, -2, -3));
+    }
+
+    SECTION("scalar broadcasts on both sides")
+    {
+        CHECK(a + 10 == tg::comp3i(11, 12, 13));
+        CHECK(10 + a == tg::comp3i(11, 12, 13));
+        CHECK(a * 2 == tg::comp3i(2, 4, 6));
+        CHECK(2 * a == tg::comp3i(2, 4, 6));
+        CHECK(b / 10 == tg::comp3i(1, 2, 3));
+        CHECK(7 - a == tg::comp3i(6, 5, 4));
+        CHECK(tg::comp3i(12, 6, 4) == tg::comp3i(12, 12, 12) / tg::comp3i(1, 2, 3));
+        CHECK(12 / tg::comp3i(1, 2, 3) == tg::comp3i(12, 6, 4));
+    }
+
+    SECTION("compound assignment, comp and scalar rhs")
+    {
+        auto c = a;
+        c += b;
+        CHECK(c == tg::comp3i(11, 22, 33));
+        c -= b;
+        CHECK(c == a);
+        c *= 2;
+        CHECK(c == tg::comp3i(2, 4, 6));
+        c /= 2;
+        CHECK(c == a);
+        c *= tg::comp3i(2, 3, 4);
+        CHECK(c == tg::comp3i(2, 6, 12));
+    }
+}
+
+TEST("tg comp - min / max")
+{
+    auto const a = tg::comp3i(1, 9, 3);
+    auto const b = tg::comp3i(5, 2, 7);
+
+    CHECK(tg::min(a, b) == tg::comp3i(1, 2, 3));
+    CHECK(tg::max(a, b) == tg::comp3i(5, 9, 7));
+    CHECK(tg::min(a, 4) == tg::comp3i(1, 4, 3));
+    CHECK(tg::max(a, 4) == tg::comp3i(4, 9, 4));
 }
