@@ -14,10 +14,15 @@ TEST("tg pos - construction")
         CHECK(p == tg::pos3f(0, 0, 0));
     }
 
-    SECTION("per-dimension and from_values")
+    SECTION("per-dimension and make_from_values")
     {
-        CHECK(tg::pos2i(1, 2) == tg::pos2i::from_values(1, 2));
+        CHECK(tg::pos2i(1, 2) == tg::pos2i::make_from_values(1, 2));
         CHECK(tg::pos3f(1, 2, 3)[2] == 3);
+    }
+
+    SECTION("zero is the origin")
+    {
+        CHECK(tg::pos3f::zero == tg::pos3f(0, 0, 0));
     }
 }
 

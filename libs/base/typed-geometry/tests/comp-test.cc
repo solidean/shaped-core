@@ -47,12 +47,17 @@ TEST("tg comp - construction")
         CHECK(c[2] == 7);
     }
 
-    SECTION("from_values")
+    SECTION("make_from_values")
     {
-        auto const c = tg::comp3f::from_values(1, 2, 3);
+        auto const c = tg::comp3f::make_from_values(1, 2, 3);
         CHECK(c[0] == 1);
         CHECK(c[1] == 2);
         CHECK(c[2] == 3);
+    }
+
+    SECTION("zero")
+    {
+        CHECK(tg::comp3f::zero == tg::comp3f(0, 0, 0));
     }
 }
 

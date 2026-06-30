@@ -71,7 +71,7 @@ public:
 
     /// variadic construction; exactly D arguments are required.
     template <class... Ts>
-    [[nodiscard]] static constexpr pos from_values(Ts... values)
+    [[nodiscard]] static constexpr pos make_from_values(Ts... values)
         requires(sizeof...(Ts) == D)
     {
         pos r;
@@ -79,6 +79,11 @@ public:
         ((r.data[i++] = T(values)), ...);
         return r;
     }
+
+    // special values
+public:
+    /// the origin (all coordinates zero). Runtime constant, not usable in constant expressions.
+    static pos const zero;
 
     // access
 public:
@@ -147,4 +152,8 @@ public:
         return a;
     }
 };
+
+template <int D, class T>
+inline pos<D, T> const pos<D, T>::zero = pos<D, T>{};
+
 } // namespace tg

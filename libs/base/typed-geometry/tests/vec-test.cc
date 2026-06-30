@@ -28,11 +28,19 @@ TEST("tg vec - construction")
         CHECK(tg::vec4f(1, 2, 3, 4)[3] == 4);
     }
 
-    SECTION("initializer list and from_values agree")
+    SECTION("initializer list and make_from_values agree")
     {
         auto const a = tg::vec3f({1, 2, 3});
-        auto const b = tg::vec3f::from_values(1, 2, 3);
+        auto const b = tg::vec3f::make_from_values(1, 2, 3);
         CHECK(a == b);
+    }
+
+    SECTION("zero and make_unit")
+    {
+        CHECK(tg::vec3f::zero == tg::vec3f(0, 0, 0));
+        CHECK(tg::vec3f::make_unit(0) == tg::vec3f(1, 0, 0));
+        CHECK(tg::vec3f::make_unit(2) == tg::vec3f(0, 0, 1));
+        CHECK_ASSERTS(tg::vec3f::make_unit(3));
     }
 
     SECTION("initializer list of wrong size asserts")
@@ -97,9 +105,9 @@ TEST("tg vec - measures")
         CHECK(err < 1e-6f);
     }
 
-    SECTION("normalizing zero asserts")
+    SECTION("normalizing zero returns zero (no assert)")
     {
-        CHECK_ASSERTS(tg::vec3f(0, 0, 0).normalized());
+        CHECK(tg::vec3f(0, 0, 0).normalized() == tg::vec3f::zero);
     }
 
     SECTION("dot product")

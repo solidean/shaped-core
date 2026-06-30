@@ -26,7 +26,7 @@ Update the tags as modules land. This document is design intent, not a guarantee
 ```txt
 src/typed-geometry/
   scalar/      [in progress]
-  linalg/      [in progress]
+  linalg/      [done for now]
   transform/   [planned]
   geometry/    [planned]
   curves/      [planned]
@@ -88,23 +88,30 @@ Special scalar-like types and scalar traits.
 
 ```txt
 scalar/
-  traits.hh    [done]     scalar_traits<T> + tg::traits::has_sqrt<T>
-  scalar.hh    [done]     tg::sqrt() and friends, dispatched through the traits
+  traits.hh    [done]     scalar_traits<T> + tg::traits::has_sqrt/has_trigonometry/is_zero/is_one
+  constants.hh [done]     tg::pi<T> (more to come)
+  scalar.hh    [done]     tg::one/sqrt/sin/cos/sin_cos/atan2, dispatched through the traits
+  angle.hh     [done]     angle<T> domain newtype + _rad_/_deg_ literals
   all.hh       [done]
-  angle.hh     [planned]
   complex.hh   [planned]
   interval.hh  [planned]
   fwd_diff.hh  [planned]
   rev_diff.hh  [planned]
   error.hh     [planned]
-  constants.hh [planned]
 ```
 
-`scalar_traits<T>` is the extensibility seam: every scalar capability (currently `has_sqrt` and
-`sqrt`) routes through it, so custom scalar types (expression trees, double-double, bigint/bigrat)
-can opt in by specializing the trait. tg avoids `std::` type-traits / `<cmath>` in user-facing code
-for this reason. `bigint`/`bigrat` are expected to live here too (they are useful as scalars
-outside of symbolic algebra).
+`scalar_traits<T>` is the extensibility seam: every scalar capability (`has_sqrt`,
+`has_trigonometry`, `one`, `is_zero`, `is_one`, `sqrt`, `sin`, `cos`, `atan2`) routes through it, so
+custom scalar types (expression trees, double-double, bigint/bigrat) can opt in by specializing the
+trait — `is_zero`/`is_one` in particular let symbolic/exact scalars give a smarter answer than a raw
+comparison. tg avoids `std::` type-traits / `<cmath>` in user-facing code for this reason.
+`f32`/`f64` are fully featured; every integer type (incl. `signed`/`unsigned char` but **not** plain
+`char`) gets `one`/`is_zero`/`is_one`; `bool` has its own specialization. `bigint`/`bigrat` are
+expected to live here too (useful as scalars outside symbolic algebra).
+
+`angle<T>` stores radians, is built only via `make_from_radians`/`make_from_degree`, read via
+`.radians()`/`.degree()`, and has `_rad_f`/`_rad_d`/`_deg_f`/`_deg_d` literals (e.g. `90_deg_f`).
+It supports addition and scalar multiplication with no wrap-around.
 
 ## linalg/ [in progress]
 
@@ -112,22 +119,20 @@ Algebraic building blocks.
 
 ```txt
 linalg/
-  vec.hh           [done]
-  vec_ops.hh       [done]     dot, normalize (cross -> bivec is planned)
-  pos.hh           [done]
+  vec.hh           [done]     + zero, make_unit
+  vec_ops.hh       [done]     dot, normalize
+  pos.hh           [done]     + zero
   pos_ops.hh       [done]     distance, distance_sqr
   comp.hh          [done]     storage + access only; arithmetic is planned (see below)
+  bivec.hh         [done]     + zero; C(D,2) components (3D order {yz, zx, xy})
+  cross.hh         [done]     cross, dual, undual (3D; the {yz,zx,xy} order makes dual the identity)
+  mat.hh           [done]     col-major, zero/identity, rotations, products
+  quat.hh          [done]     zero/identity, rotations, products, axis()/angle()
   linalg.hh        [done]
   all.hh           [done]
 
-  bivec.hh         [planned]
-  mat.hh           [planned]
-  quat.hh          [planned]
-
-  cross.hh         [planned]
   norm.hh          [planned]
   normalize.hh     [planned]
-  dual.hh          [planned]
   decomposition.hh [planned]
 ```
 
@@ -139,12 +144,18 @@ pos + vec -> pos          // [done]
 vec + vec -> vec          // [done]
 pos + pos -> pos          // [done]  translation of the singleton point set
 
-cross(vec3, vec3) -> bivec3   // [planned]
-dual(bivec3)      -> vec3     // [planned]  explicit Euclidean 3D escape hatch
-undual(vec3)      -> bivec3   // [planned]  explicit pseudovector-to-bivector conversion
+cross(vec3, vec3) -> bivec3   // [done]
+dual(bivec3)      -> vec3     // [done]  explicit Euclidean 3D escape hatch
+undual(vec3)      -> bivec3   // [done]  explicit pseudovector-to-bivector conversion
 ```
 
 `mat` is not a transform type. It is linear algebra data.
+
+Special values are exposed as static constants (`vec::zero`, `pos::zero`, `comp::zero`,
+`bivec::zero`, `mat::zero`, `mat::identity`, `quat::zero`, `quat::identity`). They are runtime
+constants (a static member can't be `constexpr` of its own incomplete type), not constant
+expressions. All factory methods are named `make_*` (e.g. `vec::make_unit`, `make_from_values`,
+`mat::make_rotation_z`).
 
 `comp` is the "semantics-free" building block in the sense that it is the raw component-wise
 type. It is therefore the eventual home of **all** component-wise arithmetic (mul, div, min/max,
@@ -318,10 +329,10 @@ expensive one (`module/all.hh`). The top-level `<typed-geometry/all.hh>` pulls i
 ## Initial Implementation Order
 
 ```txt
-1.  scalar traits/constants            [in progress]  traits + sqrt done
+1.  scalar traits/constants            [in progress]  traits, constants, one/sqrt/sin/cos, angle done
 2.  linalg: vec, pos, comp             [done]         (comp arithmetic still planned)
-3.  linalg: bivec + cross/dual/undual  [planned]
-4.  linalg: mat, quat                  [planned]
+3.  linalg: bivec + cross/dual/undual  [done]
+4.  linalg: mat, quat                  [done]
 5.  transform: rigid/affine + transform(pos/vec/bivec)   [planned]
 6.  geometry primitives: aabb, ray, segment, triangle, plane   [planned]
 7.  geometry measure/query basics      [planned]

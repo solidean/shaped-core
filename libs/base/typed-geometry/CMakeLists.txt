@@ -20,7 +20,9 @@ target_sources(typed-geometry
     src/typed-geometry/all.hh
 
     src/typed-geometry/scalar/traits.hh
+    src/typed-geometry/scalar/constants.hh
     src/typed-geometry/scalar/scalar.hh
+    src/typed-geometry/scalar/angle.hh
     src/typed-geometry/scalar/all.hh
 
     src/typed-geometry/linalg/comp.hh
@@ -28,6 +30,10 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/vec_ops.hh
     src/typed-geometry/linalg/pos.hh
     src/typed-geometry/linalg/pos_ops.hh
+    src/typed-geometry/linalg/bivec.hh
+    src/typed-geometry/linalg/cross.hh
+    src/typed-geometry/linalg/mat.hh
+    src/typed-geometry/linalg/quat.hh
     src/typed-geometry/linalg/linalg.hh
     src/typed-geometry/linalg/all.hh
 )
@@ -59,6 +65,11 @@ add_executable(typed-geometry-test
     tests/comp-test.cc
     tests/vec-test.cc
     tests/pos-test.cc
+    tests/scalar-test.cc
+    tests/angle-test.cc
+    tests/bivec-test.cc
+    tests/mat-test.cc
+    tests/quat-test.cc
 )
 
 target_link_libraries(typed-geometry-test

@@ -65,7 +65,7 @@ public:
 
     /// variadic construction; exactly D arguments are required.
     template <class... Ts>
-    [[nodiscard]] static constexpr comp from_values(Ts... values)
+    [[nodiscard]] static constexpr comp make_from_values(Ts... values)
         requires(sizeof...(Ts) == D)
     {
         comp r;
@@ -73,6 +73,11 @@ public:
         ((r.data[i++] = T(values)), ...);
         return r;
     }
+
+    // special values
+public:
+    /// all components zero. Runtime constant, not usable in constant expressions.
+    static comp const zero;
 
     // access
 public:
@@ -91,4 +96,8 @@ public:
 public:
     [[nodiscard]] friend constexpr bool operator==(comp const&, comp const&) = default;
 };
+
+template <int D, class T>
+inline comp<D, T> const comp<D, T>::zero = comp<D, T>{};
+
 } // namespace tg

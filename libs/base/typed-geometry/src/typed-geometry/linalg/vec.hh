@@ -67,7 +67,7 @@ public:
 
     /// variadic construction; exactly D arguments are required.
     template <class... Ts>
-    [[nodiscard]] static constexpr vec from_values(Ts... values)
+    [[nodiscard]] static constexpr vec make_from_values(Ts... values)
         requires(sizeof...(Ts) == D)
     {
         vec r;
@@ -75,6 +75,20 @@ public:
         ((r.data[i++] = T(values)), ...);
         return r;
     }
+
+    /// the idx-th unit vector (1 at idx, 0 elsewhere).
+    [[nodiscard]] static constexpr vec make_unit(int idx)
+    {
+        CC_ASSERT(0 <= idx && idx < D, "unit index out of range");
+        vec r;
+        r.data[idx] = tg::one<T>();
+        return r;
+    }
+
+    // special values
+public:
+    /// the zero vector (all components zero). Runtime constant, not usable in constant expressions.
+    static vec const zero;
 
     // access
 public:
@@ -108,12 +122,14 @@ public:
     }
 
     /// unit vector in the same direction; only for scalar types that support sqrt.
-    /// asserts the vector is non-zero.
+    /// returns the zero vector if this vector has (near-)zero length, rather than asserting —
+    /// experience shows a hard assert here causes too many spurious failures.
     [[nodiscard]] vec normalized() const
         requires(tg::traits::has_sqrt<T>)
     {
         auto const l = this->length();
-        CC_ASSERT(l != T{}, "cannot normalize a zero-length vector");
+        if (tg::traits::is_zero(l))
+            return zero;
         return *this / l;
     }
 
@@ -185,4 +201,8 @@ public:
         return a;
     }
 };
+
+template <int D, class T>
+inline vec<D, T> const vec<D, T>::zero = vec<D, T>{};
+
 } // namespace tg

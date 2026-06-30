@@ -95,6 +95,36 @@ specializations**. Typedefs exist for D = 2/3/4, but the type stays generic. Dim
 behavior (e.g. the 3-arg constructor, or a future `cross` for D == 3) is selected with a
 `requires` clause, not a specialization.
 
+## Factory methods are `make_*`; special values are static constants
+
+Every factory (static method that returns an instance) is named `make_*`:
+`vec::make_from_values`, `vec::make_unit`, `mat::make_from_cols`, `mat::make_rotation_z`,
+`angle::make_from_degree`, … **Why** (not obvious): C++ lets you call a static through an instance
+(`v.make_unit(0)`), so a bare verb like `unit()` or `from_values()` reads like a member operating
+on `v`. The `make_` prefix makes "this constructs a fresh value" unambiguous at the call site and
+groups factories under autocomplete. (This mirrors clean-core's `create_` rule; tg uses `make_`.)
+
+Distinguished constant values are **static data members**, not factories: `vec::zero`,
+`pos::zero`, `comp::zero`, `bivec::zero`, `mat::zero`, `mat::identity`, `quat::zero`,
+`quat::identity`. Provide these for new types where a canonical value exists.
+
+**Implementation note:** a static data member cannot be `constexpr` of its own (incomplete) class
+type, so these are declared `static T const zero;` in the class and defined `inline` out of line
+in the same header (`template <...> inline T<...> const T<...>::zero = ...;`). They are therefore
+runtime constants, usable everywhere except constant expressions. Build `identity` from
+`make_unit` via the `tg::impl::make_identity` helper rather than hand-writing the diagonal.
+
+## Multi-argument `operator[]` and preprocessor macros
+
+`mat` uses the C++23 multi-argument subscript `m[col, row]`. The comma is a problem inside
+function-like macros (`CHECK`, `CC_ASSERT`, …): the preprocessor splits on it and sees two
+arguments. Wrap the subscript in parentheses at any macro call site:
+
+```cpp
+CHECK((m[0, 0]) == 1);          // not CHECK(m[0, 0] == 1) — "too many macro arguments"
+CHECK_ASSERTS((m[3, 0]));
+```
+
 ## Constructors
 
 - All constructors are `explicit` (per the global rule), including the scalar splat
@@ -107,6 +137,19 @@ behavior (e.g. the 3-arg constructor, or a future `cross` for D == 3) is selecte
 - Default construction **zero-initializes** (`T data[D] = {}`). The types stay trivially
   copyable regardless (only the default ctor is non-trivial); assert this with a
   `static_assert(std::is_trivially_copyable_v<...>)` in tests.
+
+## Don't assert on common degenerate inputs; return a sensible value
+
+The repo-wide guidance is to `CC_ASSERT` preconditions liberally. For math operations whose
+degenerate input is *common in real code*, prefer returning a defined value over asserting.
+Concretely, `vec::normalized()` / `quat::normalized()` return `zero` for a (near-)zero length
+instead of asserting. **Why** (not obvious): zero-length normalization shows up constantly
+(accumulated directions, user data, edge cases in loops), and a hard assert there produced far too
+many spurious failures in the previous incarnation of this library. Use `tg::traits::is_zero(...)`
+for the degeneracy test (not `== 0`) so exotic scalars decide what "zero" means.
+
+This is a judgement call per operation, not a blanket waiver: keep asserting on genuine programmer
+errors (out-of-range `operator[]`, wrong-size initializer lists, …).
 
 ## Semantic typing
 
