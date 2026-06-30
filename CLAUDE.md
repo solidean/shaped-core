@@ -31,6 +31,10 @@ One-liner per library (more will be added over time):
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3
   CLI–compatible (discovery, filtering, sections, JUnit XML), so IDE test
   integration works out of the box. Namespace `nx`. Depends on clean-core.
+* **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry library
+  (`vec`/`pos`/`comp`, with `bivec`/`mat`/`quat`/transforms/geometry/mesh
+  planned). Namespace `tg`. Depends on clean-core. Early stage — see its
+  [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 
 Supporting directories:
 
@@ -45,11 +49,11 @@ Dependency direction: a library depends only on lower libraries (plus its own
 external deps). No upward or cyclic dependencies.
 
 ```text
-nexus
-  ↓
-clean-core
-  ↓
-(no dependencies)
+nexus    typed-geometry
+   ↓         ↓
+     clean-core
+        ↓
+  (no dependencies)
 ```
 
 ---
