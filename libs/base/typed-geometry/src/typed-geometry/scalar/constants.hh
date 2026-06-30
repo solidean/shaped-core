@@ -1,6 +1,6 @@
 #pragma once
 
-#include <typed-geometry/fwd.hh>
+#include <typed-geometry/scalar/fwd.hh>
 
 /// Mathematical constants, templated on the scalar type.
 ///

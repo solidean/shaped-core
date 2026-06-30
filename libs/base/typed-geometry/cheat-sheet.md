@@ -155,6 +155,34 @@ q.angle();                                        // angle — requires has_sqrt
 q.conjugate();                                    // inverse rotation for a unit quat
 ```
 
+## geometry primitives (each denotes a set of points)
+
+```cpp
+#include <typed-geometry/geometry/primitives/aabb.hh>      // and triangle/segment/ray/line/plane.hh
+tg::aabb<D,T>     {pos min, max}              // solid box {x : min <= x <= max}              — finite
+tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
+tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
+tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
+tg::line<D,T>     {pos origin; vec dir}       // {origin + t*dir : t in R}, 1D                 — infinite
+tg::plane<D,T>    {vec normal; T dist}        // hyperplane {x : dot(normal,x) == dist}        — infinite
+// members are public + named (pos0/min/normal/…), not data[]; default-ctor zero-inits; explicit ctors;
+//   defaulted operator==. No queries/measures/factories yet (representations still settling).
+// dimensional aliases: aabb2/3, triangle2/3, …   concrete: aabb3f triangle3f segment2i ray3f plane3d
+//   (aabb/triangle/segment get f/d/i; ray/line/plane get f/d — directions/normals are real)
+```
+
+## object_traits (point-set classification seam)
+
+```cpp
+#include <typed-geometry/geometry/traits.hh>
+tg::object_traits<ObjT>;                   // specialize per object type (in its own header)
+tg::traits::intrinsic_dim<ObjT>;           // int  — manifold dim of the set (triangle3f -> 2)
+tg::traits::ambient_dim<ObjT>;             // int  — dim of the surrounding space (triangle3f -> 3)
+tg::traits::is_finite<ObjT>;               // bool — is the point set bounded? (triangle yes, plane no)
+// intrinsic_dim <= ambient_dim; plane is codimension 1. The primary template is undefined on purpose:
+//   a type that forgets to specialize it is a compile error, not a silent default.
+```
+
 ## scalar traits (extensibility seam)
 
 ```cpp
@@ -177,9 +205,11 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 ## Umbrellas
 
 ```cpp
-#include <typed-geometry/linalg/linalg.hh>   // curated: vec/pos/comp + ops
-#include <typed-geometry/linalg/all.hh>      // everything in linalg
-#include <typed-geometry/all.hh>             // everything (scalar + linalg); expensive
+#include <typed-geometry/linalg/linalg.hh>     // curated: vec/pos/comp/bivec/mat/quat + ops
+#include <typed-geometry/linalg/all.hh>        // everything in linalg
+#include <typed-geometry/geometry/geometry.hh> // curated: object_traits + primitives
+#include <typed-geometry/geometry/all.hh>      // everything in geometry
+#include <typed-geometry/all.hh>               // everything (scalar + linalg + geometry); expensive
 ```
 
 ## Gotchas

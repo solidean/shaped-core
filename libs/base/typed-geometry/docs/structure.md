@@ -28,7 +28,7 @@ src/typed-geometry/
   scalar/      [in progress]
   linalg/      [done for now]
   transform/   [planned]
-  geometry/    [planned]
+  geometry/    [in progress]
   curves/      [planned]
   color/       [planned]
   symbolic/    [planned]
@@ -210,24 +210,42 @@ transform(t, p);        // OK
 m * p;                  // probably not OK
 ```
 
-## geometry/ [planned]
+## geometry/ [in progress]
 
-Geometric primitives and geometric queries.
+Geometric primitives and geometric queries. Primitive *types* and the `object_traits` seam have
+landed; queries/measures/construction are still planned.
 
 ```txt
 geometry/
-  primitives/   # aabb, obb, sphere, plane, triangle, segment, ray, line, polygon, ...
-  query/        # distance, projection, closest, intersection, intersects, containment, ...
-  measure/      # area, volume, centroid, bounds, moments
-  construct/    # hull, fitting, primitives_from_points
-  geometry.hh
-  all.hh
+  traits.hh         [done]     object_traits<ObjT> seam + tg::traits::intrinsic_dim/ambient_dim/is_finite
+  primitives/       [in progress]
+    aabb.hh         [done]     solid axis-aligned box {min..max}
+    triangle.hh     [done]     filled triangle (3 verts)
+    segment.hh      [done]     closed segment between 2 endpoints
+    ray.hh          [done]     {origin + t*dir : t >= 0}
+    line.hh         [done]     {origin + t*dir : t in R}
+    plane.hh        [done]     hyperplane {x : dot(normal,x) == dist}
+    primitives.hh   [done]
+    # planned: obb, sphere, polygon, ...
+  query/            [planned]  # distance, projection, closest, intersection, intersects, containment, ...
+  measure/          [planned]  # area, volume, centroid, bounds, moments
+  construct/        [planned]  # hull, fitting, primitives_from_points
+  geometry.hh       [done]
+  all.hh            [done]
 ```
 
-Member functions stay intrinsic/cheap (e.g. `ray.at(t)`, `aabb.center()`, `aabb.contains(p)`,
-`triangle.area()`). Symmetric/cross-type queries are free functions (`distance(a, b)`,
-`closest_point(p, primitive)`, `intersects(a, b)`, `intersection(a, b)`, `contains(a, b)`).
-Avoid making every pairwise query a member.
+Every primitive denotes a **set of points** and is classified by `object_traits` (specialized in
+its own header, colocated with the type): `intrinsic_dim` (the object's manifold dimension — a 3D
+triangle is a 2D object, so 2), `ambient_dim` (the surrounding space — 3 for that triangle), and
+`is_finite` (triangle/segment/aabb yes; ray/line/plane no). Representation is not interpretation:
+`plane` and the planned `halfspace` will share the `{normal, dist}` encoding but denote the points
+*on* vs. *on one side of* the hyperplane. See [modules/geometry.md](modules/geometry.md).
+
+Queries are intentionally **not** implemented yet — the representations settle first. When they
+land, member functions stay intrinsic/cheap (e.g. `ray.at(t)`, `aabb.center()`, `aabb.contains(p)`,
+`triangle.area()`), while symmetric/cross-type queries are free functions (`distance(a, b)`,
+`closest_point(p, primitive)`, `intersects(a, b)`, `intersection(a, b)`, `contains(a, b)`). Avoid
+making every pairwise query a member.
 
 ## curves/ [planned]
 
@@ -336,7 +354,7 @@ expensive one (`module/all.hh`). The top-level `<typed-geometry/all.hh>` pulls i
 3.  linalg: bivec + cross/dual/undual  [done]
 4.  linalg: mat, quat                  [done]
 5.  transform: rigid/affine + transform(pos/vec/bivec)   [planned]
-6.  geometry primitives: aabb, ray, segment, triangle, plane   [planned]
+6.  geometry primitives: aabb, triangle, segment, ray, line, plane + object_traits   [in progress]  types done; queries planned
 7.  geometry measure/query basics      [planned]
 8.  curves                             [planned]
 9.  symbolic scalars                   [planned]

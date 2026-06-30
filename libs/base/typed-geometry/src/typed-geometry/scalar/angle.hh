@@ -1,8 +1,8 @@
 #pragma once
 
 #include <clean-core/container/pair.hh>
-#include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/fwd.hh>
 #include <typed-geometry/scalar/traits.hh>
 
 namespace tg

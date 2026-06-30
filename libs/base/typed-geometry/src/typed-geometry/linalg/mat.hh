@@ -1,7 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
-#include <typed-geometry/fwd.hh>
+#include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>

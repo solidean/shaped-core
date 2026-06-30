@@ -1,4 +1,4 @@
-#include "approx.hh"
+#include "../approx.hh"
 
 #include <nexus/test.hh>
 #include <typed-geometry/scalar/scalar.hh>

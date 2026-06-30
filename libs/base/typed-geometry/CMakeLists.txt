@@ -19,12 +19,14 @@ target_sources(typed-geometry
     src/typed-geometry/fwd.hh
     src/typed-geometry/all.hh
 
+    src/typed-geometry/scalar/fwd.hh
     src/typed-geometry/scalar/traits.hh
     src/typed-geometry/scalar/constants.hh
     src/typed-geometry/scalar/scalar.hh
     src/typed-geometry/scalar/angle.hh
     src/typed-geometry/scalar/all.hh
 
+    src/typed-geometry/linalg/fwd.hh
     src/typed-geometry/linalg/comp.hh
     src/typed-geometry/linalg/comp_ops.hh
     src/typed-geometry/linalg/vec.hh
@@ -37,6 +39,18 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/quat.hh
     src/typed-geometry/linalg/linalg.hh
     src/typed-geometry/linalg/all.hh
+
+    src/typed-geometry/geometry/fwd.hh
+    src/typed-geometry/geometry/traits.hh
+    src/typed-geometry/geometry/primitives/aabb.hh
+    src/typed-geometry/geometry/primitives/triangle.hh
+    src/typed-geometry/geometry/primitives/segment.hh
+    src/typed-geometry/geometry/primitives/ray.hh
+    src/typed-geometry/geometry/primitives/line.hh
+    src/typed-geometry/geometry/primitives/plane.hh
+    src/typed-geometry/geometry/primitives/primitives.hh
+    src/typed-geometry/geometry/geometry.hh
+    src/typed-geometry/geometry/all.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -63,14 +77,24 @@ target_compile_options(typed-geometry
 # Test executable
 add_executable(typed-geometry-test
     tests/main.cc
-    tests/comp-test.cc
-    tests/vec-test.cc
-    tests/pos-test.cc
-    tests/scalar-test.cc
-    tests/angle-test.cc
-    tests/bivec-test.cc
-    tests/mat-test.cc
-    tests/quat-test.cc
+
+    tests/scalar/scalar-test.cc
+    tests/scalar/angle-test.cc
+
+    tests/linalg/comp-test.cc
+    tests/linalg/vec-test.cc
+    tests/linalg/pos-test.cc
+    tests/linalg/bivec-test.cc
+    tests/linalg/mat-test.cc
+    tests/linalg/quat-test.cc
+
+    tests/geometry/aabb-test.cc
+    tests/geometry/triangle-test.cc
+    tests/geometry/segment-test.cc
+    tests/geometry/ray-test.cc
+    tests/geometry/line-test.cc
+    tests/geometry/plane-test.cc
+    tests/geometry/object-traits-test.cc
 )
 
 target_link_libraries(typed-geometry-test

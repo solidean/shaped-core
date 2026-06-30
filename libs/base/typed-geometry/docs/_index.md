@@ -6,16 +6,23 @@ headers, start at the [readme](../readme.md). For repo-wide docs see
 
 ## Source organization
 
-typed-geometry's headers live in `src/typed-geometry/`, grouped by module. Only `scalar/` and
-`linalg/` exist today; the rest of the modules in the roadmap are planned.
+typed-geometry's headers live in `src/typed-geometry/`, grouped by module. `scalar/`, `linalg/`,
+and the first `geometry/` primitives exist today; the rest of the modules in the roadmap are
+planned.
 
 ```text
 typed-geometry/
-  fwd.hh        # forward decls + dimensional/typed aliases
+  fwd.hh        # aggregate forward decls (just includes the per-module <module>/fwd.hh)
   all.hh        # complete umbrella (expensive)
   scalar/       # scalar_traits<T> seam + tg::sqrt (angle/complex/interval/... planned)
-  linalg/       # vec, pos, comp (+ ops); bivec/mat/quat planned
+  linalg/       # vec, pos, comp, bivec, mat, quat (+ ops)
+  geometry/     # object_traits seam + primitives (aabb/triangle/segment/ray/line/plane); queries planned
 ```
+
+Forward declarations and the dimensional/typed aliases live in a per-module `fwd.hh`
+(`scalar/fwd.hh`, `linalg/fwd.hh`, `geometry/fwd.hh`), chained along the dependency order; the
+top-level `fwd.hh` just aggregates them. Include a single module's `fwd.hh` when that is all you
+need.
 
 ## Module docs
 
@@ -27,6 +34,8 @@ the big rationales (small ones stay in source comments).
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
 - [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos`
   translation rule and the `bivec != vec` decision.
+- [modules/geometry](modules/geometry.md) — the primitive types and the `object_traits`
+  point-set seam (`intrinsic_dim`/`ambient_dim`/`is_finite`); representation vs. interpretation.
 
 ## Topics
 

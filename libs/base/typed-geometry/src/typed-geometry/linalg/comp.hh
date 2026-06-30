@@ -1,7 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
-#include <typed-geometry/fwd.hh>
+#include <typed-geometry/linalg/fwd.hh>
 
 #include <initializer_list>
 
