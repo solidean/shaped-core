@@ -14,11 +14,10 @@ shaped-graphics/
   fwd.hh          # fwd decls + *_handle typedefs
   all.hh          # umbrella
   types.hh        # backend_kind, buffer_usage
-  context.hh      # mutable driver / factory  (stubbed)
-  command_list.hh # records GPU work          (stubbed)
-  buffer.hh       # GPU-resident, immutable shape
-  backend/        # pure-virtual bridge: backend_context, backend_command_list
-backends/         # concrete per-backend static libs (dx12/, vulkan/), smurf-named
+  context.hh      # abstract driver / factory
+  command_list.hh # abstract; records GPU work
+  buffer.hh       # abstract; GPU-resident, immutable shape (protected metadata)
+backends/         # concrete per-backend static libs (dx12/, vulkan/) that subclass the sg types
 ```
 
 ## Topics

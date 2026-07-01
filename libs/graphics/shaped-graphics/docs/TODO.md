@@ -10,9 +10,9 @@ Running list of known follow-ups. Bigger design intent lives in
   [coding-guidelines](coding-guidelines.md) note.
 - **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
   `cc::flags` once that clean-core type is implemented.
-- **Backend registration:** `sg::create_context(backend_kind)` is an unwired stub — decide how
-  the core selects/loads a backend without inverting the sg-core ← backend dependency (today a
-  caller constructs `sg::context` from an explicit backend context).
+- **Blessed escape hatch:** add an sg API that returns raw underlying GPU handles without exposing
+  the concrete backend types, so callers don't reach for `dynamic_cast` to a `sg::backend::*` type.
+  See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
 - **SDK detection:** dx12/vulkan backends are pure stubs with no SDK dependency; add real
   `find_package(Vulkan)` / Windows-SDK detection and availability gating when (2) lands.
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

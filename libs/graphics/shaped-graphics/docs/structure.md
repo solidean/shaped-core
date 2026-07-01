@@ -12,8 +12,9 @@ Update the tags as the API lands. This document is design intent, not a guarante
 ## Goals
 
 - A small, backend-agnostic graphics-API surface (`context`, `command_list`, GPU resources).
-- Concrete backends as independent static libraries; validation shared in the sg core via the
-  backend bridge, backend-specific work duplicated rather than abstracted.
+- The public `context` / `command_list` / `buffer` are abstract interfaces; concrete backends are
+  independent static libraries that subclass them directly (no separate bridge layer), with
+  backend-specific work duplicated rather than abstracted.
 - Shared-immutable resources fronting GPU-resident memory; all host↔device transfer managed by
   sg (no host-visible resources exposed).
 
@@ -22,14 +23,10 @@ Update the tags as the API lands. This document is design intent, not a guarante
 ```text
 src/shaped-graphics/
   fwd.hh / all.hh / types.hh      [in progress]
-  context.hh/.cc                  [stub]        mutable driver / resource factory
-  command_list.hh/.cc             [stub]        records GPU work
-  buffer.hh/.cc                   [in progress] shape done; transfer/creation stubbed
-  backend/                        [in progress] pure-virtual bridge
-    backend_context.hh            [in progress] kind() only; resource/command creation planned
-    backend_command_list.hh       [in progress] recording contract planned
-    backend_buffer.hh             [in progress] GPU resource an sg::buffer fronts
-backends/
+  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list/create_buffer
+  command_list.hh/.cc             [in progress] abstract; recording API planned
+  buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done
+backends/                                       # each subclasses the abstract sg types directly
   dx12/                           [stub]        sg::backend::dx12 + sg::create_dx12_context (Windows)
   vulkan/                         [stub]        sg::backend::vulkan + sg::create_vulkan_context (native desktop)
   metal/                          [planned]     tier 2

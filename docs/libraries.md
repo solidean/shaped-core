@@ -87,10 +87,11 @@ The graphics-API wrapper: a small, backend-agnostic surface — `context`, `comm
 GPU resource types (`buffer` today; `texture`, `pipeline`, … to come) — over concrete graphics
 backends. Backends are **separate static libraries**, smurf-named and namespaced
 (`sg::backend::dx12::dx12_context`), one per API: dx12/vulkan (tier 1), metal/webgpu (tier 2),
-opengl/webgl (legacy). A pure-virtual backend bridge (`backend_context`/`backend_command_list`)
-lets the sg core run generic validation before delegating. Resources are shared-immutable and
-handed out as `xyz_handle` (`= std::shared_ptr<sg::xyz>`); there are no host-visible resources —
-PCIe transfer is a globally shared resource sg manages.
+opengl/webgl (legacy). The public `context`/`command_list`/`buffer` are abstract interfaces that
+each backend subclasses directly (no separate bridge layer); cheap shared metadata lives in the
+base as protected members. Resources are shared-immutable and handed out as `xyz_handle`
+(`= std::shared_ptr<sg::xyz>`); there are no host-visible resources — PCIe transfer is a globally
+shared resource sg manages.
 
 ### shaped-rendering — namespace `sr` — depends on shaped-graphics
 

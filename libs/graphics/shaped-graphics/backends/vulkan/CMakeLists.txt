@@ -6,8 +6,7 @@ project(shaped-graphics-vulkan LANGUAGES CXX)
 # it compiles anywhere the enclosing CMakeLists enables it (native desktop). Real SDK
 # detection/linking lands with the first buffer upload/download/copy milestone.
 add_library(shaped-graphics-vulkan
-    src/shaped-graphics/backends/vulkan/vulkan_context.cc
-    src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
+    src/shaped-graphics/backends/vulkan/vulkan.cc
 )
 
 target_sources(shaped-graphics-vulkan
@@ -19,6 +18,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/fwd.hh
     src/shaped-graphics/backends/vulkan/vulkan_context.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
+    src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
 )
 
 target_compile_features(shaped-graphics-vulkan PUBLIC cxx_std_23)

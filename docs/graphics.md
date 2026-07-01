@@ -30,12 +30,12 @@ over concrete graphics backends.
   and vulkan are **tier 1** (both stubbed today); metal and webgpu are **tier 2** (soon);
   opengl and webgl are **legacy compat** (planned). A backend is built only where it is
   available for the platform/build.
-- **The backend bridge.** `sg::backend_context` / `sg::backend_command_list` /
-  `sg::backend_buffer` (under
-  [src/shaped-graphics/backend/](../libs/graphics/shaped-graphics/src/shaped-graphics/backend/))
-  are pure-virtual interfaces. `sg::context` holds a `std::shared_ptr` to one and runs
-  sg-generic validation before delegating — so validation is written once and every backend
-  inherits it.
+- **Abstract interfaces, backends derive directly.** `sg::context` / `sg::command_list` /
+  `sg::buffer` (under
+  [src/shaped-graphics/](../libs/graphics/shaped-graphics/src/shaped-graphics/)) are abstract; a
+  backend subclasses them directly (`sg::backend::vulkan::vulkan_context : sg::context`) — there is
+  no separate bridge/impl layer. Cheap shared metadata (a buffer's size/usage) lives in the base
+  as protected members, so reading it costs no virtual call and every backend inherits it.
 - **sg does not depend on the backends.** The dependency arrow points one way (backends → sg):
   there is no `sg::create_context` in the core. Each backend library instead exposes an
   `sg::create_<backend>_context(config)` factory with its own config type. `backend_kind` is a

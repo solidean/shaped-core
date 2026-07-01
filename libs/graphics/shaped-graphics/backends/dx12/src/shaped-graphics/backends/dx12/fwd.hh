@@ -7,4 +7,5 @@ namespace sg::backend::dx12
 {
 class dx12_context;
 class dx12_command_list;
+class dx12_buffer;
 } // namespace sg::backend::dx12

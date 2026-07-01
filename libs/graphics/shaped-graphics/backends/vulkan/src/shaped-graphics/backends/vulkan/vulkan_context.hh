@@ -1,8 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
-#include <shaped-graphics/backend/backend_context.hh>
-#include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/context.hh>
 
 namespace sg::backend::vulkan
 {
@@ -13,14 +12,21 @@ struct vulkan_config
 {
 };
 
-/// Vulkan backend context. Smurf-named and namespaced (sg::backend::vulkan) on purpose — see the
-/// sg coding guidelines: backend types are kept greppable and non-colliding, code is duplicated
-/// across backends rather than abstracted, and backends favor readable, low-encapsulation code
-/// (small members defined inline in the header).
-class vulkan_context final : public sg::backend_context
+/// Vulkan implementation of sg::context. Backends derive directly from the sg interfaces — there
+/// is no separate bridge layer — and have full access to the protected state. Smurf-named and
+/// namespaced (sg::backend::vulkan) on purpose; see the sg coding guidelines. Members are defined
+/// inline: backends favor readable, low-encapsulation code.
+class vulkan_context final : public sg::context
 {
 public:
-    [[nodiscard]] sg::backend_kind kind() const override { return sg::backend_kind::vulkan; }
+    vulkan_context() : sg::context(sg::backend_kind::vulkan) {}
+
+    [[nodiscard]] sg::command_list_handle create_command_list() override { CC_UNREACHABLE("not implemented yet"); }
+
+    [[nodiscard]] sg::buffer_handle create_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) override
+    {
+        CC_UNREACHABLE("not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan
 
@@ -28,8 +34,8 @@ namespace sg
 {
 /// Creates a context on the Vulkan backend. Backend factories deliberately live in the `sg`
 /// namespace (not the backend's) so they share a discoverable `sg::create_*_context` prefix while
-/// taking a backend-specific config. sg itself neither depends on nor knows this backend; only
-/// the caller that links the vulkan backend library sees this factory.
+/// taking a backend-specific config. sg itself neither depends on nor knows this backend; only a
+/// caller that links the vulkan backend library sees this factory.
 [[nodiscard]] inline context_handle create_vulkan_context(backend::vulkan::vulkan_config const& = {})
 {
     CC_UNREACHABLE("not implemented yet");

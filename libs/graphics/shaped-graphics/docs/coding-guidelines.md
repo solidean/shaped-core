@@ -62,8 +62,8 @@ sv) must not `#include`, link, or otherwise know any concrete backend. There is 
 
 Instead, **each backend library exposes a factory in the `sg` namespace**:
 `sg::create_dx12_context(dx12_config const&)`, `sg::create_vulkan_context(vulkan_config const&)`,
-… They return a `context_handle`, wrapping the backend's `backend_context`. Only a caller that
-*links that backend* sees the factory.
+… Each constructs its own `sg::context` subclass (e.g. `vulkan_context`) and returns it as a
+`context_handle`. Only a caller that *links that backend* sees the factory.
 
 - The factory lives in `sg::` (not `sg::backend::vulkan::`) so all backends share the
   discoverable `sg::create_*_context` prefix — but each takes its **own config type**, which is
@@ -79,20 +79,28 @@ implementation, a remote/streamed context, a capture/debug layer) drop in withou
 An `sg::create_context(backend_kind)` in the core would force the core to know every backend and
 invert the dependency — precisely what we avoid.
 
-## The backend bridge: validate once in the core, delegate to the backend
+## The public types are abstract; backends derive from them directly
 
-`sg::backend_context`, `sg::backend_command_list`, and `sg::backend_buffer`
-([backend/](../src/shaped-graphics/backend/)) are pure-virtual interfaces. The public
-`sg::context` / `sg::command_list` hold a `std::shared_ptr` to the matching bridge object, do
-**sg-generic validation** (argument checks, state invariants) in the core, and *then* call the
-backend. Keep validation and API-shape logic in the sg core types; keep only genuine
-backend-specific work behind the bridge. Cheap, frequently-read metadata (a buffer's size and
-usage) is stored **inline in the sg core type**, "above the fold", so reading it costs no virtual
-call; the bridge object holds only the actual backend resource.
+`sg::context`, `sg::command_list`, and `sg::buffer` are **abstract interfaces**, and a backend
+subclasses them **directly** (`sg::backend::vulkan::vulkan_context : public sg::context`). There
+is **no** separate bridge/impl layer mirroring the public API — a public type holding a
+`shared_ptr` to a parallel `backend_*` interface would duplicate the state (once in the public
+type, once in the impl) and turn every public method into a thin forwarder. One hierarchy avoids
+both.
 
-**Why** (not obvious): this extra indirection layer exists specifically so validation is written
-once and shared by every backend, instead of being re-implemented (and drifting) in dx12,
-vulkan, metal, … Putting checks in the backend would duplicate them and let them diverge.
+- **Cheap, shared metadata lives in the base as protected members**, with non-virtual accessors —
+  a buffer's `_size_in_bytes` / `_usage` sit "above the fold" in `sg::buffer`, so reading them
+  costs no virtual call and every backend buffer inherits exactly them. Operations that genuinely
+  need per-backend behavior are the pure-virtual methods (e.g. `context::create_buffer`).
+- **Protected, not private.** Backends have full access to the base's state and set it directly.
+  The coupling between a base and its own subclasses is fine and intended — this is **not** the
+  Java-esque "defend my class against bad-actor subclasses" world. Don't wrap base state in
+  private + getter/setter ceremony to hold subclasses at arm's length.
+
+**Why** (not obvious): a two-layer design (a public `context` holding a `shared_ptr` to a
+`backend_context`, etc.) duplicates all shared state and makes every public method a forwarder. A
+single hierarchy — abstract base + protected state + backend subclass — keeps the state in one
+place and the code direct, at the cost of coupling a base to its subclasses, which we accept.
 
 ## Backends are smurf-named and live in their own namespace
 
@@ -132,11 +140,12 @@ they are best served by code they can read top-to-bottom.
 
 ## Reaching the underlying backend type is a "here be dragons" escape hatch
 
-Because the concrete backend types (`sg::backend::vulkan::vulkan_context`, …) are public, you
-*can* recover them from an `sg::context` — e.g. via `dynamic_cast` on the bridge object. That is a
-deliberate, unpoliced escape hatch: it works, and it is fully "you are on your own" territory
-(you have coupled your code to a specific backend and its version). Use it only when you truly
-need backend-specific behavior sg doesn't expose.
+Because the concrete backend types (`sg::backend::vulkan::vulkan_context`, …) are public and the
+`sg::context` handle *is* that object, you *can* recover the backend type — e.g.
+`dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get())`. That is a deliberate, unpoliced
+escape hatch: it works, and it is fully "you are on your own" territory (you have coupled your code
+to a specific backend and its version). Use it only when you truly need backend-specific behavior
+sg doesn't expose.
 
 A **blessed** middle-ground escape hatch is planned for sg: an API that hands back the raw
 underlying GPU handles (native device/buffer/… handles) **without** exposing the concrete backend

@@ -7,4 +7,5 @@ namespace sg::backend::vulkan
 {
 class vulkan_context;
 class vulkan_command_list;
+class vulkan_buffer;
 } // namespace sg::backend::vulkan

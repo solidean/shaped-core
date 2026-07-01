@@ -6,8 +6,7 @@ project(shaped-graphics-dx12 LANGUAGES CXX)
 # dependency, so it compiles anywhere the enclosing CMakeLists enables it (Windows only). Real
 # SDK detection/linking lands with the first buffer upload/download/copy milestone.
 add_library(shaped-graphics-dx12
-    src/shaped-graphics/backends/dx12/dx12_context.cc
-    src/shaped-graphics/backends/dx12/dx12_command_list.cc
+    src/shaped-graphics/backends/dx12/dx12.cc
 )
 
 target_sources(shaped-graphics-dx12
@@ -19,6 +18,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/fwd.hh
     src/shaped-graphics/backends/dx12/dx12_context.hh
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
+    src/shaped-graphics/backends/dx12/dx12_buffer.hh
 )
 
 target_compile_features(shaped-graphics-dx12 PUBLIC cxx_std_23)

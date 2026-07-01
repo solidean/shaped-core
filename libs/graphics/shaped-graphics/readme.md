@@ -22,10 +22,11 @@ upload/download/copy. See [docs/structure.md](docs/structure.md) for what is `[d
   like a span over mutable GPU-resident memory.
 - **No host-visible resources.** There are no CPU-mapped buffers/textures; host↔device transfer
   is a globally shared resource sg manages, driven through command lists.
-- **Backend bridge.** `sg::backend_context` / `sg::backend_command_list` / `sg::backend_buffer`
-  are pure-virtual interfaces; `sg::context` validates generically, then delegates. Validation is
-  written once and inherited by every backend. Cheap resource metadata (a buffer's size/usage)
-  lives inline in the sg type, above the bridge, for branch-free access.
+- **Abstract interfaces, backends derive directly.** `context`, `command_list`, and `buffer` are
+  abstract; a backend subclasses them directly (`sg::backend::vulkan::vulkan_context : sg::context`)
+  — no separate bridge/impl layer. Cheap shared metadata (a buffer's size/usage) lives in the base
+  as protected members with non-virtual accessors, so reading it costs no virtual call and every
+  backend inherits it.
 - **sg does not depend on the backends.** The dependency arrow points one way (backends → sg).
   There is no `sg::create_context` in the core; each backend library instead exposes an
   `sg::create_<backend>_context(config)` factory (e.g. `sg::create_vulkan_context`) with its own
@@ -42,9 +43,8 @@ Source lives in `src/shaped-graphics/`:
 
 | Path                | What's in it |
 |---------------------|--------------|
-| (root)              | `fwd.hh` (fwd decls + `*_handle` typedefs), `all.hh`, `types.hh`, `context`, `command_list`, `buffer` |
-| `backend/`          | the pure-virtual bridge: `backend_context`, `backend_command_list`, `backend_buffer` |
-| `backends/<api>/`   | concrete per-backend static libraries (`dx12/`, `vulkan/`), each smurf-named in `sg::backend::<api>` |
+| (root)              | `fwd.hh` (fwd decls + `*_handle` typedefs), `all.hh`, `types.hh`, and the abstract `context` / `command_list` / `buffer` |
+| `backends/<api>/`   | concrete per-backend static libraries (`dx12/`, `vulkan/`) that subclass the abstract types, each smurf-named in `sg::backend::<api>` |
 
 ## Building & testing
 

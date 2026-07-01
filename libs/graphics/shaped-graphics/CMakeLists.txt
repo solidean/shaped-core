@@ -24,11 +24,6 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/buffer.hh
-
-    src/shaped-graphics/backend/fwd.hh
-    src/shaped-graphics/backend/backend_context.hh
-    src/shaped-graphics/backend/backend_command_list.hh
-    src/shaped-graphics/backend/backend_buffer.hh
 )
 
 target_compile_features(shaped-graphics PUBLIC cxx_std_23)

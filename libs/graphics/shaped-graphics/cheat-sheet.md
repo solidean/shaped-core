@@ -45,33 +45,30 @@ sg::create_vulkan_context(vulkan_config = {})      // -> context_handle         
 sg::create_dx12_context(dx12_config = {})          // -> context_handle         [stub]
 ```
 
-## command_list — records GPU work  (stubbed)
+## command_list — records GPU work  (abstract)
 
 ```cpp
 #include <shaped-graphics/command_list.hh>
-sg::command_list(std::shared_ptr<sg::backend_command_list>)  // wraps a backend command list
-// recording API (copy/upload/download buffer, ...) lands with the first milestone
+// abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
+// recording API (copy/upload/download buffer, ...) — pure-virtual — lands with the first milestone
 ```
 
-## buffer — GPU-resident, immutable shape
+## buffer — GPU-resident, immutable shape  (abstract)
 
 ```cpp
 #include <shaped-graphics/buffer.hh>
-sg::buffer(size_in_bytes, usage, shared_ptr<backend_buffer>)  // shape inline; backend owns the resource
+// abstract; a backend subclasses it. protected ctor: buffer(size_in_bytes, usage)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
+// shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 ```
 
-## backend bridge (interfaces)
+## backends — subclass the abstract sg types
 
 ```cpp
-#include <shaped-graphics/backend/backend_context.hh>
-#include <shaped-graphics/backend/backend_command_list.hh>
-#include <shaped-graphics/backend/backend_buffer.hh>
-sg::backend_context        // pure-virtual; kind() = 0; one concrete impl per backend
-sg::backend_command_list   // pure-virtual; recording contract per backend
-sg::backend_buffer         // pure-virtual; the GPU resource an sg::buffer fronts
-// concrete impls: sg::backend::dx12::dx12_context / ::dx12_command_list  (+ vulkan)
-// creation: sg::create_dx12_context / sg::create_vulkan_context (in the backend headers)
-// escape hatch: dynamic_cast a bridge object back to its sg::backend::<api>::* type — "here be dragons"
+// context/command_list/buffer are abstract; backends derive directly (no separate bridge layer):
+sg::backend::dx12::dx12_context   : sg::context        // + dx12_command_list, dx12_buffer
+sg::backend::vulkan::vulkan_context : sg::context      // + vulkan_command_list, vulkan_buffer
+// creation: sg::create_dx12_context / sg::create_vulkan_context  (declared in the backend headers)
+// escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"
 ```

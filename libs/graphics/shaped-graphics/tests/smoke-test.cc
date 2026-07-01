@@ -9,23 +9,24 @@ static_assert(std::is_same_v<sg::context_handle, std::shared_ptr<sg::context>>);
 static_assert(std::is_same_v<sg::command_list_handle, std::shared_ptr<sg::command_list>>);
 static_assert(std::is_same_v<sg::buffer_handle, std::shared_ptr<sg::buffer>>);
 
-// Most of sg is stubbed with CC_UNREACHABLE — those bodies abort by design, so these tests only
-// touch the parts that are actually implemented (value types, enums, type identities) and never
-// call a stubbed entry point.
+// context/command_list/buffer are abstract interfaces backends derive from; context is
+// non-instantiable (pure-virtual factories), and the recording/creation entry points are stubbed
+// with CC_UNREACHABLE (they abort by design). So these tests only touch the implemented parts —
+// here, the shape metadata the buffer base carries — via a minimal concrete subclass.
 
 namespace
 {
-// Minimal concrete backend_buffer so the shape test can build a buffer without a real backend.
-struct dummy_backend_buffer final : sg::backend_buffer
+struct test_buffer final : sg::buffer
 {
+    test_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) : sg::buffer(size_in_bytes, usage) {}
 };
 } // namespace
 
 TEST("sg smoke - buffer shape")
 {
-    // buffer keeps its shape metadata inline (real), fronting a backend-owned GPU resource.
-    auto const b = sg::buffer(256, sg::buffer_usage::vertex | sg::buffer_usage::copy_dst,
-                              std::make_shared<dummy_backend_buffer>());
+    // The shape metadata lives in the buffer base (protected, inline accessors); a real backend
+    // buffer inherits exactly this.
+    auto const b = test_buffer(256, sg::buffer_usage::vertex | sg::buffer_usage::copy_dst);
     CHECK(b.size_in_bytes() == 256);
     CHECK(sg::has_flag(b.usage(), sg::buffer_usage::vertex));
     CHECK(sg::has_flag(b.usage(), sg::buffer_usage::copy_dst));

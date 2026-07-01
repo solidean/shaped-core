@@ -1,7 +1,6 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
-#include <shaped-graphics/backend/fwd.hh>
 
 #include <memory>
 
@@ -17,9 +16,8 @@ class context;
 class command_list;
 class buffer;
 
-/// A `*_handle` is a std::shared_ptr to an sg type. `context` and `command_list` are the
-/// mutable drivers; `buffer` (and later `texture`) handles are shared-immutable views over
-/// GPU-resident data — the shape is fixed, the underlying GPU memory is not.
+/// A `*_handle` is a std::shared_ptr to an sg type. context/command_list/buffer are abstract
+/// interfaces; a backend subclasses them directly and you hold the base type through the handle.
 ///
 /// std::shared_ptr is deliberate for now; a future `cc::shared_ptr` would replace it (see the
 /// sg coding guidelines' note on surfacing that clean-core extension).
