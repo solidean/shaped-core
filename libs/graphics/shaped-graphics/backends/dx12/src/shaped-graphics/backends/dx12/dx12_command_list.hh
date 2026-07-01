@@ -6,13 +6,9 @@
 
 namespace sg::backend::dx12
 {
-/// DirectX 12 implementation of sg::command_list. Owns its allocator and graphics command list and
-/// is handed out already recording (record once, submit once — not reused). The concrete recording
-/// methods (copy/upload/download buffer, ...) land here with the first milestone.
-///
-/// A command list is consumed by submit/drop or simply destroyed on scope exit; single-submit and
-/// single-drop are structural (the owning unique_ptr is moved in), so no lifecycle flags are needed.
-/// The _ctx backref is where future resource-tracking teardown will unwind on destruction.
+/// DirectX 12 implementation of sg::command_list. Owns its allocator and graphics command list,
+/// handed out already recording. Recording methods (copy/upload/download buffer, ...) land here with
+/// the first milestone.
 class dx12_command_list final : public sg::command_list
 {
 public:
@@ -21,7 +17,7 @@ public:
     {
     }
 
-    dx12_context& _ctx; // creating context; must outlive this command list (global lifetime invariant)
+    dx12_context& _ctx; // creating context — outlives this list
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;
 };

@@ -11,29 +11,18 @@
 
 namespace sg::backend::dx12
 {
-/// Per-backend creation config for the DirectX 12 context. Each flag is independent: enabling the
-/// debug layer does not force WARP, and WARP does not imply the debug layer. This is why context
-/// creation lives in the backend rather than in sg — each backend takes its own config type.
+/// Creation config for the dx12 context. The two flags are independent.
 struct dx12_config
 {
-    /// Enable the D3D12 debug layer (validation) before device creation. Best-effort: if the layer
-    /// isn't installed (Graphics Tools feature absent), creation proceeds without it.
+    /// Enable the D3D12 debug/validation layer. Best-effort — skipped if it isn't installed.
     bool enable_debug_layer = false;
 
-    /// Force the WARP software adapter instead of a hardware GPU. WARP runs headless, so it is the
-    /// CI-friendly path; hardware is the default.
+    /// Use the WARP software adapter instead of a hardware GPU. Runs headless (good for CI).
     bool use_warp = false;
 };
 
-/// DirectX 12 implementation of sg::context. Backends derive directly from the sg interfaces —
-/// there is no separate bridge layer — and have full access to the protected state. Smurf-named
-/// and namespaced (sg::backend::dx12) on purpose; see the sg coding guidelines. Members are public
-/// and low-encapsulation.
-///
-/// The virtual sg::context methods are thin forwarders to backend-typed (create_dx12_*) methods:
-/// downstream code that stays on dx12 works with dx12_* types directly, and the backend body never
-/// re-casts back down from the abstract base. The heavier bodies live in dx12.cc; the ctor and the
-/// one-line forwarders stay inline (they don't earn a .cc entry).
+/// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
+/// backend-typed create_dx12_* methods — prefer those when you hold a dx12_context. Bodies in dx12.cc.
 class dx12_context final : public sg::context
 {
 public:
@@ -45,7 +34,7 @@ public:
     {
     }
 
-    ~dx12_context() override { shutdown(); } // ensures teardown before the base dtor's shut-down assert
+    ~dx12_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
 
     // backend-typed API — prefer these when you already hold a dx12_context
 
@@ -54,10 +43,8 @@ public:
     void submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
-    // sg::context overrides — thin forwarders to the backend-typed methods above. The create ones use
-    // result's explicit converting constructor (dx12_buffer_handle -> buffer_handle, and the unique_ptr
-    // up-cast). The consuming ones re-wrap the moved-out pointer as the backend type — backends never
-    // mix, so the static_cast is sound.
+    // sg::context overrides — forward to the backend-typed methods above. The static_cast down is
+    // sound: backends never mix.
 
     [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> create_command_list() override
     {
@@ -89,12 +76,7 @@ public:
 
 namespace sg
 {
-/// Creates a context on the DirectX 12 backend. Backend factories deliberately live in the `sg`
-/// namespace (not the backend's) so they share a discoverable `sg::create_*_context` prefix while
-/// taking a backend-specific config. sg itself neither depends on nor knows this backend; only a
-/// caller that links the dx12 backend library sees this factory.
-///
-/// Returns an error (never asserts) on environment failure — no adapter, device creation refused,
-/// etc. — so callers can fall back or surface it. The device-creation body lives in dx12.cc.
+/// Creates a dx12-backed sg::context. Returns an error (never asserts) on environment failure —
+/// no adapter, device creation refused, etc. Only callers that link the dx12 backend see it.
 [[nodiscard]] cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config = {});
 } // namespace sg

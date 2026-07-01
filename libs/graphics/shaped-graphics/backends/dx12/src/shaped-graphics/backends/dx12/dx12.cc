@@ -1,7 +1,5 @@
-// Implementation TU for the dx12 backend static library. The context/command_list/buffer types and
-// the one-line virtual forwarders are defined inline in the headers (backends favor readable,
-// low-encapsulation code); the heavier backend-typed bodies — device bring-up, resource creation,
-// submit/drop, shutdown — live here.
+// dx12 backend implementation: the heavier backend-typed bodies — device bring-up, resource
+// creation, submit/drop, shutdown. Small forwarders and ctors stay inline in the headers.
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
@@ -23,8 +21,7 @@ cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command
         FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandList failed");
 
-    // Handed out already recording: a command list is created open, and that is exactly the state we
-    // want (record once, submit once). No Close() here — submit closes it.
+    // Left open (recording); submit closes it.
     return std::make_unique<dx12_command_list>(*this, cc::move(allocator), cc::move(list));
 }
 
@@ -34,8 +31,7 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
 
     ComPtr<ID3D12Resource> resource;
 
-    // An empty buffer allocates nothing — like an empty span. D3D12 rejects a zero-width committed
-    // resource anyway, so a null resource is the correct representation.
+    // Empty buffer: no allocation (D3D12 rejects a zero-width resource); null is the representation.
     if (size_in_bytes > 0)
     {
         D3D12_HEAP_PROPERTIES heap = {};
@@ -70,32 +66,26 @@ void dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> c
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
 
-    // Close recording, then execute on the direct queue. NOTE: no completion fence yet — proper
-    // GPU-side synchronization lands with the submission/sync milestone. Today's lists carry no real
-    // work, so executing and then destroying the list (below) without a wait is safe in practice. A
-    // Close failure here is device-loss territory (exceptional tier), handled with that milestone.
+    // Close, then execute. NOTE: no fence yet — destroying the list right after is only safe because
+    // today's lists carry no real work. Fencing + device-loss handling land with the sync milestone.
     HRESULT hr = cmd->_list->Close();
     CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");
 
     ID3D12CommandList* lists[] = {cmd->_list.Get()};
     _queue->ExecuteCommandLists(1, lists);
-
-    // cmd is destroyed as it leaves scope — record once, submit once.
 }
 
 void dx12_context::drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot drop a null command list");
-    // The explicit form of letting the list go out of scope: cmd is destroyed here. Future
-    // resource-tracking / live-object unwind hooks into the destructor, the single teardown point.
+    // cmd is destroyed here — the explicit form of letting it leave scope. Teardown lives in the dtor.
 }
 
 void dx12_context::shutdown()
 {
     if (_is_shut_down)
         return;
-    // Future: release tracked live objects here. For now drop the device-level COM objects so the
-    // context truly holds nothing after shutdown; the ComPtrs would release on destruction anyway.
+    // Release the device-level COM objects (live-object tracking will unwind here later too).
     _queue.Reset();
     _device.Reset();
     _factory.Reset();
@@ -112,8 +102,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     UINT factory_flags = 0;
     if (config.enable_debug_layer)
     {
-        // Best-effort: the debug layer needs the "Graphics Tools" optional feature. If it isn't
-        // installed (common on headless CI), skip validation rather than failing device creation.
+        // Best-effort: needs the "Graphics Tools" feature; skip validation if it's absent, don't fail.
         ComPtr<ID3D12Debug> debug;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
         {
@@ -142,7 +131,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
             if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
                 continue; // WARP is opt-in via use_warp, not a silent fallback.
 
-            // Probe with a null device out-param: succeeds if this adapter supports D3D12 at FL 11_0.
+            // Null out-param probes D3D12 support (FL 11_0) without creating a device.
             if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
             {
                 found = true;

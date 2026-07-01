@@ -6,10 +6,8 @@
 
 namespace sg::backend::dx12
 {
-/// DirectX 12 implementation of sg::buffer. Derives directly and inherits the protected shape
-/// members (_size_in_bytes / _usage) from the base; the ID3D12Resource lives here. The resource is
-/// GPU-resident (default heap) — sg exposes no host-visible mapping — and is null for an empty
-/// (size 0) buffer, which allocates nothing.
+/// DirectX 12 implementation of sg::buffer. Holds the ID3D12Resource (GPU-resident, default heap);
+/// null for an empty (size 0) buffer.
 class dx12_buffer final : public sg::buffer
 {
 public:
@@ -18,7 +16,7 @@ public:
     {
     }
 
-    dx12_context& _ctx; // creating context; must outlive this buffer (global lifetime invariant)
+    dx12_context& _ctx; // creating context — outlives this buffer
     ComPtr<ID3D12Resource> _resource;
 };
 } // namespace sg::backend::dx12
