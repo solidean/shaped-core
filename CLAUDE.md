@@ -35,6 +35,16 @@ One-liner per library (more will be added over time):
   (`vec`/`pos`/`comp`, with `bivec`/`mat`/`quat`/transforms/geometry/mesh
   planned). Namespace `tg`. Depends on clean-core. Early stage — see its
   [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
+* **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`,
+  `command_list`, GPU resources, over per-backend static libs (dx12/vulkan tier 1;
+  metal/webgpu tier 2; opengl/webgl legacy). Namespace `sg`. Depends on clean-core +
+  typed-geometry. Early stage (stubs) — see [docs/graphics.md](docs/graphics.md).
+* **`libs/graphics/shaped-rendering`** — render routines/helpers on top of sg
+  (mipmap gen, tonemapping, texture compression, …). Namespace `sr`. Depends on
+  shaped-graphics. Early-stage skeleton.
+* **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization
+  renderer with a dev-friendly API. Namespace `sv`. Depends on shaped-rendering.
+  Early-stage skeleton.
 
 Supporting directories:
 
@@ -49,7 +59,9 @@ Dependency direction: a library depends only on lower libraries (plus its own
 external deps). No upward or cyclic dependencies.
 
 ```text
-nexus    typed-geometry
+shaped-viewer → shaped-rendering → shaped-graphics (+ backends)
+                                          ↓
+nexus    typed-geometry  ←────────────────┘
    ↓         ↓
      clean-core
         ↓

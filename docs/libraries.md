@@ -73,14 +73,53 @@ What exists today (the scalar seam, the linalg core, and the first geometry
 primitives) and the full roadmap live in
 [structure.md](../libs/base/typed-geometry/docs/structure.md).
 
+## graphics
+
+The graphics stack, layered on top of `base`. See [graphics.md](graphics.md) for the family
+overview. Early-stage: docs + buildable skeletons, with sg's core types and dx12/vulkan backends
+currently stubbed.
+
+### shaped-graphics — namespace `sg` — depends on clean-core, typed-geometry
+
+[readme](../libs/graphics/shaped-graphics/readme.md) · [docs](../libs/graphics/shaped-graphics/docs/_index.md)
+
+The graphics-API wrapper: a small, backend-agnostic surface — `context`, `command_list`, and
+GPU resource types (`buffer` today; `texture`, `pipeline`, … to come) — over concrete graphics
+backends. Backends are **separate static libraries**, smurf-named and namespaced
+(`sg::backend::dx12::dx12_context`), one per API: dx12/vulkan (tier 1), metal/webgpu (tier 2),
+opengl/webgl (legacy). A pure-virtual backend bridge (`backend_context`/`backend_command_list`)
+lets the sg core run generic validation before delegating. Resources are shared-immutable and
+handed out as `xyz_handle` (`= std::shared_ptr<sg::xyz>`); there are no host-visible resources —
+PCIe transfer is a globally shared resource sg manages.
+
+### shaped-rendering — namespace `sr` — depends on shaped-graphics
+
+[readme](../libs/graphics/shaped-rendering/readme.md) · [docs](../libs/graphics/shaped-rendering/docs/_index.md)
+
+Render routines and helpers on top of sg — the reusable building blocks of a renderer (mipmap
+generation, texture compression, tonemapping, …). Early-stage skeleton.
+
+### shaped-viewer — namespace `sv` — depends on shaped-rendering
+
+[readme](../libs/graphics/shaped-viewer/readme.md) · [docs](../libs/graphics/shaped-viewer/docs/_index.md)
+
+The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API,
+serving Shaped Code's visualization needs. The top of the graphics stack. Early-stage skeleton.
+
 ## Dependency graph
 
 ```text
-nexus    typed-geometry
-   ↓         ↓
-     clean-core
-        ↓
-  (no dependencies)
+shaped-viewer
+     ↓
+shaped-rendering
+     ↓
+shaped-graphics ──→ backends (dx12, vulkan, metal, webgpu, opengl, webgl)
+     ↓
+typed-geometry     nexus
+        ↓            ↓
+        └─ clean-core ┘
+              ↓
+        (no dependencies)
 ```
 
 For the build & test workflow shared by all libraries, see

@@ -39,6 +39,12 @@ add_subdirectory(libs/base/clean-core)
 add_subdirectory(libs/base/nexus)
 add_subdirectory(libs/base/typed-geometry)
 
+# graphics stack: shaped-graphics (sg) -> shaped-rendering (sr) -> shaped-viewer (sv).
+# Added in dependency order; sg pulls in its per-backend static libraries itself.
+add_subdirectory(libs/graphics/shaped-graphics)
+add_subdirectory(libs/graphics/shaped-rendering)
+add_subdirectory(libs/graphics/shaped-viewer)
+
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
 # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
 sc_finalize_web_runners()
