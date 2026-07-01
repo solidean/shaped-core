@@ -60,7 +60,9 @@ if(NOT EMSCRIPTEN)
     list(APPEND _sg_backends shaped-graphics-vulkan)
 endif()
 
-# Test executable
+# Test executable. This binary stays backend-agnostic (the abstract sg surface only). Backend-
+# specific tests live with their backend as their own *-test binary (see backends/dx12/tests), so
+# they are naturally guarded to the platform where that backend builds.
 add_executable(shaped-graphics-test
     tests/main.cc
     tests/smoke-test.cc

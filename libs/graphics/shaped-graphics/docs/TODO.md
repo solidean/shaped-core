@@ -13,6 +13,8 @@ Running list of known follow-ups. Bigger design intent lives in
 - **Blessed escape hatch:** add an sg API that returns raw underlying GPU handles without exposing
   the concrete backend types, so callers don't reach for `dynamic_cast` to a `sg::backend::*` type.
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
-- **SDK detection:** dx12/vulkan backends are pure stubs with no SDK dependency; add real
-  `find_package(Vulkan)` / Windows-SDK detection and availability gating when (2) lands.
+- **SDK detection:** dx12 now links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) directly off
+  the default lib path — good enough on the gated Windows path, but there's no explicit SDK
+  presence/version check yet. vulkan is still a stub; add `find_package(Vulkan)` + availability
+  gating when it gets a real implementation.
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

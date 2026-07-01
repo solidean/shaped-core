@@ -4,9 +4,9 @@
 #include <memory>
 #include <type_traits>
 
-// The public `*_handle` typedefs are std::shared_ptr to the sg types.
+// The shared `*_handle` typedefs are std::shared_ptr to the sg types. command_list has no handle:
+// it is a move-only temporary held by std::unique_ptr<sg::command_list> and passed by reference.
 static_assert(std::is_same_v<sg::context_handle, std::shared_ptr<sg::context>>);
-static_assert(std::is_same_v<sg::command_list_handle, std::shared_ptr<sg::command_list>>);
 static_assert(std::is_same_v<sg::buffer_handle, std::shared_ptr<sg::buffer>>);
 
 // context/command_list/buffer are abstract interfaces backends derive from; context is
@@ -31,6 +31,13 @@ TEST("sg smoke - buffer shape")
     CHECK(sg::has_flag(b.usage(), sg::buffer_usage::vertex));
     CHECK(sg::has_flag(b.usage(), sg::buffer_usage::copy_dst));
     CHECK(!sg::has_flag(b.usage(), sg::buffer_usage::index));
+}
+
+TEST("sg smoke - empty buffer shape")
+{
+    // Size 0 is valid — an empty buffer, like an empty span. The base only rejects negative sizes.
+    auto const b = test_buffer(0, sg::buffer_usage::none);
+    CHECK(b.size_in_bytes() == 0);
 }
 
 TEST("sg smoke - backend kind")

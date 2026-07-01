@@ -4,8 +4,8 @@
 
 #include <memory>
 
-/// Aggregate forward declarations for shaped-graphics, plus the `*_handle` shared-pointer
-/// typedefs. Include this when a fwd decl is all you need.
+/// Forward declarations and `*_handle` typedefs for shaped-graphics. Include when a forward decl is
+/// all you need.
 
 namespace sg
 {
@@ -16,12 +16,9 @@ class context;
 class command_list;
 class buffer;
 
-/// A `*_handle` is a std::shared_ptr to an sg type. context/command_list/buffer are abstract
-/// interfaces; a backend subclasses them directly and you hold the base type through the handle.
-///
-/// std::shared_ptr is deliberate for now; a future `cc::shared_ptr` would replace it (see the
-/// sg coding guidelines' note on surfacing that clean-core extension).
+/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type. context and buffer get handles;
+/// command_list does not — it's a single-use temporary held by std::unique_ptr, passed by reference.
+/// std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
-using command_list_handle = std::shared_ptr<command_list>;
 using buffer_handle = std::shared_ptr<buffer>;
 } // namespace sg

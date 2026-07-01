@@ -4,12 +4,11 @@
 
 namespace sg
 {
-/// Records GPU work for submission through its context. Mutable and single-threaded: a
-/// command_list is recorded by one thread at a time.
+/// Records GPU work, submitted through the context that created it. Single-use and single-threaded:
+/// recorded by one thread, then submitted or dropped once.
 ///
-/// This is an abstract interface: a backend subclasses it directly (e.g.
-/// sg::backend::vulkan::vulkan_command_list). The recording API (copy_buffer, upload_buffer,
-/// download_buffer, ...) lands here as pure-virtual methods with the first milestone.
+/// Abstract: a backend subclasses it. The recording API (copy/upload/download buffer, ...) lands
+/// here with the first milestone.
 class command_list
 {
 public:

@@ -279,6 +279,17 @@ m.try_lock([](auto& d){ ... });           // -> cc::optional<R> (or bool for voi
 m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then operate
 ```
 
+## Platform
+
+```cpp
+#include <clean-core/platform/win32_sanitized.hh> // safe to include ANYWHERE; on Windows pulls in
+                                                   // <Windows.h> with WIN32_LEAN_AND_MEAN + NOMINMAX,
+                                                   // elsewhere expands to nothing. The sanctioned
+                                                   // way to reach windows.h in shaped-core.
+#include <clean-core/platform/native.hh>
+cc::demangle_symbol(symbol)                        // cc::string — human-readable C++ symbol name
+```
+
 ## Gotchas
 
 - **Assertions are on in debug & relwithdebinfo, off in release.** The default

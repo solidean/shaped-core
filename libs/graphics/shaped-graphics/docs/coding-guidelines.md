@@ -151,3 +151,67 @@ A **blessed** middle-ground escape hatch is planned for sg: an API that hands ba
 underlying GPU handles (native device/buffer/… handles) **without** exposing the concrete backend
 *types*. Prefer that once it exists; reserve the `dynamic_cast`-to-backend-type route for the rare
 cases the blessed hatch doesn't cover.
+
+## Backends expose backend-typed create methods; the virtuals are thin forwarders
+
+The abstract `sg::context` methods (`create_command_list`, `create_buffer`, `submit_command_list`,
+…) are implemented in a backend as **one-line forwarders** to **non-virtual, backend-typed**
+methods: `dx12_context::create_dx12_buffer` returns a `dx12_buffer_handle`;
+`create_dx12_command_list` returns `std::unique_ptr<dx12_command_list>`. The `override` simply calls
+the backend-typed method and up-casts the result (`dx12_buffer_handle → buffer_handle`,
+`unique_ptr<dx12_command_list> → unique_ptr<command_list>`).
+
+- **Prefer the backend-typed method** whenever you already hold the concrete `dx12_context` (e.g.
+  inside the backend or in a backend test). You get the concrete type back with **no downcast**.
+- **The heavy body lives once**, in the backend-typed method (in the `.cc`); the forwarder is
+  trivial and stays inline in the header.
+
+**Why** (not obvious): the prototype found this the favored pattern *everywhere*. Backends must
+never be mixed — a `dx12_context` only ever deals in `dx12_*` objects — so routing through the
+concrete types removes a swarm of `static_cast`s that a "virtual does everything on the base types"
+design forces, and keeps each backend readable in its own vocabulary. The virtual layer exists only
+for callers who genuinely hold the abstract `sg::context`.
+
+## Handles: shared for resources, `unique_ptr` for command lists, references to operate
+
+- **Resources are shared** — `buffer` (and coming `texture`) use `buffer_handle`
+  (`std::shared_ptr`), plus a **backend-typed** handle (`dx12_buffer_handle`) for backend code.
+- **Command lists are move-only temporaries** — `record once, submit once, not reused`. They are
+  held by **`std::unique_ptr<command_list>`** (polymorphic, so not `cc::unique_ptr`), and there is
+  **deliberately no `command_list_handle` typedef** and no backend-typed command-list handle. The
+  `unique_ptr` lives in a handful of places; everything else takes the list **by reference**
+  (`command_list&`), or uses `auto`.
+
+**Why** (not obvious): sharing is the right model for GPU resources referenced by several in-flight
+command lists; a command list is a throwaway recording owned by one place, so a unique, move-only
+owner is both cheaper and more honest than a shared handle. Not minting a typedef for the rare
+`unique_ptr` keeps the ownership visible at the few sites that hold it.
+
+## Context outlives its objects; explicit `drop`/`shutdown` unwind bookkeeping
+
+- **Global lifetime invariant:** a `context` must outlive **every** command list and resource it
+  created. Backend objects hold a **literal backref** (`dx12_context&`, not a `weak_ptr`) to their
+  creating context and use it on teardown. If violating this ever becomes a real problem we can
+  revisit `weak_ptr`; the prototype never hit it.
+- **`submit`/`drop` consume the command list.** Both take it **by value as a
+  `std::unique_ptr<command_list>`** — you move it in. That makes *submit once* and *drop once*
+  structural (the list is gone afterward, no flags to track). An explicit
+  `ctx.drop_command_list(std::move(cmd))` is exactly "let it go out of scope now": both destroy the
+  list, and the **destructor** is the single teardown point where future resource-tracking unwinds.
+- **`context::shutdown()` is virtual and idempotent.** A context **must be shut down before
+  destruction**; the base `~context` asserts it, and each backend destructor calls `shutdown()` so
+  the ordinary destruction path satisfies the invariant. Each backend **overrides** `shutdown()` to
+  release its own resources — **duplicating the idempotency guard across backends is fine** (there is
+  no separate `on_shutdown` hook).
+
+**Why** (not obvious): moving the list into `submit`/`drop` lets the type system enforce
+single-use instead of runtime flags, and collapses "explicit drop" and "scope exit" onto one code
+path (destruction). The backref + "context outlives its objects" rule is what makes the destructor's
+teardown safe to run without a `weak_ptr` check on every operation.
+
+## Resources may be empty (size 0)
+
+A `buffer` of size 0 is **valid** — an empty buffer, like an empty `span`/`vector`. It allocates
+**no** GPU storage (dx12 can't create a zero-width committed resource anyway; the backend keeps a
+null underlying resource). Only a **negative** size is programmer misuse and asserts. Don't add a
+"non-empty" precondition to resource creation; empty is a normal, representable state.

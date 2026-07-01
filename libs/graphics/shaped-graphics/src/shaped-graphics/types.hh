@@ -6,11 +6,9 @@
 
 namespace sg
 {
-/// A coarse, informational tag for the kind of backend behind a context — used mainly to
-/// interpret raw underlying handles obtained through escape hatches. It is **not** the concrete
-/// backend type and **not** exhaustive: sg does not assume it knows every backend (a debug, cpu,
-/// or remote implementation may exist), so don't switch on it as if it were a closed set. The
-/// listed kinds are the currently-planned ones; more will be added.
+/// Coarse tag for the kind of backend behind a context — mainly to interpret raw handles from
+/// escape hatches. Not the concrete type, and not exhaustive (debug/cpu/remote backends may exist),
+/// so don't switch on it as a closed set. More kinds will be added.
 enum class backend_kind
 {
     dx12,
@@ -21,8 +19,8 @@ enum class backend_kind
     webgl,
 };
 
-/// How a buffer's GPU-resident storage may be used. Bit flags — combine with `|`, test with
-/// `has_flag`. Migrates to `cc::flags` once that clean-core type lands.
+/// How a buffer's storage may be used. Bit flags — combine with `|`, test with `has_flag`.
+/// Migrates to `cc::flags` once that clean-core type lands.
 enum class buffer_usage : u32
 {
     none = 0,

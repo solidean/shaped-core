@@ -3,8 +3,9 @@
 Graphics-API wrapper. Namespace `sg`. Depends on clean-core + typed-geometry. Headers are
 included by full path from `src/`: `#include <shaped-graphics/<name>.hh>`.
 
-> **Scope note:** this sheet covers the small surface that exists today. Most of it is stubbed
-> (`CC_UNREACHABLE("not implemented yet")`) — the shapes are real, the implementations are not.
+> **Scope note:** this sheet covers the small surface that exists today. The **dx12** backend is
+> real (device / command list / GPU buffer); the sg core abstract API and the **vulkan** backend are
+> still stubs. Fallible creates return `cc::result`.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 How to read this: each block leads with the include; one symbol per line with a trailing
@@ -16,9 +17,10 @@ comment giving the return type / intuition.
 
 ```cpp
 #include <shaped-graphics/fwd.hh>
-sg::context_handle        // std::shared_ptr<sg::context>        — mutable driver
-sg::command_list_handle   // std::shared_ptr<sg::command_list>   — mutable driver
+sg::context_handle        // std::shared_ptr<sg::context>        — shared, long-lived driver
 sg::buffer_handle         // std::shared_ptr<sg::buffer>         — shared-immutable resource
+// command_list has NO handle: it's a move-only temporary — std::unique_ptr<sg::command_list>,
+// passed around by reference (command_list&). record once, submit once, not reused.
 ```
 
 ## Enums
@@ -31,18 +33,25 @@ a | b                     // combine usages
 sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 ```
 
-## context — mutable driver / factory  (stubbed)
+## context — mutable driver / factory
 
 ```cpp
 #include <shaped-graphics/context.hh>
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
-ctx.create_command_list()                          // -> command_list_handle   [stub]
-ctx.create_buffer(size_in_bytes, usage)            // -> buffer_handle          [stub]
+ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
+ctx.create_buffer(size_in_bytes, usage)            // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
+ctx.submit_command_list(std::move(cmd))            // void — consumes cmd (submit once; gone after)
+ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope
+ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
+ctx.is_shut_down()                                 // bool
+// invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
 // you never call sg::create_context — there is none. each backend library provides the factory:
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-sg::create_vulkan_context(vulkan_config = {})      // -> context_handle         [stub]
+sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>  [stub]
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
-sg::create_dx12_context(dx12_config = {})          // -> context_handle         [stub]
+sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
+// dx12_config { bool enable_debug_layer=false; bool use_warp=false; }  (independent flags)
+// create errors on environment failure (no adapter, device refused); misuse asserts
 ```
 
 ## command_list — records GPU work  (abstract)
@@ -50,6 +59,7 @@ sg::create_dx12_context(dx12_config = {})          // -> context_handle         
 ```cpp
 #include <shaped-graphics/command_list.hh>
 // abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
+// -> std::unique_ptr; passed by reference (command_list&). record once, submit once, not reused.
 // recording API (copy/upload/download buffer, ...) — pure-virtual — lands with the first milestone
 ```
 
@@ -57,7 +67,7 @@ sg::create_dx12_context(dx12_config = {})          // -> context_handle         
 
 ```cpp
 #include <shaped-graphics/buffer.hh>
-// abstract; a backend subclasses it. protected ctor: buffer(size_in_bytes, usage)
+// abstract; a backend subclasses it. protected ctor: buffer(size_in_bytes, usage)  (size 0 = empty)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
@@ -70,5 +80,9 @@ b.usage()                          // sg::buffer_usage
 sg::backend::dx12::dx12_context   : sg::context        // + dx12_command_list, dx12_buffer
 sg::backend::vulkan::vulkan_context : sg::context      // + vulkan_command_list, vulkan_buffer
 // creation: sg::create_dx12_context / sg::create_vulkan_context  (declared in the backend headers)
+// backend-typed API (no downcasts when you hold the concrete context):
+dctx.create_dx12_buffer(size, usage)      // -> cc::result<dx12_buffer_handle>  (shared_ptr<dx12_buffer>)
+dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_command_list>>
+// the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"
 ```

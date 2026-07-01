@@ -1,7 +1,7 @@
 #pragma once
 
-/// Full umbrella include for shaped-graphics' public surface (the backend static libraries add
-/// their own headers on top). Prefer including the specific header you need.
+/// Umbrella include for shaped-graphics' public surface (backends add their own headers). Prefer
+/// the specific header you need.
 
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/command_list.hh>

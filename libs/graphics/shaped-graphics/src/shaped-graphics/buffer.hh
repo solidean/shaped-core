@@ -5,15 +5,12 @@
 
 namespace sg
 {
-/// A GPU-resident buffer. Its shape — size and usage — is immutable, so a buffer behaves like
-/// a span over mutable GPU memory: it cannot be resized or repurposed, but its contents change
-/// through command lists. There is no host-visible mapping; transfers go through sg's managed
-/// PCIe path. Typically held via buffer_handle.
+/// A GPU-resident buffer with immutable shape (size + usage) — like a span over mutable GPU memory:
+/// contents change through command lists, but it can't be resized or repurposed. No host-visible
+/// mapping (transfers go through command lists). Size 0 is a valid empty buffer. Held via buffer_handle.
 ///
-/// This is an abstract interface: a backend subclasses it directly (e.g.
-/// sg::backend::vulkan::vulkan_buffer) and owns the actual GPU resource. The cheap shape metadata
-/// lives here in the base as protected members with non-virtual accessors, so reading it costs no
-/// virtual call and backends have full access to it — the coupling is intentional and fine.
+/// Abstract: a backend subclasses it and owns the GPU resource. Shape metadata lives here as
+/// protected members that backends read and set directly.
 class buffer
 {
 public:
@@ -28,8 +25,6 @@ public:
 protected:
     buffer(isize size_in_bytes, buffer_usage usage);
 
-    // Shape metadata, shared by every backend. Protected, not private: backends set and read it
-    // directly. sg is not defending these classes against their own subclasses.
     isize _size_in_bytes = 0;
     buffer_usage _usage = buffer_usage::none;
 };
