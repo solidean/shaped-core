@@ -90,8 +90,15 @@ texture              [planned]  GPU-resident images + views
 pipeline             [planned]  graphics/compute pipelines + shader modules
 sampler              [planned]
 swapchain / surface  [planned]  presentation
-sync / submission    [planned]  fences, queues, submit
+epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission fences, advance/retire,
+                                  deferred deletion + finalizers, allocator recycling (dx12 real; vulkan stub)
 ```
+
+The **epoch system** is the frame-level GPU-lifetime + CPU↔GPU sync mechanism: only the concept
+(`sg::epoch` / `sg::submission_token` and the `sg::context` contract) is shared; each backend
+realizes it (dx12 does; a backend may also uphold the contract without real in-flight tracking). It
+underpins safe resource reclamation and command-allocator recycling. See
+[concepts/epochs.md](concepts/epochs.md).
 
 ## Initial implementation order
 

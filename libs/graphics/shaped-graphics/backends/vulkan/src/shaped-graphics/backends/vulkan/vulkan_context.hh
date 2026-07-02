@@ -20,7 +20,7 @@ struct vulkan_config
 class vulkan_context final : public sg::context
 {
 public:
-    vulkan_context() : sg::context(sg::backend_kind::vulkan) {}
+    vulkan_context() : sg::context(sg::backend_kind::vulkan, sg::thread_model::single_threaded) {}
 
     ~vulkan_context() override { shutdown(); } // ensures teardown before the base dtor's shut-down assert
 
@@ -34,13 +34,27 @@ public:
         return cc::error("vulkan backend not implemented yet");
     }
 
-    void submit_command_list(std::unique_ptr<sg::command_list> cmd) override
+    sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         CC_UNREACHABLE("vulkan backend not implemented yet");
     }
 
     // vulkan creates no command lists yet, so nothing is ever dropped; the hook exists for the ABC.
     void drop_command_list(std::unique_ptr<sg::command_list> cmd) override {}
+
+    // Epoch contract — stubbed until the backend is real. A backend need not track real in-flight
+    // epochs; it just has to uphold the contract. These placeholders keep the sg interface complete.
+    [[nodiscard]] sg::epoch current_epoch() const override { return sg::epoch::invalid; }
+    [[nodiscard]] sg::epoch completed_epoch() const override { return sg::epoch::invalid; }
+    void advance_epoch(cc::optional<int> allowed_in_flight) override
+    {
+        CC_UNREACHABLE("vulkan backend not implemented yet");
+    }
+    void advance_epoch_and_wait_for_idle() override { CC_UNREACHABLE("vulkan backend not implemented yet"); }
+    void process_completed_epochs() override {}
+    void wait_for_epoch(sg::epoch e) override { CC_UNREACHABLE("vulkan backend not implemented yet"); }
+    void wait_for_next_inflight_epoch() override {}
+    [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override { return false; }
 
     // No backend resources to release yet; the base shutdown() (sets the flag) is sufficient.
 };

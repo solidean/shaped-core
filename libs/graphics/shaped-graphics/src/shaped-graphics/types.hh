@@ -19,6 +19,16 @@ enum class backend_kind
     webgl,
 };
 
+/// The threading guarantees a backend's context provides. Coarse for now; expected to gain nuance
+/// (e.g. whether concurrent command-list recording is allowed). See
+/// libs/graphics/shaped-graphics/docs/concepts/threading.md.
+enum class thread_model
+{
+    single_threaded, ///< every context operation must be externally synchronized to one thread at a time
+    multi_threaded,  ///< resource / command-list ops (create / submit / drop) are safe to call concurrently;
+                     ///< epoch management (advance, waits) and shutdown must be externally synchronized
+};
+
 /// How a buffer's storage may be used. Bit flags — combine with `|`, test with `has_flag`.
 /// Migrates to `cc::flags` once that clean-core type lands.
 enum class buffer_usage : u32

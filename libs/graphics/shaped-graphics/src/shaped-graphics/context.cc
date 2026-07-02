@@ -3,7 +3,7 @@
 
 namespace sg
 {
-context::context(backend_kind backend) : _backend(backend)
+context::context(backend_kind backend, thread_model threading) : _backend(backend), _thread_model(threading)
 {
 }
 

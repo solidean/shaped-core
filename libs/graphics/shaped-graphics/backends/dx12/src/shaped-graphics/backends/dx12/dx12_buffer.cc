@@ -1,10 +1,23 @@
-// dx12_buffer: GPU buffer creation. The buffer type itself is header-only (ctor + fields); the
-// allocating create path lives here.
+// dx12_buffer: GPU buffer creation and deferred-deletion destructor. The buffer type is otherwise
+// header-only (ctor + fields).
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
 namespace sg::backend::dx12
 {
+dx12_buffer::~dx12_buffer()
+{
+    // Stage the GPU handle + finalizers for deletion once the current epoch retires. Empty buffers
+    // (null resource) with no finalizers own nothing GPU-side and need no deferral.
+    if (_resource || !_finalizers.empty())
+    {
+        dx12_expiring_resource expiring;
+        expiring.resource = cc::move(_resource);
+        expiring.finalizers = cc::move(_finalizers);
+        _ctx.schedule_deferred_deletion(cc::move(expiring));
+    }
+}
+
 cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes, sg::buffer_usage usage)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
@@ -39,6 +52,6 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
             return dx12_error(hr, "ID3D12Device::CreateCommittedResource failed");
     }
 
-    return std::make_shared<dx12_buffer>(*this, size_in_bytes, usage, cc::move(resource));
+    return std::make_shared<dx12_buffer>(*this, current_epoch(), size_in_bytes, usage, cc::move(resource));
 }
 } // namespace sg::backend::dx12

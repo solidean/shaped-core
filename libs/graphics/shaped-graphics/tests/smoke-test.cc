@@ -1,6 +1,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 
@@ -8,6 +9,14 @@
 // it is a move-only temporary held by std::unique_ptr<sg::command_list> and passed by reference.
 static_assert(std::is_same_v<sg::context_handle, std::shared_ptr<sg::context>>);
 static_assert(std::is_same_v<sg::buffer_handle, std::shared_ptr<sg::buffer>>);
+
+// Epoch / submission-token sentinels: 64-bit, invalid == 0, and deliberately-high first values so a
+// zero-initialized token is obviously wrong; not_submitted is all-ones (always "not yet complete").
+static_assert(sizeof(sg::epoch) == 8 && sizeof(sg::submission_token) == 8);
+static_assert(std::uint64_t(sg::epoch::invalid) == 0 && std::uint64_t(sg::epoch::first) == 10000);
+static_assert(std::uint64_t(sg::submission_token::invalid) == 0);
+static_assert(std::uint64_t(sg::submission_token::first) == 30000);
+static_assert(std::uint64_t(sg::submission_token::not_submitted) == ~std::uint64_t(0));
 
 // context/command_list/buffer are abstract interfaces backends derive from; context is
 // non-instantiable (pure-virtual factories), and the recording/creation entry points are stubbed
