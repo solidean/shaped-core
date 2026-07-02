@@ -277,6 +277,35 @@ cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback
 m.try_lock([](auto& d){ ... });           // -> cc::optional<R> (or bool for void) — nullopt if not acquired
 m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then operate
+
+#include <clean-core/thread/thread.hh>
+cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux)
+
+#include <clean-core/thread/threaded_actor.hh> // actor with its own thread + typed message mailbox;
+                                                // messages processed one-at-a-time in global send order
+class uploader : public cc::threaded_actor_impl<upload_job, flush_cmd> {   // one on_message per type
+protected:
+    void on_message(upload_job j) override { ... }   // runs on the actor thread; state needs no locks
+    void on_message(flush_cmd) override { ... }
+    // opt-in hooks: actor_name(), on_thread_init(), on_thread_shutdown(), on_process()->bool
+};
+auto a = cc::make_and_start_threaded_actor<uploader>(args...); // -> cc::unique_ptr<threaded_actor<...>>
+a->enqueue_message(upload_job{...});      // -> bool (false if shutting down); a->shutdown() drains + joins
+auto impl = a->take_impl<uploader>();     // std::unique_ptr — only after shutdown; ~handle joins too
+
+// Unthreaded mode: no background thread; you drive the loop (only option on single-threaded wasm).
+auto b = cc::make_threaded_actor<uploader>(args...);
+b->start(cc::threaded_actor_mode::unthreaded);
+b->process_messages_if_unthreaded();      // one cycle -> bool "more to do"; no-op when a thread runs
+b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe to call every frame
+```
+
+## Strings — encoding conversion
+
+```cpp
+#include <clean-core/string/conversion.hh>
+cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> surrogate pair; bad -> U+FFFD
+                                                  // NOT NUL-terminated (push_back(u'\0') if you need it)
 ```
 
 ## Platform

@@ -24,7 +24,10 @@ add_library(clean-core
     src/clean-core/string/print.cc
     src/clean-core/string/string.cc
     src/clean-core/string/string_view.cc
+    src/clean-core/string/conversion.cc
     src/clean-core/container/vector.cc
+    src/clean-core/thread/thread.cc
+    src/clean-core/thread/threaded_actor.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -93,6 +96,7 @@ target_sources(clean-core
     src/clean-core/string/formatter.hh
     src/clean-core/string/format.hh
     src/clean-core/string/print.hh
+    src/clean-core/string/conversion.hh
 
     src/clean-core/function/function_ref.hh
     src/clean-core/function/unique_function.hh
@@ -101,6 +105,8 @@ target_sources(clean-core
     src/clean-core/error/optional.hh
 
     src/clean-core/thread/mutex.hh
+    src/clean-core/thread/thread.hh
+    src/clean-core/thread/threaded_actor.hh
 )
 
 # Libraries should not set a global C++ standard here.
@@ -121,6 +127,11 @@ target_include_directories(clean-core
 # PRIVATE: only mimalloc_resource.cc / hash128.cc include the respective headers;
 # CMake still propagates the static libs to consumers' final link.
 target_link_libraries(clean-core PRIVATE mimalloc xxhash)
+
+# std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
+# platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
+find_package(Threads REQUIRED)
+target_link_libraries(clean-core PUBLIC Threads::Threads)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(clean-core
@@ -167,6 +178,7 @@ add_executable(clean-core-test
     tests/array-test.cc
     tests/assert-test.cc
     tests/bit-test.cc
+    tests/conversion-test.cc
     tests/fixed-array-test.cc
     tests/function_ref-test.cc
     tests/hash-test.cc
@@ -183,6 +195,8 @@ add_executable(clean-core-test
     tests/strided_span-test.cc
     tests/string-test.cc
     tests/string_view-test.cc
+    tests/thread-test.cc
+    tests/threaded_actor-test.cc
     tests/to_debug_string-test.cc
     tests/format-test.cc
     tests/print-test.cc

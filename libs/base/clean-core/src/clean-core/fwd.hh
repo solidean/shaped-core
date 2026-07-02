@@ -194,6 +194,14 @@ struct result;
 template <class T>
 struct mutex;
 
+enum class threaded_actor_mode;
+struct threaded_actor_base;
+struct threaded_actor_impl_base;
+template <class... MessageT>
+struct threaded_actor;
+template <class... MessageT>
+struct threaded_actor_impl;
+
 
 //
 // Hashing
