@@ -40,3 +40,13 @@ target_compile_options(shaped-graphics-vulkan
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
+
+# Backend-specific test binary. Home for real vulkan-specific tests (device creation, command lists,
+# buffers). Named *-test so the dev.py runner discovers it. It only exists where this subdirectory is
+# added (the sg CMakeLists gates that on a Vulkan SDK being found).
+add_executable(shaped-graphics-vulkan-test
+    tests/main.cc
+    tests/vulkan-test.cc
+)
+
+target_link_libraries(shaped-graphics-vulkan-test PRIVATE shaped-graphics-vulkan nexus)
