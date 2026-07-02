@@ -97,6 +97,27 @@ b.usage()                          // sg::buffer_usage
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 ```
 
+## memory placement — heaps & alloc-info  (stub)
+
+```cpp
+#include <shaped-graphics/allocation_info.hh>
+sg::allocation_scope                    // persistent | transient  (transient = recycle hint, still hazard-tracked)
+sg::allocation_info                     // value type: where a resource's memory lives (cheap to copy)
+ai.heap                                 // memory_heap_handle — null = dedicated / self-allocating
+ai.offset / ai.size_in_bytes            // isize — placement within `heap` (ignored when dedicated)
+ai.scope                                // sg::allocation_scope
+
+#include <shaped-graphics/memory_heap.hh>
+sg::memory_requirements                 // { isize alignment_in_bytes; isize size_in_bytes; }  (backend-reported)
+// abstract; a backend subclasses it. shared via memory_heap_handle (enable_shared_from_this)
+h.size_in_bytes()                       // isize — total underlying allocation
+h.memory_requirements_for_buffer(size, usage)         // -> memory_requirements (alignment + actual occupied size)
+h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info (validates offset alignment/bounds, mints handle back to h)
+// protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
+// flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
+// NOT yet wired: no context.create_memory_heap, create_buffer doesn't take allocation_info yet
+```
+
 ## backends — subclass the abstract sg types
 
 ```cpp

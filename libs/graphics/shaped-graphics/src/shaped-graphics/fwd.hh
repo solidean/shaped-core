@@ -15,6 +15,9 @@ using namespace cc::primitive_defines;
 class context;
 class command_list;
 class buffer;
+class memory_heap;
+struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
+struct memory_requirements; // value type (see memory_heap.hh)
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
@@ -34,9 +37,10 @@ enum class submission_token : u64
     not_submitted = u64(-1), ///< sentinel that always compares "not yet complete"
 };
 
-/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type. context and buffer get handles;
-/// command_list does not — it's a single-use temporary held by std::unique_ptr, passed by reference.
-/// std::shared_ptr is a placeholder for a future cc::shared_ptr.
+/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type. context, buffer, and memory_heap get
+/// handles; command_list does not — it's a single-use temporary held by std::unique_ptr, passed by
+/// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
 using buffer_handle = std::shared_ptr<buffer>;
+using memory_heap_handle = std::shared_ptr<memory_heap>;
 } // namespace sg

@@ -26,6 +26,8 @@ src/shaped-graphics/
   context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list/create_buffer
   command_list.hh/.cc             [in progress] abstract; recording API planned
   buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done
+  allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
+  memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
 backends/                                       # each subclasses the abstract sg types directly
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
@@ -80,6 +82,25 @@ resource sg manages, driven through command lists. See the [coding-guidelines](c
   context is **shut down before destruction** (virtual `shutdown()`, auto-run by the backend dtor).
 
 See the [coding-guidelines](coding-guidelines.md) for the rationale on each.
+
+## Memory placement
+
+`memory_heap` + `allocation_info` are the placement model: a resource's backing memory either is
+**dedicated** (self-allocating) or is **placed** into a shared `memory_heap`. A `memory_heap` is a
+factory for `allocation_info` — the caller queries `memory_requirements` (backend-reported alignment +
+actual occupied size, which may exceed the requested size), its own allocator picks an offset, and the
+heap alignment/bounds-checks it and mints an `allocation_info` pointing back into itself (an
+`enable_shared_from_this` handle keeps the heap alive as long as any placement references it). Reporting
+the occupied size from the backend is what lets textures — whose real footprint the driver decides —
+share this path. `allocation_info` is a cheap value type: a nullable
+`memory_heap_handle` (null = dedicated), an offset/size, and an `allocation_scope` lifetime hint
+(`persistent`/`transient`; transient is only a hint — the backend still tracks in-flight GPU usage).
+
+Intended flow: query requirements → allocator picks an offset → `heap.acquire_allocation_for_*(...)` →
+pass the `allocation_info` to the matching create_*. **Not yet wired:** `context` has no
+`create_memory_heap`, and `create_buffer` does not yet take an `allocation_info` — both are the natural
+next step once this stub grows. The per-resource-kind fan-out (`acquire_allocation_for_buffer`, planned
+`_texture`) mirrors sg's per-kind create methods.
 
 ## Planned surface (beyond the current stubs)
 
