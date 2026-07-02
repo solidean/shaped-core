@@ -1,12 +1,15 @@
 cmake_minimum_required(VERSION 3.28)
 project(shaped-graphics-vulkan LANGUAGES CXX)
 
-# The vulkan backend is its own static library that links the shaped-graphics core. It is
-# currently a pure stub (every entry point is CC_UNREACHABLE) with no Vulkan SDK dependency, so
-# it compiles anywhere the enclosing CMakeLists enables it (native desktop). Real SDK
-# detection/linking lands with the first buffer upload/download/copy milestone.
+# The vulkan backend is its own static library that links the shaped-graphics core. It creates a
+# live Vulkan instance/device, command lists, and GPU buffers, so it links the Vulkan loader from
+# the SDK. The enclosing CMakeLists only adds this subdirectory when find_package(Vulkan) succeeds,
+# so Vulkan::Vulkan is guaranteed available here.
 add_library(shaped-graphics-vulkan
-    src/shaped-graphics/backends/vulkan/vulkan.cc
+    src/shaped-graphics/backends/vulkan/vulkan_context.cc
+    src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
+    src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
+    src/shaped-graphics/backends/vulkan/vulkan_buffer.cc
 )
 
 target_sources(shaped-graphics-vulkan
@@ -16,6 +19,7 @@ target_sources(shaped-graphics-vulkan
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/shaped-graphics/backends/vulkan/fwd.hh
+    src/shaped-graphics/backends/vulkan/vulkan_common.hh
     src/shaped-graphics/backends/vulkan/vulkan_context.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
@@ -29,7 +33,8 @@ target_include_directories(shaped-graphics-vulkan
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-target_link_libraries(shaped-graphics-vulkan PUBLIC shaped-graphics)
+# Vulkan::Vulkan carries the loader link plus the SDK include dir (for <vulkan/vulkan.h>).
+target_link_libraries(shaped-graphics-vulkan PUBLIC shaped-graphics Vulkan::Vulkan)
 
 target_compile_options(shaped-graphics-vulkan
     PUBLIC
