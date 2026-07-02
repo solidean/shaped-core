@@ -5,7 +5,10 @@ project(shaped-graphics-dx12 LANGUAGES CXX)
 # live D3D12 device, command lists, and GPU buffers, so it links the DirectX 12 libs from the
 # Windows SDK (always present on the Windows path the enclosing CMakeLists gates it to).
 add_library(shaped-graphics-dx12
-    src/shaped-graphics/backends/dx12/dx12.cc
+    src/shaped-graphics/backends/dx12/dx12_context.cc
+    src/shaped-graphics/backends/dx12/dx12_context.create.cc
+    src/shaped-graphics/backends/dx12/dx12_command_list.cc
+    src/shaped-graphics/backends/dx12/dx12_buffer.cc
 )
 
 target_sources(shaped-graphics-dx12
