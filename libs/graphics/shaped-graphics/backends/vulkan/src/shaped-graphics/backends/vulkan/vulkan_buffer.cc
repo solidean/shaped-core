@@ -33,10 +33,16 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usage usage)
 
 vulkan_buffer::~vulkan_buffer()
 {
-    if (_buffer != VK_NULL_HANDLE)
-        vkDestroyBuffer(_ctx._device, _buffer, nullptr);
-    if (_memory != VK_NULL_HANDLE)
-        vkFreeMemory(_ctx._device, _memory, nullptr);
+    // Stage the GPU handles + finalizers for deletion once the current epoch retires. Empty buffers
+    // (null handles) with no finalizers own nothing GPU-side and need no deferral.
+    if (_buffer != VK_NULL_HANDLE || _memory != VK_NULL_HANDLE || !_finalizers.empty())
+    {
+        vulkan_expiring_resource expiring;
+        expiring.buffer = _buffer;
+        expiring.memory = _memory;
+        expiring.finalizers = cc::move(_finalizers);
+        _ctx.schedule_deferred_deletion(cc::move(expiring));
+    }
 }
 
 cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(cc::isize size_in_bytes, sg::buffer_usage usage)
@@ -89,6 +95,6 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(cc::isize 
         }
     }
 
-    return std::make_shared<vulkan_buffer>(*this, size_in_bytes, usage, buffer, memory);
+    return std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage, buffer, memory);
 }
 } // namespace sg::backend::vulkan

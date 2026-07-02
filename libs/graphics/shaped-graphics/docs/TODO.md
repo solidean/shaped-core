@@ -15,6 +15,24 @@ Running list of known follow-ups. Bigger design intent lives in
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
 - **SDK detection:** dx12 now links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) directly off
   the default lib path — good enough on the gated Windows path, but there's no explicit SDK
-  presence/version check yet. vulkan is still a stub; add `find_package(Vulkan)` + availability
-  gating when it gets a real implementation.
+  presence/version check yet. vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; a
+  version/feature floor beyond the 1.2 baseline is still worth adding.
+- **Epoch system — deferred layers:** the epoch core (counter + direct-queue epoch/submission
+  timelines, in-flight FIFO, advance/retire, throttle, deferred deletion + finalizers, command
+  allocator/pool recycling) is in for dx12 and vulkan; see [concepts/epochs.md](concepts/epochs.md).
+  Still deferred:
+  - the **async copy queue** with pooled group fences and per-resource pending syncs (start:
+    inline-only uploads on the direct queue);
+  - **transient resources** — the linear bump allocator and the transient descriptor ring-buffers
+    (start: persistent-only);
+  - the **split GPU/CPU download watermarks** for readback (start: treat a download as done when the
+    fence signals, with a synchronous CPU copy).
+- **`cc::ringbuffer`:** the epoch in-flight set uses a `cc::vector` drained from the front, because
+  `cc::ringbuffer` is currently an unimplemented stub. Switch to it once it lands.
+- **Command-allocator pool as a standalone object:** dx12's `dx12_allocator_pool` is two vectors
+  under one context-level `cc::mutex`. Promote it to an object that owns its synchronization and pools
+  **per queue** (the epoch system grows multiple queues), instead of the ad-hoc mutex on the context.
+- **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
+  it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
+  See [concepts/threading.md](concepts/threading.md).
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

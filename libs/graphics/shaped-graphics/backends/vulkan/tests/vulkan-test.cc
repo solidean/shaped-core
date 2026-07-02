@@ -84,3 +84,108 @@ TEST("sg vulkan - software-preferred context")
     CHECK(ctx.value()->backend() == sg::backend_kind::vulkan);
     exercise_context(static_cast<vulkan::vulkan_context&>(*ctx.value()));
 }
+
+namespace
+{
+// Fresh context for an epoch test, or nullptr on a host without a Vulkan device.
+sg::context_handle make_context()
+{
+    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
+    return ctx.has_value() ? ctx.value() : nullptr;
+}
+} // namespace
+
+TEST("sg vulkan - epoch advance and retire")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return; // no Vulkan device (e.g. headless CI).
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    CHECK(c.current_epoch() == sg::epoch::first);
+    // Nothing has finished yet, so the completed epoch is first-1.
+    CHECK(cc::u64(c.completed_epoch()) == cc::u64(sg::epoch::first) - 1);
+
+    c.advance_epoch_and_wait_for_idle();
+    CHECK(c.current_epoch() == sg::epoch(cc::u64(sg::epoch::first) + 1));
+    CHECK(cc::u64(c.completed_epoch()) >= cc::u64(sg::epoch::first)); // the first epoch is now done
+}
+
+TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return;
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    bool finalized = false;
+    {
+        auto buf = c.create_vulkan_buffer(256, sg::buffer_usage::copy_dst);
+        REQUIRE(buf.has_value());
+        buf.value()->add_finalizer([&finalized] { finalized = true; });
+    } // last handle dropped here → deferred deletion staged in the current epoch
+
+    // The owning epoch has not advanced/retired yet, so the resource is still (potentially) in use.
+    CHECK(!finalized);
+
+    c.advance_epoch_and_wait_for_idle(); // closes + drains the epoch the buffer died in
+    CHECK(finalized);
+}
+
+TEST("sg vulkan - command pools are recycled across epochs")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return;
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    auto const free_count
+        = [&] { return c._command_pools.lock([](vulkan::vulkan_command_pool_set& p) { return p.free.size(); }); };
+
+    auto cmd = c.create_vulkan_command_list();
+    REQUIRE(cmd.has_value());
+    c.submit_vulkan_command_list(cc::move(cmd.value()));
+    CHECK(free_count() == 0); // still in flight — captured by the current epoch
+
+    c.advance_epoch_and_wait_for_idle();
+    CHECK(free_count() == 1); // reset and returned to the free set on retire
+
+    // The next list reuses the pooled command pool rather than creating a new one.
+    auto cmd2 = c.create_vulkan_command_list();
+    REQUIRE(cmd2.has_value());
+    CHECK(free_count() == 0);
+    c.submit_vulkan_command_list(cc::move(cmd2.value()));
+    c.advance_epoch_and_wait_for_idle();
+    CHECK(free_count() == 1);
+}
+
+TEST("sg vulkan - submission token reports completion")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return;
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    auto cmd = c.create_vulkan_command_list();
+    REQUIRE(cmd.has_value());
+    auto const token = c.submit_vulkan_command_list(cc::move(cmd.value()));
+
+    c.advance_epoch_and_wait_for_idle(); // forces the GPU to catch up
+    CHECK(c.is_submission_complete(token));
+    CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
+}
+
+TEST("sg vulkan - throttle bounds epochs in flight")
+{
+    auto handle = make_context();
+    if (handle == nullptr)
+        return;
+    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+
+    // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
+    for (int i = 0; i < 5; ++i)
+        c.advance_epoch(1);
+
+    auto const in_flight = c._epoch_state.lock([](vulkan::vulkan_epoch_state& s) { return s.in_flight.size(); });
+    CHECK(in_flight <= 1);
+}

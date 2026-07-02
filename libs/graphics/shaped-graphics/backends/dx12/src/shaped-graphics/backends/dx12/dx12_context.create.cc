@@ -120,6 +120,21 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandQueue failed");
 
-    return context_handle(std::make_shared<dx12_context>(cc::move(factory), cc::move(device), cc::move(queue)));
+    // Epoch system fences (both timelines on the direct queue) + a reusable wait event. The epoch
+    // fence gates resource reclamation; the submission fence tracks per-command-list completion.
+    ComPtr<ID3D12Fence> epoch_fence;
+    if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&epoch_fence)); FAILED(hr))
+        return dx12_error(hr, "ID3D12Device::CreateFence (epoch) failed");
+
+    ComPtr<ID3D12Fence> submission_fence;
+    if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&submission_fence)); FAILED(hr))
+        return dx12_error(hr, "ID3D12Device::CreateFence (submission) failed");
+
+    HANDLE fence_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (fence_event == nullptr)
+        return cc::error("CreateEventW failed for the epoch fence wait event");
+
+    return context_handle(std::make_shared<dx12_context>(cc::move(factory), cc::move(device), cc::move(queue),
+                                                         cc::move(epoch_fence), cc::move(submission_fence), fence_event));
 }
 } // namespace sg

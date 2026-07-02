@@ -29,6 +29,15 @@ backends/         # concrete per-backend static libs (dx12/, vulkan/) that subcl
   duplication-over-abstraction stance. Extend it whenever generic advice turns out not to fit sg.
 - [TODO](TODO.md) — running list of known follow-ups.
 
+## Concepts
+
+Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions behind a topic.
+
+- [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the
+  epoch counter/fence, advance/retire, deferred deletion, and finalizers.
+- [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are
+  concurrency-safe and which must be externally synchronized.
+
 ## Conventions
 
 - Namespace `sg`; depends on clean-core (vocabulary types + assertions) and typed-geometry

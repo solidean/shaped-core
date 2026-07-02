@@ -28,6 +28,7 @@ sg::buffer_handle         // std::shared_ptr<sg::buffer>         — shared-immu
 ```cpp
 #include <shaped-graphics/types.hh>
 sg::backend_kind          // dx12, vulkan, metal, webgpu, opengl, webgl
+sg::thread_model          // single_threaded | multi_threaded (see docs/concepts/threading.md)
 sg::buffer_usage          // bit flags: none/copy_src/copy_dst/vertex/index/uniform/storage
 a | b                     // combine usages
 sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
@@ -38,20 +39,43 @@ sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 ```cpp
 #include <shaped-graphics/context.hh>
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
+ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
 ctx.create_buffer(size_in_bytes, usage)            // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
-ctx.submit_command_list(std::move(cmd))            // void — consumes cmd (submit once; gone after)
-ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope
+ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
+ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
 ctx.is_shut_down()                                 // bool
 // invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
 // you never call sg::create_context — there is none. each backend library provides the factory:
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>  [stub]
+sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
+// vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
 // dx12_config { bool enable_debug_layer=false; bool use_warp=false; }  (independent flags)
 // create errors on environment failure (no adapter, device refused); misuse asserts
+```
+
+## epochs — frame-level GPU lifetime + CPU↔GPU sync  (see docs/concepts/epochs.md)
+
+```cpp
+#include <shaped-graphics/fwd.hh>
+sg::epoch                 // enum class : u64 — invalid=0, first=10000; monotonic frame token + fence value
+sg::submission_token      // enum class : u64 — invalid=0, first=30000, not_submitted=~0; per-command-list token
+ctx.current_epoch()                     // sg::epoch — epoch new work records into
+ctx.completed_epoch()                   // sg::epoch — latest fully-finished epoch (reclaimable)
+ctx.advance_epoch(allowed_in_flight)    // void — close current epoch, open next; cc::optional<int>:
+                                        //   nullopt=never wait, 0=full drain, N=keep <=N epochs in flight
+ctx.advance_epoch_and_wait_for_idle()   // void — spelled-out advance_epoch(0); advance never hidden
+ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
+ctx.wait_for_epoch(e)                   // void — block until epoch e done, then retire (does NOT advance)
+ctx.wait_for_next_inflight_epoch()      // void — block on oldest in-flight epoch (back-pressure; no advance)
+ctx.is_submission_complete(token)       // bool — has that one command list finished?
+// command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
+// on multi_threaded backends: create/submit/drop are concurrency-safe; advance_*/wait_*/shutdown are NOT
+cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
+buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
 ```
 
 ## command_list — records GPU work  (abstract)

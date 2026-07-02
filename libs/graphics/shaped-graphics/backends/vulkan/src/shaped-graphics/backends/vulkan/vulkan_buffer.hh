@@ -12,14 +12,22 @@ namespace sg::backend::vulkan
 class vulkan_buffer final : public sg::buffer
 {
 public:
-    vulkan_buffer(vulkan_context& ctx, cc::isize size_in_bytes, sg::buffer_usage usage, VkBuffer buffer, VkDeviceMemory memory)
-      : sg::buffer(size_in_bytes, usage), _ctx(ctx), _buffer(buffer), _memory(memory)
+    vulkan_buffer(vulkan_context& ctx,
+                  sg::epoch created_in,
+                  cc::isize size_in_bytes,
+                  sg::buffer_usage usage,
+                  VkBuffer buffer,
+                  VkDeviceMemory memory)
+      : sg::buffer(size_in_bytes, usage), _ctx(ctx), _creation_epoch(created_in), _buffer(buffer), _memory(memory)
     {
     }
 
-    ~vulkan_buffer() override; // destroys _buffer + frees _memory; body in vulkan_buffer.cc
+    // Deferred deletion: hands the GPU handles + finalizers to the context, freed once the owning
+    // epoch retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
+    ~vulkan_buffer() override;
 
-    vulkan_context& _ctx; // creating context — outlives this buffer
+    vulkan_context& _ctx;      // creating context — outlives this buffer
+    sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
     VkBuffer _buffer = VK_NULL_HANDLE;
     VkDeviceMemory _memory = VK_NULL_HANDLE;
 };

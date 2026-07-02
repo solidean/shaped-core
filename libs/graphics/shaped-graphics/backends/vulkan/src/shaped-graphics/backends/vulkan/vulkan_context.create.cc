@@ -174,6 +174,32 @@ void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messe
     if (fn)
         fn(instance, messenger, nullptr);
 }
+
+// Whether the device supports timeline semaphores — the epoch system's core sync primitive. Core in
+// the 1.2 baseline we require, but still a feature bit a device may (rarely) not expose.
+bool timeline_semaphore_supported(VkPhysicalDevice dev)
+{
+    VkPhysicalDeviceVulkan12Features vk12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk12};
+    vkGetPhysicalDeviceFeatures2(dev, &features);
+    return vk12.timelineSemaphore == VK_TRUE;
+}
+
+// Creates a timeline semaphore starting at `initial_value`. The epoch/submission timelines are read
+// with vkGetSemaphoreCounterValue and waited on with vkWaitSemaphores — no host event needed.
+VkResult create_timeline_semaphore(VkDevice device, cc::u64 initial_value, VkSemaphore& out)
+{
+    auto const type_info = VkSemaphoreTypeCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+        .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+        .initialValue = initial_value,
+    };
+    auto const info = VkSemaphoreCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &type_info,
+    };
+    return vkCreateSemaphore(device, &info, nullptr, &out);
+}
 } // namespace
 } // namespace sg::backend::vulkan
 
@@ -237,7 +263,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto const best_device = picked.value().device;
     auto const best_family = picked.value().queue_family;
 
-    // Logical device with a single graphics queue.
+    // The epoch system rests on timeline semaphores; bail with a clear error if the device lacks them.
+    if (!timeline_semaphore_supported(best_device))
+    {
+        destroy_debug_messenger(instance, messenger);
+        vkDestroyInstance(instance, nullptr);
+        return cc::error("selected Vulkan device does not support timeline semaphores");
+    }
+
+    // Logical device with a single graphics queue. Opt into timelineSemaphore (core in 1.2, gated by a
+    // feature bit) so the epoch/submission timelines can be created and signaled on the queue.
     float const queue_priority = 1.0f;
     auto const queue_info = VkDeviceQueueCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -246,8 +281,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pQueuePriorities = &queue_priority,
     };
 
+    auto vk12_features = VkPhysicalDeviceVulkan12Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .timelineSemaphore = VK_TRUE,
+    };
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &vk12_features,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queue_info,
     };
@@ -263,6 +303,29 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, best_family, 0, &queue);
 
-    return context_handle(std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family, messenger));
+    // Two direct-queue timeline semaphores: the epoch timeline (drives reclamation) and the submission
+    // timeline (per-list completion). Each starts at first-1 so nothing reads as complete before use.
+    VkSemaphore epoch_timeline = VK_NULL_HANDLE;
+    if (VkResult r = create_timeline_semaphore(device, cc::u64(sg::epoch::first) - 1, epoch_timeline); r != VK_SUCCESS)
+    {
+        vkDestroyDevice(device, nullptr);
+        destroy_debug_messenger(instance, messenger);
+        vkDestroyInstance(instance, nullptr);
+        return vulkan_error(r, "vkCreateSemaphore (epoch timeline) failed");
+    }
+
+    VkSemaphore submission_timeline = VK_NULL_HANDLE;
+    if (VkResult r = create_timeline_semaphore(device, cc::u64(sg::submission_token::first) - 1, submission_timeline);
+        r != VK_SUCCESS)
+    {
+        vkDestroySemaphore(device, epoch_timeline, nullptr);
+        vkDestroyDevice(device, nullptr);
+        destroy_debug_messenger(instance, messenger);
+        vkDestroyInstance(instance, nullptr);
+        return vulkan_error(r, "vkCreateSemaphore (submission timeline) failed");
+    }
+
+    return context_handle(std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family,
+                                                           epoch_timeline, submission_timeline, messenger));
 }
 } // namespace sg

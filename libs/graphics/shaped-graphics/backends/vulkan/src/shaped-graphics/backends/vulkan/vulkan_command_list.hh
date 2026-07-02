@@ -12,8 +12,8 @@ namespace sg::backend::vulkan
 class vulkan_command_list final : public sg::command_list
 {
 public:
-    vulkan_command_list(vulkan_context& ctx, VkCommandPool pool, VkCommandBuffer buffer)
-      : _ctx(ctx), _pool(pool), _buffer(buffer)
+    vulkan_command_list(vulkan_context& ctx, sg::epoch created_in, VkCommandPool pool, VkCommandBuffer buffer)
+      : sg::command_list(created_in), _ctx(ctx), _pool(pool), _buffer(buffer)
     {
     }
 

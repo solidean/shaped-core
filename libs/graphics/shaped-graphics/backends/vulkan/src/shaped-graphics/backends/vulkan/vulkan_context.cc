@@ -81,10 +81,38 @@ void vulkan_context::shutdown()
     if (_is_shut_down)
         return;
 
-    // Drain outstanding work before tearing anything down (there is none yet, but keep it correct).
+    // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing every
+    // resource (in-flight and staged) and running finalizers — before the device is released.
+    // Externally synchronized: no create/submit/drop may run concurrently with shutdown.
+    if (_device != VK_NULL_HANDLE && _epoch_timeline != VK_NULL_HANDLE)
+        advance_epoch_and_wait_for_idle();
+
     if (_device != VK_NULL_HANDLE)
     {
         vkDeviceWaitIdle(_device);
+
+        // Every command pool is idle now (the drain retired every in-flight epoch, returning pools to
+        // the free set); destroy them before the device.
+        _command_pools.lock(
+            [&](vulkan_command_pool_set& p)
+            {
+                for (auto& cp : p.free)
+                    vkDestroyCommandPool(_device, cp.pool, nullptr);
+                p.free = {};
+                p.in_epoch = {};
+            });
+
+        if (_submission_timeline != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(_device, _submission_timeline, nullptr);
+            _submission_timeline = VK_NULL_HANDLE;
+        }
+        if (_epoch_timeline != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(_device, _epoch_timeline, nullptr);
+            _epoch_timeline = VK_NULL_HANDLE;
+        }
+
         vkDestroyDevice(_device, nullptr); // _queue is owned by the device
         _device = VK_NULL_HANDLE;
     }

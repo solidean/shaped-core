@@ -1,12 +1,15 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/context.hh>
 
+#include <atomic>
 #include <memory>
 
 namespace sg::backend::vulkan
@@ -38,13 +41,17 @@ public:
                    VkDevice device,
                    VkQueue queue,
                    cc::u32 queue_family_index,
+                   VkSemaphore epoch_timeline,
+                   VkSemaphore submission_timeline,
                    VkDebugUtilsMessengerEXT debug_messenger)
-      : sg::context(sg::backend_kind::vulkan),
+      : sg::context(sg::backend_kind::vulkan, sg::thread_model::multi_threaded),
         _instance(instance),
         _physical_device(physical_device),
         _device(device),
         _queue(queue),
         _queue_family_index(queue_family_index),
+        _epoch_timeline(epoch_timeline),
+        _submission_timeline(submission_timeline),
         _debug_messenger(debug_messenger)
     {
     }
@@ -55,7 +62,7 @@ public:
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
     [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(cc::isize size_in_bytes, sg::buffer_usage usage);
-    void submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
+    sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 
     // sg::context overrides — forward to the backend-typed methods above. The static_cast down is
@@ -71,15 +78,33 @@ public:
         return cc::result<sg::buffer_handle>(create_vulkan_buffer(size_in_bytes, usage));
     }
 
-    void submit_command_list(std::unique_ptr<sg::command_list> cmd) override
+    sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
-        submit_vulkan_command_list(std::unique_ptr<vulkan_command_list>(static_cast<vulkan_command_list*>(cmd.release())));
+        return submit_vulkan_command_list(
+            std::unique_ptr<vulkan_command_list>(static_cast<vulkan_command_list*>(cmd.release())));
     }
 
     void drop_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         drop_vulkan_command_list(std::unique_ptr<vulkan_command_list>(static_cast<vulkan_command_list*>(cmd.release())));
     }
+
+    // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once
+    // that epoch retires. Called from ~vulkan_buffer; safe to call from any thread.
+    void schedule_deferred_deletion(vulkan_expiring_resource expiring);
+
+    // Epoch contract — bodies in vulkan_epoch.cc. These return sg vocabulary types (no backend-typed
+    // variant needed), so the whole body lives in the override. Realized on a pair of timeline
+    // semaphores: the epoch timeline gates reclamation, the submission timeline answers per-list queries.
+
+    [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
+    [[nodiscard]] sg::epoch completed_epoch() const override;
+    void advance_epoch(cc::optional<int> allowed_in_flight) override;
+    void advance_epoch_and_wait_for_idle() override { advance_epoch(0); }
+    void process_completed_epochs() override;
+    void wait_for_epoch(sg::epoch e) override;
+    void wait_for_next_inflight_epoch() override;
+    [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
 
     void shutdown() override;
 
@@ -92,6 +117,27 @@ public:
     VkDevice _device = VK_NULL_HANDLE;
     VkQueue _queue = VK_NULL_HANDLE; // owned by the device, not destroyed
     cc::u32 _queue_family_index = 0;
+
+    // Epoch machinery. The epoch timeline is signaled with the epoch value at the end of each epoch;
+    // the submission timeline is a per-command-list value on the same queue (Vulkan's analog of dx12's
+    // two direct-queue fences). Both are VK_SEMAPHORE_TYPE_TIMELINE, so completion is a counter read.
+    VkSemaphore _epoch_timeline = VK_NULL_HANDLE;
+    VkSemaphore _submission_timeline = VK_NULL_HANDLE;
+
+    // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
+    sg::epoch _current_epoch = sg::epoch::first;
+
+    // create / submit / drop are thread-safe, so the shared bookkeeping they touch is synchronized:
+    //  - _open_command_lists: bumped per create, dropped per submit/drop — a lock-free counter.
+    //  - _next_submission: the next completion token; guarded together with the vkQueueSubmit + signal
+    //    in submit so token order == queue/signal order (out-of-order signals would break completion).
+    //  - _command_pools: the command-pool pool (see vulkan_command_pool_set).
+    std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
+    cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
+    cc::mutex<vulkan_command_pool_set> _command_pools;
+
+    cc::mutex<vulkan_epoch_state> _epoch_state;
+
     VkDebugUtilsMessengerEXT _debug_messenger = VK_NULL_HANDLE; // VK_NULL_HANDLE when validation is off
 };
 } // namespace sg::backend::vulkan

@@ -8,6 +8,7 @@ project(shaped-graphics-vulkan LANGUAGES CXX)
 add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_context.cc
     src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
+    src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
     src/shaped-graphics/backends/vulkan/vulkan_buffer.cc
 )
@@ -21,6 +22,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/fwd.hh
     src/shaped-graphics/backends/vulkan/vulkan_common.hh
     src/shaped-graphics/backends/vulkan/vulkan_context.hh
+    src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
 )
