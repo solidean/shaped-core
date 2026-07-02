@@ -38,8 +38,8 @@ void exercise_context(dx12::dx12_context& ctx)
     CHECK(empty.value()->size_in_bytes() == 0);
     CHECK(empty.value()->_resource == nullptr);
 
-    // storage usage takes the ALLOW_UNORDERED_ACCESS path.
-    auto storage = ctx.create_dx12_buffer(1024, sg::buffer_usage::storage);
+    // read-write storage (UAV) usage takes the ALLOW_UNORDERED_ACCESS path.
+    auto storage = ctx.create_dx12_buffer(1024, sg::buffer_usage::storage_read_write);
     REQUIRE(storage.has_value());
     CHECK(storage.value()->size_in_bytes() == 1024);
 

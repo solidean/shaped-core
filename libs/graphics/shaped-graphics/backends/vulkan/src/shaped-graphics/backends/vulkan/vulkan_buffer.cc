@@ -20,7 +20,9 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usage usage)
         flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     if (sg::has_flag(usage, sg::buffer_usage::uniform))
         flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::storage))
+    // Vulkan doesn't distinguish read-only vs read-write storage at the usage-bit level (that's a
+    // descriptor/access concern), so both map to the same STORAGE_BUFFER_BIT.
+    if (sg::has_flag(usage, sg::buffer_usage::storage_read) || sg::has_flag(usage, sg::buffer_usage::storage_read_write))
         flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
     // Vulkan rejects a zero-usage buffer; a usage-less non-empty buffer keeps a benign transfer dst

@@ -29,7 +29,9 @@ sg::buffer_handle         // std::shared_ptr<sg::buffer>         — shared-immu
 #include <shaped-graphics/types.hh>
 sg::backend_kind          // dx12, vulkan, metal, webgpu, opengl, webgl
 sg::thread_model          // single_threaded | multi_threaded (see docs/concepts/threading.md)
-sg::buffer_usage          // bit flags: none/copy_src/copy_dst/vertex/index/uniform/storage
+sg::buffer_usage          // bit flags: none/copy_src/copy_dst/vertex/index/uniform/
+                          //   storage_read/storage_read_write/indirect/accel_struct_{storage,build_input}
+                          //   (granularity set by Vulkan; DX12 typeless, Metal untyped — they consume a subset)
 a | b                     // combine usages
 sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 ```
