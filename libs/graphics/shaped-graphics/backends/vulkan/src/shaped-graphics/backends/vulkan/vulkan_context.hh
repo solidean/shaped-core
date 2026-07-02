@@ -52,8 +52,5 @@ namespace sg
 /// namespace (not the backend's) so they share a discoverable `sg::create_*_context` prefix while
 /// taking a backend-specific config. sg itself neither depends on nor knows this backend; only a
 /// caller that links the vulkan backend library sees this factory.
-[[nodiscard]] inline cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config const& = {})
-{
-    return cc::error("vulkan backend not implemented yet");
-}
+[[nodiscard]] cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config const& = {});
 } // namespace sg
