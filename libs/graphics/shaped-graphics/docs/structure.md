@@ -29,7 +29,7 @@ src/shaped-graphics/
 backends/                                       # each subclasses the abstract sg types directly
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
-  vulkan/                         [stub]        sg::backend::vulkan + sg::create_vulkan_context (native desktop)
+  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): real device/cmd-list/buffer
   metal/                          [planned]     tier 2
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
@@ -38,15 +38,14 @@ backends/                                       # each subclasses the abstract s
 
 ## Backend tiers
 
-- **Tier 1 (now):** dx12, vulkan. dx12 is real (device + command list + GPU buffer); vulkan is
-  still stubbed.
+- **Tier 1 (now):** dx12, vulkan. Both are real (device + command list + GPU buffer + epoch system).
 - **Tier 2 (soon):** metal, webgpu.
 - **Legacy compat (planned):** opengl, webgl.
 
 A backend is built only where it is available for the platform/build. The gates are platform-only
-(dx12 → Windows, vulkan → native desktop). dx12 now links the Windows-SDK D3D12 libs
-(`d3d12 dxgi dxguid`), always present on the Windows path; vulkan is still a stub with no SDK
-dependency, and `find_package(Vulkan)`-style detection lands with its real implementation.
+(dx12 → Windows, vulkan → native desktop). dx12 links the Windows-SDK D3D12 libs
+(`d3d12 dxgi dxguid`), always present on the Windows path; vulkan gates on `find_package(Vulkan)` and
+links `Vulkan::Vulkan` (the loader + headers), so it builds wherever a Vulkan SDK is installed.
 
 Fallible creates (`create_*_context`, `create_command_list`, `create_buffer`) return `cc::result`;
 programmer misuse (e.g. `size <= 0`) asserts rather than returning an error. See the
@@ -90,8 +89,8 @@ texture              [planned]  GPU-resident images + views
 pipeline             [planned]  graphics/compute pipelines + shader modules
 sampler              [planned]
 swapchain / surface  [planned]  presentation
-epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission fences, advance/retire,
-                                  deferred deletion + finalizers, allocator recycling (dx12 real; vulkan stub)
+epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
+                                  deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)
 ```
 
 The **epoch system** is the frame-level GPU-lifetime + CPU↔GPU sync mechanism: only the concept

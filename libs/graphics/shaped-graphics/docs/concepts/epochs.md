@@ -56,8 +56,10 @@ stance: the shared piece is the vocabulary, not a cross-backend implementation.
 
 The **dx12** backend is the reference realization (see
 [dx12_epoch.hh](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.hh) /
-[dx12_epoch.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc)). The concepts
-map cleanly onto Vulkan timeline semaphores or Metal shared events.
+[dx12_epoch.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc)). The **vulkan**
+backend realizes the same design on a pair of timeline semaphores (see
+[vulkan_epoch.cc](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_epoch.cc)); Metal
+would map it onto shared events.
 
 ## Lifecycle: advance and retire
 
@@ -117,9 +119,10 @@ Preserve these; the rest is tuning:
 
 ## What's implemented today vs deferred
 
-**Today (dx12):** the epoch counter + both direct-queue fences, the in-flight FIFO of per-epoch
-payloads, advance/retire, the `allowed_in_flight` throttle, deferred deletion of buffers with
-finalizers, and per-epoch command-allocator recycling. The vulkan backend stubs the contract.
+**Today (dx12 and vulkan):** the epoch counter + both direct-queue timelines (dx12 fences / vulkan
+timeline semaphores), the in-flight FIFO of per-epoch payloads, advance/retire, the
+`allowed_in_flight` throttle, deferred deletion of buffers with finalizers, and per-epoch
+command-allocator (dx12) / command-pool (vulkan) recycling.
 
 **Deferred** (see [TODO.md](../TODO.md)): the async copy queue with pooled group fences and
 per-resource pending syncs; transient resources (linear bump allocator + transient descriptor

@@ -48,7 +48,10 @@ it, then submits or drops it once, in the epoch it was opened in.
   counter is atomic, the completion token is assigned together with the queue submit + fence signal
   under one lock (so token order equals signal order), and the command-allocator pool is
   mutex-guarded. `advance_epoch` and `shutdown` are externally synchronized.
-- **vulkan** — `single_threaded` (stub); revisit when the backend is real.
+- **vulkan** — `multi_threaded`, mirroring dx12: the open-command-list counter is atomic, the
+  completion token is assigned together with the `vkQueueSubmit` + timeline-semaphore signal under one
+  lock (so token order equals signal order), and the command-pool set is mutex-guarded. `advance_epoch`
+  and `shutdown` are externally synchronized.
 
 ## See also
 

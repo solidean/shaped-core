@@ -49,7 +49,8 @@ ctx.is_shut_down()                                 // bool
 // invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
 // you never call sg::create_context — there is none. each backend library provides the factory:
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>  [stub]
+sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
+// vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
 // dx12_config { bool enable_debug_layer=false; bool use_warp=false; }  (independent flags)

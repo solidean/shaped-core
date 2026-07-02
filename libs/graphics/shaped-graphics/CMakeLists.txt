@@ -44,10 +44,9 @@ target_compile_options(shaped-graphics
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# Backends: each is its own static library that links this core. A backend is built only where
-# it is available for the platform/build; the stubs carry no SDK dependency yet, so the gates
-# are platform-only for now (dx12 -> Windows, vulkan -> native desktop). Enabled backends are
-# collected so the test binary link-checks them.
+# Backends: each is its own static library that links this core. A backend is built only where it is
+# available for the platform/build: dx12 needs Windows (its SDK ships with it), vulkan needs the
+# Vulkan SDK on a non-web target. Enabled backends are collected so the test binary link-checks them.
 set(_sg_backends "")
 
 if(WIN32)
@@ -56,8 +55,14 @@ if(WIN32)
 endif()
 
 if(NOT EMSCRIPTEN)
-    add_subdirectory(backends/vulkan)
-    list(APPEND _sg_backends shaped-graphics-vulkan)
+    # Optional: the vulkan backend links the loader, so it only builds when the SDK is present.
+    find_package(Vulkan)
+    if(Vulkan_FOUND)
+        add_subdirectory(backends/vulkan)
+        list(APPEND _sg_backends shaped-graphics-vulkan)
+    else()
+        message(STATUS "shaped-graphics: Vulkan SDK not found, skipping the vulkan backend")
+    endif()
 endif()
 
 # Test executable. This binary stays backend-agnostic (the abstract sg surface only). Backend-

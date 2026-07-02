@@ -15,11 +15,12 @@ Running list of known follow-ups. Bigger design intent lives in
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
 - **SDK detection:** dx12 now links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) directly off
   the default lib path — good enough on the gated Windows path, but there's no explicit SDK
-  presence/version check yet. vulkan is still a stub; add `find_package(Vulkan)` + availability
-  gating when it gets a real implementation.
+  presence/version check yet. vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; a
+  version/feature floor beyond the 1.2 baseline is still worth adding.
 - **Epoch system — deferred layers:** the epoch core (counter + direct-queue epoch/submission
-  fences, in-flight FIFO, advance/retire, throttle, deferred deletion + finalizers, command-allocator
-  recycling) is in for dx12; see [concepts/epochs.md](concepts/epochs.md). Still deferred:
+  timelines, in-flight FIFO, advance/retire, throttle, deferred deletion + finalizers, command
+  allocator/pool recycling) is in for dx12 and vulkan; see [concepts/epochs.md](concepts/epochs.md).
+  Still deferred:
   - the **async copy queue** with pooled group fences and per-resource pending syncs (start:
     inline-only uploads on the direct queue);
   - **transient resources** — the linear bump allocator and the transient descriptor ring-buffers
