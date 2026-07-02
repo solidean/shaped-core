@@ -11,6 +11,8 @@ The entry point for repo-wide documentation. (Library-local docs live next to th
   Tier 2 (supported), or Tier 3 (planned), and which build types should work.
 - [libraries.md](libraries.md) — catalog of the shaped-core libraries: what each is, its
   namespace, and the dependency order.
+- [graphics.md](graphics.md) — overview of the graphics library family (shaped-graphics `sg`,
+  shaped-rendering `sr`, shaped-viewer `sv`) and how they layer.
 - [coding-guidelines.md](coding-guidelines.md) — coding standards and design principles for the
   shaped-core libraries. `.clang-format` / `.clang-tidy` / `.clangd` are authoritative for
   formatting.
@@ -40,6 +42,16 @@ See [guides/_index.md](guides/_index.md) for the full list. Most useful:
   [cheat-sheet](../libs/base/nexus/cheat-sheet.md) covers `TEST`/`CHECK`/`SECTION`, and
   [catch2-runner-compat](../libs/base/nexus/docs/catch2-runner-compat.md) covers how nexus test
   binaries are discovered and filtered.
+- [typed-geometry](../libs/base/typed-geometry/readme.md) — the `tg` math & geometry library;
+  [cheat-sheet](../libs/base/typed-geometry/cheat-sheet.md) and
+  [docs hub](../libs/base/typed-geometry/docs/_index.md).
+- **graphics family** ([overview](graphics.md)) — shaped-graphics
+  ([readme](../libs/graphics/shaped-graphics/readme.md) ·
+  [docs](../libs/graphics/shaped-graphics/docs/_index.md)), shaped-rendering
+  ([readme](../libs/graphics/shaped-rendering/readme.md) ·
+  [docs](../libs/graphics/shaped-rendering/docs/_index.md)), shaped-viewer
+  ([readme](../libs/graphics/shaped-viewer/readme.md) ·
+  [docs](../libs/graphics/shaped-viewer/docs/_index.md)).
 
 > Place new repo-wide docs here (kebab-case names), in the matching subfolder. See
 > [CLAUDE.md](../CLAUDE.md) for the repo's working conventions.

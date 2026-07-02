@@ -51,6 +51,7 @@ target_sources(clean-core
     src/clean-core/platform/native.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
+    src/clean-core/platform/win32_sanitized.hh
 
     src/clean-core/math/bit.hh
     src/clean-core/math/random.hh

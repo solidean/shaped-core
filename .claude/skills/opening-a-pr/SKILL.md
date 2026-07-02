@@ -20,6 +20,12 @@ allowed-tools: Bash Read
    `git diff --stat HEAD` — confirm only the intended work is staged, nothing
    unrelated rode along.
 
+   **Always `git fetch origin main` first, then diff against `origin/main`, not
+   local `main`.** Local `main` is usually stale (it only moves when you pull), so
+   `main..HEAD` silently reports the wrong commits and diff. Use
+   `git fetch origin main --quiet && git log --oneline origin/main..HEAD` (and
+   `git diff --stat origin/main..HEAD`) to see what the PR actually contains.
+
 3. **Commit in logical units.** Group related changes; split genuinely separate
    threads into separate commits. Prefer a new commit over amending an existing
    one. Multi-line messages go through a heredoc with the **Bash** tool — never
