@@ -58,8 +58,9 @@ public:
     /// (freed once that epoch retires). Called from ~dx12_buffer; safe to call from any thread.
     void schedule_deferred_deletion(dx12_expiring_resource expiring);
 
-    // sg::context overrides — forward to the backend-typed methods above. The static_cast down is
-    // sound: backends never mix.
+    // sg::context overrides — forward to the backend-typed methods above. A command list is only
+    // ever a dx12 one here (backends never mix), so the downcast is sound; a CC_ASSERT'd dynamic_cast
+    // guards against a foreign command list slipping in (compiled out in release).
 
     [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> create_command_list() override
     {
@@ -73,12 +74,14 @@ public:
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
+        CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");
         return submit_dx12_command_list(
             std::unique_ptr<dx12_command_list>(static_cast<dx12_command_list*>(cmd.release())));
     }
 
     void drop_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
+        CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");
         drop_dx12_command_list(std::unique_ptr<dx12_command_list>(static_cast<dx12_command_list*>(cmd.release())));
     }
 
