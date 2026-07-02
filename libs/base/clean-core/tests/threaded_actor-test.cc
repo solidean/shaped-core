@@ -5,10 +5,13 @@
 #include <nexus/test.hh>
 
 #include <atomic>
-#include <latch>
 #include <memory>
 
 using namespace cc::primitive_defines;
+
+// Most tests run the actor unthreaded and drive it by hand: deterministic, race-free, and valid on
+// every platform (including single-threaded WebAssembly). A small threaded smoke section, gated on
+// CC_HAS_THREADS, exercises the real background thread.
 
 // ============================================================================
 // Test actors
@@ -83,7 +86,7 @@ protected:
     void on_message(int msg) override { log.push_back(msg); }
 };
 
-// Batches messages into a local queue and doubles them out in on_process.
+// Batches messages into a local queue and flushes them out in on_process.
 class batching_actor : public cc::threaded_actor_impl<int>
 {
 public:
@@ -156,7 +159,304 @@ protected:
     void on_message(cc::string msg) override { log->push_back(cc::move(msg)); }
 };
 
-// Signals a latch on shutdown, for RAII tests.
+namespace
+{
+// Drive an unthreaded actor until it has no more work. Test agents go idle, so this terminates.
+template <class Actor>
+void pump_until_idle(Actor& actor)
+{
+    while (actor.process_messages_if_unthreaded())
+    {
+    }
+}
+constexpr auto unthreaded = cc::threaded_actor_mode::unthreaded;
+} // namespace
+
+// ============================================================================
+// Unthreaded, deterministic (all platforms)
+// ============================================================================
+
+TEST("threaded_actor - unthreaded single-type in-order delivery")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+    actor->start(unthreaded);
+
+    for (int i = 0; i < 5; ++i)
+        REQUIRE(actor->enqueue_message(i));
+    pump_until_idle(*actor);
+    actor->shutdown();
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == 5);
+    for (int i = 0; i < 5; ++i)
+        CHECK(impl->log[i] == i);
+}
+
+TEST("threaded_actor - unthreaded pre-start messages are kept")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+
+    REQUIRE(actor->enqueue_message(0));
+    REQUIRE(actor->enqueue_message(1));
+
+    actor->start(unthreaded);
+    REQUIRE(actor->enqueue_message(2));
+    pump_until_idle(*actor);
+    actor->shutdown();
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == 3);
+    for (int i = 0; i < 3; ++i)
+        CHECK(impl->log[i] == i);
+}
+
+TEST("threaded_actor - unthreaded multi-type preserves global ordering")
+{
+    auto actor = cc::make_threaded_actor<multi_type_actor>();
+    actor->start(unthreaded);
+
+    REQUIRE(actor->enqueue_message(msg_a{1}));
+    REQUIRE(actor->enqueue_message(msg_b{10}));
+    REQUIRE(actor->enqueue_message(msg_a{2}));
+    REQUIRE(actor->enqueue_message(msg_b{11}));
+    REQUIRE(actor->enqueue_message(msg_b{12}));
+    REQUIRE(actor->enqueue_message(msg_a{3}));
+    pump_until_idle(*actor);
+    actor->shutdown();
+
+    auto impl = actor->take_impl<multi_type_actor>();
+    REQUIRE(impl->log.size() == 6);
+    char const types[] = {'A', 'B', 'A', 'B', 'B', 'A'};
+    int const ids[] = {1, 10, 2, 11, 12, 3};
+    for (int i = 0; i < 6; ++i)
+    {
+        CHECK(impl->log[i].type == types[i]);
+        CHECK(impl->log[i].id == ids[i]);
+    }
+}
+
+TEST("threaded_actor - unthreaded three message types")
+{
+    auto actor = cc::make_threaded_actor<three_type_actor>();
+    actor->start(unthreaded);
+
+    REQUIRE(actor->enqueue_message(msg_a{1}));
+    REQUIRE(actor->enqueue_message(msg_b{2}));
+    REQUIRE(actor->enqueue_message(msg_c{3}));
+    REQUIRE(actor->enqueue_message(msg_a{4}));
+    REQUIRE(actor->enqueue_message(msg_c{5}));
+    REQUIRE(actor->enqueue_message(msg_b{6}));
+    pump_until_idle(*actor);
+    actor->shutdown();
+
+    auto impl = actor->take_impl<three_type_actor>();
+    REQUIRE(impl->tags.size() == 6);
+    char const expected[] = {'A', 'B', 'C', 'A', 'C', 'B'};
+    for (int i = 0; i < 6; ++i)
+        CHECK(impl->tags[i] == expected[i]);
+}
+
+TEST("threaded_actor - unthreaded init runs at start, shutdown runs at shutdown")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+    actor->start(unthreaded);
+
+    // on_thread_init runs on the caller during start()
+    {
+        // peek without taking: not shut down yet, so use a message round-trip to observe liveness
+        REQUIRE(actor->enqueue_message(1));
+        pump_until_idle(*actor);
+    }
+    actor->shutdown();
+
+    auto impl = actor->take_impl<int_log_actor>();
+    CHECK(impl->init_count == 1);
+    CHECK(impl->shutdown_count == 1);
+    REQUIRE(impl->log.size() == 1);
+}
+
+TEST("threaded_actor - unthreaded init precedes messages, shutdown follows")
+{
+    auto actor = cc::make_threaded_actor<lifecycle_actor>();
+    actor->start(unthreaded);
+
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(actor->enqueue_message(i));
+    pump_until_idle(*actor);
+    actor->shutdown();
+
+    auto impl = actor->take_impl<lifecycle_actor>();
+    REQUIRE(impl->log.size() == 5);
+    CHECK(impl->log.front() == lifecycle_actor::marker_init);
+    CHECK(impl->log.back() == lifecycle_actor::marker_shutdown);
+    for (int i = 0; i < 3; ++i)
+        CHECK(impl->log[i + 1] == i);
+}
+
+TEST("threaded_actor - unthreaded on_process batches a local queue")
+{
+    auto output = std::make_shared<cc::vector<int>>();
+    auto actor = cc::make_threaded_actor<batching_actor>(output);
+    actor->start(unthreaded);
+
+    for (int i = 1; i <= 3; ++i)
+        REQUIRE(actor->enqueue_message(i));
+    pump_until_idle(*actor);
+    actor->shutdown();
+
+    REQUIRE(output->size() == 3);
+    for (int i = 0; i < 3; ++i)
+        CHECK((*output)[i] == i + 1);
+
+    auto impl = actor->take_impl<batching_actor>();
+    CHECK(impl->process_calls > 0);
+}
+
+TEST("threaded_actor - unthreaded begin_shutdown rejects new messages but keeps queued ones")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+    actor->start(unthreaded);
+
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(actor->enqueue_message(i));
+
+    actor->begin_shutdown();
+    CHECK(!actor->enqueue_message(99));
+    CHECK(!actor->enqueue_message(100));
+
+    actor->shutdown(); // drains the 3 queued messages
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == 3);
+    for (int i = 0; i < 3; ++i)
+        CHECK(impl->log[i] == i);
+}
+
+TEST("threaded_actor - unthreaded shutdown drains everything without an explicit pump")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+
+    constexpr int n = 50;
+    for (int i = 0; i < n; ++i)
+        REQUIRE(actor->enqueue_message(i));
+
+    actor->start(unthreaded);
+    actor->shutdown(); // final synchronous drain processes all queued messages
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == n);
+    for (int i = 0; i < n; ++i)
+        CHECK(impl->log[i] == i);
+}
+
+TEST("threaded_actor - unthreaded lifecycle state queries")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+
+    CHECK(!actor->is_shutting_down());
+    actor->start(unthreaded);
+    CHECK(actor->is_running());
+    CHECK(!actor->is_shutting_down());
+
+    actor->begin_shutdown();
+    CHECK(actor->is_shutting_down());
+    CHECK(!actor->is_running());
+
+    actor->shutdown();
+    CHECK(actor->is_shut_down());
+}
+
+TEST("threaded_actor - process_messages_if_unthreaded reports more-to-do then goes idle")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+    actor->start(unthreaded);
+
+    REQUIRE(actor->enqueue_message(1));
+    REQUIRE(actor->enqueue_message(2));
+    CHECK(actor->process_messages_if_unthreaded());  // dispatched something
+    CHECK(!actor->process_messages_if_unthreaded()); // nothing left
+
+    actor->shutdown();
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == 2);
+}
+
+TEST("threaded_actor - process_messages_if_unthreaded_for_ms drains within budget")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+    actor->start(unthreaded);
+
+    for (int i = 0; i < 10; ++i)
+        REQUIRE(actor->enqueue_message(i));
+
+    CHECK(!actor->process_messages_if_unthreaded_for_ms(1000.0)); // returns false: went idle
+    actor->shutdown();
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == 10);
+}
+
+TEST("threaded_actor - unthreaded pipeline A -> B -> C forwarding")
+{
+    auto final_log = std::make_shared<cc::vector<cc::string>>();
+
+    auto c = cc::make_threaded_actor<string_log_actor>(final_log);
+    auto b = cc::make_threaded_actor<int_to_string_actor>(c.get());
+    auto a = cc::make_threaded_actor<forwarding_actor>(b.get());
+
+    a->start(unthreaded);
+    b->start(unthreaded);
+    c->start(unthreaded);
+
+    constexpr int n = 10;
+    for (int i = 0; i < n; ++i)
+        REQUIRE(a->enqueue_message(i));
+
+    // Pump in dependency order: A forwards to B, B to C.
+    pump_until_idle(*a);
+    pump_until_idle(*b);
+    pump_until_idle(*c);
+
+    a->shutdown();
+    b->shutdown();
+    c->shutdown();
+
+    auto impl_a = a->take_impl<forwarding_actor>();
+    REQUIRE(impl_a->log.size() == n);
+    for (int i = 0; i < n; ++i)
+        CHECK(impl_a->log[i] == i);
+
+    REQUIRE(final_log->size() == n);
+    for (int i = 0; i < n; ++i)
+        CHECK((*final_log)[i] == cc::to_string(i));
+}
+
+// ============================================================================
+// Threaded smoke tests (real background thread)
+// ============================================================================
+
+#if CC_HAS_THREADS
+
+#include <latch>
+
+TEST("threaded_actor - threaded start/shutdown with in-order delivery")
+{
+    auto actor = cc::make_and_start_threaded_actor<int_log_actor>();
+    REQUIRE(actor->is_running());
+
+    for (int i = 0; i < 20; ++i)
+        REQUIRE(actor->enqueue_message(i));
+    actor->shutdown();
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == 20);
+    for (int i = 0; i < 20; ++i)
+        CHECK(impl->log[i] == i);
+    CHECK(impl->init_count == 1);
+    CHECK(impl->shutdown_count == 1);
+}
+
+// Signals a latch on shutdown, so we can observe destructor-driven shutdown completing.
 class raii_actor : public cc::threaded_actor_impl<int>
 {
 public:
@@ -173,221 +473,13 @@ protected:
     void on_thread_shutdown() override { done->count_down(); }
 };
 
-// ============================================================================
-// Lifecycle and ordering
-// ============================================================================
-
-TEST("threaded_actor - single-type start/shutdown with in-order delivery")
-{
-    auto actor = cc::make_threaded_actor<int_log_actor>();
-
-    actor->start();
-    for (int i = 0; i < 5; ++i)
-        REQUIRE(actor->enqueue_message(i));
-    actor->shutdown();
-
-    auto impl = actor->take_impl<int_log_actor>();
-    REQUIRE(impl != nullptr);
-    REQUIRE(impl->log.size() == 5);
-    for (int i = 0; i < 5; ++i)
-        CHECK(impl->log[i] == i);
-}
-
-TEST("threaded_actor - pre-start messages are queued and processed after start")
-{
-    auto actor = cc::make_threaded_actor<int_log_actor>();
-
-    REQUIRE(actor->enqueue_message(0));
-    REQUIRE(actor->enqueue_message(1));
-    REQUIRE(actor->enqueue_message(2));
-
-    actor->start();
-    REQUIRE(actor->enqueue_message(3));
-    REQUIRE(actor->enqueue_message(4));
-    actor->shutdown();
-
-    auto impl = actor->take_impl<int_log_actor>();
-    REQUIRE(impl->log.size() == 5);
-    for (int i = 0; i < 5; ++i)
-        CHECK(impl->log[i] == i);
-}
-
-TEST("threaded_actor - multi-type preserves global ordering across types")
-{
-    auto actor = cc::make_threaded_actor<multi_type_actor>();
-
-    actor->start();
-    REQUIRE(actor->enqueue_message(msg_a{1}));
-    REQUIRE(actor->enqueue_message(msg_b{10}));
-    REQUIRE(actor->enqueue_message(msg_a{2}));
-    REQUIRE(actor->enqueue_message(msg_b{11}));
-    REQUIRE(actor->enqueue_message(msg_b{12}));
-    REQUIRE(actor->enqueue_message(msg_a{3}));
-    actor->shutdown();
-
-    auto impl = actor->take_impl<multi_type_actor>();
-    REQUIRE(impl->log.size() == 6);
-    char const types[] = {'A', 'B', 'A', 'B', 'B', 'A'};
-    int const ids[] = {1, 10, 2, 11, 12, 3};
-    for (int i = 0; i < 6; ++i)
-    {
-        CHECK(impl->log[i].type == types[i]);
-        CHECK(impl->log[i].id == ids[i]);
-    }
-}
-
-TEST("threaded_actor - three message types")
-{
-    auto actor = cc::make_threaded_actor<three_type_actor>();
-
-    actor->start();
-    REQUIRE(actor->enqueue_message(msg_a{1}));
-    REQUIRE(actor->enqueue_message(msg_b{2}));
-    REQUIRE(actor->enqueue_message(msg_c{3}));
-    REQUIRE(actor->enqueue_message(msg_a{4}));
-    REQUIRE(actor->enqueue_message(msg_c{5}));
-    REQUIRE(actor->enqueue_message(msg_b{6}));
-    actor->shutdown();
-
-    auto impl = actor->take_impl<three_type_actor>();
-    REQUIRE(impl->tags.size() == 6);
-    char const expected[] = {'A', 'B', 'C', 'A', 'C', 'B'};
-    for (int i = 0; i < 6; ++i)
-        CHECK(impl->tags[i] == expected[i]);
-}
-
-// ============================================================================
-// Thread init/shutdown hooks
-// ============================================================================
-
-TEST("threaded_actor - on_thread_init and on_thread_shutdown run exactly once")
-{
-    auto actor = cc::make_threaded_actor<int_log_actor>();
-
-    actor->start();
-    REQUIRE(actor->enqueue_message(1));
-    REQUIRE(actor->enqueue_message(2));
-    actor->shutdown();
-
-    auto impl = actor->take_impl<int_log_actor>();
-    CHECK(impl->init_count == 1);
-    CHECK(impl->shutdown_count == 1);
-}
-
-TEST("threaded_actor - init precedes messages and shutdown follows them")
-{
-    auto actor = cc::make_threaded_actor<lifecycle_actor>();
-
-    actor->start();
-    for (int i = 0; i < 3; ++i)
-        REQUIRE(actor->enqueue_message(i));
-    actor->shutdown();
-
-    auto impl = actor->take_impl<lifecycle_actor>();
-    REQUIRE(impl->log.size() >= 2);
-    CHECK(impl->log.front() == lifecycle_actor::marker_init);
-    CHECK(impl->log.back() == lifecycle_actor::marker_shutdown);
-
-    int init_count = 0;
-    int shutdown_count = 0;
-    for (int v : impl->log)
-    {
-        if (v == lifecycle_actor::marker_init)
-            init_count++;
-        if (v == lifecycle_actor::marker_shutdown)
-            shutdown_count++;
-    }
-    CHECK(init_count == 1);
-    CHECK(shutdown_count == 1);
-}
-
-TEST("threaded_actor - on_process batches a local queue")
-{
-    auto output = std::make_shared<cc::vector<int>>();
-    auto actor = cc::make_threaded_actor<batching_actor>(output);
-
-    actor->start();
-    REQUIRE(actor->enqueue_message(1));
-    REQUIRE(actor->enqueue_message(2));
-    REQUIRE(actor->enqueue_message(3));
-    actor->shutdown();
-
-    REQUIRE(output->size() == 3);
-    for (int i = 0; i < 3; ++i)
-        CHECK((*output)[i] == i + 1);
-
-    auto impl = actor->take_impl<batching_actor>();
-    CHECK(impl->process_calls > 0);
-}
-
-// ============================================================================
-// Shutdown semantics
-// ============================================================================
-
-TEST("threaded_actor - begin_shutdown rejects new messages but keeps queued ones")
-{
-    auto actor = cc::make_threaded_actor<int_log_actor>();
-
-    actor->start();
-    REQUIRE(actor->enqueue_message(0));
-    REQUIRE(actor->enqueue_message(1));
-    REQUIRE(actor->enqueue_message(2));
-
-    actor->begin_shutdown();
-    CHECK(!actor->enqueue_message(99));
-    CHECK(!actor->enqueue_message(100));
-
-    actor->shutdown();
-
-    auto impl = actor->take_impl<int_log_actor>();
-    REQUIRE(impl->log.size() == 3);
-    for (int i = 0; i < 3; ++i)
-        CHECK(impl->log[i] == i);
-}
-
-TEST("threaded_actor - shutdown drains all messages sent before it begins")
-{
-    auto actor = cc::make_threaded_actor<int_log_actor>();
-
-    constexpr int n = 100;
-    for (int i = 0; i < n; ++i)
-        REQUIRE(actor->enqueue_message(i));
-
-    actor->start();
-    actor->shutdown();
-
-    auto impl = actor->take_impl<int_log_actor>();
-    REQUIRE(impl->log.size() == n);
-    for (int i = 0; i < n; ++i)
-        CHECK(impl->log[i] == i);
-}
-
-TEST("threaded_actor - is_shutting_down reflects lifecycle state")
-{
-    auto actor = cc::make_threaded_actor<int_log_actor>();
-
-    CHECK(!actor->is_shutting_down());
-    actor->start();
-    CHECK(!actor->is_shutting_down());
-    CHECK(actor->is_running());
-
-    actor->begin_shutdown();
-    CHECK(actor->is_shutting_down());
-    CHECK(!actor->is_running());
-
-    actor->shutdown();
-    CHECK(actor->is_shutting_down());
-    CHECK(actor->is_shut_down());
-}
-
 TEST("threaded_actor - destructor triggers graceful shutdown")
 {
     auto log = std::make_shared<cc::vector<int>>();
     auto done = std::make_shared<std::latch>(1);
 
     {
-        auto actor = cc::make_threaded_actor<raii_actor>(log, done);
-        actor->start();
+        auto actor = cc::make_and_start_threaded_actor<raii_actor>(log, done);
         REQUIRE(actor->enqueue_message(10));
         REQUIRE(actor->enqueue_message(20));
         REQUIRE(actor->enqueue_message(30));
@@ -401,55 +493,19 @@ TEST("threaded_actor - destructor triggers graceful shutdown")
     CHECK((*log)[2] == 30);
 }
 
-// ============================================================================
-// Pipelines
-// ============================================================================
-
-TEST("threaded_actor - three-actor pipeline A -> B -> C forwarding")
-{
-    auto final_log = std::make_shared<cc::vector<cc::string>>();
-
-    // build downstream-first so upstream pointers are valid
-    auto c = cc::make_threaded_actor<string_log_actor>(final_log);
-    auto b = cc::make_threaded_actor<int_to_string_actor>(c.get());
-    auto a = cc::make_threaded_actor<forwarding_actor>(b.get());
-
-    a->start();
-    b->start();
-    c->start();
-
-    constexpr int n = 10;
-    for (int i = 0; i < n; ++i)
-        REQUIRE(a->enqueue_message(i));
-
-    // sequential shutdown drains the pipeline: each shutdown() blocks until that stage has
-    // forwarded everything, so the next stage is still accepting when it does.
-    a->shutdown();
-    b->shutdown();
-    c->shutdown();
-
-    auto impl_a = a->take_impl<forwarding_actor>();
-    REQUIRE(impl_a->log.size() == n);
-    for (int i = 0; i < n; ++i)
-        CHECK(impl_a->log[i] == i);
-
-    auto impl_b = b->take_impl<int_to_string_actor>();
-    REQUIRE(impl_b->log.size() == n);
-
-    REQUIRE(final_log->size() == n);
-    for (int i = 0; i < n; ++i)
-        CHECK((*final_log)[i] == cc::to_string(i));
-}
-
-TEST("threaded_actor - make_and_start_threaded_actor starts immediately")
+TEST("threaded_actor - process_messages_if_unthreaded is a no-op in threaded mode")
 {
     auto actor = cc::make_and_start_threaded_actor<int_log_actor>();
 
-    REQUIRE(actor->is_running());
-    REQUIRE(actor->enqueue_message(7));
+    CHECK(!actor->process_messages_if_unthreaded());
+    CHECK(!actor->process_messages_if_unthreaded_for_ms(5.0));
+
+    REQUIRE(actor->enqueue_message(1));
     actor->shutdown();
 
     auto impl = actor->take_impl<int_log_actor>();
     REQUIRE(impl->log.size() == 1);
-    CHECK(impl->log[0] == 7);
+    CHECK(impl->log[0] == 1);
 }
+
+#endif // CC_HAS_THREADS

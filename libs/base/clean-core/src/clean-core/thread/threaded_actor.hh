@@ -40,12 +40,30 @@
 //   actor->enqueue_message(log_line{"hello"});
 //   actor->shutdown();
 //
+// Threading modes (chosen at start()): by default an actor runs its own thread where the platform
+// has them (threaded_actor_mode::threaded_if_possible). Pass threaded_actor_mode::unthreaded — the
+// only real option on single-threaded platforms like WebAssembly — to run without a thread: nothing
+// is spawned and you drive processing yourself with process_messages_if_unthreaded[_for_ms](), which
+// is a no-op when a thread is running and so is safe to call unconditionally. This keeps one code
+// path and a uniform API across platforms; it is also handy for deterministic, race-free tests.
+// Caveat: unthreaded, on_message and the hooks run on the *calling* thread, so a blocking handler
+// stalls that thread — the "blocking only stalls this actor" property holds only in threaded mode.
+//
 // Note: messages are stored in a std::variant<Msg...> for now (mid-term: replace with a cc variant
 // once one exists), and the polymorphic impl is held by std::unique_ptr (cc::unique_ptr forbids the
 // upcast/downcast this needs). std::thread and the std::atomic/condition_variable are kept as-is.
 
 namespace cc
 {
+/// How a threaded_actor is driven, chosen at start().
+enum class threaded_actor_mode
+{
+    /// run the actor on its own thread where the platform has threads, else fall back to unthreaded
+    threaded_if_possible,
+    /// run no thread; drive processing via process_messages_if_unthreaded[_for_ms]()
+    unthreaded,
+};
+
 // CRTP mixins (plumbing, not user-facing); the aggregate types live in fwd.hh
 template <class MessageT>
 struct threaded_actor_message_handler;
@@ -60,18 +78,34 @@ struct cc::threaded_actor_base
 {
     // lifecycle
 public:
-    /// Spawns the actor thread and starts processing. Call exactly once. Messages enqueued before
-    /// start() are kept and processed once the thread is running.
-    void start();
+    /// Starts the actor. Call exactly once. In threaded mode spawns the actor thread; in unthreaded
+    /// mode runs no thread and you must drive it with process_messages_if_unthreaded[_for_ms]().
+    /// Messages enqueued before start() are kept. On single-threaded platforms the mode is forced
+    /// to unthreaded regardless of the argument.
+    void start(threaded_actor_mode mode = threaded_actor_mode::threaded_if_possible);
 
     /// Requests shutdown without blocking; new messages are rejected immediately. Lets several
     /// actors begin shutting down in parallel before any join. Call at most once, after start()
     /// and before shutdown(); shutdown() calls it for you if you did not.
     void begin_shutdown();
 
-    /// Requests shutdown and blocks until the thread has drained every queued message and joined.
-    /// Runs on_thread_shutdown before the thread exits. Call at most once, after start().
+    /// Requests shutdown and blocks until all queued messages have been drained. In threaded mode
+    /// joins the thread; unthreaded, drains synchronously on the caller. Runs on_thread_shutdown
+    /// before returning. Call at most once, after start().
     void shutdown();
+
+    // manual pump (only meaningful when started unthreaded)
+public:
+    /// Runs one processing cycle on the calling thread (drain the inbox, dispatch, one on_process).
+    /// Returns true if there may be more work (something was dispatched or on_process asked to run
+    /// again). No-op returning false unless the actor was started unthreaded and is not shut down —
+    /// so it is safe to call unconditionally every frame regardless of platform or mode.
+    bool process_messages_if_unthreaded();
+
+    /// Repeats process_messages_if_unthreaded() until idle or max_ms of wall-clock elapses
+    /// (max_ms <= 0 runs a single cycle). Returns true if it stopped on the budget with work
+    /// still pending.
+    bool process_messages_if_unthreaded_for_ms(double max_ms);
 
     /// True once shutdown has begun: new messages are rejected and the thread is winding down.
     [[nodiscard]] bool is_shutting_down() const;
@@ -106,6 +140,7 @@ private:
     std::atomic_bool _is_started = false;
     std::atomic_bool _is_shutting_down = false;
     std::atomic_bool _is_shut_down = false;
+    bool _is_unthreaded = false; // set once at start(); no background thread touches it
 
     template <class... MessageT>
     friend struct threaded_actor;

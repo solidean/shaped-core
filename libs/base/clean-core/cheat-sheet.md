@@ -292,6 +292,12 @@ protected:
 auto a = cc::make_and_start_threaded_actor<uploader>(args...); // -> cc::unique_ptr<threaded_actor<...>>
 a->enqueue_message(upload_job{...});      // -> bool (false if shutting down); a->shutdown() drains + joins
 auto impl = a->take_impl<uploader>();     // std::unique_ptr — only after shutdown; ~handle joins too
+
+// Unthreaded mode: no background thread; you drive the loop (only option on single-threaded wasm).
+auto b = cc::make_threaded_actor<uploader>(args...);
+b->start(cc::threaded_actor_mode::unthreaded);
+b->process_messages_if_unthreaded();      // one cycle -> bool "more to do"; no-op when a thread runs
+b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe to call every frame
 ```
 
 ## Strings — encoding conversion
