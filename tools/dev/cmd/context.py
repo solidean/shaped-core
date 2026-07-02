@@ -92,12 +92,22 @@ class Context:
             self.die(str(e))
 
     def discover(self, preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
-        """Discover targets for a preset, auto-configuring if needed."""
+        """Discover targets for a preset, (re)configuring first when the tree is stale or unconfigured.
+
+        Configuring up front (not just on NotConfiguredError) is what keeps the target list current:
+        an already-configured tree happily answers with a stale list after CMakeLists/sources change,
+        so `list-targets` and `build -t <new-target>` would otherwise miss anything added since the
+        last configure. `ensure_configured` fingerprints the cmake inputs, so this is a no-op when
+        nothing relevant changed."""
+        result = dev.ensure_configured(preset, root=self.root, emsdk_path=emsdk_path)
+        if result is not None and not result.ok:
+            self.die(f"Configure failed for {preset.name!r}")
         try:
             return dev.discover_targets(preset.build_dir, preset.build_type)
         except dev.NotConfiguredError:
-            result = dev.ensure_configured(preset, root=self.root, emsdk_path=emsdk_path)
-            if result is not None and not result.ok:
+            # Fingerprint was current but the file-API reply is missing/corrupt; force a reconfigure.
+            results = dev.configure([preset], root=self.root, force=True, emsdk_path=emsdk_path)
+            if results and not results[0].ok:
                 self.die(f"Configure failed for {preset.name!r}")
             return dev.discover_targets(preset.build_dir, preset.build_type)
 
