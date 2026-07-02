@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
@@ -21,17 +22,59 @@ public:
     /// The backend kind driving this context — a coarse tag, not the concrete type.
     [[nodiscard]] backend_kind backend() const { return _backend; }
 
+    /// The threading guarantees this backend provides (see the threading concept doc).
+    [[nodiscard]] thread_model threading() const { return _thread_model; }
+
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
 
     /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer).
     [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes, buffer_usage usage) = 0;
 
-    /// Submits a command list for execution and consumes it.
-    virtual void submit_command_list(std::unique_ptr<command_list> cmd) = 0;
+    /// Submits a command list for execution and consumes it, returning a token for its completion.
+    /// A command list must be submitted (or dropped) in the same epoch it was opened in.
+    virtual submission_token submit_command_list(std::unique_ptr<command_list> cmd) = 0;
 
     /// Discards a command list unsubmitted and consumes it — same as letting it go out of scope.
+    /// Must happen in the epoch the list was opened in.
     virtual void drop_command_list(std::unique_ptr<command_list> cmd) = 0;
+
+    // Epochs — frame-level GPU lifetime + CPU↔GPU sync.
+    // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
+public:
+    /// The epoch new work is currently recorded into.
+    [[nodiscard]] virtual epoch current_epoch() const = 0;
+
+    /// The latest epoch whose GPU work has fully finished (its resources are reclaimable).
+    [[nodiscard]] virtual epoch completed_epoch() const = 0;
+
+    /// Closes the current epoch and opens the next: all its GPU work is gated behind one fence
+    /// value, this epoch's garbage becomes reclaimable once that fence signals. Every command list
+    /// opened this epoch must already be submitted or dropped. Advancing is a deliberate, rationed
+    /// operation — it also bounds how far the CPU runs ahead of the GPU.
+    ///
+    /// `allowed_in_flight` throttles pipelining depth: nullopt never waits; 0 fully drains the GPU
+    /// before returning; N keeps at most N prior epochs in flight (a windowed renderer typically
+    /// passes its swapchain back-buffer count).
+    virtual void advance_epoch(cc::optional<int> allowed_in_flight) = 0;
+
+    /// Advance the epoch and block until the GPU is fully idle (equivalent to advance_epoch(0)).
+    virtual void advance_epoch_and_wait_for_idle() = 0;
+
+    /// Reclaims everything owned by epochs the GPU has finished. Safe to call at any time; also
+    /// runs implicitly after the waits below.
+    virtual void process_completed_epochs() = 0;
+
+    /// Blocks until the given epoch's GPU work has finished, then retires completed epochs. Does
+    /// not advance.
+    virtual void wait_for_epoch(epoch e) = 0;
+
+    /// Blocks on the oldest in-flight epoch, then retires — the standard back-pressure primitive
+    /// when a resource pool is exhausted. Returns immediately if nothing is in flight. Does not advance.
+    virtual void wait_for_next_inflight_epoch() = 0;
+
+    /// Whether the command list that produced this token has finished executing.
+    [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;
 
     /// Releases all backend resources; the context is unusable afterwards. Idempotent, and run
     /// automatically on destruction.
@@ -41,9 +84,10 @@ public:
     [[nodiscard]] bool is_shut_down() const { return _is_shut_down; }
 
 protected:
-    explicit context(backend_kind backend);
+    context(backend_kind backend, thread_model threading);
 
     backend_kind _backend;
+    thread_model _thread_model;
     bool _is_shut_down = false;
 };
 } // namespace sg

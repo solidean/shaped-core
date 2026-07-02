@@ -10,6 +10,22 @@ that isn't obvious from the code), that's the signal to add the rule here.
 
 ---
 
+## Editorial: no meta-commentary, no contrasting with the past
+
+Two rules for how we write sg comments and docs, on top of the repo-wide concise-comment guidance.
+
+- **No meta-commentary in class/API comments about how the code is organized** — where a concept
+  "lives", that only the concept is shared while backends differ, how some other backend might
+  realize it, and so on. A user reads a header to *use* the type; keep its comment about what it does
+  and the preconditions that matter. That kind of design context belongs in the concept doc
+  ([docs/concepts/](_index.md)), which a header may point to in one line.
+
+- **Never contrast with past behavior.** This is a greenfield build — there is no "before", no
+  "previously", no "used to", no "this now fixes / removes the old hazard". Such lines reference a
+  history that never existed and are pure noise. Describe what *is*. If a mechanism prevents a
+  problem, state it in the present or conditional: write "without epochs we would have a
+  use-after-free", **not** "epochs fix the use-after-free we had before".
+
 ## Shared types are handed out as `*_handle` = `std::shared_ptr`
 
 Every shared sg type `xyz` has a typedef `xyz_handle = std::shared_ptr<sg::xyz>` (see

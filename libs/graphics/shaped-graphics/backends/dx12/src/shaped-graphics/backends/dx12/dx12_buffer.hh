@@ -11,12 +11,21 @@ namespace sg::backend::dx12
 class dx12_buffer final : public sg::buffer
 {
 public:
-    dx12_buffer(dx12_context& ctx, cc::isize size_in_bytes, sg::buffer_usage usage, ComPtr<ID3D12Resource> resource)
-      : sg::buffer(size_in_bytes, usage), _ctx(ctx), _resource(cc::move(resource))
+    dx12_buffer(dx12_context& ctx,
+                sg::epoch created_in,
+                cc::isize size_in_bytes,
+                sg::buffer_usage usage,
+                ComPtr<ID3D12Resource> resource)
+      : sg::buffer(size_in_bytes, usage), _ctx(ctx), _creation_epoch(created_in), _resource(cc::move(resource))
     {
     }
 
-    dx12_context& _ctx; // creating context — outlives this buffer
+    // Deferred deletion: hands the GPU handle + finalizers to the context, freed once the owning
+    // epoch retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
+    ~dx12_buffer() override;
+
+    dx12_context& _ctx;        // creating context — outlives this buffer
+    sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
     ComPtr<ID3D12Resource> _resource;
 };
 } // namespace sg::backend::dx12

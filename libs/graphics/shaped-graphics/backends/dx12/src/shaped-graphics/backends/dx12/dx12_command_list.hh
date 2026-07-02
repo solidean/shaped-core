@@ -12,8 +12,11 @@ namespace sg::backend::dx12
 class dx12_command_list final : public sg::command_list
 {
 public:
-    dx12_command_list(dx12_context& ctx, ComPtr<ID3D12CommandAllocator> allocator, ComPtr<ID3D12GraphicsCommandList> list)
-      : _ctx(ctx), _allocator(cc::move(allocator)), _list(cc::move(list))
+    dx12_command_list(dx12_context& ctx,
+                      sg::epoch created_in,
+                      ComPtr<ID3D12CommandAllocator> allocator,
+                      ComPtr<ID3D12GraphicsCommandList> list)
+      : sg::command_list(created_in), _ctx(ctx), _allocator(cc::move(allocator)), _list(cc::move(list))
     {
     }
 
