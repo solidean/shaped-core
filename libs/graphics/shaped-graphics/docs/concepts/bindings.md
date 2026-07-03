@@ -48,10 +48,13 @@ compiled_shader.bindings ─▶ binding_layout ─▶ binding_group (name → ra
 ```
 
 `binding_layout`, `binding_group`, `compute_pipeline`, and the `command_list` recording that binds and
-dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) exist as **abstract** types
-today — created via `ctx.persistent.create_*`. The backends stub them (`CC_UNREACHABLE`) until the
-dx12 compute milestone fills in the root signature / pipeline state / descriptor-heap translation of
-`raw_view`s. This doc covers the data-model foundation they build on.
+dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) are created via
+`ctx.persistent.create_*`. The **dx12** backend implements the full chain — a `binding_layout` becomes
+a root signature, a `binding_group` allocates a range in a shader-visible descriptor heap and
+translates each `raw_view` into a native CBV/SRV/UAV, and a dispatch binds the table and runs. The
+**vulkan** backend stubs them (`CC_UNREACHABLE`) until its own compute milestone. Compilation is still
+external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test embeds a precompiled
+DXIL blob).
 
 ## Deferred
 

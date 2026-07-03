@@ -47,19 +47,9 @@ protected:
                             cc::isize dst_offset_in_bytes,
                             cc::isize size_in_bytes) override;
 
-    // Compute recording (reached through cmd.compute) — not implemented yet; lands with the dx12
-    // compute milestone.
-    void compute_bind_pipeline(sg::compute_pipeline const&) override
-    {
-        CC_UNREACHABLE("dx12 compute bind_pipeline is not implemented yet");
-    }
-    void compute_bind_group(cc::u32, sg::binding_group const&) override
-    {
-        CC_UNREACHABLE("dx12 compute bind_group is not implemented yet");
-    }
-    void compute_dispatch(cc::u32, cc::u32, cc::u32) override
-    {
-        CC_UNREACHABLE("dx12 compute dispatch is not implemented yet");
-    }
+    // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
+    void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
+    void compute_bind_group(cc::u32 set, sg::binding_group const& group) override;
+    void compute_dispatch(cc::u32 x, cc::u32 y, cc::u32 z) override;
 };
 } // namespace sg::backend::dx12

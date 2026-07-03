@@ -169,7 +169,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 // data model only: no compiler yet (construct by hand / future loader)
 ```
 
-## bind path — layout / pipeline / group + compute dispatch  (abstract; backends stub until the dx12 compute milestone)
+## bind path — layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
 
 ```cpp
 #include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
