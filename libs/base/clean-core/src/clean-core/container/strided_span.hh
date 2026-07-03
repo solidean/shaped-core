@@ -277,3 +277,10 @@ private:
     isize _size = 0;
     isize _stride_bytes = 0;
 };
+
+// strided_span is a borrow range: its validity is independent of the view object.
+namespace cc
+{
+template <class T>
+inline constexpr bool enable_borrowed_range<strided_span<T>> = true;
+} // namespace cc

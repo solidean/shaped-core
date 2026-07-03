@@ -108,7 +108,7 @@ and neither backend can bind a resource into a heap yet.
 ## Planned surface (beyond the current stubs)
 
 ```text
-buffer transfer      [planned]  command_list upload / download / copy  (first milestone)
+buffer transfer      [in progress]  command_list inline upload / download (dx12 real, vulkan stub); copy planned
 views                [in progress]  strongly-typed resource views; buffer views done, binding path + texture/texel deferred
 texture              [planned]  GPU-resident images + views (texture/texel view family)
 pipeline             [planned]  graphics/compute pipelines + shader modules
@@ -128,8 +128,8 @@ underpins safe resource reclamation and command-allocator recycling. See
 
 ```text
 1. core types + backend bridge stubs + dx12/vulkan stubs   [in progress]  (this bootstrap)
-2. command_list buffer upload / download / copy            [planned]      first real milestone
-3. real dx12 + vulkan backends for (2) (+ SDK detection)   [planned]
+2. command_list buffer inline upload / download            [in progress]  dx12 real; copy + vulkan pending
+3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
 4. textures + views                                        [in progress]  buffer views done; textures + texture/texel views + binding path remain
 5. pipelines + shaders                                     [planned]
 6. presentation (swapchain/surface) + submission/sync      [planned]

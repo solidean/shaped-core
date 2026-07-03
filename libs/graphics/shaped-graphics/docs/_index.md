@@ -39,6 +39,10 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   concurrency-safe and which must be externally synchronized.
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the
   access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
+- [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
+  epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
+- [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK
+  ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.
 
 ## Conventions
 

@@ -22,4 +22,41 @@ using Microsoft::WRL::ComPtr;
 {
     return cc::error(cc::format("{} (hr=0x{:08X})", what, cc::u32(hr)), site);
 }
+
+/// A committed buffer resource together with its persistent CPU mapping.
+struct dx12_mapped_buffer
+{
+    ComPtr<ID3D12Resource> resource;
+    void* mapped = nullptr; // byte 0 of the mapping; cast to cc::byte* at the call site
+};
+
+/// Creates a `size`-byte committed BUFFER on `heap_type`, left in `initial_state`, and persistently
+/// maps it. Used for the inline UPLOAD / READBACK ring buffers. `size` must be > 0.
+[[nodiscard]] inline cc::result<dx12_mapped_buffer> create_mapped_ring_buffer(ID3D12Device* device,
+                                                                              D3D12_HEAP_TYPE heap_type,
+                                                                              D3D12_RESOURCE_STATES initial_state,
+                                                                              cc::isize size)
+{
+    D3D12_HEAP_PROPERTIES heap = {};
+    heap.Type = heap_type;
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width = UINT64(size);
+    desc.Height = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // required for buffers
+
+    dx12_mapped_buffer out;
+    if (HRESULT hr = device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, initial_state, nullptr,
+                                                     IID_PPV_ARGS(&out.resource));
+        FAILED(hr))
+        return dx12_error(hr, "CreateCommittedResource (inline ring buffer) failed");
+    if (HRESULT hr = out.resource->Map(0, nullptr, &out.mapped); FAILED(hr))
+        return dx12_error(hr, "ID3D12Resource::Map (inline ring buffer) failed");
+    return out;
+}
 } // namespace sg::backend::dx12

@@ -16,6 +16,11 @@ void dx12_context::shutdown()
     if (_queue && _epoch_fence && _fence_event)
         advance_epoch_and_wait_for_idle();
 
+    // Drain + join the download actor and release the ring buffers while the submission fence is still
+    // alive (the actor may block on it). The GPU is idle by now, so pending copies complete promptly.
+    _download_inline.shutdown();
+    _upload_inline.shutdown();
+
     _allocators.lock(
         [](dx12_allocator_pool& p)
         {

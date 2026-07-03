@@ -734,3 +734,100 @@ static_assert(
             && s.subspan_clamped(10).empty();
     }(),
     "span subspan should be usable in constexpr");
+
+// span is a borrow range
+static_assert(cc::enable_borrowed_range<cc::span<int>>, "span<T> should be a borrow range");
+static_assert(cc::enable_borrowed_range<cc::fixed_span<int, 3>>, "fixed_span should be a borrow range");
+static_assert(!cc::enable_borrowed_range<cc::vector<int>>, "vector is not a borrow range");
+
+TEST("span - size_bytes")
+{
+    int data[] = {1, 2, 3, 4};
+    auto const s = cc::span<int>{data, 4};
+    CHECK(s.size_bytes() == 4 * cc::isize(sizeof(int)));
+    CHECK(cc::span<int>{}.size_bytes() == 0);
+}
+
+TEST("span - first_n / last_n")
+{
+    int data[] = {0, 1, 2, 3, 4};
+    auto const s = cc::span<int>{data, 5};
+
+    SECTION("first_n")
+    {
+        CHECK(s.first_n(0).empty());
+        CHECK(s.first_n(2).size() == 2);
+        CHECK(s.first_n(2)[0] == 0);
+        CHECK(s.first_n(2)[1] == 1);
+        CHECK(s.first_n(5).size() == 5);
+    }
+
+    SECTION("last_n")
+    {
+        CHECK(s.last_n(0).empty());
+        CHECK(s.last_n(2).size() == 2);
+        CHECK(s.last_n(2)[0] == 3);
+        CHECK(s.last_n(2)[1] == 4);
+        CHECK(s.last_n(5).size() == 5);
+    }
+
+    SECTION("clamped")
+    {
+        CHECK(s.first_n_clamped(-3).empty());
+        CHECK(s.first_n_clamped(99).size() == 5);
+        CHECK(s.last_n_clamped(-3).empty());
+        CHECK(s.last_n_clamped(99).size() == 5);
+        CHECK(s.last_n_clamped(2)[0] == 3);
+    }
+}
+
+TEST("span - reinterpret_as / bytes")
+{
+    SECTION("reinterpret to smaller")
+    {
+        int data[] = {1, 2};
+        auto const s = cc::span<int>{data, 2};
+        auto const shorts = s.reinterpret_as<short>();
+        CHECK(shorts.size() == 4);
+        CHECK(s.as_bytes().size() == 8);
+    }
+
+    SECTION("as_mutable_bytes writes through")
+    {
+        int x = 0;
+        auto const s = cc::span<int>{&x, 1};
+        auto const bytes = s.as_mutable_bytes();
+        CHECK(bytes.size() == cc::isize(sizeof(int)));
+        for (auto& b : bytes)
+            b = cc::byte{0xFF};
+        CHECK(x == -1); // all bits set
+    }
+
+    SECTION("as_bytes on const span")
+    {
+        int const data[] = {1, 2, 3};
+        auto const s = cc::span<int const>{data, 3};
+        auto const bytes = s.as_bytes();
+        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        CHECK(bytes.size() == 12);
+    }
+}
+
+TEST("span - try_reinterpret_as")
+{
+    cc::byte buf[8] = {};
+    auto const s = cc::span<cc::byte>{buf, 8};
+
+    SECTION("divisible succeeds")
+    {
+        auto const r = s.try_reinterpret_as<int>();
+        REQUIRE(r.has_value());
+        CHECK(r.value().size() == 2);
+    }
+
+    SECTION("indivisible yields nullopt")
+    {
+        auto const r = s.first_n(5).try_reinterpret_as<int>();
+        CHECK(!r.has_value());
+    }
+}

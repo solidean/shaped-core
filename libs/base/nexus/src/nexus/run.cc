@@ -1,6 +1,7 @@
 #include "run.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/crash_handler.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/tests/execute.hh>
@@ -62,6 +63,11 @@ void write_to(std::ostream& os, cc::string_view s)
 
 int nx::run(int argc, char** argv)
 {
+    // Install a crash handler so a fatal fault in a test prints the offending test and a
+    // stacktrace instead of a bare non-zero exit code.
+    cc::install_crash_handler();
+    cc::add_crash_context_hook(&nx::impl::report_running_test);
+
     // Handle --help flag
     if (argc == 2 && cc::string_view(argv[1]) == "--help")
     {

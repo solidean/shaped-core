@@ -14,7 +14,13 @@ using namespace cc::primitive_defines;
 
 class context;
 class command_list;
+class command_list_upload_scope;
+class command_list_download_scope;
 class buffer;
+class bytes_waiter;
+class bytes_future;
+template <class T>
+class data_future;
 class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)

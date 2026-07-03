@@ -323,7 +323,38 @@ def run_step(
             except Exception:
                 extra = ""
         verb = "succeeded" if result.ok else "failed"
+        code_note = "" if result.ok else _describe_exit_code(returncode)
         tint = console.green if result.ok else console.red
-        print(tint(f"  {label} {verb}{extra} in {duration_s * 1000:.0f} ms"), file=sys.stderr)
+        print(tint(f"  {label} {verb}{extra}{code_note} in {duration_s * 1000:.0f} ms"), file=sys.stderr)
 
     return result
+
+
+# Windows surfaces a fatal SEH fault as the NTSTATUS exception code (returned signed by
+# subprocess); POSIX returns the negated terminating signal. Name the common crash codes so a
+# bare non-zero exit reads as "access violation" rather than an opaque number.
+_NTSTATUS_NAMES = {
+    0xC0000005: "access violation (segfault)",
+    0x80000003: "breakpoint / __debugbreak",
+    0xC000001D: "illegal instruction",
+    0xC00000FD: "stack overflow",
+    0xC0000094: "integer divide by zero",
+    0xC0000409: "stack buffer overrun / fail-fast",
+    0xC0000374: "heap corruption",
+}
+_SIGNAL_NAMES = {4: "SIGILL", 6: "SIGABRT", 7: "SIGBUS", 8: "SIGFPE", 11: "SIGSEGV"}
+
+
+def _describe_exit_code(rc: int) -> str:
+    """Human-readable suffix for a non-zero process exit, empty for clean exits."""
+    if rc == 0:
+        return ""
+    if -64 <= rc < 0:  # POSIX: negative small value is the terminating signal
+        sig = -rc
+        name = _SIGNAL_NAMES.get(sig)
+        return f" (signal {sig}: {name})" if name else f" (signal {sig})"
+    u = rc & 0xFFFFFFFF  # Windows NTSTATUS crash codes arrive as signed 32-bit
+    name = _NTSTATUS_NAMES.get(u)
+    if name is not None:
+        return f" (exit 0x{u:08X}: {name})"
+    return f" (exit code {rc})"

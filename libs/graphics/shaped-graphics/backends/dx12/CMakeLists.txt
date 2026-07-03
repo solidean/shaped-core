@@ -10,6 +10,8 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
+    src/shaped-graphics/backends/dx12/dx12_upload_inline.cc
+    src/shaped-graphics/backends/dx12/dx12_download_inline.cc
 )
 
 target_sources(shaped-graphics-dx12
@@ -24,6 +26,10 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_epoch.hh
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
     src/shaped-graphics/backends/dx12/dx12_buffer.hh
+    src/shaped-graphics/backends/dx12/dx12_resource_upload.hh
+    src/shaped-graphics/backends/dx12/dx12_resource_download.hh
+    src/shaped-graphics/backends/dx12/dx12_upload_inline.hh
+    src/shaped-graphics/backends/dx12/dx12_download_inline.hh
 )
 
 target_compile_features(shaped-graphics-dx12 PUBLIC cxx_std_23)

@@ -13,6 +13,7 @@
 #include <nexus/tests/section.hh>
 
 #include <chrono>        // std::chrono: no cc timing yet
+#include <cstdio>        // std::fputs / std::fwrite: crash-context hook writes to stderr without allocating
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
@@ -136,6 +137,13 @@ struct test_duplicate_section
 };
 
 thread_local cc::vector<test_context> g_context_stack;
+
+// Plain globals tracking the currently running test, read by the crash-context hook
+// (report_running_test). Kept as a raw pointer + length so the hook needs no allocation
+// and no cc::string access. Updated just before each test/section runs.
+char const* g_running_test_data = nullptr;
+int g_running_test_size = 0;
+int g_running_test_section = 0;
 
 // When non-null, check results are tallied here instead of being recorded on the active test
 // (see nx::impl::scoped_check_capture). Only the innermost installed sink is active.
@@ -326,6 +334,21 @@ nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
 nx::impl::scoped_check_capture::~scoped_check_capture()
 {
     g_check_capture = nullptr;
+}
+
+void nx::impl::report_running_test() noexcept
+{
+    if (g_running_test_data == nullptr || g_running_test_size <= 0)
+    {
+        std::fputs("running test: <none>\n", stderr);
+        return;
+    }
+    std::fputs("running test: \"", stderr);
+    std::fwrite(g_running_test_data, 1, size_t(g_running_test_size), stderr);
+    std::fputc('"', stderr);
+    if (g_running_test_section > 0)
+        std::fprintf(stderr, " (section %d)", g_running_test_section);
+    std::fputc('\n', stderr);
 }
 
 void nx::impl::record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better)
@@ -528,6 +551,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                 ctx.leaf_section = nullptr;
                 ctx.root_section->next_open_section = nullptr;
             }
+
+            // publish the running test for the crash-context hook (points a fatal fault at this test)
+            g_running_test_data = instance.declaration->name.data();
+            g_running_test_size = int(instance.declaration->name.size());
+            g_running_test_section = section_num;
 
             if (config.verbose)
             {

@@ -23,6 +23,19 @@ sg::buffer_handle         // std::shared_ptr<sg::buffer const>   — shared-immu
 // passed around by reference (command_list&). record once, submit once, not reused.
 ```
 
+## bytes_future / bytes_waiter — download results
+
+```cpp
+#include <shaped-graphics/bytes_future.hh>
+sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, waiter}
+f.is_valid()                        // bool — backed by a real download (vs default-constructed)
+f.is_ready()                        // bool — polls the waiter; true once the bytes are valid
+f.try_get_bytes()                   // -> cc::optional<cc::span<cc::byte const>>  (polls; nullopt until ready)
+f.wait_get_bytes()                  // -> cc::optional<...>  blocks until ready; nullopt if not yet submitted
+sg::data_future<T>                  // typed wrapper: try_get_data()/wait_get_data() -> cc::optional<cc::span<T const>>
+sg::bytes_waiter                    // abstract poll handle a backend subclasses; sg::ready_bytes_waiter = ready-on-construction
+```
+
 ## Enums
 
 ```cpp
@@ -89,7 +102,13 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 #include <shaped-graphics/command_list.hh>
 // abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
 // -> std::unique_ptr; passed by reference (command_list&). record once, submit once, not reused.
-// recording API (copy/upload/download buffer, ...) — pure-virtual — lands with the first milestone
+cmd.upload.bytes_to_buffer(buf, bytes, offset=0)     // void — stage host bytes into buf (needs copy_dst); empty = no-op
+cmd.upload.data_to_buffer(buf, range, offset=0)      // void — typed convenience (trivially-copyable contiguous range)
+cmd.download.bytes_from_buffer(buf, offset, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
+cmd.download.data_from_buffer<T>(buf, off, count)    // -> sg::data_future<T>
+// inline path: copy is recorded here; the download future is ready after the submitted list finishes on
+// the GPU (no advance_epoch needed). dx12 today: uploading + downloading the SAME buffer needs two
+// command lists (no barrier system yet). vulkan transfer is a TODO stub.
 ```
 
 ## buffer — GPU-resident, immutable shape  (abstract)
