@@ -18,9 +18,14 @@ dx12_buffer::~dx12_buffer()
     }
 }
 
-cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes, sg::buffer_usage usage)
+cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes,
+                                                                sg::buffer_usage usage,
+                                                                sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
+    // TEMPORARY: only dedicated allocations (committed resources) are implemented. Placement into a
+    // memory_heap needs CreatePlacedResource + heap sub-allocation — not wired up yet.
+    CC_ASSERT(alloc.is_dedicated(), "placed allocations (non-null memory_heap) not implemented yet");
 
     ComPtr<ID3D12Resource> resource;
 
@@ -39,8 +44,10 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
         desc.Format = DXGI_FORMAT_UNKNOWN;
         desc.SampleDesc.Count = 1;
         desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // required for buffers
-        desc.Flags = sg::has_flag(usage, sg::buffer_usage::storage) ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-                                                                    : D3D12_RESOURCE_FLAG_NONE;
+        // Only a UAV (read-write storage) needs a creation flag; SRV / CBV / VBV / IBV / copy / indirect
+        // are all allowed by default on a D3D12 buffer.
+        desc.Flags = sg::has_flag(usage, sg::buffer_usage::readwrite_buffer) ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+                                                                             : D3D12_RESOURCE_FLAG_NONE;
 
         // Created in COMMON: buffer copies rely on D3D12 implicit state promotion/decay (a buffer is
         // promoted from COMMON to COPY_DEST / COPY_SOURCE on use and decays back at ExecuteCommandLists),

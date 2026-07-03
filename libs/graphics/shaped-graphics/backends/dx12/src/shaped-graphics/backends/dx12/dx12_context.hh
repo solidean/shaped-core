@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
@@ -51,7 +52,9 @@ public:
     // backend-typed API — prefer these when you already hold a dx12_context
 
     [[nodiscard]] cc::result<std::unique_ptr<dx12_command_list>> create_dx12_command_list();
-    [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(cc::isize size_in_bytes, sg::buffer_usage usage);
+    [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(cc::isize size_in_bytes,
+                                                                    sg::buffer_usage usage,
+                                                                    sg::allocation_info const& alloc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
@@ -68,9 +71,11 @@ public:
         return cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list());
     }
 
-    [[nodiscard]] cc::result<sg::buffer_handle> create_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) override
+    [[nodiscard]] cc::result<sg::buffer_handle> create_buffer(cc::isize size_in_bytes,
+                                                              sg::buffer_usage usage,
+                                                              sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage));
+        return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
     }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override

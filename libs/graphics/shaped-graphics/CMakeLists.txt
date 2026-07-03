@@ -10,6 +10,8 @@ add_library(shaped-graphics
     src/shaped-graphics/bytes_future.cc
     src/shaped-graphics/command_list.cc
     src/shaped-graphics/context.cc
+    src/shaped-graphics/context.persistent.cc
+    src/shaped-graphics/memory_heap.cc
 )
 
 # Public headers live co-located in src/. FILE_SET models the public API explicitly.
@@ -23,9 +25,12 @@ target_sources(shaped-graphics
     src/shaped-graphics/all.hh
     src/shaped-graphics/types.hh
     src/shaped-graphics/context.hh
+    src/shaped-graphics/context.persistent.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/buffer.hh
     src/shaped-graphics/bytes_future.hh
+    src/shaped-graphics/allocation_info.hh
+    src/shaped-graphics/memory_heap.hh
 )
 
 target_compile_features(shaped-graphics PUBLIC cxx_std_23)
