@@ -29,6 +29,9 @@ src/shaped-graphics/
   buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done; as_* view factories
   views.hh                        [in progress] strongly-typed buffer views (uniform/readonly/readwrite<T>, byte=raw)
                                                 + erased raw_view; texture/texel views deferred (need texture/format)
+  binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
+  compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
+                                                (no compiler yet); binding_layout / binding_group / pipeline are next
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
   memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
 backends/                                       # each subclasses the abstract sg types directly

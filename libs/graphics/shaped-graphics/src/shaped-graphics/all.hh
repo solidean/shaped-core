@@ -4,12 +4,14 @@
 /// the specific header you need.
 
 #include <shaped-graphics/allocation_info.hh>
+#include <shaped-graphics/binding.hh>
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/command_list.upload.hh>
+#include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/fwd.hh>

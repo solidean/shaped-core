@@ -149,6 +149,26 @@ v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/si
 // buffer views only today; texture/texel views (dimension-typed) deferred until sg::texture + sg::format
 ```
 
+## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
+
+```cpp
+#include <shaped-graphics/binding.hh>
+sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
+                            //   backend-agnostic reflection kind (replaces D3D_SHADER_INPUT_TYPE); +sampler/texture/accel later
+sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
+                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
+sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
+sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
+
+#include <shaped-graphics/compiled_shader.hh>
+sg::shader_stage            // vertex | fragment | compute (+ more later)
+sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob
+sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
+                            //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler }  — value type
+sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
+// data model only: no compiler yet (construct by hand / future loader); binding_layout / binding_group / pipeline are next
+```
+
 ## memory placement — heaps & alloc-info  (stub)
 
 ```cpp
