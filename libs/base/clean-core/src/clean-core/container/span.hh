@@ -9,11 +9,6 @@
 #include <type_traits>
 #include <utility>
 
-// TODO:
-// - reinterpret_as / as_bytes / as_mutable_bytes
-// - first + last
-// - size_bytes
-
 /// Non-owning view over a contiguous sequence of T, similar to std::span.
 /// Stores a pointer and runtime size.
 /// Trivially copyable regardless of T's triviality.
@@ -119,6 +114,8 @@ public:
 public:
     /// Returns the number of elements in the span.
     [[nodiscard]] constexpr isize size() const { return _size; }
+    /// Returns the total size of the viewed elements in bytes (size() * sizeof(T)).
+    [[nodiscard]] constexpr isize size_bytes() const { return _size * isize(sizeof(T)); }
     /// Returns true if size() == 0.
     [[nodiscard]] constexpr bool empty() const { return _size == 0; }
 
@@ -194,6 +191,77 @@ public:
         auto const end = cc::clamp(r.end, start, _size);
         return span(_data + start, end - start);
     }
+
+    // leading / trailing subspans
+public:
+    /// Returns the leading n elements, i.e. the subspan [0, n).
+    /// Precondition: 0 <= n <= size().
+    [[nodiscard]] constexpr span first_n(isize n) const
+    {
+        CC_ASSERT(is_subspan(n), "first_n count out of range");
+        return span(_data, n);
+    }
+
+    /// Returns the trailing n elements, i.e. the subspan [size() - n, size()).
+    /// Precondition: 0 <= n <= size().
+    [[nodiscard]] constexpr span last_n(isize n) const
+    {
+        CC_ASSERT(is_subspan(n), "last_n count out of range");
+        return span(_data + (_size - n), n);
+    }
+
+    /// Like first_n(n) but clamps n into [0, size()] instead of asserting.
+    [[nodiscard]] constexpr span first_n_clamped(isize n) const
+    {
+        n = cc::clamp(n, isize(0), _size);
+        return span(_data, n);
+    }
+
+    /// Like last_n(n) but clamps n into [0, size()] instead of asserting.
+    [[nodiscard]] constexpr span last_n_clamped(isize n) const
+    {
+        n = cc::clamp(n, isize(0), _size);
+        return span(_data + (_size - n), n);
+    }
+
+    // reinterpretation
+public:
+    /// Reinterprets the viewed bytes as a span of U. U and T must be trivially copyable.
+    /// sizeof(T) must be divisible by sizeof(U), so the element count is always exact; for
+    /// the general case use try_reinterpret_as. Must not cast away const (T const -> U const).
+    template <class U>
+    [[nodiscard]] cc::span<U> reinterpret_as() const
+    {
+        static_assert(std::is_trivially_copyable_v<std::remove_const_t<T>>, "reinterpret_as requires trivially "
+                                                                            "copyable T");
+        static_assert(std::is_trivially_copyable_v<std::remove_const_t<U>>, "reinterpret_as requires trivially "
+                                                                            "copyable U");
+        static_assert(std::is_const_v<U> || !std::is_const_v<T>, "reinterpret_as must not cast away const");
+        static_assert(sizeof(T) % sizeof(U) == 0, "reinterpret_as needs sizeof(T) divisible by sizeof(U); use "
+                                                  "try_reinterpret_as");
+        return cc::span<U>(reinterpret_cast<U*>(_data), _size * isize(sizeof(T)) / isize(sizeof(U)));
+    }
+
+    /// Like reinterpret_as but works for any size: returns nullopt when the total byte
+    /// size is not divisible by sizeof(U). U and T must be trivially copyable; must not cast away const.
+    template <class U>
+    [[nodiscard]] cc::optional<cc::span<U>> try_reinterpret_as() const
+    {
+        static_assert(std::is_trivially_copyable_v<std::remove_const_t<T>>, "try_reinterpret_as requires trivially "
+                                                                            "copyable T");
+        static_assert(std::is_trivially_copyable_v<std::remove_const_t<U>>, "try_reinterpret_as requires trivially "
+                                                                            "copyable U");
+        static_assert(std::is_const_v<U> || !std::is_const_v<T>, "try_reinterpret_as must not cast away const");
+        auto const total = _size * isize(sizeof(T));
+        if (total % isize(sizeof(U)) != 0)
+            return {}; // empty optional; avoids a non-dependent cc::nullopt lookup before optional is included
+        return cc::span<U>(reinterpret_cast<U*>(_data), total / isize(sizeof(U)));
+    }
+
+    /// Reinterprets the viewed elements as immutable raw bytes.
+    [[nodiscard]] cc::span<cc::byte const> as_bytes() const { return reinterpret_as<cc::byte const>(); }
+    /// Reinterprets the viewed elements as mutable raw bytes; only available for non-const T.
+    [[nodiscard]] cc::span<cc::byte> as_mutable_bytes() const { return reinterpret_as<cc::byte>(); }
 
     // hashing
 public:
@@ -362,3 +430,17 @@ struct std::tuple_element<I, cc::fixed_span<T, N>>
 {
     using type = T;
 };
+
+// span and fixed_span are borrow ranges: their validity is independent of the view object.
+namespace cc
+{
+template <class T>
+inline constexpr bool enable_borrowed_range<span<T>> = true;
+template <class T, isize N>
+inline constexpr bool enable_borrowed_range<fixed_span<T, N>> = true;
+} // namespace cc
+
+// Deferred include (breaks the span <-> optional cycle): try_reinterpret_as returns
+// cc::optional<span<U>>. optional.hh includes span.hh, so we pull it in only after span
+// is fully defined; the dependent return type is not instantiated until first use.
+#include <clean-core/error/optional.hh>

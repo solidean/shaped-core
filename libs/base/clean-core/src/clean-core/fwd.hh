@@ -105,6 +105,12 @@ struct strided_iterator;
 template <class T>
 struct strided_span;
 
+/// Opt-in trait (std::ranges style): true for view types whose validity is independent
+/// of the view object's lifetime (span, string_view, ...). Specialized to true at each
+/// view's own header. Consumed e.g. by make_pinned_data to distinguish borrows from owners.
+template <class T>
+inline constexpr bool enable_borrowed_range = false;
+
 
 //
 // Container
@@ -112,6 +118,9 @@ struct strided_span;
 
 template <class T, class ContainerT>
 struct allocating_container;
+
+template <class T>
+struct pinned_data;
 
 template <class T>
 struct array;
