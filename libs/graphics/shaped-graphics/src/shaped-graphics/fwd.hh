@@ -14,6 +14,8 @@ using namespace cc::primitive_defines;
 
 class context;
 class command_list;
+class command_list_upload_scope;
+class command_list_download_scope;
 class buffer;
 class bytes_waiter;
 class bytes_future;

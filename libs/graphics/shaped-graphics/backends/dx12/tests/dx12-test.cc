@@ -206,12 +206,12 @@ TEST("sg dx12 - buffer upload then download round-trips")
 
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
     c.submit_dx12_command_list(cc::move(up.value()));
 
     auto down = c.create_dx12_command_list();
     REQUIRE(down.has_value());
-    auto future = down.value()->download_from_buffer(buf.value(), 0, 256);
+    auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     c.submit_dx12_command_list(cc::move(down.value()));
 
     // Ready after the submitted list finishes on the GPU — no advance_epoch needed.
@@ -231,18 +231,19 @@ TEST("sg dx12 - typed upload/download convenience")
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
-    auto buf = c.create_dx12_buffer(cc::isize(4) * sizeof(int), sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
+    auto buf = c.create_dx12_buffer(cc::isize(4) * sizeof(int), sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst,
+                                    sg::allocation_info{});
     REQUIRE(buf.has_value());
 
     int const in[4] = {5, 6, 7, 8};
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_data_to_buffer(buf.value(), cc::span<int const>(in, 4));
+    up.value()->upload.data_to_buffer(buf.value(), cc::span<int const>(in, 4));
     c.submit_dx12_command_list(cc::move(up.value()));
 
     auto down = c.create_dx12_command_list();
     REQUIRE(down.has_value());
-    auto future = down.value()->download_data_from_buffer<int>(buf.value(), 0, 4);
+    auto future = down.value()->download.data_from_buffer<int>(buf.value(), 0, 4);
     c.submit_dx12_command_list(cc::move(down.value()));
 
     auto const data = future.wait_get_data();
@@ -263,8 +264,8 @@ TEST("sg dx12 - empty transfers")
 
     auto cmd = c.create_dx12_command_list();
     REQUIRE(cmd.has_value());
-    cmd.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>()); // no-op
-    auto future = cmd.value()->download_from_buffer(buf.value(), 0, 0);
+    cmd.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>()); // no-op
+    auto future = cmd.value()->download.bytes_from_buffer(buf.value(), 0, 0);
     CHECK(future.is_valid());
     CHECK(future.is_ready()); // zero-size read is immediately ready
     auto const bytes = future.try_get_bytes();
@@ -288,12 +289,12 @@ TEST("sg dx12 - partial download with offset")
 
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
     c.submit_dx12_command_list(cc::move(up.value()));
 
     auto down = c.create_dx12_command_list();
     REQUIRE(down.has_value());
-    auto future = down.value()->download_from_buffer(buf.value(), 64, 64);
+    auto future = down.value()->download.bytes_from_buffer(buf.value(), 64, 64);
     c.submit_dx12_command_list(cc::move(down.value()));
 
     auto const bytes = future.wait_get_bytes();
@@ -325,13 +326,13 @@ TEST("sg dx12 - multiple uploads in one list, last writer wins")
 
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(first, 16));
-    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(second, 16)); // overwrites
+    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(first, 16));
+    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(second, 16)); // overwrites
     c.submit_dx12_command_list(cc::move(up.value()));
 
     auto down = c.create_dx12_command_list();
     REQUIRE(down.has_value());
-    auto future = down.value()->download_from_buffer(buf.value(), 0, 16);
+    auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 16);
     c.submit_dx12_command_list(cc::move(down.value()));
 
     auto const bytes = future.wait_get_bytes();
@@ -358,13 +359,13 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
 
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
     c.submit_dx12_command_list(cc::move(up.value()));
 
     {
         auto down = c.create_dx12_command_list();
         REQUIRE(down.has_value());
-        auto future = down.value()->download_from_buffer(buf.value(), 0, 256);
+        auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
         c.submit_dx12_command_list(cc::move(down.value()));
         // future dropped here without waiting → the actor cancels the memcpy but still frees the space
     }
@@ -373,7 +374,7 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
 
     auto down2 = c.create_dx12_command_list();
     REQUIRE(down2.has_value());
-    auto future = down2.value()->download_from_buffer(buf.value(), 0, 256);
+    auto future = down2.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     c.submit_dx12_command_list(cc::move(down2.value()));
 
     auto const bytes = future.wait_get_bytes();
@@ -399,12 +400,12 @@ TEST("sg dx12 - inline transfer reused across epochs")
 
         auto up = c.create_dx12_command_list();
         REQUIRE(up.has_value());
-        up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 1024));
+        up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 1024));
         c.submit_dx12_command_list(cc::move(up.value()));
 
         auto down = c.create_dx12_command_list();
         REQUIRE(down.has_value());
-        auto future = down.value()->download_from_buffer(buf.value(), 0, 1024);
+        auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 1024);
         c.submit_dx12_command_list(cc::move(down.value()));
 
         auto const bytes = future.wait_get_bytes();
@@ -429,8 +430,10 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
-    auto buf_a = c.create_dx12_buffer(128, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
-    auto buf_b = c.create_dx12_buffer(128, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
+    auto buf_a
+        = c.create_dx12_buffer(128, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
+    auto buf_b
+        = c.create_dx12_buffer(128, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
     REQUIRE(buf_a.has_value());
     REQUIRE(buf_b.has_value());
 
@@ -444,8 +447,8 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
 
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_to_buffer(buf_a.value(), cc::span<cc::byte const>(src_a, 128));
-    up.value()->upload_to_buffer(buf_b.value(), cc::span<cc::byte const>(src_b, 128));
+    up.value()->upload.bytes_to_buffer(buf_a.value(), cc::span<cc::byte const>(src_a, 128));
+    up.value()->upload.bytes_to_buffer(buf_b.value(), cc::span<cc::byte const>(src_b, 128));
     c.submit_dx12_command_list(cc::move(up.value()));
 
     // Two lists open at once; A reserves its ring window first, then B reserves the next window.
@@ -453,8 +456,8 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
     auto list_b = c.create_dx12_command_list();
     REQUIRE(list_a.has_value());
     REQUIRE(list_b.has_value());
-    auto future_a = list_a.value()->download_from_buffer(buf_a.value(), 0, 128);
-    auto future_b = list_b.value()->download_from_buffer(buf_b.value(), 0, 128);
+    auto future_a = list_a.value()->download.bytes_from_buffer(buf_a.value(), 0, 128);
+    auto future_b = list_b.value()->download.bytes_from_buffer(buf_b.value(), 0, 128);
 
     // Submit B before A: submission (and thus copy) order is the reverse of allocation order.
     c.submit_dx12_command_list(cc::move(list_b.value()));
@@ -495,13 +498,13 @@ TEST("sg dx12 - dropping a recording list cancels its downloads")
 
     auto up = c.create_dx12_command_list();
     REQUIRE(up.has_value());
-    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
     c.submit_dx12_command_list(cc::move(up.value()));
 
     // Record a download, then drop the list without submitting → the future is cancelled.
     auto dropped = c.create_dx12_command_list();
     REQUIRE(dropped.has_value());
-    auto cancelled = dropped.value()->download_from_buffer(buf.value(), 0, 256);
+    auto cancelled = dropped.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     c.drop_dx12_command_list(cc::move(dropped.value()));
 
     CHECK(!cancelled.is_ready());
@@ -512,7 +515,7 @@ TEST("sg dx12 - dropping a recording list cancels its downloads")
     // The ring is free again: a fresh download round-trips.
     auto down = c.create_dx12_command_list();
     REQUIRE(down.has_value());
-    auto future = down.value()->download_from_buffer(buf.value(), 0, 256);
+    auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     c.submit_dx12_command_list(cc::move(down.value()));
 
     auto const bytes = future.wait_get_bytes();

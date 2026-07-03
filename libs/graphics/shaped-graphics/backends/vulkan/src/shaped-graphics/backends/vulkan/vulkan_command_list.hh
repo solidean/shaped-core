@@ -18,20 +18,21 @@ public:
     {
     }
 
-    // TODO: inline buffer transfer for the vulkan backend (see the dx12 backend for the reference impl).
-    void upload_to_buffer(sg::buffer_handle, cc::span<cc::byte const>, cc::isize) override
-    {
-        CC_UNREACHABLE("vulkan inline buffer upload is not implemented yet");
-    }
-    [[nodiscard]] sg::bytes_future download_from_buffer(sg::buffer_handle, cc::isize, cc::isize) override
-    {
-        CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
-    }
-
     ~vulkan_command_list() override; // destroys _pool (and its buffer); body in vulkan_command_list.cc
 
     vulkan_context& _ctx; // creating context — outlives this list
     VkCommandPool _pool = VK_NULL_HANDLE;
     VkCommandBuffer _buffer = VK_NULL_HANDLE; // owned by _pool, freed with it
+
+protected:
+    // TODO: inline buffer transfer for the vulkan backend (see the dx12 backend for the reference impl).
+    void upload_bytes_to_buffer(sg::buffer_handle, cc::span<cc::byte const>, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan inline buffer upload is not implemented yet");
+    }
+    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::buffer_handle, cc::isize, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan

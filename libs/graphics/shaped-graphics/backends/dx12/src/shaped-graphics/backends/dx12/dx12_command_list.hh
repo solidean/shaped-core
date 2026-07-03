@@ -23,12 +23,6 @@ public:
     {
     }
 
-    void upload_to_buffer(sg::buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes = 0) override;
-
-    [[nodiscard]] sg::bytes_future download_from_buffer(sg::buffer_handle buffer,
-                                                        cc::isize offset_in_bytes,
-                                                        cc::isize size_in_bytes) override;
-
     dx12_context& _ctx; // creating context — outlives this list
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;
@@ -36,5 +30,13 @@ public:
     // Deferred readback copies recorded into this list; stamped with the submission token and handed
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
+
+protected:
+    // Reached through the base's cmd.upload / cmd.download scopes.
+    void upload_bytes_to_buffer(sg::buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes) override;
+
+    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::buffer_handle buffer,
+                                                              cc::isize offset_in_bytes,
+                                                              cc::isize size_in_bytes) override;
 };
 } // namespace sg::backend::dx12

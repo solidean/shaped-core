@@ -6,7 +6,9 @@
 
 namespace sg::backend::dx12
 {
-void dx12_command_list::upload_to_buffer(sg::buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
+void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
+                                               cc::span<cc::byte const> data,
+                                               cc::isize offset_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "upload target buffer is null");
     auto* const dst = dynamic_cast<dx12_buffer*>(buffer.get());
@@ -20,9 +22,9 @@ void dx12_command_list::upload_to_buffer(sg::buffer_handle buffer, cc::span<cc::
     _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
 }
 
-sg::bytes_future dx12_command_list::download_from_buffer(sg::buffer_handle buffer,
-                                                         cc::isize offset_in_bytes,
-                                                         cc::isize size_in_bytes)
+sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle buffer,
+                                                               cc::isize offset_in_bytes,
+                                                               cc::isize size_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "download source buffer is null");
     auto* const src = dynamic_cast<dx12_buffer*>(buffer.get());

@@ -7,7 +7,7 @@
 ## What inline upload is
 
 **Inline upload** stages latency-critical CPU→GPU buffer writes through a persistently-mapped
-**UPLOAD-heap ring buffer** on the direct queue. `command_list::upload_to_buffer` memcpys the source
+**UPLOAD-heap ring buffer** on the direct queue. `cmd.upload.bytes_to_buffer` memcpys the source
 bytes into the ring and records a `CopyBufferRegion` **immediately** into the recording list — so the
 destination buffer is usable by later commands in the *same* list. It is the "inline" path because the
 copy is inlined into the caller's command stream, not deferred to a separate transfer submission.

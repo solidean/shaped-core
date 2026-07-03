@@ -7,7 +7,7 @@
 ## What inline download is
 
 **Inline download** reads GPU buffer bytes back to the host through a persistently-mapped
-**READBACK-heap ring buffer** on the direct queue. `command_list::download_from_buffer` records a
+**READBACK-heap ring buffer** on the direct queue. `cmd.download.bytes_from_buffer` records a
 `CopyBufferRegion` from the source into a reserved ring window **inline** in the recording list, and
 returns a [`bytes_future`](../../src/shaped-graphics/bytes_future.hh) immediately. The actual bytes
 arrive **asynchronously**: the GPU writes the readback window when it executes the list, and only then

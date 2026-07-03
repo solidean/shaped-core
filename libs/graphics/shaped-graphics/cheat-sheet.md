@@ -27,7 +27,7 @@ sg::buffer_handle         // std::shared_ptr<sg::buffer>         — shared-immu
 
 ```cpp
 #include <shaped-graphics/bytes_future.hh>
-sg::bytes_future                    // returned by command_list::download_from_buffer; holds {span, pin, waiter}
+sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, waiter}
 f.is_valid()                        // bool — backed by a real download (vs default-constructed)
 f.is_ready()                        // bool — polls the waiter; true once the bytes are valid
 f.try_get_bytes()                   // -> cc::optional<cc::span<cc::byte const>>  (polls; nullopt until ready)
@@ -102,10 +102,10 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 #include <shaped-graphics/command_list.hh>
 // abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
 // -> std::unique_ptr; passed by reference (command_list&). record once, submit once, not reused.
-cmd.upload_to_buffer(buf, bytes, offset=0)         // void — stage host bytes into buf (needs copy_dst); empty = no-op
-cmd.upload_data_to_buffer(buf, range, offset=0)    // void — typed convenience (trivially-copyable contiguous range)
-cmd.download_from_buffer(buf, offset, size)        // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
-cmd.download_data_from_buffer<T>(buf, off, count)  // -> sg::data_future<T>
+cmd.upload.bytes_to_buffer(buf, bytes, offset=0)     // void — stage host bytes into buf (needs copy_dst); empty = no-op
+cmd.upload.data_to_buffer(buf, range, offset=0)      // void — typed convenience (trivially-copyable contiguous range)
+cmd.download.bytes_from_buffer(buf, offset, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
+cmd.download.data_from_buffer<T>(buf, off, count)    // -> sg::data_future<T>
 // inline path: copy is recorded here; the download future is ready after the submitted list finishes on
 // the GPU (no advance_epoch needed). dx12 today: uploading + downloading the SAME buffer needs two
 // command lists (no barrier system yet). vulkan transfer is a TODO stub.
