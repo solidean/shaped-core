@@ -78,10 +78,7 @@ every view's access (a `readwrite_view` requires `readwrite_buffer`, etc.). The 
 Every typed view converts (`to_raw()`, or implicitly) into one plain
 [`raw_view`](../../src/shaped-graphics/views.hh) — a tagged struct (access + shape enums + handle +
 params) that a backend `switch`es on to build its native descriptor. The type safety lives entirely
-in the typed views; users never touch `raw_view`, only the backend does. It is a single struct rather
-than a `std::variant` on purpose: a variant over open, *templated* view instantiations is unpleasant,
-and the frontend already guarantees only well-formed views reach it. Resource handles live outside any
-union, so there is no manual union-lifetime code.
+in the typed views; users never touch `raw_view`, only the backend does.
 
 ## Scope today, and what's deferred
 

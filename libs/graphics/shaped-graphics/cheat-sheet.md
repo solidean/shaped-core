@@ -123,7 +123,7 @@ sg::view_class               // uniform | readonly | readwrite   (access; mirror
 sg::view_shape               // uniform_block | structured | raw (layout; derived from T)
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
 v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/size/element_count/stride }
-// backends switch on (access, shape) to build the native descriptor — no std::variant (name raw_view is TBD)
+// backends switch on (access, shape) to build the native descriptor  (name raw_view is TBD)
 // buffer views only today; texture/texel views (dimension-typed) deferred until sg::texture + sg::format
 ```
 
