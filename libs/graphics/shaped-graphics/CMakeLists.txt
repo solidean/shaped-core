@@ -27,6 +27,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.persistent.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/buffer.hh
+    src/shaped-graphics/views.hh
     src/shaped-graphics/allocation_info.hh
     src/shaped-graphics/memory_heap.hh
 )
@@ -76,6 +77,7 @@ endif()
 add_executable(shaped-graphics-test
     tests/main.cc
     tests/smoke-test.cc
+    tests/views-test.cc
 )
 
 target_link_libraries(shaped-graphics-test

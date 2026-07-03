@@ -26,7 +26,9 @@ src/shaped-graphics/
   context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_buffer funneled via ctx.persistent
   context.persistent.hh/.cc       [in progress] context_persistent_scope: ctx.persistent resource factory (back-ref + friend of context)
   command_list.hh/.cc             [in progress] abstract; recording API planned
-  buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done
+  buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done; as_* view factories
+  views.hh                        [in progress] strongly-typed buffer views (uniform/readonly/readwrite<T>, byte=raw)
+                                                + erased raw_view; texture/texel views deferred (need texture/format)
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
   memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
 backends/                                       # each subclasses the abstract sg types directly
@@ -107,7 +109,8 @@ and neither backend can bind a resource into a heap yet.
 
 ```text
 buffer transfer      [planned]  command_list upload / download / copy  (first milestone)
-texture              [planned]  GPU-resident images + views
+views                [in progress]  strongly-typed resource views; buffer views done, binding path + texture/texel deferred
+texture              [planned]  GPU-resident images + views (texture/texel view family)
 pipeline             [planned]  graphics/compute pipelines + shader modules
 sampler              [planned]
 swapchain / surface  [planned]  presentation
@@ -127,7 +130,7 @@ underpins safe resource reclamation and command-allocator recycling. See
 1. core types + backend bridge stubs + dx12/vulkan stubs   [in progress]  (this bootstrap)
 2. command_list buffer upload / download / copy            [planned]      first real milestone
 3. real dx12 + vulkan backends for (2) (+ SDK detection)   [planned]
-4. textures + views                                        [planned]
+4. textures + views                                        [in progress]  buffer views done; textures + texture/texel views + binding path remain
 5. pipelines + shaders                                     [planned]
 6. presentation (swapchain/surface) + submission/sync      [planned]
 7. tier 2 backends (metal, webgpu)                         [planned]

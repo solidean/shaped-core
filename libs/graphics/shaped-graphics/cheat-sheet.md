@@ -100,6 +100,31 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
+// view factories — a strongly-typed view onto this buffer (buffer's usage must cover the access):
+b.as_uniform_buffer<T>(offset=0)           // -> sg::uniform_view<T>    (CBV/UBO; needs uniform_buffer usage; offset 256-aligned)
+                                           //   T is a uniform_element: size multiple of 16, <= 64 KiB (not byte)
+b.as_readonly_buffer<T>({.offset=, .size=})// -> sg::readonly_view<T>   (SRV; range in elements of T; default = whole)
+b.as_readwrite_buffer<T>({.offset=,.size=})// -> sg::readwrite_view<T>  (UAV; needs readwrite_buffer usage)
+b.as_raw_readonly({.offset=,.size=})       // -> readonly_view<byte>    (raw / byte-addressed; range in bytes; default = whole)
+b.as_raw_readwrite({.offset=,.size=})      // -> readwrite_view<byte>   (raw / byte-addressed; range in bytes; default = whole)
+```
+
+## views — strongly-typed resource views  (see docs/concepts/views.md)
+
+```cpp
+#include <shaped-graphics/views.hh>
+sg::view_element<T>          // concept: T is `byte`, or sizeof(T) % 4 == 0 (GPUs load DWORD-aligned)
+sg::uniform_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
+sg::uniform_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
+sg::readonly_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
+sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
+// each holds a buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
+sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage)
+sg::view_shape               // uniform_block | structured | raw (layout; derived from T)
+sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
+v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/size/element_count/stride }
+// backends switch on (access, shape) to build the native descriptor — no std::variant (name raw_view is TBD)
+// buffer views only today; texture/texel views (dimension-typed) deferred until sg::texture + sg::format
 ```
 
 ## memory placement — heaps & alloc-info  (stub)

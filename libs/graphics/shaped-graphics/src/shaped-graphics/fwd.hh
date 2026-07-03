@@ -19,6 +19,13 @@ class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)
 
+// Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
+// (uniform_view/readonly_view/readwrite_view) are constrained, so only the enums and raw_view are
+// forward-declared here; include views.hh for the views themselves.
+enum class view_class;
+enum class view_shape;
+struct raw_view;
+
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
 /// libs/graphics/shaped-graphics/docs/concepts/epochs.md.

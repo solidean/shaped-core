@@ -10,6 +10,15 @@ Running list of known follow-ups. Bigger design intent lives in
   [coding-guidelines](coding-guidelines.md) note.
 - **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
   `cc::flags` once that clean-core type is implemented.
+- **Views — deferred layers:** buffer views (`uniform`/`readonly`/`readwrite`, `byte` = raw) + the
+  erased `raw_view` are in; see [concepts/views.md](concepts/views.md). Still deferred:
+  - **texture + texel views** — their own view family, blocked on `sg::texture` + a pixel-`format`
+    enum (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array, + `render_target`/`depth_stencil`);
+  - the **binding path** (pipelines, descriptor groups/layouts, `command_list` binding) that consumes
+    `raw_view`, plus **reflection-driven validation** of a view's `T`/access against the shader;
+  - the **backend `raw_view` translation** (`switch` on `(access, shape)` → native descriptor) — no
+    backend code exists for views yet;
+  - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
 - **Blessed escape hatch:** add an sg API that returns raw underlying GPU handles without exposing
   the concrete backend types, so callers don't reach for `dynamic_cast` to a `sg::backend::*` type.
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
