@@ -40,7 +40,7 @@ void exercise_context(vulkan::vulkan_context& ctx)
     CHECK(empty.value()->_memory == VK_NULL_HANDLE);
 
     // read-write storage usage takes the STORAGE_BUFFER path.
-    auto storage = ctx.create_vulkan_buffer(1024, sg::buffer_usage::storage_read_write);
+    auto storage = ctx.create_vulkan_buffer(1024, sg::buffer_usage::readwrite_buffer);
     REQUIRE(storage.has_value());
     CHECK(storage.value()->size_in_bytes() == 1024);
 
@@ -53,7 +53,7 @@ void exercise_context(vulkan::vulkan_context& ctx)
     // command list, all through the base type.
     auto& base = static_cast<sg::context&>(ctx);
 
-    auto via_base = base.persistent.create_buffer(64, sg::buffer_usage::vertex);
+    auto via_base = base.persistent.create_buffer(64, sg::buffer_usage::vertex_buffer);
     REQUIRE(via_base.has_value());
     CHECK(via_base.value()->size_in_bytes() == 64);
 

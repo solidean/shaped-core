@@ -35,11 +35,11 @@ TEST("sg smoke - buffer shape")
 {
     // The shape metadata lives in the buffer base (protected, inline accessors); a real backend
     // buffer inherits exactly this.
-    auto const b = test_buffer(256, sg::buffer_usage::vertex | sg::buffer_usage::copy_dst);
+    auto const b = test_buffer(256, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
     CHECK(b.size_in_bytes() == 256);
-    CHECK(sg::has_flag(b.usage(), sg::buffer_usage::vertex));
+    CHECK(sg::has_flag(b.usage(), sg::buffer_usage::vertex_buffer));
     CHECK(sg::has_flag(b.usage(), sg::buffer_usage::copy_dst));
-    CHECK(!sg::has_flag(b.usage(), sg::buffer_usage::index));
+    CHECK(!sg::has_flag(b.usage(), sg::buffer_usage::index_buffer));
 }
 
 TEST("sg smoke - empty buffer shape")

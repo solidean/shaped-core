@@ -46,9 +46,8 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
         desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // required for buffers
         // Only a UAV (read-write storage) needs a creation flag; SRV / CBV / VBV / IBV / copy / indirect
         // are all allowed by default on a D3D12 buffer.
-        desc.Flags = sg::has_flag(usage, sg::buffer_usage::storage_read_write)
-                       ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-                       : D3D12_RESOURCE_FLAG_NONE;
+        desc.Flags = sg::has_flag(usage, sg::buffer_usage::readwrite_buffer) ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+                                                                             : D3D12_RESOURCE_FLAG_NONE;
 
         D3D12_RESOURCE_STATES initial_state = sg::has_flag(usage, sg::buffer_usage::copy_dst)
                                                 ? D3D12_RESOURCE_STATE_COPY_DEST
