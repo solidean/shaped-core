@@ -48,8 +48,8 @@ enum class buffer_usage : u32
     copy_dst = 1u << 1,                // Vk TRANSFER_DST / WGPU COPY_DST; DX12 initial state; Metal implicit
     vertex_buffer = 1u << 2,           // Vk VERTEX / WGPU VERTEX
     index_buffer = 1u << 3,            // Vk INDEX / WGPU INDEX
-    uniform_buffer = 1u << 4,          // constant buffer: Vk UNIFORM(_TEXEL) / WGPU UNIFORM (size-capped)
-    readonly_buffer = 1u << 5,         // read-only structured/raw SRV: Vk STORAGE(_TEXEL) / WGPU STORAGE; DX12 no flag
+    uniform_buffer = 1u << 4,          // constant buffer: Vk UNIFORM / WGPU UNIFORM (size-capped)
+    readonly_buffer = 1u << 5,         // read-only structured/raw SRV: Vk STORAGE / WGPU STORAGE; DX12 no flag
     readwrite_buffer = 1u << 6,        // UAV: Vk STORAGE / WGPU STORAGE; DX12 ALLOW_UNORDERED_ACCESS
     indirect_command_buffer = 1u << 7, // Vk INDIRECT / WGPU INDIRECT
 
@@ -59,10 +59,17 @@ enum class buffer_usage : u32
     accel_structure_build_input = 1u << 9, // Vk AS_BUILD_INPUT_READ_ONLY_KHR; DX12 plain SRV
 
     // Not yet modeled — add when a backend needs them:
+    // texel_buffer           — typed buffer view (Vk UNIFORM/STORAGE_TEXEL / DX12 typed SRV/UAV): HW
+    //                          format decode over a linear layout. Narrow niche — a texture or a
+    //                          structured buffer covers most cases; deferred until a concrete need.
+    // device_address         — raw GPU buffer pointer for pointer-based bindless (Vk buffer_reference /
+    //                          SHADER_DEVICE_ADDRESS; DX12 addresses always available). Deferred; the
+    //                          accel-structure usages above already get it implicitly.
     // conditional_rendering  — Vk CONDITIONAL_RENDERING_EXT only (DX12 predication implicit; no WGPU/Metal)
     // stream_output          — transform feedback: Vk XFB EXT / DX12 stream-output
     // shared/external        — NOT a usage: cross-device sharing is a memory property; belongs on
     //                          memory_heap / allocation_info (DX12 HEAP_FLAG_SHARED / Vk external memory)
+    // shader_binding_table   — raytracing SBT: gets its own abstraction, not a buffer usage.
 };
 
 [[nodiscard]] constexpr buffer_usage operator|(buffer_usage a, buffer_usage b)
