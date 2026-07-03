@@ -2,12 +2,14 @@
 // CPU copies. Downloads record a GPU readback copy at record time; at submit the deferred copies are
 // stamped with the list's submission token and enqueued on a cc::threaded_actor. The actor blocks on
 // the submission fence, memcpys the readback bytes into the destination (skipping it if the future was
-// dropped), marks the waiter ready, and frees the ring space.
+// dropped), marks the waiter ready, and releases the epoch's outstanding-copy count.
 //
-// TODO: the free watermark advances monotonically in actor (== submit) order, which matches the ring
-// allocation order only when lists are submitted in the order their space was reserved (true for a
-// single recording thread). Robust concurrent multi-list ordering wants per-region completion tracking
-// / the split GPU-CPU download watermarks — deferred (see the epochs concept doc).
+// Ring space is reclaimed at EPOCH granularity, not per submission. Reservations happen concurrently
+// in allocation order; multiple lists record in parallel, so submission order (the actor's copy order)
+// need not match allocation order. Freeing a window per submission could release space an interleaved,
+// not-yet-submitted list still holds. So each epoch carries an outstanding-copy counter, and a closed
+// epoch's whole ring span frees only once that counter hits zero — i.e. every one of its downloads has
+// drained (or its list was dropped). See libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -15,11 +17,13 @@
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_download.hh>
 
+#include <memory>
+
 namespace sg::backend::dx12
 {
 namespace
 {
-/// The download system's async agent: one thread that drains readback copies in submit order.
+/// The download system's async agent: one thread that drains readback copies in submission order.
 class dx12_download_actor final : public cc::threaded_actor_impl<dx12_download_copy_job>
 {
 public:
@@ -35,7 +39,7 @@ protected:
             job.deferred_cpu_copy();
         if (job.waiter)
             job.waiter->mark_ready();
-        _sys.advance_free_watermark(job.end_pos);
+        _sys.on_copy_done(job.epoch_copies); // release this download's hold on its epoch's ring span
     }
 
 private:
@@ -43,17 +47,52 @@ private:
 };
 } // namespace
 
-void dx12_download_inline_system::initialize(ComPtr<ID3D12Resource> buffer,
-                                             cc::byte* mapped,
-                                             cc::isize capacity,
-                                             HANDLE wait_event)
+cc::result<cc::unit> dx12_download_inline_system::initialize(cc::isize capacity)
 {
     CC_ASSERT(capacity > 0, "download ring capacity must be positive");
-    _buffer = cc::move(buffer);
-    _mapped = mapped;
+
+    // READBACK heap, COPY_DEST: the GPU writes readback bytes here via CopyBufferRegion, the actor
+    // reads them back out on the CPU.
+    auto ring = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST,
+                                          capacity);
+    CC_RETURN_IF_ERROR(ring);
+    _buffer = cc::move(ring.value().resource);
+    _mapped = static_cast<cc::byte*>(ring.value().mapped);
     _capacity = capacity;
-    _wait_event = wait_event;
+
+    _wait_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (_wait_event == nullptr)
+        return cc::error("CreateEventW failed for the download wait event");
+
+    _ring.lock([](ring_state& s) { s.current_epoch_copies = std::make_shared<std::atomic<cc::isize>>(0); });
+
     _actor = cc::make_and_start_threaded_actor<dx12_download_actor>(*this);
+    return cc::unit{};
+}
+
+void dx12_download_inline_system::ring_state::reclaim(dx12_download_inline_system& sys)
+{
+    cc::u64 const prev = sys._freed_pos.load(std::memory_order_acquire);
+    cc::u64 new_freed = prev;
+
+    // Free every leading epoch whose copies have all drained. The FIFO is ordered by allocation, so a
+    // still-busy epoch blocks reclaim of everything reserved after it.
+    cc::isize retired = 0;
+    for (auto const& cp : checkpoints)
+    {
+        if (cp.outstanding->load(std::memory_order_acquire) != 0)
+            break;
+        new_freed = cp.end_pos;
+        ++retired;
+    }
+    if (retired > 0)
+        checkpoints.remove_from_to(0, retired);
+
+    if (new_freed > prev)
+    {
+        sys._freed_pos.store(new_freed, std::memory_order_release);
+        sys._freed_pos.notify_all();
+    }
 }
 
 dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc::isize size)
@@ -66,8 +105,12 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
         cc::optional<reservation> r = _ring.lock(
             [&](ring_state& s) -> cc::optional<reservation>
             {
+                s.reclaim(*this); // pick up epochs the actor has drained since we last looked
+
                 cc::u64 start = s.next_pos;
                 cc::isize offset = cc::isize(start % cc::u64(_capacity));
+                // TODO: split the copy across the seam instead of wasting the tail (see
+                // libs/graphics/shaped-graphics/docs/concepts/download.inline.md).
                 if (offset + size > _capacity) // would wrap: waste the tail, restart at 0
                 {
                     start += cc::u64(_capacity - offset);
@@ -75,17 +118,26 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
                 }
                 cc::u64 const end = start + cc::u64(size);
                 if (end - _freed_pos.load(std::memory_order_acquire) > cc::u64(_capacity))
-                    return {}; // space still held by earlier, not-yet-copied downloads
+                {
+                    // The window overlaps space still held by earlier epochs. Only closed epochs
+                    // (checkpoints) can release it; if there are none, this one open epoch's downloads
+                    // exceed the ring — a hard budget error rather than a deadlock (a documented v1
+                    // limitation, like the upload ring).
+                    CC_ASSERT(!s.checkpoints.empty(), "inline downloads in one epoch exceed the readback ring "
+                                                      "capacity");
+                    return {};
+                }
                 s.next_pos = end;
-                return reservation{offset, end};
+                s.current_epoch_copies->fetch_add(1, std::memory_order_relaxed); // one more copy for this epoch
+                return reservation{offset, s.current_epoch_copies};
             });
 
         if (r.has_value())
-            return r.value();
+            return cc::move(r.value());
 
-        // Wait for the actor to free space. This blocks the recording thread; it is only safe because
-        // the occupied space belongs to already-submitted lists that the actor is draining. A single
-        // list whose own downloads exceed the ring would deadlock here (a documented v1 limitation).
+        // Wait for the actor to drain an earlier epoch and advance the free watermark. Safe to block
+        // the recording thread: the occupied space belongs to already-submitted lists the actor is
+        // draining. A single epoch whose own downloads exceed the ring asserts above instead.
         cc::u64 const seen = _freed_pos.load(std::memory_order_acquire);
         _freed_pos.wait(seen, std::memory_order_acquire);
     }
@@ -106,7 +158,7 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     cc::span<cc::byte> const dst_span(dst.get(), size);
     auto waiter = std::make_shared<dx12_download_waiter>();
 
-    reservation const res = reserve(size);
+    reservation res = reserve(size);
     dx12_buffer_download download(src, offset, dst_span);
     download.prepare(cmd);
     dx12_download_allocation const alloc{_buffer.Get(), _mapped, res.offset, size};
@@ -117,7 +169,7 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
     job.pin = std::weak_ptr<void>(dst);
     job.waiter = waiter;
-    job.end_pos = res.end_pos;
+    job.epoch_copies = cc::move(res.epoch_copies);
     cmd._pending_downloads.push_back(cc::move(job));
 
     return sg::bytes_future(cc::span<cc::byte const>(dst.get(), size), std::shared_ptr<void>(dst), cc::move(waiter));
@@ -137,11 +189,37 @@ void dx12_download_inline_system::enqueue_submitted(sg::submission_token token, 
 
 void dx12_download_inline_system::discard_unsubmitted(cc::vector<dx12_download_copy_job>& jobs)
 {
-    // The space was reserved in allocation order; freeing to each end_pos reclaims it (single-thread
-    // recording keeps these the newest reservations — see the ordering note atop this file).
-    for (auto const& job : jobs)
-        advance_free_watermark(job.end_pos);
+    // Never submitted: the deferred copies won't run and their futures can't complete. Cancel each
+    // future and release the epoch-copy count it held, so the epoch still reaches zero and reclaims its
+    // ring span once its *submitted* downloads drain. The reserved bytes are not freed individually —
+    // they sit inside the open epoch's span and are reclaimed with it.
+    bool released = false;
+    for (auto& job : jobs)
+    {
+        if (job.waiter)
+            job.waiter->mark_cancelled();
+        if (job.epoch_copies)
+        {
+            job.epoch_copies->fetch_sub(1, std::memory_order_acq_rel);
+            released = true;
+        }
+    }
+    if (released)
+        _ring.lock([&](ring_state& s) { s.reclaim(*this); });
     jobs.clear();
+}
+
+void dx12_download_inline_system::on_epoch_advance(sg::epoch closed)
+{
+    _ring.lock(
+        [&](ring_state& s)
+        {
+            // Snapshot the cursor as `closed`'s boundary and hand off its counter; the fresh counter
+            // tallies the next epoch. reclaim in case `closed` already fully drained (counter at zero).
+            s.checkpoints.push_back(epoch_checkpoint{closed, s.next_pos, cc::move(s.current_epoch_copies)});
+            s.current_epoch_copies = std::make_shared<std::atomic<cc::isize>>(0);
+            s.reclaim(*this);
+        });
 }
 
 void dx12_download_inline_system::wait_for_submission(sg::submission_token token)
@@ -156,12 +234,10 @@ void dx12_download_inline_system::wait_for_submission(sg::submission_token token
     }
 }
 
-void dx12_download_inline_system::advance_free_watermark(cc::u64 end_pos)
+void dx12_download_inline_system::on_copy_done(std::shared_ptr<std::atomic<cc::isize>> const& epoch_copies)
 {
-    cc::u64 prev = _freed_pos.load(std::memory_order_acquire);
-    while (end_pos > prev && !_freed_pos.compare_exchange_weak(prev, end_pos, std::memory_order_acq_rel))
-        ; // prev is refreshed on failure
-    _freed_pos.notify_all();
+    epoch_copies->fetch_sub(1, std::memory_order_acq_rel);
+    _ring.lock([&](ring_state& s) { s.reclaim(*this); });
 }
 
 void dx12_download_inline_system::shutdown()

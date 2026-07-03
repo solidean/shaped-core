@@ -37,19 +37,10 @@ struct dx12_config
 class dx12_context final : public sg::context
 {
 public:
-    dx12_context(ComPtr<IDXGIFactory4> factory,
-                 ComPtr<ID3D12Device> device,
-                 ComPtr<ID3D12CommandQueue> queue,
-                 ComPtr<ID3D12Fence> epoch_fence,
-                 ComPtr<ID3D12Fence> submission_fence,
-                 HANDLE fence_event)
+    // Default-constructs an empty context; create_dx12_context populates the device objects and
+    // initializes the inline transfer systems. The COM pointers and fences start null.
+    dx12_context()
       : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded),
-        _factory(cc::move(factory)),
-        _device(cc::move(device)),
-        _queue(cc::move(queue)),
-        _epoch_fence(cc::move(epoch_fence)),
-        _submission_fence(cc::move(submission_fence)),
-        _fence_event(fence_event),
         _upload_inline(*this),
         _download_inline(*this)
     {

@@ -418,3 +418,104 @@ TEST("sg dx12 - inline transfer reused across epochs")
         c.advance_epoch(2);
     }
 }
+
+// Two lists record downloads concurrently (interleaved ring reservations) but submit in the OPPOSITE
+// order. The actor copies in submission order — which no longer matches ring-allocation order — so a
+// per-submission free watermark would reclaim the first-allocated window while the other list still
+// holds it. Epoch-granular reclaim must keep both windows pinned; both futures must read back intact.
+TEST("sg dx12 - interleaved downloads submitted out of allocation order")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf_a = c.create_dx12_buffer(128, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto buf_b = c.create_dx12_buffer(128, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf_a.has_value());
+    REQUIRE(buf_b.has_value());
+
+    cc::byte src_a[128];
+    cc::byte src_b[128];
+    for (int i = 0; i < 128; ++i)
+    {
+        src_a[i] = cc::byte(0xA0 + (i & 0xF));
+        src_b[i] = cc::byte(0xB0 + (i & 0xF));
+    }
+
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_to_buffer(buf_a.value(), cc::span<cc::byte const>(src_a, 128));
+    up.value()->upload_to_buffer(buf_b.value(), cc::span<cc::byte const>(src_b, 128));
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    // Two lists open at once; A reserves its ring window first, then B reserves the next window.
+    auto list_a = c.create_dx12_command_list();
+    auto list_b = c.create_dx12_command_list();
+    REQUIRE(list_a.has_value());
+    REQUIRE(list_b.has_value());
+    auto future_a = list_a.value()->download_from_buffer(buf_a.value(), 0, 128);
+    auto future_b = list_b.value()->download_from_buffer(buf_b.value(), 0, 128);
+
+    // Submit B before A: submission (and thus copy) order is the reverse of allocation order.
+    c.submit_dx12_command_list(cc::move(list_b.value()));
+    c.submit_dx12_command_list(cc::move(list_a.value()));
+
+    auto const bytes_a = future_a.wait_get_bytes();
+    auto const bytes_b = future_b.wait_get_bytes();
+    REQUIRE(bytes_a.has_value());
+    REQUIRE(bytes_b.has_value());
+    bool ok_a = true;
+    bool ok_b = true;
+    for (int i = 0; i < 128; ++i)
+    {
+        if (bytes_a.value()[i] != cc::byte(0xA0 + (i & 0xF)))
+            ok_a = false;
+        if (bytes_b.value()[i] != cc::byte(0xB0 + (i & 0xF)))
+            ok_b = false;
+    }
+    CHECK(ok_a);
+    CHECK(ok_b);
+}
+
+// Dropping (never submitting) a list with a pending download cancels its future: it never becomes
+// ready, wait fails instead of blocking forever, and the ring space it reserved is reclaimed with the
+// epoch so later downloads still succeed.
+TEST("sg dx12 - dropping a recording list cancels its downloads")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    cc::byte src[256];
+    for (int i = 0; i < 256; ++i)
+        src[i] = cc::byte(i);
+
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    // Record a download, then drop the list without submitting → the future is cancelled.
+    auto dropped = c.create_dx12_command_list();
+    REQUIRE(dropped.has_value());
+    auto cancelled = dropped.value()->download_from_buffer(buf.value(), 0, 256);
+    c.drop_dx12_command_list(cc::move(dropped.value()));
+
+    CHECK(!cancelled.is_ready());
+    CHECK(!cancelled.wait_get_bytes().has_value()); // cancelled: fails, does not block
+
+    c.advance_epoch_and_wait_for_idle(); // reclaims the dropped list's ring span with its epoch
+
+    // The ring is free again: a fresh download round-trips.
+    auto down = c.create_dx12_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download_from_buffer(buf.value(), 0, 256);
+    c.submit_dx12_command_list(cc::move(down.value()));
+
+    auto const bytes = future.wait_get_bytes();
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value()[100] == cc::byte(100));
+}

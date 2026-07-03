@@ -3,6 +3,7 @@
 // be wrap wastes the tail and restarts at 0). Space is reclaimed per epoch: at advance we snapshot the
 // cursor for the closing epoch, and at retire we free everything up to the highest finished epoch.
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_upload.hh>
@@ -10,12 +11,19 @@
 
 namespace sg::backend::dx12
 {
-void dx12_upload_inline_system::initialize(ComPtr<ID3D12Resource> buffer, cc::byte* mapped, cc::isize capacity)
+cc::result<cc::unit> dx12_upload_inline_system::initialize(cc::isize capacity)
 {
     CC_ASSERT(capacity > 0, "upload ring capacity must be positive");
-    _buffer = cc::move(buffer);
-    _mapped = mapped;
+
+    // UPLOAD heap, GENERIC_READ: the GPU reads staged bytes from here via CopyBufferRegion.
+    auto ring = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                          capacity);
+    CC_RETURN_IF_ERROR(ring);
+
+    _buffer = cc::move(ring.value().resource);
+    _mapped = static_cast<cc::byte*>(ring.value().mapped);
     _capacity = capacity;
+    return cc::unit{};
 }
 
 cc::isize dx12_upload_inline_system::reserve(cc::isize size)
@@ -30,6 +38,8 @@ cc::isize dx12_upload_inline_system::reserve(cc::isize size)
             {
                 cc::u64 start = s.next_pos;
                 cc::isize offset = cc::isize(start % cc::u64(_capacity));
+                // TODO: split the copy across the seam instead of wasting the tail (see
+                // libs/graphics/shaped-graphics/docs/concepts/upload.inline.md).
                 if (offset + size > _capacity) // would wrap: waste the tail, restart at 0
                 {
                     start += cc::u64(_capacity - offset);

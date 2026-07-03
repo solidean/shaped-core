@@ -18,8 +18,9 @@ class dx12_upload_inline_system
 public:
     explicit dx12_upload_inline_system(dx12_context& ctx) : _ctx(ctx) {}
 
-    /// Takes ownership of the persistently-mapped ring buffer. Called once during context bring-up.
-    void initialize(ComPtr<ID3D12Resource> buffer, cc::byte* mapped, cc::isize capacity);
+    /// Creates + persistently maps the UPLOAD ring buffer (capacity bytes, > 0). Called once during
+    /// context bring-up. Returns a dx12 error if the resource or mapping could not be created.
+    [[nodiscard]] cc::result<cc::unit> initialize(cc::isize capacity);
 
     /// Stages `data` into `dst` at `dst_offset`, recording the copy into `cmd`. Synchronous: the
     /// source bytes are consumed before returning. Empty `data` is a no-op.
