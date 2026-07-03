@@ -29,6 +29,7 @@ public:
     /// with buffer_usage::copy_dst. The source bytes are copied immediately, so it is safe to mutate
     /// or free them once this returns. The write is visible to later commands in the same list. An
     /// empty span is a no-op. Precondition: offset_in_bytes + data.size() <= buffer size.
+    /// TODO: version with pinned_data that tries to copy it in parallel and blocks on submit?
     virtual void upload_to_buffer(buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes = 0) = 0;
 
     /// Reads `size_in_bytes` from `buffer` starting at `offset_in_bytes` back to the host. The buffer
