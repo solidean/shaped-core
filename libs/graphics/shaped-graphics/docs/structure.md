@@ -23,7 +23,8 @@ Update the tags as the API lands. This document is design intent, not a guarante
 ```text
 src/shaped-graphics/
   fwd.hh / all.hh / types.hh      [in progress]
-  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list/create_buffer
+  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_buffer funneled via ctx.persistent
+  context.persistent.hh/.cc       [in progress] persistent_scope: ctx.persistent resource factory (back-ref + friend of context)
   command_list.hh/.cc             [in progress] abstract; recording API planned
   buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
@@ -68,6 +69,13 @@ mutable GPU memory, held via `*_handle`. A resource may be **empty** (size 0 —
 storage). There are **no host-visible resources**; host↔device transfer is a globally shared
 resource sg manages, driven through command lists. See the [coding-guidelines](coding-guidelines.md).
 
+Resource creation is reached through a **lifetime scope** on the context rather than the context
+directly: `ctx.persistent.create_buffer(...)`. A scope (`sg::persistent_scope`) is a thin facade with a
+back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
+and the scope — a friend — funnels through it, tagging the request with its lifetime. Today only the
+persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `allocation_scope`)
+is the planned second one.
+
 ## Ownership & lifetime
 
 - **Resources are shared** (`buffer_handle` = `shared_ptr`); **command lists are move-only**
@@ -97,10 +105,12 @@ share this path. `allocation_info` is a cheap value type: a nullable
 (`persistent`/`transient`; transient is only a hint — the backend still tracks in-flight GPU usage).
 
 Intended flow: query requirements → allocator picks an offset → `heap.acquire_allocation_for_*(...)` →
-pass the `allocation_info` to the matching create_*. **Not yet wired:** `context` has no
-`create_memory_heap`, and `create_buffer` does not yet take an `allocation_info` — both are the natural
-next step once this stub grows. The per-resource-kind fan-out (`acquire_allocation_for_buffer`, planned
-`_texture`) mirrors sg's per-kind create methods.
+pass the `allocation_info` to the matching create_*. `create_buffer` already takes a (defaulted)
+`allocation_info`, but only the **dedicated** case (null heap → own committed resource) is implemented —
+a placed allocation asserts in the backends (`is_dedicated()` gate) until placement lands. **Not yet
+wired:** `context` has no `create_memory_heap`, and neither backend can bind a resource into a heap yet.
+The per-resource-kind fan-out (`acquire_allocation_for_buffer`, planned `_texture`) mirrors sg's per-kind
+create methods.
 
 ## Planned surface (beyond the current stubs)
 

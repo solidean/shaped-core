@@ -18,9 +18,14 @@ dx12_buffer::~dx12_buffer()
     }
 }
 
-cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes, sg::buffer_usage usage)
+cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes,
+                                                                sg::buffer_usage usage,
+                                                                sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
+    // TEMPORARY: only dedicated allocations (committed resources) are implemented. Placement into a
+    // memory_heap needs CreatePlacedResource + heap sub-allocation — not wired up yet.
+    CC_ASSERT(alloc.is_dedicated(), "placed allocations (non-null memory_heap) not implemented yet");
 
     ComPtr<ID3D12Resource> resource;
 

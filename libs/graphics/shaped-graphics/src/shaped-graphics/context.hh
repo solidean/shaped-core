@@ -2,6 +2,7 @@
 
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
 
@@ -25,11 +26,12 @@ public:
     /// The threading guarantees this backend provides (see the threading concept doc).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
 
+    /// Persistent-lifetime resource factory. Create long-lived GPU resources through it:
+    /// `ctx.persistent.create_buffer(...)`. (A transient scope for per-frame resources may follow.)
+    persistent_scope persistent;
+
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
-
-    /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer).
-    [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes, buffer_usage usage) = 0;
 
     /// Submits a command list for execution and consumes it, returning a token for its completion.
     /// A command list must be submitted (or dropped) in the same epoch it was opened in.
@@ -85,6 +87,19 @@ public:
 
 protected:
     context(backend_kind backend, thread_model threading);
+
+    // Backend resource-creation hooks. Public callers reach these through a lifetime scope
+    // (`ctx.persistent.create_buffer(...)`), which funnels here as a friend — the scope tags the
+    // request with its lifetime, the backend does the allocation.
+    friend class persistent_scope;
+
+    /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer). `alloc` selects
+    /// the backing memory (dedicated vs placed into a memory_heap). No default here — callers reach this
+    /// through a lifetime scope, which supplies it.
+    [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes,
+                                                                  buffer_usage usage,
+                                                                  allocation_info const& alloc)
+        = 0;
 
     backend_kind _backend;
     thread_model _thread_model;

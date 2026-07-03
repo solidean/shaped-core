@@ -43,7 +43,9 @@ sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
-ctx.create_buffer(size_in_bytes, usage)            // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
+ctx.persistent.create_buffer(size, usage, alloc={}) // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
+                                                   //   resource creation lives on the lifetime scope (sg::persistent_scope)
+                                                   //   alloc defaults to a dedicated allocation_info; placed (heap) not impl yet
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
@@ -108,6 +110,7 @@ sg::allocation_info                     // value type: where a resource's memory
 ai.heap                                 // memory_heap_handle — null = dedicated / self-allocating
 ai.offset / ai.size_in_bytes            // isize — placement within `heap` (ignored when dedicated)
 ai.scope                                // sg::allocation_scope
+ai.is_dedicated()                       // bool — heap == nullptr (owns its allocation; "committed" in dx12)
 
 #include <shaped-graphics/memory_heap.hh>
 sg::memory_requirements                 // { isize alignment_in_bytes; isize size_in_bytes; }  (backend-reported)
@@ -117,7 +120,8 @@ h.memory_requirements_for_buffer(size, usage)         // -> memory_requirements 
 h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info (validates offset alignment/bounds, mints handle back to h)
 // protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
 // flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
-// NOT yet wired: no context.create_memory_heap, create_buffer doesn't take allocation_info yet
+// create_buffer takes the allocation_info, but only dedicated (null heap) works today — placement asserts.
+// NOT yet wired: no context.create_memory_heap; placed allocations not implemented in the backends yet
 ```
 
 ## backends — subclass the abstract sg types

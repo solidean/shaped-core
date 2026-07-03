@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
@@ -61,7 +62,9 @@ public:
     // backend-typed API — prefer these when you already hold a vulkan_context
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
-    [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(cc::isize size_in_bytes, sg::buffer_usage usage);
+    [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(cc::isize size_in_bytes,
+                                                                        sg::buffer_usage usage,
+                                                                        sg::allocation_info const& alloc = {});
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 
@@ -73,9 +76,11 @@ public:
         return cc::result<std::unique_ptr<sg::command_list>>(create_vulkan_command_list());
     }
 
-    [[nodiscard]] cc::result<sg::buffer_handle> create_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) override
+    [[nodiscard]] cc::result<sg::buffer_handle> create_buffer(cc::isize size_in_bytes,
+                                                              sg::buffer_usage usage,
+                                                              sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::buffer_handle>(create_vulkan_buffer(size_in_bytes, usage));
+        return cc::result<sg::buffer_handle>(create_vulkan_buffer(size_in_bytes, usage, alloc));
     }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override

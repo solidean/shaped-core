@@ -38,5 +38,9 @@ struct allocation_info
 
     /// Lifetime hint the backend honors (see allocation_scope).
     allocation_scope scope = allocation_scope::persistent;
+
+    /// True when the resource owns its allocation (no heap) instead of being placed into a shared one —
+    /// a "committed resource" in dx12 terms. Equivalent to `heap == nullptr`.
+    [[nodiscard]] bool is_dedicated() const { return heap == nullptr; }
 };
 } // namespace sg
