@@ -42,5 +42,5 @@ enum class submission_token : u64
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
 using buffer_handle = std::shared_ptr<buffer>;
-using memory_heap_handle = std::shared_ptr<memory_heap>;
+using memory_heap_handle = std::shared_ptr<memory_heap const>; // immutable resource — it tracks no allocations
 } // namespace sg

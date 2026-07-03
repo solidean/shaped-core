@@ -28,7 +28,7 @@ public:
 
     /// Persistent-lifetime resource factory. Create long-lived GPU resources through it:
     /// `ctx.persistent.create_buffer(...)`. (A transient scope for per-frame resources may follow.)
-    persistent_scope persistent;
+    context_persistent_scope persistent;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
@@ -88,14 +88,11 @@ public:
 protected:
     context(backend_kind backend, thread_model threading);
 
-    // Backend resource-creation hooks. Public callers reach these through a lifetime scope
-    // (`ctx.persistent.create_buffer(...)`), which funnels here as a friend — the scope tags the
-    // request with its lifetime, the backend does the allocation.
-    friend class persistent_scope;
+    // Reached by the lifetime scopes (`ctx.persistent.create_buffer(...)`), which funnel here as friends.
+    friend class context_persistent_scope;
 
     /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer). `alloc` selects
-    /// the backing memory (dedicated vs placed into a memory_heap). No default here — callers reach this
-    /// through a lifetime scope, which supplies it.
+    /// the backing memory (see allocation_info).
     [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes,
                                                                   buffer_usage usage,
                                                                   allocation_info const& alloc)

@@ -17,7 +17,7 @@ memory_requirements memory_heap::memory_requirements_for_buffer(isize size_in_by
     return query_buffer_requirements(size_in_bytes, usage);
 }
 
-allocation_info memory_heap::acquire_allocation_for_buffer(isize size_in_bytes, buffer_usage usage, isize offset)
+allocation_info memory_heap::acquire_allocation_for_buffer(isize size_in_bytes, buffer_usage usage, isize offset) const
 {
     memory_requirements const reqs = memory_requirements_for_buffer(size_in_bytes, usage);
     CC_ASSERT(reqs.alignment_in_bytes > 0, "backend must report a positive alignment");

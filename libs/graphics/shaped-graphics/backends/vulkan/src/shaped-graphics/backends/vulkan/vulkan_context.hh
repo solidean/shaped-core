@@ -64,7 +64,7 @@ public:
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
     [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(cc::isize size_in_bytes,
                                                                         sg::buffer_usage usage,
-                                                                        sg::allocation_info const& alloc = {});
+                                                                        sg::allocation_info const& alloc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 

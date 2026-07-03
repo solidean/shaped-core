@@ -4,10 +4,10 @@
 
 namespace sg
 {
-/// Lifetime hint the backend honors for a placement. `transient` marks memory expected to live for a
-/// frame/epoch rather than indefinitely, letting the backend recycle it aggressively — but it is only a
-/// hint: the backend still tracks in-flight GPU usage, so a transient allocation never waives hazard
-/// tracking. `persistent` is the default long-lived scope.
+/// Lifetime mode of a placement — a hard contract, not a hint. `persistent` memory lives until its
+/// handles are released. `transient` memory expires when its epoch retires; using a transient resource
+/// beyond that epoch is a hard error, and the backend may recycle the memory immediately. (Both modes
+/// still get in-flight GPU hazard tracking; that is orthogonal to the lifetime.)
 enum class allocation_scope
 {
     persistent,
@@ -36,11 +36,14 @@ struct allocation_info
     /// Byte size of the placement. Ignored when `heap` is null (the resource sizes its own allocation).
     isize size_in_bytes = 0;
 
-    /// Lifetime hint the backend honors (see allocation_scope).
+    /// Lifetime mode of the allocation (see allocation_scope).
     allocation_scope scope = allocation_scope::persistent;
 
     /// True when the resource owns its allocation (no heap) instead of being placed into a shared one —
     /// a "committed resource" in dx12 terms. Equivalent to `heap == nullptr`.
     [[nodiscard]] bool is_dedicated() const { return heap == nullptr; }
+
+    /// True when the resource is sub-allocated into a shared heap. Equivalent to `heap != nullptr`.
+    [[nodiscard]] bool is_placed() const { return heap != nullptr; }
 };
 } // namespace sg

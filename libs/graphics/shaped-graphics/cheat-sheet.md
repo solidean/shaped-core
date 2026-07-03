@@ -45,7 +45,7 @@ ctx.backend()                                      // sg::backend_kind (coarse t
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
 ctx.persistent.create_buffer(size, usage, alloc={}) // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
-                                                   //   resource creation lives on the lifetime scope (sg::persistent_scope)
+                                                   //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to a dedicated allocation_info; placed (heap) not impl yet
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
@@ -106,19 +106,20 @@ b.usage()                          // sg::buffer_usage
 
 ```cpp
 #include <shaped-graphics/allocation_info.hh>
-sg::allocation_scope                    // persistent | transient  (transient = recycle hint, still hazard-tracked)
+sg::allocation_scope                    // persistent | transient  (hard lifetime contract; transient expires at epoch retire)
 sg::allocation_info                     // value type: where a resource's memory lives (cheap to copy)
 ai.heap                                 // memory_heap_handle — null = dedicated / self-allocating
 ai.offset / ai.size_in_bytes            // isize — placement within `heap` (ignored when dedicated)
 ai.scope                                // sg::allocation_scope
 ai.is_dedicated()                       // bool — heap == nullptr (owns its allocation; "committed" in dx12)
+ai.is_placed()                          // bool — heap != nullptr (sub-allocated into a shared heap)
 
 #include <shaped-graphics/memory_heap.hh>
 sg::memory_requirements                 // { isize alignment_in_bytes; isize size_in_bytes; }  (backend-reported)
-// abstract; a backend subclasses it. shared via memory_heap_handle (enable_shared_from_this)
+// abstract, immutable; a backend subclasses it. shared via memory_heap_handle = shared_ptr<memory_heap const>
 h.size_in_bytes()                       // isize — total underlying allocation
 h.memory_requirements_for_buffer(size, usage)         // -> memory_requirements (alignment + actual occupied size)
-h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info (validates offset alignment/bounds, mints handle back to h)
+h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info, const (validates offset alignment/bounds, mints handle back to h; no tracking)
 // protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
 // flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
 // create_buffer takes the allocation_info, but only dedicated (null heap) works today — placement asserts.

@@ -53,7 +53,7 @@ public:
     [[nodiscard]] cc::result<std::unique_ptr<dx12_command_list>> create_dx12_command_list();
     [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(cc::isize size_in_bytes,
                                                                     sg::buffer_usage usage,
-                                                                    sg::allocation_info const& alloc = {});
+                                                                    sg::allocation_info const& alloc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 

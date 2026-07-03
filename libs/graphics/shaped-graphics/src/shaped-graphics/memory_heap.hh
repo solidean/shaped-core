@@ -22,16 +22,14 @@ struct memory_requirements
 };
 
 /// A block of GPU memory into which many resources are sub-allocated, sharing one underlying allocation.
-/// It is a factory for allocation_info: the caller picks an offset (its own external allocator does the
-/// sub-allocation), and the heap validates that offset and mints an allocation_info pointing back into
-/// itself. Held via memory_heap_handle so a minted placement keeps the heap alive.
+/// It is an immutable factory for allocation_info: the caller picks an offset (its own external allocator
+/// does the sub-allocation and tracking), and the heap validates that offset and mints an allocation_info
+/// pointing back into itself. Held via memory_heap_handle so a minted placement keeps the heap alive.
 ///
 /// Intended flow: query the resource's requirements → your allocator picks an offset → heap
 /// acquire_allocation_for_*(...) → pass the allocation_info to the matching create_* call.
 ///
-/// Abstract: a backend subclasses it and owns the GPU allocation. Public acquire_* methods are
-/// non-virtual (they centralize bounds/alignment validation) and forward to a protected backend hook
-/// that reports the placement alignment a resource of that shape needs.
+/// Abstract: a backend subclasses it and owns the GPU allocation.
 class memory_heap : public std::enable_shared_from_this<memory_heap>
 {
 public:
@@ -47,15 +45,14 @@ public:
     /// Mints a placement for a buffer of the given shape at `offset` within this heap. `offset` must be
     /// non-negative, aligned per memory_requirements_for_buffer, and leave room for the required size
     /// inside the heap. The placement's size is the backend-reported size, not the requested one. The
-    /// returned allocation_info holds a handle back to this heap.
-    [[nodiscard]] allocation_info acquire_allocation_for_buffer(isize size_in_bytes, buffer_usage usage, isize offset);
+    /// returned allocation_info holds a handle back to this heap. Does not track the allocation — the
+    /// caller's external allocator owns that.
+    [[nodiscard]] allocation_info acquire_allocation_for_buffer(isize size_in_bytes, buffer_usage usage, isize offset) const;
 
 protected:
     explicit memory_heap(isize size_in_bytes);
 
-    /// Backend hook: memory requirements (alignment + occupied size) for a buffer of this shape. The
-    /// public memory_requirements_for_buffer / acquire_allocation_for_buffer build on it. Backend-specific
-    /// (driven by API/device rules).
+    /// Backend hook: memory requirements (alignment + occupied size) for a buffer of this shape.
     [[nodiscard]] virtual memory_requirements query_buffer_requirements(isize size_in_bytes, buffer_usage usage) const
         = 0;
 
