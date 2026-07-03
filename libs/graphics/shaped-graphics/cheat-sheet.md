@@ -18,7 +18,7 @@ comment giving the return type / intuition.
 ```cpp
 #include <shaped-graphics/fwd.hh>
 sg::context_handle        // std::shared_ptr<sg::context>        — shared, long-lived driver
-sg::buffer_handle         // std::shared_ptr<sg::buffer>         — shared-immutable resource
+sg::buffer_handle         // std::shared_ptr<sg::buffer const>   — shared-immutable resource
 // command_list has NO handle: it's a move-only temporary — std::unique_ptr<sg::command_list>,
 // passed around by reference (command_list&). record once, submit once, not reused.
 ```

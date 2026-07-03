@@ -8,7 +8,7 @@
 // The shared `*_handle` typedefs are std::shared_ptr to the sg types. command_list has no handle:
 // it is a move-only temporary held by std::unique_ptr<sg::command_list> and passed by reference.
 static_assert(std::is_same_v<sg::context_handle, std::shared_ptr<sg::context>>);
-static_assert(std::is_same_v<sg::buffer_handle, std::shared_ptr<sg::buffer>>);
+static_assert(std::is_same_v<sg::buffer_handle, std::shared_ptr<sg::buffer const>>);
 
 // Epoch / submission-token sentinels: 64-bit, invalid == 0, and deliberately-high first values so a
 // zero-initialized token is obviously wrong; not_submitted is all-ones (always "not yet complete").

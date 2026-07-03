@@ -38,7 +38,7 @@ public:
     /// pass an offset to select one block of a UBO array). The offset must be 256-byte aligned; `T`'s
     /// size rules (multiple of 16, <= 64 KiB) are enforced by uniform_element. Requires uniform_buffer usage.
     template <uniform_element T>
-    [[nodiscard]] uniform_view<T> as_uniform_buffer(isize offset_in_bytes = 0)
+    [[nodiscard]] uniform_view<T> as_uniform_buffer(isize offset_in_bytes = 0) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
         CC_ASSERT(offset_in_bytes % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte "
@@ -52,7 +52,7 @@ public:
 
     /// A read-only storage view of the whole buffer as an array of `T` (SRV). Requires readonly_buffer usage.
     template <view_element T>
-    [[nodiscard]] readonly_view<T> as_readonly_buffer()
+    [[nodiscard]] readonly_view<T> as_readonly_buffer() const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         return readonly_view<T>{.buffer = shared_from_this(),
@@ -62,7 +62,7 @@ public:
 
     /// A read-only storage view of `range` elements of `T` (SRV). Requires readonly_buffer usage.
     template <view_element T>
-    [[nodiscard]] readonly_view<T> as_readonly_buffer(cc::offset_size range)
+    [[nodiscard]] readonly_view<T> as_readonly_buffer(cc::offset_size range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         return readonly_view<T>{.buffer = shared_from_this(),
@@ -72,7 +72,7 @@ public:
 
     /// A read-write storage view of the whole buffer as an array of `T` (UAV). Requires readwrite_buffer usage.
     template <view_element T>
-    [[nodiscard]] readwrite_view<T> as_readwrite_buffer()
+    [[nodiscard]] readwrite_view<T> as_readwrite_buffer() const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         return readwrite_view<T>{.buffer = shared_from_this(),
@@ -82,7 +82,7 @@ public:
 
     /// A read-write storage view of `range` elements of `T` (UAV). Requires readwrite_buffer usage.
     template <view_element T>
-    [[nodiscard]] readwrite_view<T> as_readwrite_buffer(cc::offset_size range)
+    [[nodiscard]] readwrite_view<T> as_readwrite_buffer(cc::offset_size range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         return readwrite_view<T>{.buffer = shared_from_this(),
@@ -91,19 +91,19 @@ public:
     }
 
     /// A raw, byte-addressed read-only view (SRV over `byte`) of the whole buffer. Requires readonly_buffer usage.
-    [[nodiscard]] readonly_view<cc::byte> as_raw_readonly() { return as_readonly_buffer<cc::byte>(); }
+    [[nodiscard]] readonly_view<cc::byte> as_raw_readonly() const { return as_readonly_buffer<cc::byte>(); }
 
     /// A raw, byte-addressed read-only view of `range` bytes (SRV over `byte`). Requires readonly_buffer usage.
-    [[nodiscard]] readonly_view<cc::byte> as_raw_readonly(cc::offset_size range)
+    [[nodiscard]] readonly_view<cc::byte> as_raw_readonly(cc::offset_size range) const
     {
         return as_readonly_buffer<cc::byte>(range);
     }
 
     /// A raw, byte-addressed read-write view (UAV over `byte`) of the whole buffer. Requires readwrite_buffer usage.
-    [[nodiscard]] readwrite_view<cc::byte> as_raw_readwrite() { return as_readwrite_buffer<cc::byte>(); }
+    [[nodiscard]] readwrite_view<cc::byte> as_raw_readwrite() const { return as_readwrite_buffer<cc::byte>(); }
 
     /// A raw, byte-addressed read-write view of `range` bytes (UAV over `byte`). Requires readwrite_buffer usage.
-    [[nodiscard]] readwrite_view<cc::byte> as_raw_readwrite(cc::offset_size range)
+    [[nodiscard]] readwrite_view<cc::byte> as_raw_readwrite(cc::offset_size range) const
     {
         return as_readwrite_buffer<cc::byte>(range);
     }
@@ -111,7 +111,8 @@ public:
     /// Registers a callback to run once this buffer's GPU storage is released *and* no longer in
     /// flight (its owning epoch has retired). The feedback point for reclaiming externally-owned
     /// backing memory (e.g. placed resources on a custom allocator). Do not assume which thread runs it.
-    void add_finalizer(cc::unique_function<void()> finalizer) { _finalizers.push_back(cc::move(finalizer)); }
+    /// Const: registering a finalizer is a lifetime hook, not a change to the buffer's shape.
+    void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
 
 protected:
     buffer(isize size_in_bytes, buffer_usage usage);
@@ -128,6 +129,6 @@ protected:
 
     isize _size_in_bytes = 0;
     buffer_usage _usage = buffer_usage::none;
-    cc::vector<cc::unique_function<void()>> _finalizers;
+    mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
 };
 } // namespace sg
