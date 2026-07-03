@@ -3,8 +3,16 @@
 Running list of known follow-ups. Bigger design intent lives in
 [structure.md](structure.md).
 
-- **First milestone:** command-list buffer upload / download / copy (sg core API + real dx12 and
-  vulkan implementations). Everything in the core is currently a `CC_UNREACHABLE` stub.
+- **Buffer transfer — remaining:** inline buffer upload / download is in (sg `command_list` API +
+  `bytes_future`, real dx12 over UPLOAD / READBACK ring buffers, a `cc::threaded_actor` for deferred
+  readback copies). Still open: buffer-to-buffer **copy**; the **vulkan** implementation (currently a
+  `CC_UNREACHABLE` stub); **texture** upload/download (the `dx12_resource_upload/_download` helpers are
+  shaped for it, concrete texture impls are TODO); a real **barrier + per-resource state-tracking**
+  system (buffers use D3D12 implicit promotion/decay today, so uploading then downloading the *same*
+  buffer needs two command lists); and download robustness — the readback ring's free watermark
+  advances in submit order, which only matches allocation order for single-threaded recording (needs
+  per-region tracking / the split GPU-CPU watermarks), plus fallback staging when a single list's
+  inline transfers exceed the ring capacity (currently asserts).
 - **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder. Surface a
   `cc::shared_ptr` in clean-core and switch handles to it (keeps sg off `std::`). See the
   [coding-guidelines](coding-guidelines.md) note.

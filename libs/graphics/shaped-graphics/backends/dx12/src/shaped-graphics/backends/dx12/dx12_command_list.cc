@@ -6,6 +6,38 @@
 
 namespace sg::backend::dx12
 {
+void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
+                                               cc::span<cc::byte const> data,
+                                               cc::isize offset_in_bytes)
+{
+    CC_ASSERT(buffer != nullptr, "upload target buffer is null");
+    auto* const dst = dynamic_cast<dx12_buffer*>(buffer.get());
+    CC_ASSERT(dst != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + data.size() <= dst->size_in_bytes(), "upload range is out of "
+                                                                                             "the buffer's bounds");
+    if (data.empty())
+        return;
+    CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "upload target buffer must have "
+                                                                      "buffer_usage::copy_dst");
+    _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
+}
+
+sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle buffer,
+                                                               cc::isize offset_in_bytes,
+                                                               cc::isize size_in_bytes)
+{
+    CC_ASSERT(buffer != nullptr, "download source buffer is null");
+    auto* const src = dynamic_cast<dx12_buffer*>(buffer.get());
+    CC_ASSERT(src != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(size_in_bytes >= 0, "download size must be non-negative");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= src->size_in_bytes(),
+              "download range is out of the buffer's bounds");
+    if (size_in_bytes > 0)
+        CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "download source buffer must have "
+                                                                          "buffer_usage::copy_src");
+    return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
+}
+
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()
 {
     // Reuse a pooled allocator if one is free (it re-entered the pool only once idle), else make one.
@@ -58,6 +90,10 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             next = sg::submission_token(cc::u64(next) + 1);
             HRESULT const sig = _queue->Signal(_submission_fence.Get(), cc::u64(t));
             CC_ASSERT(SUCCEEDED(sig), "ID3D12CommandQueue::Signal failed");
+
+            // Stamp this list's deferred downloads with the token and hand them to the actor under the
+            // same lock, so the actor's copy order matches submission (and thus ring-allocation) order.
+            _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
             return t;
         });
 
@@ -73,6 +109,9 @@ void dx12_context::drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd
     CC_ASSERT(cmd != nullptr, "cannot drop a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be dropped in the epoch it was opened "
                                                           "in");
+
+    // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
+    _download_inline.discard_unsubmitted(cmd->_pending_downloads);
 
     // Never submitted, so the GPU never touched this allocator — release the list object, then
     // return the allocator straight to the free pool (reset happens at reuse). Teardown lives in the dtor.

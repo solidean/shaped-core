@@ -134,7 +134,19 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (fence_event == nullptr)
         return cc::error("CreateEventW failed for the epoch fence wait event");
 
-    return context_handle(std::make_shared<dx12_context>(cc::move(factory), cc::move(device), cc::move(queue),
-                                                         cc::move(epoch_fence), cc::move(submission_fence), fence_event));
+    auto ctx = std::make_shared<dx12_context>();
+    ctx->_factory = cc::move(factory);
+    ctx->_device = cc::move(device);
+    ctx->_queue = cc::move(queue);
+    ctx->_epoch_fence = cc::move(epoch_fence);
+    ctx->_submission_fence = cc::move(submission_fence);
+    ctx->_fence_event = fence_event;
+
+    // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
+    // with its logic) off the now-populated device.
+    CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
+    CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
+
+    return context_handle(cc::move(ctx));
 }
 } // namespace sg

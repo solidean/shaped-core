@@ -81,6 +81,10 @@ Style / language
 - Prefer `cc::` utilities over `std::`: `cc::move`, `cc::forward`, `cc::exchange`
   (in `common/utility.hh`), `cc::span`, `cc::vector`, `cc::optional`,
   `cc::result`, `cc::string`, etc.
+- `cc::span` has **no `as_bytes` / `as_mutable_bytes` / `reinterpret_as`** yet
+  (still a TODO in `container/span.hh`). To go to/from a `cc::span<cc::byte const>`,
+  build it explicitly: `cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(
+  s.data()), s.size() * cc::isize(sizeof(T)))`. `cc::byte` is `std::byte`.
 - `always_false<T>` from the old clean-core does **not** exist. For an
   unsupported-specialization guard, a plain primary-template
   `static_assert(!std::is_array_v<T>, "…")` usually covers the case without a
