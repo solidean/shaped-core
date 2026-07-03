@@ -26,20 +26,20 @@ void exercise_context(dx12::dx12_context& ctx)
     ctx.submit_dx12_command_list(cc::move(cmd.value()));
 
     // Buffer with real GPU storage.
-    auto buf = ctx.create_dx12_buffer(256, sg::buffer_usage::copy_dst);
+    auto buf = ctx.create_dx12_buffer(256, sg::buffer_usage::copy_dst, sg::allocation_info{});
     REQUIRE(buf.has_value());
     CHECK(buf.value()->size_in_bytes() == 256);
     CHECK(sg::has_flag(buf.value()->usage(), sg::buffer_usage::copy_dst));
     CHECK(buf.value()->_resource != nullptr);
 
     // Empty buffer: valid, and allocates no GPU resource.
-    auto empty = ctx.create_dx12_buffer(0, sg::buffer_usage::none);
+    auto empty = ctx.create_dx12_buffer(0, sg::buffer_usage::none, sg::allocation_info{});
     REQUIRE(empty.has_value());
     CHECK(empty.value()->size_in_bytes() == 0);
     CHECK(empty.value()->_resource == nullptr);
 
-    // storage usage takes the ALLOW_UNORDERED_ACCESS path.
-    auto storage = ctx.create_dx12_buffer(1024, sg::buffer_usage::storage);
+    // read-write storage (UAV) usage takes the ALLOW_UNORDERED_ACCESS path.
+    auto storage = ctx.create_dx12_buffer(1024, sg::buffer_usage::readwrite_buffer, sg::allocation_info{});
     REQUIRE(storage.has_value());
     CHECK(storage.value()->size_in_bytes() == 1024);
 
@@ -52,7 +52,7 @@ void exercise_context(dx12::dx12_context& ctx)
     // command list, all through the base type.
     auto& base = static_cast<sg::context&>(ctx);
 
-    auto via_base = base.create_buffer(64, sg::buffer_usage::vertex);
+    auto via_base = base.persistent.create_buffer(64, sg::buffer_usage::vertex_buffer);
     REQUIRE(via_base.has_value());
     CHECK(via_base.value()->size_in_bytes() == 64);
 
@@ -119,7 +119,7 @@ TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch re
 
     bool finalized = false;
     {
-        auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_dst);
+        auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_dst, sg::allocation_info{});
         REQUIRE(buf.has_value());
         buf.value()->add_finalizer([&finalized] { finalized = true; });
     } // last handle dropped here → deferred deletion staged in the current epoch

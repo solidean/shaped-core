@@ -14,13 +14,15 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usage usage)
         flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     if (sg::has_flag(usage, sg::buffer_usage::copy_dst))
         flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::vertex))
+    if (sg::has_flag(usage, sg::buffer_usage::vertex_buffer))
         flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::index))
+    if (sg::has_flag(usage, sg::buffer_usage::index_buffer))
         flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::uniform))
+    if (sg::has_flag(usage, sg::buffer_usage::uniform_buffer))
         flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    if (sg::has_flag(usage, sg::buffer_usage::storage))
+    // Vulkan doesn't distinguish read-only vs read-write storage at the usage-bit level (that's a
+    // descriptor/access concern), so both map to the same STORAGE_BUFFER_BIT.
+    if (sg::has_flag(usage, sg::buffer_usage::readonly_buffer) || sg::has_flag(usage, sg::buffer_usage::readwrite_buffer))
         flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
     // Vulkan rejects a zero-usage buffer; a usage-less non-empty buffer keeps a benign transfer dst
@@ -45,9 +47,15 @@ vulkan_buffer::~vulkan_buffer()
     }
 }
 
-cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(cc::isize size_in_bytes, sg::buffer_usage usage)
+cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(cc::isize size_in_bytes,
+                                                                      sg::buffer_usage usage,
+                                                                      sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
+    // TEMPORARY: only dedicated allocations are implemented. Placement into a memory_heap needs binding
+    // the buffer to a sub-range of the heap's VkDeviceMemory (vkBindBufferMemory at an offset) — not
+    // wired up yet.
+    CC_ASSERT(alloc.is_dedicated(), "placed allocations (non-null memory_heap) not implemented yet");
 
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
