@@ -31,7 +31,10 @@ src/shaped-graphics/
                                                 + erased raw_view; texture/texel views deferred (need texture/format)
   binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
   compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
-                                                (no compiler yet); binding_layout / binding_group / pipeline are next
+  binding_layout.hh/.cc           [in progress] abstract: the bindable-set schema (built from bindings); backend = root sig / set layout
+  compute_pipeline.hh/.cc         [in progress] abstract: compute shader + layout; backend = PSO / VkPipeline
+  binding_group.hh/.cc            [in progress] abstract: layout instance bound to raw_views (named_view); backend = heap range / VkDescriptorSet
+  command_list.compute.hh/.cc     [in progress] cmd.compute scope: bind_pipeline / bind_group / dispatch (backend stubs until dx12 compute)
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
   memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
 backends/                                       # each subclasses the abstract sg types directly

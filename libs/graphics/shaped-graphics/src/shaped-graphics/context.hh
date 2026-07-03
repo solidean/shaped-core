@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/context.persistent.hh>
@@ -96,6 +97,19 @@ protected:
     [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes,
                                                                   buffer_usage usage,
                                                                   allocation_info const& alloc)
+        = 0;
+
+    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings.
+    [[nodiscard]] virtual cc::result<binding_layout_handle> create_binding_layout(cc::span<binding const> bindings) = 0;
+
+    /// Builds a compute_pipeline from a compute `shader` compiled against `layout`.
+    [[nodiscard]] virtual cc::result<compute_pipeline_handle> create_compute_pipeline(compiled_shader const& shader,
+                                                                                      binding_layout_handle layout)
+        = 0;
+
+    /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
+    [[nodiscard]] virtual cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
+                                                                                cc::span<named_view const> views)
         = 0;
 
     backend_kind _backend;

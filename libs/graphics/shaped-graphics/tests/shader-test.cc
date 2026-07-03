@@ -1,9 +1,16 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding.hh>
+#include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/compiled_shader.hh>
 
 #include <memory>
+#include <type_traits>
+
+// The bind-path handles are shared_ptr to immutable backend objects.
+static_assert(std::is_same_v<sg::binding_layout_handle, std::shared_ptr<sg::binding_layout const>>);
+static_assert(std::is_same_v<sg::compute_pipeline_handle, std::shared_ptr<sg::compute_pipeline const>>);
+static_assert(std::is_same_v<sg::binding_group_handle, std::shared_ptr<sg::binding_group const>>);
 
 // The binding vocabulary + compiled_shader data model are pure CPU value types — no GPU backend. A
 // minimal concrete buffer subclass produces real views to validate bindings against.
@@ -97,4 +104,16 @@ TEST("sg bindings - compiled_shader holds reflection")
     // The declared binding accepts a matching bound view.
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
     CHECK(sg::accepts(b.type, buf->as_readwrite_buffer<particle>()));
+}
+
+TEST("sg bindings - named_view pairs a name with a bound view")
+{
+    auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
+
+    // A typed view converts implicitly to the named_view's raw_view.
+    sg::named_view const nv{.name = "Output", .view = buf->as_readwrite_buffer<particle>()};
+    CHECK(nv.name == "Output");
+    CHECK(nv.view.access == sg::view_class::readwrite);
+    CHECK(nv.view.shape == sg::view_shape::structured);
+    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view));
 }

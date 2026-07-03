@@ -48,8 +48,10 @@ compiled_shader.bindings ─▶ binding_layout ─▶ binding_group (name → ra
 ```
 
 `binding_layout`, `binding_group`, `compute_pipeline`, and the `command_list` recording that binds and
-dispatches them are the next milestones (dx12 first). This doc covers the data-model foundation they
-build on.
+dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) exist as **abstract** types
+today — created via `ctx.persistent.create_*`. The backends stub them (`CC_UNREACHABLE`) until the
+dx12 compute milestone fills in the root signature / pipeline state / descriptor-heap translation of
+`raw_view`s. This doc covers the data-model foundation they build on.
 
 ## Deferred
 

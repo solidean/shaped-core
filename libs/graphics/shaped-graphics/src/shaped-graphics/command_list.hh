@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/command_list.compute.hh>
 #include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.upload.hh>
@@ -31,14 +32,18 @@ public:
     /// Device→device copy facade: `cmd.copy.buffer_bytes_region(...)` / `cmd.copy.buffer_data_region<T>(...)`.
     command_list_copy_scope copy;
 
+    /// Compute facade: `cmd.compute.bind_pipeline(...)` / `.bind_group(...)` / `.dispatch(...)`.
+    command_list_compute_scope compute;
+
 protected:
     explicit command_list(epoch created_in);
 
-    // Backend seams the upload/download/copy scopes forward to (contracts documented there); friends so
-    // the scopes can reach them.
+    // Backend seams the upload/download/copy/compute scopes forward to (contracts documented there);
+    // friends so the scopes can reach them.
     friend class command_list_upload_scope;
     friend class command_list_download_scope;
     friend class command_list_copy_scope;
+    friend class command_list_compute_scope;
 
     virtual void upload_bytes_to_buffer(buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
         = 0;
@@ -54,6 +59,10 @@ protected:
                                     cc::isize dst_offset_in_bytes,
                                     cc::isize size_in_bytes)
         = 0;
+
+    virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
+    virtual void compute_bind_group(u32 set, binding_group const& group) = 0;
+    virtual void compute_dispatch(u32 x, u32 y, u32 z) = 0;
 
     epoch _epoch = epoch::invalid;
 };

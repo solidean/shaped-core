@@ -80,6 +80,23 @@ public:
         return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
     }
 
+    // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet; lands with
+    // the dx12 compute milestone.
+    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const>) override
+    {
+        CC_UNREACHABLE("dx12 binding_layout creation is not implemented yet");
+    }
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compiled_shader const&,
+                                                                                  sg::binding_layout_handle) override
+    {
+        CC_UNREACHABLE("dx12 compute_pipeline creation is not implemented yet");
+    }
+    [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle,
+                                                                            cc::span<sg::named_view const>) override
+    {
+        CC_UNREACHABLE("dx12 binding_group creation is not implemented yet");
+    }
+
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");

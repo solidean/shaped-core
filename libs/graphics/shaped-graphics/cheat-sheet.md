@@ -166,7 +166,23 @@ sg::shader_format           // dxil | spirv | metal_lib — which backend consum
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
                             //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler }  — value type
 sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
-// data model only: no compiler yet (construct by hand / future loader); binding_layout / binding_group / pipeline are next
+// data model only: no compiler yet (construct by hand / future loader)
+```
+
+## bind path — layout / pipeline / group + compute dispatch  (abstract; backends stub until the dx12 compute milestone)
+
+```cpp
+#include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
+sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; backend subclasses; *_handle = shared_ptr<T const>
+sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
+// creation (on ctx.persistent; returns cc::result; backends CC_UNREACHABLE until implemented):
+ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema)
+ctx.persistent.create_compute_pipeline(compiled_shader const&, layout)    // -> compute_pipeline_handle
+ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout)
+// recording (on a command_list, via the cmd.compute scope):
+cmd.compute.bind_pipeline(pipeline)      // void — make it the active compute pipeline
+cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
+cmd.compute.dispatch(x, y, z)            // void — dispatch x*y*z workgroups
 ```
 
 ## memory placement — heaps & alloc-info  (stub)
