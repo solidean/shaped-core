@@ -158,6 +158,11 @@ def test(
             cmd = [*launcher, str(target.artifact)]
             if test_name:
                 cmd.append(test_name)
+            # Forward verbosity to the runner: nexus's -v prints "- start <test>"
+            # before each test (and its section index), so a crash/hang pinpoints
+            # the last test that started. Harmless positional for other runners.
+            if verbose:
+                cmd.append("-v")
             # nexus writes a native per-test JUnit report here; non-nexus or
             # crashed binaries simply won't, and we fall back to synthesis below.
             # Clear any stale report first so a crashed run can't be read as fresh.
