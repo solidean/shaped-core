@@ -551,6 +551,13 @@ private:
     isize _size = 0;
 };
 
+// string_view is a borrow range: its validity is independent of the view object.
+namespace cc
+{
+template <>
+inline constexpr bool enable_borrowed_range<string_view> = true;
+} // namespace cc
+
 // ============================================================================
 // Implementation of prefix/suffix matching operations
 // ============================================================================

@@ -89,13 +89,34 @@ s[i];  s.front();  s.back();  s.data();  s.begin();  s.end();  s.size();  s.empt
 s.subspan(off);  s.subspan({.offset=o,.size=n});  s.subspan({.start=a,.end=b});   // asserts valid range
 s.is_subspan(off / {.offset,.size} / {.start,.end});   // -> bool; true => matching subspan won't assert
 s.subspan_clamped(...);                   // same 3 overloads, clamps range into [0,size()] instead of asserting
+s.first_n(n);  s.last_n(n);               // leading / trailing n elements; asserts 0<=n<=size (+_clamped variants)
+s.size_bytes();                           // -> isize == size()*sizeof(T)
+s.reinterpret_as<U>();                    // -> span<U>; U,T trivially-copyable, sizeof(T)%sizeof(U)==0, keeps const
+s.try_reinterpret_as<U>();                // -> optional<span<U>>; nullopt if total bytes % sizeof(U) != 0
+s.as_bytes();  s.as_mutable_bytes();      // -> span<byte const> / span<byte> (mutable only for non-const T)
 cc::fixed_span<int, 3> fs(ptr);           // compile-time size N; adds get<I>() tuple protocol
+cc::enable_borrowed_range<V>;             // opt-in bool trait: true for span/fixed_span/strided_span/string_view
 
 #include <clean-core/container/strided_span.hh>   // cc::strided_span<T> — view with a byte stride
 ss.start_ptr();  ss[i];  ss.size();  ss.stride_bytes();
 ss.is_contiguous();                       // -> bool
 ss.as_span();                             // -> cc::optional<span<T>> (nullopt if non-contiguous)
 ss.reversed();                            // negated-stride view
+```
+
+## Pinned data — shareable owning view (span + shared owner)
+
+```cpp
+#include <clean-core/container/pinned_data.hh>
+cc::pinned_data<int> pd = cc::pinned_data<int>::create_filled(n, v);  // also create_defaulted/uninitialized/copy_of(span)
+pd.data(); pd.size(); pd.size_bytes(); pd[i]; pd.front(); pd.back(); pd.begin(); pd.end();  // span-like; passes as span<T>
+pd.span();                                // -> cc::span<T>
+pd.subdata(off / {.offset,.size} / {.start,.end});   // -> new pinned_data sharing the owner (+subdata_clamped)
+pd.reinterpret_as<U>();  pd.try_reinterpret_as<U>();  pd.as_bytes();  pd.as_mutable_bytes();  // like span, new pinned_data sharing owner
+cc::pinned_data<int const> c = pd;        // T -> T const conversion, shares owner
+
+cc::as_pinned_data(std::shared_ptr<Container>);   // wrap a shared contiguous container, never copies
+cc::make_pinned_data(container_or_shared_ptr);    // shared_ptr -> wrap; owning rvalue -> move; borrow/lvalue -> copy
 ```
 
 ## Strings (UTF-8)
@@ -317,6 +338,13 @@ cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> su
                                                    // way to reach windows.h in shaped-core.
 #include <clean-core/platform/native.hh>
 cc::demangle_symbol(symbol)                        // cc::string — human-readable C++ symbol name
+
+#include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
+cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
+
+#include <clean-core/error/crash_handler.hh>
+cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace
+cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 
 ## Gotchas

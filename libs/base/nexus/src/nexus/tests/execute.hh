@@ -90,4 +90,9 @@ void report_check_result(check_kind kind,
 
 // Appends a metric to the active test's execution. No-op when no test is running. Used by nx::guide.
 void record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better);
+
+// Crash-context hook (cc::crash_context_hook): writes the currently running test (and section index)
+// to stderr. Registered with cc::add_crash_context_hook so a fatal fault points at the offending test.
+// Reads only plain globals updated per test; safe to call from a constrained crash context.
+void report_running_test() noexcept;
 } // namespace nx::impl

@@ -19,6 +19,7 @@ add_library(clean-core
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
+    src/clean-core/error/crash_handler.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/format.cc
     src/clean-core/string/print.cc
@@ -82,6 +83,7 @@ target_sources(clean-core
     src/clean-core/container/variant.hh
     src/clean-core/container/span.hh
     src/clean-core/container/strided_span.hh
+    src/clean-core/container/pinned_data.hh
     src/clean-core/container/impl/allocating_container.hh
 
     src/clean-core/sequence/sequence.hh
@@ -103,6 +105,7 @@ target_sources(clean-core
 
     src/clean-core/error/result.hh
     src/clean-core/error/optional.hh
+    src/clean-core/error/crash_handler.hh
 
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
@@ -189,6 +192,7 @@ add_executable(clean-core-test
     tests/mutex-test.cc
     tests/node_allocation-test.cc
     tests/optional-test.cc
+    tests/pinned_data-test.cc
     tests/random-test.cc
     tests/result-test.cc
     tests/span-test.cc
