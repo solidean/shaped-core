@@ -1,0 +1,137 @@
+#pragma once
+
+#include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
+#include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
+#include <shaped-graphics/fwd.hh>
+
+#include <atomic>
+#include <memory>
+#include <type_traits>
+
+namespace sg
+{
+/// The pollable completion handle behind a bytes_future. Abstract — a backend subclasses it to track
+/// its own readback mechanism (fence values, ring positions, ...). A download's data is valid once
+/// the waiter reports ready.
+class bytes_waiter
+{
+public:
+    virtual ~bytes_waiter();
+
+    /// Whether the download has completed and its destination bytes are valid.
+    [[nodiscard]] bool is_ready() const { return _is_ready.load(std::memory_order_acquire); }
+
+    /// Checks completion, possibly advancing internal state to make progress. Returns is_ready().
+    [[nodiscard]] virtual bool poll_ready() { return is_ready(); }
+
+    /// Blocks until ready. Returns false when blocking cannot make progress (e.g. the recording
+    /// command list has not been submitted yet, so waiting would stall the thread that must submit).
+    [[nodiscard]] virtual bool wait() = 0;
+
+    /// Backend seam: marks the download complete and wakes any blocked waiters. Called once the
+    /// destination bytes are valid.
+    void mark_ready()
+    {
+        _is_ready.store(true, std::memory_order_release);
+        _is_ready.notify_all();
+    }
+
+protected:
+    /// Set true once the destination bytes are valid; read on the fast path, waited on in wait().
+    std::atomic_bool _is_ready = false;
+};
+
+/// A bytes_waiter that is ready on construction — for empty or synchronous downloads that need no
+/// GPU readback.
+class ready_bytes_waiter final : public bytes_waiter
+{
+public:
+    ready_bytes_waiter() { _is_ready.store(true, std::memory_order_release); }
+
+    [[nodiscard]] bool wait() override { return true; }
+};
+
+/// The result of a download command: a pending GPU→CPU transfer of raw bytes. Copyable and movable.
+/// Holds the destination span, a pin that keeps that destination alive until the transfer finishes,
+/// and the waiter that tracks completion. Read the bytes with try_get_bytes() once ready.
+class bytes_future
+{
+    // ctors
+public:
+    /// An invalid future — not backed by any download.
+    bytes_future() = default;
+
+    /// Backs a future by a destination span kept alive by `pin`, with completion tracked by `waiter`.
+    /// The backend fills `data` before signaling the waiter ready. `pin` may be null when `data` is
+    /// empty. This is the single seam a future-provided-destination download reuses.
+    bytes_future(cc::span<cc::byte const> data, std::shared_ptr<void> pin, std::shared_ptr<bytes_waiter> waiter)
+      : _data(data), _pin(cc::move(pin)), _waiter(cc::move(waiter))
+    {
+    }
+
+    // queries
+public:
+    /// Whether this future is backed by a real download (vs default-constructed).
+    [[nodiscard]] bool is_valid() const { return _waiter != nullptr; }
+
+    /// Whether the result is ready (polls the waiter). Prefer try_get_bytes if you also want the data.
+    [[nodiscard]] bool is_ready() const { return _waiter != nullptr && _waiter->poll_ready(); }
+
+    /// Blocks until ready, then returns the bytes. Returns nullopt if invalid or if blocking cannot
+    /// make progress (the recording list is not yet submitted).
+    [[nodiscard]] cc::optional<cc::span<cc::byte const>> wait_get_bytes() const;
+
+    /// The result bytes if ready (polls), else nullopt. The span is valid as long as this future is.
+    [[nodiscard]] cc::optional<cc::span<cc::byte const>> try_get_bytes() const;
+
+    // members
+private:
+    cc::span<cc::byte const> _data; // destination view; valid once the waiter is ready
+    std::shared_ptr<void> _pin;     // keeps _data alive
+    std::shared_ptr<bytes_waiter> _waiter;
+};
+
+/// Strongly-typed view of a bytes_future for a trivially-copyable element type. The byte count must
+/// be a multiple of sizeof(T).
+template <class T>
+class data_future
+{
+    static_assert(std::is_trivially_copyable_v<T>, "data_future element type must be trivially copyable");
+
+public:
+    data_future() = default;
+    explicit data_future(bytes_future bytes) : _bytes(cc::move(bytes)) {}
+
+    [[nodiscard]] bool is_valid() const { return _bytes.is_valid(); }
+    [[nodiscard]] bool is_ready() const { return _bytes.is_ready(); }
+
+    /// The typed result if ready (polls). Asserts the downloaded byte count is a multiple of sizeof(T).
+    [[nodiscard]] cc::optional<cc::span<T const>> try_get_data() const
+    {
+        auto const bytes = _bytes.try_get_bytes();
+        if (!bytes.has_value())
+            return {};
+        return as_typed(bytes.value());
+    }
+
+    /// Blocks until ready, then returns the typed result. See bytes_future::wait_get_bytes.
+    [[nodiscard]] cc::optional<cc::span<T const>> wait_get_data() const
+    {
+        auto const bytes = _bytes.wait_get_bytes();
+        if (!bytes.has_value())
+            return {};
+        return as_typed(bytes.value());
+    }
+
+private:
+    [[nodiscard]] static cc::optional<cc::span<T const>> as_typed(cc::span<cc::byte const> bytes)
+    {
+        CC_ASSERT(bytes.size() % cc::isize(sizeof(T)) == 0, "downloaded byte count is not a multiple of sizeof(T)");
+        return cc::span<T const>(reinterpret_cast<T const*>(bytes.data()), bytes.size() / cc::isize(sizeof(T)));
+    }
+
+    bytes_future _bytes;
+};
+} // namespace sg

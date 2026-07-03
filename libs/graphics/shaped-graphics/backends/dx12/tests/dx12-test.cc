@@ -185,3 +185,236 @@ TEST("sg dx12 - throttle bounds epochs in flight")
     auto const in_flight = c._epoch_state.lock([](dx12::dx12_epoch_state& s) { return s.in_flight.size(); });
     CHECK(in_flight <= 1);
 }
+
+// --- Inline buffer transfer --------------------------------------------------------------------
+// Upload / download over the inline UPLOAD / READBACK ring buffers, on WARP so they run on headless
+// CI. NOTE: without the barrier system, uploading and then downloading the SAME buffer must span two
+// command lists (buffer state decays to COMMON at each submit); these tests follow that pattern.
+
+TEST("sg dx12 - buffer upload then download round-trips")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    cc::byte src[256];
+    for (int i = 0; i < 256; ++i)
+        src[i] = cc::byte(i);
+
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    auto down = c.create_dx12_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download_from_buffer(buf.value(), 0, 256);
+    c.submit_dx12_command_list(cc::move(down.value()));
+
+    // Ready after the submitted list finishes on the GPU — no advance_epoch needed.
+    auto const bytes = future.wait_get_bytes();
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == 256);
+    bool matches = true;
+    for (int i = 0; i < 256; ++i)
+        if (bytes.value()[i] != cc::byte(i))
+            matches = false;
+    CHECK(matches);
+}
+
+TEST("sg dx12 - typed upload/download convenience")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(cc::isize(4) * sizeof(int), sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    int const in[4] = {5, 6, 7, 8};
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_data_to_buffer(buf.value(), cc::span<int const>(in, 4));
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    auto down = c.create_dx12_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download_data_from_buffer<int>(buf.value(), 0, 4);
+    c.submit_dx12_command_list(cc::move(down.value()));
+
+    auto const data = future.wait_get_data();
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == 4);
+    CHECK(data.value()[0] == 5);
+    CHECK(data.value()[3] == 8);
+}
+
+TEST("sg dx12 - empty transfers")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(16, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    auto cmd = c.create_dx12_command_list();
+    REQUIRE(cmd.has_value());
+    cmd.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>()); // no-op
+    auto future = cmd.value()->download_from_buffer(buf.value(), 0, 0);
+    CHECK(future.is_valid());
+    CHECK(future.is_ready()); // zero-size read is immediately ready
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value().empty());
+    c.submit_dx12_command_list(cc::move(cmd.value()));
+}
+
+TEST("sg dx12 - partial download with offset")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    cc::byte src[256];
+    for (int i = 0; i < 256; ++i)
+        src[i] = cc::byte(i);
+
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    auto down = c.create_dx12_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download_from_buffer(buf.value(), 64, 64);
+    c.submit_dx12_command_list(cc::move(down.value()));
+
+    auto const bytes = future.wait_get_bytes();
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == 64);
+    bool matches = true;
+    for (int i = 0; i < 64; ++i)
+        if (bytes.value()[i] != cc::byte(64 + i))
+            matches = false;
+    CHECK(matches);
+}
+
+TEST("sg dx12 - multiple uploads in one list, last writer wins")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(16, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    cc::byte first[16];
+    cc::byte second[16];
+    for (int i = 0; i < 16; ++i)
+    {
+        first[i] = cc::byte(0xAA);
+        second[i] = cc::byte(0xBB);
+    }
+
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(first, 16));
+    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(second, 16)); // overwrites
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    auto down = c.create_dx12_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download_from_buffer(buf.value(), 0, 16);
+    c.submit_dx12_command_list(cc::move(down.value()));
+
+    auto const bytes = future.wait_get_bytes();
+    REQUIRE(bytes.has_value());
+    bool all_second = true;
+    for (int i = 0; i < 16; ++i)
+        if (bytes.value()[i] != cc::byte(0xBB))
+            all_second = false;
+    CHECK(all_second);
+}
+
+TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    cc::byte src[256];
+    for (int i = 0; i < 256; ++i)
+        src[i] = cc::byte(i);
+
+    auto up = c.create_dx12_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+    c.submit_dx12_command_list(cc::move(up.value()));
+
+    {
+        auto down = c.create_dx12_command_list();
+        REQUIRE(down.has_value());
+        auto future = down.value()->download_from_buffer(buf.value(), 0, 256);
+        c.submit_dx12_command_list(cc::move(down.value()));
+        // future dropped here without waiting → the actor cancels the memcpy but still frees the space
+    }
+
+    c.advance_epoch_and_wait_for_idle(); // let the GPU + actor settle
+
+    auto down2 = c.create_dx12_command_list();
+    REQUIRE(down2.has_value());
+    auto future = down2.value()->download_from_buffer(buf.value(), 0, 256);
+    c.submit_dx12_command_list(cc::move(down2.value()));
+
+    auto const bytes = future.wait_get_bytes();
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value().size() == 256);
+    CHECK(bytes.value()[100] == cc::byte(100));
+}
+
+TEST("sg dx12 - inline transfer reused across epochs")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.create_dx12_buffer(1024, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+
+    for (int e = 0; e < 4; ++e)
+    {
+        cc::byte src[1024];
+        for (int i = 0; i < 1024; ++i)
+            src[i] = cc::byte((i + e) & 0xFF);
+
+        auto up = c.create_dx12_command_list();
+        REQUIRE(up.has_value());
+        up.value()->upload_to_buffer(buf.value(), cc::span<cc::byte const>(src, 1024));
+        c.submit_dx12_command_list(cc::move(up.value()));
+
+        auto down = c.create_dx12_command_list();
+        REQUIRE(down.has_value());
+        auto future = down.value()->download_from_buffer(buf.value(), 0, 1024);
+        c.submit_dx12_command_list(cc::move(down.value()));
+
+        auto const bytes = future.wait_get_bytes();
+        REQUIRE(bytes.has_value());
+        bool matches = true;
+        for (int i = 0; i < 1024; ++i)
+            if (bytes.value()[i] != cc::byte((i + e) & 0xFF))
+                matches = false;
+        CHECK(matches);
+
+        c.advance_epoch(2);
+    }
+}

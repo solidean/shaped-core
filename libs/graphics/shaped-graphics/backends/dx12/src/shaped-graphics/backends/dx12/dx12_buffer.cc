@@ -42,12 +42,13 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
         desc.Flags = sg::has_flag(usage, sg::buffer_usage::storage) ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                                                                     : D3D12_RESOURCE_FLAG_NONE;
 
-        D3D12_RESOURCE_STATES initial_state = sg::has_flag(usage, sg::buffer_usage::copy_dst)
-                                                ? D3D12_RESOURCE_STATE_COPY_DEST
-                                                : D3D12_RESOURCE_STATE_COMMON;
-
-        if (HRESULT hr = _device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, initial_state, nullptr,
-                                                          IID_PPV_ARGS(&resource));
+        // Created in COMMON: buffer copies rely on D3D12 implicit state promotion/decay (a buffer is
+        // promoted from COMMON to COPY_DEST / COPY_SOURCE on use and decays back at ExecuteCommandLists),
+        // so no explicit barriers are recorded for transfers.
+        // TODO: a real per-resource barrier + state-tracking system will replace this (and enable, e.g.,
+        // uploading then downloading the same buffer within one command list).
+        if (HRESULT hr = _device->CreateCommittedResource(
+                &heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource));
             FAILED(hr))
             return dx12_error(hr, "ID3D12Device::CreateCommittedResource failed");
     }

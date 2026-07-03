@@ -7,6 +7,7 @@ project(shaped-graphics LANGUAGES CXX)
 add_library(shaped-graphics
     src/shaped-graphics/shaped-graphics.cc
     src/shaped-graphics/buffer.cc
+    src/shaped-graphics/bytes_future.cc
     src/shaped-graphics/command_list.cc
     src/shaped-graphics/context.cc
 )
@@ -24,6 +25,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/buffer.hh
+    src/shaped-graphics/bytes_future.hh
 )
 
 target_compile_features(shaped-graphics PUBLIC cxx_std_23)
@@ -71,6 +73,7 @@ endif()
 add_executable(shaped-graphics-test
     tests/main.cc
     tests/smoke-test.cc
+    tests/bytes_future-test.cc
 )
 
 target_link_libraries(shaped-graphics-test

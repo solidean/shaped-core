@@ -27,6 +27,9 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     sg::epoch const last = _current_epoch;
     _current_epoch = sg::epoch(cc::u64(last) + 1);
 
+    // Snapshot the inline upload ring cursor as `last`'s boundary; its space frees once `last` retires.
+    _upload_inline.on_epoch_advance(last);
+
     // Signal end-of-epoch: enqueues "epoch `last` finished" after all of its recorded GPU work.
     HRESULT const hr = _queue->Signal(_epoch_fence.Get(), cc::u64(last));
     CC_ASSERT(SUCCEEDED(hr), "ID3D12CommandQueue::Signal failed");
@@ -69,6 +72,9 @@ void dx12_context::process_completed_epochs()
     if (!_epoch_fence)
         return;
     cc::u64 const completed = _epoch_fence->GetCompletedValue();
+
+    // Reclaim inline upload ring space held by every epoch the GPU has now finished.
+    _upload_inline.on_epochs_completed(sg::epoch(completed));
 
     // Drain finished epochs (oldest first, FIFO is sorted) under the lock; reclaim outside it.
     cc::vector<dx12_epoch_data> done = _epoch_state.lock(

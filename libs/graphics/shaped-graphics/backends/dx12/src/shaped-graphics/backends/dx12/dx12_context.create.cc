@@ -134,7 +134,59 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (fence_event == nullptr)
         return cc::error("CreateEventW failed for the epoch fence wait event");
 
-    return context_handle(std::make_shared<dx12_context>(cc::move(factory), cc::move(device), cc::move(queue),
-                                                         cc::move(epoch_fence), cc::move(submission_fence), fence_event));
+    auto ctx = std::make_shared<dx12_context>(cc::move(factory), cc::move(device), cc::move(queue),
+                                              cc::move(epoch_fence), cc::move(submission_fence), fence_event);
+
+    // Inline transfer ring buffers: persistently-mapped UPLOAD (CPU→GPU) and READBACK (GPU→CPU) heaps.
+    auto ring_desc = [](cc::isize size)
+    {
+        D3D12_RESOURCE_DESC d = {};
+        d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        d.Width = UINT64(size);
+        d.Height = 1;
+        d.DepthOrArraySize = 1;
+        d.MipLevels = 1;
+        d.Format = DXGI_FORMAT_UNKNOWN;
+        d.SampleDesc.Count = 1;
+        d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // required for buffers
+        return d;
+    };
+
+    D3D12_HEAP_PROPERTIES upload_heap = {};
+    upload_heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12_RESOURCE_DESC const upload_desc = ring_desc(config.upload_ring_bytes);
+    ComPtr<ID3D12Resource> upload_ring;
+    if (HRESULT hr
+        = ctx->_device->CreateCommittedResource(&upload_heap, D3D12_HEAP_FLAG_NONE, &upload_desc,
+                                                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload_ring));
+        FAILED(hr))
+        return dx12_error(hr, "CreateCommittedResource (upload ring) failed");
+    void* upload_mapped = nullptr;
+    if (HRESULT hr = upload_ring->Map(0, nullptr, &upload_mapped); FAILED(hr))
+        return dx12_error(hr, "ID3D12Resource::Map (upload ring) failed");
+
+    D3D12_HEAP_PROPERTIES readback_heap = {};
+    readback_heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC const readback_desc = ring_desc(config.download_ring_bytes);
+    ComPtr<ID3D12Resource> readback_ring;
+    if (HRESULT hr
+        = ctx->_device->CreateCommittedResource(&readback_heap, D3D12_HEAP_FLAG_NONE, &readback_desc,
+                                                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback_ring));
+        FAILED(hr))
+        return dx12_error(hr, "CreateCommittedResource (readback ring) failed");
+    void* readback_mapped = nullptr;
+    if (HRESULT hr = readback_ring->Map(0, nullptr, &readback_mapped); FAILED(hr))
+        return dx12_error(hr, "ID3D12Resource::Map (readback ring) failed");
+
+    HANDLE download_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (download_event == nullptr)
+        return cc::error("CreateEventW failed for the download wait event");
+
+    ctx->_upload_inline.initialize(cc::move(upload_ring), static_cast<cc::byte*>(upload_mapped),
+                                   config.upload_ring_bytes);
+    ctx->_download_inline.initialize(cc::move(readback_ring), static_cast<cc::byte*>(readback_mapped),
+                                     config.download_ring_bytes, download_event);
+
+    return context_handle(cc::move(ctx));
 }
 } // namespace sg

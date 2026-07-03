@@ -15,6 +15,10 @@ using namespace cc::primitive_defines;
 class context;
 class command_list;
 class buffer;
+class bytes_waiter;
+class bytes_future;
+template <class T>
+class data_future;
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See

@@ -5,7 +5,9 @@
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
+#include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/context.hh>
 
@@ -14,7 +16,7 @@
 
 namespace sg::backend::dx12
 {
-/// Creation config for the dx12 context. The two flags are independent.
+/// Creation config for the dx12 context. The flags are independent.
 struct dx12_config
 {
     /// Enable the D3D12 debug/validation layer. Best-effort — skipped if it isn't installed.
@@ -22,6 +24,12 @@ struct dx12_config
 
     /// Use the WARP software adapter instead of a hardware GPU. Runs headless (good for CI).
     bool use_warp = false;
+
+    /// Capacity of the inline UPLOAD ring buffer, in bytes. Bounds the per-epoch inline upload volume.
+    cc::isize upload_ring_bytes = cc::isize(16) * 1024 * 1024;
+
+    /// Capacity of the inline READBACK ring buffer, in bytes. Bounds the in-flight inline download volume.
+    cc::isize download_ring_bytes = cc::isize(16) * 1024 * 1024;
 };
 
 /// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
@@ -41,7 +49,9 @@ public:
         _queue(cc::move(queue)),
         _epoch_fence(cc::move(epoch_fence)),
         _submission_fence(cc::move(submission_fence)),
-        _fence_event(fence_event)
+        _fence_event(fence_event),
+        _upload_inline(*this),
+        _download_inline(*this)
     {
     }
 
@@ -123,6 +133,11 @@ public:
     cc::mutex<dx12_allocator_pool> _allocators;
 
     cc::mutex<dx12_epoch_state> _epoch_state;
+
+    // Inline host↔device buffer transfer over UPLOAD / READBACK ring buffers on the direct queue.
+    // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
+    dx12_upload_inline_system _upload_inline;
+    dx12_download_inline_system _download_inline;
 };
 } // namespace sg::backend::dx12
 
