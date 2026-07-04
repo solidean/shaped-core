@@ -38,5 +38,16 @@ protected:
     {
         CC_UNREACHABLE("vulkan inline buffer copy is not implemented yet");
     }
+
+    // Compute recording (reached through cmd.compute) — not implemented yet.
+    void compute_bind_pipeline(sg::compute_pipeline const&) override
+    {
+        CC_UNREACHABLE("vulkan compute bind_pipeline is not implemented yet");
+    }
+    void compute_bind_group(int, sg::binding_group const&) override
+    {
+        CC_UNREACHABLE("vulkan compute bind_group is not implemented yet");
+    }
+    void compute_dispatch(int, int, int) override { CC_UNREACHABLE("vulkan compute dispatch is not implemented yet"); }
 };
 } // namespace sg::backend::vulkan

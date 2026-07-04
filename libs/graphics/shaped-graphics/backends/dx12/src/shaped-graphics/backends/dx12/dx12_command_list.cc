@@ -2,10 +2,49 @@
 // fields); its create/submit/drop bodies live here. Allocators are epoch-gated (recycled once the
 // epoch retires); see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
+#include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
 namespace sg::backend::dx12
 {
+void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
+{
+    auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
+    CC_ASSERT(dp != nullptr, "compute_pipeline is not a dx12 compute_pipeline");
+
+    // The shader-visible heap must be set before any root descriptor table is bound.
+    ID3D12DescriptorHeap* heaps[] = {_ctx._descriptor_heap.heap.Get()};
+    _list->SetDescriptorHeaps(1, heaps);
+    _list->SetComputeRootSignature(dp->layout->root_signature.Get());
+    _list->SetPipelineState(dp->pipeline_state.Get());
+}
+
+void dx12_command_list::compute_bind_group(int set, sg::binding_group const& group)
+{
+    CC_ASSERT(set == 0, "only descriptor set 0 is supported yet");
+    auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
+    CC_ASSERT(dg != nullptr, "binding_group is not a dx12 binding_group");
+
+    // Buffers are in COMMON and implicitly promote to UNORDERED_ACCESS / non-pixel-shader-resource on
+    // the dispatch access, so no explicit transition barrier is needed here (no state tracker yet).
+    _list->SetComputeRootDescriptorTable(0, dg->table_start);
+}
+
+void dx12_command_list::compute_dispatch(int x, int y, int z)
+{
+    CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
+    _list->Dispatch(UINT(x), UINT(y), UINT(z));
+
+    // Flush UAV writes so a later command list (e.g. the download copy) observes them. Buffers then
+    // decay to COMMON at ExecuteCommandLists and the copy implicitly promotes them to COPY_SOURCE.
+    D3D12_RESOURCE_BARRIER uav = {};
+    uav.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uav.UAV.pResource = nullptr; // global UAV barrier
+    _list->ResourceBarrier(1, &uav);
+}
+
 void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
                                                cc::span<cc::byte const> data,
                                                cc::isize offset_in_bytes)

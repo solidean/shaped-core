@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
@@ -60,6 +61,17 @@ public:
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
+    // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
+    // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
+    [[nodiscard]] cc::result<dx12_binding_layout_handle> create_dx12_binding_layout(cc::span<sg::binding const> bindings,
+                                                                                    sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(sg::compiled_shader const& shader,
+                                                                                        dx12_binding_layout_handle layout,
+                                                                                        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_layout_handle layout,
+                                                                                  cc::span<sg::named_view const> views,
+                                                                                  sg::lifetime_scope scope);
+
     /// Stages a refcount-zero GPU resource for deferred deletion, attributed to the epoch it dies in
     /// (freed once that epoch retires). Called from ~dx12_buffer; safe to call from any thread.
     void schedule_deferred_deletion(dx12_expiring_resource expiring);
@@ -79,6 +91,16 @@ public:
     {
         return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
     }
+
+    // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
+    // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
+    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const> bindings,
+                                                                              sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compute_pipeline_description const& desc,
+                                                                                  sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle layout,
+                                                                            cc::span<sg::named_view const> views,
+                                                                            sg::lifetime_scope scope) override;
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
@@ -142,6 +164,10 @@ public:
     // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
     dx12_upload_inline_system _upload_inline;
     dx12_download_inline_system _download_inline;
+
+    // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
+    // Initialized in create_dx12_context.
+    dx12_descriptor_heap _descriptor_heap;
 };
 } // namespace sg::backend::dx12
 

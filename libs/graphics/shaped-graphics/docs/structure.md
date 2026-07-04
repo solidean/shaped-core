@@ -29,6 +29,12 @@ src/shaped-graphics/
   buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done; as_* view factories
   views.hh                        [in progress] strongly-typed buffer views (uniform/readonly/readwrite<T>, byte=raw)
                                                 + erased raw_view; texture/texel views deferred (need texture/format)
+  binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
+  compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
+  binding_layout.hh/.cc           [in progress] abstract: the bindable-set schema (built from bindings); dx12 = root sig (vulkan stub)
+  compute_pipeline.hh/.cc         [in progress] abstract: compute shader + layout; dx12 = PSO (vulkan stub)
+  binding_group.hh/.cc            [in progress] abstract: layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
+  command_list.compute.hh/.cc     [in progress] cmd.compute scope: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
   memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
 backends/                                       # each subclasses the abstract sg types directly
@@ -75,7 +81,7 @@ Resource creation is reached through a **lifetime scope** on the context rather 
 directly: `ctx.persistent.create_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
 back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
 and the scope — a friend — funnels through it, tagging the request with its lifetime. Today only the
-persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `allocation_scope`)
+persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `lifetime_scope`)
 is the planned second one.
 
 ## Ownership & lifetime
@@ -110,8 +116,9 @@ and neither backend can bind a resource into a heap yet.
 ```text
 buffer transfer      [in progress]  command_list inline upload / download (dx12 real, vulkan stub); copy planned
 views                [in progress]  strongly-typed resource views; buffer views done, binding path + texture/texel deferred
+bindings             [in progress]  compiled_shader + binding vocab; binding_layout/group + compute_pipeline (dx12 real, vulkan stub)
 texture              [planned]  GPU-resident images + views (texture/texel view family)
-pipeline             [planned]  graphics/compute pipelines + shader modules
+pipeline             [in progress]  compute pipeline + bind path (dx12 real, vulkan stub); graphics pipelines + shader compiler planned
 sampler              [planned]
 swapchain / surface  [planned]  presentation
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
@@ -131,7 +138,7 @@ underpins safe resource reclamation and command-allocator recycling. See
 2. command_list buffer inline upload / download            [in progress]  dx12 real; copy + vulkan pending
 3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
 4. textures + views                                        [in progress]  buffer views done; textures + texture/texel views + binding path remain
-5. pipelines + shaders                                     [planned]
+5. pipelines + shaders                                     [in progress]  compute bind path dx12-real (vulkan + graphics + shader compiler pending)
 6. presentation (swapchain/surface) + submission/sync      [planned]
 7. tier 2 backends (metal, webgpu)                         [planned]
 8. legacy backends (opengl, webgl)                         [planned]

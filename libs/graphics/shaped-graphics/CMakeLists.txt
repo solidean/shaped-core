@@ -12,6 +12,10 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.upload.cc
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
+    src/shaped-graphics/command_list.compute.cc
+    src/shaped-graphics/binding_layout.cc
+    src/shaped-graphics/compute_pipeline.cc
+    src/shaped-graphics/binding_group.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/memory_heap.cc
@@ -33,8 +37,14 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.upload.hh
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
+    src/shaped-graphics/command_list.compute.hh
     src/shaped-graphics/buffer.hh
     src/shaped-graphics/views.hh
+    src/shaped-graphics/binding.hh
+    src/shaped-graphics/binding_layout.hh
+    src/shaped-graphics/compiled_shader.hh
+    src/shaped-graphics/compute_pipeline.hh
+    src/shaped-graphics/binding_group.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/allocation_info.hh
     src/shaped-graphics/memory_heap.hh
@@ -87,6 +97,7 @@ add_executable(shaped-graphics-test
     tests/smoke-test.cc
     tests/views-test.cc
     tests/bytes_future-test.cc
+    tests/shader-test.cc
 )
 
 target_link_libraries(shaped-graphics-test

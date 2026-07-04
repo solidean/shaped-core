@@ -17,6 +17,7 @@ class command_list;
 class command_list_upload_scope;
 class command_list_download_scope;
 class command_list_copy_scope;
+class command_list_compute_scope;
 class buffer;
 class bytes_waiter;
 class bytes_future;
@@ -26,12 +27,39 @@ class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)
 
+/// Lifetime mode of a resource — a hard contract, not a hint. `persistent` lives until its handles are
+/// released; `transient` expires when its epoch retires (using it beyond that is a hard error, and the
+/// backend may recycle it immediately). Passed to every `create_*` (buffers carry it inside
+/// allocation_info). Both modes still get in-flight GPU hazard tracking, which is orthogonal.
+enum class lifetime_scope
+{
+    persistent,
+    transient,
+};
+
 // Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
 // (uniform_view/readonly_view/readwrite_view) are constrained, so only the enums and raw_view are
 // forward-declared here; include views.hh for the views themselves.
 enum class view_class;
 enum class view_shape;
 struct raw_view;
+
+// Compiled shaders + reflected bindings (see compiled_shader.hh / binding.hh) — value types.
+enum class binding_type;
+enum class shader_stage;
+enum class shader_format;
+struct binding;
+struct compiler_info;
+struct compute_dimensions;
+struct compiled_shader;
+
+// Bind path: schema (binding_layout) -> pipeline (compute_pipeline) -> instance (binding_group). See
+// binding_layout.hh / compute_pipeline.hh / binding_group.hh.
+class binding_layout;
+class compute_pipeline;
+struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
+class binding_group;
+struct named_view; // {name, raw_view} — input to create_binding_group
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
@@ -56,5 +84,9 @@ enum class submission_token : u64
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
 using buffer_handle = std::shared_ptr<buffer const>; // shared-immutable: a view/handle can't reshape the buffer
-using memory_heap_handle = std::shared_ptr<memory_heap const>; // immutable resource — it tracks no allocations
+using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
+using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
+using binding_layout_handle = std::shared_ptr<binding_layout const>;   // immutable schema
+using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
+using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
 } // namespace sg

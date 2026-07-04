@@ -11,6 +11,15 @@ class dx12_command_list;
 class dx12_command_allocator_pool;
 class dx12_buffer;
 
+// Bind path (see dx12_binding_layout.hh / dx12_compute_pipeline.hh / dx12_binding_group.hh).
+struct dx12_descriptor_heap;
+class dx12_binding_layout;
+class dx12_compute_pipeline;
+class dx12_binding_group;
+using dx12_binding_layout_handle = std::shared_ptr<dx12_binding_layout const>;
+using dx12_compute_pipeline_handle = std::shared_ptr<dx12_compute_pipeline const>;
+using dx12_binding_group_handle = std::shared_ptr<dx12_binding_group const>;
+
 // Inline buffer transfer (see dx12_upload_inline.hh / dx12_download_inline.hh and the resource helpers).
 class dx12_upload_inline_system;
 class dx12_download_inline_system;

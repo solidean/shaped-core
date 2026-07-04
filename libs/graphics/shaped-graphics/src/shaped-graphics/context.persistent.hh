@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/fwd.hh>
@@ -9,7 +10,7 @@ namespace sg
 {
 /// Resource factory for a context's *persistent* lifetime scope, reached as `ctx.persistent`.
 /// Persistent resources live until their handles are released (as opposed to a future transient scope,
-/// whose resources the backend recycles per frame/epoch). See allocation_scope.
+/// whose resources the backend recycles per frame/epoch). See lifetime_scope.
 ///
 /// A thin facade over its owning context: it forwards each create_* to the context's backend impl.
 class context_persistent_scope
@@ -20,6 +21,16 @@ public:
     [[nodiscard]] cc::result<buffer_handle> create_buffer(isize size_in_bytes,
                                                           buffer_usage usage,
                                                           allocation_info const& alloc = {});
+
+    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings.
+    [[nodiscard]] cc::result<binding_layout_handle> create_binding_layout(cc::span<binding const> bindings);
+
+    /// Builds a compute_pipeline from a description (compute shader + layout).
+    [[nodiscard]] cc::result<compute_pipeline_handle> create_compute_pipeline(compute_pipeline_description const& desc);
+
+    /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
+    [[nodiscard]] cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
+                                                                        cc::span<named_view const> views);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_persistent_scope(context_persistent_scope const&) = delete;

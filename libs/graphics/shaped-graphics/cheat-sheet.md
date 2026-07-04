@@ -149,15 +149,54 @@ v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/si
 // buffer views only today; texture/texel views (dimension-typed) deferred until sg::texture + sg::format
 ```
 
+## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
+
+```cpp
+#include <shaped-graphics/binding.hh>
+sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
+                            //   backend-agnostic reflection kind (replaces D3D_SHADER_INPUT_TYPE); +sampler/texture/accel later
+sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
+                            //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
+sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
+sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
+
+#include <shaped-graphics/compiled_shader.hh>
+sg::shader_stage            // vertex | fragment | compute (+ more later)
+sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob
+sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
+                            //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler }  — value type
+sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
+// data model only: no compiler yet (construct by hand / future loader)
+```
+
+## bind path — layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
+
+```cpp
+#include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
+sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; backend subclasses; *_handle = shared_ptr<T const>
+sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
+sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
+// creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
+ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema)
+ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle
+ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout)
+// recording (on a command_list, via the cmd.compute scope):
+cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
+cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
+cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
+cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+```
+
 ## memory placement — heaps & alloc-info  (stub)
 
 ```cpp
+#include <shaped-graphics/fwd.hh>
+sg::lifetime_scope                      // persistent | transient  (hard lifetime contract; transient expires at epoch retire)
 #include <shaped-graphics/allocation_info.hh>
-sg::allocation_scope                    // persistent | transient  (hard lifetime contract; transient expires at epoch retire)
 sg::allocation_info                     // value type: where a resource's memory lives (cheap to copy)
 ai.heap                                 // memory_heap_handle — null = dedicated / self-allocating
 ai.offset / ai.size_in_bytes            // isize — placement within `heap` (ignored when dedicated)
-ai.scope                                // sg::allocation_scope
+ai.scope                                // sg::lifetime_scope
 ai.is_dedicated()                       // bool — heap == nullptr (owns its allocation; "committed" in dx12)
 ai.is_placed()                          // bool — heap != nullptr (sub-allocated into a shared heap)
 
