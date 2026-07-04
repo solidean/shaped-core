@@ -54,7 +54,7 @@ struct dx12_download_copy_job
 {
     sg::submission_token token = sg::submission_token::not_submitted;
     cc::unique_function<void()> deferred_cpu_copy;
-    std::weak_ptr<void> pin;
+    std::weak_ptr<void const> pin;
     std::shared_ptr<dx12_download_waiter> waiter;
 
     /// The reserving epoch's outstanding-copy counter. Held until this job is drained (or its list is

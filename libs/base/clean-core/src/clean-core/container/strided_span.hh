@@ -235,7 +235,7 @@ public:
 public:
     /// Attempts to convert this strided_span to a contiguous span.
     /// Returns nullopt if the stride is not equal to sizeof(T).
-    [[nodiscard]] constexpr cc::optional<cc::span<T>> try_to_span() const
+    [[nodiscard]] constexpr cc::optional<cc::span<T>> try_as_span() const
     {
         if (is_contiguous())
             return cc::span<T>(start_ptr(), _size);

@@ -274,6 +274,33 @@ private:
     isize _size = 0;
 };
 
+namespace cc
+{
+/// Byte view over any container exposing data()/size(); elements must be trivially copyable.
+template <class ContainerT>
+    requires requires(ContainerT const& c) {
+        c.data();
+        c.size();
+        requires std::is_pointer_v<decltype(c.data())>;
+    }
+[[nodiscard]] auto as_bytes(ContainerT const& c)
+{
+    return cc::span<std::remove_pointer_t<decltype(c.data())>>(c).as_bytes();
+}
+
+/// Mutable byte view over a non-const container exposing data()/size(); elements must be trivially copyable.
+template <class ContainerT>
+    requires requires(ContainerT& c) {
+        c.data();
+        c.size();
+        requires std::is_pointer_v<decltype(c.data())>;
+    }
+[[nodiscard]] auto as_mutable_bytes(ContainerT& c)
+{
+    return cc::span<std::remove_pointer_t<decltype(c.data())>>(c).as_mutable_bytes();
+}
+} // namespace cc
+
 /// Non-owning view over a contiguous sequence of exactly N elements of type T.
 /// Similar to span but with compile-time fixed size N.
 /// Trivially copyable regardless of T's triviality.

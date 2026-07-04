@@ -850,3 +850,33 @@ TEST("string_view - special cases")
         CHECK(sv.size() == 0);
     }
 }
+
+TEST("string_view - as_span / as_bytes")
+{
+    // a longer backing buffer, viewed without its trailing content, proves the span excludes anything past size()
+    char const* backing = "abcXYZ";
+    auto const sv = cc::string_view{backing, 3};
+
+    SECTION("as_span covers exactly the viewed chars")
+    {
+        auto const s = sv.as_span();
+        static_assert(std::is_same_v<decltype(s), cc::span<char const> const>);
+        CHECK(s.data() == backing);
+        CHECK(s.size() == 3);
+        CHECK(s[2] == 'c');
+    }
+
+    SECTION("as_bytes covers exactly the viewed bytes")
+    {
+        auto const bytes = sv.as_bytes();
+        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        CHECK(bytes.size() == 3);
+        CHECK(bytes[0] == cc::byte('a'));
+    }
+
+    SECTION("empty view yields empty span")
+    {
+        auto const s = cc::string_view{}.as_span();
+        CHECK(s.empty());
+    }
+}

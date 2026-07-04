@@ -28,7 +28,7 @@ public:
     /// (e.g. pinned_data<int> -> pinned_data<int const>). Shares the same owner.
     template <class U>
         requires(std::is_convertible_v<U*, T*>)
-    pinned_data(pinned_data<U> const& other) : _span(other._span), _owner(other._owner)
+    pinned_data(pinned_data<U> const& other) : _span(other._span), _pin(other._pin)
     {
     }
 
@@ -66,31 +66,33 @@ public:
     [[nodiscard]] bool empty() const { return _span.empty(); }
     /// Returns the non-owning span view of the pinned data.
     [[nodiscard]] cc::span<T> span() const { return _span; }
+    /// Returns the type-erased shared owner keeping the memory alive; empty for an unpinned/empty view.
+    [[nodiscard]] std::shared_ptr<void const> pin() const { return _pin; }
 
     // subdata
 public:
     /// Returns the subdata [offset, size()), sharing this pinned_data's owner.
     /// Precondition: 0 <= offset <= size().
-    [[nodiscard]] pinned_data subdata(isize offset) const { return create_from_pin(_span.subspan(offset), _owner); }
+    [[nodiscard]] pinned_data subdata(isize offset) const { return create_from_pin(_span.subspan(offset), _pin); }
     /// Returns the subdata [r.offset, r.offset + r.size), sharing this pinned_data's owner.
-    [[nodiscard]] pinned_data subdata(offset_size r) const { return create_from_pin(_span.subspan(r), _owner); }
+    [[nodiscard]] pinned_data subdata(offset_size r) const { return create_from_pin(_span.subspan(r), _pin); }
     /// Returns the subdata [r.start, r.end), sharing this pinned_data's owner.
-    [[nodiscard]] pinned_data subdata(start_end r) const { return create_from_pin(_span.subspan(r), _owner); }
+    [[nodiscard]] pinned_data subdata(start_end r) const { return create_from_pin(_span.subspan(r), _pin); }
 
     /// Like subdata(offset) but clamps the range into [0, size()] instead of asserting.
     [[nodiscard]] pinned_data subdata_clamped(isize offset) const
     {
-        return create_from_pin(_span.subspan_clamped(offset), _owner);
+        return create_from_pin(_span.subspan_clamped(offset), _pin);
     }
     /// Like subdata(offset_size) but clamps the range into [0, size()] instead of asserting.
     [[nodiscard]] pinned_data subdata_clamped(offset_size r) const
     {
-        return create_from_pin(_span.subspan_clamped(r), _owner);
+        return create_from_pin(_span.subspan_clamped(r), _pin);
     }
     /// Like subdata(start_end) but clamps the range into [0, size()] instead of asserting.
     [[nodiscard]] pinned_data subdata_clamped(start_end r) const
     {
-        return create_from_pin(_span.subspan_clamped(r), _owner);
+        return create_from_pin(_span.subspan_clamped(r), _pin);
     }
 
     // reinterpretation
@@ -100,7 +102,7 @@ public:
     template <class U>
     [[nodiscard]] pinned_data<U> reinterpret_as() const
     {
-        return pinned_data<U>::create_from_pin(_span.template reinterpret_as<U>(), _owner);
+        return pinned_data<U>::create_from_pin(_span.template reinterpret_as<U>(), _pin);
     }
 
     /// Like reinterpret_as but returns nullopt when the total byte size is not divisible by sizeof(U).
@@ -110,27 +112,27 @@ public:
         auto const view = _span.template try_reinterpret_as<U>();
         if (!view.has_value())
             return {};
-        return pinned_data<U>::create_from_pin(view.value(), _owner);
+        return pinned_data<U>::create_from_pin(view.value(), _pin);
     }
 
     /// Reinterprets the pinned elements as immutable raw bytes, sharing the owner.
     [[nodiscard]] pinned_data<cc::byte const> as_bytes() const
     {
-        return pinned_data<cc::byte const>::create_from_pin(_span.as_bytes(), _owner);
+        return pinned_data<cc::byte const>::create_from_pin(_span.as_bytes(), _pin);
     }
     /// Reinterprets the pinned elements as mutable raw bytes, sharing the owner; only for non-const T.
     [[nodiscard]] pinned_data<cc::byte> as_mutable_bytes() const
     {
-        return pinned_data<cc::byte>::create_from_pin(_span.as_mutable_bytes(), _owner);
+        return pinned_data<cc::byte>::create_from_pin(_span.as_mutable_bytes(), _pin);
     }
 
     // factories
 public:
     /// Wraps an existing span and its shared owner into a pinned_data.
-    /// The owner must keep the memory referenced by data alive.
-    [[nodiscard]] static pinned_data create_from_pin(cc::span<T> data, std::shared_ptr<void> owner)
+    /// The pin must keep the memory referenced by data alive.
+    [[nodiscard]] static pinned_data create_from_pin(cc::span<T> data, std::shared_ptr<void const> pin)
     {
-        return pinned_data(data, cc::move(owner));
+        return pinned_data(data, cc::move(pin));
     }
 
     /// Allocates and pins size default-constructed elements. Only valid for non-const T.
@@ -160,7 +162,7 @@ public:
 
     // members
 private:
-    pinned_data(cc::span<T> s, std::shared_ptr<void> owner) : _span(s), _owner(cc::move(owner)) {}
+    pinned_data(cc::span<T> s, std::shared_ptr<void const> pin) : _span(s), _pin(cc::move(pin)) {}
 
     /// Moves an owning array onto the heap, pins it, and views its storage.
     [[nodiscard]] static pinned_data create_owning(cc::array<T>&& buffer)
@@ -168,14 +170,14 @@ private:
         auto buf = std::make_shared<cc::array<T>>(cc::move(buffer));
         // Read data()/size() before moving buf: argument evaluation order is unsequenced.
         auto const view = cc::span<T>(buf->data(), buf->size());
-        return pinned_data(view, std::shared_ptr<void>(cc::move(buf)));
+        return pinned_data(view, std::shared_ptr<void const>(cc::move(buf)));
     }
 
     template <class U>
     friend struct cc::pinned_data;
 
     cc::span<T> _span;
-    std::shared_ptr<void> _owner;
+    std::shared_ptr<void const> _pin;
 };
 
 namespace cc
@@ -194,7 +196,7 @@ template <class Container>
     if (!p)
         return pinned_data<elem>{};
     auto const view = cc::span<elem>(p->data(), p->size());
-    return pinned_data<elem>::create_from_pin(view, std::shared_ptr<void>(cc::move(p)));
+    return pinned_data<elem>::create_from_pin(view, std::shared_ptr<void const>(cc::move(p)));
 }
 
 /// Creates a pinned_data from any contiguous container, pinning its elements. Chooses the
@@ -230,7 +232,7 @@ template <class Container>
             auto buf = std::make_shared<cc::array<value>>(cc::array<value>::create_copy_of(cc::span<value const>(c)));
             // Read data()/size() before moving buf: argument evaluation order is unsequenced.
             auto const view = cc::span<elem>(buf->data(), buf->size());
-            return pinned_data<elem>::create_from_pin(view, std::shared_ptr<void>(cc::move(buf)));
+            return pinned_data<elem>::create_from_pin(view, std::shared_ptr<void const>(cc::move(buf)));
         }
     }
 }

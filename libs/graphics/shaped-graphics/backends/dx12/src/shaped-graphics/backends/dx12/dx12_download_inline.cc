@@ -11,6 +11,7 @@
 // epoch's whole ring span frees only once that counter hits zero — i.e. every one of its downloads has
 // drained (or its list was dropped). See libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -149,13 +150,13 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
                                                               cc::isize size)
 {
     if (size == 0)
-        return sg::bytes_future(cc::span<cc::byte const>(), nullptr, std::make_shared<sg::ready_bytes_waiter>());
+        return sg::bytes_future(cc::pinned_data<cc::byte const>(), std::make_shared<sg::ready_bytes_waiter>());
 
     CC_ASSERT(_mapped != nullptr, "download system used before initialization");
 
-    // Destination the readback bytes land in; the pin keeps it alive until the copy runs (or cancels).
-    std::shared_ptr<cc::byte[]> dst = std::make_shared<cc::byte[]>(std::size_t(size));
-    cc::span<cc::byte> const dst_span(dst.get(), size);
+    // Destination the readback bytes land in; the pinned_data keeps it alive until the copy runs (or cancels).
+    auto dst = cc::pinned_data<cc::byte>::create_uninitialized(size);
+    cc::span<cc::byte> const dst_span = dst.span();
     auto waiter = std::make_shared<dx12_download_waiter>();
 
     reservation res = reserve(size);
@@ -167,12 +168,12 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
 
     dx12_download_copy_job job;
     job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
-    job.pin = std::weak_ptr<void>(dst);
+    job.pin = std::weak_ptr<void const>(dst.pin());
     job.waiter = waiter;
     job.epoch_copies = cc::move(res.epoch_copies);
     cmd._pending_downloads.push_back(cc::move(job));
 
-    return sg::bytes_future(cc::span<cc::byte const>(dst.get(), size), std::shared_ptr<void>(dst), cc::move(waiter));
+    return sg::bytes_future(cc::move(dst), cc::move(waiter));
 }
 
 void dx12_download_inline_system::enqueue_submitted(sg::submission_token token, cc::vector<dx12_download_copy_job>& jobs)

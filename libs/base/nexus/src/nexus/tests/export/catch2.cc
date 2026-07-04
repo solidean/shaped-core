@@ -2,7 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
-#include <clean-core/string/to_string.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/tests/export/xml.hh>
 
 using nx::impl::xml_escape;
@@ -21,24 +21,11 @@ void print_section_expressions(cc::string& out,
         if (error_count >= max_errors)
             return;
 
-        out += indent;
-        out += "<Expression success=\"false\" ";
-        out += "filename=\"";
-        out += xml_escape(error.location.file_name());
-        out += "\" ";
-        out += "line=\"";
-        out += cc::to_string(error.location.line());
-        out += "\">\n";
-        out += indent;
-        out += "  <Original>";
-        out += xml_escape(error.expr);
-        out += "</Original>\n";
-        out += indent;
-        out += "  <Expanded>";
-        out += xml_escape(error.expanded);
-        out += "</Expanded>\n";
-        out += indent;
-        out += "</Expression>\n";
+        out.appendf("{}<Expression success=\"false\" filename=\"{}\" line=\"{}\">\n", indent,
+                    xml_escape(error.location.file_name()), error.location.line());
+        out.appendf("{}  <Original>{}</Original>\n", indent, xml_escape(error.expr));
+        out.appendf("{}  <Expanded>{}</Expanded>\n", indent, xml_escape(error.expanded));
+        out.appendf("{}</Expression>\n", indent);
 
         ++error_count;
     }
@@ -56,16 +43,8 @@ void print_section_recursive(cc::string& out,
     // Print subsections
     for (auto const& subsec : sec.subsections)
     {
-        out += indent;
-        out += "<Section name=\"";
-        out += xml_escape(subsec.name);
-        out += "\" ";
-        out += "filename=\"";
-        out += xml_escape(subsec.location.file_name());
-        out += "\" ";
-        out += "line=\"";
-        out += cc::to_string(subsec.location.line());
-        out += "\">\n";
+        out.appendf("{}<Section name=\"{}\" filename=\"{}\" line=\"{}\">\n", indent, xml_escape(subsec.name),
+                    xml_escape(subsec.location.file_name()), subsec.location.line());
 
         // Recursively print subsection content
         print_section_recursive(out, subsec, indent + "  ", error_count, max_errors);
@@ -74,21 +53,10 @@ void print_section_recursive(cc::string& out,
         // If the section is considered failing but has 0 failed checks (e.g., missing CHECK),
         // report at least 1 failure so C++ TestMate interprets it correctly
         auto const failures = subsec.is_considered_failing ? cc::max(subsec.failed_checks, 1) : subsec.failed_checks;
-        out += indent;
-        out += "  <OverallResults ";
-        out += "successes=\"";
-        out += cc::to_string(subsec.executed_checks - subsec.failed_checks);
-        out += "\" ";
-        out += "failures=\"";
-        out += cc::to_string(failures);
-        out += "\" ";
-        out += "expectedFailures=\"0\" ";
-        out += "durationInSeconds=\"";
-        out += cc::to_string(subsec.duration_seconds);
-        out += "\"/>\n";
-
-        out += indent;
-        out += "</Section>\n";
+        out.appendf("{}  <OverallResults successes=\"{}\" failures=\"{}\" expectedFailures=\"0\" "
+                    "durationInSeconds=\"{}\"/>\n",
+                    indent, subsec.executed_checks - subsec.failed_checks, failures, subsec.duration_seconds);
+        out.appendf("{}</Section>\n", indent);
     }
 }
 } // namespace
@@ -102,18 +70,12 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
     for (auto const& decl : registry.declarations)
     {
         out += "  <TestCase>\n";
-        out += "    <Name>";
-        out += xml_escape(decl.name);
-        out += "</Name>\n";
+        out.appendf("    <Name>{}</Name>\n", xml_escape(decl.name));
         out += "    <ClassName/>\n";
         out += "    <Tags></Tags>\n";
         out += "    <SourceInfo>\n";
-        out += "      <File>";
-        out += xml_escape(decl.location.file_name());
-        out += "</File>\n";
-        out += "      <Line>";
-        out += cc::to_string(decl.location.line());
-        out += "</Line>\n";
+        out.appendf("      <File>{}</File>\n", xml_escape(decl.location.file_name()));
+        out.appendf("      <Line>{}</Line>\n", decl.location.line());
         out += "    </SourceInfo>\n";
         out += "  </TestCase>\n";
     }
@@ -144,15 +106,8 @@ cc::string nx::write_catch2_results_xml(nx::test_schedule_execution const& execu
         auto const& decl = *exec.instance.declaration;
         bool const success = !exec.is_considered_failing();
 
-        out += "  <TestCase name=\"";
-        out += xml_escape(decl.name);
-        out += "\" ";
-        out += "filename=\"";
-        out += xml_escape(decl.location.file_name());
-        out += "\" ";
-        out += "line=\"";
-        out += cc::to_string(decl.location.line());
-        out += "\">\n";
+        out.appendf("  <TestCase name=\"{}\" filename=\"{}\" line=\"{}\">\n", xml_escape(decl.name),
+                    xml_escape(decl.location.file_name()), decl.location.line());
 
         // Print all sections and expressions recursively (capped at max_errors)
         int const max_errors = 50;
@@ -160,12 +115,8 @@ cc::string nx::write_catch2_results_xml(nx::test_schedule_execution const& execu
         print_section_recursive(out, exec.root, "    ", error_count, max_errors);
 
         // Print test case summary
-        out += "    <OverallResult success=\"";
-        out += (success ? "true" : "false");
-        out += "\" ";
-        out += "durationInSeconds=\"";
-        out += cc::to_string(exec.root.duration_seconds);
-        out += "\"/>\n";
+        out.appendf("    <OverallResult success=\"{}\" durationInSeconds=\"{}\"/>\n", success,
+                    exec.root.duration_seconds);
         out += "  </TestCase>\n";
     }
 

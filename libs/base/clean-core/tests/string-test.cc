@@ -1014,3 +1014,41 @@ TEST("string - replace range")
         CHECK(s == cc::string_view{"xyz"});
     }
 }
+
+TEST("string - as_span / as_bytes")
+{
+    SECTION("spans cover exactly the content, no terminator")
+    {
+        cc::string s = cc::string("hello");
+        auto const chars = s.as_span();
+        static_assert(std::is_same_v<decltype(chars), cc::span<char const> const>);
+        CHECK(chars.data() == s.data());
+        CHECK(chars.size() == 5);
+
+        auto const bytes = s.as_bytes();
+        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        CHECK(bytes.size() == 5);
+        CHECK(bytes[0] == cc::byte('h'));
+    }
+
+    SECTION("as_mutable_span writes through")
+    {
+        cc::string s = cc::string("hello");
+        s.as_mutable_span()[0] = 'H';
+        CHECK(s == cc::string_view{"Hello"});
+    }
+
+    SECTION("as_mutable_bytes writes through")
+    {
+        cc::string s = cc::string("hello");
+        s.as_mutable_bytes()[4] = cc::byte('O');
+        CHECK(s == cc::string_view{"hellO"});
+    }
+
+    SECTION("long (heap) string spans its content")
+    {
+        cc::string s = cc::string("this is a very long string that exceeds SSO capacity for sure");
+        CHECK(s.as_span().size() == s.size());
+        CHECK(s.as_bytes().size() == s.size());
+    }
+}

@@ -430,6 +430,17 @@ public:
     /// Returns the last byte. Precondition: !empty().
     [[nodiscard]] char back() const { return string_view(*this).back(); }
 
+    // span access
+public:
+    /// The stored chars as a span (no trailing terminator).
+    [[nodiscard]] cc::span<char const> as_span() const { return cc::span<char const>(data(), size()); }
+    /// The stored chars as a mutable span (no trailing terminator).
+    [[nodiscard]] cc::span<char> as_mutable_span() { return cc::span<char>(data(), size()); }
+    /// The stored chars as immutable raw bytes.
+    [[nodiscard]] cc::span<cc::byte const> as_bytes() const { return as_span().as_bytes(); }
+    /// The stored chars as mutable raw bytes.
+    [[nodiscard]] cc::span<cc::byte> as_mutable_bytes() { return as_mutable_span().as_mutable_bytes(); }
+
     // string_view read forwarding
 public:
     /// Lexicographically compares with another view. Returns <0, 0, or >0.

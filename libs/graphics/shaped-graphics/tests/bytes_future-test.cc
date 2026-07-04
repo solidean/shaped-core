@@ -1,3 +1,4 @@
+#include <clean-core/container/pinned_data.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/bytes_future.hh>
 
@@ -17,10 +18,10 @@ TEST("sg bytes_future - default is invalid")
 
 TEST("sg bytes_future - ready waiter yields its bytes")
 {
-    auto pin = std::shared_ptr<cc::byte[]>(new cc::byte[3]{cc::byte(10), cc::byte(20), cc::byte(30)});
-    cc::span<cc::byte const> const data(pin.get(), 3);
+    cc::byte const src[] = {cc::byte(10), cc::byte(20), cc::byte(30)};
+    auto const data = cc::pinned_data<cc::byte>::create_copy_of(src);
 
-    sg::bytes_future f(data, std::shared_ptr<void>(pin), std::make_shared<sg::ready_bytes_waiter>());
+    sg::bytes_future f(data, std::make_shared<sg::ready_bytes_waiter>());
     CHECK(f.is_valid());
     CHECK(f.is_ready());
 
@@ -36,11 +37,10 @@ TEST("sg bytes_future - ready waiter yields its bytes")
 
 TEST("sg data_future - typed view over the bytes")
 {
-    auto pin = std::shared_ptr<int[]>(new int[2]{7, 9});
-    cc::span<cc::byte const> const bytes(reinterpret_cast<cc::byte const*>(pin.get()), 2 * cc::isize(sizeof(int)));
+    int const src[] = {7, 9};
+    auto const data = cc::pinned_data<int>::create_copy_of(src);
 
-    sg::data_future<int> df(
-        sg::bytes_future(bytes, std::shared_ptr<void>(pin), std::make_shared<sg::ready_bytes_waiter>()));
+    sg::data_future<int> df(sg::bytes_future(data.as_bytes(), std::make_shared<sg::ready_bytes_waiter>()));
     CHECK(df.is_valid());
     CHECK(df.is_ready());
 
