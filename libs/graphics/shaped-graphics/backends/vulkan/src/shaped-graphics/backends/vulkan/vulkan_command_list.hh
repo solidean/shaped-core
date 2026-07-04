@@ -44,13 +44,10 @@ protected:
     {
         CC_UNREACHABLE("vulkan compute bind_pipeline is not implemented yet");
     }
-    void compute_bind_group(cc::u32, sg::binding_group const&) override
+    void compute_bind_group(int, sg::binding_group const&) override
     {
         CC_UNREACHABLE("vulkan compute bind_group is not implemented yet");
     }
-    void compute_dispatch(cc::u32, cc::u32, cc::u32) override
-    {
-        CC_UNREACHABLE("vulkan compute dispatch is not implemented yet");
-    }
+    void compute_dispatch(int, int, int) override { CC_UNREACHABLE("vulkan compute dispatch is not implemented yet"); }
 };
 } // namespace sg::backend::vulkan

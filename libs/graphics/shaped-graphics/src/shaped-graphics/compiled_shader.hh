@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
@@ -43,9 +44,9 @@ struct compiler_info
 /// A compute shader's `[numthreads]` / `local_size` — the workgroup dimensions.
 struct compute_dimensions
 {
-    u32 x = 1;
-    u32 y = 1;
-    u32 z = 1;
+    int x = 1;
+    int y = 1;
+    int z = 1;
 };
 
 /// A successfully compiled shader: the bytecode blob and its extracted metadata + reflection, ready to
@@ -57,8 +58,8 @@ struct compiled_shader
     shader_format format = shader_format::dxil;
     cc::string entry_point;
 
-    /// The opaque bytecode, in `format`. Owned here (a shared, immutable blob once cc::shared_ptr lands).
-    cc::vector<cc::byte> bytecode;
+    /// The opaque bytecode, in `format`. An owning, shareable, immutable byte blob.
+    cc::pinned_data<cc::byte const> bytecode;
 
     /// Reflected resource bindings — a flat list; per-set grouping is derived by the consumer.
     cc::vector<binding> bindings;

@@ -21,7 +21,7 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     _list->SetPipelineState(dp->pipeline_state.Get());
 }
 
-void dx12_command_list::compute_bind_group(cc::u32 set, sg::binding_group const& group)
+void dx12_command_list::compute_bind_group(int set, sg::binding_group const& group)
 {
     CC_ASSERT(set == 0, "only descriptor set 0 is supported yet");
     auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
@@ -32,9 +32,10 @@ void dx12_command_list::compute_bind_group(cc::u32 set, sg::binding_group const&
     _list->SetComputeRootDescriptorTable(0, dg->table_start);
 }
 
-void dx12_command_list::compute_dispatch(cc::u32 x, cc::u32 y, cc::u32 z)
+void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
-    _list->Dispatch(x, y, z);
+    CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
+    _list->Dispatch(UINT(x), UINT(y), UINT(z));
 
     // Flush UAV writes so a later command list (e.g. the download copy) observes them. Buffers then
     // decay to COMMON at ExecuteCommandLists and the copy implicitly promotes them to COPY_SOURCE.

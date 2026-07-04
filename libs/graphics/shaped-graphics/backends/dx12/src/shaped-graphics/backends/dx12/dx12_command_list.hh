@@ -49,7 +49,7 @@ protected:
 
     // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
-    void compute_bind_group(cc::u32 set, sg::binding_group const& group) override;
-    void compute_dispatch(cc::u32 x, cc::u32 y, cc::u32 z) override;
+    void compute_bind_group(int set, sg::binding_group const& group) override;
+    void compute_dispatch(int x, int y, int z) override;
 };
 } // namespace sg::backend::dx12

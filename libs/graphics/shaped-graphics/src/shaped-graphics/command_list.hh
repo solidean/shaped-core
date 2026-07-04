@@ -61,8 +61,8 @@ protected:
         = 0;
 
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
-    virtual void compute_bind_group(u32 set, binding_group const& group) = 0;
-    virtual void compute_dispatch(u32 x, u32 y, u32 z) = 0;
+    virtual void compute_bind_group(int set, binding_group const& group) = 0;
+    virtual void compute_dispatch(int x, int y, int z) = 0;
 
     epoch _epoch = epoch::invalid;
 };

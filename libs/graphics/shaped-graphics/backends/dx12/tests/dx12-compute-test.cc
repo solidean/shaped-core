@@ -28,7 +28,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
-    constexpr sg::u32 count = 256; // a multiple of the shader's 64-thread workgroup
+    constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
 
     // The compiled compute shader: embedded DXIL bytecode + its (hand-authored) reflection — one
     // read-write structured binding named "Output" at (set 0, index 0) = register(u0, space0).
@@ -37,8 +37,8 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     shader.format = sg::shader_format::dxil;
     shader.entry_point = "main";
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 1, .z = 1};
-    for (unsigned char b : double_compute_dxil)
-        shader.bytecode.push_back(cc::byte(b));
+    shader.bytecode = cc::make_pinned_data(cc::span<cc::byte const>(
+        reinterpret_cast<cc::byte const*>(double_compute_dxil), cc::isize(sizeof(double_compute_dxil))));
     shader.bindings.push_back(sg::binding{
         .name = "Output",
         .set = 0,
@@ -70,7 +70,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     REQUIRE(disp.has_value());
     disp.value()->compute.bind_pipeline(*pipeline.value());
     disp.value()->compute.bind_group(0, *group.value());
-    disp.value()->compute.dispatch_threads(count, 1, 1);
+    disp.value()->compute.dispatch_threads(count); // y, z default to 1
     c.submit_dx12_command_list(cc::move(disp.value()));
 
     // Read the result back in a second list (the buffer decays to COMMON between submits).
@@ -83,8 +83,8 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == cc::isize(count));
     bool ok = true;
-    for (sg::u32 i = 0; i < count; ++i)
-        if (data.value()[i] != i * 2)
+    for (int i = 0; i < count; ++i)
+        if (data.value()[i] != cc::u32(i) * 2)
             ok = false;
     CHECK(ok);
 }
