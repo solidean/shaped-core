@@ -18,6 +18,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
+    src/shaped-graphics/backends/dx12/dx12_descriptor_heap.cc
     src/shaped-graphics/backends/dx12/dx12_view_desc.cc
     src/shaped-graphics/backends/dx12/dx12_bind.cc
 )

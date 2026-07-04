@@ -39,6 +39,13 @@ struct dx12_config
     /// Capacity of the transient-buffer heap, in bytes. Bounds the per-epoch transient buffer volume
     /// summed over all epochs kept in flight (rounded up to the 64 KiB placement alignment).
     cc::isize transient_heap_bytes = cc::isize(128) * 1024 * 1024;
+
+    /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
+    cc::u32 descriptor_heap_capacity = 1u << 16;
+
+    /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the
+    /// rest is the persistent bump region.
+    float descriptor_transient_fraction = 0.25f;
 };
 
 /// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the

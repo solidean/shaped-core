@@ -10,14 +10,19 @@ namespace sg::backend::dx12
 {
 cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& ctx,
                                                                  dx12_binding_layout_handle layout,
-                                                                 cc::span<sg::named_view const> views)
+                                                                 cc::span<sg::named_view const> views,
+                                                                 sg::lifetime_scope scope)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_layout");
 
     auto group = std::make_shared<dx12_binding_group>();
     group->layout = layout;
 
-    UINT const base = ctx._descriptor_heap.allocate(layout->descriptor_count);
+    // Persistent groups bump-allocate (live until teardown); transient groups ring-allocate (reclaimed
+    // when their epoch retires).
+    UINT const base = scope == sg::lifetime_scope::transient
+                          ? ctx._descriptor_heap.allocate_transient(layout->descriptor_count)
+                          : ctx._descriptor_heap.allocate_persistent(layout->descriptor_count);
     group->table_start = ctx._descriptor_heap.gpu_at(base);
 
     // Match each provided view to a layout slot by name, validate it, and create its descriptor.
