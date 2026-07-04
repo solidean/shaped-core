@@ -55,16 +55,35 @@ The axes are independent, but in practice:
 
 - **Persistent** resources are where the placed-vs-dedicated choice matters most: long-lived resources
   are what you pack into shared heaps to control fragmentation and allocation count.
-- **Transient** resources will usually be backed by a **placed linear allocation** on top of a heap — a
-  bump allocator per epoch, reset when the epoch retires — rather than a dedicated allocation each frame.
+- **Transient** resources are backed by a **placed linear allocation** on top of a heap — a bump
+  allocator reclaimed per epoch — rather than a dedicated allocation each frame.
+
+## Transient allocation
+
+`ctx.transient.create_buffer(size, usage)` sub-allocates from a **ring over one DEFAULT heap**: a
+monotonic bump cursor hands out placement offsets, windows never wrap (a would-be wrap wastes the tail
+and restarts). The space an epoch consumes is snapshotted at `advance_epoch` and its **free watermark**
+released once that epoch retires — so reuse is only ever handed out after the epoch fence proves the GPU
+is done with it. This is safe at any pipelining depth (unlike a reset-on-epoch-change bump pointer,
+which assumes a single epoch in flight); the same u64-cursor + per-epoch-checkpoint scheme backs the
+inline upload/download rings. A request larger than the whole heap falls back to a committed resource.
+When the ring is full the allocator retires the oldest in-flight epoch to reclaim space.
+
+`ctx.transient.create_binding_group(...)` works the same way over the shader-visible descriptor heap,
+which is split into a transient ring (leading fraction) and the persistent bump region (see
+[bindings](bindings.md)).
+
+Because the storage is recycled at epoch retire, **using a transient resource past its epoch is a hard
+error** — a tripwire asserts in the transfer/bind paths (`buffer` becomes expired, a transient
+`binding_group` refuses to bind) rather than silently reading a later epoch's data.
 
 ## Status
 
 Both **dedicated** and **placed** buffer backing work on dx12: `ctx.persistent.create_memory_heap(size)`
 mints a heap, and a placement's `allocation_info` routes `create_buffer` through `CreatePlacedResource`
-(the buffer holds a handle to its heap so the heap outlives the placement). The vulkan backend still
-stubs both. The transient scope is not yet exposed — only `ctx.persistent` exists — so the per-epoch
-bump allocator that will sit on top of a heap is still to come.
+(the buffer holds a handle to its heap so the heap outlives the placement). `ctx.transient` exposes
+per-epoch buffers and binding groups (above). The vulkan backend stubs all of it (heaps, placed
+resources, transient) until its own milestone.
 
 ## See also
 
