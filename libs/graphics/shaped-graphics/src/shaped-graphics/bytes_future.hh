@@ -113,7 +113,7 @@ public:
         auto const bytes = _bytes.try_get_bytes();
         if (!bytes.has_value())
             return {};
-        return bytes.value().try_reinterpret_as<T const>();
+        return bytes.value().template try_reinterpret_as<T const>();
     }
 
     /// Blocks until ready, then returns the typed result. See bytes_future::wait_get_bytes.
@@ -122,7 +122,7 @@ public:
         auto const bytes = _bytes.wait_get_bytes();
         if (!bytes.has_value())
             return {};
-        return bytes.value().try_reinterpret_as<T const>();
+        return bytes.value().template try_reinterpret_as<T const>();
     }
 
 private:
