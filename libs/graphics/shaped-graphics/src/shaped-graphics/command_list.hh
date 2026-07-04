@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.upload.hh>
 #include <shaped-graphics/fwd.hh>
@@ -27,13 +28,17 @@ public:
     /// Device→host download facade: `cmd.download.bytes_from_buffer(...)` / `cmd.download.data_from_buffer<T>(...)`.
     command_list_download_scope download;
 
+    /// Device→device copy facade: `cmd.copy.buffer_bytes_region(...)` / `cmd.copy.buffer_data_region<T>(...)`.
+    command_list_copy_scope copy;
+
 protected:
     explicit command_list(epoch created_in);
 
-    // Backend seams the upload/download scopes forward to (contracts documented there); friends so the
-    // scopes can reach them.
+    // Backend seams the upload/download/copy scopes forward to (contracts documented there); friends so
+    // the scopes can reach them.
     friend class command_list_upload_scope;
     friend class command_list_download_scope;
+    friend class command_list_copy_scope;
 
     virtual void upload_bytes_to_buffer(buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
         = 0;
@@ -41,6 +46,13 @@ protected:
     [[nodiscard]] virtual bytes_future download_bytes_from_buffer(buffer_handle buffer,
                                                                   cc::isize offset_in_bytes,
                                                                   cc::isize size_in_bytes)
+        = 0;
+
+    virtual void copy_buffer_region(buffer_handle src,
+                                    buffer_handle dst,
+                                    cc::isize src_offset_in_bytes,
+                                    cc::isize dst_offset_in_bytes,
+                                    cc::isize size_in_bytes)
         = 0;
 
     epoch _epoch = epoch::invalid;

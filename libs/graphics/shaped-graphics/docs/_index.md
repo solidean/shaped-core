@@ -33,6 +33,8 @@ backends/         # concrete per-backend static libs (dx12/, vulkan/) that subcl
 
 Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions behind a topic.
 
+- [backends](concepts/backends.md) — what a backend is, why we duplicate rather than abstract across
+  them, and how each backend carries its own tests (feature smoke + backend-internal invariants).
 - [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the
   epoch counter/fence, advance/retire, deferred deletion, and finalizers.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are

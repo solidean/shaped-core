@@ -34,5 +34,9 @@ protected:
     {
         CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
     }
+    void copy_buffer_region(sg::buffer_handle, sg::buffer_handle, cc::isize, cc::isize, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan inline buffer copy is not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan

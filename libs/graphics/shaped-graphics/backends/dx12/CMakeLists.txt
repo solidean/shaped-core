@@ -51,12 +51,18 @@ target_compile_options(shaped-graphics-dx12
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# Backend-specific test binary. Small, but this is the home for real dx12-specific tests (device
-# creation, command lists, buffers). Named *-test so the dev.py runner discovers it. It only exists
+# Backend-specific test binary. The home for real dx12-specific tests — feature smoke tests plus
+# backend-internal invariant tests (pooling, epochs) that reach into concrete dx12 types. Split per
+# topic; see libs/graphics/shaped-graphics/docs/concepts/backends.md. Named *-test so the dev.py
+# runner discovers it. Only exists
 # on Windows because this whole subdirectory is gated there by the sg CMakeLists.
 add_executable(shaped-graphics-dx12-test
     tests/main.cc
-    tests/dx12-test.cc
+    tests/dx12-context-test.cc
+    tests/dx12-epoch-test.cc
+    tests/dx12-command-pool-test.cc
+    tests/dx12-transfer-test.cc
+    tests/dx12-copy-test.cc
 )
 
 target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)

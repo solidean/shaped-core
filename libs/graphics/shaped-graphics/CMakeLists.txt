@@ -11,6 +11,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.cc
     src/shaped-graphics/command_list.upload.cc
     src/shaped-graphics/command_list.download.cc
+    src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/memory_heap.cc
@@ -31,6 +32,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/command_list.upload.hh
     src/shaped-graphics/command_list.download.hh
+    src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/buffer.hh
     src/shaped-graphics/views.hh
     src/shaped-graphics/bytes_future.hh

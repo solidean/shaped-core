@@ -34,11 +34,17 @@ public:
     cc::vector<dx12_download_copy_job> _pending_downloads;
 
 protected:
-    // Reached through the base's cmd.upload / cmd.download scopes.
+    // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
     void upload_bytes_to_buffer(sg::buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes) override;
 
     [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::buffer_handle buffer,
                                                               cc::isize offset_in_bytes,
                                                               cc::isize size_in_bytes) override;
+
+    void copy_buffer_region(sg::buffer_handle src,
+                            sg::buffer_handle dst,
+                            cc::isize src_offset_in_bytes,
+                            cc::isize dst_offset_in_bytes,
+                            cc::isize size_in_bytes) override;
 };
 } // namespace sg::backend::dx12
