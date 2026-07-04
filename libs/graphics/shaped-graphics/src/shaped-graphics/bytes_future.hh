@@ -1,7 +1,7 @@
 #pragma once
 
-#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
@@ -63,11 +63,11 @@ public:
     /// An invalid future — not backed by any download.
     bytes_future() = default;
 
-    /// Backs a future by a destination span kept alive by `pin`, with completion tracked by `waiter`.
-    /// The backend fills `data` before signaling the waiter ready. `pin` may be null when `data` is
-    /// empty. This is the single seam a future-provided-destination download reuses.
-    bytes_future(cc::span<cc::byte const> data, std::shared_ptr<void> pin, std::shared_ptr<bytes_waiter> waiter)
-      : _data(data), _pin(cc::move(pin)), _waiter(cc::move(waiter))
+    /// Backs a future by a destination `data` (bytes plus the owner that keeps them alive), with
+    /// completion tracked by `waiter`. The backend fills `data` before signaling the waiter ready.
+    /// `data` may be empty. This is the single seam a future-provided-destination download reuses.
+    bytes_future(cc::pinned_data<cc::byte const> data, std::shared_ptr<bytes_waiter> waiter)
+      : _data(cc::move(data)), _waiter(cc::move(waiter))
     {
     }
 
@@ -81,15 +81,15 @@ public:
 
     /// Blocks until ready, then returns the bytes. Returns nullopt if invalid or if blocking cannot
     /// make progress (the recording list is not yet submitted).
-    [[nodiscard]] cc::optional<cc::span<cc::byte const>> wait_get_bytes() const;
+    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_get_bytes() const;
 
-    /// The result bytes if ready (polls), else nullopt. The span is valid as long as this future is.
-    [[nodiscard]] cc::optional<cc::span<cc::byte const>> try_get_bytes() const;
+    /// The result bytes if ready (polls), else nullopt. The returned pinned_data keeps the bytes alive
+    /// on its own, so it stays valid even past this future's lifetime.
+    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> try_get_bytes() const;
 
     // members
 private:
-    cc::span<cc::byte const> _data; // destination view; valid once the waiter is ready
-    std::shared_ptr<void> _pin;     // keeps _data alive
+    cc::pinned_data<cc::byte const> _data; // destination bytes + owner; valid once the waiter is ready
     std::shared_ptr<bytes_waiter> _waiter;
 };
 
@@ -107,31 +107,25 @@ public:
     [[nodiscard]] bool is_valid() const { return _bytes.is_valid(); }
     [[nodiscard]] bool is_ready() const { return _bytes.is_ready(); }
 
-    /// The typed result if ready (polls). Asserts the downloaded byte count is a multiple of sizeof(T).
-    [[nodiscard]] cc::optional<cc::span<T const>> try_get_data() const
+    /// The typed result if ready (polls). Yields nullopt when the byte count is not a multiple of sizeof(T).
+    [[nodiscard]] cc::optional<cc::pinned_data<T const>> try_get_data() const
     {
         auto const bytes = _bytes.try_get_bytes();
         if (!bytes.has_value())
             return {};
-        return as_typed(bytes.value());
+        return bytes.value().try_reinterpret_as<T const>();
     }
 
     /// Blocks until ready, then returns the typed result. See bytes_future::wait_get_bytes.
-    [[nodiscard]] cc::optional<cc::span<T const>> wait_get_data() const
+    [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_get_data() const
     {
         auto const bytes = _bytes.wait_get_bytes();
         if (!bytes.has_value())
             return {};
-        return as_typed(bytes.value());
+        return bytes.value().try_reinterpret_as<T const>();
     }
 
 private:
-    [[nodiscard]] static cc::optional<cc::span<T const>> as_typed(cc::span<cc::byte const> bytes)
-    {
-        CC_ASSERT(bytes.size() % cc::isize(sizeof(T)) == 0, "downloaded byte count is not a multiple of sizeof(T)");
-        return cc::span<T const>(reinterpret_cast<T const*>(bytes.data()), bytes.size() / cc::isize(sizeof(T)));
-    }
-
     bytes_future _bytes;
 };
 } // namespace sg
