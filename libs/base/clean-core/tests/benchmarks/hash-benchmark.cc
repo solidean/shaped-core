@@ -43,7 +43,7 @@ namespace
 {
 CC_FORCE_INLINE cc::span<cc::byte const> as_bytes(char const* p, size_t n)
 {
-    return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(p), isize(n));
+    return cc::span<char const>(p, isize(n)).as_bytes();
 }
 
 // Sweeps `lengths`, printing one throughput row each. When `record`, the points nearest 8 B and 64 KiB are

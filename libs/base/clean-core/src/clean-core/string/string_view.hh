@@ -143,6 +143,13 @@ public:
     /// Returns true if size() == 0.
     [[nodiscard]] constexpr bool empty() const { return _size == 0; }
 
+    // span access
+public:
+    /// The viewed chars as a span (no trailing terminator; string_view has none).
+    [[nodiscard]] constexpr cc::span<char const> as_span() const { return cc::span<char const>(_data, _size); }
+    /// The viewed chars as immutable raw bytes.
+    [[nodiscard]] cc::span<cc::byte const> as_bytes() const { return as_span().as_bytes(); }
+
     // substring operations
 public:
     /// Returns a subview starting at offset to the end of the string.
@@ -531,10 +538,7 @@ public:
     /// hand-rolled word-at-a-time hash wins below ~16 bytes but not enough to special-case). See
     /// libs/base/clean-core/docs/benchmarks/string-hash-benchmark.md. Equal content hashes equally to
     /// cc::string, so a string_view can be used for heterogeneous lookup in a string-keyed map.
-    [[nodiscard]] friend u64 hash(string_view v)
-    {
-        return cc::make_hash_of_bytes(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(v.data()), v.size()));
-    }
+    [[nodiscard]] friend u64 hash(string_view v) { return cc::make_hash_of_bytes(v.as_bytes()); }
 
     // members
 private:

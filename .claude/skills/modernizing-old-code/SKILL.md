@@ -81,10 +81,14 @@ Style / language
 - Prefer `cc::` utilities over `std::`: `cc::move`, `cc::forward`, `cc::exchange`
   (in `common/utility.hh`), `cc::span`, `cc::vector`, `cc::optional`,
   `cc::result`, `cc::string`, etc.
-- `cc::span` has **no `as_bytes` / `as_mutable_bytes` / `reinterpret_as`** yet
-  (still a TODO in `container/span.hh`). To go to/from a `cc::span<cc::byte const>`,
-  build it explicitly: `cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(
-  s.data()), s.size() * cc::isize(sizeof(T)))`. `cc::byte` is `std::byte`.
+- Byte views exist — don't hand-roll `reinterpret_cast`. `cc::span` has
+  `s.as_bytes()` / `s.as_mutable_bytes()` (and `reinterpret_as<U>()` /
+  `try_reinterpret_as<U>()`); `cc::string` / `cc::string_view` have `as_span()` /
+  `as_bytes()` (plus `as_mutable_span()` / `as_mutable_bytes()` on `string`); and free
+  `cc::as_bytes(c)` / `cc::as_mutable_bytes(c)` byte-view any container exposing
+  `.data()`/`.size()` (all `cc`/`std` containers, string, string_view). To byte-view a
+  bare C array or pointer+len, wrap in `cc::span` first, then `.as_bytes()`. `cc::byte`
+  is `std::byte`.
 - `always_false<T>` from the old clean-core does **not** exist. For an
   unsupported-specialization guard, a plain primary-template
   `static_assert(!std::is_array_v<T>, "…")` usually covers the case without a

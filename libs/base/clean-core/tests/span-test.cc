@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
 // static assertions for triviality
@@ -829,5 +830,42 @@ TEST("span - try_reinterpret_as")
     {
         auto const r = s.first_n(5).try_reinterpret_as<int>();
         CHECK(!r.has_value());
+    }
+}
+
+TEST("span - free as_bytes / as_mutable_bytes")
+{
+    SECTION("container yields byte view")
+    {
+        cc::vector<int> v = {1, 2, 3};
+        auto const bytes = cc::as_bytes(v);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        CHECK(bytes.size() == 3 * cc::isize(sizeof(int)));
+    }
+
+    SECTION("const container yields span<byte const>")
+    {
+        cc::vector<int> const v = {1, 2};
+        auto const bytes = cc::as_bytes(v);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        CHECK(bytes.size() == 2 * cc::isize(sizeof(int)));
+    }
+
+    SECTION("string_view yields its chars as bytes")
+    {
+        cc::string_view const sv = "abc";
+        auto const bytes = cc::as_bytes(sv);
+        CHECK(bytes.size() == 3);
+        CHECK(bytes[0] == cc::byte('a'));
+    }
+
+    SECTION("as_mutable_bytes writes through")
+    {
+        cc::vector<int> v = {0};
+        auto const bytes = cc::as_mutable_bytes(v);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte> const>);
+        for (auto& b : bytes)
+            b = cc::byte{0xFF};
+        CHECK(v[0] == -1); // all bits set
     }
 }

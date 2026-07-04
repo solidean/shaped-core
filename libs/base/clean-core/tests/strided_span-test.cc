@@ -443,13 +443,13 @@ TEST("strided_span - operations")
     }
 }
 
-TEST("strided_span - try_to_span conversion")
+TEST("strided_span - try_as_span conversion")
 {
     SECTION("contiguous conversion succeeds")
     {
         int data[] = {1, 2, 3, 4, 5};
         auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
-        auto const maybe_span = s.try_to_span();
+        auto const maybe_span = s.try_as_span();
 
         CHECK(maybe_span.has_value());
         auto const span = maybe_span.value();
@@ -463,7 +463,7 @@ TEST("strided_span - try_to_span conversion")
     {
         int data[] = {1, 0, 2, 0, 3, 0};
         auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(2 * sizeof(int))};
-        auto const maybe_span = s.try_to_span();
+        auto const maybe_span = s.try_as_span();
 
         CHECK(!maybe_span.has_value());
     }
@@ -471,7 +471,7 @@ TEST("strided_span - try_to_span conversion")
     SECTION("empty span conversion succeeds")
     {
         auto const s = cc::strided_span<int>{};
-        auto const maybe_span = s.try_to_span();
+        auto const maybe_span = s.try_as_span();
 
         CHECK(maybe_span.has_value());
         auto const span = maybe_span.value();
@@ -482,7 +482,7 @@ TEST("strided_span - try_to_span conversion")
     {
         int value = 42;
         auto const s = cc::strided_span<int>::create_from_single(value);
-        auto const maybe_span = s.try_to_span();
+        auto const maybe_span = s.try_as_span();
 
         CHECK(maybe_span.has_value());
         auto const span = maybe_span.value();
@@ -494,7 +494,7 @@ TEST("strided_span - try_to_span conversion")
     {
         int value = 42;
         auto const s = cc::strided_span<int>::create_from_repeated(value, 5);
-        auto const maybe_span = s.try_to_span();
+        auto const maybe_span = s.try_as_span();
 
         CHECK(!maybe_span.has_value());
     }

@@ -94,13 +94,14 @@ s.size_bytes();                           // -> isize == size()*sizeof(T)
 s.reinterpret_as<U>();                    // -> span<U>; U,T trivially-copyable, sizeof(T)%sizeof(U)==0, keeps const
 s.try_reinterpret_as<U>();                // -> optional<span<U>>; nullopt if total bytes % sizeof(U) != 0
 s.as_bytes();  s.as_mutable_bytes();      // -> span<byte const> / span<byte> (mutable only for non-const T)
+cc::as_bytes(c);  cc::as_mutable_bytes(c);// free fns over any data()/size() container (cc/std, string, string_view)
 cc::fixed_span<int, 3> fs(ptr);           // compile-time size N; adds get<I>() tuple protocol
 cc::enable_borrowed_range<V>;             // opt-in bool trait: true for span/fixed_span/strided_span/string_view
 
 #include <clean-core/container/strided_span.hh>   // cc::strided_span<T> — view with a byte stride
 ss.start_ptr();  ss[i];  ss.size();  ss.stride_bytes();
 ss.is_contiguous();                       // -> bool
-ss.as_span();                             // -> cc::optional<span<T>> (nullopt if non-contiguous)
+ss.try_as_span();                         // -> cc::optional<span<T>> (nullopt if non-contiguous)
 ss.reversed();                            // negated-stride view
 ```
 
@@ -111,6 +112,7 @@ ss.reversed();                            // negated-stride view
 cc::pinned_data<int> pd = cc::pinned_data<int>::create_filled(n, v);  // also create_defaulted/uninitialized/copy_of(span)
 pd.data(); pd.size(); pd.size_bytes(); pd[i]; pd.front(); pd.back(); pd.begin(); pd.end();  // span-like; passes as span<T>
 pd.span();                                // -> cc::span<T>
+pd.pin();                                 // -> std::shared_ptr<void const>; the type-erased owner (for weak_ptr / lifetime)
 pd.subdata(off / {.offset,.size} / {.start,.end});   // -> new pinned_data sharing the owner (+subdata_clamped)
 pd.reinterpret_as<U>();  pd.try_reinterpret_as<U>();  pd.as_bytes();  pd.as_mutable_bytes();  // like span, new pinned_data sharing owner
 cc::pinned_data<int const> c = pd;        // T -> T const conversion, shares owner
@@ -135,6 +137,8 @@ str.replace_all(from, to);                        // -> isize count; char/char o
 str.replace_first(from, to);  str.replace_last(from, to);   // -> bool; char/char or sv/sv
 str.replace({.offset,.size} / {.start,.end}, with);         // replace a range with a string_view
 str.is_small();                                   // -> bool (currently in SSO mode)
+str.as_span();  str.as_mutable_span();            // -> span<char const> / span<char> (content only, no terminator)
+str.as_bytes();  str.as_mutable_bytes();          // -> span<byte const> / span<byte>
 str.c_str_materialize();                          // -> char const* '\0'-terminated (valid until next mutation)
 str.c_str_if_terminated();                        // -> char const* or nullptr if not terminated
 
@@ -146,6 +150,7 @@ sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
 sv.compare(o);  sv == o;  sv < o;                       // lexicographic
+sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
