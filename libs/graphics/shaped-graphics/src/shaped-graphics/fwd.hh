@@ -25,6 +25,13 @@ class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)
 
+// Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
+// (uniform_view/readonly_view/readwrite_view) are constrained, so only the enums and raw_view are
+// forward-declared here; include views.hh for the views themselves.
+enum class view_class;
+enum class view_shape;
+struct raw_view;
+
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
 /// libs/graphics/shaped-graphics/docs/concepts/epochs.md.
@@ -47,6 +54,6 @@ enum class submission_token : u64
 /// handles; command_list does not — it's a single-use temporary held by std::unique_ptr, passed by
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
-using buffer_handle = std::shared_ptr<buffer>;
+using buffer_handle = std::shared_ptr<buffer const>; // shared-immutable: a view/handle can't reshape the buffer
 using memory_heap_handle = std::shared_ptr<memory_heap const>; // immutable resource — it tracks no allocations
 } // namespace sg

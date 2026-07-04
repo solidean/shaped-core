@@ -14,3 +14,4 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory_heap.hh>
 #include <shaped-graphics/types.hh>
+#include <shaped-graphics/views.hh>

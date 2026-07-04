@@ -32,6 +32,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.upload.hh
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/buffer.hh
+    src/shaped-graphics/views.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/allocation_info.hh
     src/shaped-graphics/memory_heap.hh
@@ -82,6 +83,7 @@ endif()
 add_executable(shaped-graphics-test
     tests/main.cc
     tests/smoke-test.cc
+    tests/views-test.cc
     tests/bytes_future-test.cc
 )
 

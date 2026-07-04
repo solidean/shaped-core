@@ -37,6 +37,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   epoch counter/fence, advance/retire, deferred deletion, and finalizers.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are
   concurrency-safe and which must be externally synchronized.
+- [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the
+  access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
   epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK

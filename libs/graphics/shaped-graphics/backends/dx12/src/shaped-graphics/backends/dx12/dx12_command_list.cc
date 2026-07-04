@@ -11,7 +11,7 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
                                                cc::isize offset_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "upload target buffer is null");
-    auto* const dst = dynamic_cast<dx12_buffer*>(buffer.get());
+    auto const* const dst = dynamic_cast<dx12_buffer const*>(buffer.get());
     CC_ASSERT(dst != nullptr, "buffer is not a dx12 buffer");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + data.size() <= dst->size_in_bytes(), "upload range is out of "
                                                                                              "the buffer's bounds");
@@ -27,7 +27,7 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
                                                                cc::isize size_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "download source buffer is null");
-    auto* const src = dynamic_cast<dx12_buffer*>(buffer.get());
+    auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
     CC_ASSERT(src != nullptr, "buffer is not a dx12 buffer");
     CC_ASSERT(size_in_bytes >= 0, "download size must be non-negative");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= src->size_in_bytes(),
