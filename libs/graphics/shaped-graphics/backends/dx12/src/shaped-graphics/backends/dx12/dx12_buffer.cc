@@ -26,6 +26,13 @@ D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usa
     return desc;
 }
 
+bool dx12_buffer::is_expired() const
+{
+    // Transient storage is recycled once its epoch retires; the moment the current epoch has moved past
+    // the one it was created in, naming it is illegal.
+    return _is_transient && _ctx.current_epoch() != _creation_epoch;
+}
+
 dx12_buffer::~dx12_buffer()
 {
     // Stage the GPU handle + finalizers for deletion once the current epoch retires. Empty buffers
@@ -84,7 +91,8 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
         }
     }
 
+    bool const is_transient = alloc.scope == sg::lifetime_scope::transient;
     return std::make_shared<dx12_buffer>(*this, current_epoch(), size_in_bytes, usage, cc::move(resource),
-                                         cc::move(heap_handle));
+                                         cc::move(heap_handle), is_transient);
 }
 } // namespace sg::backend::dx12

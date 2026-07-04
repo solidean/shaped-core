@@ -17,12 +17,13 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
 
     auto group = std::make_shared<dx12_binding_group>();
     group->layout = layout;
+    group->transient = scope == sg::lifetime_scope::transient;
+    group->creation_epoch = ctx.current_epoch();
 
     // Persistent groups bump-allocate (live until teardown); transient groups ring-allocate (reclaimed
     // when their epoch retires).
-    UINT const base = scope == sg::lifetime_scope::transient
-                          ? ctx._descriptor_heap.allocate_transient(layout->descriptor_count)
-                          : ctx._descriptor_heap.allocate_persistent(layout->descriptor_count);
+    UINT const base = group->transient ? ctx._descriptor_heap.allocate_transient(layout->descriptor_count)
+                                       : ctx._descriptor_heap.allocate_persistent(layout->descriptor_count);
     group->table_start = ctx._descriptor_heap.gpu_at(base);
 
     // Match each provided view to a layout slot by name, validate it, and create its descriptor.

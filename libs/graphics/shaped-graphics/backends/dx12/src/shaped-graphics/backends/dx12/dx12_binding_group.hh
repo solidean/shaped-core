@@ -28,5 +28,10 @@ public:
     dx12_binding_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
     cc::vector<sg::buffer_handle> referenced; // keeps the bound buffers alive while the group lives
+
+    // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
+    // binding one afterwards is a hard error (checked at bind). Both are inert for a persistent group.
+    sg::epoch creation_epoch = sg::epoch::invalid;
+    bool transient = false;
 };
 } // namespace sg::backend::dx12

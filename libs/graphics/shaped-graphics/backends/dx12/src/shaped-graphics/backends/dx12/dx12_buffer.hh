@@ -22,12 +22,14 @@ public:
                 cc::isize size_in_bytes,
                 sg::buffer_usage usage,
                 ComPtr<ID3D12Resource> resource,
-                sg::memory_heap_handle heap = nullptr)
+                sg::memory_heap_handle heap = nullptr,
+                bool is_transient = false)
       : sg::buffer(size_in_bytes, usage),
         _ctx(ctx),
         _creation_epoch(created_in),
         _resource(cc::move(resource)),
-        _heap(cc::move(heap))
+        _heap(cc::move(heap)),
+        _is_transient(is_transient)
     {
     }
 
@@ -35,9 +37,15 @@ public:
     // epoch retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
     ~dx12_buffer() override;
 
+    /// True once a transient buffer's epoch has passed: its storage may have been recycled, so using it
+    /// (in a transfer or a binding) is a hard error. Always false for a persistent buffer. Body in .cc
+    /// (reads the context's current epoch).
+    [[nodiscard]] bool is_expired() const;
+
     dx12_context& _ctx;        // creating context — outlives this buffer
-    sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
+    sg::epoch _creation_epoch; // epoch this buffer was created in (transient expiry / identity / diagnostics)
     ComPtr<ID3D12Resource> _resource;
     sg::memory_heap_handle _heap; // backing heap for a placed buffer; null when dedicated (committed)
+    bool _is_transient;           // transient buffers expire when _creation_epoch passes
 };
 } // namespace sg::backend::dx12

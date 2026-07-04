@@ -104,6 +104,21 @@ TEST("sg dx12 - transient buffers in one epoch are independent")
     CHECK(ok_b);
 }
 
+TEST("sg dx12 - transient buffer reports expired once its epoch passes")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto buf = c.transient.create_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf.has_value());
+    auto const& db = static_cast<dx12::dx12_buffer const&>(*buf.value());
+    CHECK(!db.is_expired()); // fresh: created in the current epoch
+
+    c.advance_epoch_and_wait_for_idle(); // its epoch has now passed
+    CHECK(db.is_expired());              // using it now (transfer / binding) would be a hard error
+}
+
 // Allocate one transient buffer per epoch for many epochs on a small heap. Each 256-byte buffer
 // occupies a 64 KiB placement window, so 30 iterations (~2 MiB) far exceed the 512 KiB heap: the ring
 // must wrap and reclaim retired epochs' windows, and every epoch's data must still round-trip intact.
