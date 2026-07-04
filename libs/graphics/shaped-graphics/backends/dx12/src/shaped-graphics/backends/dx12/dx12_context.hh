@@ -11,6 +11,7 @@
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_transient_buffer_allocator.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/context.hh>
@@ -34,6 +35,10 @@ struct dx12_config
 
     /// Capacity of the inline READBACK ring buffer, in bytes. Bounds the in-flight inline download volume.
     cc::isize download_ring_bytes = cc::isize(16) * 1024 * 1024;
+
+    /// Capacity of the transient-buffer heap, in bytes. Bounds the per-epoch transient buffer volume
+    /// summed over all epochs kept in flight (rounded up to the 64 KiB placement alignment).
+    cc::isize transient_heap_bytes = cc::isize(128) * 1024 * 1024;
 };
 
 /// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
@@ -47,7 +52,8 @@ public:
       : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded),
         _cmd_pool(*this),
         _upload_inline(*this),
-        _download_inline(*this)
+        _download_inline(*this),
+        _transient_buffers(*this)
     {
     }
 
@@ -60,6 +66,8 @@ public:
                                                                     sg::buffer_usage usage,
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
+    [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_transient_buffer(cc::isize size_in_bytes,
+                                                                             sg::buffer_usage usage);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
@@ -97,6 +105,12 @@ public:
     [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize size_in_bytes) override
     {
         return cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes));
+    }
+
+    [[nodiscard]] cc::result<sg::buffer_handle> create_transient_buffer(cc::isize size_in_bytes,
+                                                                        sg::buffer_usage usage) override
+    {
+        return cc::result<sg::buffer_handle>(create_dx12_transient_buffer(size_in_bytes, usage));
     }
 
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
@@ -171,6 +185,10 @@ public:
     // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
     dx12_upload_inline_system _upload_inline;
     dx12_download_inline_system _download_inline;
+
+    // Transient buffer pool: a ring over a DEFAULT heap, reclaimed per epoch. ctx.transient.create_buffer
+    // sub-allocates placements from it. Initialized in create_dx12_context.
+    dx12_transient_buffer_allocator _transient_buffers;
 
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.

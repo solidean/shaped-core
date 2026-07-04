@@ -147,6 +147,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 
+    // The transient buffer pool's backing heap (a ring reclaimed per epoch).
+    CC_RETURN_IF_ERROR(ctx->_transient_buffers.initialize(config.transient_heap_bytes));
+
     // The shader-visible descriptor heap binding_groups allocate their tables from. Bump-allocated
     // (no reclaim yet), so sized generously. TODO: make the capacity a config + reclaim ranges.
     CC_RETURN_IF_ERROR(ctx->_descriptor_heap.initialize(ctx->_device.Get(), 1u << 16));

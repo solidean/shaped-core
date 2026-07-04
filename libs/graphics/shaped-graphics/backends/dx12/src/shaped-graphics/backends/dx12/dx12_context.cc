@@ -20,6 +20,7 @@ void dx12_context::shutdown()
     // alive (the actor may block on it). The GPU is idle by now, so pending copies complete promptly.
     _download_inline.shutdown();
     _upload_inline.shutdown();
+    _transient_buffers.shutdown();
     _cmd_pool.shutdown();
 
     if (_fence_event)

@@ -32,6 +32,8 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // Same for the inline download ring, but its span frees once the actor drains `last`'s readback
     // copies (tracked per-epoch), not at GPU retire — so the hook is only needed here, not in retire.
     _download_inline.on_epoch_advance(last);
+    // Same again for the transient buffer heap: snapshot `last`'s window, freed once `last` retires.
+    _transient_buffers.on_epoch_advance(last);
 
     // Signal end-of-epoch: enqueues "epoch `last` finished" after all of its recorded GPU work.
     HRESULT const hr = _queue->Signal(_epoch_fence.Get(), cc::u64(last));
@@ -72,6 +74,8 @@ void dx12_context::process_completed_epochs()
 
     // Reclaim inline upload ring space held by every epoch the GPU has now finished.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
+    // Reclaim transient buffer heap windows the same way — the epoch fence proves the memory is idle.
+    _transient_buffers.on_epochs_completed(sg::epoch(completed));
 
     // Drain finished epochs (oldest first, FIFO is sorted) under the lock; reclaim outside it.
     cc::vector<dx12_epoch_data> done = _epoch_state.lock(

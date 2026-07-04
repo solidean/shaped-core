@@ -13,6 +13,8 @@ namespace sg
 using namespace cc::primitive_defines;
 
 class context;
+class context_persistent_scope;
+class context_transient_scope;
 class command_list;
 class command_list_upload_scope;
 class command_list_download_scope;
