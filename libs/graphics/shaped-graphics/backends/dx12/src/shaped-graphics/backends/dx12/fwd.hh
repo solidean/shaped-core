@@ -10,6 +10,8 @@ class dx12_context;
 class dx12_command_list;
 class dx12_command_allocator_pool;
 class dx12_buffer;
+class dx12_memory_heap;
+using dx12_memory_heap_handle = std::shared_ptr<dx12_memory_heap const>;
 
 // Bind path (see dx12_binding_layout.hh / dx12_compute_pipeline.hh / dx12_binding_group.hh).
 struct dx12_descriptor_heap;

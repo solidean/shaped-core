@@ -13,6 +13,11 @@ cc::result<buffer_handle> context_persistent_scope::create_buffer(isize size_in_
     return _ctx.create_buffer(size_in_bytes, usage, alloc);
 }
 
+cc::result<memory_heap_handle> context_persistent_scope::create_memory_heap(isize size_in_bytes)
+{
+    return _ctx.create_memory_heap(size_in_bytes);
+}
+
 cc::result<binding_layout_handle> context_persistent_scope::create_binding_layout(cc::span<binding const> bindings)
 {
     return _ctx.create_binding_layout(bindings, lifetime_scope::persistent);

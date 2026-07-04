@@ -83,6 +83,11 @@ public:
         return cc::result<sg::buffer_handle>(create_vulkan_buffer(size_in_bytes, usage, alloc));
     }
 
+    [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan memory_heap creation is not implemented yet");
+    }
+
     // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet.
     [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const>,
                                                                               sg::lifetime_scope) override

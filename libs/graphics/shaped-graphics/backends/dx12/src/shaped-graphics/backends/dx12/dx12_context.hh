@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
+#include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/context.hh>
@@ -58,6 +59,7 @@ public:
     [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(cc::isize size_in_bytes,
                                                                     sg::buffer_usage usage,
                                                                     sg::allocation_info const& alloc);
+    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
@@ -90,6 +92,11 @@ public:
                                                               sg::allocation_info const& alloc) override
     {
         return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
+    }
+
+    [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize size_in_bytes) override
+    {
+        return cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes));
     }
 
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
