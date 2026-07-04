@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
+#include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -27,20 +28,8 @@ struct dx12_expiring_resource
 struct dx12_epoch_data
 {
     epoch epoch_id = epoch::invalid;
-    cc::vector<ComPtr<ID3D12CommandAllocator>> allocators; // reset + returned to the pool on retire
-    cc::vector<dx12_expiring_resource> expiring;           // freed on retire
-};
-
-/// The command-allocator pool: allocators of command lists submitted in the current epoch (moved
-/// into the epoch payload at advance) and idle allocators ready for reuse. Guarded by a mutex
-/// because create / submit / drop are thread-safe.
-///
-/// TODO: promote to a standalone object that owns its synchronization and pools per queue (the epoch
-/// system will grow multiple queues), rather than two vectors under one context-level mutex.
-struct dx12_allocator_pool
-{
-    cc::vector<ComPtr<ID3D12CommandAllocator>> in_epoch; // captured by submitted lists this epoch
-    cc::vector<ComPtr<ID3D12CommandAllocator>> free;     // idle, reset, ready for reuse
+    cc::vector<dx12_pooled_allocator> allocators; // reset + returned to the pool on retire
+    cc::vector<dx12_expiring_resource> expiring;  // freed on retire
 };
 
 /// The mutex-guarded epoch state: the in-flight FIFO plus the deferred-deletion staging area.

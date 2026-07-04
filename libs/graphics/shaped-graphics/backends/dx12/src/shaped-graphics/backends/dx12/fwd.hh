@@ -8,6 +8,7 @@ namespace sg::backend::dx12
 {
 class dx12_context;
 class dx12_command_list;
+class dx12_command_allocator_pool;
 class dx12_buffer;
 
 // Inline buffer transfer (see dx12_upload_inline.hh / dx12_download_inline.hh and the resource helpers).

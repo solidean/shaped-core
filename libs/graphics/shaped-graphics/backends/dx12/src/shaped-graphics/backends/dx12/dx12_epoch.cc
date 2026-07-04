@@ -41,13 +41,7 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // no submit races the allocator drain; the lock is for correctness, not contention.)
     dx12_epoch_data data;
     data.epoch_id = last;
-    data.allocators = _allocators.lock(
-        [](dx12_allocator_pool& p)
-        {
-            cc::vector<ComPtr<ID3D12CommandAllocator>> out = cc::move(p.in_epoch);
-            p.in_epoch = {};
-            return out;
-        });
+    data.allocators = _cmd_pool.drain_in_epoch_allocators();
     _epoch_state.lock(
         [&](dx12_epoch_state& s)
         {
@@ -94,18 +88,10 @@ void dx12_context::process_completed_epochs()
             return out;
         });
 
-    // Allocators are safe to reset now — every command list sourced from them has finished — so
-    // reset them and return them to the free pool.
-    _allocators.lock(
-        [&](dx12_allocator_pool& p)
-        {
-            for (auto& e : done)
-                for (auto& a : e.allocators)
-                {
-                    a->Reset();
-                    p.free.push_back(cc::move(a));
-                }
-        });
+    // Allocators are safe to reset now — every command list sourced from them has finished — so hand
+    // them back to the pool, which resets each and returns it to its queue's free list.
+    for (auto& e : done)
+        _cmd_pool.reclaim_allocators(cc::move(e.allocators));
 
     cc::vector<cc::unique_function<void()>> finalizers;
     for (auto& e : done)

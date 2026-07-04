@@ -40,32 +40,15 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
 
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()
 {
-    // Reuse a pooled allocator if one is free (it re-entered the pool only once idle), else make one.
-    ComPtr<ID3D12CommandAllocator> allocator = _allocators.lock(
-        [](dx12_allocator_pool& p) -> ComPtr<ID3D12CommandAllocator>
-        {
-            if (p.free.empty())
-                return {};
-            return p.free.pop_back();
-        });
-    if (allocator)
-    {
-        if (HRESULT hr = allocator->Reset(); FAILED(hr))
-            return dx12_error(hr, "ID3D12CommandAllocator::Reset failed");
-    }
-    else if (HRESULT hr = _device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator));
-             FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateCommandAllocator failed");
-
-    ComPtr<ID3D12GraphicsCommandList> list;
-    if (HRESULT hr
-        = _device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&list));
-        FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateCommandList failed");
+    // Single DIRECT queue for now; the pool is per-queue-ready for the copy/compute/video queues to come.
+    auto constexpr queue = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    auto acquired = _cmd_pool.acquire_command_list(queue);
+    CC_RETURN_IF_ERROR(acquired);
 
     _open_command_lists.fetch_add(1, std::memory_order_relaxed); // must reach 0 before the epoch can advance
     // Left open (recording); submit closes it. Stamped with the epoch it must be submitted/dropped in.
-    return std::make_unique<dx12_command_list>(*this, current_epoch(), cc::move(allocator), cc::move(list));
+    return std::make_unique<dx12_command_list>(
+        *this, current_epoch(), queue, cc::move(acquired.value().allocator.allocator), cc::move(acquired.value().list));
 }
 
 sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
@@ -97,9 +80,11 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             return t;
         });
 
-    // The allocator is in flight until this epoch retires — hand it to the current epoch. The list
-    // object itself can be dropped now (resetting an in-flight list object is legal).
-    _allocators.lock([&](dx12_allocator_pool& p) { p.in_epoch.push_back(cc::move(cmd->_allocator)); });
+    // The allocator is in flight until this epoch retires — hand it to the pool's epoch capture. The
+    // list is already closed and can be reused now (resetting an in-flight list onto a fresh, GPU-safe
+    // allocator is legal), so return it to the pool for the next acquire.
+    _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
+    _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     return token;
 }
@@ -113,10 +98,13 @@ void dx12_context::drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd
     // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
     _download_inline.discard_unsubmitted(cmd->_pending_downloads);
 
-    // Never submitted, so the GPU never touched this allocator — release the list object, then
-    // return the allocator straight to the free pool (reset happens at reuse). Teardown lives in the dtor.
-    cmd->_list.Reset();
-    _allocators.lock([&](dx12_allocator_pool& p) { p.free.push_back(cc::move(cmd->_allocator)); });
+    // Never submitted, so the GPU never touched this allocator. Close the list so it is poolable, then
+    // return both to the pool: the list for reuse, the allocator straight to the free pool (it was
+    // never executed, so no epoch gates it; reset happens at reuse).
+    HRESULT const closed = cmd->_list->Close();
+    CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
+    _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
+    _cmd_pool.return_free_allocator({cc::move(cmd->_allocator), cmd->_queue});
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 } // namespace sg::backend::dx12
