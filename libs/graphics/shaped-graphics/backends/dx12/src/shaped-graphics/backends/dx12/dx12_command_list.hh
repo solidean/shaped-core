@@ -17,13 +17,15 @@ class dx12_command_list final : public sg::command_list
 public:
     dx12_command_list(dx12_context& ctx,
                       sg::epoch created_in,
+                      D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
                       ComPtr<ID3D12GraphicsCommandList> list)
-      : sg::command_list(created_in), _ctx(ctx), _allocator(cc::move(allocator)), _list(cc::move(list))
+      : sg::command_list(created_in), _ctx(ctx), _queue(queue), _allocator(cc::move(allocator)), _list(cc::move(list))
     {
     }
 
-    dx12_context& _ctx; // creating context — outlives this list
+    dx12_context& _ctx;             // creating context — outlives this list
+    D3D12_COMMAND_LIST_TYPE _queue; // queue the allocator/list belong to — routes them back to the pool
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;
 

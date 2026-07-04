@@ -137,8 +137,7 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
-    auto const free_count
-        = [&] { return c._allocators.lock([](dx12::dx12_allocator_pool& p) { return p.free.size(); }); };
+    auto const free_count = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
 
     auto cmd = c.create_dx12_command_list();
     REQUIRE(cmd.has_value());
@@ -155,6 +154,48 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     c.submit_dx12_command_list(cc::move(cmd2.value()));
     c.advance_epoch_and_wait_for_idle();
     CHECK(free_count() == 1);
+}
+
+TEST("sg dx12 - command lists are pooled and reused")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto const free_lists = [&] { return c._cmd_pool.free_command_list_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
+
+    CHECK(free_lists() == 0);
+
+    // A submitted list is closed and returned to the pool immediately (lists are not epoch-gated).
+    auto cmd = c.create_dx12_command_list();
+    REQUIRE(cmd.has_value());
+    c.submit_dx12_command_list(cc::move(cmd.value()));
+    CHECK(free_lists() == 1);
+
+    // The next create reuses the pooled list (cheap reset) rather than creating a fresh one.
+    auto cmd2 = c.create_dx12_command_list();
+    REQUIRE(cmd2.has_value());
+    CHECK(free_lists() == 0);
+    c.submit_dx12_command_list(cc::move(cmd2.value()));
+    CHECK(free_lists() == 1);
+}
+
+TEST("sg dx12 - a dropped list returns its allocator and list to the pool immediately")
+{
+    auto handle = make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto const free_allocs = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
+    auto const free_lists = [&] { return c._cmd_pool.free_command_list_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
+
+    auto cmd = c.create_dx12_command_list();
+    REQUIRE(cmd.has_value());
+    c.drop_dx12_command_list(cc::move(cmd.value()));
+
+    // Never submitted, so the GPU never touched the allocator: both go straight back, no epoch needed.
+    CHECK(free_allocs() == 1);
+    CHECK(free_lists() == 1);
 }
 
 TEST("sg dx12 - submission token reports completion")

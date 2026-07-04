@@ -4,6 +4,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
+#include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
@@ -42,6 +43,7 @@ public:
     // initializes the inline transfer systems. The COM pointers and fences start null.
     dx12_context()
       : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded),
+        _cmd_pool(*this),
         _upload_inline(*this),
         _download_inline(*this)
     {
@@ -123,12 +125,18 @@ public:
     //  - _next_submission: the next completion token; guarded together with the ExecuteCommandLists +
     //    Signal in submit so token order == queue/signal order (out-of-order signals could move the
     //    fence value backwards).
-    //  - _allocators: the command-allocator pool (see dx12_allocator_pool).
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
-    cc::mutex<dx12_allocator_pool> _allocators;
 
     cc::mutex<dx12_epoch_state> _epoch_state;
+
+    // Extra systems — owned by value, constructed with *this. The command-allocator pool recycles
+    // command allocators (epoch-gated) and command lists per queue.
+    //
+    // TODO: more backend systems will grow here as the API expands — a group-fence pool, async
+    // upload/download (copy-queue) systems, a query system, a descriptor system, and RTV/DSV
+    // allocators. (Inline upload/download already exist below.)
+    dx12_command_allocator_pool _cmd_pool;
 
     // Inline host↔device buffer transfer over UPLOAD / READBACK ring buffers on the direct queue.
     // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
