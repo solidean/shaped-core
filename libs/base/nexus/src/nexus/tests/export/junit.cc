@@ -2,7 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/string/to_string.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/tests/export/xml.hh>
 
 using nx::impl::xml_escape;
@@ -37,22 +37,8 @@ cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_exe
     // but is widely understood; the dev.py runner reads it to report check counts.
     auto emit_suite_attrs = [&](cc::string& os)
     {
-        os += "name=\"";
-        os += suite;
-        os += "\" ";
-        os += "tests=\"";
-        os += cc::to_string(total_tests);
-        os += "\" ";
-        os += "failures=\"";
-        os += cc::to_string(failed_tests);
-        os += "\" ";
-        os += "errors=\"0\" skipped=\"0\" ";
-        os += "assertions=\"";
-        os += cc::to_string(total_checks);
-        os += "\" ";
-        os += "time=\"";
-        os += cc::to_string(total_time);
-        os += "\"";
+        os.appendf("name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"0\" assertions=\"{}\" time=\"{}\"",
+                   suite, total_tests, failed_tests, total_checks, total_time);
     };
 
     cc::string out;
@@ -69,15 +55,8 @@ cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_exe
         CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
         auto const& decl = *exec.instance.declaration;
 
-        out += "    <testcase classname=\"";
-        out += suite;
-        out += "\" ";
-        out += "name=\"";
-        out += xml_escape(decl.name);
-        out += "\" ";
-        out += "time=\"";
-        out += cc::to_string(exec.root.duration_seconds);
-        out += "\"";
+        out.appendf("    <testcase classname=\"{}\" name=\"{}\" time=\"{}\"", suite, xml_escape(decl.name),
+                    exec.root.duration_seconds);
 
         if (!exec.is_considered_failing())
         {
@@ -94,11 +73,7 @@ cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_exe
         // test's own declaration when a test fails without a specific check
         // (e.g. a test that ran no checks at all).
         auto const& msg_loc = errors.empty() ? decl.location : errors.front()->location;
-        out += "      <failure message=\"";
-        out += xml_escape(msg_loc.file_name());
-        out += ":";
-        out += cc::to_string(msg_loc.line());
-        out += "\">";
+        out.appendf("      <failure message=\"{}:{}\">", xml_escape(msg_loc.file_name()), msg_loc.line());
 
         if (errors.empty())
         {
@@ -115,11 +90,7 @@ cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_exe
                     body += " => ";
                     body += error->expanded;
                 }
-                body += " at ";
-                body += error->location.file_name();
-                body += ":";
-                body += cc::to_string(error->location.line());
-                body += "\n";
+                body.appendf(" at {}:{}\n", error->location.file_name(), error->location.line());
             }
             out += xml_escape(body);
         }

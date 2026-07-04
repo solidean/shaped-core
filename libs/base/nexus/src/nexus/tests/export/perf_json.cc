@@ -1,17 +1,13 @@
 #include "perf_json.hh"
 
 #include <clean-core/common/assert.hh>
-#include <clean-core/string/to_string.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/tests/export/json.hh>
 
 cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_execution const& execution)
 {
     cc::string out;
-    out += "{\n";
-    out += "  \"suite\": \"";
-    out += json_escape(suite_name);
-    out += "\",\n";
-    out += "  \"metrics\": [";
+    out.appendf("{{\n  \"suite\": \"{}\",\n  \"metrics\": [", json_escape(suite_name));
 
     bool first = true;
     for (auto const& exec : execution.executions)
@@ -24,17 +20,9 @@ cc::string nx::write_perf_json(cc::string_view suite_name, nx::test_schedule_exe
             out += first ? "\n" : ",\n";
             first = false;
 
-            out += "    {\"test\": \"";
-            out += test;
-            out += "\", \"name\": \"";
-            out += json_escape(metric.name);
-            out += "\", \"value\": ";
-            out += cc::to_string(metric.value);
-            out += ", \"unit\": \"";
-            out += json_escape(metric.unit);
-            out += "\", \"higher_is_better\": ";
-            out += metric.higher_is_better ? "true" : "false";
-            out += "}";
+            out.appendf("    {{\"test\": \"{}\", \"name\": \"{}\", \"value\": {}, \"unit\": \"{}\", "
+                        "\"higher_is_better\": {}}}",
+                        test, json_escape(metric.name), metric.value, json_escape(metric.unit), metric.higher_is_better);
         }
     }
 
