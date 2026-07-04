@@ -38,6 +38,47 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
     return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
 }
 
+void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
+                                           sg::buffer_handle dst,
+                                           cc::isize src_offset_in_bytes,
+                                           cc::isize dst_offset_in_bytes,
+                                           cc::isize size_in_bytes)
+{
+    CC_ASSERT(src != nullptr, "copy source buffer is null");
+    CC_ASSERT(dst != nullptr, "copy dest buffer is null");
+    auto const* const s = dynamic_cast<dx12_buffer const*>(src.get());
+    auto const* const d = dynamic_cast<dx12_buffer const*>(dst.get());
+    CC_ASSERT(s != nullptr && d != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(size_in_bytes >= 0, "copy size must be non-negative");
+    CC_ASSERT(src_offset_in_bytes >= 0 && src_offset_in_bytes + size_in_bytes <= s->size_in_bytes(),
+              "copy source range is out of the buffer's bounds");
+    CC_ASSERT(dst_offset_in_bytes >= 0 && dst_offset_in_bytes + size_in_bytes <= d->size_in_bytes(),
+              "copy dest range is out of the buffer's bounds");
+    if (size_in_bytes == 0)
+        return;
+    CC_ASSERT(sg::has_flag(s->usage(), sg::buffer_usage::copy_src), "copy source buffer must have "
+                                                                    "buffer_usage::copy_src");
+    CC_ASSERT(sg::has_flag(d->usage(), sg::buffer_usage::copy_dst), "copy dest buffer must have "
+                                                                    "buffer_usage::copy_dst");
+    // Same-buffer copy: the source and destination ranges must not overlap.
+    if (s->_resource.Get() == d->_resource.Get())
+        CC_ASSERT(dst_offset_in_bytes + size_in_bytes <= src_offset_in_bytes
+                      || src_offset_in_bytes + size_in_bytes <= dst_offset_in_bytes,
+                  "source and destination ranges overlap in a same-buffer copy");
+
+    // Conservative global barrier for correctness: prior GPU writes (e.g. a UAV write into the source)
+    // must be visible before the copy reads them. Coarse and heavy-handed.
+    // TODO: replace with granular per-resource transition barriers once the state-tracking barrier
+    // system lands (it will emit the precise COPY_SOURCE/COPY_DEST transitions this stands in for).
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barrier.UAV.pResource = nullptr; // null resource = global barrier over all UAV accesses
+    _list->ResourceBarrier(1, &barrier);
+
+    _list->CopyBufferRegion(d->_resource.Get(), UINT64(dst_offset_in_bytes), s->_resource.Get(),
+                            UINT64(src_offset_in_bytes), UINT64(size_in_bytes));
+}
+
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()
 {
     // Single DIRECT queue for now; the pool is per-queue-ready for the copy/compute/video queues to come.

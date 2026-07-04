@@ -106,9 +106,12 @@ cmd.upload.bytes_to_buffer(buf, bytes, offset=0)     // void — stage host byte
 cmd.upload.data_to_buffer(buf, range, offset=0)      // void — typed convenience (trivially-copyable contiguous range)
 cmd.download.bytes_from_buffer(buf, offset, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
 cmd.download.data_from_buffer<T>(buf, off, count)    // -> sg::data_future<T>
+cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
+cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 // inline path: copy is recorded here; the download future is ready after the submitted list finishes on
-// the GPU (no advance_epoch needed). dx12 today: uploading + downloading the SAME buffer needs two
-// command lists (no barrier system yet). vulkan transfer is a TODO stub.
+// the GPU (no advance_epoch needed). dx12 today: uploading + downloading (or copying) the SAME buffer needs
+// separate command lists (no barrier system yet — copy inserts a conservative global barrier for now).
+// copy within one buffer requires non-overlapping ranges. vulkan transfer is a TODO stub.
 ```
 
 ## buffer — GPU-resident, immutable shape  (abstract)
