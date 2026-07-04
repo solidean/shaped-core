@@ -13,6 +13,8 @@ namespace sg::backend::dx12
 class dx12_compute_pipeline final : public sg::compute_pipeline
 {
 public:
+    explicit dx12_compute_pipeline(sg::compute_dimensions workgroup_size) : sg::compute_pipeline(workgroup_size) {}
+
     [[nodiscard]] static cc::result<dx12_compute_pipeline_handle> create(ID3D12Device* device,
                                                                          dx12_binding_layout_handle layout,
                                                                          sg::compiled_shader const& shader);

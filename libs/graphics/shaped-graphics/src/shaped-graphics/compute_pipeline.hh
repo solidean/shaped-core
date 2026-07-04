@@ -1,9 +1,21 @@
 #pragma once
 
+#include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace sg
 {
+/// Everything needed to build a compute_pipeline: the compiled compute `shader` and the
+/// `binding_layout` it is compiled against. A struct (rather than loose arguments) so it stays
+/// consistent with the graphics-pipeline descriptions to come, and can grow a cached-pipeline field
+/// for PSO caching.
+struct compute_pipeline_description
+{
+    compiled_shader const& shader;
+    binding_layout_handle layout;
+    // TODO: cached_pipeline — a previously-built pipeline / cache blob to seed the backend PSO cache.
+};
+
 /// A ready-to-run compute pipeline: a compute shader compiled against a binding_layout. Bound to a
 /// command list and dispatched. Held via compute_pipeline_handle.
 ///
@@ -14,7 +26,12 @@ class compute_pipeline
 public:
     virtual ~compute_pipeline();
 
+    /// The shader's workgroup size (`[numthreads]` / `local_size`) — drives `cmd.compute.dispatch_threads`.
+    [[nodiscard]] compute_dimensions workgroup_size() const { return _workgroup_size; }
+
 protected:
-    compute_pipeline() = default;
+    explicit compute_pipeline(compute_dimensions workgroup_size) : _workgroup_size(workgroup_size) {}
+
+    compute_dimensions _workgroup_size;
 };
 } // namespace sg

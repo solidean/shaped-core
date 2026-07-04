@@ -10,7 +10,7 @@ namespace sg
 {
 /// Resource factory for a context's *persistent* lifetime scope, reached as `ctx.persistent`.
 /// Persistent resources live until their handles are released (as opposed to a future transient scope,
-/// whose resources the backend recycles per frame/epoch). See allocation_scope.
+/// whose resources the backend recycles per frame/epoch). See lifetime_scope.
 ///
 /// A thin facade over its owning context: it forwards each create_* to the context's backend impl.
 class context_persistent_scope
@@ -25,9 +25,8 @@ public:
     /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings.
     [[nodiscard]] cc::result<binding_layout_handle> create_binding_layout(cc::span<binding const> bindings);
 
-    /// Builds a compute_pipeline from a compute `shader` compiled against `layout`.
-    [[nodiscard]] cc::result<compute_pipeline_handle> create_compute_pipeline(compiled_shader const& shader,
-                                                                              binding_layout_handle layout);
+    /// Builds a compute_pipeline from a description (compute shader + layout).
+    [[nodiscard]] cc::result<compute_pipeline_handle> create_compute_pipeline(compute_pipeline_description const& desc);
 
     /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
     [[nodiscard]] cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,

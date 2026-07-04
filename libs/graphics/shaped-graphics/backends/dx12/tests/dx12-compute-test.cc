@@ -53,22 +53,24 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
                                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src, sg::allocation_info{});
     REQUIRE(buf.has_value());
 
-    auto layout = c.create_dx12_binding_layout(shader.bindings);
+    auto layout = c.create_dx12_binding_layout(shader.bindings, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
-    auto pipeline = c.create_dx12_compute_pipeline(shader, layout.value());
+    auto pipeline = c.create_dx12_compute_pipeline(shader, layout.value(), sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
     // Bind the output buffer's read-write structured view to "Output".
     sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
-    auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1));
+    auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1),
+                                             sg::lifetime_scope::persistent);
     REQUIRE(group.has_value());
 
-    // Record + submit the dispatch.
+    // Record + submit the dispatch. dispatch_threads auto-divides the thread count by the shader's
+    // 64-thread workgroup, so this is the count/64 = 4 groups a raw dispatch_groups would spell out.
     auto disp = c.create_dx12_command_list();
     REQUIRE(disp.has_value());
     disp.value()->compute.bind_pipeline(*pipeline.value());
     disp.value()->compute.bind_group(0, *group.value());
-    disp.value()->compute.dispatch(count / 64, 1, 1);
+    disp.value()->compute.dispatch_threads(count, 1, 1);
     c.submit_dx12_command_list(cc::move(disp.value()));
 
     // Read the result back in a second list (the buffer decays to COMMON between submits).

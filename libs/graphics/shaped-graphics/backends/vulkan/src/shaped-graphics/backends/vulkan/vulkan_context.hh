@@ -84,17 +84,19 @@ public:
     }
 
     // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const>) override
+    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const>,
+                                                                              sg::lifetime_scope) override
     {
         CC_UNREACHABLE("vulkan binding_layout creation is not implemented yet");
     }
-    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compiled_shader const&,
-                                                                                  sg::binding_layout_handle) override
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compute_pipeline_description const&,
+                                                                                  sg::lifetime_scope) override
     {
         CC_UNREACHABLE("vulkan compute_pipeline creation is not implemented yet");
     }
     [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle,
-                                                                            cc::span<sg::named_view const>) override
+                                                                            cc::span<sg::named_view const>,
+                                                                            sg::lifetime_scope) override
     {
         CC_UNREACHABLE("vulkan binding_group creation is not implemented yet");
     }

@@ -28,7 +28,7 @@ allocation_info memory_heap::acquire_allocation_for_buffer(isize size_in_bytes, 
     info.heap = shared_from_this();
     info.offset = offset;
     info.size_in_bytes = reqs.size_in_bytes; // backend-reported size (may exceed the requested size)
-    info.scope = allocation_scope::persistent;
+    info.scope = lifetime_scope::persistent;
     return info;
 }
 } // namespace sg

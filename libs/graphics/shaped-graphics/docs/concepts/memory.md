@@ -6,7 +6,7 @@
 
 Two orthogonal axes decide where a resource's GPU memory comes from and how long it lives:
 
-- **Lifetime mode** — `allocation_scope`: `persistent` vs `transient`. *When* the memory is valid.
+- **Lifetime mode** — `lifetime_scope`: `persistent` vs `transient`. *When* the memory is valid.
 - **Backing** — dedicated vs placed. *How* the memory is allocated.
 
 An [`allocation_info`](../../src/shaped-graphics/allocation_info.hh) carries both and is passed to every
@@ -67,6 +67,6 @@ resource into a heap.
 
 ## See also
 
-- [allocation_info.hh](../../src/shaped-graphics/allocation_info.hh) — the value type and `allocation_scope`.
+- [allocation_info.hh](../../src/shaped-graphics/allocation_info.hh) — the value type and `lifetime_scope`.
 - [memory_heap.hh](../../src/shaped-graphics/memory_heap.hh) — the heap factory and `memory_requirements`.
 - [epochs](epochs.md) — the epoch retirement that bounds a transient resource's lifetime.

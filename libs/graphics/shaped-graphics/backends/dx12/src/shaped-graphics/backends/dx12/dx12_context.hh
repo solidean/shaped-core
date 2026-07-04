@@ -62,11 +62,15 @@ public:
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
     // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
-    [[nodiscard]] cc::result<dx12_binding_layout_handle> create_dx12_binding_layout(cc::span<sg::binding const> bindings);
+    // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
+    [[nodiscard]] cc::result<dx12_binding_layout_handle> create_dx12_binding_layout(cc::span<sg::binding const> bindings,
+                                                                                    sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(sg::compiled_shader const& shader,
-                                                                                        dx12_binding_layout_handle layout);
+                                                                                        dx12_binding_layout_handle layout,
+                                                                                        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_layout_handle layout,
-                                                                                  cc::span<sg::named_view const> views);
+                                                                                  cc::span<sg::named_view const> views,
+                                                                                  sg::lifetime_scope scope);
 
     /// Stages a refcount-zero GPU resource for deferred deletion, attributed to the epoch it dies in
     /// (freed once that epoch retires). Called from ~dx12_buffer; safe to call from any thread.
@@ -88,13 +92,15 @@ public:
         return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
     }
 
-    // Bind-path sg::context overrides — thin forwarders (downcast the sg layout handle) to the
-    // backend-typed creates above. Bodies in dx12_bind.cc.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const> bindings) override;
-    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compiled_shader const& shader,
-                                                                                  sg::binding_layout_handle layout) override;
+    // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
+    // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
+    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const> bindings,
+                                                                              sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compute_pipeline_description const& desc,
+                                                                                  sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle layout,
-                                                                            cc::span<sg::named_view const> views) override;
+                                                                            cc::span<sg::named_view const> views,
+                                                                            sg::lifetime_scope scope) override;
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {

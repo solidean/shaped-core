@@ -81,7 +81,7 @@ Resource creation is reached through a **lifetime scope** on the context rather 
 directly: `ctx.persistent.create_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
 back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
 and the scope — a friend — funnels through it, tagging the request with its lifetime. Today only the
-persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `allocation_scope`)
+persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `lifetime_scope`)
 is the planned second one.
 
 ## Ownership & lifetime

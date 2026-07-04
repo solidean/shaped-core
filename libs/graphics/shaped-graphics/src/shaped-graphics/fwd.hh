@@ -27,6 +27,16 @@ class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)
 
+/// Lifetime mode of a resource — a hard contract, not a hint. `persistent` lives until its handles are
+/// released; `transient` expires when its epoch retires (using it beyond that is a hard error, and the
+/// backend may recycle it immediately). Passed to every `create_*` (buffers carry it inside
+/// allocation_info). Both modes still get in-flight GPU hazard tracking, which is orthogonal.
+enum class lifetime_scope
+{
+    persistent,
+    transient,
+};
+
 // Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
 // (uniform_view/readonly_view/readwrite_view) are constrained, so only the enums and raw_view are
 // forward-declared here; include views.hh for the views themselves.
@@ -47,6 +57,7 @@ struct compiled_shader;
 // binding_layout.hh / compute_pipeline.hh / binding_group.hh.
 class binding_layout;
 class compute_pipeline;
+struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
 struct named_view; // {name, raw_view} — input to create_binding_group
 

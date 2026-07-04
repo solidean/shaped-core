@@ -13,8 +13,9 @@ cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Dev
     CC_ASSERT(shader.stage == sg::shader_stage::compute, "compute pipeline requires a compute shader");
     CC_ASSERT(shader.format == sg::shader_format::dxil, "the dx12 backend requires DXIL bytecode");
     CC_ASSERT(!shader.bytecode.empty(), "compute shader has no bytecode");
+    CC_ASSERT(shader.workgroup_size.has_value(), "a compute shader must report its workgroup size");
 
-    auto pipeline = std::make_shared<dx12_compute_pipeline>();
+    auto pipeline = std::make_shared<dx12_compute_pipeline>(shader.workgroup_size.value());
     pipeline->layout = cc::move(layout);
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};

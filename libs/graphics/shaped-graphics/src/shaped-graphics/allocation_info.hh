@@ -4,16 +4,6 @@
 
 namespace sg
 {
-/// Lifetime mode of a placement — a hard contract, not a hint. `persistent` memory lives until its
-/// handles are released. `transient` memory expires when its epoch retires; using a transient resource
-/// beyond that epoch is a hard error, and the backend may recycle the memory immediately. (Both modes
-/// still get in-flight GPU hazard tracking; that is orthogonal to the lifetime.)
-enum class allocation_scope
-{
-    persistent,
-    transient,
-};
-
 /// A value describing where a resource's backing GPU memory lives — a cheap, copyable placement handle,
 /// not an owner of the GPU resource itself. Produced by a memory_heap (or hand-built for the dedicated
 /// case) and passed to a create_* call.
@@ -36,8 +26,8 @@ struct allocation_info
     /// Byte size of the placement. Ignored when `heap` is null (the resource sizes its own allocation).
     isize size_in_bytes = 0;
 
-    /// Lifetime mode of the allocation (see allocation_scope).
-    allocation_scope scope = allocation_scope::persistent;
+    /// Lifetime mode of the allocation (see lifetime_scope).
+    lifetime_scope scope = lifetime_scope::persistent;
 
     /// True when the resource owns its allocation (no heap) instead of being placed into a shared one —
     /// a "committed resource" in dx12 terms. Equivalent to `heap == nullptr`.

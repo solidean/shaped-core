@@ -175,25 +175,28 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 #include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
 sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; backend subclasses; *_handle = shared_ptr<T const>
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
-// creation (on ctx.persistent; returns cc::result; backends CC_UNREACHABLE until implemented):
+sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
+// creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
 ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema)
-ctx.persistent.create_compute_pipeline(compiled_shader const&, layout)    // -> compute_pipeline_handle
+ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle
 ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout)
 // recording (on a command_list, via the cmd.compute scope):
-cmd.compute.bind_pipeline(pipeline)      // void — make it the active compute pipeline
+cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
-cmd.compute.dispatch(x, y, z)            // void — dispatch x*y*z workgroups
+cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
+cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
 ```
 
 ## memory placement — heaps & alloc-info  (stub)
 
 ```cpp
+#include <shaped-graphics/fwd.hh>
+sg::lifetime_scope                      // persistent | transient  (hard lifetime contract; transient expires at epoch retire)
 #include <shaped-graphics/allocation_info.hh>
-sg::allocation_scope                    // persistent | transient  (hard lifetime contract; transient expires at epoch retire)
 sg::allocation_info                     // value type: where a resource's memory lives (cheap to copy)
 ai.heap                                 // memory_heap_handle — null = dedicated / self-allocating
 ai.offset / ai.size_in_bytes            // isize — placement within `heap` (ignored when dedicated)
-ai.scope                                // sg::allocation_scope
+ai.scope                                // sg::lifetime_scope
 ai.is_dedicated()                       // bool — heap == nullptr (owns its allocation; "committed" in dx12)
 ai.is_placed()                          // bool — heap != nullptr (sub-allocated into a shared heap)
 
