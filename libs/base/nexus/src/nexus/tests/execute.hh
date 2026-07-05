@@ -115,6 +115,14 @@ cc::span<cc::string const> current_section_filters(); // effective section scope
 // Registry nx::invoke_tests queries during the active execute_tests run (nullptr outside a run). Set from the
 // running schedule, so dispatching within a local-registry run stays within that registry.
 nx::test_registry const* active_registry();
+
+// True if `decl` is already running on the current execution chain (an ancestor invoke, or the running test
+// itself). nx::invoke_tests uses this to break invocation cycles rather than recurse forever.
+bool is_declaration_active(nx::test_declaration const* decl);
+
+// Records an "invocation cycle" error on the currently running test (so it fails), naming `decl`. Called when
+// a driver/invocable would (transitively) invoke a test already running above it.
+void report_invocation_cycle(nx::test_declaration const* decl);
 } // namespace nx::impl
 
 namespace nx::impl

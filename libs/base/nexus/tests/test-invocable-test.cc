@@ -241,6 +241,113 @@ TEST("invocable tests - an uninvoked invocable test leaves no nested execution (
     CHECK(exec.count_total_tests() == 1);
 }
 
+TEST("invocable tests - an invocable's SECTIONs are explored inside invoke_tests; the driver runs once")
+{
+    int driver_runs = 0;
+    int contexts_built = 0;
+    int invocable_runs = 0;
+    std::vector<std::string> visited;
+
+    nx::test_registry reg;
+    add_invocable(reg, "sectioned",
+                  [&](int ctx_id)
+                  {
+                      ++invocable_runs;
+                      CHECK(ctx_id == 1); // the same context is handed to every section pass
+
+                      SECTION("sec A")
+                      {
+                          visited.emplace_back("A");
+                          SUCCEED();
+                      }
+                      SECTION("sec B")
+                      {
+                          visited.emplace_back("B");
+                          SUCCEED();
+                      }
+                  });
+    reg.add_declaration("driver", {},
+                        [&]
+                        {
+                            ++driver_runs;
+                            int const ctx_id = ++contexts_built; // "build the context" — must happen exactly once
+                            nx::invoke_tests("run", ctx_id);
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    // section-replay of the invocable happens inside invoke_tests, not by re-running the driver: the driver
+    // body (and thus context construction) runs exactly once, while the invocable body re-runs per section.
+    CHECK(driver_runs == 1);
+    CHECK(contexts_built == 1);
+    CHECK(invocable_runs == 2);
+    auto const expected_visited = std::vector<std::string>{"A", "B"};
+    CHECK(visited == expected_visited);
+    CHECK(exec.count_failed_tests() == 0);
+}
+
+TEST("invocable tests - a self-invoking invocable is caught by the cycle guard (no infinite recursion)")
+{
+    struct cyc
+    {
+        int v = 0;
+    };
+    int runs = 0;
+
+    nx::test_registry reg;
+    add_invocable(reg, "self",
+                  [&](cyc c)
+                  {
+                      ++runs;
+                      CHECK(true);
+                      nx::invoke_tests<cyc>("again", cyc{c.v + 1}); // matches "self" again -> would recurse forever
+                  });
+    reg.add_declaration("driver", {}, [&] { nx::invoke_tests<cyc>("start", cyc{0}); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(runs == 1);                      // ran once; the recursive invoke was refused instead of looping
+    CHECK(exec.count_failed_tests() >= 1); // the cycle surfaces as a failure, not a silent no-op
+}
+
+TEST("invocable tests - an indirect invocation cycle (A -> B -> A) is caught")
+{
+    struct ta
+    {
+    };
+    struct tb
+    {
+    };
+    int a_runs = 0;
+    int b_runs = 0;
+
+    nx::test_registry reg;
+    add_invocable(reg, "A",
+                  [&](ta)
+                  {
+                      ++a_runs;
+                      CHECK(true);
+                      nx::invoke_tests<tb>("to-b", tb{});
+                  });
+    add_invocable(reg, "B",
+                  [&](tb)
+                  {
+                      ++b_runs;
+                      CHECK(true);
+                      nx::invoke_tests<ta>("to-a", ta{}); // A is already running above -> cycle
+                  });
+    reg.add_declaration("driver", {}, [&] { nx::invoke_tests<ta>("start", ta{}); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(a_runs == 1); // each runs once; the back-edge into A is refused
+    CHECK(b_runs == 1);
+    CHECK(exec.count_failed_tests() >= 1);
+}
+
 // --- static end-to-end smoke of the INVOCABLE_TEST macro + real nx::invoke_tests against the static registry.
 // The driver must invoke this, or a full unfiltered run would report it as an orphan.
 

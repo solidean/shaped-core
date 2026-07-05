@@ -69,6 +69,14 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
         if (consumed + 1 < sf.size() && cc::string_view(sf[consumed + 1]) != decl->name)
             continue;
 
+        // Cycle guard: this invocable is already running further up the chain, so invoking it again would
+        // recurse forever. Fail the current test with a clear message instead of overflowing the stack.
+        if (is_declaration_active(decl))
+        {
+            report_invocation_cycle(decl);
+            continue;
+        }
+
         test_execution child;
         child.instance.declaration = decl;
         child.invocation_group = cc::string(name);

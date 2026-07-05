@@ -366,6 +366,26 @@ nx::test_registry const* nx::impl::active_registry()
     return g_active_registry;
 }
 
+bool nx::impl::is_declaration_active(nx::test_declaration const* decl)
+{
+    for (auto const& ctx : g_context_stack)
+        if (ctx.execution != nullptr && ctx.execution->instance.declaration == decl)
+            return true;
+    return false;
+}
+
+void nx::impl::report_invocation_cycle(nx::test_declaration const* decl)
+{
+    CC_ASSERT(!g_context_stack.empty(), "must be called within a running test");
+    auto const name = decl != nullptr ? cc::string_view(decl->name) : cc::string_view("<null>");
+    g_context_stack.back().errors.push_back(nx::test_error{
+        .expr = cc::format("nx::invoke_tests cycle: \"{}\" is already running", name),
+        .location = decl != nullptr ? decl->location : cc::source_location::current(),
+        .extra_lines = {"an invocable must not (transitively) invoke itself"},
+        .expanded = cc::format("invocation cycle: \"{}\" would recurse into itself", name),
+    });
+}
+
 nx::test_execution* nx::impl::current_execution()
 {
     if (g_context_stack.empty())
