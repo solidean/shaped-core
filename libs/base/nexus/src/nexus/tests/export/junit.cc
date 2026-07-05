@@ -19,6 +19,69 @@ void collect_errors(nx::test_execution::section const& sec, cc::vector<nx::test_
     for (auto const& subsec : sec.subsections)
         collect_errors(subsec, out);
 }
+
+// Emits one <testcase> for `exec` (failing only on its *own* tree; dispatched children are their own
+// testcases), then recurses into dispatched children. `prefix` accumulates the addressable path.
+void emit_testcase(cc::string& out, cc::string const& suite, nx::test_execution const& exec, cc::string const& prefix)
+{
+    CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
+    auto const& decl = *exec.instance.declaration;
+
+    cc::string name = prefix;
+    if (!exec.invocation_group.empty())
+    {
+        name += exec.invocation_group;
+        name += " / ";
+    }
+    name += decl.name;
+
+    out.appendf("    <testcase classname=\"{}\" name=\"{}\" time=\"{}\"", suite, xml_escape(name),
+                exec.root.duration_seconds);
+
+    if (!exec.root.is_considered_failing)
+    {
+        out += "/>\n";
+    }
+    else
+    {
+        out += ">\n";
+
+        cc::vector<nx::test_error const*> errors;
+        collect_errors(exec.root, errors);
+
+        // message points at the first failing location, or the test's declaration when it failed with no
+        // specific check (e.g. a test that ran no checks at all).
+        auto const& msg_loc = errors.empty() ? decl.location : errors.front()->location;
+        out.appendf("      <failure message=\"{}:{}\">", xml_escape(msg_loc.file_name()), msg_loc.line());
+
+        if (errors.empty())
+        {
+            out += xml_escape("test failed without a reported check");
+        }
+        else
+        {
+            cc::string body;
+            for (auto const* error : errors)
+            {
+                body += error->expr;
+                if (!error->expanded.empty() && error->expanded != error->expr)
+                {
+                    body += " => ";
+                    body += error->expanded;
+                }
+                body.appendf(" at {}:{}\n", error->location.file_name(), error->location.line());
+            }
+            out += xml_escape(body);
+        }
+
+        out += "</failure>\n";
+        out += "    </testcase>\n";
+    }
+
+    cc::string const child_prefix = name + " / ";
+    for (auto const& child : exec.nested)
+        emit_testcase(out, suite, child, child_prefix);
+}
 } // namespace
 
 cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_execution const& execution)
@@ -51,53 +114,7 @@ cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_exe
     out += ">\n";
 
     for (auto const& exec : execution.executions)
-    {
-        CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");
-        auto const& decl = *exec.instance.declaration;
-
-        out.appendf("    <testcase classname=\"{}\" name=\"{}\" time=\"{}\"", suite, xml_escape(decl.name),
-                    exec.root.duration_seconds);
-
-        if (!exec.is_considered_failing())
-        {
-            out += "/>\n";
-            continue;
-        }
-
-        out += ">\n";
-
-        cc::vector<test_error const*> errors;
-        collect_errors(exec.root, errors);
-
-        // The message attribute points at the first failing location, or the
-        // test's own declaration when a test fails without a specific check
-        // (e.g. a test that ran no checks at all).
-        auto const& msg_loc = errors.empty() ? decl.location : errors.front()->location;
-        out.appendf("      <failure message=\"{}:{}\">", xml_escape(msg_loc.file_name()), msg_loc.line());
-
-        if (errors.empty())
-        {
-            out += xml_escape("test failed without a reported check");
-        }
-        else
-        {
-            cc::string body;
-            for (auto const* error : errors)
-            {
-                body += error->expr;
-                if (!error->expanded.empty() && error->expanded != error->expr)
-                {
-                    body += " => ";
-                    body += error->expanded;
-                }
-                body.appendf(" at {}:{}\n", error->location.file_name(), error->location.line());
-            }
-            out += xml_escape(body);
-        }
-
-        out += "</failure>\n";
-        out += "    </testcase>\n";
-    }
+        emit_testcase(out, suite, exec, cc::string());
 
     out += "  </testsuite>\n";
     out += "</testsuites>\n";

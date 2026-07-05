@@ -108,6 +108,10 @@ struct test_context
     cc::unique_ptr<test_section> root_section;
     cc::vector<test_section*> curr_section;
 
+    // How many leading section_filters this context's path already consumed (see run_test_body): a nested
+    // dispatched child starts matching sections at section_filters[filter_offset].
+    int filter_offset = 0;
+
     // current stats
     int executed_checks = 0;
     int failed_checks = 0;
@@ -138,6 +142,10 @@ struct test_duplicate_section
 
 thread_local cc::vector<test_context> g_context_stack;
 
+// Registry that nx::invoke_tests queries during the current execute_tests run (so a run over a local registry
+// dispatches within that same registry). Saved/restored around execute_tests to support nesting.
+thread_local nx::test_registry const* g_active_registry = nullptr;
+
 // Plain globals tracking the currently running test, read by the crash-context hook
 // (report_running_test). Kept as a raw pointer + length so the hook needs no allocation
 // and no cc::string access. Updated just before each test/section runs.
@@ -151,13 +159,18 @@ thread_local nx::impl::check_capture_sink* g_check_capture = nullptr;
 
 bool is_section_allowed(cc::span<test_section* const> curr_section,
                         cc::string_view section_name,
-                        nx::test_schedule_config const* config)
+                        nx::test_schedule_config const* config,
+                        int filter_offset)
 {
     // No filter means all sections are allowed
     if (config == nullptr || config->section_filters.empty())
         return true;
 
-    auto const& filter = config->section_filters;
+    // A dispatched child's path already consumed `filter_offset` leading filter segments (the dispatch
+    // group + child name); its own sections match against the remainder.
+    if (filter_offset >= config->section_filters.size())
+        return true;
+    auto const filter = cc::span<cc::string const>(config->section_filters).subspan(filter_offset);
 
     // index 0 is the root, which carries no filterable name
     auto const path = curr_section.subspan(1);
@@ -179,12 +192,13 @@ bool is_section_allowed(cc::span<test_section* const> curr_section,
     return true;
 }
 
-void test_execute_begin(nx::test_execution& execution, nx::test_schedule_config const& config)
+void test_execute_begin(nx::test_execution& execution, nx::test_schedule_config const& config, int filter_offset)
 {
     g_context_stack.push_back(test_context{
         .execution = &execution,
         .config = &config,
         .root_section = cc::make_unique<test_section>(),
+        .filter_offset = filter_offset,
     });
     g_context_stack.back().root_section->location = execution.instance.declaration->location;
     g_context_stack.back().curr_section.push_back(g_context_stack.back().root_section.get());
@@ -198,8 +212,10 @@ void test_execute_end()
     CC_ASSERT(ctx.execution != nullptr, "should always have a valid execution");
 
     // Only normal tests must contain a CHECK/REQUIRE; manual tests and guide benchmarks may legitimately
-    // have none — don't flag that as failure.
-    bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal;
+    // have none — don't flag that as failure. A driver that dispatches parametrized tests (nested non-empty)
+    // is also exempt: its assertions live in the dispatched children, not its own body.
+    bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal
+                             && ctx.execution->nested.empty();
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
 
     g_context_stack.remove_back();
@@ -249,7 +265,7 @@ nx::impl::raii_section_opener nx::impl::test_open_section(cc::string name, cc::s
     auto& curr_sec = *ctx.curr_section.back();
 
     // check section filter if provided
-    if (!is_section_allowed(ctx.curr_section, name, ctx.config))
+    if (!is_section_allowed(ctx.curr_section, name, ctx.config, ctx.filter_offset))
     {
         // we do this so early that the subsection is not even actually created
         return raii_section_opener(false);
@@ -334,6 +350,34 @@ nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
 nx::impl::scoped_check_capture::~scoped_check_capture()
 {
     g_check_capture = nullptr;
+}
+
+nx::test_registry const* nx::impl::active_registry()
+{
+    return g_active_registry;
+}
+
+nx::test_execution* nx::impl::current_execution()
+{
+    if (g_context_stack.empty())
+        return nullptr;
+    return g_context_stack.back().execution;
+}
+
+nx::test_schedule_config const* nx::impl::current_config()
+{
+    if (g_context_stack.empty())
+        return nullptr;
+    return g_context_stack.back().config;
+}
+
+int nx::impl::current_filter_consumed()
+{
+    if (g_context_stack.empty())
+        return 0;
+    auto& ctx = g_context_stack.back();
+    // curr_section always holds at least the root (which carries no filterable name)
+    return ctx.filter_offset + int(ctx.curr_section.size()) - 1;
 }
 
 void nx::impl::report_running_test() noexcept
@@ -483,24 +527,63 @@ void nx::impl::report_check_result(check_kind kind,
 
 bool nx::test_execution::is_considered_failing() const
 {
-    return root.is_considered_failing;
+    if (root.is_considered_failing)
+        return true;
+    for (auto const& child : nested)
+        if (child.is_considered_failing())
+            return true;
+    return false;
 }
+
+namespace nx
+{
+namespace
+{
+int total_tests_of(nx::test_execution const& exec)
+{
+    int n = 1;
+    for (auto const& child : exec.nested)
+        n += total_tests_of(child);
+    return n;
+}
+int failed_tests_of(nx::test_execution const& exec)
+{
+    // A dispatched child counts as its own test; the driver counts only if its own tree fails.
+    int n = exec.root.is_considered_failing ? 1 : 0;
+    for (auto const& child : exec.nested)
+        n += failed_tests_of(child);
+    return n;
+}
+int total_checks_of(nx::test_execution const& exec)
+{
+    int n = exec.root.executed_checks;
+    for (auto const& child : exec.nested)
+        n += total_checks_of(child);
+    return n;
+}
+int failed_checks_of(nx::test_execution const& exec)
+{
+    int n = exec.root.failed_checks;
+    for (auto const& child : exec.nested)
+        n += failed_checks_of(child);
+    return n;
+}
+} // namespace
+} // namespace nx
 
 int nx::test_schedule_execution::count_total_tests() const
 {
-    return int(executions.size());
+    int total = 0;
+    for (auto const& exec : executions)
+        total += total_tests_of(exec);
+    return total;
 }
 
 int nx::test_schedule_execution::count_failed_tests() const
 {
     int failed = 0;
     for (auto const& exec : executions)
-    {
-        if (exec.is_considered_failing())
-        {
-            ++failed;
-        }
-    }
+        failed += failed_tests_of(exec);
     return failed;
 }
 
@@ -508,7 +591,7 @@ int nx::test_schedule_execution::count_total_checks() const
 {
     int total = 0;
     for (auto const& exec : executions)
-        total += exec.root.executed_checks;
+        total += total_checks_of(exec);
     return total;
 }
 
@@ -516,8 +599,135 @@ int nx::test_schedule_execution::count_failed_checks() const
 {
     int failed = 0;
     for (auto const& exec : executions)
-        failed += exec.root.failed_checks;
+        failed += failed_checks_of(exec);
     return failed;
+}
+
+void nx::impl::run_test_body(nx::test_execution& execution,
+                             nx::test_schedule_config const& config,
+                             cc::function_ref<void()> body,
+                             int filter_offset)
+{
+    CC_ASSERT(execution.instance.declaration != nullptr, "instances must be valid");
+    auto const& decl = *execution.instance.declaration;
+
+    // Set up test context for check reporting
+    test_execute_begin(execution, config, filter_offset);
+
+    // Execute the test body, re-running it once per section-exploration pass
+    auto section_num = 0;
+    auto should_continue = true;
+    while (should_continue)
+    {
+        // CAUTION: a test is allowed to run nested tests, thus growing the context stack here
+        {
+            auto& ctx = g_context_stack.back();
+            ctx.exec_count++;
+            ctx.leaf_section = nullptr;
+            ctx.root_section->next_open_section = nullptr;
+        }
+
+        // publish the running test for the crash-context hook (points a fatal fault at this test)
+        g_running_test_data = decl.name.data();
+        g_running_test_size = int(decl.name.size());
+        g_running_test_section = section_num;
+
+        if (config.verbose)
+        {
+            if (section_num == 0)
+                cc::println("  - start \"{}\"", decl.name);
+            else
+                cc::println("  - start \"{}\" section {}", decl.name, section_num);
+        }
+        section_num++;
+        auto const t_section_start = std::chrono::high_resolution_clock::now();
+
+        try
+        {
+            auto _ = cc::impl::scoped_assertion_handler(
+                [](cc::impl::assertion_info const& info)
+                {
+                    // failing assertion has same semantics as REQUIRE -> it aborts
+                    nx::impl::report_check_result(impl::check_kind::require, impl::cmp_op::assert_fail, info.expression,
+                                                  false, {info.message}, info.location);
+                });
+
+            body();
+        }
+        catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
+        {
+            // REQUIRE failure already logged in report_check_result, this catch
+            // only serves to abort test execution without treating it as a further error
+        }
+        catch (test_skipped const&) // NOLINT(bugprone-empty-catch)
+        {
+            // SKIP already counted as a successful check in report_check_result, this catch
+            // only serves to abort test execution
+        }
+        catch (test_duplicate_section const& e)
+        {
+            g_context_stack.back().errors.push_back(test_error{
+                .expr = cc::format("duplicate section: \"{}\"", e.name),
+                .location = e.location,
+                .extra_lines = {},
+                .expanded = cc::format("duplicate section: \"{}\"", e.name),
+            });
+            should_continue = false; // wrong use of test framework
+        }
+        catch (std::exception const& e)
+        {
+            g_context_stack.back().errors.push_back(test_error{
+                .expr = cc::format("uncaught exception: {}", e.what()),
+                .location = decl.location,
+                .extra_lines = {},
+                .expanded = cc::format("uncaught exception: {}", e.what()),
+            });
+        }
+        catch (...)
+        {
+            g_context_stack.back().errors.push_back(test_error{
+                .expr = "uncaught unknown exception",
+                .location = decl.location,
+                .extra_lines = {},
+                .expanded = "uncaught unknown exception",
+            });
+        }
+
+        // associate stats & errors with leaf
+        auto sec = g_context_stack.back().leaf_section;
+        if (sec == nullptr)
+            sec = g_context_stack.back().root_section.get();
+        CC_ASSERT(sec != nullptr, "should always have a leaf section");
+        {
+            auto& ctx = g_context_stack.back();
+            auto const t_section_end = std::chrono::high_resolution_clock::now();
+            sec->duration_seconds = std::chrono::duration<double>(t_section_end - t_section_start).count();
+            sec->executed_checks = cc::exchange(ctx.executed_checks, 0);
+            sec->failed_checks = cc::exchange(ctx.failed_checks, 0);
+            sec->errors = cc::exchange(ctx.errors, {});
+        }
+
+        // no new sections to execute? we're done
+        CC_ASSERT(!g_context_stack.empty(), "test context should still be valid");
+        if (g_context_stack.back().root_section->next_open_section == nullptr)
+        {
+            // so it's not marked as unreachable
+            g_context_stack.back().root_section->is_done = true;
+
+            // .. and we're done!
+            should_continue = false;
+        }
+    }
+
+    // Clean up test context (finalizes execution.root)
+    test_execute_end();
+
+    if (config.verbose)
+    {
+        double const duration_ms = execution.root.duration_seconds * 1000.0;
+        cc::println("    ... in {:.2f} ms ({} checks, {} failed checks, {} errors)", duration_ms,
+                    execution.root.executed_checks, execution.root.failed_checks, execution.root.errors.size());
+    }
 }
 
 nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, test_schedule_config const& config)
@@ -529,130 +739,22 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         cc::println("executing {} tests", schedule.instances.size());
     }
 
+    // Make this schedule's registry the one nx::invoke_tests queries (save/restore for nested execute_tests).
+    auto* const prev_registry = g_active_registry;
+    g_active_registry = schedule.registry;
+    CC_DEFER
+    {
+        g_active_registry = prev_registry;
+    };
+
     for (auto const& instance : schedule.instances)
     {
         CC_ASSERT(instance.declaration != nullptr, "instances must be valid");
-        CC_ASSERT(instance.declaration->function.is_valid(), "instances must be valid");
+        CC_ASSERT(instance.declaration->function.is_valid(), "ordinary instances must have a nullary body");
         test_execution execution;
         execution.instance = instance;
 
-        // Set up test context for check reporting
-        test_execute_begin(execution, config);
-
-        // Execute the test function if it exists
-        auto section_num = 0;
-        auto should_continue = true;
-        while (should_continue)
-        {
-            // CAUTION: a test is allowed to run nested tests, thus growing the context stack here
-            {
-                auto& ctx = g_context_stack.back();
-                ctx.exec_count++;
-                ctx.leaf_section = nullptr;
-                ctx.root_section->next_open_section = nullptr;
-            }
-
-            // publish the running test for the crash-context hook (points a fatal fault at this test)
-            g_running_test_data = instance.declaration->name.data();
-            g_running_test_size = int(instance.declaration->name.size());
-            g_running_test_section = section_num;
-
-            if (config.verbose)
-            {
-                if (section_num == 0)
-                    cc::println("  - start \"{}\"", instance.declaration->name);
-                else
-                    cc::println("  - start \"{}\" section {}", instance.declaration->name, section_num);
-            }
-            section_num++;
-            auto const t_section_start = std::chrono::high_resolution_clock::now();
-
-            try
-            {
-                auto _ = cc::impl::scoped_assertion_handler(
-                    [](cc::impl::assertion_info const& info)
-                    {
-                        // failing assertion has same semantics as REQUIRE -> it aborts
-                        nx::impl::report_check_result(impl::check_kind::require, impl::cmp_op::assert_fail,
-                                                      info.expression, false, {info.message}, info.location);
-                    });
-
-                instance.declaration->function();
-            }
-            catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
-            {
-                // REQUIRE failure already logged in report_check_result, this catch
-                // only serves to abort test execution without treating it as a further error
-            }
-            catch (test_skipped const&) // NOLINT(bugprone-empty-catch)
-            {
-                // SKIP already counted as a successful check in report_check_result, this catch
-                // only serves to abort test execution
-            }
-            catch (test_duplicate_section const& e)
-            {
-                g_context_stack.back().errors.push_back(test_error{
-                    .expr = cc::format("duplicate section: \"{}\"", e.name),
-                    .location = e.location,
-                    .extra_lines = {},
-                    .expanded = cc::format("duplicate section: \"{}\"", e.name),
-                });
-                should_continue = false; // wrong use of test framework
-            }
-            catch (std::exception const& e)
-            {
-                g_context_stack.back().errors.push_back(test_error{
-                    .expr = cc::format("uncaught exception: {}", e.what()),
-                    .location = instance.declaration->location,
-                    .extra_lines = {},
-                    .expanded = cc::format("uncaught exception: {}", e.what()),
-                });
-            }
-            catch (...)
-            {
-                g_context_stack.back().errors.push_back(test_error{
-                    .expr = "uncaught unknown exception",
-                    .location = instance.declaration->location,
-                    .extra_lines = {},
-                    .expanded = "uncaught unknown exception",
-                });
-            }
-
-            // associate stats & errors with leaf
-            auto sec = g_context_stack.back().leaf_section;
-            if (sec == nullptr)
-                sec = g_context_stack.back().root_section.get();
-            CC_ASSERT(sec != nullptr, "should always have a leaf section");
-            {
-                auto& ctx = g_context_stack.back();
-                auto const t_section_end = std::chrono::high_resolution_clock::now();
-                sec->duration_seconds = std::chrono::duration<double>(t_section_end - t_section_start).count();
-                sec->executed_checks = cc::exchange(ctx.executed_checks, 0);
-                sec->failed_checks = cc::exchange(ctx.failed_checks, 0);
-                sec->errors = cc::exchange(ctx.errors, {});
-            }
-
-            // no new sections to execute? we're done
-            CC_ASSERT(!g_context_stack.empty(), "test context should still be valid");
-            if (g_context_stack.back().root_section->next_open_section == nullptr)
-            {
-                // so it's not marked as unreachable
-                g_context_stack.back().root_section->is_done = true;
-
-                // .. and we're done!
-                should_continue = false;
-            }
-        }
-
-        // Clean up test context
-        test_execute_end();
-
-        if (config.verbose)
-        {
-            double const duration_ms = execution.root.duration_seconds * 1000.0;
-            cc::println("    ... in {:.2f} ms ({} checks, {} failed checks, {} errors)", duration_ms,
-                        execution.root.executed_checks, execution.root.failed_checks, execution.root.errors.size());
-        }
+        nx::impl::run_test_body(execution, config, [&] { instance.declaration->function(); }, /*filter_offset=*/0);
 
         result.executions.push_back(cc::move(execution));
     }

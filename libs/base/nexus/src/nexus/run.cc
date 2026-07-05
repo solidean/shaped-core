@@ -12,9 +12,10 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <fstream>     // std::ofstream: JUnit report file output
-#include <iostream>    // std::cout / std::cerr: console output
-#include <string_view> // std::string_view: streams a cc::string into std::ostream (no operator<<)
+#include <fstream>       // std::ofstream: JUnit report file output
+#include <iostream>      // std::cout / std::cerr: console output
+#include <string_view>   // std::string_view: streams a cc::string into std::ostream (no operator<<)
+#include <unordered_set> // std::unordered_set: cc has no set type yet
 
 namespace
 {
@@ -58,6 +59,45 @@ cc::string program_name(char const* argv0)
 void write_to(std::ostream& os, cc::string_view s)
 {
     os.write(s.data(), s.size());
+}
+
+// Prints failing tests, recursing into invoked (nested) executions. `prefix` is the accumulated
+// addressable path of the parent (invocation group + name segments), so a failing instance shows its
+// full "driver / group / test" location.
+void print_failing(std::ostream& os, nx::test_execution const& exec, cc::string const& prefix)
+{
+    auto const* const decl = exec.instance.declaration;
+
+    cc::string label = prefix;
+    if (!exec.invocation_group.empty())
+    {
+        if (!label.empty())
+            label += " / ";
+        label += exec.invocation_group;
+    }
+    if (decl != nullptr)
+    {
+        if (!label.empty())
+            label += " / ";
+        label += decl->name;
+    }
+
+    if (exec.root.is_considered_failing && decl != nullptr)
+        os << "  " << as_sv(label) << " at " << decl->location.file_name() << ":" << decl->location.line() << "\n";
+
+    for (auto const& child : exec.nested)
+        print_failing(os, child, label);
+}
+
+// Collects the declarations of all invoked (nested) executions — i.e. which invocable tests actually ran
+// this session. Used to detect orphans (declared but never invoked).
+void collect_invoked(nx::test_execution const& exec, std::unordered_set<void const*>& out)
+{
+    for (auto const& child : exec.nested)
+    {
+        out.insert(child.instance.declaration);
+        collect_invoked(child, out);
+    }
 }
 } // namespace
 
@@ -193,31 +233,47 @@ int nx::run(int argc, char** argv)
         }
     }
 
+    // Orphan invocable tests: in a full, unfiltered normal sweep every enabled INVOCABLE_TEST must be
+    // invoked by some driver (see nx::invoke_tests). Anything left over is almost always a wiring mistake.
+    int orphan_count = 0;
+    bool const full_normal_sweep = config.filters.empty() && config.section_filters.empty()
+                                && config.selected_bucket == nx::config::test_bucket::normal;
+    if (full_normal_sweep)
+    {
+        std::unordered_set<void const*> invoked;
+        for (auto const& exec : execution.executions)
+            collect_invoked(exec, invoked);
+
+        for (auto const& decl : registry.declarations)
+            if (decl.is_invocable() && decl.test_config.enabled && !invoked.contains(&decl))
+            {
+                if (orphan_count == 0)
+                    std::cerr << "\nOrphan invocable tests (declared but never invoked):\n";
+                std::cerr << "  " << as_sv(decl.name) << " at " << decl.location.file_name() << ":"
+                          << decl.location.line() << "\n";
+                ++orphan_count;
+            }
+    }
+
     // Check for failures
     int const failed_tests = execution.count_failed_tests();
     int const total_tests = execution.count_total_tests();
     int const failed_checks = execution.count_failed_checks();
     int const total_checks = execution.count_total_checks();
 
-    if (failed_tests > 0)
+    if (failed_tests > 0 || orphan_count > 0)
     {
-        // Print failed test information
-        std::cerr << "\nFailed tests:\n";
-        for (auto const& exec : execution.executions)
+        if (failed_tests > 0)
         {
-            if (exec.is_considered_failing())
-            {
-                auto const& decl = exec.instance.declaration;
-                if (decl)
-                {
-                    std::cerr << "  " << as_sv(decl->name) << " at " << decl->location.file_name() << ":"
-                              << decl->location.line() << "\n";
-                }
-            }
-        }
+            std::cerr << "\nFailed tests:\n";
+            for (auto const& exec : execution.executions)
+                print_failing(std::cerr, exec, cc::string());
 
-        std::cerr << "\n" << failed_tests << " of " << total_tests << " tests failed\n";
-        std::cerr << "Failed " << failed_checks << " of " << total_checks << " checks\n";
+            std::cerr << "\n" << failed_tests << " of " << total_tests << " tests failed\n";
+            std::cerr << "Failed " << failed_checks << " of " << total_checks << " checks\n";
+        }
+        if (orphan_count > 0)
+            std::cerr << "\n" << orphan_count << " invocable test(s) were never invoked\n";
         return 1;
     }
 

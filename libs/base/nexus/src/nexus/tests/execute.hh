@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/tests/schedule.hh>
@@ -62,6 +63,14 @@ struct test_execution
     // note: global stats == root stats
     section root;
 
+    // Executions dispatched from this test's body via nx::invoke_tests (parametrized-test instances run as
+    // addressable children). Empty for ordinary tests. invocation_group is the nx::invoke_tests(name) segment
+    // under which this execution ran (empty for a top-level test); the child's own name is
+    // instance.declaration->name, so its addressable path is invocation_group / declaration name / sections.
+    cc::vector<test_execution> nested;
+    cc::string invocation_group;
+
+    // Failing if this test's own tree fails or any dispatched child fails.
     [[nodiscard]] bool is_considered_failing() const;
 };
 
@@ -69,6 +78,7 @@ struct test_schedule_execution
 {
     cc::vector<test_execution> executions;
 
+    // All counts recurse into dispatched (nested) executions: a dispatched instance counts as its own test.
     [[nodiscard]] int count_total_tests() const;
     [[nodiscard]] int count_failed_tests() const;
     [[nodiscard]] int count_total_checks() const;
@@ -78,6 +88,29 @@ struct test_schedule_execution
 test_schedule_execution execute_tests(test_schedule const& schedule, test_schedule_config const& config);
 
 } // namespace nx
+
+namespace nx::impl
+{
+// Runs one test body through the section-replay loop under a freshly pushed (possibly nested) context,
+// finalizing stats into `execution.root`. `body` is invoked once per section-exploration pass. Shared by
+// the top-level scheduler and nx::invoke_tests (which runs parametrized-test bodies as nested executions).
+// `filter_offset` shifts which section_filters element the context's first section level matches against
+// (0 at top level; deeper for dispatched children whose path already consumed leading filter segments).
+void run_test_body(nx::test_execution& execution,
+                   nx::test_schedule_config const& config,
+                   cc::function_ref<void()> body,
+                   int filter_offset);
+
+// Accessors into the innermost running test context, used by nx::invoke_tests. Must be called from within a
+// running test body (the context stack is non-empty).
+nx::test_execution* current_execution(); // where dispatched children attach
+nx::test_schedule_config const* current_config();
+int current_filter_consumed(); // section_filters already matched by this path + ancestors
+
+// Registry nx::invoke_tests queries during the active execute_tests run (nullptr outside a run). Set from the
+// running schedule, so dispatching within a local-registry run stays within that registry.
+nx::test_registry const* active_registry();
+} // namespace nx::impl
 
 namespace nx::impl
 {

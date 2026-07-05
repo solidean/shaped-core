@@ -2,6 +2,11 @@
 
 #include <clean-core/fwd.hh>
 
+namespace nx
+{
+struct typed_value; // the fuzz engine's value slots (see nexus/tests/typed_value.hh)
+}
+
 // Forward declarations and index vocabulary for the nx::fuzz API-sequence fuzzer.
 //
 // The engine models a fuzz program in SSA-like form: every value lives in a "slot" addressed by
@@ -40,7 +45,6 @@ struct typed_value_index
     [[nodiscard]] bool is_valid() const { return type != type_index::invalid && value != value_index::invalid; }
 };
 
-struct fuzz_value;
 struct fuzz_operation;
 struct executed_operation;
 struct fuzz_machine;

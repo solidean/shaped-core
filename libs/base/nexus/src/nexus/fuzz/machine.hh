@@ -5,7 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <nexus/fuzz/executed_operation.hh>
 #include <nexus/fuzz/operation.hh>
-#include <nexus/fuzz/value.hh>
+#include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
 
@@ -48,7 +48,7 @@ struct fuzz_machine
     /// Per-run mutable values, grouped by interned type. Slot growth is append-only within a run.
     struct state
     {
-        cc::vector<cc::vector<fuzz_value>> values_by_type;
+        cc::vector<cc::vector<typed_value>> values_by_type;
 
         [[nodiscard]] int count_of(type_index t) const { return int(values_by_type[int(t)].size()); }
     };
@@ -95,10 +95,10 @@ struct fuzz_machine
 
 private:
     type_index intern(std::type_index t);
-    cc::span<fuzz_value*> assemble_args(state& s,
-                                        executed_operation const& exec,
-                                        cc::vector<fuzz_value>& synth,
-                                        cc::vector<fuzz_value*>& buf) const;
+    cc::span<typed_value*> assemble_args(state& s,
+                                         executed_operation const& exec,
+                                         cc::vector<typed_value>& synth,
+                                         cc::vector<typed_value*>& buf) const;
 
     cc::vector<op_info> _operations;
     cc::vector<type_info> _types;

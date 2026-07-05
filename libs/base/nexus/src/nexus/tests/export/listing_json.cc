@@ -24,9 +24,10 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
                                        test_schedule_config const& config,
                                        test_registry const& registry)
 {
+    // Invocable tests are inert (never scheduled directly), so they never count as eligible.
     int eligible_count = 0;
     for (auto const& decl : registry.declarations)
-        if (config.would_run(decl))
+        if (!decl.is_invocable() && config.would_run(decl))
             ++eligible_count;
 
     cc::string out;
@@ -51,10 +52,15 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         out += first ? "\n" : ",\n";
         first = false;
 
+        // Invocable (inert) tests never run standalone, so they are reported as not eligible; they are
+        // still listed (with invocable: true) so tooling can see them and not treat the binary as empty.
+        bool const invocable = decl.is_invocable();
+        bool const eligible = !invocable && config.would_run(decl);
+
         out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"bucket\": \"{}\", \"enabled\": {}, "
-                    "\"seed\": {}, \"name_matches\": {}, \"eligible\": {}}}",
+                    "\"seed\": {}, \"invocable\": {}, \"name_matches\": {}, \"eligible\": {}}}",
                     json_escape(decl.name), json_escape(decl.location.file_name()), decl.location.line(),
-                    bucket_name(tc.bucket), tc.enabled, tc.seed, config.name_matches(decl), config.would_run(decl));
+                    bucket_name(tc.bucket), tc.enabled, tc.seed, invocable, config.name_matches(decl), eligible);
     }
     out += first ? "]\n" : "\n  ]\n";
 

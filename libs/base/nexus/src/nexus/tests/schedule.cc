@@ -204,9 +204,14 @@ bool nx::test_schedule_config::would_run(test_declaration const& decl) const
 nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, test_registry const& registry)
 {
     test_schedule schedule;
+    schedule.registry = &registry;
 
     for (auto const& decl : registry.declarations)
     {
+        // Parametrized tests are inert: a sweep never schedules them; they run only via nx::invoke_tests.
+        if (decl.is_invocable())
+            continue;
+
         CC_ASSERT(decl.function.is_valid(), "invalid test decl");
 
         if (!config.would_run(decl))

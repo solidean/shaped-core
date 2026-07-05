@@ -93,6 +93,34 @@ TEST("string ops")
 }
 ```
 
+## Invocable tests (parametrized / data-driven / generator)
+
+```cpp
+// An INVOCABLE_TEST takes arguments and is INERT (a sweep never runs it). params are a parenthesized macro
+// arg; the body follows with NO trailing ';'. Trailing config items compose as with TEST.
+INVOCABLE_TEST("mesh - decimate", (mesh_case const& c), nx::config::seed(3))
+{ CHECK(decimate(c).is_manifold()); }
+
+// A driver produces data and invokes it. nx::invoke_tests(name, args...) runs EVERY INVOCABLE_TEST whose
+// decayed argument signature matches args..., each as an addressable child under section `name`. Leave the
+// template arg to deduce by default.
+TEST("sg backend - vulkan")
+{
+    auto ctx = sg::make_context(sg::backend::vulkan);   // expensive setup happens ONCE
+    nx::invoke_tests("vulkan", ctx);                     // every sg test, reusing the one context
+}
+```
+
+- **Addressable iteration, not sections**: the driver body runs once; each match is driven to completion
+  internally. Don't mix a top-level `invoke_tests` with sibling `SECTION`s (they'd replay the driver).
+- **Matching is coarse** (decayed signature; `T` == `T const&`): every `INVOCABLE_TEST(int)` matches any
+  `invoke_tests` of an `int`. Use a unique key type (`sg::context_handle`, a `case` struct, a tag).
+- **Params must be by value or `const&`** — a mutable lvalue ref is a compile error (args are shared inputs).
+- **Address one instance**: `dev.py test "<driver>" -c <invoke-name> <test-name> [<section>...]`.
+- **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` no driver invoked fails.
+- Args are boxed by (decayed) value — prefer cheap-to-copy / handle types. See
+  [docs/invocable-tests.md](docs/invocable-tests.md). (Type-parametrized/templated tests: not yet.)
+
 ## Running tests
 
 ```bash
@@ -139,7 +167,7 @@ TEST("add1 never reaches 7")                 // ordinary TEST: build setup once,
 // rng-driven ops:        add_op("gen", [](cc::random& r){ return r.uniform(0,10); });  // seeded + replayable
 
 // eval (what emitted regression SECTIONs call; chain results to mutate/feed forward):
-test->eval_op_to<int>("add1", 41);          // == 42  (also eval_op -> fuzz_value, eval_op_bool -> bool)
+test->eval_op_to<int>("add1", 41);          // == 42  (also eval_op -> typed_value, eval_op_bool -> bool)
 auto res = test->execute_fuzzer(seed);      // one deterministic run; res.failing_run on a finding
 auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regression("test", dialect)
 ```
@@ -157,8 +185,9 @@ auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regressi
 - **The `_AS` exception checks match subclasses too** (a `std::runtime_error`
   satisfies `..._THROWS_AS(expr, std::exception)`).
 - **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
-- **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, generators. (Benchmarks: use `GUIDE_BENCHMARK` + `nx::guide`.)
-  Use `.context()` / `.note()` / `.dump()` for messages.
+- **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` (above), not Catch2 generators.
+- **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, type-parametrized (templated) tests. (Benchmarks:
+  use `GUIDE_BENCHMARK` + `nx::guide`.) Use `.context()` / `.note()` / `.dump()` for messages.
 
 See [docs/catch2-runner-compat.md](docs/catch2-runner-compat.md) for the exact
 CLI subset and how IDE discovery works.

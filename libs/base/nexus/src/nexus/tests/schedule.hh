@@ -58,6 +58,10 @@ struct test_schedule
 {
     cc::vector<test_instance> instances;
 
+    // The registry these instances came from. nx::invoke_tests queries it to find parametrized tests to run,
+    // so a run against a local registry (e.g. in tests) dispatches within that same registry.
+    test_registry const* registry = nullptr;
+
     static test_schedule create(test_schedule_config const& config, test_registry const& registry);
 
     void print() const;

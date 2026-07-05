@@ -7,7 +7,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/fuzz/signature.hh>
-#include <nexus/fuzz/value.hh>
+#include <nexus/tests/typed_value.hh>
 
 #include <type_traits>
 #include <typeindex>
@@ -35,7 +35,7 @@ struct fuzz_operation
         op->_arg_is_mutable = cc::arg_is_mutable_of(sig_t{});
         op->_returns_void = cc::returns_void(sig_t{});
         op->_return_type = cc::return_type_of(sig_t{});
-        op->_invoker = [fn = cc::forward<F>(fn)](cc::span<fuzz_value*> in) -> fuzz_value
+        op->_invoker = [fn = cc::forward<F>(fn)](cc::span<typed_value*> in) -> typed_value
         { return impl::invoke_operation(fn, in, sig_t{}); };
         return op;
     }
@@ -70,7 +70,7 @@ struct fuzz_operation
     fuzz_operation* when(F&& cond)
     {
         using sig_t = cc::signature_of<F>;
-        _preconditions.push_back([cond = cc::forward<F>(cond)](cc::span<fuzz_value*> in) -> bool
+        _preconditions.push_back([cond = cc::forward<F>(cond)](cc::span<typed_value*> in) -> bool
                                  { return impl::invoke_precondition(cond, in, sig_t{}); });
         return this;
     }
@@ -88,9 +88,9 @@ struct fuzz_operation
 
     // ---- invocation ------------------------------------------------------------------------------
 
-    [[nodiscard]] fuzz_value invoke(cc::span<fuzz_value*> inputs) const { return _invoker(inputs); }
+    [[nodiscard]] typed_value invoke(cc::span<typed_value*> inputs) const { return _invoker(inputs); }
 
-    [[nodiscard]] bool check_preconditions(cc::span<fuzz_value*> inputs) const
+    [[nodiscard]] bool check_preconditions(cc::span<typed_value*> inputs) const
     {
         for (auto const& p : _preconditions)
             if (!p(inputs))
@@ -100,17 +100,17 @@ struct fuzz_operation
 
     // ---- direct evaluation (used by regression code) ---------------------------------------------
 
-    /// Boxes the given arguments and invokes the operation. A fuzz_value argument is referenced
+    /// Boxes the given arguments and invokes the operation. A typed_value argument is referenced
     /// directly (so chained calls share and mutate the same value); anything else is boxed by copy.
     template <class... Args>
-    [[nodiscard]] fuzz_value eval(Args&&... args) const
+    [[nodiscard]] typed_value eval(Args&&... args) const
     {
-        cc::vector<fuzz_value> storage;
-        cc::vector<fuzz_value*> ptrs;
+        cc::vector<typed_value> storage;
+        cc::vector<typed_value*> ptrs;
         storage.reserve(sizeof...(Args)); // reserve so &storage.back() stays valid as we fill
         ptrs.reserve(sizeof...(Args));
         (eval_arg(storage, ptrs, cc::forward<Args>(args)), ...);
-        return _invoker(cc::span<fuzz_value*>(ptrs));
+        return _invoker(cc::span<typed_value*>(ptrs));
     }
 
     template <class T, class... Args>
@@ -127,23 +127,23 @@ struct fuzz_operation
 
 private:
     template <class A>
-    static void eval_arg(cc::vector<fuzz_value>& storage, cc::vector<fuzz_value*>& ptrs, A&& a)
+    static void eval_arg(cc::vector<typed_value>& storage, cc::vector<typed_value*>& ptrs, A&& a)
     {
         using plain = std::remove_cvref_t<A>;
-        if constexpr (std::is_same_v<plain, fuzz_value>)
+        if constexpr (std::is_same_v<plain, typed_value>)
         {
-            ptrs.push_back(const_cast<fuzz_value*>(&a)); // reference the caller's value directly
+            ptrs.push_back(const_cast<typed_value*>(&a)); // reference the caller's value directly
         }
         else
         {
-            storage.push_back(fuzz_value::create(std::forward<A>(a)));
+            storage.push_back(typed_value::create(std::forward<A>(a)));
             ptrs.push_back(&storage.back());
         }
     }
 
     cc::string _name;
-    cc::unique_function<fuzz_value(cc::span<fuzz_value*>)> _invoker;
-    cc::vector<cc::unique_function<bool(cc::span<fuzz_value*>)>> _preconditions;
+    cc::unique_function<typed_value(cc::span<typed_value*>)> _invoker;
+    cc::vector<cc::unique_function<bool(cc::span<typed_value*>)>> _preconditions;
 
     cc::vector<std::type_index> _arg_types;
     cc::vector<bool> _arg_is_mutable;
