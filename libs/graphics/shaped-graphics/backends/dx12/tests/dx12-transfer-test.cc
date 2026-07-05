@@ -5,8 +5,9 @@
 // Inline buffer transfer: upload / download over the inline UPLOAD / READBACK ring buffers, on WARP
 // so they run on headless CI. See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md and
 // libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
-// NOTE: without the barrier system, uploading and then downloading the SAME buffer must span two
-// command lists (buffer state decays to COMMON at each submit); these tests follow that pattern.
+// NOTE: these tests split upload and download across separate command lists. Same-list upload-then-
+// download of one buffer is also correct now (dx12_command_list::record_transfer_barrier orders it) —
+// the backend-agnostic tests (tests/transfer/) cover that single-list path.
 
 namespace
 {

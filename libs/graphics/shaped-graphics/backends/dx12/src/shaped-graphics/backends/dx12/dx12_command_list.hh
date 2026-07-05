@@ -51,5 +51,14 @@ protected:
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
     void compute_bind_group(int set, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
+
+private:
+    // After a transfer op, returns `buffer` from its just-used copy state to COMMON, so the next op in
+    // the *same* list re-promotes it from COMMON — matching the cross-list decay the backend otherwise
+    // relies on. Buffers in COMMON are implicitly promoted on use, so no explicit "before" transition is
+    // needed; this reset is both the state fix and the write→read ordering point within one list.
+    // TODO: replace with tracked per-resource transitions once the state-tracking barrier system lands
+    // (it will emit precise, minimal COPY_SOURCE/COPY_DEST transitions instead of bouncing through COMMON).
+    void restore_buffer_to_common(dx12_buffer const& buffer, D3D12_RESOURCE_STATES from_state);
 };
 } // namespace sg::backend::dx12

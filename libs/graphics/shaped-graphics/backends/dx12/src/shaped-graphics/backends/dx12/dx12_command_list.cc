@@ -9,6 +9,17 @@
 
 namespace sg::backend::dx12
 {
+void dx12_command_list::restore_buffer_to_common(dx12_buffer const& buffer, D3D12_RESOURCE_STATES from_state)
+{
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = buffer._resource.Get();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = from_state;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+    _list->ResourceBarrier(1, &barrier);
+}
+
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
 {
     auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
@@ -58,7 +69,8 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
         return;
     CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "upload target buffer must have "
                                                                       "buffer_usage::copy_dst");
-    _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
+    _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes); // promotes dst COMMON→COPY_DEST
+    restore_buffer_to_common(*dst, D3D12_RESOURCE_STATE_COPY_DEST);        // so a later op re-promotes it
 }
 
 sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle buffer,
@@ -74,7 +86,11 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
     if (size_in_bytes > 0)
         CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "download source buffer must have "
                                                                           "buffer_usage::copy_src");
-    return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
+    // The readback copy promotes src COMMON→COPY_SOURCE; reset it to COMMON so a later op re-promotes it.
+    auto future = _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
+    if (size_in_bytes > 0)
+        restore_buffer_to_common(*src, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    return future;
 }
 
 void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
@@ -105,17 +121,19 @@ void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
                       || src_offset_in_bytes + size_in_bytes <= dst_offset_in_bytes,
                   "source and destination ranges overlap in a same-buffer copy");
 
-    // Conservative global barrier for correctness: prior GPU writes (e.g. a UAV write into the source)
-    // must be visible before the copy reads them. Coarse and heavy-handed.
-    // TODO: replace with granular per-resource transition barriers once the state-tracking barrier
-    // system lands (it will emit the precise COPY_SOURCE/COPY_DEST transitions this stands in for).
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    barrier.UAV.pResource = nullptr; // null resource = global barrier over all UAV accesses
-    _list->ResourceBarrier(1, &barrier);
-
+    // Both buffers are in COMMON (fresh, decayed at the last submit, or reset by an earlier op in this
+    // list), so the copy implicitly promotes src→COPY_SOURCE and dst→COPY_DEST — no explicit "before"
+    // transition. Reset them to COMMON afterwards so a later op in this same list re-promotes them.
     _list->CopyBufferRegion(d->_resource.Get(), UINT64(dst_offset_in_bytes), s->_resource.Get(),
                             UINT64(src_offset_in_bytes), UINT64(size_in_bytes));
+
+    // Same-buffer copy: the resource holds a single (ambiguous) promoted state — leave it; it decays at
+    // the next submit and no in-list op reuses it here. Distinct buffers reset independently.
+    if (s->_resource.Get() != d->_resource.Get())
+    {
+        restore_buffer_to_common(*s, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        restore_buffer_to_common(*d, D3D12_RESOURCE_STATE_COPY_DEST);
+    }
 }
 
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()
