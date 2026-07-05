@@ -4,6 +4,7 @@
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/catch2.hh>
 #include <nexus/tests/export/junit.hh>
@@ -120,6 +121,10 @@ int nx::run(int argc, char** argv)
 
     // Get the static test registry
     auto& registry = get_static_test_registry();
+
+    // Run NX_TEST_SETUP callbacks: they define aliases (with full registry access) and must run before any
+    // listing or scheduling, so aliases are visible even when we only list/discover tests and never run them.
+    nx::run_setup_callbacks(registry);
 
     // Handle Catch2 XML discovery mode for TestMate integration
     if (config.is_catch2_xml_discovery)

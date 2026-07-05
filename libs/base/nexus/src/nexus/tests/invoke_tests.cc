@@ -8,9 +8,7 @@
 #include <algorithm> // std::sort: stable invocation order (registry order is static-init order)
 #include <cstring>   // std::strcmp: order matched tests by source location
 
-namespace
-{
-bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b)
+bool nx::impl::signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b)
 {
     if (a.size() != b.size())
         return false;
@@ -19,7 +17,6 @@ bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_inde
             return false;
     return true;
 }
-} // namespace
 
 nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
                                                   cc::span<std::type_index const> signature,
@@ -34,7 +31,10 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
     // How many section_filters this path already consumed (ancestors + our own open sections). The
     // invocation group is the next segment, the child name the one after; the child's own sections follow.
     int const consumed = current_filter_consumed();
-    auto const& sf = config->section_filters;
+
+    // The effective scope of the running instance (a fragment's path for an alias-expanded instance, else the
+    // global -c). Dispatched children inherit it so an alias fragment scopes exactly its one target.
+    auto const sf = current_section_filters();
 
     // whole invocation group scoped out by -c
     if (consumed < sf.size() && cc::string_view(sf[consumed]) != name)
@@ -73,7 +73,7 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
         child.instance.declaration = decl;
         child.invocation_group = cc::string(name);
 
-        run_test_body(child, *config, [&] { decl->invocable_function(values); }, consumed + 2);
+        run_test_body(child, *config, [&] { decl->invocable_function(values); }, sf, consumed + 2);
 
         ++result.executed;
         parent->nested.push_back(cc::move(child));

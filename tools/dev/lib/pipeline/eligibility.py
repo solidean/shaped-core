@@ -43,6 +43,7 @@ class BinaryListing:
 
     name: str
     eligible_count: int
+    eligible_alias_count: int  # matched aliases (a filter can select an alias with no eligible plain test)
     tests: list[dict]  # raw per-test records: name, bucket, enabled, name_matches, eligible, ...
 
 
@@ -89,6 +90,7 @@ def query_listing(
     return BinaryListing(
         name=target.name,
         eligible_count=int(data.get("eligible_count", 0)),
+        eligible_alias_count=int(data.get("eligible_alias_count", 0)),
         tests=list(data.get("tests", [])),
     )
 
@@ -206,8 +208,8 @@ def select_eligible_binaries(
         )
         if listing is None:
             runnable.append(name)  # couldn't determine — keep it
-        elif listing.eligible_count > 0:
-            runnable.append(name)
+        elif listing.eligible_count > 0 or listing.eligible_alias_count > 0:
+            runnable.append(name)  # a matching plain test, or an alias the filter selects
         else:
             zero_listings.append(listing)
 

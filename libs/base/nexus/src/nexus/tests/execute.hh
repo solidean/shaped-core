@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/source_location.hh>
@@ -96,16 +97,20 @@ namespace nx::impl
 // the top-level scheduler and nx::invoke_tests (which runs parametrized-test bodies as nested executions).
 // `filter_offset` shifts which section_filters element the context's first section level matches against
 // (0 at top level; deeper for dispatched children whose path already consumed leading filter segments).
+// `section_filters` is the effective per-instance section scope (an alias fragment's path, or the run-global
+// config.section_filters); a dispatched child passes down its parent's span so scoping stays consistent.
 void run_test_body(nx::test_execution& execution,
                    nx::test_schedule_config const& config,
                    cc::function_ref<void()> body,
+                   cc::span<cc::string const> section_filters,
                    int filter_offset);
 
 // Accessors into the innermost running test context, used by nx::invoke_tests. Must be called from within a
 // running test body (the context stack is non-empty).
 nx::test_execution* current_execution(); // where dispatched children attach
 nx::test_schedule_config const* current_config();
-int current_filter_consumed(); // section_filters already matched by this path + ancestors
+int current_filter_consumed();                        // section_filters already matched by this path + ancestors
+cc::span<cc::string const> current_section_filters(); // effective section scope of the running instance
 
 // Registry nx::invoke_tests queries during the active execute_tests run (nullptr outside a run). Set from the
 // running schedule, so dispatching within a local-registry run stays within that registry.

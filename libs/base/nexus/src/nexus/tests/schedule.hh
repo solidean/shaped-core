@@ -9,6 +9,10 @@ namespace nx
 struct test_instance
 {
     test_declaration const* declaration = nullptr;
+
+    // Section scope for just this instance (an alias fragment's path). Empty ⇒ fall back to the run-global
+    // config.section_filters. Lets one alias scope driver A to path X while another scopes driver B to path Y.
+    cc::vector<cc::string> section_filters;
 };
 
 struct test_schedule_config
@@ -50,6 +54,11 @@ struct test_schedule_config
     // bucket gate (match_any_bucket, or same bucket) AND the disabled gate (enabled,
     // or run_disabled_tests). This is exactly the predicate test_schedule::create uses.
     bool would_run(test_declaration const& decl) const;
+
+    // True if some non-empty filter is a substring of the alias name. Always false when filters is empty: a
+    // full sweep already runs every driver unscoped (invoking every invocable), so expanding aliases too
+    // would double-run them. Aliases therefore only take effect under an explicit filter.
+    bool alias_matches(test_alias const& alias) const;
 
     static test_schedule_config create_from_args(int argc, char** argv);
 };

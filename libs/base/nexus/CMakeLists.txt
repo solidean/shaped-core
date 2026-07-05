@@ -6,6 +6,7 @@ add_library(nexus
     src/nexus/run.cc
     src/nexus/test.cc
     src/nexus/guide.cc
+    src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
     src/nexus/tests/config.cc
     src/nexus/tests/invoke_tests.cc
@@ -39,6 +40,7 @@ target_sources(nexus
     src/nexus/run.hh
     src/nexus/test.hh
     src/nexus/guide.hh
+    src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
     src/nexus/tests/config.hh
     src/nexus/tests/invoke_tests.hh
@@ -94,6 +96,7 @@ add_executable(nexus-test
     tests/test-registry-test.cc
     tests/test-section-test.cc
     tests/test-invocable-test.cc
+    tests/test-alias-test.cc
     tests/test-typed-value-test.cc
     tests/fuzz-engine-test.cc
     tests/fuzz-minimize-test.cc

@@ -25,6 +25,9 @@ namespace impl
 invocation_result invoke_tests_impl(cc::string_view name,
                                     cc::span<std::type_index const> signature,
                                     cc::span<nx::typed_value*> values);
+
+// Element-wise equality of two decayed argument-type lists (the invoke_tests / alias join key).
+bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b);
 } // namespace impl
 
 /// Runs every INVOCABLE_TEST whose *decayed* argument signature matches `Args...`, passing `args...`.

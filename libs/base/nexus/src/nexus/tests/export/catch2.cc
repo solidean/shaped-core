@@ -133,6 +133,21 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
         out += "  </TestCase>\n";
     }
 
+    // Aliases are runnable (unlike bare invocable decls): clicking one runs its name as a filter, which the
+    // scheduler expands into the fragment runs. Advertise them so IDEs can offer them directly.
+    for (auto const& alias : registry.aliases)
+    {
+        out += "  <TestCase>\n";
+        out.appendf("    <Name>{}</Name>\n", xml_escape(alias.name));
+        out += "    <ClassName/>\n";
+        out += "    <Tags></Tags>\n";
+        out += "    <SourceInfo>\n";
+        out.appendf("      <File>{}</File>\n", xml_escape(alias.location.file_name()));
+        out.appendf("      <Line>{}</Line>\n", alias.location.line());
+        out += "    </SourceInfo>\n";
+        out += "  </TestCase>\n";
+    }
+
     out += "</MatchingTests>\n";
     return out;
 }

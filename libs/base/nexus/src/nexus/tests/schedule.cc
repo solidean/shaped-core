@@ -13,6 +13,17 @@ std::string_view as_sv(cc::string_view s)
 {
     return std::string_view(s.data(), size_t(s.size()));
 }
+
+// Element-wise equality of two section paths (cc::vector has no operator==).
+bool same_path(cc::span<cc::string const> a, cc::span<cc::string const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (cc::isize i = 0; i < a.size(); ++i)
+        if (cc::string_view(a[i]) != cc::string_view(b[i]))
+            return false;
+    return true;
+}
 } // namespace
 
 nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, char** argv)
@@ -201,6 +212,24 @@ bool nx::test_schedule_config::would_run(test_declaration const& decl) const
     return name_matches(decl);
 }
 
+bool nx::test_schedule_config::alias_matches(test_alias const& alias) const
+{
+    // Empty filters = a full sweep, which already runs every driver unscoped; do not expand aliases then.
+    if (filters.empty())
+        return false;
+
+    for (auto const& filter : filters)
+    {
+        if (filter.empty())
+            continue;
+
+        if (alias.name.contains(filter))
+            return true;
+    }
+
+    return false;
+}
+
 nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, test_registry const& registry)
 {
     test_schedule schedule;
@@ -220,6 +249,42 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         schedule.instances.push_back(test_instance{
             .declaration = &decl,
         });
+    }
+
+    // Aliases: a filter matching an alias name pulls in one instance per fragment, each scoped to the
+    // fragment's section path (an explicit hit, so bucket/disabled gates are bypassed like a named test).
+    //
+    // A fragment is dropped when its target run is already covered, so nothing executes twice:
+    //  - the driver is already scheduled *unscoped* (empty section filters, i.e. matched directly by name) —
+    //    that run drives every invocable, including this fragment's, so the scoped copy is redundant;
+    //  - an identical (driver, section path) instance already exists (two aliases sharing a fragment).
+    for (auto const& alias : registry.aliases)
+    {
+        if (!config.alias_matches(alias))
+            continue;
+
+        for (auto const& frag : alias.fragments)
+        {
+            if (frag.driver == nullptr)
+                continue;
+
+            bool covered = false;
+            for (auto const& inst : schedule.instances)
+                if (inst.declaration == frag.driver
+                    && (inst.section_filters.empty() || same_path(inst.section_filters, frag.section_path)))
+                {
+                    covered = true;
+                    break;
+                }
+
+            if (covered)
+                continue;
+
+            schedule.instances.push_back(test_instance{
+                .declaration = frag.driver,
+                .section_filters = frag.section_path,
+            });
+        }
     }
 
     return schedule;

@@ -86,19 +86,58 @@ cheap-to-copy / handle types; pass large data behind a handle or `case const*`.
 ## Addressing a single instance
 
 An instance's address is its section path: `<driver name>` (matched by the test-name
-filter) then `<invoke name> / <test name> / <its sections>` (matched by `-c`):
+filter) then `<invoke name> / <test name> / <its sections>`, each segment matched by a
+`-c` flag — **repeat `-c` to descend the path**:
 
 ```bash
-uv run dev.py test "sg backend - vulkan" -c vulkan "sg - clears backbuffer"
+uv run dev.py test "sg vulkan backend" -c vulkan -c "sg - clears backbuffer"
 ```
 
 runs just that one instance on just that backend. Nesting composes: an invoked test
-can itself invoke tests, and the paths stack.
+can itself invoke tests, and the paths stack. `dev.py test` forwards everything after
+the test name straight to the binary, so the `-c` flags reach the nexus runner.
 
-> Bare-name addressing of an instance (`dev.py test "sg - clears backbuffer"` with no
-> driver) is **not** supported yet — it needs a driver→instance map that only exists
-> at run time. Use the `driver … -c …` form above. (A future alias mechanism may add
-> the shorthand.)
+## Running an instance by name (aliases)
+
+A driver is addressable, but an individual invocable isn't — until an **alias** binds
+its name to a driver plus a section path. Define aliases in an `NX_TEST_SETUP` block,
+which runs once at startup (before any listing or scheduling) with full read access to
+the registry:
+
+```cpp
+NX_TEST_SETUP(nx::setup& s)
+{
+    // For every context_handle invocable, make its name run on every backend driver.
+    for (auto const* t : s.invocables_with<sg::context_handle>())
+    {
+        cc::vector<nx::alias_fragment> fragments;
+        for (auto const& b : backends())              // {driver name, invoke group} per backend
+            if (auto const* d = s.find_test(b.driver))
+                fragments.push_back({.driver = d, .section_path = {b.invoke, t->name}});
+        s.define_alias(t->name, cc::move(fragments));
+    }
+}
+```
+
+The invocable is then runnable by its own name, expanding to one scoped run per fragment:
+
+```bash
+uv run dev.py test "sg - clears backbuffer"   # runs it on every backend
+```
+
+An alias participates in name filtering like a real test, with rules that keep anything
+from running twice:
+
+- A **full, unfiltered run** ignores aliases — every driver already runs and invokes
+  everything, so expansion would only duplicate.
+- If a filter also selects a fragment's **driver by name** (the driver then runs
+  unscoped, covering all its invocables), that fragment is dropped.
+- A fragment's section path is authoritative; a global `-c` does not further scope an
+  alias-expanded instance (it applies only to directly-named instances).
+
+Aliases are per binary (the registry is), so an alias can only reference drivers in its
+own binary; `dev.py test` unions the matches across binaries. `nx::setup` also exposes
+`tests()` (all declarations) and `find_test(name)` for building fragments.
 
 ## Orphan safety net
 

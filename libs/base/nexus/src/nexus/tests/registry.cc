@@ -38,4 +38,9 @@ void test_registry::add_invocable_declaration(cc::string name,
     });
 }
 
+void test_registry::add_alias(test_alias alias)
+{
+    aliases.push_back(cc::move(alias));
+}
+
 } // namespace nx

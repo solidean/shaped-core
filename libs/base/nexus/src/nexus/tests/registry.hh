@@ -32,9 +32,30 @@ struct test_declaration
     [[nodiscard]] bool is_invocable() const { return !signature.empty(); }
 };
 
+// One runnable target an alias expands to: a driver test plus the section path that scopes into it. For a
+// per-backend invocable, the path is {invoke-group, invocable-name} (e.g. {"dx12", "sg - clears backbuffer"}),
+// so running the alias drives just that one instance under that one backend's driver.
+struct alias_fragment
+{
+    test_declaration const* driver = nullptr;
+    cc::vector<cc::string> section_path;
+};
+
+// A pseudo test-name that stands for a set of scoped runs. Defined at startup by NX_TEST_SETUP with full
+// registry access; a filter matching an alias name expands into one scheduled instance per fragment.
+struct test_alias
+{
+    cc::string name;
+    cc::vector<alias_fragment> fragments;
+    cc::source_location location;
+};
+
 struct test_registry
 {
     cc::vector<test_declaration> declarations;
+
+    // Populated by run_setup_callbacks (from NX_TEST_SETUP bodies) before scheduling/listing.
+    cc::vector<test_alias> aliases;
 
     void add_declaration(cc::string name,
                          config::cfg test_config,
@@ -46,6 +67,8 @@ struct test_registry
                                    cc::vector<std::type_index> signature,
                                    cc::unique_function<void(cc::span<nx::typed_value*>)> invocable_function,
                                    cc::source_location loc = cc::source_location::current());
+
+    void add_alias(test_alias alias);
 };
 
 test_registry& get_static_test_registry();

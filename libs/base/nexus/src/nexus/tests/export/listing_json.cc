@@ -30,6 +30,13 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
         if (!decl.is_invocable() && config.would_run(decl))
             ++eligible_count;
 
+    // Aliases run their fragments when a filter matches the alias name; a binary whose only match is an alias
+    // must still be selected, so this count is reported alongside eligible_count (dev.py OR's the two).
+    int eligible_alias_count = 0;
+    for (auto const& alias : registry.aliases)
+        if (config.alias_matches(alias))
+            ++eligible_alias_count;
+
     cc::string out;
     out.appendf("{{\n  \"suite\": \"{}\",\n", json_escape(suite_name));
 
@@ -42,6 +49,7 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
     out.appendf("  \"match_any_bucket\": {},\n", config.match_any_bucket);
     out.appendf("  \"run_disabled_tests\": {},\n", config.run_disabled_tests);
     out.appendf("  \"eligible_count\": {},\n", eligible_count);
+    out.appendf("  \"eligible_alias_count\": {},\n", eligible_alias_count);
 
     out += "  \"tests\": [";
     bool first = true;
@@ -63,6 +71,21 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
                     bucket_name(tc.bucket), tc.enabled, tc.seed, invocable, config.name_matches(decl), eligible);
     }
     out += first ? "]\n" : "\n  ]\n";
+
+    // Aliases: pseudo test-names a filter can select (each expands to one or more scoped fragment runs).
+    out += "  ,\"aliases\": [";
+    bool first_alias = true;
+    for (auto const& alias : registry.aliases)
+    {
+        out += first_alias ? "\n" : ",\n";
+        first_alias = false;
+
+        out.appendf("    {{\"name\": \"{}\", \"file\": \"{}\", \"line\": {}, \"fragment_count\": {}, "
+                    "\"name_matches\": {}}}",
+                    json_escape(alias.name), json_escape(alias.location.file_name()), alias.location.line(),
+                    alias.fragments.size(), config.alias_matches(alias));
+    }
+    out += first_alias ? "]\n" : "\n  ]\n";
 
     out += "}\n";
     return out;

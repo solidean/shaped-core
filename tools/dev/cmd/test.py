@@ -33,12 +33,22 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                            help="Do not write any JUnit XML result files (per-binary XML is on by default)")
     p.add_argument("test_name", nargs="?",
                    help="Specific test name or binary to run (auto-discovers the binary)")
+    p.add_argument("runner_args", nargs=argparse.REMAINDER,
+                   help="Args after the test name are forwarded verbatim to the test binary, e.g. "
+                        "`-c <section>` to scope into a section/instance (repeat -c to descend a path). "
+                        "An optional leading `--` is dropped.")
     return p
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     primary = presets[0]
+
+    # Everything after the test name is passed straight to the test binary (e.g. `-c <section>` for nexus
+    # section/instance scoping). argparse.REMAINDER keeps a leading `--` if present; drop that one separator.
+    runner_args = list(args.runner_args or [])
+    if runner_args and runner_args[0] == "--":
+        runner_args = runner_args[1:]
 
     # Optionally build first (incremental — fast when nothing changed).
     if not args.no_build:
@@ -72,7 +82,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if test_name:
         binary_names, diag = dev.select_eligible_binaries(
             primary, all_targets, binary_names,
-            test_name=test_name, root=ctx.root,
+            test_name=test_name, root=ctx.root, extra_args=runner_args,
         )
         if diag:
             ctx.die(diag)
@@ -82,6 +92,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         binary_names,
         root=ctx.root,
         test_name=test_name,
+        extra_args=runner_args,
         timeout=args.timeout if args.timeout else None,
         write_xml=not args.no_xml_reports,
         mirror=args.mirror_output,

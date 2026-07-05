@@ -116,7 +116,13 @@ TEST("sg backend - vulkan")
 - **Matching is coarse** (decayed signature; `T` == `T const&`): every `INVOCABLE_TEST(int)` matches any
   `invoke_tests` of an `int`. Use a unique key type (`sg::context_handle`, a `case` struct, a tag).
 - **Params must be by value or `const&`** — a mutable lvalue ref is a compile error (args are shared inputs).
-- **Address one instance**: `dev.py test "<driver>" -c <invoke-name> <test-name> [<section>...]`.
+- **Address one instance**: `dev.py test "<driver>" -c <invoke-name> -c <test-name> [-c <section>...]` (one
+  `-c` per path segment; `dev.py test` forwards everything after the name to the binary).
+- **Run an instance by name**: an `NX_TEST_SETUP(nx::setup& s)` block defines *aliases* — `s.define_alias(name,
+  {alias_fragment{driver, section_path}, ...})` binds a name to driver+scope, so `dev.py test "<test-name>"`
+  runs it (one scoped run per fragment, e.g. per backend). `s.invocables_with<Args...>()` / `find_test(name)`
+  help build them. Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already
+  name-selected is dropped.
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` no driver invoked fails.
 - Args are boxed by (decayed) value — prefer cheap-to-copy / handle types. See
   [docs/invocable-tests.md](docs/invocable-tests.md). (Type-parametrized/templated tests: not yet.)
@@ -137,8 +143,8 @@ uv run dev.py test                       # build + run the whole suite
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,
-//   name_matches, eligible) under the rest of the args, then exit 0. Used by `dev.py test` to pre-select which
-//   binaries actually contain a matching test. "-" means stdout.
+//   name_matches, eligible) plus an "aliases" array and eligible_alias_count, under the rest of the args, then
+//   exit 0. Used by `dev.py test` to pre-select binaries with a matching test or alias. "-" means stdout.
 ```
 
 ## Fuzz testing (`nx::fuzz`)

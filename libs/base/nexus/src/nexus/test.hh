@@ -6,6 +6,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/platform/source_location.hh>
+#include <nexus/tests/alias.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/config.hh>
 #include <nexus/tests/invoke_tests.hh>
@@ -89,3 +90,20 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
     static void CC_MACRO_JOIN(_nx_invocable_fn_, unique_id) params
 
 #define INVOCABLE_TEST(name, params, ...) NX_IMPL_INVOCABLE_TEST(name, __COUNTER__, params, __VA_ARGS__)
+
+// A startup hook: its body runs once, before any test listing or scheduling, with full access to the
+// registry (all declarations) via the `nx::setup` handle. Used to define aliases — pseudo test-names that
+// expand, under filter matching, into scoped runs of invocable tests. Multiple NX_TEST_SETUP blocks compose.
+//
+//   NX_TEST_SETUP(nx::setup& s)
+//   {
+//       for (auto const* t : s.invocables_with<sg::context_handle>())
+//           s.define_alias(t->name, fragments_for(t));
+//   }
+#define NX_IMPL_TEST_SETUP(unique_id, ...)                                                                              \
+    static void CC_MACRO_JOIN(_nx_setup_fn_, unique_id)(__VA_ARGS__);                                                   \
+    static const bool CC_MACRO_JOIN(_nx_setup_reg_, unique_id)                                                          \
+        = (::nx::impl::register_setup(&CC_MACRO_JOIN(_nx_setup_fn_, unique_id), cc::source_location::current()), true); \
+    static void CC_MACRO_JOIN(_nx_setup_fn_, unique_id)(__VA_ARGS__)
+
+#define NX_TEST_SETUP(...) NX_IMPL_TEST_SETUP(__COUNTER__, __VA_ARGS__)
