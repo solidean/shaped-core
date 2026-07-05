@@ -147,9 +147,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 
-    // The transient buffer pool's backing heap (a ring reclaimed per epoch).
-    CC_RETURN_IF_ERROR(ctx->_transient_buffers.initialize(config.transient_heap_bytes));
-
     // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a
     // per-epoch-reclaimed transient ring (leading fraction) and a persistent bump region (the rest).
     CC_RETURN_IF_ERROR(

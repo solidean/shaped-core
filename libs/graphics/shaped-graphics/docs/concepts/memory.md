@@ -60,22 +60,35 @@ The axes are independent, but in practice:
 
 ## Transient allocation
 
-`ctx.transient.create_buffer(size, usage)` sub-allocates from a **ring over one DEFAULT heap**: a
-monotonic bump cursor hands out placement offsets, windows never wrap (a would-be wrap wastes the tail
-and restarts). The space an epoch consumes is snapshotted at `advance_epoch` and its **free watermark**
-released once that epoch retires — so reuse is only ever handed out after the epoch fence proves the GPU
-is done with it. This is safe at any pipelining depth (unlike a reset-on-epoch-change bump pointer,
-which assumes a single epoch in flight); the same u64-cursor + per-epoch-checkpoint scheme backs the
-inline upload/download rings. A request larger than the whole heap falls back to a committed resource.
-When the ring is full the allocator retires the oldest in-flight epoch to reclaim space.
+`ctx.transient.create_buffer(size, usage)` sub-allocates from a **per-epoch bump allocator** over one
+DEFAULT heap the transient scope owns: a monotonic head hands out placement offsets, and **resets to 0
+whenever the epoch changes**. Successive epochs therefore alias the same storage — which is not only
+safe but desired. It is safe because a single direct queue executes each epoch's GPU work before the
+next's, so epoch N's transient memory is finished before epoch N+1 (which resets to 0) can touch it; the
+epoch boundary is the barrier. It is desired because a one-epoch-sized heap serves any pipelining depth,
+which is smaller and kinder to caches than a ring sized for every in-flight frame. A request larger than
+the budget falls back to a dedicated (committed) allocation. The budget defaults to 128 MiB and is set
+with `ctx.transient.set_buffer_budget`.
 
-`ctx.transient.create_binding_group(...)` works the same way over the shader-visible descriptor heap,
-which is split into a transient ring (leading fraction) and the persistent bump region (see
-[bindings](bindings.md)).
+> This bump-reset-and-alias scheme is specific to buffers, whose transient contents are only ever
+> GPU-touched. Transient **descriptors** are different: they are written by the CPU at group creation,
+> so a slot cannot be reused until the epoch that wrote it retires. They therefore use a per-epoch ring,
+> not a bump-reset — see [bindings](bindings.md). A future step may fold transient buffers and textures
+> into one shared heap/budget once we know the big-4 backends can serve both from a single heap.
 
-Because the storage is recycled at epoch retire, **using a transient resource past its epoch is a hard
-error** — a tripwire asserts in the transfer/bind paths (`buffer` becomes expired, a transient
-`binding_group` refuses to bind) rather than silently reading a later epoch's data.
+## Expiry
+
+Storage that a lifetime scope reclaims must not be named afterwards, so `sg::buffer` carries explicit
+expiry state, independent of how it was allocated:
+
+- `is_expired()` / `is_valid()` — public: whether the buffer still names live storage.
+- `expire()` — release the storage now (deferred until no longer in flight), even while handles remain.
+
+A **transient** buffer is auto-expired when its epoch advances (its bump storage is about to be reused).
+A **persistent** buffer can be expired **explicitly** to free memory early without hunting down every
+`shared_ptr`. Using an expired buffer in a transfer or a binding is a hard error (asserted). A transient
+`binding_group` has the analogous rule — binding one past its epoch asserts, since the ring may have
+recycled its descriptor slots.
 
 ## Status
 

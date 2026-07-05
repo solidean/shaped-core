@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
 
@@ -12,19 +13,28 @@ namespace sg
 /// scratch (intermediate buffers, one-shot binding groups) that never needs to outlive the work that
 /// produced it. Using one past its epoch is a hard error.
 ///
-/// A thin facade over its owning context, mirroring context_persistent_scope; it forwards each create_*
-/// to the context's backend impl with a transient lifetime.
+/// Buffers are sub-allocated by a simple **per-epoch bump allocator** over one persistent memory_heap
+/// the scope owns: the head resets to 0 whenever the epoch changes, so successive epochs alias the same
+/// storage. That is safe — a direct queue executes each epoch's GPU work before the next's, so the
+/// memory is free by the time it is reused — and cheaper than a ring (smaller heap, better cache
+/// behaviour). Requests larger than the budget fall back to a dedicated (committed) allocation. This is
+/// all built on the public create_memory_heap + create_buffer; the backend only sees a transient,
+/// heap-placed allocation_info.
 class context_transient_scope
 {
 public:
-    /// Allocates a transient buffer of `size_in_bytes` (>= 0, 0 is a valid empty buffer). The backend
-    /// sub-allocates it from the epoch's pool; the memory is recycled once this epoch retires.
+    /// Allocates a transient buffer of `size_in_bytes` (>= 0, 0 is a valid empty buffer) from the
+    /// current epoch's bump window; the storage is reused once the epoch changes.
     [[nodiscard]] cc::result<buffer_handle> create_buffer(isize size_in_bytes, buffer_usage usage);
 
     /// Instantiates `layout` with the given name->view bindings as a transient binding_group (validated
     /// against the layout), whose descriptors are recycled when this epoch retires.
     [[nodiscard]] cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
                                                                         cc::span<named_view const> views);
+
+    /// Sets the transient-buffer heap budget in bytes (the per-epoch bump capacity). Must be called
+    /// before the first transient buffer; the heap is created lazily on first use. Default: 128 MiB.
+    void set_buffer_budget(isize size_in_bytes);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_transient_scope(context_transient_scope const&) = delete;
@@ -37,5 +47,16 @@ private:
     explicit context_transient_scope(context& ctx) : _ctx(ctx) {}
 
     context& _ctx;
+
+    // The bump allocator state: the heap (lazy), its budget, the current head, and the epoch the head
+    // was last reset for. Guarded — create_buffer may run on any thread.
+    struct bump_state
+    {
+        memory_heap_handle heap = nullptr;
+        isize budget = isize(128) * 1024 * 1024;
+        isize head = 0;
+        u64 last_epoch = 0; // sg::epoch value the head was last reset for (0 = never)
+    };
+    cc::mutex<bump_state> _bump;
 };
 } // namespace sg

@@ -20,14 +20,14 @@ public:
     struct slot
     {
         sg::binding binding;
-        UINT table_offset = 0;
+        int table_offset = 0;
     };
 
     [[nodiscard]] static cc::result<dx12_binding_layout_handle> create(ID3D12Device* device,
                                                                        cc::span<sg::binding const> bindings);
 
     ComPtr<ID3D12RootSignature> root_signature;
-    cc::vector<slot> slots;    // one per binding, in declaration order
-    UINT descriptor_count = 0; // total descriptors the table holds
+    cc::vector<slot> slots;   // one per binding, in declaration order
+    int descriptor_count = 0; // total descriptors the table holds
 };
 } // namespace sg::backend::dx12

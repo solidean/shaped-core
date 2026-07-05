@@ -1,7 +1,7 @@
 // dx12_descriptor_heap: the shader-visible CBV/SRV/UAV heap, split into a per-epoch-reclaimed transient
-// ring (front) and a persistent bump region (rest). The transient ring reuses the u64-cursor +
-// per-epoch-checkpoint scheme of the inline rings; the persistent region is a plain atomic bump. See
-// libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+// ring (front) and a persistent free-ranges region (rest). The transient ring reuses the u64-cursor +
+// per-epoch-checkpoint scheme of the inline rings; the persistent region is a first-fit free list with
+// coalescing frees. See dx12_descriptor_heap.hh and libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/error/optional.hh>
@@ -10,14 +10,14 @@
 
 namespace sg::backend::dx12
 {
-cc::result<cc::unit> dx12_descriptor_heap::initialize(dx12_context& ctx, UINT descriptor_capacity, float transient_fraction)
+cc::result<cc::unit> dx12_descriptor_heap::initialize(dx12_context& ctx, int descriptor_capacity, float transient_fraction)
 {
     CC_ASSERT(descriptor_capacity > 0, "descriptor heap capacity must be positive");
     CC_ASSERT(transient_fraction >= 0.0f && transient_fraction < 1.0f, "transient fraction must be in [0, 1)");
 
     D3D12_DESCRIPTOR_HEAP_DESC desc = {};
     desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    desc.NumDescriptors = descriptor_capacity;
+    desc.NumDescriptors = UINT(descriptor_capacity);
     desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if (HRESULT hr = ctx._device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr))
         return dx12_error(hr, "CreateDescriptorHeap (shader-visible CBV/SRV/UAV) failed");
@@ -25,32 +25,81 @@ cc::result<cc::unit> dx12_descriptor_heap::initialize(dx12_context& ctx, UINT de
     _ctx = &ctx;
     cpu_start = heap->GetCPUDescriptorHandleForHeapStart();
     gpu_start = heap->GetGPUDescriptorHandleForHeapStart();
-    increment = ctx._device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    increment = int(ctx._device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
     capacity = descriptor_capacity;
-    transient_capacity = UINT(float(descriptor_capacity) * transient_fraction);
+    transient_capacity = int(float(descriptor_capacity) * transient_fraction);
+
+    // The persistent region starts out as one big free span.
+    persistent_free.lock([&](cc::vector<free_range>& f)
+                         { f.push_back({transient_capacity, capacity - transient_capacity}); });
     return cc::unit{};
 }
 
-UINT dx12_descriptor_heap::allocate_persistent(UINT count)
+int dx12_descriptor_heap::allocate_persistent(int count)
 {
-    UINT const offset = persistent_cursor.fetch_add(count, std::memory_order_relaxed);
-    CC_ASSERT(transient_capacity + offset + count <= capacity, "persistent descriptor region exhausted (bump "
-                                                               "allocator, no reclaim)");
-    return transient_capacity + offset;
+    CC_ASSERT(count > 0, "persistent descriptor allocation must be positive");
+    return persistent_free.lock(
+        [&](cc::vector<free_range>& f) -> int
+        {
+            // First fit: carve `count` off the front of the first span large enough.
+            for (cc::isize i = 0; i < f.size(); ++i)
+            {
+                if (f[i].count < count)
+                    continue;
+                int const offset = f[i].start;
+                f[i].start += count;
+                f[i].count -= count;
+                if (f[i].count == 0)
+                    f.remove_at(i);
+                return offset;
+            }
+            CC_UNREACHABLE("persistent descriptor region exhausted (no free span fits)");
+        });
 }
 
-UINT dx12_descriptor_heap::allocate_transient(UINT count)
+void dx12_descriptor_heap::free_persistent(int offset, int count)
+{
+    CC_ASSERT(count > 0, "freeing an empty persistent descriptor range");
+    persistent_free.lock(
+        [&](cc::vector<free_range>& f)
+        {
+            // Append, then bubble into its sorted-by-start position (the list stays small).
+            f.push_back(free_range{offset, count});
+            cc::isize pos = f.size() - 1;
+            while (pos > 0 && f[pos - 1].start > f[pos].start)
+            {
+                free_range const tmp = f[pos - 1];
+                f[pos - 1] = f[pos];
+                f[pos] = tmp;
+                --pos;
+            }
+
+            // Coalesce with the next span, then the previous, so no adjacent free spans remain.
+            if (pos + 1 < f.size() && f[pos].start + f[pos].count == f[pos + 1].start)
+            {
+                f[pos].count += f[pos + 1].count;
+                f.remove_at(pos + 1);
+            }
+            if (pos > 0 && f[pos - 1].start + f[pos - 1].count == f[pos].start)
+            {
+                f[pos - 1].count += f[pos].count;
+                f.remove_at(pos);
+            }
+        });
+}
+
+int dx12_descriptor_heap::allocate_transient(int count)
 {
     CC_ASSERT(count > 0, "transient descriptor allocation must be positive");
     CC_ASSERT(count <= transient_capacity, "a single binding group exceeds the transient descriptor region");
 
     for (;;)
     {
-        cc::optional<UINT> slot = transient_ring.lock(
-            [&](ring_state& s) -> cc::optional<UINT>
+        cc::optional<int> slot = transient_ring.lock(
+            [&](ring_state& s) -> cc::optional<int>
             {
                 cc::u64 start = s.next_pos;
-                UINT offset = UINT(start % cc::u64(transient_capacity));
+                int offset = int(start % cc::u64(transient_capacity));
                 if (offset + count > transient_capacity) // a table must be contiguous: waste the tail, restart at 0
                 {
                     start += cc::u64(transient_capacity - offset);

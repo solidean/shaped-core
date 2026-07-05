@@ -12,7 +12,6 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
     src/shaped-graphics/backends/dx12/dx12_memory_heap.cc
-    src/shaped-graphics/backends/dx12/dx12_transient_buffer_allocator.cc
     src/shaped-graphics/backends/dx12/dx12_upload_inline.cc
     src/shaped-graphics/backends/dx12/dx12_download_inline.cc
     src/shaped-graphics/backends/dx12/dx12_binding_layout.cc
@@ -37,7 +36,6 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh
     src/shaped-graphics/backends/dx12/dx12_buffer.hh
     src/shaped-graphics/backends/dx12/dx12_memory_heap.hh
-    src/shaped-graphics/backends/dx12/dx12_transient_buffer_allocator.hh
     src/shaped-graphics/backends/dx12/dx12_resource_upload.hh
     src/shaped-graphics/backends/dx12/dx12_resource_download.hh
     src/shaped-graphics/backends/dx12/dx12_upload_inline.hh

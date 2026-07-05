@@ -4,6 +4,7 @@
 // dx12_context.cc.
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/buffer.hh>
 
 namespace sg::backend::dx12
 {
@@ -32,10 +33,23 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // Same for the inline download ring, but its span frees once the actor drains `last`'s readback
     // copies (tracked per-epoch), not at GPU retire — so the hook is only needed here, not in retire.
     _download_inline.on_epoch_advance(last);
-    // Same again for the transient buffer heap and the transient descriptor ring: snapshot `last`'s
-    // window, freed once `last` retires.
-    _transient_buffers.on_epoch_advance(last);
+    // Same again for the transient descriptor ring: snapshot `last`'s window, freed once `last` retires.
     _descriptor_heap.on_epoch_advance(last);
+
+    // Auto-expire `last`'s transient buffers: their placed storage in ctx.transient's heap is reused by
+    // the new epoch, so mark them expired now, which releases each resource into the deferred-deletion
+    // staging area. Done before the staged drain below so those releases are attributed to `last`.
+    // Outside any lock — expire() re-enters schedule_deferred_deletion, which takes _epoch_state.
+    cc::vector<std::weak_ptr<sg::buffer>> const expiring_transient = _transient_expiring.lock(
+        [](cc::vector<std::weak_ptr<sg::buffer>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+    for (auto& w : expiring_transient)
+        if (auto const b = w.lock())
+            b->expire();
 
     // Signal end-of-epoch: enqueues "epoch `last` finished" after all of its recorded GPU work.
     HRESULT const hr = _queue->Signal(_epoch_fence.Get(), cc::u64(last));
@@ -76,9 +90,7 @@ void dx12_context::process_completed_epochs()
 
     // Reclaim inline upload ring space held by every epoch the GPU has now finished.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
-    // Reclaim transient buffer heap windows + transient descriptor ring slots the same way — the epoch
-    // fence proves the memory/slots are idle.
-    _transient_buffers.on_epochs_completed(sg::epoch(completed));
+    // Reclaim transient descriptor ring slots the same way — the epoch fence proves the slots are idle.
     _descriptor_heap.on_epochs_completed(sg::epoch(completed));
 
     // Drain finished epochs (oldest first, FIFO is sorted) under the lock; reclaim outside it.

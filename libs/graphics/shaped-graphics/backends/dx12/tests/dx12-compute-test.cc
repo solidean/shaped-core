@@ -150,3 +150,33 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         c.advance_epoch(2); // keep at most 2 epochs in flight → the rings reclaim older slots/windows
     }
 }
+
+// Create + release many PERSISTENT binding groups on a tiny persistent descriptor region (4 slots).
+// Each group takes 1 descriptor; 50 iterations far exceed the region, so the group's range must be
+// returned to the free list (epoch-deferred) and reused — a bump allocator would exhaust after 4.
+TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
+{
+    auto ctx_r = sg::create_dx12_context(
+        {.use_warp = true, .descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f}); // 4 persistent slots
+    REQUIRE(ctx_r.has_value());
+    auto handle = ctx_r.value();
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    sg::compiled_shader const shader = make_double_shader();
+    auto layout = c.create_dx12_binding_layout(shader.bindings, sg::lifetime_scope::persistent);
+    REQUIRE(layout.has_value());
+
+    auto buf = c.persistent.create_buffer(256, sg::buffer_usage::readwrite_buffer);
+    REQUIRE(buf.has_value());
+
+    for (int i = 0; i < 50; ++i)
+    {
+        sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
+        auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1),
+                                                 sg::lifetime_scope::persistent);
+        REQUIRE(group.has_value());          // never exhausts: released ranges are reclaimed
+        group.value().reset();               // drop -> schedules the range's deferred free
+        c.advance_epoch_and_wait_for_idle(); // retire -> the finalizer returns it to the free list
+    }
+    CHECK(true);
+}

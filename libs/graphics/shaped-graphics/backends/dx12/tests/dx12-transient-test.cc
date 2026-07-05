@@ -2,23 +2,15 @@
 
 #include <nexus/test.hh>
 
-// Transient buffers: per-epoch scratch sub-allocated from a ring over one DEFAULT heap, reclaimed once
-// the creating epoch retires. On WARP so they run headless on CI. See
-// libs/graphics/shaped-graphics/docs/concepts/memory.md.
+// Transient buffers: per-epoch scratch sub-allocated by a bump allocator over one DEFAULT heap whose
+// head resets each epoch (successive epochs alias the same storage). On WARP so they run headless on CI.
+// See libs/graphics/shaped-graphics/docs/concepts/memory.md.
 // NOTE (as in the transfer tests): without the barrier system, upload-then-download of the SAME buffer
 // must span two command lists (state decays to COMMON at each submit).
 
 namespace
 {
 namespace dx12 = sg::backend::dx12;
-
-// A WARP context with a deliberately small transient heap, so a few buffers exhaust it and the
-// per-epoch reclaim path (ring wrap + watermark) is actually exercised on CI.
-sg::context_handle make_small_transient_warp(cc::isize transient_bytes)
-{
-    auto ctx = sg::create_dx12_context({.use_warp = true, .transient_heap_bytes = transient_bytes});
-    return ctx.has_value() ? ctx.value() : nullptr;
-}
 } // namespace
 
 TEST("sg dx12 - transient buffer round-trips within its epoch")
@@ -112,21 +104,23 @@ TEST("sg dx12 - transient buffer reports expired once its epoch passes")
 
     auto buf = c.transient.create_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf.has_value());
-    auto const& db = static_cast<dx12::dx12_buffer const&>(*buf.value());
-    CHECK(!db.is_expired()); // fresh: created in the current epoch
+    CHECK(buf.value()->is_valid()); // fresh: created in the current epoch
+    CHECK(!buf.value()->is_expired());
 
-    c.advance_epoch_and_wait_for_idle(); // its epoch has now passed
-    CHECK(db.is_expired());              // using it now (transfer / binding) would be a hard error
+    c.advance_epoch_and_wait_for_idle(); // its epoch has now passed -> auto-expired at advance
+    CHECK(buf.value()->is_expired());    // using it now (transfer / binding) would be a hard error
+    CHECK(!buf.value()->is_valid());
 }
 
-// Allocate one transient buffer per epoch for many epochs on a small heap. Each 256-byte buffer
-// occupies a 64 KiB placement window, so 30 iterations (~2 MiB) far exceed the 512 KiB heap: the ring
-// must wrap and reclaim retired epochs' windows, and every epoch's data must still round-trip intact.
-TEST("sg dx12 - transient buffer heap recycles across many epochs")
+// Allocate one transient buffer per epoch for many epochs on a small budget. Each 256-byte buffer
+// occupies a 64 KiB placement, so a 512 KiB budget holds only a handful — but the bump head resets
+// every epoch, so successive epochs alias the same storage and every epoch's data still round-trips.
+TEST("sg dx12 - transient buffer storage reused across many epochs")
 {
-    auto handle = make_small_transient_warp(cc::isize(512) * 1024);
+    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
+    c.transient.set_buffer_budget(cc::isize(512) * 1024);
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
@@ -157,6 +151,6 @@ TEST("sg dx12 - transient buffer heap recycles across many epochs")
                 matches = false;
         CHECK(matches);
 
-        c.advance_epoch(2); // keep at most 2 epochs in flight → the ring reclaims older windows
+        c.advance_epoch(2); // keep at most 2 epochs in flight → the bump head resets, aliasing storage
     }
 }

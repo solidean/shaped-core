@@ -108,14 +108,9 @@ protected:
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into. Size
     /// must be >= 0 (0 is a valid empty heap that holds no placements). A heap is persistent — it
     /// outlives the resources placed in it — so it is reached through ctx.persistent.create_memory_heap.
+    /// ctx.transient also builds on it: a transient buffer is just create_buffer with a transient,
+    /// heap-placed allocation_info picked by ctx.transient's per-epoch bump allocator.
     [[nodiscard]] virtual cc::result<memory_heap_handle> create_memory_heap(isize size_in_bytes) = 0;
-
-    /// Allocates a transient buffer from the current epoch's pool (the backend picks the placement).
-    /// Its memory is recycled once the creating epoch retires; using it beyond that epoch is a hard
-    /// error. Size must be >= 0. Reached through ctx.transient.create_buffer.
-    [[nodiscard]] virtual cc::result<buffer_handle> create_transient_buffer(isize size_in_bytes,
-                                                                            buffer_usage usage)
-        = 0;
 
     // The bind-path creates carry an explicit lifetime_scope (persistent vs transient); the
     // ctx.persistent / ctx.transient facades append it. (Buffers carry it inside allocation_info instead.)

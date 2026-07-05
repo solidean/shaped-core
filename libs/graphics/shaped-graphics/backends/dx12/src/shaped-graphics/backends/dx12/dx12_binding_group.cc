@@ -8,6 +8,22 @@
 
 namespace sg::backend::dx12
 {
+dx12_binding_group::~dx12_binding_group()
+{
+    // A persistent group returns its descriptor range to the free list, deferred until its last-using
+    // epoch retires (via a finalizer, mirroring buffer deletion). Transient ranges are reclaimed by the
+    // ring, so nothing to free here.
+    if (_ctx != nullptr && !transient && descriptor_count > 0)
+    {
+        dx12_expiring_resource expiring;
+        auto* const heap = &_ctx->_descriptor_heap;
+        int const offset = table_offset;
+        int const count = descriptor_count;
+        expiring.finalizers.push_back([heap, offset, count] { heap->free_persistent(offset, count); });
+        _ctx->schedule_deferred_deletion(cc::move(expiring));
+    }
+}
+
 cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& ctx,
                                                                  dx12_binding_layout_handle layout,
                                                                  cc::span<sg::named_view const> views,
@@ -16,14 +32,18 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_layout");
 
     auto group = std::make_shared<dx12_binding_group>();
+    group->_ctx = &ctx;
     group->layout = layout;
     group->transient = scope == sg::lifetime_scope::transient;
     group->creation_epoch = ctx.current_epoch();
+    group->descriptor_count = layout->descriptor_count;
 
-    // Persistent groups bump-allocate (live until teardown); transient groups ring-allocate (reclaimed
-    // when their epoch retires).
-    UINT const base = group->transient ? ctx._descriptor_heap.allocate_transient(layout->descriptor_count)
-                                       : ctx._descriptor_heap.allocate_persistent(layout->descriptor_count);
+    // Persistent groups allocate from the free list (freed on release); transient groups ring-allocate
+    // (reclaimed collectively when their epoch retires). Recorded so the destructor can free a persistent
+    // range even if creation fails partway.
+    int const base = group->transient ? ctx._descriptor_heap.allocate_transient(layout->descriptor_count)
+                                      : ctx._descriptor_heap.allocate_persistent(layout->descriptor_count);
+    group->table_offset = base;
     group->table_start = ctx._descriptor_heap.gpu_at(base);
 
     // Match each provided view to a layout slot by name, validate it, and create its descriptor.

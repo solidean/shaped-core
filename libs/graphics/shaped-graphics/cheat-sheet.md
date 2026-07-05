@@ -61,7 +61,8 @@ ctx.persistent.create_buffer(size, usage, alloc={}) // -> cc::result<buffer_hand
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
 ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_handle>  (heap placed resources sub-allocate into)
-ctx.transient.create_buffer(size, usage)           // -> cc::result<buffer_handle>  per-epoch scratch; recycled when the epoch retires
+ctx.transient.create_buffer(size, usage)           // -> cc::result<buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
+ctx.transient.set_buffer_budget(size)              // void — transient-buffer heap budget (before first use; default 128 MiB)
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
@@ -125,6 +126,8 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // abstract; a backend subclasses it. protected ctor: buffer(size_in_bytes, usage)  (size 0 = empty)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
+b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient auto-expires at advance_epoch
+b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 // view factories — a strongly-typed view onto this buffer (buffer's usage must cover the access):
 b.as_uniform_buffer<T>(offset=0)           // -> sg::uniform_view<T>    (CBV/UBO; needs uniform_buffer usage; offset 256-aligned)

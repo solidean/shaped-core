@@ -26,17 +26,10 @@ D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usa
     return desc;
 }
 
-bool dx12_buffer::is_expired() const
-{
-    // Transient storage is recycled once its epoch retires; the moment the current epoch has moved past
-    // the one it was created in, naming it is illegal.
-    return _is_transient && _ctx.current_epoch() != _creation_epoch;
-}
-
-dx12_buffer::~dx12_buffer()
+void dx12_buffer::release_storage() const
 {
     // Stage the GPU handle + finalizers for deletion once the current epoch retires. Empty buffers
-    // (null resource) with no finalizers own nothing GPU-side and need no deferral.
+    // (null resource) with no finalizers own nothing GPU-side; already-released ones no-op here.
     if (_resource || !_finalizers.empty())
     {
         dx12_expiring_resource expiring;
@@ -45,6 +38,16 @@ dx12_buffer::~dx12_buffer()
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }
+
+void dx12_buffer::on_expired() const
+{
+    release_storage();
+}
+
+dx12_buffer::~dx12_buffer()
+{
+    release_storage();
+} // no-op if expire() already released the storage
 
 cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes,
                                                                 sg::buffer_usage usage,
@@ -91,8 +94,14 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
         }
     }
 
-    bool const is_transient = alloc.scope == sg::lifetime_scope::transient;
-    return std::make_shared<dx12_buffer>(*this, current_epoch(), size_in_bytes, usage, cc::move(resource),
-                                         cc::move(heap_handle), is_transient);
+    auto buffer = std::make_shared<dx12_buffer>(*this, current_epoch(), size_in_bytes, usage, cc::move(resource),
+                                                cc::move(heap_handle));
+
+    // A transient buffer is auto-expired when its epoch advances: register it so advance_epoch can flip
+    // it (see dx12_epoch.cc). Weak, so holding the registration never keeps the buffer alive.
+    if (alloc.scope == sg::lifetime_scope::transient)
+        _transient_expiring.lock([&](cc::vector<std::weak_ptr<sg::buffer>>& v) { v.push_back(buffer); });
+
+    return buffer;
 }
 } // namespace sg::backend::dx12

@@ -15,8 +15,8 @@ namespace sg::backend::dx12
 /// binds as a root descriptor table.
 ///
 /// The descriptor range comes from the heap region matching `scope`: a persistent group's table is
-/// bump-allocated and lives until context teardown; a transient group's is ring-allocated and reclaimed
-/// when its epoch retires.
+/// allocated from the free list and returned to it (epoch-deferred) when the group is released; a
+/// transient group's is ring-allocated and reclaimed collectively when its epoch retires.
 class dx12_binding_group final : public sg::binding_group
 {
 public:
@@ -25,8 +25,17 @@ public:
                                                                       cc::span<sg::named_view const> views,
                                                                       sg::lifetime_scope scope);
 
+    dx12_binding_group() = default;
+
+    // Returns a persistent group's descriptor range to the free list, deferred until its last-using
+    // epoch retires (a transient group's range is reclaimed by the ring, so nothing to free). Body in .cc.
+    ~dx12_binding_group() override;
+
+    dx12_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
     dx12_binding_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
+    int table_offset = 0; // heap-relative start of the allocated range (for freeing a persistent group)
+    int descriptor_count = 0;
     cc::vector<sg::buffer_handle> referenced; // keeps the bound buffers alive while the group lives
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so

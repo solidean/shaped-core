@@ -8,6 +8,7 @@
 #include <shaped-graphics/types.hh>
 #include <shaped-graphics/views.hh>
 
+#include <atomic>
 #include <memory>
 
 namespace sg
@@ -114,8 +115,31 @@ public:
     /// Const: registering a finalizer is a lifetime hook, not a change to the buffer's shape.
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
 
+    // Expiry — a buffer may be marked expired (its storage reclaimed) while handles to it still exist;
+    // naming an expired buffer (in a transfer or a binding) is invalid. This is explicit state, not tied
+    // to any one lifetime mode: a transient buffer is auto-expired when its epoch advances, and a
+    // persistent buffer can be expired explicitly to free its storage early without dropping every handle.
+
+    /// Whether this buffer's storage has been reclaimed. Once true, it never goes back to false.
+    [[nodiscard]] bool is_expired() const { return _expired.load(std::memory_order_acquire); }
+
+    /// The negation of is_expired(): the buffer still names live storage.
+    [[nodiscard]] bool is_valid() const { return !is_expired(); }
+
+    /// Expire the buffer now, releasing its GPU storage (deferred until no longer in flight). Idempotent.
+    /// Const: expiry is a lifetime operation, not a change to the buffer's shape.
+    void expire() const
+    {
+        if (!_expired.exchange(true, std::memory_order_acq_rel))
+            on_expired();
+    }
+
 protected:
     buffer(isize size_in_bytes, buffer_usage usage);
+
+    /// Backend hook run once, from expire(), after the buffer is marked expired: release the GPU
+    /// storage (backends defer it until the owning epoch retires). Default: nothing to release.
+    virtual void on_expired() const {}
 
     /// Validates a `range` given in elements of `T` against the buffer bounds and returns its byte offset.
     template <view_element T>
@@ -130,5 +154,6 @@ protected:
     isize _size_in_bytes = 0;
     buffer_usage _usage = buffer_usage::none;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
+    mutable std::atomic<bool> _expired{false};                   // mutable: expire() is a const lifetime hook
 };
 } // namespace sg

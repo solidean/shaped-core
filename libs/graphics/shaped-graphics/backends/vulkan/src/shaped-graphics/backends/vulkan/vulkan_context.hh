@@ -88,11 +88,6 @@ public:
         CC_UNREACHABLE("vulkan memory_heap creation is not implemented yet");
     }
 
-    [[nodiscard]] cc::result<sg::buffer_handle> create_transient_buffer(cc::isize, sg::buffer_usage) override
-    {
-        CC_UNREACHABLE("vulkan transient buffers are not implemented yet");
-    }
-
     // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet.
     [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const>,
                                                                               sg::lifetime_scope) override

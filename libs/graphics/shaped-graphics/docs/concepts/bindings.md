@@ -56,11 +56,21 @@ dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) is lif
 The **dx12** backend implements the full chain — a `binding_layout` becomes a root signature, a
 `binding_group` allocates a range in the single shader-visible descriptor heap and translates each
 `raw_view` into a native CBV/SRV/UAV, and a dispatch binds the table and runs. That heap is **split by
-lifetime**: a leading transient **ring** reclaimed per epoch (same watermark scheme as the transient
-buffer heap — see [memory](memory.md)) and a persistent **bump** region for the rest. A transient group
-that outlives its epoch is refused at bind (its slots may already be reused). The **vulkan** backend
-stubs the chain (`CC_UNREACHABLE`) until its own compute milestone. Compilation is still external: a
-`compiled_shader`'s bytecode + reflection are supplied (the dx12 test embeds a precompiled DXIL blob).
+lifetime**, and the two halves use different allocators because their hazard models differ:
+
+- a leading **transient ring** reclaimed per epoch. Descriptors are **written by the CPU** when a group
+  is created and read by the GPU during that epoch, so a slot can't be reused until the epoch that wrote
+  it retires — a CPU/GPU in-flight hazard the ring's per-epoch watermark enforces. (This is unlike the
+  transient *buffer* heap, whose contents are only GPU-touched, so it can bump-reset and alias across
+  epochs — see [memory](memory.md).) A transient group bound past its epoch is refused (its slots may
+  already be reused).
+- a **persistent free-ranges allocator** for the rest: a group's range is returned to the free list when
+  the group is released, deferred (via an epoch finalizer, like buffer deletion) until its last-using
+  epoch retires — so long-lived groups don't leak the heap.
+
+The **vulkan** backend stubs the chain (`CC_UNREACHABLE`) until its own compute milestone. Compilation is
+still external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test embeds a
+precompiled DXIL blob).
 
 ## Deferred
 
