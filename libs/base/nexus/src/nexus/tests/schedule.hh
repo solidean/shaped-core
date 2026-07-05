@@ -10,9 +10,11 @@ struct test_instance
 {
     test_declaration const* declaration = nullptr;
 
-    // Section scope for just this instance (an alias fragment's path). Empty ⇒ fall back to the run-global
-    // config.section_filters. Lets one alias scope driver A to path X while another scopes driver B to path Y.
-    cc::vector<cc::string> section_filters;
+    // Section scopes for this instance: a set of allowed section paths. A section or dispatched invocable runs
+    // if it matches ANY scope. Empty ⇒ fall back to the run-global config.section_filters. Every matched alias
+    // fragment that shares a driver is grouped into one instance's scope set, so the driver body runs exactly
+    // once no matter how many of its aliases matched — aliases are pure filters, not additive schedule entries.
+    cc::vector<cc::vector<cc::string>> section_scopes;
 };
 
 struct test_schedule_config

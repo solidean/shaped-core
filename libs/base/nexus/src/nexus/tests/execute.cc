@@ -108,13 +108,14 @@ struct test_context
     cc::unique_ptr<test_section> root_section;
     cc::vector<test_section*> curr_section;
 
-    // The effective section filters for this context: an alias fragment's per-instance path, or the run-global
-    // config.section_filters. A dispatched child inherits its parent's span (see invoke_tests). Points into
-    // storage that outlives the run (the execution's instance, or the config).
-    cc::span<cc::string const> section_filters;
+    // The effective set of allowed section paths for this context (an instance's grouped alias-fragment paths,
+    // or the run-global config.section_filters as one scope). A section/dispatch runs if it matches ANY scope.
+    // A dispatched child inherits the reduced subset consistent with its path (see invoke_tests). Spans point
+    // into storage that outlives the run (the execution's instance, the config, or the dispatcher's locals).
+    cc::span<cc::vector<cc::string> const> section_scopes;
 
-    // How many leading section_filters this context's path already consumed (see run_test_body): a nested
-    // dispatched child starts matching sections at section_filters[filter_offset].
+    // How many leading scope segments this context's path already consumed (see run_test_body): a nested
+    // dispatched child starts matching sections at scope[filter_offset].
     int filter_offset = 0;
 
     // current stats
@@ -162,20 +163,17 @@ int g_running_test_section = 0;
 // (see nx::impl::scoped_check_capture). Only the innermost installed sink is active.
 thread_local nx::impl::check_capture_sink* g_check_capture = nullptr;
 
-bool is_section_allowed(cc::span<test_section* const> curr_section,
-                        cc::string_view section_name,
-                        cc::span<cc::string const> section_filters,
-                        int filter_offset)
+// Does one scope (a single filter path) permit `section_name` opening at the current section path?
+bool scope_allows(cc::span<test_section* const> curr_section,
+                  cc::string_view section_name,
+                  cc::span<cc::string const> scope,
+                  int filter_offset)
 {
-    // No filter means all sections are allowed
-    if (section_filters.empty())
+    // A dispatched child's path already consumed `filter_offset` leading segments (the dispatch group + child
+    // name); its own sections match against the remainder. Consumed past the end ⇒ everything below is allowed.
+    if (filter_offset >= scope.size())
         return true;
-
-    // A dispatched child's path already consumed `filter_offset` leading filter segments (the dispatch
-    // group + child name); its own sections match against the remainder.
-    if (filter_offset >= section_filters.size())
-        return true;
-    auto const filter = section_filters.subspan(filter_offset);
+    auto const filter = scope.subspan(filter_offset);
 
     // index 0 is the root, which carries no filterable name
     auto const path = curr_section.subspan(1);
@@ -197,16 +195,32 @@ bool is_section_allowed(cc::span<test_section* const> curr_section,
     return true;
 }
 
+// A section is allowed if it matches ANY scope (OR semantics). No scopes ⇒ everything is allowed.
+bool is_section_allowed(cc::span<test_section* const> curr_section,
+                        cc::string_view section_name,
+                        cc::span<cc::vector<cc::string> const> section_scopes,
+                        int filter_offset)
+{
+    if (section_scopes.empty())
+        return true;
+
+    for (auto const& scope : section_scopes)
+        if (scope_allows(curr_section, section_name, scope, filter_offset))
+            return true;
+
+    return false;
+}
+
 void test_execute_begin(nx::test_execution& execution,
                         nx::test_schedule_config const& config,
-                        cc::span<cc::string const> section_filters,
+                        cc::span<cc::vector<cc::string> const> section_scopes,
                         int filter_offset)
 {
     g_context_stack.push_back(test_context{
         .execution = &execution,
         .config = &config,
         .root_section = cc::make_unique<test_section>(),
-        .section_filters = section_filters,
+        .section_scopes = section_scopes,
         .filter_offset = filter_offset,
     });
     g_context_stack.back().root_section->location = execution.instance.declaration->location;
@@ -274,7 +288,7 @@ nx::impl::raii_section_opener nx::impl::test_open_section(cc::string name, cc::s
     auto& curr_sec = *ctx.curr_section.back();
 
     // check section filter if provided
-    if (!is_section_allowed(ctx.curr_section, name, ctx.section_filters, ctx.filter_offset))
+    if (!is_section_allowed(ctx.curr_section, name, ctx.section_scopes, ctx.filter_offset))
     {
         // we do this so early that the subsection is not even actually created
         return raii_section_opener(false);
@@ -409,11 +423,11 @@ int nx::impl::current_filter_consumed()
     return ctx.filter_offset + int(ctx.curr_section.size()) - 1;
 }
 
-cc::span<cc::string const> nx::impl::current_section_filters()
+cc::span<cc::vector<cc::string> const> nx::impl::current_section_scopes()
 {
     if (g_context_stack.empty())
         return {};
-    return g_context_stack.back().section_filters;
+    return g_context_stack.back().section_scopes;
 }
 
 void nx::impl::report_running_test() noexcept
@@ -642,14 +656,14 @@ int nx::test_schedule_execution::count_failed_checks() const
 void nx::impl::run_test_body(nx::test_execution& execution,
                              nx::test_schedule_config const& config,
                              cc::function_ref<void()> body,
-                             cc::span<cc::string const> section_filters,
+                             cc::span<cc::vector<cc::string> const> section_scopes,
                              int filter_offset)
 {
     CC_ASSERT(execution.instance.declaration != nullptr, "instances must be valid");
     auto const& decl = *execution.instance.declaration;
 
     // Set up test context for check reporting
-    test_execute_begin(execution, config, section_filters, filter_offset);
+    test_execute_begin(execution, config, section_scopes, filter_offset);
 
     // Execute the test body, re-running it once per section-exploration pass
     auto section_num = 0;
@@ -791,14 +805,20 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         test_execution execution;
         execution.instance = instance;
 
-        // Per-instance scope (an alias fragment's path) overrides the run-global filters; empty ⇒ use global.
-        // Point into the execution's own copy, which is stable for the whole call.
-        auto const section_filters = execution.instance.section_filters.empty()
-                                       ? cc::span<cc::string const>(config.section_filters)
-                                       : cc::span<cc::string const>(execution.instance.section_filters);
+        // Effective scopes: the instance's own grouped set (alias-expanded), else the run-global -c path
+        // presented as a single scope, else none (run everything). All three storages outlive run_test_body.
+        cc::vector<cc::vector<cc::string>> global_scope;
+        cc::span<cc::vector<cc::string> const> section_scopes;
+        if (!execution.instance.section_scopes.empty())
+            section_scopes = execution.instance.section_scopes;
+        else if (!config.section_filters.empty())
+        {
+            global_scope.push_back(config.section_filters);
+            section_scopes = global_scope;
+        }
 
         nx::impl::run_test_body(
-            execution, config, [&] { instance.declaration->function(); }, section_filters,
+            execution, config, [&] { instance.declaration->function(); }, section_scopes,
             /*filter_offset=*/0);
 
         result.executions.push_back(cc::move(execution));

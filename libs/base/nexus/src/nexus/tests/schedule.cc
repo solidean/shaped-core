@@ -251,13 +251,16 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         });
     }
 
-    // Aliases: a filter matching an alias name pulls in one instance per fragment, each scoped to the
-    // fragment's section path (an explicit hit, so bucket/disabled gates are bypassed like a named test).
+    // Aliases act purely as filters: a matched alias name selects (driver, section-path) leaves to run. Every
+    // matched fragment that shares a driver is grouped into that driver's ONE instance, whose scope set is the
+    // union of their paths — so a driver's body runs exactly once regardless of how many of its aliases match
+    // (aliases never add schedule entries in an additive sense). Bucket/disabled gates are bypassed for these,
+    // like a directly named test.
     //
     // A fragment is dropped when its target run is already covered, so nothing executes twice:
-    //  - the driver is already scheduled *unscoped* (empty section filters, i.e. matched directly by name) —
-    //    that run drives every invocable, including this fragment's, so the scoped copy is redundant;
-    //  - an identical (driver, section path) instance already exists (two aliases sharing a fragment).
+    //  - the driver is already scheduled *unscoped* (matched directly by name) — that run drives every
+    //    invocable, including this fragment's, so any scoped instance is redundant;
+    //  - its exact (driver, section path) is already in the driver's scope set (two aliases sharing a fragment).
     for (auto const& alias : registry.aliases)
     {
         if (!config.alias_matches(alias))
@@ -268,22 +271,40 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
             if (frag.driver == nullptr)
                 continue;
 
-            bool covered = false;
+            // Covered by an unscoped run of this driver? then everything under it runs already.
+            bool covered_unscoped = false;
             for (auto const& inst : schedule.instances)
-                if (inst.declaration == frag.driver
-                    && (inst.section_filters.empty() || same_path(inst.section_filters, frag.section_path)))
+                if (inst.declaration == frag.driver && inst.section_scopes.empty())
                 {
-                    covered = true;
+                    covered_unscoped = true;
                     break;
                 }
-
-            if (covered)
+            if (covered_unscoped)
                 continue;
 
-            schedule.instances.push_back(test_instance{
-                .declaration = frag.driver,
-                .section_filters = frag.section_path,
-            });
+            // Find (or create) the single scoped instance for this driver, then add this path (deduped).
+            test_instance* scoped = nullptr;
+            for (auto& inst : schedule.instances)
+                if (inst.declaration == frag.driver && !inst.section_scopes.empty())
+                {
+                    scoped = &inst;
+                    break;
+                }
+            if (scoped == nullptr)
+            {
+                schedule.instances.push_back(test_instance{.declaration = frag.driver});
+                scoped = &schedule.instances.back();
+            }
+
+            bool already = false;
+            for (auto const& path : scoped->section_scopes)
+                if (same_path(path, frag.section_path))
+                {
+                    already = true;
+                    break;
+                }
+            if (!already)
+                scoped->section_scopes.push_back(frag.section_path);
         }
     }
 
