@@ -1,5 +1,6 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/alias.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
@@ -118,6 +119,32 @@ TEST("export - test listing JSON reports eligibility and metadata for every test
     CHECK(json.contains("\"name\": \"gamma\""));
     CHECK(json.contains("\"bucket\": \"manual\""));
     CHECK(json.contains("\"enabled\": false"));
+}
+
+TEST("export - test listing JSON reports aliases and counts a filter-matched alias as eligible")
+{
+    nx::test_registry reg;
+    reg.add_declaration("drv", {}, [] {});
+    nx::setup(reg).define_alias(
+        "api thing", {nx::alias_fragment{.driver = reg.declarations.data(), .section_path = {"g", "api thing"}}});
+
+    // No filter: the alias is listed but not counted as an eligible match (a full sweep runs drivers directly).
+    {
+        char const* const args[] = {"prog"};
+        cc::string const json = nx::write_test_listing_json("s", config_from(args), reg);
+        CHECK(json.contains("\"aliases\": ["));
+        CHECK(json.contains("\"name\": \"api thing\""));
+        CHECK(json.contains("\"fragment_count\": 1"));
+        CHECK(json.contains("\"eligible_alias_count\": 0"));
+    }
+
+    // A filter matching the alias name marks it eligible, so dev.py keeps this binary even with no plain match.
+    {
+        char const* const args[] = {"prog", "api thing"};
+        cc::string const json = nx::write_test_listing_json("s", config_from(args), reg);
+        CHECK(json.contains("\"eligible_count\": 0"));
+        CHECK(json.contains("\"eligible_alias_count\": 1"));
+    }
 }
 
 TEST("export - junit report for an all-pass run has no failure elements")

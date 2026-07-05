@@ -10,7 +10,7 @@
 #include <nexus/fuzz/operation.hh>
 #include <nexus/fuzz/regression_dialect.hh>
 #include <nexus/fuzz/run.hh>
-#include <nexus/fuzz/value.hh>
+#include <nexus/tests/typed_value.hh>
 
 namespace nx::fuzz
 {
@@ -79,7 +79,7 @@ struct test
     // ---- direct evaluation (used by regression code) ---------------------------------------------
 
     template <class... Args>
-    [[nodiscard]] fuzz_value eval_op(cc::string_view op, Args&&... args) const
+    [[nodiscard]] typed_value eval_op(cc::string_view op, Args&&... args) const
     {
         return op_or_die(op)->eval(cc::forward<Args>(args)...);
     }

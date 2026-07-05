@@ -89,9 +89,10 @@ if(NOT EMSCRIPTEN)
     endif()
 endif()
 
-# Test executable. This binary stays backend-agnostic (the abstract sg surface only). Backend-
-# specific tests live with their backend as their own *-test binary (see backends/dx12/tests), so
-# they are naturally guarded to the platform where that backend builds.
+# Test executable. Besides the pure/abstract-surface tests, this is where the sg *API* is tested: the tests
+# under tests/api/ are context_handle INVOCABLE_TESTs run against every available backend (each backend
+# contributes an entry-point driver under tests/backends/). Per-backend smoke tests and internal invariants
+# still live with their backend as their own *-test binary (see backends/dx12/tests).
 add_executable(shaped-graphics-test
     tests/main.cc
     tests/smoke-test.cc
@@ -99,6 +100,22 @@ add_executable(shaped-graphics-test
     tests/bytes_future-test.cc
     tests/shader-test.cc
 )
+
+# Cross-backend API tests: run the sg API against each backend compiled into this binary. An alias (defined in
+# tests/api/aliases.cc) makes each invocable runnable by name across all backends. Only meaningful when at
+# least one backend is present.
+if(_sg_backends)
+    target_sources(shaped-graphics-test PRIVATE
+        tests/api/context-suite.cc
+        tests/api/aliases.cc
+    )
+    if(WIN32)
+        target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
+    endif()
+    if(Vulkan_FOUND)
+        target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
+    endif()
+endif()
 
 target_link_libraries(shaped-graphics-test
     PRIVATE

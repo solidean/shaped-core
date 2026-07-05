@@ -2,46 +2,47 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
-#include <nexus/fuzz/fwd.hh>
 
 #include <type_traits>
 #include <typeindex> // std::type_index: runtime type identity for the type-erased box
 #include <typeinfo>
 
-namespace nx::fuzz
+namespace nx
 {
-/// A single, type-erased, heap-boxed value flowing through a fuzz program.
+/// A single, type-erased, heap-boxed value. The shared substrate for typed test-argument passing
+/// (nx::invoke_tests / INVOCABLE_TEST) and the fuzz engine's value slots.
 ///
 /// Move-only: a value lives in exactly one slot and is never silently copied. get<T&>() returns a
-/// reference *into* the box, so an operation taking `T&` mutates the stored value in place (this is
-/// how mutating operations are modeled). A default-constructed value is "void" and not valid.
-struct fuzz_value
+/// reference *into* the box, so a callee taking `T&` mutates the stored value in place. A
+/// default-constructed value is "void" and not valid. The stored type is always the *decayed* type
+/// of whatever was boxed, so matching is on decayed identity (`T` and `T const&` box the same type).
+struct typed_value
 {
     /// Boxes a copy/move of `value`. The stored type is the decayed type of V.
     template <class V>
-    [[nodiscard]] static fuzz_value create(V value)
+    [[nodiscard]] static typed_value create(V value)
     {
         using T = std::decay_t<V>;
-        static_assert(std::is_move_constructible_v<T>, "fuzz values must be movable");
-        fuzz_value v;
+        static_assert(std::is_move_constructible_v<T>, "typed values must be movable");
+        typed_value v;
         v._type = std::type_index(typeid(T));
         v._data = new T(cc::move(value));
         v._deleter = [](void* p) { delete static_cast<T*>(p); };
         return v;
     }
 
-    fuzz_value() = default;
+    typed_value() = default;
 
-    fuzz_value(fuzz_value const&) = delete;
-    fuzz_value& operator=(fuzz_value const&) = delete;
+    typed_value(typed_value const&) = delete;
+    typed_value& operator=(typed_value const&) = delete;
 
-    fuzz_value(fuzz_value&& other) noexcept : _type(other._type), _data(other._data), _deleter(other._deleter)
+    typed_value(typed_value&& other) noexcept : _type(other._type), _data(other._data), _deleter(other._deleter)
     {
         other._data = nullptr;
         other._deleter = nullptr;
     }
 
-    fuzz_value& operator=(fuzz_value&& other) noexcept
+    typed_value& operator=(typed_value&& other) noexcept
     {
         if (this != &other)
         {
@@ -55,7 +56,7 @@ struct fuzz_value
         return *this;
     }
 
-    ~fuzz_value() { reset(); }
+    ~typed_value() { reset(); }
 
     [[nodiscard]] bool is_valid() const { return _data != nullptr; }
     [[nodiscard]] std::type_index type() const { return _type; }
@@ -75,8 +76,8 @@ struct fuzz_value
         static_assert(!std::is_rvalue_reference_v<T>, "rvalue references are not supported");
         static_assert(!std::is_pointer_v<std::decay_t<T>>, "storing raw pointers is not supported");
         using plain_t = std::decay_t<T>;
-        CC_ASSERT(is_valid(), "fuzz value is not valid");
-        CC_ASSERT(is<plain_t>(), "fuzz value accessed at the wrong type");
+        CC_ASSERT(is_valid(), "typed value is not valid");
+        CC_ASSERT(is<plain_t>(), "typed value accessed at the wrong type");
         return *static_cast<plain_t*>(_data);
     }
 
@@ -95,4 +96,4 @@ private:
     void* _data = nullptr;
     void (*_deleter)(void*) = nullptr;
 };
-} // namespace nx::fuzz
+} // namespace nx

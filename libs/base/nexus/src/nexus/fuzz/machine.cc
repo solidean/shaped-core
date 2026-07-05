@@ -144,14 +144,14 @@ fuzz_machine::state fuzz_machine::make_initial_state() const
 {
     state s;
     for (int i = 0; i < int(_types.size()); ++i)
-        s.values_by_type.push_back(cc::vector<fuzz_value>());
+        s.values_by_type.push_back(cc::vector<typed_value>());
     return s;
 }
 
-cc::span<fuzz_value*> fuzz_machine::assemble_args(state& s,
-                                                  executed_operation const& exec,
-                                                  cc::vector<fuzz_value>& synth,
-                                                  cc::vector<fuzz_value*>& buf) const
+cc::span<typed_value*> fuzz_machine::assemble_args(state& s,
+                                                   executed_operation const& exec,
+                                                   cc::vector<typed_value>& synth,
+                                                   cc::vector<typed_value*>& buf) const
 {
     int rng = 0;
     for (auto slot : exec.arg_slots)
@@ -163,7 +163,7 @@ cc::span<fuzz_value*> fuzz_machine::assemble_args(state& s,
     {
         if (is_random_type(slot.type))
         {
-            synth.push_back(fuzz_value::create(cc::random::from_state(exec.state)));
+            synth.push_back(typed_value::create(cc::random::from_state(exec.state)));
             buf.push_back(&synth.back());
         }
         else
@@ -171,14 +171,14 @@ cc::span<fuzz_value*> fuzz_machine::assemble_args(state& s,
             buf.push_back(&s.values_by_type[int(slot.type)][int(slot.value)]);
         }
     }
-    return cc::span<fuzz_value*>(buf);
+    return cc::span<typed_value*>(buf);
 }
 
 bool fuzz_machine::preconditions_fulfilled(state const& s, executed_operation const& exec) const
 {
     auto const& oi = _operations[int(exec.operation)];
-    cc::vector<fuzz_value> synth;
-    cc::vector<fuzz_value*> buf;
+    cc::vector<typed_value> synth;
+    cc::vector<typed_value*> buf;
     // assemble reads slots; the const_cast is safe because precondition evaluation never mutates.
     auto args = assemble_args(const_cast<state&>(s), exec, synth, buf);
     return oi.op->check_preconditions(args);
@@ -188,8 +188,8 @@ fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_
 {
     auto const& oi = _operations[int(exec.operation)];
 
-    cc::vector<fuzz_value> synth;
-    cc::vector<fuzz_value*> buf;
+    cc::vector<typed_value> synth;
+    cc::vector<typed_value*> buf;
     auto args = assemble_args(s, exec, synth, buf);
 
     // Capture CHECK/REQUIRE failures (without aborting or polluting the host test) and reroute a
@@ -199,7 +199,7 @@ fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_
     auto handler = cc::impl::scoped_assertion_handler([](cc::impl::assertion_info const& info)
                                                       { throw impl::assertion_failure{info.message}; });
 
-    fuzz_value result;
+    typed_value result;
     try
     {
         result = oi.op->invoke(args);

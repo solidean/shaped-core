@@ -6,8 +6,10 @@ add_library(nexus
     src/nexus/run.cc
     src/nexus/test.cc
     src/nexus/guide.cc
+    src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
     src/nexus/tests/config.cc
+    src/nexus/tests/invoke_tests.cc
     src/nexus/tests/execute.cc
     src/nexus/tests/registry.cc
     src/nexus/tests/schedule.cc
@@ -38,11 +40,15 @@ target_sources(nexus
     src/nexus/run.hh
     src/nexus/test.hh
     src/nexus/guide.hh
+    src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
     src/nexus/tests/config.hh
+    src/nexus/tests/invoke_tests.hh
     src/nexus/tests/execute.hh
     src/nexus/tests/registry.hh
     src/nexus/tests/schedule.hh
+    src/nexus/tests/typed_value.hh
+    src/nexus/tests/typed_invoke.hh
     src/nexus/tests/export/xml.hh
     src/nexus/tests/export/catch2.hh
     src/nexus/tests/export/junit.hh
@@ -51,7 +57,6 @@ target_sources(nexus
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
-    src/nexus/fuzz/value.hh
     src/nexus/fuzz/signature.hh
     src/nexus/fuzz/operation.hh
     src/nexus/fuzz/executed_operation.hh
@@ -90,7 +95,9 @@ add_executable(nexus-test
     tests/test-export-test.cc
     tests/test-registry-test.cc
     tests/test-section-test.cc
-    tests/fuzz-value-test.cc
+    tests/test-invocable-test.cc
+    tests/test-alias-test.cc
+    tests/test-typed-value-test.cc
     tests/fuzz-engine-test.cc
     tests/fuzz-minimize-test.cc
     tests/fuzz-regression-test.cc

@@ -59,6 +59,54 @@ void print_section_recursive(cc::string& out,
         out.appendf("{}</Section>\n", indent);
     }
 }
+
+// Renders dispatched (nested) executions as sections: one <Section> per dispatch group, containing one
+// <Section> per instance (named by the parametrized test), whose own sections/children nest below. This
+// mirrors the executor's section path (group / instance / ...) so IDE "run this section" (-c) works.
+void print_nested_executions(cc::string& out,
+                             nx::test_execution const& parent,
+                             cc::string const& indent,
+                             int& error_count,
+                             int max_errors)
+{
+    cc::isize i = 0;
+    while (i < parent.nested.size())
+    {
+        auto const group = parent.nested[i].invocation_group;
+        out.appendf("{}<Section name=\"{}\">\n", indent, xml_escape(group));
+
+        double group_duration = 0;
+        bool group_failing = false;
+        while (i < parent.nested.size() && parent.nested[i].invocation_group == group)
+        {
+            auto const& child = parent.nested[i];
+            CC_ASSERT(child.instance.declaration != nullptr, "nested instance is invalid");
+            auto const& decl = *child.instance.declaration;
+
+            out.appendf("{}  <Section name=\"{}\" filename=\"{}\" line=\"{}\">\n", indent, xml_escape(decl.name),
+                        xml_escape(decl.location.file_name()), decl.location.line());
+            print_section_recursive(out, child.root, indent + "    ", error_count, max_errors);
+            print_nested_executions(out, child, indent + "    ", error_count, max_errors);
+
+            bool const child_failing = child.is_considered_failing();
+            auto const failures = child_failing ? cc::max(child.root.failed_checks, 1) : child.root.failed_checks;
+            out.appendf("{}    <OverallResults successes=\"{}\" failures=\"{}\" expectedFailures=\"0\" "
+                        "durationInSeconds=\"{}\"/>\n",
+                        indent, child.root.executed_checks - child.root.failed_checks, failures,
+                        child.root.duration_seconds);
+            out.appendf("{}  </Section>\n", indent);
+
+            group_duration += child.root.duration_seconds;
+            group_failing |= child_failing;
+            ++i;
+        }
+
+        out.appendf("{}  <OverallResults successes=\"{}\" failures=\"{}\" expectedFailures=\"0\" "
+                    "durationInSeconds=\"{}\"/>\n",
+                    indent, group_failing ? 0 : 1, group_failing ? 1 : 0, group_duration);
+        out.appendf("{}</Section>\n", indent);
+    }
+}
 } // namespace
 
 cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
@@ -69,6 +117,11 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
 
     for (auto const& decl : registry.declarations)
     {
+        // Parametrized tests are inert (run only under their driver via nx::invoke_tests); don't advertise them
+        // as standalone runnable cases or the IDE would select nothing when one is clicked.
+        if (decl.is_invocable())
+            continue;
+
         out += "  <TestCase>\n";
         out.appendf("    <Name>{}</Name>\n", xml_escape(decl.name));
         out += "    <ClassName/>\n";
@@ -76,6 +129,21 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
         out += "    <SourceInfo>\n";
         out.appendf("      <File>{}</File>\n", xml_escape(decl.location.file_name()));
         out.appendf("      <Line>{}</Line>\n", decl.location.line());
+        out += "    </SourceInfo>\n";
+        out += "  </TestCase>\n";
+    }
+
+    // Aliases are runnable (unlike bare invocable decls): clicking one runs its name as a filter, which the
+    // scheduler expands into the fragment runs. Advertise them so IDEs can offer them directly.
+    for (auto const& alias : registry.aliases)
+    {
+        out += "  <TestCase>\n";
+        out.appendf("    <Name>{}</Name>\n", xml_escape(alias.name));
+        out += "    <ClassName/>\n";
+        out += "    <Tags></Tags>\n";
+        out += "    <SourceInfo>\n";
+        out.appendf("      <File>{}</File>\n", xml_escape(alias.location.file_name()));
+        out.appendf("      <Line>{}</Line>\n", alias.location.line());
         out += "    </SourceInfo>\n";
         out += "  </TestCase>\n";
     }
@@ -113,6 +181,7 @@ cc::string nx::write_catch2_results_xml(nx::test_schedule_execution const& execu
         int const max_errors = 50;
         int error_count = 0;
         print_section_recursive(out, exec.root, "    ", error_count, max_errors);
+        print_nested_executions(out, exec, "    ", error_count, max_errors);
 
         // Print test case summary
         out.appendf("    <OverallResult success=\"{}\" durationInSeconds=\"{}\"/>\n", success,

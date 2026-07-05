@@ -28,5 +28,5 @@
 #include <nexus/fuzz/regression_dialect.hh>
 #include <nexus/fuzz/run.hh>
 #include <nexus/fuzz/test.hh>
-#include <nexus/fuzz/value.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/typed_value.hh>
