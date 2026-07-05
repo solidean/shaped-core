@@ -60,10 +60,11 @@ The axes are independent, but in practice:
 
 ## Status
 
-Only the **dedicated** backing is implemented today; a placed allocation asserts in the backends
-(`is_dedicated()` gate) until placed-resource binding lands. The transient scope is not yet exposed —
-only `ctx.persistent` exists. `context` has no `create_memory_heap` yet, and neither backend can bind a
-resource into a heap.
+Both **dedicated** and **placed** buffer backing work on dx12: `ctx.persistent.create_memory_heap(size)`
+mints a heap, and a placement's `allocation_info` routes `create_buffer` through `CreatePlacedResource`
+(the buffer holds a handle to its heap so the heap outlives the placement). The vulkan backend still
+stubs both. The transient scope is not yet exposed — only `ctx.persistent` exists — so the per-epoch
+bump allocator that will sit on top of a heap is still to come.
 
 ## See also
 

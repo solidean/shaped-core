@@ -22,6 +22,11 @@ public:
                                                           buffer_usage usage,
                                                           allocation_info const& alloc = {});
 
+    /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into (query a
+    /// resource's requirements from the heap, pick an offset, then create_* with that placement). Size
+    /// must be >= 0 (0 is a valid empty heap).
+    [[nodiscard]] cc::result<memory_heap_handle> create_memory_heap(isize size_in_bytes);
+
     /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings.
     [[nodiscard]] cc::result<binding_layout_handle> create_binding_layout(cc::span<binding const> bindings);
 

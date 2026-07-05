@@ -99,6 +99,11 @@ protected:
                                                                   allocation_info const& alloc)
         = 0;
 
+    /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into. Size
+    /// must be >= 0 (0 is a valid empty heap that holds no placements). A heap is persistent — it
+    /// outlives the resources placed in it — so it is reached through ctx.persistent.create_memory_heap.
+    [[nodiscard]] virtual cc::result<memory_heap_handle> create_memory_heap(isize size_in_bytes) = 0;
+
     // The bind-path creates carry an explicit lifetime_scope (persistent vs transient); the
     // ctx.persistent / ctx.transient facades append it. (Buffers carry it inside allocation_info instead.)
 
