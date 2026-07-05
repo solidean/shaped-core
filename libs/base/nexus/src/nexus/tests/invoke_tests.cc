@@ -28,17 +28,32 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
     auto const* const config = current_config();
     CC_ASSERT(parent != nullptr && config != nullptr, "nx::invoke_tests must be called from within a running test");
 
-    // How many section_filters this path already consumed (ancestors + our own open sections). The
-    // invocation group is the next segment, the child name the one after; the child's own sections follow.
+    // How many scope segments this path already consumed (ancestors + our own open sections). The invocation
+    // group is the next segment, the child name the one after; the child's own sections follow.
     int const consumed = current_filter_consumed();
 
-    // The effective scope of the running instance (a fragment's path for an alias-expanded instance, else the
-    // global -c). Dispatched children inherit it so an alias fragment scopes exactly its one target.
-    auto const sf = current_section_filters();
+    // The effective scopes of the running instance (the grouped alias-fragment paths, or the global -c as one
+    // scope). A dispatch runs if it matches ANY scope; the child descends with just the consistent subset.
+    auto const scopes = current_section_scopes();
 
-    // whole invocation group scoped out by -c
-    if (consumed < sf.size() && cc::string_view(sf[consumed]) != name)
-        return result;
+    // A scope permits segment `seg` at index `idx` when it is exhausted there (matches everything below) or
+    // names `seg`.
+    auto const permits = [](cc::span<cc::string const> s, int idx, cc::string_view seg)
+    { return idx >= int(s.size()) || cc::string_view(s[idx]) == seg; };
+
+    // Whole invocation group scoped out? (unscoped runs it; otherwise some scope must permit `name` here)
+    if (!scopes.empty())
+    {
+        bool any_group = false;
+        for (auto const& s : scopes)
+            if (permits(s, consumed, name))
+            {
+                any_group = true;
+                break;
+            }
+        if (!any_group)
+            return result;
+    }
 
     // Collect signature matches from the active registry (the run's own registry; static registry for a
     // normal run), sorted for a stable, reproducible order (registry order is static-init order).
@@ -65,9 +80,17 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
     {
         ++result.matched;
 
-        // child scoped out by -c
-        if (consumed + 1 < sf.size() && cc::string_view(sf[consumed + 1]) != decl->name)
-            continue;
+        // Reduce to the scopes consistent with this (group, child). The child descends with just those, so a
+        // divergent sibling scope can't spuriously match deeper. Unscoped (empty) stays unscoped ⇒ run all.
+        cc::vector<cc::vector<cc::string>> child_scopes;
+        if (!scopes.empty())
+        {
+            for (auto const& s : scopes)
+                if (permits(s, consumed, name) && permits(s, consumed + 1, decl->name))
+                    child_scopes.push_back(s);
+            if (child_scopes.empty())
+                continue; // this child is scoped out
+        }
 
         // Cycle guard: this invocable is already running further up the chain, so invoking it again would
         // recurse forever. Fail the current test with a clear message instead of overflowing the stack.
@@ -81,7 +104,7 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
         child.instance.declaration = decl;
         child.invocation_group = cc::string(name);
 
-        run_test_body(child, *config, [&] { decl->invocable_function(values); }, sf, consumed + 2);
+        run_test_body(child, *config, [&] { decl->invocable_function(values); }, child_scopes, consumed + 2);
 
         ++result.executed;
         parent->nested.push_back(cc::move(child));

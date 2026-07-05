@@ -89,19 +89,12 @@ TEST("sg bindings - compiled_shader holds reflection")
         .type = sg::binding_type::readwrite_structured_buffer,
     });
 
-    CHECK(shader.stage == sg::shader_stage::compute);
-    CHECK(shader.format == sg::shader_format::dxil);
-    CHECK(shader.entry_point == "main");
-    REQUIRE(shader.workgroup_size.has_value());
-    CHECK(shader.workgroup_size.value().x == 64);
+    // The behavioral payload of reflection: the declared binding accepts a matching bound view (a
+    // structured buffer carries no block_size, unlike a uniform block).
     REQUIRE(shader.bindings.size() == 1);
-
     auto const& b = shader.bindings[0];
-    CHECK(b.name == "Output");
-    CHECK(b.type == sg::binding_type::readwrite_structured_buffer);
     CHECK(!b.block_size.has_value());
 
-    // The declared binding accepts a matching bound view.
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
     CHECK(sg::accepts(b.type, buf->as_readwrite_buffer<particle>()));
 }

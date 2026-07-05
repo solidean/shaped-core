@@ -5,7 +5,6 @@ project(shaped-graphics LANGUAGES CXX)
 # GPU resource types plus the pure-virtual backend bridge. Concrete backends live under
 # backends/ as their own static libraries and are added conditionally below.
 add_library(shaped-graphics
-    src/shaped-graphics/shaped-graphics.cc
     src/shaped-graphics/buffer.cc
     src/shaped-graphics/bytes_future.cc
     src/shaped-graphics/command_list.cc
@@ -89,25 +88,35 @@ if(NOT EMSCRIPTEN)
     endif()
 endif()
 
-# Test executable. Besides the pure/abstract-surface tests, this is where the sg *API* is tested: the tests
-# under tests/api/ are context_handle INVOCABLE_TESTs run against every available backend (each backend
-# contributes an entry-point driver under tests/backends/). Per-backend smoke tests and internal invariants
-# still live with their backend as their own *-test binary (see backends/dx12/tests).
+# Test executable. Tests are organized by topic under tests/<topic>/. Pure/abstract-surface tests (value
+# types, no GPU) compile unconditionally; the backend-agnostic sg *API* tests are context_handle
+# INVOCABLE_TESTs run against every available backend and are gated on a backend being present (below), since
+# the nexus orphan check fails an enabled invocable that no driver invokes. Per-backend smoke tests and
+# internal invariants live with their backend as their own *-test binary (see backends/dx12/tests).
 add_executable(shaped-graphics-test
     tests/main.cc
-    tests/smoke-test.cc
-    tests/views-test.cc
-    tests/bytes_future-test.cc
-    tests/shader-test.cc
+    tests/buffer/views-test.cc
+    tests/transfer/bytes_future-test.cc
+    tests/binding/binding-test.cc
 )
 
-# Cross-backend API tests: run the sg API against each backend compiled into this binary. An alias (defined in
-# tests/api/aliases.cc) makes each invocable runnable by name across all backends. Only meaningful when at
-# least one backend is present.
+# Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
+# contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
+# each invocable runnable by name across all backends. Only meaningful when at least one backend is present.
+#
+# TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
+# support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
+# It would make this `if(_sg_backends)` guard unnecessary (a backend is always present), let large parts of
+# the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
+# against. Future work.
 if(_sg_backends)
     target_sources(shaped-graphics-test PRIVATE
-        tests/api/context-suite.cc
-        tests/api/aliases.cc
+        tests/backends/backends.cc
+        tests/context/context-test.cc
+        tests/buffer/buffer-test.cc
+        tests/command_list/command_list-test.cc
+        tests/transfer/transfer-test.cc
+        tests/copy/copy-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)

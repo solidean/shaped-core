@@ -2,9 +2,10 @@
 
 #include <nexus/test.hh>
 
-// Device→device buffer copy: cmd.copy.buffer_bytes_region / buffer_data_region. Same WARP +
-// COMMON-state-decay rules as the inline transfers, so upload → copy → download is three separately
-// submitted command lists. See libs/graphics/shaped-graphics/docs/concepts/backends.md.
+// Device→device buffer copy: cmd.copy.buffer_bytes_region / buffer_data_region, on WARP. These tests
+// split upload → copy → download across separate command lists; recording all three in one list is also
+// correct now (dx12_command_list::record_transfer_barrier orders them) — the backend-agnostic tests
+// (tests/copy/) cover that single-list path. See libs/graphics/shaped-graphics/docs/concepts/backends.md.
 
 namespace
 {

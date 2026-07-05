@@ -66,7 +66,7 @@ TEST("aliases - setup API selects invocables by decayed signature and records al
     CHECK(reg.aliases[0].fragments[0].driver == s.find_test("driver"));
 }
 
-TEST("aliases - a filter matching an alias expands to one scoped instance per fragment")
+TEST("aliases - a filter matching an alias expands to one scoped instance")
 {
     int ran_a = 0;
     int ran_b = 0;
@@ -93,9 +93,10 @@ TEST("aliases - a filter matching an alias expands to one scoped instance per fr
     auto schedule = nx::test_schedule::create(with_filter("childB"), reg);
     REQUIRE(schedule.instances.size() == 1);
     CHECK(schedule.instances[0].declaration == s.find_test("drv"));
-    REQUIRE(schedule.instances[0].section_filters.size() == 2);
-    CHECK(schedule.instances[0].section_filters[0] == "grp");
-    CHECK(schedule.instances[0].section_filters[1] == "childB");
+    REQUIRE(schedule.instances[0].section_scopes.size() == 1);
+    REQUIRE(schedule.instances[0].section_scopes[0].size() == 2);
+    CHECK(schedule.instances[0].section_scopes[0][0] == "grp");
+    CHECK(schedule.instances[0].section_scopes[0][1] == "childB");
 
     auto exec = nx::execute_tests(schedule, with_filter("childB"));
 
@@ -143,6 +144,70 @@ TEST("aliases - a multi-fragment alias runs each fragment scoped to its own driv
     CHECK(exec.executions[1].nested[0].instance.declaration->name == "shared");
 }
 
+TEST("aliases - many aliases of one driver collapse into a single scoped run")
+{
+    // The "sg -" case: one backend driver, several invocables, an alias per invocable. A filter matching the
+    // alias names (but NOT the driver name) must schedule the driver ONCE — with every matched path in its
+    // scope set — never once per alias. Aliases are pure filters, not additive schedule entries.
+    int drv_runs = 0;
+    int ran_a = 0;
+    int ran_b = 0;
+    int ran_c = 0;
+    int ran_d = 0;
+
+    nx::test_registry reg;
+    add_invocable(reg, "sel A",
+                  [&](int)
+                  {
+                      ++ran_a;
+                      CHECK(true);
+                  });
+    add_invocable(reg, "sel B",
+                  [&](int)
+                  {
+                      ++ran_b;
+                      CHECK(true);
+                  });
+    add_invocable(reg, "sel C",
+                  [&](int)
+                  {
+                      ++ran_c;
+                      CHECK(true);
+                  });
+    add_invocable(reg, "sel D",
+                  [&](int)
+                  {
+                      ++ran_d;
+                      CHECK(true);
+                  }); // not aliased → must stay filtered out
+    reg.add_declaration("backend", {},
+                        [&]
+                        {
+                            ++drv_runs;
+                            nx::invoke_tests<int>("g", 0);
+                        });
+
+    nx::setup s(reg);
+    s.define_alias("pick sel A", {nx::alias_fragment{.driver = s.find_test("backend"), .section_path = {"g", "sel A"}}});
+    s.define_alias("pick sel B", {nx::alias_fragment{.driver = s.find_test("backend"), .section_path = {"g", "sel B"}}});
+    s.define_alias("pick sel C", {nx::alias_fragment{.driver = s.find_test("backend"), .section_path = {"g", "sel C"}}});
+
+    // "pick sel" matches all three alias names, none of which is the driver name "backend".
+    auto schedule = nx::test_schedule::create(with_filter("pick sel"), reg);
+    REQUIRE(schedule.instances.size() == 1); // ONE driver instance, not three
+    CHECK(schedule.instances[0].declaration == s.find_test("backend"));
+    CHECK(schedule.instances[0].section_scopes.size() == 3); // all three selected paths, OR-matched at run time
+
+    auto exec = nx::execute_tests(schedule, with_filter("pick sel"));
+    CHECK(drv_runs == 1); // the driver body (and its one-time setup) ran exactly once
+    CHECK(ran_a == 1);
+    CHECK(ran_b == 1);
+    CHECK(ran_c == 1);
+    CHECK(ran_d == 0); // the unaliased invocable stayed filtered out
+    REQUIRE(exec.executions.size() == 1);
+    CHECK(exec.executions[0].nested.size() == 3); // A, B, C dispatched under the single driver run
+}
+
 TEST("aliases - duplicate fragments (same driver + path) are scheduled once")
 {
     nx::test_registry reg;
@@ -173,7 +238,7 @@ TEST("aliases - a full sweep (no filter) does not expand aliases")
     auto schedule = nx::test_schedule::create({}, reg);
     REQUIRE(schedule.instances.size() == 1);
     CHECK(schedule.instances[0].declaration == s.find_test("drv"));
-    CHECK(schedule.instances[0].section_filters.empty());
+    CHECK(schedule.instances[0].section_scopes.empty());
 }
 
 TEST("aliases - a driver selected directly by name subsumes its alias fragments (no double run)")
@@ -196,7 +261,7 @@ TEST("aliases - a driver selected directly by name subsumes its alias fragments 
     auto schedule = nx::test_schedule::create(with_filter("drv"), reg);
     // only the unscoped driver run — the alias fragment is dropped as already covered by it
     REQUIRE(schedule.instances.size() == 1);
-    CHECK(schedule.instances[0].section_filters.empty());
+    CHECK(schedule.instances[0].section_scopes.empty());
 
     auto exec = nx::execute_tests(schedule, with_filter("drv"));
     CHECK(ran == 1); // "child" runs exactly once, not once per driver + once per fragment

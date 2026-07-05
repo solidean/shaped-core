@@ -1,4 +1,4 @@
-#include "sg_test_backends.hh"
+#include "sg_backends.hh"
 
 #include <nexus/test.hh>
 #include <shaped-graphics/fwd.hh> // sg::context_handle
