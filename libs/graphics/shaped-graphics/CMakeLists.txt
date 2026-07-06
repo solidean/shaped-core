@@ -18,6 +18,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/context.transient.cc
+    src/shaped-graphics/context.upload.cc
     src/shaped-graphics/memory_heap.cc
 )
 
@@ -34,6 +35,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.hh
     src/shaped-graphics/context.persistent.hh
     src/shaped-graphics/context.transient.hh
+    src/shaped-graphics/context.upload.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/command_list.upload.hh
     src/shaped-graphics/command_list.download.hh
@@ -118,6 +120,7 @@ if(_sg_backends)
         tests/buffer/buffer-test.cc
         tests/command_list/command_list-test.cc
         tests/transfer/transfer-test.cc
+        tests/transfer/upload-async-test.cc
         tests/copy/copy-test.cc
         tests/transient/transient-test.cc
     )

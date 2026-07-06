@@ -64,6 +64,8 @@ ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_
 ctx.transient.create_buffer(size, usage)           // -> cc::result<buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
+ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset=0)  // void — ASYNC stream host bytes into buf on the copy queue (needs copy_dst); fire-and-forget, pin holds the bytes; later lists reading buf auto-wait; empty = no-op
+ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset=0)      // void — typed convenience; re-views the SAME pin as bytes (no copy). build the pin with cc::make_pinned_data / cc::as_pinned_data
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
@@ -113,6 +115,8 @@ cmd.download.bytes_from_buffer(buf, offset, size)    // -> sg::bytes_future (nee
 cmd.download.data_from_buffer<T>(buf, off, count)    // -> sg::data_future<T>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
+// cmd.upload = INLINE (recorded in this list, visible to later commands in it); ctx.upload = ASYNC (copy
+// queue, off the frame path — for bulk streaming). See docs/concepts/upload.async.md.
 // inline path: copy is recorded here; the download future is ready after the submitted list finishes on
 // the GPU (no advance_epoch needed). dx12 today: uploading + downloading (or copying) the SAME buffer needs
 // separate command lists (no barrier system yet — copy inserts a conservative global barrier for now).

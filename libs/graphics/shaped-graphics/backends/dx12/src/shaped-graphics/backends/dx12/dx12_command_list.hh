@@ -33,6 +33,17 @@ public:
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
 
+    // Highest async-upload completion value any buffer this list reads is waiting on. At submit the
+    // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
+    // means no referenced buffer had a pending async upload. See note_buffer_use.
+    dx12_copy_fence_value _required_copy_wait = dx12_copy_fence_value::none;
+
+    // Buffers this list uses, stamped with the list's submission token at submit so a later async upload
+    // to them defers behind this list (the reverse of _required_copy_wait). Raw pointers: the buffers
+    // outlive submit — their handles are held by the caller, and the recorded copies already reference
+    // their resources. Duplicates are harmless (the stamp is an idempotent max).
+    cc::vector<dx12_buffer const*> _used_buffers;
+
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
     void upload_bytes_to_buffer(sg::buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes) override;
@@ -60,5 +71,10 @@ private:
     // TODO: replace with tracked per-resource transitions once the state-tracking barrier system lands
     // (it will emit precise, minimal COPY_SOURCE/COPY_DEST transitions instead of bouncing through COMMON).
     void restore_buffer_to_common(dx12_buffer const& buffer, D3D12_RESOURCE_STATES from_state);
+
+    // Records that this list reads `buffer`: maxes the buffer's pending async-upload completion value
+    // into _required_copy_wait, so the direct queue waits for that copy at submit. Call at the start of
+    // every op that reads a buffer an async upload may have written.
+    void note_buffer_use(dx12_buffer const& buffer);
 };
 } // namespace sg::backend::dx12

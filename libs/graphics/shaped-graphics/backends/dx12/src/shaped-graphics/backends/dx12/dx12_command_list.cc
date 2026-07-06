@@ -20,6 +20,18 @@ void dx12_command_list::restore_buffer_to_common(dx12_buffer const& buffer, D3D1
     _list->ResourceBarrier(1, &barrier);
 }
 
+void dx12_command_list::note_buffer_use(dx12_buffer const& buffer)
+{
+    // Forward: this list reads a buffer an async upload may still be writing → wait for that copy.
+    cc::u64 const v = buffer._pending_async_upload_value.load(std::memory_order_acquire);
+    if (v > cc::u64(_required_copy_wait))
+        _required_copy_wait = dx12_copy_fence_value(v);
+
+    // Reverse: remember the buffer so submit stamps it with this list's token, deferring a later async
+    // upload to it behind this list.
+    _used_buffers.push_back(&buffer);
+}
+
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
 {
     auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
@@ -42,6 +54,11 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
     // binding one past that epoch would point the table at another epoch's descriptors.
     CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
               "transient binding_group used past its epoch (its descriptors have been recycled)");
+
+    // Any bound buffer an async upload wrote must land before the dispatch reads it.
+    for (auto const& ref : dg->referenced)
+        if (auto const* const b = dynamic_cast<dx12_buffer const*>(ref.get()))
+            note_buffer_use(*b);
 
     // Buffers are in COMMON and implicitly promote to UNORDERED_ACCESS / non-pixel-shader-resource on
     // the dispatch access, so no explicit transition barrier is needed here (no state tracker yet).
@@ -75,6 +92,7 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
         return;
     CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "upload target buffer must have "
                                                                       "buffer_usage::copy_dst");
+    note_buffer_use(*dst); // a prior async upload to dst must land before this inline copy overwrites it
     _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes); // promotes dst COMMON→COPY_DEST
     restore_buffer_to_common(*dst, D3D12_RESOURCE_STATE_COPY_DEST);        // so a later op re-promotes it
 }
@@ -91,8 +109,11 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= src->size_in_bytes(),
               "download range is out of the buffer's bounds");
     if (size_in_bytes > 0)
+    {
         CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "download source buffer must have "
                                                                           "buffer_usage::copy_src");
+        note_buffer_use(*src); // a prior async upload to src must land before this readback reads it
+    }
     // The readback copy promotes src COMMON→COPY_SOURCE; reset it to COMMON so a later op re-promotes it.
     auto future = _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
     if (size_in_bytes > 0)
@@ -123,6 +144,8 @@ void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
                                                                     "buffer_usage::copy_src");
     CC_ASSERT(sg::has_flag(d->usage(), sg::buffer_usage::copy_dst), "copy dest buffer must have "
                                                                     "buffer_usage::copy_dst");
+    note_buffer_use(*s); // prior async uploads to either endpoint must land before this on-queue copy
+    note_buffer_use(*d);
     // Same-buffer copy: the source and destination ranges must not overlap.
     if (s->_resource.Get() == d->_resource.Get())
         CC_ASSERT(dst_offset_in_bytes + size_in_bytes <= src_offset_in_bytes
@@ -172,6 +195,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next)
         {
+            // If this list reads a buffer an async upload is still writing, make the direct queue wait on
+            // the copy queue's completion fence before executing, so the copy is visible. Over-waiting on
+            // a higher value is safe; a stale/already-signaled value returns immediately.
+            if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
+                _queue->Wait(_copy_fence.Get(), cc::u64(cmd->_required_copy_wait));
+
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);
 
@@ -185,6 +214,20 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
             return t;
         });
+
+    // Stamp every buffer this list used with the token, so a later async upload to it defers its copy
+    // behind this list (the reverse per-resource sync). Done after submit returns the token — the caller
+    // then issues the async upload, which reads this stamp, so the ordering holds.
+    for (auto const* const buf : cmd->_used_buffers)
+    {
+        cc::u64 prev = buf->_last_used_submission_token.load(std::memory_order_relaxed);
+        while (prev < cc::u64(token)
+               && !buf->_last_used_submission_token.compare_exchange_weak(
+                   prev, cc::u64(token), std::memory_order_release, std::memory_order_relaxed))
+        {
+            // CAS retries; `prev` is refreshed with the current value each time.
+        }
+    }
 
     // The allocator is in flight until this epoch retires — hand it to the pool's epoch capture. The
     // list is already closed and can be reused now (resetting an in-flight list onto a fresh, GPU-safe

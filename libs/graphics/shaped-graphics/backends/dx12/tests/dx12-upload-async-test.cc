@@ -1,0 +1,91 @@
+#include "dx12-test-common.hh"
+
+#include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/vector.hh>
+#include <nexus/test.hh>
+
+// dx12 async-upload internals that the backend-agnostic tier-1 suite (tests/transfer/upload-async-test.cc)
+// can't reach: the staging pipeline's window packing and recycling, forced with a deliberately tiny window
+// size (a dx12_config knob). The public upload/sync contract is pinned in tier 1. See
+// libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
+
+namespace
+{
+namespace dx12 = sg::backend::dx12;
+
+// A pinned byte buffer filled by fn(i), moved into the pin (owns it, zero-copy).
+cc::pinned_data<cc::byte const> make_bytes(cc::isize n, auto&& fn)
+{
+    cc::vector<cc::byte> data;
+    data.reserve(n);
+    for (cc::isize i = 0; i < n; ++i)
+        data.push_back(cc::byte(fn(i)));
+    return cc::make_pinned_data(cc::move(data));
+}
+} // namespace
+
+// A single upload larger than one staging window must pack across several windows, pipelining and
+// recycling as it goes. A fresh context with deliberately tiny windows forces it.
+TEST("sg dx12 - async upload larger than a staging window packs across windows")
+{
+    auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 4096});
+    REQUIRE(ctx.has_value());
+    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+
+    cc::isize const n = 20000; // several windows, non-aligned so partial windows are exercised
+    auto buf = c.create_dx12_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
+    REQUIRE(buf.has_value());
+
+    c.upload.bytes_to_buffer(buf.value(), make_bytes(n, [](cc::isize i) { return i * 7 + 1; }));
+
+    auto down = c.create_dx12_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, n);
+    c.submit_dx12_command_list(cc::move(down.value()));
+
+    auto const bytes = future.wait_get_bytes();
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == n);
+    bool matches = true;
+    for (cc::isize i = 0; i < n; ++i)
+        if (bytes.value()[i] != cc::byte(i * 7 + 1))
+            matches = false;
+    CHECK(matches);
+}
+
+// Many uploads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on
+// the window fence and recycle windows repeatedly. Each targets its own buffer; all must read back intact.
+TEST("sg dx12 - many async uploads recycle the staging windows")
+{
+    auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
+    REQUIRE(ctx.has_value());
+    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+
+    int const count = 24;
+    cc::isize const each = 1024;
+    cc::vector<sg::buffer_handle> bufs;
+    for (int k = 0; k < count; ++k)
+    {
+        auto buf
+            = c.create_dx12_buffer(each, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
+        REQUIRE(buf.has_value());
+        c.upload.bytes_to_buffer(buf.value(), make_bytes(each, [k](cc::isize i) { return i + k; }));
+        bufs.push_back(buf.value());
+    }
+
+    bool all_ok = true;
+    for (int k = 0; k < count; ++k)
+    {
+        auto down = c.create_dx12_command_list();
+        REQUIRE(down.has_value());
+        auto future = down.value()->download.bytes_from_buffer(bufs[k], 0, each);
+        c.submit_dx12_command_list(cc::move(down.value()));
+
+        auto const bytes = future.wait_get_bytes();
+        REQUIRE(bytes.has_value());
+        for (cc::isize i = 0; i < each; ++i)
+            if (bytes.value()[i] != cc::byte(i + k))
+                all_ok = false;
+    }
+    CHECK(all_ok);
+}

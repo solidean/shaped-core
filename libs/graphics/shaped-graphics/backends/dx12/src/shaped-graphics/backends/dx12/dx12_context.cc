@@ -20,6 +20,9 @@ void dx12_context::shutdown()
     // alive (the actor may block on it). The GPU is idle by now, so pending copies complete promptly.
     _download_inline.shutdown();
     _upload_inline.shutdown();
+    // The async upload actor runs on the independent copy queue, which advance-and-wait did not drain, so
+    // its shutdown waits for that queue to idle. Do it while the copy queue + completion fence are alive.
+    _upload_async.shutdown();
     _cmd_pool.shutdown();
 
     if (_fence_event)
@@ -29,8 +32,10 @@ void dx12_context::shutdown()
     }
     _submission_fence.Reset();
     _epoch_fence.Reset();
+    _copy_fence.Reset();
 
     // Release the device-level COM objects (live-object tracking will unwind here later too).
+    _copy_queue.Reset();
     _queue.Reset();
     _device.Reset();
     _factory.Reset();

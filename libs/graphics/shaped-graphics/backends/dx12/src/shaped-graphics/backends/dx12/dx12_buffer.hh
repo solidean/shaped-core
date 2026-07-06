@@ -5,6 +5,8 @@
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/fwd.hh>
 
+#include <atomic>
+
 namespace sg::backend::dx12
 {
 /// The D3D12_RESOURCE_DESC for a buffer of this shape. Shared by committed + placed creation and by a
@@ -39,6 +41,21 @@ public:
     sg::epoch _creation_epoch;                // epoch this buffer was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed buffer; null when dedicated
+
+    // Two per-resource sync stamps that make the CPU timeline (submit → async upload → submit) mirror GPU
+    // ordering. Both only ever grow, are never reset (a stale value just yields a cheap already-satisfied
+    // wait), and are mutable+atomic (stamped through the const buffer handle from any thread). A minimal
+    // stand-in until the per-resource state-tracking layer subsumes them.
+
+    // Forward: highest completion value an ASYNC upload (ctx.upload, not the inline cmd.upload) here will
+    // signal on the copy queue. A later direct-queue list that reads this buffer waits for it at submit,
+    // so it sees the async write.
+    mutable std::atomic<cc::u64> _pending_async_upload_value = 0;
+
+    // Reverse: highest direct-queue submission token of a command list that used this buffer. An async
+    // upload here defers its copy until this token completes, so it never overwrites the buffer while an
+    // earlier-submitted list still uses it.
+    mutable std::atomic<cc::u64> _last_used_submission_token = 0;
 
 protected:
     // Release the GPU storage (deferred to epoch retire) when the buffer is expired — see sg::buffer.

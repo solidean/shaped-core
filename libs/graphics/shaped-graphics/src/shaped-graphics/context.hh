@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
+#include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
 
@@ -35,6 +37,10 @@ public:
     /// Transient-lifetime resource factory for per-frame scratch, recycled when the epoch retires:
     /// `ctx.transient.create_buffer(...)`. See lifetime_scope.
     context_transient_scope transient;
+
+    /// Async host→device upload facade: `ctx.upload.bytes_to_buffer(...)`. Streams buffer writes on a
+    /// dedicated copy queue, off the frame path (the context-level mirror of the inline cmd.upload).
+    context_upload_scope upload;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
@@ -97,6 +103,16 @@ protected:
     // Reached by the lifetime scopes (`ctx.persistent.create_buffer(...)`), which funnel here as friends.
     friend class context_persistent_scope;
     friend class context_transient_scope;
+    friend class context_upload_scope;
+
+    /// Streams `data` into `buffer` at `offset_in_bytes` on a dedicated copy queue (reached via
+    /// ctx.upload). The pin holds the source bytes alive until the copy consumes them; a later command
+    /// list that reads the buffer automatically waits on the copy. Empty data is a no-op. Buffer must
+    /// have buffer_usage::copy_dst; offset_in_bytes + data.size() must be within the buffer.
+    virtual void async_upload_bytes_to_buffer(buffer_handle buffer,
+                                              cc::pinned_data<cc::byte const> data,
+                                              isize offset_in_bytes)
+        = 0;
 
     /// Applies a pending `ctx.transient.set_budget()` at the current epoch boundary (draining in-flight
     /// epochs first, then resizing the transient heap). A backend calls this from advance_epoch once the

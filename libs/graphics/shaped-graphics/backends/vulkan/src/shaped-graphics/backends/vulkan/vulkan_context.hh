@@ -117,6 +117,12 @@ public:
         drop_vulkan_command_list(std::unique_ptr<vulkan_command_list>(static_cast<vulkan_command_list*>(cmd.release())));
     }
 
+    // Async upload (ctx.upload) — not implemented yet.
+    void async_upload_bytes_to_buffer(sg::buffer_handle, cc::pinned_data<cc::byte const>, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan async upload is not implemented yet");
+    }
+
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once
     // that epoch retires. Called from ~vulkan_buffer; safe to call from any thread.
     void schedule_deferred_deletion(vulkan_expiring_resource expiring);
