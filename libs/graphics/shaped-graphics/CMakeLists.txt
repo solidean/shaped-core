@@ -129,6 +129,7 @@ if(_sg_backends)
         tests/buffer/buffer-test.cc
         tests/command_list/command_list-test.cc
         tests/transfer/transfer-test.cc
+        tests/transfer/transfer-fuzz-test.cc
         tests/transfer/upload-async-test.cc
         tests/copy/copy-test.cc
         tests/transient/transient-test.cc
