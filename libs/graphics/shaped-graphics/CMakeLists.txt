@@ -119,6 +119,7 @@ if(_sg_backends)
         tests/command_list/command_list-test.cc
         tests/transfer/transfer-test.cc
         tests/copy/copy-test.cc
+        tests/transient/transient-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
