@@ -71,7 +71,10 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
 
         create_buffer_view(ctx._device.Get(), nv.view, ctx._descriptor_heap.cpu_at(base + s.table_offset));
         if (nv.view.buffer)
+        {
             group->referenced.push_back(nv.view.buffer);
+            group->hazard_views.push_back(nv.view); // its (buffer, access class) drives the dispatch hazard declare
+        }
     }
 
     // Every declared binding must be provided (no null / default descriptors yet).

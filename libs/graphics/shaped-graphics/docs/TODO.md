@@ -3,16 +3,26 @@
 Running list of known follow-ups. Bigger design intent lives in
 [structure.md](structure.md).
 
-- **Buffer transfer — remaining:** inline buffer upload / download is in (sg `command_list` API +
+- **Buffer transfer — remaining:** inline buffer upload / download / copy is in (sg `command_list` API +
   `bytes_future`, real dx12 over UPLOAD / READBACK ring buffers, a `cc::threaded_actor` for deferred
-  readback copies). Still open: buffer-to-buffer **copy**; the **vulkan** implementation (currently a
-  `CC_UNREACHABLE` stub); **texture** upload/download (the `dx12_resource_upload/_download` helpers are
-  shaped for it, concrete texture impls are TODO); a real **barrier + per-resource state-tracking**
-  system (buffers use D3D12 implicit promotion/decay today, so uploading then downloading the *same*
-  buffer needs two command lists); and download robustness — the readback ring's free watermark
-  advances in submit order, which only matches allocation order for single-threaded recording (needs
-  per-region tracking / the split GPU-CPU watermarks), plus fallback staging when a single list's
-  inline transfers exceed the ring capacity (currently asserts).
+  readback copies). Still open: the **vulkan** implementation (currently a `CC_UNREACHABLE` stub);
+  **texture** upload/download (the `dx12_resource_upload/_download` helpers are shaped for it, concrete
+  texture impls are TODO); and download robustness — the readback ring's free watermark advances in
+  submit order, which only matches allocation order for single-threaded recording (needs per-region
+  tracking / the split GPU-CPU watermarks), plus fallback staging when a single list's inline transfers
+  exceed the ring capacity (currently asserts).
+- **Barriers + access tracking — remaining:** the access-tracking system is in for **buffers** (inferred
+  access, the three-timeline `resource_access_state`, the command-list slot model with revert/promote, and
+  dx12 enhanced-barrier emission — see [concepts/barriers.md](concepts/barriers.md)). Uploading then
+  downloading / self-copying the *same* buffer now works in one command list. Still open: **textures** —
+  the covering-partition subresource tracking is defined + unit-tested but not exercised (needs
+  `sg::texture` + layouts), and the revert/promote machinery is teeth-free for buffers until then;
+  **vulkan** barrier emission (lands with its compute/transfer milestone; it reuses the shared vocabulary
+  + state machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs
+  an array binding path + a binding-name→resource reflection map); migrating `access_flags` /
+  `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables
+  automatic transitions for callers that know their resources are already in the right layout; and folding
+  the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder. Surface a
   `cc::shared_ptr` in clean-core and switch handles to it (keeps sg off `std::`). See the
   [coding-guidelines](coding-guidelines.md) note.

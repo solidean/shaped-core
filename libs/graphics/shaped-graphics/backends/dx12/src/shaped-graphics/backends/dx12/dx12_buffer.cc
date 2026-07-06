@@ -26,6 +26,60 @@ D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usa
     return desc;
 }
 
+sg::access_barrier dx12_buffer::declare_access(sg::command_list_slot slot,
+                                               sg::pipeline_stage_flags stages,
+                                               sg::access_flags access) const
+{
+    return _access.lock(
+        [&](access_tracking& t) -> sg::access_barrier
+        {
+            int const i = int(slot);
+            CC_ASSERT(i >= 0, "declare_access with an invalid command_list_slot");
+            while (t.slots.size() <= i)
+                t.slots.push_back(access_slot{});
+            auto& e = t.slots[i];
+            if (!e.active)
+            {
+                e.active = true;
+                e.state = t.canonical; // start from the committed state (general layout for buffers)
+            }
+            e.state.declare(stages, access); // layout defaults to general — buffers never transition
+            return e.state.flush();
+        });
+}
+
+void dx12_buffer::finalize_slot(sg::command_list_slot slot, bool promote) const
+{
+    _access.lock(
+        [&](access_tracking& t)
+        {
+            int const i = int(slot);
+            if (i >= t.slots.size() || !t.slots[i].active)
+                return; // this list never touched the buffer
+            auto& e = t.slots[i];
+            CC_ASSERT(!e.state.has_pending_declares(), "a declared access was never flushed by a GPU op");
+            if (promote)
+                t.canonical = e.state; // committed state carries into the next command list
+            // else: roll back to canonical. For buffers this emits nothing (layout is always general); the
+            // revert transition + its hidden-cost warning arrive with textures.
+            e.active = false;
+            e.state = sg::resource_access_state{};
+        });
+}
+
+void dx12_buffer::discard_slot(sg::command_list_slot slot) const
+{
+    _access.lock(
+        [&](access_tracking& t)
+        {
+            int const i = int(slot);
+            if (i >= t.slots.size())
+                return;
+            t.slots[i].active = false;
+            t.slots[i].state = sg::resource_access_state{};
+        });
+}
+
 void dx12_buffer::release_storage() const
 {
     // Stage the GPU handle + finalizers for deletion once the current epoch retires. Empty buffers

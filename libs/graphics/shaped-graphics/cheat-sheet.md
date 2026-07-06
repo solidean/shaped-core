@@ -114,9 +114,9 @@ cmd.download.data_from_buffer<T>(buf, off, count)    // -> sg::data_future<T>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 // inline path: copy is recorded here; the download future is ready after the submitted list finishes on
-// the GPU (no advance_epoch needed). dx12 today: uploading + downloading (or copying) the SAME buffer needs
-// separate command lists (no barrier system yet — copy inserts a conservative global barrier for now).
-// copy within one buffer requires non-overlapping ranges. vulkan transfer is a TODO stub.
+// the GPU (no advance_epoch needed). Uploading + downloading + copying the SAME buffer works in ONE list —
+// the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
+// vulkan transfer is a TODO stub.
 ```
 
 ## buffer — GPU-resident, immutable shape  (abstract)
@@ -193,6 +193,11 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
+cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
+                                                         // (scalar bindings are inferred; arrays can't be — declare them)
+// Access is inferred from each op (upload⇒transfer_write, dispatch⇒bound views' access); no public
+// declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```
 
 ## memory placement — heaps & alloc-info  (stub)

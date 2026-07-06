@@ -41,6 +41,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   epoch counter/fence, advance/retire, deferred deletion, and finalizers.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are
   concurrency-safe and which must be externally synchronized.
+- [barriers](concepts/barriers.md) — access tracking + GPU barriers: access inferred from each op, the
+  three-timeline minimal-barrier state machine, and the concurrent-command-list slot model.
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the
   access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
 - [bindings](concepts/bindings.md) — `compiled_shader` reflection: the backend-agnostic `binding`

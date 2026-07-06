@@ -37,6 +37,7 @@ public:
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
     dx12_descriptor_alloc table; // the group's descriptor range (its start feeds table_start; count for freeing)
     cc::vector<sg::buffer_handle> referenced; // keeps the bound buffers alive while the group lives
+    cc::vector<sg::raw_view> hazard_views;    // bound views (buffer + access class) — declared for hazards at dispatch
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
     // binding one afterwards is a hard error (checked at bind). Both are inert for a persistent group.

@@ -69,8 +69,8 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
     }
 
     _open_command_lists.fetch_add(1, std::memory_order_relaxed); // must reach 0 before the epoch can advance
-    // Stamped with the epoch it must be submitted/dropped in.
-    return std::make_unique<vulkan_command_list>(*this, current_epoch(), pool, buffer);
+    // Stamped with the epoch it must be submitted/dropped in, plus an access-tracking slot freed on submit/drop.
+    return std::make_unique<vulkan_command_list>(*this, current_epoch(), _command_list_slots.acquire(), pool, buffer);
 }
 
 sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd)
@@ -115,6 +115,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     _command_pools.lock([&](vulkan_command_pool_set& p) { p.in_epoch.push_back({cmd->_pool, cmd->_buffer}); });
     cmd->_pool = VK_NULL_HANDLE;
     cmd->_buffer = VK_NULL_HANDLE;
+    (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     return token;
 }
@@ -130,6 +131,7 @@ void vulkan_context::drop_vulkan_command_list(std::unique_ptr<vulkan_command_lis
     _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd->_pool, cmd->_buffer}); });
     cmd->_pool = VK_NULL_HANDLE;
     cmd->_buffer = VK_NULL_HANDLE;
+    (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 } // namespace sg::backend::vulkan
