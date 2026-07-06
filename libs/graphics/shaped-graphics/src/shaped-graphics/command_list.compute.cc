@@ -35,4 +35,16 @@ void command_list_compute_scope::dispatch_threads(int x, int y, int z)
 {
     _cmd.compute_dispatch(ceil_div(x, _bound_wg_x), ceil_div(y, _bound_wg_y), ceil_div(z, _bound_wg_z));
 }
+
+void command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                             cc::span<array_buffer_access const> elements)
+{
+    _cmd.compute_declare_array_buffer_access(binding_name, elements);
+}
+
+void command_list_compute_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                              cc::span<array_texture_access const> elements)
+{
+    _cmd.compute_declare_array_texture_access(binding_name, elements);
+}
 } // namespace sg

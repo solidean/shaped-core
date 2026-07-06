@@ -4,6 +4,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
 #include <shaped-graphics/context.upload.hh>
@@ -151,6 +152,11 @@ protected:
                                                                                 cc::span<named_view const> views,
                                                                                 lifetime_scope scope)
         = 0;
+
+    /// Hands out the per-command-list slot that keys concurrent access-state tracking. A backend acquires
+    /// a slot when it opens a command list and releases it on submit/drop; the release's "returns to zero"
+    /// result drives the revert-vs-promote decision. Shared here so every backend uses the same substrate.
+    command_list_slot_allocator _command_list_slots;
 
     backend_kind _backend;
     thread_model _thread_model;

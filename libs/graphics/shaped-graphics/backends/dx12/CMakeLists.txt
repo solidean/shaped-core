@@ -9,6 +9,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_context.create.cc
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
+    src/shaped-graphics/backends/dx12/dx12_barrier.cc
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
     src/shaped-graphics/backends/dx12/dx12_memory_heap.cc
@@ -34,6 +35,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_context.hh
     src/shaped-graphics/backends/dx12/dx12_epoch.hh
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
+    src/shaped-graphics/backends/dx12/dx12_barrier.hh
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh
     src/shaped-graphics/backends/dx12/dx12_buffer.hh
     src/shaped-graphics/backends/dx12/dx12_memory_heap.hh

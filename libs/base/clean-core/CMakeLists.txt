@@ -195,6 +195,7 @@ add_executable(clean-core-test
     tests/pinned_data-test.cc
     tests/random-test.cc
     tests/result-test.cc
+    tests/small_vector-test.cc
     tests/span-test.cc
     tests/strided_span-test.cc
     tests/string-test.cc

@@ -8,9 +8,18 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/views.hh> // sg::view_class
 
 namespace sg::backend::dx12
 {
+/// A bound buffer paired with the access class it is used as — the backend-typed input to the dispatch
+/// hazard declares (see dx12_command_list::compute_dispatch).
+struct dx12_hazard_view
+{
+    dx12_buffer_handle buffer;
+    sg::view_class access;
+};
+
 /// dx12 binding_group: a contiguous range of descriptors in the context's shader-visible heap, one
 /// per layout binding, created from the bound views. `table_start` is the GPU handle the command list
 /// binds as a root descriptor table.
@@ -36,7 +45,8 @@ public:
     dx12_binding_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
     dx12_descriptor_alloc table; // the group's descriptor range (its start feeds table_start; count for freeing)
-    cc::vector<sg::buffer_handle> referenced; // keeps the bound buffers alive while the group lives
+    cc::vector<dx12_buffer_handle> referenced; // keeps the bound buffers alive while the group lives
+    cc::vector<dx12_hazard_view> hazard_views; // (buffer + access class) — declared for hazards at dispatch
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
     // binding one afterwards is a hard error (checked at bind). Both are inert for a persistent group.

@@ -40,8 +40,8 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // the new epoch, so mark them expired now, which releases each resource into the deferred-deletion
     // staging area. Done before the staged drain below so those releases are attributed to `last`.
     // Outside any lock — expire() re-enters schedule_deferred_deletion, which takes _epoch_state.
-    cc::vector<std::weak_ptr<sg::buffer>> const expiring_transient = _transient_expiring.lock(
-        [](cc::vector<std::weak_ptr<sg::buffer>>& v)
+    cc::vector<std::weak_ptr<sg::buffer const>> const expiring_transient = _transient_expiring.lock(
+        [](cc::vector<std::weak_ptr<sg::buffer const>>& v)
         {
             auto out = cc::move(v);
             v.clear();

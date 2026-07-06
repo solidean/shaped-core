@@ -20,6 +20,7 @@ class dx12_context;
 class dx12_command_list;
 class dx12_command_allocator_pool;
 class dx12_buffer;
+using dx12_buffer_handle = std::shared_ptr<dx12_buffer const>;
 class dx12_memory_heap;
 using dx12_memory_heap_handle = std::shared_ptr<dx12_memory_heap const>;
 
@@ -45,8 +46,4 @@ struct dx12_download_copy_job;
 // Async buffer upload on a dedicated copy queue (see dx12_upload_async.hh).
 class dx12_upload_async_system;
 struct dx12_async_upload_job;
-
-/// Backend-typed buffer handle (shared, like buffer_handle). No command-list handle — those are
-/// move-only, held by std::unique_ptr<dx12_command_list>.
-using dx12_buffer_handle = std::shared_ptr<dx12_buffer>;
 } // namespace sg::backend::dx12

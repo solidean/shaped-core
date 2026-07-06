@@ -13,8 +13,12 @@ namespace sg::backend::vulkan
 class vulkan_command_list final : public sg::command_list
 {
 public:
-    vulkan_command_list(vulkan_context& ctx, sg::epoch created_in, VkCommandPool pool, VkCommandBuffer buffer)
-      : sg::command_list(created_in), _ctx(ctx), _pool(pool), _buffer(buffer)
+    vulkan_command_list(vulkan_context& ctx,
+                        sg::epoch created_in,
+                        sg::command_list_slot slot,
+                        VkCommandPool pool,
+                        VkCommandBuffer buffer)
+      : sg::command_list(created_in, slot), _ctx(ctx), _pool(pool), _buffer(buffer)
     {
     }
 
@@ -49,5 +53,13 @@ protected:
         CC_UNREACHABLE("vulkan compute bind_group is not implemented yet");
     }
     void compute_dispatch(int, int, int) override { CC_UNREACHABLE("vulkan compute dispatch is not implemented yet"); }
+    void compute_declare_array_buffer_access(cc::string_view, cc::span<sg::array_buffer_access const>) override
+    {
+        CC_UNREACHABLE("vulkan compute declare_array_buffer_access is not implemented yet");
+    }
+    void compute_declare_array_texture_access(cc::string_view, cc::span<sg::array_texture_access const>) override
+    {
+        CC_UNREACHABLE("vulkan compute declare_array_texture_access is not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan

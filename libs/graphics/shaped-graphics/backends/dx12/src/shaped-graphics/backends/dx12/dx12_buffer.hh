@@ -1,8 +1,12 @@
 #pragma once
 
+#include <clean-core/container/small_vector.hh>
+#include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/backend/resource_access_state.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/buffer.hh>
+#include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/fwd.hh>
 
 #include <atomic>
@@ -42,10 +46,11 @@ public:
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed buffer; null when dedicated
 
-    // Two per-resource sync stamps that make the CPU timeline (submit → async upload → submit) mirror GPU
-    // ordering. Both only ever grow, are never reset (a stale value just yields a cheap already-satisfied
-    // wait), and are mutable+atomic (stamped through the const buffer handle from any thread). A minimal
-    // stand-in until the per-resource state-tracking layer subsumes them.
+    // Two per-resource cross-queue sync stamps that make the CPU timeline (submit → async upload → submit)
+    // mirror GPU ordering between the direct queue and the async-upload copy queue. Both only ever grow, are
+    // never reset (a stale value just yields a cheap already-satisfied wait), and are mutable+atomic (stamped
+    // through the const buffer handle from any thread). Distinct from the access-state tracking below: that
+    // orders direct-queue lists against each other; these order the copy queue against the direct queue.
 
     // Forward: highest completion value an ASYNC upload (ctx.upload, not the inline cmd.upload) here will
     // signal on the copy queue. A later direct-queue list that reads this buffer waits for it at submit,
@@ -56,6 +61,40 @@ public:
     // upload here defers its copy until this token completes, so it never overwrites the buffer while an
     // earlier-submitted list still uses it.
     mutable std::atomic<cc::u64> _last_used_submission_token = 0;
+
+    // --- concurrent access-state tracking ------------------------------------------------------------
+    // Each open command list keys its private access state by its command_list_slot; `canonical` is the
+    // committed state between lists. Mutable: a buffer's shape is fixed (shared-immutable) but its tracked
+    // GPU state changes as lists record against it. Guarded by a mutex because concurrent command lists may
+    // record against the same buffer. A dx12 buffer's layout is always `general` — D3D12 decays buffers to
+    // COMMON at ExecuteCommandLists — so cross-list ordering rides on that decay and only intra-list
+    // hazards ever produce barriers.
+    struct access_slot
+    {
+        sg::resource_access_state state;
+        bool active = false; // this slot's command list has touched the buffer since it started tracking
+    };
+    struct access_tracking
+    {
+        cc::small_vector<access_slot, 4> slots; // indexed by command_list_slot; SVO for a few concurrent lists
+        sg::resource_access_state canonical;    // committed state between command lists (layout always general)
+    };
+    mutable cc::mutex<access_tracking> _access;
+
+    /// Declare `stages`/`access` for `slot` (lazily starting from canonical on first touch) and return the
+    /// intra-list barrier to emit before the op — `needed == false` when it is a freebie. Thread-safe.
+    [[nodiscard]] sg::access_barrier declare_access(sg::command_list_slot slot,
+                                                    sg::pipeline_stage_flags stages,
+                                                    sg::access_flags access) const;
+
+    /// Finalize `slot` when its command list is submitted: promote its final state to canonical if this was
+    /// the last open list (`promote`), else roll back to canonical (a no-op layout-wise for buffers). Clears
+    /// the slot for reuse. No barriers are needed for buffers (layout is always general). Thread-safe.
+    void finalize_slot(sg::command_list_slot slot, bool promote) const;
+
+    /// Discard `slot` when its command list is dropped: the recorded work never runs, so just clear the
+    /// slot (canonical is unchanged). Thread-safe.
+    void discard_slot(sg::command_list_slot slot) const;
 
 protected:
     // Release the GPU storage (deferred to epoch retire) when the buffer is expired — see sg::buffer.

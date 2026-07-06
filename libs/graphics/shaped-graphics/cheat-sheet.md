@@ -118,9 +118,9 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // cmd.upload = INLINE (recorded in this list, visible to later commands in it); ctx.upload = ASYNC (copy
 // queue, off the frame path — for bulk streaming). See docs/concepts/upload.async.md.
 // inline path: copy is recorded here; the download future is ready after the submitted list finishes on
-// the GPU (no advance_epoch needed). dx12 today: uploading + downloading (or copying) the SAME buffer needs
-// separate command lists (no barrier system yet — copy inserts a conservative global barrier for now).
-// copy within one buffer requires non-overlapping ranges. vulkan transfer is a TODO stub.
+// the GPU (no advance_epoch needed). Uploading + downloading + copying the SAME buffer works in ONE list —
+// the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
+// vulkan transfer is a TODO stub.
 ```
 
 ## buffer — GPU-resident, immutable shape  (abstract)
@@ -197,6 +197,11 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
+cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
+                                                         // (scalar bindings are inferred; arrays can't be — declare them)
+// Access is inferred from each op (upload⇒transfer_write, dispatch⇒bound views' access); no public
+// declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```
 
 ## memory placement — heaps & alloc-info  (stub)
@@ -232,7 +237,7 @@ sg::backend::dx12::dx12_context   : sg::context        // + dx12_command_list, d
 sg::backend::vulkan::vulkan_context : sg::context      // + vulkan_command_list, vulkan_buffer
 // creation: sg::create_dx12_context / sg::create_vulkan_context  (declared in the backend headers)
 // backend-typed API (no downcasts when you hold the concrete context):
-dctx.create_dx12_buffer(size, usage)      // -> cc::result<dx12_buffer_handle>  (shared_ptr<dx12_buffer>)
+dctx.create_dx12_buffer(size, usage)      // -> cc::result<dx12_buffer_handle>  (shared_ptr<dx12_buffer const>)
 dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_command_list>>
 // the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"

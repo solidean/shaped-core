@@ -17,10 +17,15 @@ class dx12_command_list final : public sg::command_list
 public:
     dx12_command_list(dx12_context& ctx,
                       sg::epoch created_in,
+                      sg::command_list_slot slot,
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
                       ComPtr<ID3D12GraphicsCommandList> list)
-      : sg::command_list(created_in), _ctx(ctx), _queue(queue), _allocator(cc::move(allocator)), _list(cc::move(list))
+      : sg::command_list(created_in, slot),
+        _ctx(ctx),
+        _queue(queue),
+        _allocator(cc::move(allocator)),
+        _list(cc::move(list))
     {
     }
 
@@ -33,16 +38,17 @@ public:
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
 
-    // Highest async-upload completion value any buffer this list reads is waiting on. At submit the
-    // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
-    // means no referenced buffer had a pending async upload. See note_buffer_use.
-    dx12_copy_fence_value _required_copy_wait = dx12_copy_fence_value::none;
+    // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop, and so
+    // each gets the reverse async-upload stamp at submit) and the group currently bound to compute set 0
+    // (whose views are declared at dispatch).
+    cc::vector<dx12_buffer_handle> _touched_buffers;
+    dx12_binding_group const* _bound_group = nullptr;
 
-    // Buffers this list uses, stamped with the list's submission token at submit so a later async upload
-    // to them defers behind this list (the reverse of _required_copy_wait). Raw pointers: the buffers
-    // outlive submit — their handles are held by the caller, and the recorded copies already reference
-    // their resources. Duplicates are harmless (the stamp is an idempotent max).
-    cc::vector<dx12_buffer const*> _used_buffers;
+    // Highest async-upload completion value any buffer this list touches is waiting on. At submit the
+    // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
+    // means no touched buffer had a pending async upload. Maintained by track_buffer_access; the reverse
+    // stamp (defer a later async upload behind this list) is applied to _touched_buffers at submit.
+    dx12_copy_fence_value _required_copy_wait = dx12_copy_fence_value::none;
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
@@ -62,19 +68,17 @@ protected:
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
     void compute_bind_group(int set, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
+    void compute_declare_array_buffer_access(cc::string_view binding_name,
+                                             cc::span<sg::array_buffer_access const> elements) override;
+    void compute_declare_array_texture_access(cc::string_view binding_name,
+                                              cc::span<sg::array_texture_access const> elements) override;
 
 private:
-    // After a transfer op, returns `buffer` from its just-used copy state to COMMON, so the next op in
-    // the *same* list re-promotes it from COMMON — matching the cross-list decay the backend otherwise
-    // relies on. Buffers in COMMON are implicitly promoted on use, so no explicit "before" transition is
-    // needed; this reset is both the state fix and the write→read ordering point within one list.
-    // TODO: replace with tracked per-resource transitions once the state-tracking barrier system lands
-    // (it will emit precise, minimal COPY_SOURCE/COPY_DEST transitions instead of bouncing through COMMON).
-    void restore_buffer_to_common(dx12_buffer const& buffer, D3D12_RESOURCE_STATES from_state);
-
-    // Records that this list reads `buffer`: maxes the buffer's pending async-upload completion value
-    // into _required_copy_wait, so the direct queue waits for that copy at submit. Call at the start of
-    // every op that reads a buffer an async upload may have written.
-    void note_buffer_use(dx12_buffer const& buffer);
+    // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker
+    // asks for (COPY_DEST→COPY_SOURCE and the like — precise, no bounce through COMMON), and record the
+    // buffer so its slot is finalized at submit/drop. Cross-list ordering rides on D3D12's decay of buffers
+    // to COMMON at ExecuteCommandLists, so no trailing barrier is needed. Also folds the buffer's pending
+    // async-upload value into _required_copy_wait (the forward cross-queue sync for ctx.upload).
+    void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 };
 } // namespace sg::backend::dx12
