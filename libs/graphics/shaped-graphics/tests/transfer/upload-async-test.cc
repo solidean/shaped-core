@@ -36,7 +36,7 @@ cc::pinned_data<cc::byte const> pinned_bytes(cc::isize n, auto&& fn)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -59,7 +59,7 @@ INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handl
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, cc::isize(4) * sizeof(int));
@@ -84,7 +84,7 @@ INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle ctx))
     CHECK(data.value()[3] == 8);
 }
 
-INVOCABLE_TEST("sg - async upload of empty data is a no-op", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - async upload of empty data is a no-op", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 16);
@@ -96,7 +96,7 @@ INVOCABLE_TEST("sg - async upload of empty data is a no-op", (sg::context_handle
 // Reverse per-resource sync: a command list writes the buffer and is submitted; THEN an async upload to
 // it must defer its copy until that list has finished, so it composes *after* it (not races it). The
 // download reads the async value — with the reverse sync the buffer holds the async bytes, not the list's.
-INVOCABLE_TEST("sg - async upload composes after a list that wrote the buffer", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - async upload composes after a list that wrote the buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -128,7 +128,7 @@ INVOCABLE_TEST("sg - async upload composes after a list that wrote the buffer", 
 }
 
 // Two async uploads to the same buffer compose in submission order — the second wins.
-INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -151,7 +151,7 @@ INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_h
 }
 
 // A later command list that reads the async-uploaded buffer via a device copy also auto-waits on it.
-INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_transfer_buffer(ctx, 128);

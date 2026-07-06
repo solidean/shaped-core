@@ -61,7 +61,7 @@ struct particle
 };
 } // namespace
 
-INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -72,7 +72,7 @@ INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_han
     CHECK(buf.value()->is_valid()); // fresh: created in the current epoch
 }
 
-INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -82,13 +82,13 @@ INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context
     CHECK(buf.value()->is_valid());
 }
 
-INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     CHECK(transient_round_trip(ctx, 0));
 }
 
-INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -132,7 +132,7 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     CHECK(ok);
 }
 
-INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -148,7 +148,7 @@ INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::conte
 
 // The transient heap resets its bump head each epoch, so successive epochs alias the same storage. Every
 // epoch's data must still round-trip while a couple of epochs stay in flight.
-INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -161,7 +161,7 @@ INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::con
 
 // set_budget is deferred: it records a pending budget the next advance_epoch applies (draining in-flight
 // work, resizing the heap). Data must keep round-tripping across a shrink and a grow.
-INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -184,7 +184,7 @@ INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::co
 
 // The setter is repeatable and touches no GPU state; the last value before an advance wins. (The old API
 // asserted on a second call / after first use — this pins the new, forgiving contract.)
-INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -196,7 +196,7 @@ INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (
     CHECK(transient_round_trip(ctx, 3));
 }
 
-INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -219,7 +219,7 @@ INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", 
     CHECK(group.value() != nullptr);
 }
 
-INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 

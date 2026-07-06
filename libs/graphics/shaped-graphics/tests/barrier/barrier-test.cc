@@ -23,7 +23,7 @@ sg::buffer_handle make_buffer(sg::context_handle const& ctx, cc::isize size)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - two concurrent command lists record and submit independently", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - two concurrent command lists record and submit independently", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const a = make_buffer(ctx, cc::isize(16) * sizeof(int));
@@ -62,7 +62,7 @@ INVOCABLE_TEST("sg - two concurrent command lists record and submit independentl
     CHECK(db.value()[15] == 1015);
 }
 
-INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_buffer(ctx, 256);

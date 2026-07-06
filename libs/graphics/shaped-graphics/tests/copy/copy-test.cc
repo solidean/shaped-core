@@ -21,7 +21,7 @@ sg::buffer_handle make_copy_buffer(sg::context_handle const& ctx, cc::isize size
 }
 } // namespace
 
-INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 256);
@@ -49,7 +49,7 @@ INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle ctx))
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 256);
@@ -79,7 +79,7 @@ INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle
     CHECK(bytes.value()[200] == pattern(200));
 }
 
-INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 256);
@@ -108,7 +108,7 @@ INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle ctx))
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, cc::isize(8) * sizeof(int));
@@ -131,7 +131,7 @@ INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle ctx))
     CHECK(data.value()[3] == 6);
 }
 
-INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 16);

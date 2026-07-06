@@ -24,7 +24,7 @@ sg::buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize 
 }
 } // namespace
 
-INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -50,7 +50,7 @@ INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::con
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -75,7 +75,7 @@ INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_ha
     CHECK(bytes.value()[100] == pattern(100));
 }
 
-INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, cc::isize(4) * sizeof(int));
@@ -94,7 +94,7 @@ INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle ctx
     CHECK(data.value()[3] == 8);
 }
 
-INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -124,7 +124,7 @@ INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::contex
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 16);
@@ -153,7 +153,7 @@ INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::conte
     CHECK(all_second);
 }
 
-INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 16);
@@ -171,7 +171,7 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle ctx))
     ctx->submit_command_list(cc::move(cmd.value()));
 }
 
-INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, cc::isize(8) * sizeof(int));

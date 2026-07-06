@@ -8,7 +8,7 @@
 // Backend-agnostic command-list lifecycle: create → submit / drop, epoch stamping, and submission-token
 // completion. Run against every available backend (see tests/context/context-test.cc for the mechanism).
 
-INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -19,7 +19,7 @@ INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (s
     ctx->drop_command_list(cc::move(cmd.value())); // dropping an unsubmitted list is safe
 }
 
-INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -34,7 +34,7 @@ INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::cont
     CHECK(ctx->is_submission_complete(token));
 }
 
-INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
