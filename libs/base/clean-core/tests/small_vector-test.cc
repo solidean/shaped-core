@@ -180,31 +180,110 @@ TEST("small_vector - assignment")
     }
 }
 
-TEST("small_vector - pop_back / clear / resize / reserve")
+TEST("small_vector - pop_back / remove_back / clear / resize / reserve")
 {
     cc::small_vector<int, 4> v;
     for (int i = 0; i < 6; ++i)
         v.push_back(i);
 
-    v.pop_back();
+    CHECK(v.pop_back() == 5); // pop_back returns the element (cc::vector-consistent)
     CHECK(v.size() == 5);
     CHECK(v.back() == 4);
 
+    v.remove_back(); // remove_back is the void form
+    CHECK(v.size() == 4);
+    CHECK(v.back() == 3);
+
     v.reserve(64);
     CHECK(v.capacity() >= 64);
-    CHECK(v.size() == 5);
+    CHECK(v.size() == 4);
 
-    v.resize(2);
+    v.resize_down_to(2);
     CHECK(v.size() == 2);
     CHECK(v[1] == 1);
 
-    v.resize(4);
+    v.resize_to_defaulted(4);
     CHECK(v.size() == 4);
     CHECK(v[2] == 0); // value-initialized
     CHECK(v[3] == 0);
 
+    v.resize_to_filled(6, 9);
+    CHECK(v.size() == 6);
+    CHECK(v[4] == 9);
+    CHECK(v[5] == 9);
+
     v.clear();
     CHECK(v.empty());
+}
+
+TEST("small_vector - factories mirror cc::vector")
+{
+    auto d = cc::small_vector<int, 4>::create_defaulted(3);
+    CHECK(d.size() == 3);
+    CHECK(d[0] == 0);
+    CHECK(d.is_inline());
+
+    auto f = cc::small_vector<int, 2>::create_filled(5, 7); // > N -> heap
+    CHECK(f.size() == 5);
+    CHECK(!f.is_inline());
+    CHECK(f[4] == 7);
+
+    int const src[3] = {1, 2, 3};
+    auto c = cc::small_vector<int, 4>::create_copy_of(cc::span<int const>(src, 3));
+    CHECK(c.size() == 3);
+    CHECK(c[2] == 3);
+
+    auto cap = cc::small_vector<int, 2>::create_with_capacity(32);
+    CHECK(cap.empty());
+    CHECK(cap.capacity() >= 32);
+    CHECK(!cap.is_inline());
+}
+
+TEST("small_vector - extract_allocation and try_extract_allocation")
+{
+    SECTION("inline is materialized on extract")
+    {
+        cc::small_vector<int, 4> v;
+        v.push_back(1);
+        v.push_back(2);
+        CHECK(v.is_inline());
+
+        auto alloc = v.extract_allocation(); // must materialize the inline elements to the heap
+        CHECK(alloc.obj_end - alloc.obj_start == 2);
+        CHECK(alloc.obj_start[0] == 1);
+        CHECK(alloc.obj_start[1] == 2);
+        CHECK(v.empty());
+        CHECK(v.is_inline());
+    }
+
+    SECTION("try_extract only succeeds in heap mode")
+    {
+        cc::small_vector<int, 2> inl;
+        inl.push_back(1);
+        CHECK(!inl.try_extract_allocation().has_value()); // inline -> nullopt, still holds its element
+        CHECK(inl.size() == 1);
+
+        cc::small_vector<int, 2> heap;
+        for (int i = 0; i < 5; ++i)
+            heap.push_back(i);
+        CHECK(!heap.is_inline());
+        auto taken = heap.try_extract_allocation();
+        REQUIRE(taken.has_value());
+        CHECK(taken.value().obj_end - taken.value().obj_start == 5);
+        CHECK(heap.empty());
+    }
+
+    SECTION("round-trip through create_from_allocation")
+    {
+        cc::small_vector<int, 4> v;
+        v.push_back(10);
+        v.push_back(20);
+        auto v2 = cc::small_vector<int, 4>::create_from_allocation(v.extract_allocation());
+        CHECK(!v2.is_inline()); // adopting an allocation is always heap mode
+        CHECK(v2.size() == 2);
+        CHECK(v2[0] == 10);
+        CHECK(v2[1] == 20);
+    }
 }
 
 TEST("small_vector - element lifetimes balance across a spill")
