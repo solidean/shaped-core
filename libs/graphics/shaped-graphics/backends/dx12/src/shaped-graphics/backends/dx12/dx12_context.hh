@@ -34,6 +34,13 @@ struct dx12_config
 
     /// Capacity of the inline READBACK ring buffer, in bytes. Bounds the in-flight inline download volume.
     cc::isize download_ring_bytes = cc::isize(16) * 1024 * 1024;
+
+    /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
+    int descriptor_heap_capacity = 1 << 16;
+
+    /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the
+    /// rest is the persistent bump region.
+    float descriptor_transient_fraction = 0.25f;
 };
 
 /// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
@@ -171,6 +178,11 @@ public:
     // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
     dx12_upload_inline_system _upload_inline;
     dx12_download_inline_system _download_inline;
+
+    // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
+    // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a
+    // buffer alive. Guarded because create runs on any thread while advance runs on the driver thread.
+    cc::mutex<cc::vector<std::weak_ptr<sg::buffer>>> _transient_expiring;
 
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.

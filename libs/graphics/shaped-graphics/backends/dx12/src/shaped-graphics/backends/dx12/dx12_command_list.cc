@@ -38,6 +38,11 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
     auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
     CC_ASSERT(dg != nullptr, "binding_group is not a dx12 binding_group");
 
+    // Transient expiry tripwire: a transient group's descriptor slots are recycled after its epoch, so
+    // binding one past that epoch would point the table at another epoch's descriptors.
+    CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
+              "transient binding_group used past its epoch (its descriptors have been recycled)");
+
     // Buffers are in COMMON and implicitly promote to UNORDERED_ACCESS / non-pixel-shader-resource on
     // the dispatch access, so no explicit transition barrier is needed here (no state tracker yet).
     _list->SetComputeRootDescriptorTable(0, dg->table_start);
@@ -63,6 +68,7 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
     CC_ASSERT(buffer != nullptr, "upload target buffer is null");
     auto const* const dst = dynamic_cast<dx12_buffer const*>(buffer.get());
     CC_ASSERT(dst != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(!dst->is_expired(), "upload target is a transient buffer used past its epoch (expired)");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + data.size() <= dst->size_in_bytes(), "upload range is out of "
                                                                                              "the buffer's bounds");
     if (data.empty())
@@ -80,6 +86,7 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
     CC_ASSERT(buffer != nullptr, "download source buffer is null");
     auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
     CC_ASSERT(src != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(!src->is_expired(), "download source is a transient buffer used past its epoch (expired)");
     CC_ASSERT(size_in_bytes >= 0, "download size must be non-negative");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= src->size_in_bytes(),
               "download range is out of the buffer's bounds");
@@ -104,6 +111,7 @@ void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
     auto const* const s = dynamic_cast<dx12_buffer const*>(src.get());
     auto const* const d = dynamic_cast<dx12_buffer const*>(dst.get());
     CC_ASSERT(s != nullptr && d != nullptr, "buffer is not a dx12 buffer");
+    CC_ASSERT(!s->is_expired() && !d->is_expired(), "copy uses a transient buffer past its epoch (expired)");
     CC_ASSERT(size_in_bytes >= 0, "copy size must be non-negative");
     CC_ASSERT(src_offset_in_bytes >= 0 && src_offset_in_bytes + size_in_bytes <= s->size_in_bytes(),
               "copy source range is out of the buffer's bounds");

@@ -27,7 +27,7 @@ cc::result<dx12_binding_layout_handle> dx12_binding_layout::create(ID3D12Device*
 
     // One descriptor range per binding, packed contiguously into a single table.
     cc::vector<D3D12_DESCRIPTOR_RANGE> ranges;
-    UINT offset = 0;
+    int offset = 0;
     for (auto const& b : bindings)
     {
         CC_ASSERT(b.count >= 1, "unbounded / zero-count bindings are not supported yet");
@@ -37,11 +37,11 @@ cc::result<dx12_binding_layout_handle> dx12_binding_layout::create(ID3D12Device*
         range.NumDescriptors = b.count;
         range.BaseShaderRegister = b.index; // (set, index) -> (space, register); register-type from the kind
         range.RegisterSpace = b.set;
-        range.OffsetInDescriptorsFromTableStart = offset;
+        range.OffsetInDescriptorsFromTableStart = UINT(offset);
         ranges.push_back(range);
 
         layout->slots.push_back({b, offset});
-        offset += b.count;
+        offset += int(b.count);
     }
     layout->descriptor_count = offset;
 

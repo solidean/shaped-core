@@ -35,9 +35,18 @@ public:
     // epoch retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
     ~dx12_buffer() override;
 
-    dx12_context& _ctx;        // creating context — outlives this buffer
-    sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
-    ComPtr<ID3D12Resource> _resource;
-    sg::memory_heap_handle _heap; // backing heap for a placed buffer; null when dedicated (committed)
+    dx12_context& _ctx;                       // creating context — outlives this buffer
+    sg::epoch _creation_epoch;                // epoch this buffer was created in (identity / diagnostics)
+    mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
+    sg::memory_heap_handle _heap;             // backing heap for a placed buffer; null when dedicated
+
+protected:
+    // Release the GPU storage (deferred to epoch retire) when the buffer is expired — see sg::buffer.
+    void on_expired() const override;
+
+private:
+    // Shared by on_expired() and the destructor: stage the resource + finalizers for deferred deletion.
+    // A no-op once already released (so expire()-then-destroy doesn't double-schedule).
+    void release_storage() const;
 };
 } // namespace sg::backend::dx12

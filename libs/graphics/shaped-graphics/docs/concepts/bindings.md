@@ -47,14 +47,30 @@ compiled_shader.bindings ─▶ binding_layout ─▶ binding_group (name → ra
    (reflection)              (the schema)       (the first raw_view consumer; backend → native descriptor)
 ```
 
-`binding_layout`, `binding_group`, `compute_pipeline`, and the `command_list` recording that binds and
-dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) are created via
-`ctx.persistent.create_*`. The **dx12** backend implements the full chain — a `binding_layout` becomes
-a root signature, a `binding_group` allocates a range in a shader-visible descriptor heap and
-translates each `raw_view` into a native CBV/SRV/UAV, and a dispatch binds the table and runs. The
-**vulkan** backend stubs them (`CC_UNREACHABLE`) until its own compute milestone. Compilation is still
-external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test embeds a precompiled
-DXIL blob).
+`binding_layout` and `compute_pipeline` are cached schemas — always `ctx.persistent.create_*`.
+A `binding_group`, being a per-instance set of bound resources, comes in both lifetimes:
+`ctx.persistent.create_binding_group` for one that lives until released, `ctx.transient.create_binding_group`
+for per-frame scratch recycled when its epoch retires. The `command_list` recording that binds and
+dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) is lifetime-agnostic.
+
+The **dx12** backend implements the full chain — a `binding_layout` becomes a root signature, a
+`binding_group` allocates a range in the single shader-visible descriptor heap and translates each
+`raw_view` into a native CBV/SRV/UAV, and a dispatch binds the table and runs. That heap is **split by
+lifetime**, and the two halves use different allocators because their hazard models differ:
+
+- a leading **transient ring** reclaimed per epoch. Descriptors are **written by the CPU** when a group
+  is created and read by the GPU during that epoch, so a slot can't be reused until the epoch that wrote
+  it retires — a CPU/GPU in-flight hazard the ring's per-epoch watermark enforces. (This is unlike the
+  transient *buffer* heap, whose contents are only GPU-touched, so it can bump-reset and alias across
+  epochs — see [memory](memory.md).) A transient group bound past its epoch is refused (its slots may
+  already be reused).
+- a **persistent free-ranges allocator** for the rest: a group's range is returned to the free list when
+  the group is released, deferred (via an epoch finalizer, like buffer deletion) until its last-using
+  epoch retires — so long-lived groups don't leak the heap.
+
+The **vulkan** backend stubs the chain (`CC_UNREACHABLE`) until its own compute milestone. Compilation is
+still external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test embeds a
+precompiled DXIL blob).
 
 ## Deferred
 

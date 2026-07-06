@@ -4,9 +4,9 @@
 namespace sg
 {
 context::context(backend_kind backend, thread_model threading)
-  : persistent(*this), _backend(backend), _thread_model(threading)
+  : persistent(*this), transient(*this), _backend(backend), _thread_model(threading)
 {
-    // persistent(*this) only stores the back-reference; it doesn't touch any not-yet-constructed member.
+    // The scope members only store a back-reference; they don't touch any not-yet-constructed member.
 }
 
 context::~context()

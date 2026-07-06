@@ -17,6 +17,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
+    src/shaped-graphics/backends/dx12/dx12_descriptor_heap.cc
     src/shaped-graphics/backends/dx12/dx12_view_desc.cc
     src/shaped-graphics/backends/dx12/dx12_bind.cc
 )
@@ -77,6 +78,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-copy-test.cc
     tests/dx12-compute-test.cc
     tests/dx12-placed-test.cc
+    tests/dx12-transient-test.cc
 )
 
 target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)

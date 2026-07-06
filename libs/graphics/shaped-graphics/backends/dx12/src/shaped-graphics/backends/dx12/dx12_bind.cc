@@ -12,10 +12,11 @@ namespace sg::backend::dx12
 {
 namespace
 {
-// The bind-path resources are all persistent for now; transient recycling is not implemented.
+// Layouts and pipelines are cached schemas — persistent only; a transient one is a category error.
+// (binding_groups, by contrast, support both lifetimes.)
 void require_persistent(sg::lifetime_scope scope)
 {
-    CC_ASSERT(scope == sg::lifetime_scope::persistent, "transient bind-path resources are not implemented yet");
+    CC_ASSERT(scope == sg::lifetime_scope::persistent, "binding_layout / compute_pipeline must be persistent");
 }
 } // namespace
 
@@ -40,8 +41,7 @@ cc::result<dx12_binding_group_handle> dx12_context::create_dx12_binding_group(dx
                                                                               cc::span<sg::named_view const> views,
                                                                               sg::lifetime_scope scope)
 {
-    require_persistent(scope);
-    return dx12_binding_group::create(*this, cc::move(layout), views);
+    return dx12_binding_group::create(*this, cc::move(layout), views, scope);
 }
 
 // --- sg::context override forwarders --------------------------------------------------------------

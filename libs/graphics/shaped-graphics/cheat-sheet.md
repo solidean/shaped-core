@@ -59,7 +59,12 @@ ctx.threading()                                    // sg::thread_model — which
 ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
 ctx.persistent.create_buffer(size, usage, alloc={}) // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
-                                                   //   alloc defaults to a dedicated allocation_info; placed (heap) not impl yet
+                                                   //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
+ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_handle>  (heap placed resources sub-allocate into)
+ctx.transient.create_buffer(size, usage)           // -> cc::result<buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
+ctx.transient.set_buffer_budget(size)              // void — transient-buffer heap budget (before first use; default 128 MiB)
+ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
+                                                   //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
@@ -121,6 +126,8 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // abstract; a backend subclasses it. protected ctor: buffer(size_in_bytes, usage)  (size 0 = empty)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
+b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient auto-expires at advance_epoch
+b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 // view factories — a strongly-typed view onto this buffer (buffer's usage must cover the access):
 b.as_uniform_buffer<T>(offset=0)           // -> sg::uniform_view<T>    (CBV/UBO; needs uniform_buffer usage; offset 256-aligned)
@@ -180,6 +187,7 @@ sg::compute_pipeline_description  // { compiled_shader const& shader; binding_la
 ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema)
 ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle
 ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout)
+ctx.transient.create_binding_group(layout, span<named_view const>)        // -> binding_group_handle    per-epoch (ring-allocated); layout/pipeline stay persistent
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`

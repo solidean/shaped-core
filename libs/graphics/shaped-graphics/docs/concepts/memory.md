@@ -55,16 +55,48 @@ The axes are independent, but in practice:
 
 - **Persistent** resources are where the placed-vs-dedicated choice matters most: long-lived resources
   are what you pack into shared heaps to control fragmentation and allocation count.
-- **Transient** resources will usually be backed by a **placed linear allocation** on top of a heap — a
-  bump allocator per epoch, reset when the epoch retires — rather than a dedicated allocation each frame.
+- **Transient** resources are backed by a **placed linear allocation** on top of a heap — a bump
+  allocator reclaimed per epoch — rather than a dedicated allocation each frame.
+
+## Transient allocation
+
+`ctx.transient.create_buffer(size, usage)` sub-allocates from a **per-epoch bump allocator** over one
+DEFAULT heap the transient scope owns: a monotonic head hands out placement offsets, and **resets to 0
+whenever the epoch changes**. Successive epochs therefore alias the same storage — which is not only
+safe but desired. It is safe because a single direct queue executes each epoch's GPU work before the
+next's, so epoch N's transient memory is finished before epoch N+1 (which resets to 0) can touch it; the
+epoch boundary is the barrier. It is desired because a one-epoch-sized heap serves any pipelining depth,
+which is smaller and kinder to caches than a ring sized for every in-flight frame. A request larger than
+the budget falls back to a dedicated (committed) allocation. The budget defaults to 128 MiB and is set
+with `ctx.transient.set_buffer_budget`.
+
+> This bump-reset-and-alias scheme is specific to buffers, whose transient contents are only ever
+> GPU-touched. Transient **descriptors** are different: they are written by the CPU at group creation,
+> so a slot cannot be reused until the epoch that wrote it retires. They therefore use a per-epoch ring,
+> not a bump-reset — see [bindings](bindings.md). A future step may fold transient buffers and textures
+> into one shared heap/budget once we know the big-4 backends can serve both from a single heap.
+
+## Expiry
+
+Storage that a lifetime scope reclaims must not be named afterwards, so `sg::buffer` carries explicit
+expiry state, independent of how it was allocated:
+
+- `is_expired()` / `is_valid()` — public: whether the buffer still names live storage.
+- `expire()` — release the storage now (deferred until no longer in flight), even while handles remain.
+
+A **transient** buffer is auto-expired when its epoch advances (its bump storage is about to be reused).
+A **persistent** buffer can be expired **explicitly** to free memory early without hunting down every
+`shared_ptr`. Using an expired buffer in a transfer or a binding is a hard error (asserted). A transient
+`binding_group` has the analogous rule — binding one past its epoch asserts, since the ring may have
+recycled its descriptor slots.
 
 ## Status
 
 Both **dedicated** and **placed** buffer backing work on dx12: `ctx.persistent.create_memory_heap(size)`
 mints a heap, and a placement's `allocation_info` routes `create_buffer` through `CreatePlacedResource`
-(the buffer holds a handle to its heap so the heap outlives the placement). The vulkan backend still
-stubs both. The transient scope is not yet exposed — only `ctx.persistent` exists — so the per-epoch
-bump allocator that will sit on top of a heap is still to come.
+(the buffer holds a handle to its heap so the heap outlives the placement). `ctx.transient` exposes
+per-epoch buffers and binding groups (above). The vulkan backend stubs all of it (heaps, placed
+resources, transient) until its own milestone.
 
 ## See also
 
