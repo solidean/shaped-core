@@ -14,7 +14,7 @@ namespace dx12 = sg::backend::dx12;
 
 TEST("sg dx12 - buffer copy round-trips")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -54,7 +54,7 @@ TEST("sg dx12 - buffer copy round-trips")
 
 TEST("sg dx12 - buffer copy with offsets")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -96,7 +96,7 @@ TEST("sg dx12 - buffer copy with offsets")
 
 TEST("sg dx12 - typed buffer_data_region copy")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -133,7 +133,7 @@ TEST("sg dx12 - typed buffer_data_region copy")
 
 TEST("sg dx12 - typed buffer_data_region copy with element offsets")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -173,7 +173,7 @@ TEST("sg dx12 - typed buffer_data_region copy with element offsets")
 
 TEST("sg dx12 - same-buffer non-overlapping copy")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -213,7 +213,7 @@ TEST("sg dx12 - same-buffer non-overlapping copy")
 
 TEST("sg dx12 - zero-size copy is a no-op")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 

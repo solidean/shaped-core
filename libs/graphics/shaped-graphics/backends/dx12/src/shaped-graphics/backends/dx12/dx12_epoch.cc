@@ -80,6 +80,10 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
         else
             process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
     }
+
+    // Apply a pending ctx.transient.set_budget() now that the new epoch is open: this drains all in-flight
+    // epochs and resizes the transient heap. Rare (only after a set_budget), so the stall is acceptable.
+    apply_pending_transient_budget();
 }
 
 void dx12_context::process_completed_epochs()

@@ -7,14 +7,42 @@
 
 namespace sg
 {
-void context_transient_scope::set_buffer_budget(isize size_in_bytes)
+void context_transient_scope::set_budget(isize size_in_bytes)
 {
-    CC_ASSERT(size_in_bytes > 0, "transient buffer budget must be positive");
+    CC_ASSERT(size_in_bytes > 0, "transient budget must be positive");
+    // Record the request; it is applied at the next advance_epoch (see apply_pending_budget_at_epoch_boundary).
+    _bump.lock([&](bump_state& s) { s.pending_budget = size_in_bytes; });
+}
+
+void context_transient_scope::apply_pending_budget_at_epoch_boundary()
+{
+    isize pending = 0;
+    bool live = false;
     _bump.lock(
         [&](bump_state& s)
         {
-            CC_ASSERT(s.heap == nullptr, "transient buffer budget must be set before the first transient buffer");
-            s.budget = size_in_bytes;
+            pending = s.pending_budget;
+            live = s.heap != nullptr;
+        });
+    if (pending == 0)
+        return;
+
+    // Drain every in-flight epoch so no GPU work still references the current transient heap before we drop
+    // it. Only needed if a heap actually exists. Uses base-context virtuals only, so it is backend-agnostic.
+    if (live)
+    {
+        while (u64(_ctx.completed_epoch()) + 1 < u64(_ctx.current_epoch()))
+            _ctx.wait_for_next_inflight_epoch();
+        _ctx.process_completed_epochs(); // retire any already-finished epochs so their heap references drop
+    }
+
+    _bump.lock(
+        [&](bump_state& s)
+        {
+            s.heap = nullptr; // released here (fully drained above); recreated lazily at the new budget
+            s.budget = s.pending_budget;
+            s.head = 0;
+            s.pending_budget = 0;
         });
 }
 

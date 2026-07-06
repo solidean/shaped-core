@@ -98,6 +98,11 @@ protected:
     friend class context_persistent_scope;
     friend class context_transient_scope;
 
+    /// Applies a pending `ctx.transient.set_budget()` at the current epoch boundary (draining in-flight
+    /// epochs first, then resizing the transient heap). A backend calls this from advance_epoch once the
+    /// new epoch is open. No-op if no budget change is pending.
+    void apply_pending_transient_budget() { transient.apply_pending_budget_at_epoch_boundary(); }
+
     /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer). `alloc` selects
     /// the backing memory (see allocation_info).
     [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes,

@@ -19,7 +19,7 @@ cc::isize align_up(cc::isize value, cc::isize alignment)
 
 TEST("sg dx12 - two placed buffers share one heap without aliasing")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -81,7 +81,7 @@ TEST("sg dx12 - two placed buffers share one heap without aliasing")
 
 TEST("sg dx12 - placed buffer keeps its heap alive")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -117,7 +117,7 @@ TEST("sg dx12 - placed buffer keeps its heap alive")
 
 TEST("sg dx12 - placed read-write (UAV) buffer creates")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 

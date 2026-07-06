@@ -16,7 +16,7 @@ namespace dx12 = sg::backend::dx12;
 
 TEST("sg dx12 - buffer upload then download round-trips")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -50,7 +50,7 @@ TEST("sg dx12 - buffer upload then download round-trips")
 
 TEST("sg dx12 - typed upload/download convenience")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -78,7 +78,7 @@ TEST("sg dx12 - typed upload/download convenience")
 
 TEST("sg dx12 - empty transfers")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -99,7 +99,7 @@ TEST("sg dx12 - empty transfers")
 
 TEST("sg dx12 - partial download with offset")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -132,7 +132,7 @@ TEST("sg dx12 - partial download with offset")
 
 TEST("sg dx12 - multiple uploads in one list, last writer wins")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -169,7 +169,7 @@ TEST("sg dx12 - multiple uploads in one list, last writer wins")
 
 TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -208,7 +208,7 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
 
 TEST("sg dx12 - inline transfer reused across epochs")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -249,7 +249,7 @@ TEST("sg dx12 - inline transfer reused across epochs")
 // holds it. Epoch-granular reclaim must keep both windows pinned; both futures must read back intact.
 TEST("sg dx12 - interleaved downloads submitted out of allocation order")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -308,7 +308,7 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
 // epoch so later downloads still succeed.
 TEST("sg dx12 - dropping a recording list cancels its downloads")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 

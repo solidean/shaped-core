@@ -27,6 +27,8 @@ backends/         # concrete per-backend static libs (dx12/, vulkan/) that subcl
 - [coding-guidelines](coding-guidelines.md) — sg-specific conventions on top of the repo-wide
   ones: handles, mutable-vs-immutable types, the backend bridge, backend smurf naming, and the
   duplication-over-abstraction stance. Extend it whenever generic advice turns out not to fit sg.
+- [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run
+  against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
 - [TODO](TODO.md) — running list of known follow-ups.
 
 ## Concepts

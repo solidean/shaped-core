@@ -62,7 +62,7 @@ ctx.persistent.create_buffer(size, usage, alloc={}) // -> cc::result<buffer_hand
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
 ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_handle>  (heap placed resources sub-allocate into)
 ctx.transient.create_buffer(size, usage)           // -> cc::result<buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
-ctx.transient.set_buffer_budget(size)              // void — transient-buffer heap budget (before first use; default 128 MiB)
+ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)

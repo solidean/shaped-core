@@ -7,6 +7,7 @@
 // not expose — the kind of test that only belongs in a backend suite. See
 // libs/graphics/shaped-graphics/docs/concepts/backends.md.
 // Allocators are epoch-gated (recycled once the epoch retires); lists are not (returned at submit).
+// These assert absolute pool counts, so each takes a fresh make_warp_context() rather than the shared one.
 
 namespace
 {
