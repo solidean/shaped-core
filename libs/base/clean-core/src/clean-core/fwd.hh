@@ -135,6 +135,8 @@ template <class T>
 struct unique_vector;
 template <class T, isize N>
 struct fixed_vector;
+template <class T, isize N>
+struct small_vector;
 
 // template <class T>
 // struct devector;

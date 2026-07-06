@@ -77,6 +77,11 @@ v.clear();  v.fill(x);  auto a = v.extract_allocation();
 #include <clean-core/container/fixed_array.hh>     // cc::fixed_array<T, N> — inline T[N] aggregate
 cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size()
 auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), structured bindings
+
+#include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, first N inline (SVO)
+cc::small_vector<int, 4> sv;                       // no alloc up to N; spills to heap past N
+sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
+sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 ```
 
 ## Views — non-owning (must not outlive their data)
