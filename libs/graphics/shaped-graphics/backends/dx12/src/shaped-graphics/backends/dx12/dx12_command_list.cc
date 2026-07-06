@@ -11,7 +11,7 @@
 
 namespace sg::backend::dx12
 {
-void dx12_command_list::track_buffer_access(dx12_buffer_const_handle const& buffer,
+void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
                                             sg::pipeline_stage_flags stages,
                                             sg::access_flags access)
 {

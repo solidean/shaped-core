@@ -233,7 +233,7 @@ sg::backend::dx12::dx12_context   : sg::context        // + dx12_command_list, d
 sg::backend::vulkan::vulkan_context : sg::context      // + vulkan_command_list, vulkan_buffer
 // creation: sg::create_dx12_context / sg::create_vulkan_context  (declared in the backend headers)
 // backend-typed API (no downcasts when you hold the concrete context):
-dctx.create_dx12_buffer(size, usage)      // -> cc::result<dx12_buffer_handle>  (shared_ptr<dx12_buffer>)
+dctx.create_dx12_buffer(size, usage)      // -> cc::result<dx12_buffer_handle>  (shared_ptr<dx12_buffer const>)
 dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_command_list>>
 // the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"

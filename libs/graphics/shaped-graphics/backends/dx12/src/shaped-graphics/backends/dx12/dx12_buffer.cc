@@ -154,8 +154,8 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
     // A transient buffer is auto-expired when its epoch advances: register it so advance_epoch can flip
     // it (see dx12_epoch.cc). Weak, so holding the registration never keeps the buffer alive.
     if (alloc.scope == sg::lifetime_scope::transient)
-        _transient_expiring.lock([&](cc::vector<std::weak_ptr<sg::buffer>>& v) { v.push_back(buffer); });
+        _transient_expiring.lock([&](cc::vector<std::weak_ptr<sg::buffer const>>& v) { v.push_back(buffer); });
 
-    return buffer;
+    return dx12_buffer_handle(cc::move(buffer));
 }
 } // namespace sg::backend::dx12

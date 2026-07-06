@@ -16,7 +16,7 @@ namespace sg::backend::dx12
 /// hazard declares (see dx12_command_list::compute_dispatch).
 struct dx12_hazard_view
 {
-    dx12_buffer_const_handle buffer;
+    dx12_buffer_handle buffer;
     sg::view_class access;
 };
 
@@ -45,8 +45,8 @@ public:
     dx12_binding_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
     dx12_descriptor_alloc table; // the group's descriptor range (its start feeds table_start; count for freeing)
-    cc::vector<dx12_buffer_const_handle> referenced; // keeps the bound buffers alive while the group lives
-    cc::vector<dx12_hazard_view> hazard_views;       // (buffer + access class) — declared for hazards at dispatch
+    cc::vector<dx12_buffer_handle> referenced; // keeps the bound buffers alive while the group lives
+    cc::vector<dx12_hazard_view> hazard_views; // (buffer + access class) — declared for hazards at dispatch
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
     // binding one afterwards is a hard error (checked at bind). Both are inert for a persistent group.
