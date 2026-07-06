@@ -43,9 +43,9 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list_slot.hh
     src/shaped-graphics/buffer.hh
     src/shaped-graphics/resource_access.hh
-    src/shaped-graphics/resource_access_state.hh
-    src/shaped-graphics/access_inference.hh
-    src/shaped-graphics/subresource.hh
+    src/shaped-graphics/backend/resource_access_state.hh
+    src/shaped-graphics/backend/access_inference.hh
+    src/shaped-graphics/backend/subresource.hh
     src/shaped-graphics/views.hh
     src/shaped-graphics/binding.hh
     src/shaped-graphics/binding_layout.hh

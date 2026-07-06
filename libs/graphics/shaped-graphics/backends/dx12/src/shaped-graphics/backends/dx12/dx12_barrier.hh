@@ -1,7 +1,7 @@
 #pragma once
 
+#include <shaped-graphics/backend/resource_access_state.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
-#include <shaped-graphics/resource_access_state.hh>
 
 /// dx12's barrier layer: translate the backend-neutral access vocabulary (stages / access) into D3D12
 /// enhanced-barrier bits and record a batched buffer barrier. dx12 owns its barriering entirely — the

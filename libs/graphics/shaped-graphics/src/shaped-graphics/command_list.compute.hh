@@ -49,14 +49,15 @@ public:
     /// pipeline's workgroup size (`ceil(threads / workgroup_size)`). A pipeline must be bound first.
     void dispatch_threads(int x, int y = 1, int z = 1);
 
-    /// Declares per-element access for a *buffer* array / bindless binding. Scalar bindings have their
-    /// access inferred from the shader + bound view; array element usage cannot be — a shader may index only
-    /// some elements, or use them differently — so it is declared explicitly here. `binding_name` is the
-    /// array binding's reflection name; each `array_buffer_access` names one element and how it is accessed.
+    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch
+    /// only** (declare again before each dispatch that needs it). Scalar bindings have their access inferred
+    /// from the shader + bound view; array element usage cannot be — a shader may index only some elements,
+    /// or use them differently — so it is declared explicitly here. `binding_name` is the array binding's
+    /// reflection name; each `array_buffer_access` names one element and how it is accessed.
     void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
 
-    /// Declares per-element access for a *texture* array / bindless binding — like the buffer form, but each
-    /// element also names the layout it must be in.
+    /// Declares per-element access for a *texture* array / bindless binding — like the buffer form (next
+    /// dispatch only), but each element also names the layout it must be in.
     void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
 
     // Pinned to its owning command list: neither copyable nor movable.

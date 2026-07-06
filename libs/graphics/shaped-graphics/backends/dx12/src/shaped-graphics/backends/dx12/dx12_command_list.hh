@@ -40,7 +40,7 @@ public:
 
     // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop) and the
     // group currently bound to compute set 0 (whose views are declared at dispatch).
-    cc::vector<sg::buffer_handle> _touched_buffers;
+    cc::vector<dx12_buffer_const_handle> _touched_buffers;
     dx12_binding_group const* _bound_group = nullptr;
 
 protected:
@@ -71,6 +71,8 @@ private:
     // asks for (COPY_DEST→COPY_SOURCE and the like — precise, no bounce through COMMON), and record the
     // buffer so its slot is finalized at submit/drop. Cross-list ordering rides on D3D12's decay of buffers
     // to COMMON at ExecuteCommandLists, so no trailing barrier is needed.
-    void track_buffer_access(sg::buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
+    void track_buffer_access(dx12_buffer_const_handle const& buffer,
+                             sg::pipeline_stage_flags stages,
+                             sg::access_flags access);
 };
 } // namespace sg::backend::dx12

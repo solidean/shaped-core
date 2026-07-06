@@ -17,7 +17,7 @@ There is no public `declare_access`. What a resource is used as follows from the
 - a compute `dispatch` ⇒ each bound view's access class: `readonly` ⇒ `shader_read`, `readwrite` ⇒
   `shader_write`, `uniform` ⇒ `uniform_read` (the inferred replacement for a per-binding declaration).
 
-The mapping lives in [access_inference.hh](../../src/shaped-graphics/access_inference.hh) so every backend
+The mapping lives in [access_inference.hh](../../src/shaped-graphics/backend/access_inference.hh) so every backend
 agrees on the semantics.
 
 **The one exception — arrays / bindless.** Element usage of a resource *array* bound to a shader cannot be
@@ -38,7 +38,7 @@ need a hazard barrier (shader/transfer/accel writes) — color/depth *targets* a
 
 ## Minimal barriers: the three-timeline state
 
-[resource_access_state.hh](../../src/shaped-graphics/resource_access_state.hh) is the reusable state
+[resource_access_state.hh](../../src/shaped-graphics/backend/resource_access_state.hh) is the reusable state
 machine a backend feeds declared accesses into. It keeps three timelines so read-after-read is free and
 only the *delta* of new work is synced:
 
@@ -55,7 +55,7 @@ core "emit this barrier" seam.
 ## Subresources: a covering partition (designed-in for textures)
 
 A texture's subresource domain is the grid (mip × array slice × aspect plane). Buffers are
-single-subresource and never touch this. [subresource.hh](../../src/shaped-graphics/subresource.hh)
+single-subresource and never touch this. [subresource.hh](../../src/shaped-graphics/backend/subresource.hh)
 tracks per-subresource state as a **covering partition**: a set of range-boxes that always exactly tile
 the whole domain. Declaring an access to a sub-range *splits* boxes so the range aligns to box boundaries
 (keeping the tiling exact), then touches only the covered boxes; `try_merge` collapses back to one box
@@ -109,7 +109,7 @@ lands.
 ## See also
 
 - [resource_access.hh](../../src/shaped-graphics/resource_access.hh) — the neutral vocabulary.
-- [resource_access_state.hh](../../src/shaped-graphics/resource_access_state.hh) — the three-timeline machine.
-- [subresource.hh](../../src/shaped-graphics/subresource.hh) — the covering partition.
+- [resource_access_state.hh](../../src/shaped-graphics/backend/resource_access_state.hh) — the three-timeline machine.
+- [subresource.hh](../../src/shaped-graphics/backend/subresource.hh) — the covering partition.
 - [command_list_slot.hh](../../src/shaped-graphics/command_list_slot.hh) — the concurrency substrate.
 - [threading](threading.md) — the thread model concurrent recording builds on.

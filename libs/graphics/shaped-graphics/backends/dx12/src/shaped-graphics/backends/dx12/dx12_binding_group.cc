@@ -72,8 +72,10 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         create_buffer_view(ctx._device.Get(), nv.view, ctx._descriptor_heap.cpu_at(base + s.table_offset));
         if (nv.view.buffer)
         {
-            group->referenced.push_back(nv.view.buffer);
-            group->hazard_views.push_back(nv.view); // its (buffer, access class) drives the dispatch hazard declare
+            auto dx = std::dynamic_pointer_cast<dx12_buffer const>(nv.view.buffer);
+            CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
+            group->referenced.push_back(dx);
+            group->hazard_views.push_back({dx, nv.view.access}); // (buffer, access class) → dispatch hazard declare
         }
     }
 

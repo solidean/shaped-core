@@ -4,8 +4,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
+#include <shaped-graphics/backend/resource_access_state.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/resource_access_state.hh>
 
 /// Subresource addressing and the covering-partition that tracks per-subresource access state for
 /// textures. A texture's subresource domain is the discrete grid (mip level × array slice × aspect

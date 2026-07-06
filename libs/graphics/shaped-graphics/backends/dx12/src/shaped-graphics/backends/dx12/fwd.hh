@@ -35,4 +35,7 @@ struct dx12_download_copy_job;
 /// Backend-typed buffer handle (shared, like buffer_handle). No command-list handle — those are
 /// move-only, held by std::unique_ptr<dx12_command_list>.
 using dx12_buffer_handle = std::shared_ptr<dx12_buffer>;
+/// Immutable backend-typed buffer handle — what a const sg::buffer_handle down-casts to. Used where dx12
+/// code retains a bound/touched buffer and calls its (const) access-tracking methods.
+using dx12_buffer_const_handle = std::shared_ptr<dx12_buffer const>;
 } // namespace sg::backend::dx12
