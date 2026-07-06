@@ -32,9 +32,12 @@ public:
     [[nodiscard]] cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
                                                                         cc::span<named_view const> views);
 
-    /// Sets the transient-buffer heap budget in bytes (the per-epoch bump capacity). Must be called
-    /// before the first transient buffer; the heap is created lazily on first use. Default: 128 MiB.
-    void set_buffer_budget(isize size_in_bytes);
+    /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources
+    /// (buffers today, textures in future). May be called any time, repeatedly: it records a *pending*
+    /// budget and returns immediately without touching the GPU. The change takes effect at the next
+    /// advance_epoch, which drains in-flight work and resizes the transient heap; until then the current
+    /// budget stays in force. Default: 128 MiB.
+    void set_budget(isize size_in_bytes);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_transient_scope(context_transient_scope const&) = delete;
@@ -46,16 +49,24 @@ private:
     friend class context;
     explicit context_transient_scope(context& ctx) : _ctx(ctx) {}
 
+    // Applies a pending set_budget() at an epoch boundary: if one is pending, drains all in-flight epochs
+    // (so nothing still references the current transient heap), then drops the heap and adopts the new
+    // budget — the heap is lazily recreated at the new size on the next transient allocation. No-op if
+    // nothing is pending. Reached via context::apply_pending_transient_budget from a backend's advance_epoch.
+    void apply_pending_budget_at_epoch_boundary();
+
     context& _ctx;
 
-    // The bump allocator state: the heap (lazy), its budget, the current head, and the epoch the head
-    // was last reset for. Guarded — create_buffer may run on any thread.
+    // The bump allocator state: the heap (lazy), its budget, the current head, the epoch the head was last
+    // reset for, and a budget change awaiting the next epoch boundary. Guarded — create_buffer may run on
+    // any thread.
     struct bump_state
     {
         memory_heap_handle heap = nullptr;
         isize budget = isize(128) * 1024 * 1024;
         isize head = 0;
-        u64 last_epoch = 0; // sg::epoch value the head was last reset for (0 = never)
+        u64 last_epoch = 0;       // sg::epoch value the head was last reset for (0 = never)
+        isize pending_budget = 0; // a set_budget() awaiting the next epoch boundary (0 = none pending)
     };
     cc::mutex<bump_state> _bump;
 };

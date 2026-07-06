@@ -120,7 +120,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
-    c.transient.set_buffer_budget(cc::isize(512) * 1024);
+    c.transient.set_budget(cc::isize(512) * 1024); // takes effect from the next epoch on (see set_budget)
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
@@ -152,5 +152,65 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
         CHECK(matches);
 
         c.advance_epoch(2); // keep at most 2 epochs in flight → the bump head resets, aliasing storage
+    }
+}
+
+// set_budget is deferred: it records a pending budget that the next advance_epoch applies by draining
+// in-flight work and resizing the transient heap. Change the budget mid-run, with epochs in flight, and
+// confirm transient buffers keep round-tripping across the resize (drain doesn't deadlock, heap is
+// recreated at the new size, data survives).
+TEST("sg dx12 - transient budget resize takes effect at the next epoch")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+
+    auto const round_trip = [&](int tag)
+    {
+        auto buf = c.transient.create_buffer(256, usage);
+        REQUIRE(buf.has_value());
+
+        cc::byte src[256];
+        for (int i = 0; i < 256; ++i)
+            src[i] = cc::byte((i + tag) & 0xFF);
+
+        auto up = c.create_dx12_command_list();
+        REQUIRE(up.has_value());
+        up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+        c.submit_dx12_command_list(cc::move(up.value()));
+
+        auto down = c.create_dx12_command_list();
+        REQUIRE(down.has_value());
+        auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
+        c.submit_dx12_command_list(cc::move(down.value()));
+
+        auto const bytes = future.wait_get_bytes();
+        REQUIRE(bytes.has_value());
+        bool matches = true;
+        for (int i = 0; i < 256; ++i)
+            if (bytes.value()[i] != cc::byte((i + tag) & 0xFF))
+                matches = false;
+        CHECK(matches);
+    };
+
+    // Epoch 0 uses the default budget (the heap is created here, before any set_budget lands).
+    round_trip(0);
+
+    // Request a small budget, then two more, keeping epochs in flight so the apply-time drain has work.
+    c.transient.set_budget(cc::isize(512) * 1024);
+    for (int e = 1; e <= 4; ++e)
+    {
+        c.advance_epoch(2); // first advance applies the pending 512 KiB budget (drains + resizes)
+        round_trip(e);
+    }
+
+    // Grow the budget and confirm data still survives the resize.
+    c.transient.set_budget(cc::isize(4) * 1024 * 1024);
+    for (int e = 5; e <= 8; ++e)
+    {
+        c.advance_epoch(2);
+        round_trip(e);
     }
 }

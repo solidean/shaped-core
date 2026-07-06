@@ -35,11 +35,11 @@ cc::result<cc::unit> dx12_descriptor_heap::initialize(dx12_context& ctx, int des
     return cc::unit{};
 }
 
-int dx12_descriptor_heap::allocate_persistent(int count)
+dx12_descriptor_alloc dx12_descriptor_heap::allocate_persistent(int count)
 {
     CC_ASSERT(count > 0, "persistent descriptor allocation must be positive");
     return persistent_free.lock(
-        [&](cc::vector<free_range>& f) -> int
+        [&](cc::vector<free_range>& f) -> dx12_descriptor_alloc
         {
             // First fit: carve `count` off the front of the first span large enough.
             for (cc::isize i = 0; i < f.size(); ++i)
@@ -51,15 +51,17 @@ int dx12_descriptor_heap::allocate_persistent(int count)
                 f[i].count -= count;
                 if (f[i].count == 0)
                     f.remove_at(i);
-                return offset;
+                return {offset, count};
             }
             CC_UNREACHABLE("persistent descriptor region exhausted (no free span fits)");
         });
 }
 
-void dx12_descriptor_heap::free_persistent(int offset, int count)
+void dx12_descriptor_heap::free_persistent(dx12_descriptor_alloc alloc)
 {
-    CC_ASSERT(count > 0, "freeing an empty persistent descriptor range");
+    CC_ASSERT(!alloc.is_empty(), "freeing an empty persistent descriptor range");
+    int const offset = alloc.offset;
+    int const count = alloc.count;
     persistent_free.lock(
         [&](cc::vector<free_range>& f)
         {
@@ -88,8 +90,14 @@ void dx12_descriptor_heap::free_persistent(int offset, int count)
         });
 }
 
-int dx12_descriptor_heap::allocate_transient(int count)
+dx12_descriptor_alloc dx12_descriptor_heap::allocate_transient(int count)
 {
+    // Why a ring here and not a per-epoch bump-reset like transient *buffers*: these descriptors are
+    // written by the CPU (create_binding_group) and read by the GPU during the epoch, so a slot cannot be
+    // reused until the epoch that wrote it retires — resetting to 0 each epoch would let a new epoch's CPU
+    // write stomp a descriptor a still-in-flight older epoch reads. Transient buffers dodge this because
+    // their contents are written on the GPU timeline (FIFO-safe on the single queue), so they can bump-reset
+    // and alias across epochs; descriptors cannot. The ring's checkpoints + freed_pos enforce exactly this.
     CC_ASSERT(count > 0, "transient descriptor allocation must be positive");
     CC_ASSERT(count <= transient_capacity, "a single binding group exceeds the transient descriptor region");
 
@@ -113,7 +121,7 @@ int dx12_descriptor_heap::allocate_transient(int count)
             });
 
         if (slot.has_value())
-            return slot.value();
+            return {slot.value(), count};
 
         // Ring full: retire the oldest in-flight epoch to advance the watermark. If nothing is in
         // flight, this epoch's transient groups exceed the region — a hard budget error.

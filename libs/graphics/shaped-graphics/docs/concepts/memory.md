@@ -67,14 +67,18 @@ safe but desired. It is safe because a single direct queue executes each epoch's
 next's, so epoch N's transient memory is finished before epoch N+1 (which resets to 0) can touch it; the
 epoch boundary is the barrier. It is desired because a one-epoch-sized heap serves any pipelining depth,
 which is smaller and kinder to caches than a ring sized for every in-flight frame. A request larger than
-the budget falls back to a dedicated (committed) allocation. The budget defaults to 128 MiB and is set
-with `ctx.transient.set_buffer_budget`.
+the budget falls back to a dedicated (committed) allocation. The budget defaults to 128 MiB and is a
+single shared pool for all transient resources (buffers today, textures once wired), set with
+`ctx.transient.set_budget`. That setter is deferred: it records a pending budget and returns without
+touching the GPU; the **next** `advance_epoch` applies it by draining in-flight work and resizing the
+heap, so the change is predictable and never mid-epoch.
 
 > This bump-reset-and-alias scheme is specific to buffers, whose transient contents are only ever
 > GPU-touched. Transient **descriptors** are different: they are written by the CPU at group creation,
 > so a slot cannot be reused until the epoch that wrote it retires. They therefore use a per-epoch ring,
-> not a bump-reset — see [bindings](bindings.md). A future step may fold transient buffers and textures
-> into one shared heap/budget once we know the big-4 backends can serve both from a single heap.
+> not a bump-reset — see [bindings](bindings.md). Placing textures in the shared heap additionally needs
+> the backend heap to allow buffers and textures together (on dx12: Resource Heap Tier 2, dropping the
+> current `ALLOW_ONLY_BUFFERS` flag) plus texture memory-requirement queries — future work.
 
 ## Expiry
 

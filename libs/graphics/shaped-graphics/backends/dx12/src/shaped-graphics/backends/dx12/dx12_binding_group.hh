@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/fwd.hh>
@@ -34,8 +35,7 @@ public:
     dx12_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
     dx12_binding_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
-    int table_offset = 0; // heap-relative start of the allocated range (for freeing a persistent group)
-    int descriptor_count = 0;
+    dx12_descriptor_alloc table; // the group's descriptor range (its start feeds table_start; count for freeing)
     cc::vector<sg::buffer_handle> referenced; // keeps the bound buffers alive while the group lives
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
