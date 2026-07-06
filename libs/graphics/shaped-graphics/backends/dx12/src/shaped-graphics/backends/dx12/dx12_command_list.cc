@@ -2,6 +2,8 @@
 // fields); its create/submit/drop bodies live here. Allocators are epoch-gated (recycled once the
 // epoch retires); see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
+#include <shaped-graphics/backend/access_inference.hh>
+#include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
@@ -9,15 +11,22 @@
 
 namespace sg::backend::dx12
 {
-void dx12_command_list::restore_buffer_to_common(dx12_buffer const& buffer, D3D12_RESOURCE_STATES from_state)
+void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
+                                            sg::pipeline_stage_flags stages,
+                                            sg::access_flags access)
 {
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Transition.pResource = buffer._resource.Get();
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    barrier.Transition.StateBefore = from_state;
-    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-    _list->ResourceBarrier(1, &barrier);
+    if (buffer->_resource == nullptr)
+        return; // empty (size 0) buffer: no GPU storage, nothing to order
+
+    sg::access_barrier const barrier = buffer->declare_access(slot(), stages, access);
+    if (barrier.needed)
+        emit_buffer_barrier(_list.Get(), buffer->_resource.Get(), barrier);
+
+    // Record once so its slot is finalized at submit/drop (dedup — a buffer may be touched by many ops).
+    for (auto const& h : _touched_buffers)
+        if (h == buffer)
+            return;
+    _touched_buffers.push_back(buffer);
 }
 
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
@@ -43,22 +52,44 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
     CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
               "transient binding_group used past its epoch (its descriptors have been recycled)");
 
-    // Buffers are in COMMON and implicitly promote to UNORDERED_ACCESS / non-pixel-shader-resource on
-    // the dispatch access, so no explicit transition barrier is needed here (no state tracker yet).
+    // Remember the bound group so its views' accesses are declared at dispatch (the point work runs).
+    _bound_group = dg;
     _list->SetComputeRootDescriptorTable(0, dg->table_start);
 }
 
 void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
-    _list->Dispatch(UINT(x), UINT(y), UINT(z));
 
-    // Flush UAV writes so a later command list (e.g. the download copy) observes them. Buffers then
-    // decay to COMMON at ExecuteCommandLists and the copy implicitly promotes them to COPY_SOURCE.
-    D3D12_RESOURCE_BARRIER uav = {};
-    uav.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    uav.UAV.pResource = nullptr; // global UAV barrier
-    _list->ResourceBarrier(1, &uav);
+    // Declare each bound resource's shader access before the dispatch: the tracker emits any intra-list
+    // hazard barrier (e.g. a prior transfer_write → shader_read RAW, or a WAW between two dispatches).
+    // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
+    if (_bound_group != nullptr)
+        for (auto const& view : _bound_group->hazard_views)
+            if (view.buffer)
+                track_buffer_access(view.buffer, sg::pipeline_stage_flags::compute, sg::shader_access_of(view.access));
+
+    _list->Dispatch(UINT(x), UINT(y), UINT(z));
+}
+
+void dx12_command_list::compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                            cc::span<sg::array_buffer_access const> elements)
+{
+    CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
+    // Arrays / bindless are not auto-tracked: which elements a shader indexes (and how) can't be inferred,
+    // so the caller declares it here. Applying it needs a binding-name → bound-resources reflection map and
+    // an array binding path, neither of which exists yet — so there is nothing to record for now.
+    // TODO: once array bindings land, declare each element's access on its buffer for the next dispatch.
+    (void)elements;
+}
+
+void dx12_command_list::compute_declare_array_texture_access(cc::string_view binding_name,
+                                                             cc::span<sg::array_texture_access const> elements)
+{
+    CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
+    // Texture arrays are blocked on sg::texture (no texture resource exists yet). The API is in place; the
+    // per-element layout + subresource declaration will be applied once textures + the array binding path land.
+    CC_ASSERT(elements.empty(), "texture array access declaration is not implemented yet (no sg::texture)");
 }
 
 void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
@@ -66,7 +97,7 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
                                                cc::isize offset_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "upload target buffer is null");
-    auto const* const dst = dynamic_cast<dx12_buffer const*>(buffer.get());
+    auto const dst = std::dynamic_pointer_cast<dx12_buffer const>(buffer);
     CC_ASSERT(dst != nullptr, "buffer is not a dx12 buffer");
     CC_ASSERT(!dst->is_expired(), "upload target is a transient buffer used past its epoch (expired)");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + data.size() <= dst->size_in_bytes(), "upload range is out of "
@@ -75,8 +106,10 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
         return;
     CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "upload target buffer must have "
                                                                       "buffer_usage::copy_dst");
-    _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes); // promotes dst COMMON→COPY_DEST
-    restore_buffer_to_common(*dst, D3D12_RESOURCE_STATE_COPY_DEST);        // so a later op re-promotes it
+    // Order this write against any prior use of the buffer in this list (precise, no bounce through COMMON),
+    // then record the copy.
+    track_buffer_access(dst, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_write);
+    _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
 }
 
 sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle buffer,
@@ -84,7 +117,7 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
                                                                cc::isize size_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "download source buffer is null");
-    auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
+    auto const src = std::dynamic_pointer_cast<dx12_buffer const>(buffer);
     CC_ASSERT(src != nullptr, "buffer is not a dx12 buffer");
     CC_ASSERT(!src->is_expired(), "download source is a transient buffer used past its epoch (expired)");
     CC_ASSERT(size_in_bytes >= 0, "download size must be non-negative");
@@ -93,11 +126,10 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
     if (size_in_bytes > 0)
         CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "download source buffer must have "
                                                                           "buffer_usage::copy_src");
-    // The readback copy promotes src COMMON→COPY_SOURCE; reset it to COMMON so a later op re-promotes it.
-    auto future = _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
+    // Order this read against any prior write of the buffer in this list, then record the readback copy.
     if (size_in_bytes > 0)
-        restore_buffer_to_common(*src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    return future;
+        track_buffer_access(src, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_read);
+    return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
 }
 
 void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
@@ -108,8 +140,8 @@ void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
 {
     CC_ASSERT(src != nullptr, "copy source buffer is null");
     CC_ASSERT(dst != nullptr, "copy dest buffer is null");
-    auto const* const s = dynamic_cast<dx12_buffer const*>(src.get());
-    auto const* const d = dynamic_cast<dx12_buffer const*>(dst.get());
+    auto const s = std::dynamic_pointer_cast<dx12_buffer const>(src);
+    auto const d = std::dynamic_pointer_cast<dx12_buffer const>(dst);
     CC_ASSERT(s != nullptr && d != nullptr, "buffer is not a dx12 buffer");
     CC_ASSERT(!s->is_expired() && !d->is_expired(), "copy uses a transient buffer past its epoch (expired)");
     CC_ASSERT(size_in_bytes >= 0, "copy size must be non-negative");
@@ -124,24 +156,25 @@ void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
     CC_ASSERT(sg::has_flag(d->usage(), sg::buffer_usage::copy_dst), "copy dest buffer must have "
                                                                     "buffer_usage::copy_dst");
     // Same-buffer copy: the source and destination ranges must not overlap.
-    if (s->_resource.Get() == d->_resource.Get())
+    bool const same_resource = s->_resource.Get() == d->_resource.Get();
+    if (same_resource)
         CC_ASSERT(dst_offset_in_bytes + size_in_bytes <= src_offset_in_bytes
                       || src_offset_in_bytes + size_in_bytes <= dst_offset_in_bytes,
                   "source and destination ranges overlap in a same-buffer copy");
 
-    // Both buffers are in COMMON (fresh, decayed at the last submit, or reset by an earlier op in this
-    // list), so the copy implicitly promotes src→COPY_SOURCE and dst→COPY_DEST — no explicit "before"
-    // transition. Reset them to COMMON afterwards so a later op in this same list re-promotes them.
+    // Order the copy against prior use of each buffer. A self-copy reads and writes one resource, so it is
+    // declared as a single combined access (one barrier); distinct buffers are ordered independently.
+    if (same_resource)
+        track_buffer_access(s, sg::pipeline_stage_flags::transfer,
+                            sg::access_flags::transfer_read | sg::access_flags::transfer_write);
+    else
+    {
+        track_buffer_access(s, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_read);
+        track_buffer_access(d, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_write);
+    }
+
     _list->CopyBufferRegion(d->_resource.Get(), UINT64(dst_offset_in_bytes), s->_resource.Get(),
                             UINT64(src_offset_in_bytes), UINT64(size_in_bytes));
-
-    // Same-buffer copy: the resource holds a single (ambiguous) promoted state — leave it; it decays at
-    // the next submit and no in-list op reuses it here. Distinct buffers reset independently.
-    if (s->_resource.Get() != d->_resource.Get())
-    {
-        restore_buffer_to_common(*s, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        restore_buffer_to_common(*d, D3D12_RESOURCE_STATE_COPY_DEST);
-    }
 }
 
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()
@@ -152,9 +185,11 @@ cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command
     CC_RETURN_IF_ERROR(acquired);
 
     _open_command_lists.fetch_add(1, std::memory_order_relaxed); // must reach 0 before the epoch can advance
-    // Left open (recording); submit closes it. Stamped with the epoch it must be submitted/dropped in.
-    return std::make_unique<dx12_command_list>(
-        *this, current_epoch(), queue, cc::move(acquired.value().allocator.allocator), cc::move(acquired.value().list));
+    // Left open (recording); submit closes it. Stamped with the epoch it must be submitted/dropped in, plus
+    // an access-tracking slot that keys its private per-resource state (released on submit/drop).
+    return std::make_unique<dx12_command_list>(*this, current_epoch(), _command_list_slots.acquire(), queue,
+                                               cc::move(acquired.value().allocator.allocator),
+                                               cc::move(acquired.value().list));
 }
 
 sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
@@ -162,6 +197,16 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
+
+    // Finalize access tracking before closing. `promote` when this is the only open list: its final state
+    // becomes the resources' canonical state; otherwise each resource rolls back to canonical (a no-op for
+    // buffers, whose layout is always general — the revert transitions + hidden-cost warning arrive with
+    // textures). Any revert barriers would be recorded here, before Close. (The live-count peek is a benign
+    // approximation while buffers are teeth-free; it tightens when textures make reverts observable.)
+    bool const promote = _command_list_slots.live_count() == 1;
+    for (auto const& b : cmd->_touched_buffers)
+        b->finalize_slot(cmd->slot(), promote);
+    cmd->_touched_buffers.clear();
 
     HRESULT const hr = cmd->_list->Close();
     CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");
@@ -191,6 +236,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // allocator is legal), so return it to the pool for the next acquire.
     _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
+    (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     return token;
 }
@@ -203,6 +249,13 @@ void dx12_context::drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd
 
     // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
     _download_inline.discard_unsubmitted(cmd->_pending_downloads);
+
+    // The recorded work never runs, so its declared accesses leave no committed state: just clear each
+    // touched buffer's slot (canonical unchanged), then release the slot.
+    for (auto const& b : cmd->_touched_buffers)
+        b->discard_slot(cmd->slot());
+    cmd->_touched_buffers.clear();
+    (void)_command_list_slots.release(cmd->slot());
 
     // Never submitted, so the GPU never touched this allocator. Close the list so it is poolable, then
     // return both to the pool: the list for reuse, the allocator straight to the free pool (it was

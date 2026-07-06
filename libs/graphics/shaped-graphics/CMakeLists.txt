@@ -12,6 +12,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
+    src/shaped-graphics/command_list_slot.cc
     src/shaped-graphics/binding_layout.cc
     src/shaped-graphics/compute_pipeline.cc
     src/shaped-graphics/binding_group.cc
@@ -39,7 +40,12 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
+    src/shaped-graphics/command_list_slot.hh
     src/shaped-graphics/buffer.hh
+    src/shaped-graphics/resource_access.hh
+    src/shaped-graphics/backend/resource_access_state.hh
+    src/shaped-graphics/backend/access_inference.hh
+    src/shaped-graphics/backend/subresource.hh
     src/shaped-graphics/views.hh
     src/shaped-graphics/binding.hh
     src/shaped-graphics/binding_layout.hh
@@ -100,6 +106,9 @@ add_executable(shaped-graphics-test
     tests/buffer/views-test.cc
     tests/transfer/bytes_future-test.cc
     tests/binding/binding-test.cc
+    tests/barrier/access_state-test.cc
+    tests/barrier/subresource-test.cc
+    tests/barrier/slot-test.cc
 )
 
 # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
@@ -120,6 +129,7 @@ if(_sg_backends)
         tests/transfer/transfer-test.cc
         tests/copy/copy-test.cc
         tests/transient/transient-test.cc
+        tests/barrier/barrier-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)

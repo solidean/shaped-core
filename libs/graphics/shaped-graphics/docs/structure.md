@@ -114,7 +114,9 @@ and neither backend can bind a resource into a heap yet.
 ## Planned surface (beyond the current stubs)
 
 ```text
-buffer transfer      [in progress]  command_list inline upload / download (dx12 real, vulkan stub); copy planned
+buffer transfer      [in progress]  command_list inline upload / download / copy (dx12 real, vulkan stub)
+barriers             [in progress]  inferred access + state tracking + concurrent-list slot model; dx12 enhanced
+                                  barriers real for buffers, textures/subresources designed-in, vulkan pending
 views                [in progress]  strongly-typed resource views; buffer views done, binding path + texture/texel deferred
 bindings             [in progress]  compiled_shader + binding vocab; binding_layout/group + compute_pipeline (dx12 real, vulkan stub)
 texture              [planned]  GPU-resident images + views (texture/texel view family)

@@ -40,7 +40,10 @@ when its underlying API or its own bookkeeping is not safe to touch from several
   is a deliberate, rationed operation (see [epochs](epochs.md)).
 
 A command list is still **single-threaded per instance** regardless of the model: one thread records
-it, then submits or drops it once, in the epoch it was opened in.
+it, then submits or drops it once, in the epoch it was opened in. But **several command lists may record
+concurrently**, even against the same resource — each takes an access-tracking slot that keys its private
+per-resource state, so their recording does not share mutable state. See
+[barriers](barriers.md) for the slot model and the revert-to-canonical contract on submit.
 
 ## Backends today
 

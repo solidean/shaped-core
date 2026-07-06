@@ -182,7 +182,7 @@ public:
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a
     // buffer alive. Guarded because create runs on any thread while advance runs on the driver thread.
-    cc::mutex<cc::vector<std::weak_ptr<sg::buffer>>> _transient_expiring;
+    cc::mutex<cc::vector<std::weak_ptr<sg::buffer const>>> _transient_expiring;
 
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.

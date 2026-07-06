@@ -6,6 +6,7 @@
 #include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.upload.hh>
+#include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace sg
@@ -20,6 +21,11 @@ public:
 
     /// The epoch this list was opened in. It must be submitted or dropped before that epoch advances.
     [[nodiscard]] epoch created_in_epoch() const { return _epoch; }
+
+    /// The access-tracking slot this list holds for its lifetime — keys its private access-state entry in
+    /// every resource it touches, so concurrent lists don't share state. See
+    /// libs/graphics/shaped-graphics/docs/concepts/barriers.md.
+    [[nodiscard]] command_list_slot slot() const { return _slot; }
 
     // buffer transfer — host↔device copies recorded at this point in the list
 
@@ -36,7 +42,7 @@ public:
     command_list_compute_scope compute;
 
 protected:
-    explicit command_list(epoch created_in);
+    command_list(epoch created_in, command_list_slot slot);
 
     // Backend seams the upload/download/copy/compute scopes forward to (contracts documented there);
     // friends so the scopes can reach them.
@@ -64,6 +70,16 @@ protected:
     virtual void compute_bind_group(int set, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;
 
+    // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
+    // Split by resource family: buffers carry no layout, textures do.
+    virtual void compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                     cc::span<array_buffer_access const> elements)
+        = 0;
+    virtual void compute_declare_array_texture_access(cc::string_view binding_name,
+                                                      cc::span<array_texture_access const> elements)
+        = 0;
+
     epoch _epoch = epoch::invalid;
+    command_list_slot _slot = command_list_slot::invalid;
 };
 } // namespace sg

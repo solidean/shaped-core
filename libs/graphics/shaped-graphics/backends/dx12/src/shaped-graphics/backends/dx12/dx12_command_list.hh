@@ -17,10 +17,15 @@ class dx12_command_list final : public sg::command_list
 public:
     dx12_command_list(dx12_context& ctx,
                       sg::epoch created_in,
+                      sg::command_list_slot slot,
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
                       ComPtr<ID3D12GraphicsCommandList> list)
-      : sg::command_list(created_in), _ctx(ctx), _queue(queue), _allocator(cc::move(allocator)), _list(cc::move(list))
+      : sg::command_list(created_in, slot),
+        _ctx(ctx),
+        _queue(queue),
+        _allocator(cc::move(allocator)),
+        _list(cc::move(list))
     {
     }
 
@@ -32,6 +37,11 @@ public:
     // Deferred readback copies recorded into this list; stamped with the submission token and handed
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
+
+    // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop) and the
+    // group currently bound to compute set 0 (whose views are declared at dispatch).
+    cc::vector<dx12_buffer_handle> _touched_buffers;
+    dx12_binding_group const* _bound_group = nullptr;
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
@@ -51,14 +61,16 @@ protected:
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
     void compute_bind_group(int set, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
+    void compute_declare_array_buffer_access(cc::string_view binding_name,
+                                             cc::span<sg::array_buffer_access const> elements) override;
+    void compute_declare_array_texture_access(cc::string_view binding_name,
+                                              cc::span<sg::array_texture_access const> elements) override;
 
 private:
-    // After a transfer op, returns `buffer` from its just-used copy state to COMMON, so the next op in
-    // the *same* list re-promotes it from COMMON — matching the cross-list decay the backend otherwise
-    // relies on. Buffers in COMMON are implicitly promoted on use, so no explicit "before" transition is
-    // needed; this reset is both the state fix and the write→read ordering point within one list.
-    // TODO: replace with tracked per-resource transitions once the state-tracking barrier system lands
-    // (it will emit precise, minimal COPY_SOURCE/COPY_DEST transitions instead of bouncing through COMMON).
-    void restore_buffer_to_common(dx12_buffer const& buffer, D3D12_RESOURCE_STATES from_state);
+    // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker
+    // asks for (COPY_DEST→COPY_SOURCE and the like — precise, no bounce through COMMON), and record the
+    // buffer so its slot is finalized at submit/drop. Cross-list ordering rides on D3D12's decay of buffers
+    // to COMMON at ExecuteCommandLists, so no trailing barrier is needed.
+    void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 };
 } // namespace sg::backend::dx12
