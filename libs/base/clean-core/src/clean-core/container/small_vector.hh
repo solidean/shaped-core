@@ -1,11 +1,13 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh> // cc::make_hash_range
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/impl/allocating_container.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/fwd.hh>
 
+#include <initializer_list>
 #include <new>
 
 /// Growable vector with small-vector optimization: the first `N` elements live inline (no allocation),
@@ -103,6 +105,15 @@ public:
     {
         _is_small = true;
         _s.sso.size = 0;
+    }
+
+    small_vector(std::initializer_list<T> init)
+    {
+        _is_small = true;
+        _s.sso.size = 0;
+        reserve(isize(init.size()));
+        for (auto const& e : init)
+            push_back(e);
     }
 
     small_vector(small_vector const& rhs) { _init_copy(rhs); }
@@ -233,6 +244,151 @@ public:
             _s.heap.remove_back();
     }
 
+    /// Constructs an element at the back without reallocation — the existing capacity must suffice.
+    template <class... Args>
+    T& emplace_back_stable(Args&&... args)
+    {
+        CC_ASSERT(has_capacity_back_for(1), "emplace_back_stable requires spare capacity (would reallocate)");
+        if (_is_small)
+        {
+            T* const slot = _s.sso.ptr() + _s.sso.size;
+            new (cc::placement_new, slot) T(cc::forward<Args>(args)...);
+            ++_s.sso.size;
+            return *slot;
+        }
+        return _s.heap.emplace_back_stable(cc::forward<Args>(args)...);
+    }
+    T& push_back_stable(T const& value) { return emplace_back_stable(value); }
+    T& push_back_stable(T&& value) { return emplace_back_stable(cc::move(value)); }
+
+    /// Removes and returns the element at `idx`, preserving order. Precondition: 0 <= idx < size().
+    [[nodiscard]] T pop_at(isize idx)
+    {
+        T value = cc::move((*this)[idx]);
+        remove_at(idx);
+        return value;
+    }
+    /// Removes the element at `idx`, preserving order (O(n) compaction). Precondition: 0 <= idx < size().
+    void remove_at(isize idx)
+    {
+        CC_ASSERT(idx >= 0 && idx < size(), "remove_at index out of bounds");
+        T* const d = data();
+        cc::impl::compact_move_objects_backward(d + idx, d + idx + 1, d + size());
+        _shrink_to(size() - 1);
+    }
+    /// Removes and returns the element at `idx` by swapping in the last element (O(1), does not preserve order).
+    [[nodiscard]] T pop_at_unordered(isize idx)
+    {
+        T value = cc::move((*this)[idx]);
+        remove_at_unordered(idx);
+        return value;
+    }
+    /// Removes the element at `idx` by swapping in the last element (O(1), does not preserve order).
+    void remove_at_unordered(isize idx)
+    {
+        CC_ASSERT(idx >= 0 && idx < size(), "remove_at_unordered index out of bounds");
+        isize const last = size() - 1;
+        if (idx != last)
+            data()[idx] = cc::move(data()[last]);
+        _shrink_to(last);
+    }
+
+    /// Removes `count` elements starting at `start`, preserving order. Precondition: start + count <= size().
+    void remove_at_range(isize start, isize count)
+    {
+        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range out of bounds");
+        if (count == 0)
+            return;
+        T* const d = data();
+        cc::impl::compact_move_objects_backward(d + start, d + start + count, d + size());
+        _shrink_to(size() - count);
+    }
+    /// Removes `count` elements starting at `start` by moving trailing elements into the gap (unordered).
+    void remove_at_range_unordered(isize start, isize count)
+    {
+        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range_unordered out of bounds");
+        if (count == 0)
+            return;
+        T* const d = data();
+        cc::impl::compact_move_objects_backward(d + start, d + size() - count, d + size());
+        _shrink_to(size() - count);
+    }
+    /// Removes the range [start, end), preserving order. Precondition: start <= end <= size().
+    void remove_from_to(isize start, isize end)
+    {
+        CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to out of bounds");
+        remove_at_range(start, end - start);
+    }
+    /// Removes the range [start, end) by moving trailing elements into the gap (unordered).
+    void remove_from_to_unordered(isize start, isize end)
+    {
+        CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to_unordered out of bounds");
+        remove_at_range_unordered(start, end - start);
+    }
+
+    /// Removes every element for which `pred` is true (preserving order); returns the number removed.
+    template <class Pred>
+    isize remove_all_where(Pred&& pred)
+    {
+        T* const d = data();
+        isize const n = size();
+        isize write = 0;
+        for (isize read = 0; read < n; ++read)
+            if (!pred(d[read]))
+            {
+                if (write != read)
+                    d[write] = cc::move(d[read]);
+                ++write;
+            }
+        _shrink_to(write);
+        return n - write;
+    }
+    /// Removes the first element matching `pred`; returns its index, or nullopt if none matched.
+    template <class Pred>
+    cc::optional<isize> remove_first_where(Pred&& pred)
+    {
+        for (isize i = 0, n = size(); i < n; ++i)
+            if (pred((*this)[i]))
+            {
+                remove_at(i);
+                return i;
+            }
+        return {};
+    }
+    /// Removes the last element matching `pred`; returns its index, or nullopt if none matched.
+    template <class Pred>
+    cc::optional<isize> remove_last_where(Pred&& pred)
+    {
+        for (isize i = size() - 1; i >= 0; --i)
+            if (pred((*this)[i]))
+            {
+                remove_at(i);
+                return i;
+            }
+        return {};
+    }
+    /// Removes every element equal to `value`; returns the number removed.
+    isize remove_all_value(T const& value)
+    {
+        return remove_all_where([&](T const& e) { return e == value; });
+    }
+    /// Removes the first element equal to `value`; returns its index, or nullopt.
+    cc::optional<isize> remove_first_value(T const& value)
+    {
+        return remove_first_where([&](T const& e) { return e == value; });
+    }
+    /// Removes the last element equal to `value`; returns its index, or nullopt.
+    cc::optional<isize> remove_last_value(T const& value)
+    {
+        return remove_last_where([&](T const& e) { return e == value; });
+    }
+    /// Keeps only the elements for which `pred` is true (preserving order); returns the number removed.
+    template <class Pred>
+    isize retain_all_where(Pred&& pred)
+    {
+        return remove_all_where([&](T const& e) { return !pred(e); });
+    }
+
     /// Destroys all elements; size becomes 0. Keeps the current storage mode and capacity.
     void clear()
     {
@@ -331,6 +487,71 @@ public:
             _s.heap.resize_to_uninitialized(new_size);
     }
 
+    /// Resizes to `new_size`; new elements are constructed with `args...`.
+    template <class... Args>
+    void resize_to_constructed(isize new_size, Args&&... args)
+    {
+        CC_ASSERT(new_size >= 0, "small_vector size must be >= 0");
+        if (new_size <= size())
+            return _shrink_to(new_size);
+        reserve(new_size);
+        while (size() < new_size)
+            emplace_back_stable(args...); // args reused (copied) for each new element
+    }
+
+    /// Clears, then resizes to `new_size` with value-initialized elements.
+    void clear_resize_to_defaulted(isize new_size)
+    {
+        clear();
+        resize_to_defaulted(new_size);
+    }
+    /// Clears, then resizes to `new_size` with copies of `value`.
+    void clear_resize_to_filled(isize new_size, T const& value)
+    {
+        clear();
+        resize_to_filled(new_size, value);
+    }
+    /// Clears, then resizes to `new_size` with uninitialized elements (trivial types only).
+    void clear_resize_to_uninitialized(isize new_size)
+    {
+        clear();
+        resize_to_uninitialized(new_size);
+    }
+    /// Clears, then resizes to `new_size` with elements constructed from `args...`.
+    template <class... Args>
+    void clear_resize_to_constructed(isize new_size, Args&&... args)
+    {
+        clear();
+        resize_to_constructed(new_size, cc::forward<Args>(args)...);
+    }
+
+    /// Ensures capacity for `count` more elements beyond the current size (exponential growth).
+    void reserve_back(isize count) { reserve(size() + count); }
+    /// Ensures capacity for `count` more elements beyond the current size (exact allocation).
+    void reserve_back_exact(isize count) { reserve_exact(size() + count); }
+
+    /// Reduces capacity toward the current size. If the elements fit inline, returns to inline storage
+    /// (freeing the heap allocation); otherwise shrinks the heap allocation.
+    void shrink_to_fit()
+    {
+        if (_is_small)
+            return; // inline storage is already minimal
+        if (size() <= N)
+        {
+            // Re-inline: extract the allocation, move its elements into the inline buffer, then let the
+            // extracted allocation destroy the moved-from originals and free its storage.
+            cc::allocation<T> alloc = _s.heap.extract_allocation();
+            _s.heap.~data_heap();
+            _is_small = true;
+            _s.sso.size = 0;
+            T* dst = _s.sso.ptr();
+            cc::impl::move_create_objects_to(dst, alloc.obj_start, alloc.obj_end);
+            _s.sso.size = alloc.obj_end - alloc.obj_start;
+        }
+        else
+            _s.heap.shrink_to_fit();
+    }
+
     // allocation extraction
 public:
     /// Extracts the underlying allocation, leaving this empty. If currently inline, the elements are first
@@ -358,6 +579,9 @@ public:
         _s.sso.size = 0;
         return out;
     }
+
+    /// Structural, order-dependent hash over the elements (independent of capacity / storage mode).
+    [[nodiscard]] friend u64 hash(small_vector const& v) { return cc::make_hash_range(v); }
 
 private:
     // Heap representation: a back-growing allocating_container over T (vector-like policy).

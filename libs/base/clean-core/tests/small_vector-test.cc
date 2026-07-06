@@ -322,3 +322,118 @@ TEST("small_vector - move-only element type")
     CHECK(w[1].value == 2);
     CHECK(v.size() == 0);
 }
+
+TEST("small_vector - initializer list and hash")
+{
+    cc::small_vector<int, 4> v = {1, 2, 3, 4, 5}; // > N -> heap
+    CHECK(v.size() == 5);
+    CHECK(v[0] == 1);
+    CHECK(v[4] == 5);
+
+    cc::small_vector<int, 8> const w = {1, 2, 3, 4, 5}; // inline, same content
+    CHECK(hash(v) == hash(w));                          // hash is content-based, independent of storage mode
+}
+
+TEST("small_vector - stable appenders require capacity")
+{
+    cc::small_vector<int, 2> v;
+    v.reserve(8);
+    auto const* const data0 = v.data();
+    v.push_back_stable(1);
+    v.emplace_back_stable(2);
+    CHECK(v.data() == data0); // no reallocation
+    CHECK(v.size() == 2);
+    CHECK(v[1] == 2);
+
+    cc::small_vector<int, 1> full;
+    full.push_back(1);                          // size == capacity (1)
+    CHECK_ASSERTS(full.emplace_back_stable(3)); // no spare capacity -> asserts
+}
+
+TEST("small_vector - ordered and unordered element removal")
+{
+    auto make = []
+    {
+        cc::small_vector<int, 3> v;
+        for (int i = 0; i < 6; ++i) // 0..5, heap
+            v.push_back(i);
+        return v;
+    };
+
+    SECTION("remove_at / pop_at preserve order")
+    {
+        auto v = make();
+        CHECK(v.pop_at(1) == 1);
+        CHECK(v.size() == 5);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 2); // shifted down
+        v.remove_at(0);
+        CHECK(v[0] == 2);
+    }
+
+    SECTION("unordered swaps in the last element")
+    {
+        auto v = make();
+        CHECK(v.pop_at_unordered(0) == 0);
+        CHECK(v.size() == 5);
+        CHECK(v[0] == 5); // last moved into the hole
+        v.remove_at_unordered(1);
+        CHECK(v.size() == 4);
+    }
+
+    SECTION("range removal")
+    {
+        auto v = make();
+        v.remove_at_range(1, 2); // drop 1,2
+        CHECK(v.size() == 4);
+        CHECK(v[0] == 0);
+        CHECK(v[1] == 3);
+        v.remove_from_to(0, 1); // drop 0
+        CHECK(v[0] == 3);
+    }
+
+    SECTION("predicate and value removal")
+    {
+        auto v = make();
+        CHECK(v.remove_all_where([](int x) { return x % 2 == 0; }) == 3); // drop 0,2,4
+        CHECK(v.size() == 3);
+        CHECK(v[0] == 1);
+
+        auto w = make();                                             // {0,1,2,3,4,5}
+        CHECK(w.remove_first_value(3).value() == 3);                 // -> {0,1,2,4,5}
+        CHECK(w.retain_all_where([](int x) { return x < 3; }) == 2); // drop 4,5 -> keep {0,1,2}
+        CHECK(w.size() == 3);
+    }
+}
+
+TEST("small_vector - resize_to_constructed and clear_resize")
+{
+    cc::small_vector<int, 2> v;
+    v.resize_to_constructed(4, 7);
+    CHECK(v.size() == 4);
+    CHECK(v[0] == 7);
+    CHECK(v[3] == 7);
+
+    v.clear_resize_to_filled(3, 9);
+    CHECK(v.size() == 3);
+    CHECK(v[2] == 9);
+
+    v.clear_resize_to_defaulted(2);
+    CHECK(v[0] == 0);
+}
+
+TEST("small_vector - shrink_to_fit returns to inline when it fits")
+{
+    cc::small_vector<int, 4> v;
+    for (int i = 0; i < 20; ++i)
+        v.push_back(i);
+    CHECK(!v.is_inline());
+
+    v.resize_down_to(3); // now fits inline, but still heap
+    CHECK(!v.is_inline());
+    v.shrink_to_fit();
+    CHECK(v.is_inline()); // re-inlined
+    CHECK(v.size() == 3);
+    CHECK(v[0] == 0);
+    CHECK(v[2] == 2);
+}
