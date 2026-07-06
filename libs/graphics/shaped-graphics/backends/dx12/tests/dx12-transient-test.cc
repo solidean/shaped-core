@@ -19,7 +19,7 @@ namespace dx12 = sg::backend::dx12;
 // still round-trips. The 512 KiB budget is set deferred and takes effect from the second epoch on.
 TEST("sg dx12 - transient buffer storage reused across many epochs")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
     c.transient.set_budget(cc::isize(512) * 1024); // applied at the next advance_epoch (see set_budget)

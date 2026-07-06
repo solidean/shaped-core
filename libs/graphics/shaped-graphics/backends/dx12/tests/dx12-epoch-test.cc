@@ -16,7 +16,7 @@ namespace dx12 = sg::backend::dx12;
 
 TEST("sg dx12 - epoch advance and retire")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::make_warp_context(); // fresh: this asserts the epoch counter's initial value
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -31,7 +31,7 @@ TEST("sg dx12 - epoch advance and retire")
 
 TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -51,7 +51,7 @@ TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch re
 
 TEST("sg dx12 - submission token reports completion")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
@@ -66,7 +66,7 @@ TEST("sg dx12 - submission token reports completion")
 
 TEST("sg dx12 - throttle bounds epochs in flight")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 

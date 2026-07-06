@@ -1,3 +1,5 @@
+#include "dx12-test-common.hh"
+
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
@@ -15,12 +17,6 @@
 namespace
 {
 namespace dx12 = sg::backend::dx12;
-
-sg::context_handle make_warp()
-{
-    auto ctx = sg::create_dx12_context({.use_warp = true});
-    return ctx.has_value() ? ctx.value() : nullptr;
-}
 
 // The compiled compute shader for double_compute.hlsl: embedded DXIL + its hand-authored reflection —
 // one read-write structured binding "Output" at (set 0, index 0). Shared by the tests below.
@@ -46,7 +42,7 @@ sg::compiled_shader make_double_shader()
 
 TEST("sg dx12 - compute dispatch writes a structured buffer")
 {
-    auto handle = make_warp();
+    auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
