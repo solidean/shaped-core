@@ -171,6 +171,39 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
     ctx->submit_command_list(cc::move(cmd.value()));
 }
 
+// Regression (found by transfer-fuzz-test, seed 1): after advance_epoch_and_wait_for_idle() a submitted
+// readback must be ready — idle means the copy completed and the future is fulfilled. It flakily isn't:
+// wait-for-idle drains the GPU but the future can briefly still report not-ready, so a single is_ready()
+// sample right after the wait misses. The race fires at a varying round with a varying rate, hence the
+// loop and the once-per-round sample (a re-check would let the future catch up and mask the bug).
+INVOCABLE_TEST("sg - readback is ready immediately after wait_for_idle", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const buf = make_transfer_buffer(ctx, 256);
+
+    cc::byte src[256];
+    for (int i = 0; i < 256; ++i)
+        src[i] = pattern(i);
+    {
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd.has_value());
+        cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+        ctx->submit_command_list(cc::move(cmd.value()));
+    }
+
+    for (int round = 0; round < 256; ++round)
+    {
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd.has_value());
+        auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 256);
+        ctx->submit_command_list(cc::move(cmd.value()));
+
+        ctx->advance_epoch_and_wait_for_idle();
+
+        REQUIRE(future.is_ready()); // idle means the readback completed
+    }
+}
+
 INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
