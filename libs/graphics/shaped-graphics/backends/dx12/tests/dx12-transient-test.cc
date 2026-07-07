@@ -28,7 +28,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
 
     for (int e = 0; e < 30; ++e)
     {
-        auto buf = c.transient.create_buffer(256, usage);
+        auto buf = c.transient.create_raw_buffer(256, usage);
         REQUIRE(buf.has_value());
 
         cc::byte src[256];

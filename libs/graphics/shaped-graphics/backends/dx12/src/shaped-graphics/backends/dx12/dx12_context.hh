@@ -94,11 +94,11 @@ public:
         return cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list());
     }
 
-    [[nodiscard]] cc::result<sg::buffer_handle> create_buffer(cc::isize size_in_bytes,
-                                                              sg::buffer_usage usage,
-                                                              sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> create_raw_buffer(cc::isize size_in_bytes,
+                                                                      sg::buffer_usage usage,
+                                                                      sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
+        return cc::result<sg::raw_buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
     }
 
     [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize size_in_bytes) override
@@ -182,7 +182,7 @@ public:
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a
     // buffer alive. Guarded because create runs on any thread while advance runs on the driver thread.
-    cc::mutex<cc::vector<std::weak_ptr<sg::buffer const>>> _transient_expiring;
+    cc::mutex<cc::vector<std::weak_ptr<sg::raw_buffer const>>> _transient_expiring;
 
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.

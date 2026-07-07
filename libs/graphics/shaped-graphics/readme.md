@@ -16,7 +16,7 @@ upload/download/copy. See [docs/structure.md](docs/structure.md) for what is `[d
 ## Design at a glance
 
 - **Handles.** Every shared type `xyz` has `xyz_handle = std::shared_ptr<sg::xyz>`
-  (`context_handle`, `command_list_handle`, `buffer_handle`). Public factories return handles.
+  (`context_handle`, `command_list_handle`, `raw_buffer_handle`). Public factories return handles.
 - **Mutable drivers vs shared-immutable resources.** `context` and `command_list` are mutable,
   stateful, single-threaded. `buffer` (and future `texture`) are immutable in *shape* and act
   like a span over mutable GPU-resident memory.

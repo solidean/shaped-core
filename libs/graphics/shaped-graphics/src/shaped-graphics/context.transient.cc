@@ -46,7 +46,7 @@ void context_transient_scope::apply_pending_budget_at_epoch_boundary()
         });
 }
 
-cc::result<buffer_handle> context_transient_scope::create_buffer(isize size_in_bytes, buffer_usage usage)
+cc::result<raw_buffer_handle> context_transient_scope::create_raw_buffer(isize size_in_bytes, buffer_usage usage)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
 
@@ -88,7 +88,7 @@ cc::result<buffer_handle> context_transient_scope::create_buffer(isize size_in_b
         alloc = reserved.value();
     }
 
-    return _ctx.create_buffer(size_in_bytes, usage, alloc);
+    return _ctx.create_raw_buffer(size_in_bytes, usage, alloc);
 }
 
 cc::result<binding_group_handle> context_transient_scope::create_binding_group(binding_layout_handle layout,

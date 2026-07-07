@@ -20,7 +20,7 @@ class command_list_upload_scope;
 class command_list_download_scope;
 class command_list_copy_scope;
 class command_list_compute_scope;
-class buffer;
+class raw_buffer;
 class bytes_waiter;
 class bytes_future;
 template <class T>
@@ -95,7 +95,7 @@ enum class submission_token : u64
 /// handles; command_list does not — it's a single-use temporary held by std::unique_ptr, passed by
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
-using buffer_handle = std::shared_ptr<buffer const>; // shared-immutable: a view/handle can't reshape the buffer
+using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_layout_handle = std::shared_ptr<binding_layout const>;   // immutable schema

@@ -18,14 +18,14 @@ namespace sg
 /// storage. That is safe — a direct queue executes each epoch's GPU work before the next's, so the
 /// memory is free by the time it is reused — and cheaper than a ring (smaller heap, better cache
 /// behaviour). Requests larger than the budget fall back to a dedicated (committed) allocation. This is
-/// all built on the public create_memory_heap + create_buffer; the backend only sees a transient,
+/// all built on the public create_memory_heap + create_raw_buffer; the backend only sees a transient,
 /// heap-placed allocation_info.
 class context_transient_scope
 {
 public:
     /// Allocates a transient buffer of `size_in_bytes` (>= 0, 0 is a valid empty buffer) from the
     /// current epoch's bump window; the storage is reused once the epoch changes.
-    [[nodiscard]] cc::result<buffer_handle> create_buffer(isize size_in_bytes, buffer_usage usage);
+    [[nodiscard]] cc::result<raw_buffer_handle> create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
     /// Instantiates `layout` with the given name->view bindings as a transient binding_group (validated
     /// against the layout), whose descriptors are recycled when this epoch retires.
@@ -58,7 +58,7 @@ private:
     context& _ctx;
 
     // The bump allocator state: the heap (lazy), its budget, the current head, the epoch the head was last
-    // reset for, and a budget change awaiting the next epoch boundary. Guarded — create_buffer may run on
+    // reset for, and a budget change awaiting the next epoch boundary. Guarded — create_raw_buffer may run on
     // any thread.
     struct bump_state
     {

@@ -92,7 +92,7 @@ void dx12_command_list::compute_declare_array_texture_access(cc::string_view bin
     CC_ASSERT(elements.empty(), "texture array access declaration is not implemented yet (no sg::texture)");
 }
 
-void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
+void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                cc::span<cc::byte const> data,
                                                cc::isize offset_in_bytes)
 {
@@ -112,7 +112,7 @@ void dx12_command_list::upload_bytes_to_buffer(sg::buffer_handle buffer,
     _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
 }
 
-sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle buffer,
+sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                                cc::isize offset_in_bytes,
                                                                cc::isize size_in_bytes)
 {
@@ -132,8 +132,8 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::buffer_handle
     return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
 }
 
-void dx12_command_list::copy_buffer_region(sg::buffer_handle src,
-                                           sg::buffer_handle dst,
+void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
+                                           sg::raw_buffer_handle dst,
                                            cc::isize src_offset_in_bytes,
                                            cc::isize dst_offset_in_bytes,
                                            cc::isize size_in_bytes)

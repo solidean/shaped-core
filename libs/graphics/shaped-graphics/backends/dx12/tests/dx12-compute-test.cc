@@ -115,8 +115,8 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 
     for (int e = 0; e < 40; ++e)
     {
-        auto buf = c.transient.create_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
-                                             sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto buf = c.transient.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
+                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
         REQUIRE(buf.has_value());
 
         sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
@@ -162,7 +162,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
     auto layout = c.create_dx12_binding_layout(shader.bindings, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
 
-    auto buf = c.persistent.create_buffer(256, sg::buffer_usage::readwrite_buffer);
+    auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf.has_value());
 
     for (int i = 0; i < 50; ++i)

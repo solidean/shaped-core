@@ -12,8 +12,8 @@ namespace sg
 /// optional and default to 0.
 struct buffer_bytes_copy
 {
-    buffer_handle src;                 ///< copy source; must not be null; needs buffer_usage::copy_src
-    buffer_handle dst;                 ///< copy destination; must not be null; needs buffer_usage::copy_dst
+    raw_buffer_handle src;             ///< copy source; must not be null; needs buffer_usage::copy_src
+    raw_buffer_handle dst;             ///< copy destination; must not be null; needs buffer_usage::copy_dst
     cc::isize size_in_bytes;           ///< bytes to copy; 0 is a valid no-op
     cc::isize src_offset_in_bytes = 0; ///< byte offset into src
     cc::isize dst_offset_in_bytes = 0; ///< byte offset into dst
@@ -25,8 +25,8 @@ struct buffer_bytes_copy
 template <class T>
 struct buffer_data_copy
 {
-    buffer_handle src;
-    buffer_handle dst;
+    raw_buffer_handle src;
+    raw_buffer_handle dst;
     cc::isize count;          ///< number of T elements to copy
     cc::isize src_offset = 0; ///< element offset into src
     cc::isize dst_offset = 0; ///< element offset into dst

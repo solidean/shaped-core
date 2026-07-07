@@ -60,7 +60,7 @@ The axes are independent, but in practice:
 
 ## Transient allocation
 
-`ctx.transient.create_buffer(size, usage)` sub-allocates from a **per-epoch bump allocator** over one
+`ctx.transient.create_raw_buffer(size, usage)` sub-allocates from a **per-epoch bump allocator** over one
 DEFAULT heap the transient scope owns: a monotonic head hands out placement offsets, and **resets to 0
 whenever the epoch changes**. Successive epochs therefore alias the same storage — which is not only
 safe but desired. It is safe because a single direct queue executes each epoch's GPU work before the
@@ -82,7 +82,7 @@ heap, so the change is predictable and never mid-epoch.
 
 ## Expiry
 
-Storage that a lifetime scope reclaims must not be named afterwards, so `sg::buffer` carries explicit
+Storage that a lifetime scope reclaims must not be named afterwards, so `sg::raw_buffer` carries explicit
 expiry state, independent of how it was allocated:
 
 - `is_expired()` / `is_valid()` — public: whether the buffer still names live storage.
@@ -97,7 +97,7 @@ recycled its descriptor slots.
 ## Status
 
 Both **dedicated** and **placed** buffer backing work on dx12: `ctx.persistent.create_memory_heap(size)`
-mints a heap, and a placement's `allocation_info` routes `create_buffer` through `CreatePlacedResource`
+mints a heap, and a placement's `allocation_info` routes `create_raw_buffer` through `CreatePlacedResource`
 (the buffer holds a handle to its heap so the heap outlives the placement). `ctx.transient` exposes
 per-epoch buffers and binding groups (above). The vulkan backend stubs all of it (heaps, placed
 resources, transient) until its own milestone.

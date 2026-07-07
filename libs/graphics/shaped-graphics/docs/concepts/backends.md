@@ -6,7 +6,7 @@
 
 ## What a backend is
 
-`sg::context`, `sg::command_list`, and `sg::buffer` are **abstract interfaces**. A *backend* is a
+`sg::context`, `sg::command_list`, and `sg::raw_buffer` are **abstract interfaces**. A *backend* is a
 self-contained static library under [`backends/`](../../backends/) that subclasses them directly
 (`sg::backend::dx12::dx12_context : public sg::context`) and drives a real graphics API — dx12,
 vulkan, and later others (a cpu reference, a capture/debug layer, a remote context).

@@ -30,7 +30,7 @@ when its underlying API or its own bookkeeping is not safe to touch from several
 **`multi_threaded`** — split into two tiers:
 
 - **Concurrency-safe:** resource and command-list operations — `create_command_list`,
-  `create_buffer`, `submit_command_list`, `drop_command_list` (and a resource's refcount reaching
+  `create_raw_buffer`, `submit_command_list`, `drop_command_list` (and a resource's refcount reaching
   zero, i.e. deferred deletion) — may be called from several threads at once.
 - **Externally synchronized:** **epoch management** (`advance_epoch`,
   `advance_epoch_and_wait_for_idle`, `wait_for_epoch`, `wait_for_next_inflight_epoch`,

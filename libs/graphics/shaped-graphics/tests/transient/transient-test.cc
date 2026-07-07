@@ -4,9 +4,9 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh> // sg::named_view
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/context.hh>
+#include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 // Backend-agnostic tests for the transient lifetime scope (ctx->transient): per-epoch scratch buffers, the
@@ -26,7 +26,7 @@ sg::buffer_usage const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage
 // every byte matched — the round-trip that proves a transient buffer names live, distinct storage.
 bool transient_round_trip(sg::context_handle const& ctx, int seed)
 {
-    auto buf = ctx->transient.create_buffer(256, copy_both);
+    auto buf = ctx->transient.create_raw_buffer(256, copy_both);
     if (!buf.has_value())
         return false;
 
@@ -65,7 +65,7 @@ INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_han
 {
     REQUIRE(ctx != nullptr);
 
-    auto buf = ctx->transient.create_buffer(1024, sg::buffer_usage::uniform_buffer);
+    auto buf = ctx->transient.create_raw_buffer(1024, sg::buffer_usage::uniform_buffer);
     REQUIRE(buf.has_value());
     CHECK(buf.value()->size_in_bytes() == 1024);
     CHECK(sg::has_flag(buf.value()->usage(), sg::buffer_usage::uniform_buffer));
@@ -76,7 +76,7 @@ INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context
 {
     REQUIRE(ctx != nullptr);
 
-    auto buf = ctx->transient.create_buffer(0, sg::buffer_usage::none);
+    auto buf = ctx->transient.create_raw_buffer(0, sg::buffer_usage::none);
     REQUIRE(buf.has_value());
     CHECK(buf.value()->size_in_bytes() == 0);
     CHECK(buf.value()->is_valid());
@@ -92,8 +92,8 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
 {
     REQUIRE(ctx != nullptr);
 
-    auto a = ctx->transient.create_buffer(128, copy_both);
-    auto b = ctx->transient.create_buffer(128, copy_both);
+    auto a = ctx->transient.create_raw_buffer(128, copy_both);
+    auto b = ctx->transient.create_raw_buffer(128, copy_both);
     REQUIRE(a.has_value());
     REQUIRE(b.has_value());
 
@@ -136,7 +136,7 @@ INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::conte
 {
     REQUIRE(ctx != nullptr);
 
-    auto buf = ctx->transient.create_buffer(256, copy_both);
+    auto buf = ctx->transient.create_raw_buffer(256, copy_both);
     REQUIRE(buf.has_value());
     CHECK(buf.value()->is_valid());
     CHECK(!buf.value()->is_expired());
@@ -210,7 +210,7 @@ INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", 
     auto layout = ctx->persistent.create_binding_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout.has_value());
 
-    auto buf = ctx->persistent.create_buffer(256, sg::buffer_usage::readwrite_buffer);
+    auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf.has_value());
 
     sg::named_view const nv{.name = "Data", .view = buf.value()->as_readwrite_buffer<particle>()};
@@ -233,7 +233,7 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
     auto layout = ctx->persistent.create_binding_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout.has_value());
 
-    auto buf = ctx->persistent.create_buffer(256, sg::buffer_usage::readwrite_buffer);
+    auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf.has_value());
 
     // A view bound to a name the layout does not declare is rejected, not silently ignored.

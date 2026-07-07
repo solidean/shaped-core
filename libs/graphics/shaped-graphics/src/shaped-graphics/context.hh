@@ -30,11 +30,11 @@ public:
     [[nodiscard]] thread_model threading() const { return _thread_model; }
 
     /// Persistent-lifetime resource factory. Create long-lived GPU resources through it:
-    /// `ctx.persistent.create_buffer(...)`.
+    /// `ctx.persistent.create_raw_buffer(...)`.
     context_persistent_scope persistent;
 
     /// Transient-lifetime resource factory for per-frame scratch, recycled when the epoch retires:
-    /// `ctx.transient.create_buffer(...)`. See lifetime_scope.
+    /// `ctx.transient.create_raw_buffer(...)`. See lifetime_scope.
     context_transient_scope transient;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
@@ -95,7 +95,7 @@ public:
 protected:
     context(backend_kind backend, thread_model threading);
 
-    // Reached by the lifetime scopes (`ctx.persistent.create_buffer(...)`), which funnel here as friends.
+    // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     friend class context_persistent_scope;
     friend class context_transient_scope;
 
@@ -106,15 +106,15 @@ protected:
 
     /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer). `alloc` selects
     /// the backing memory (see allocation_info).
-    [[nodiscard]] virtual cc::result<buffer_handle> create_buffer(isize size_in_bytes,
-                                                                  buffer_usage usage,
-                                                                  allocation_info const& alloc)
+    [[nodiscard]] virtual cc::result<raw_buffer_handle> create_raw_buffer(isize size_in_bytes,
+                                                                          buffer_usage usage,
+                                                                          allocation_info const& alloc)
         = 0;
 
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into. Size
     /// must be >= 0 (0 is a valid empty heap that holds no placements). A heap is persistent — it
     /// outlives the resources placed in it — so it is reached through ctx.persistent.create_memory_heap.
-    /// ctx.transient also builds on it: a transient buffer is just create_buffer with a transient,
+    /// ctx.transient also builds on it: a transient buffer is just create_raw_buffer with a transient,
     /// heap-placed allocation_info picked by ctx.transient's per-epoch bump allocator.
     [[nodiscard]] virtual cc::result<memory_heap_handle> create_memory_heap(isize size_in_bytes) = 0;
 

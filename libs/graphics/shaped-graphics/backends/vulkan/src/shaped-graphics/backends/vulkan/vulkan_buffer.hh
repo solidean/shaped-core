@@ -2,14 +2,14 @@
 
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
-#include <shaped-graphics/buffer.hh>
+#include <shaped-graphics/raw_buffer.hh>
 
 namespace sg::backend::vulkan
 {
-/// Vulkan implementation of sg::buffer. Holds the VkBuffer and its backing device-local
+/// Vulkan implementation of sg::raw_buffer. Holds the VkBuffer and its backing device-local
 /// VkDeviceMemory (sg exposes no host-visible buffers). Both are VK_NULL_HANDLE for an empty
 /// (size 0) buffer.
-class vulkan_buffer final : public sg::buffer
+class vulkan_buffer final : public sg::raw_buffer
 {
 public:
     vulkan_buffer(vulkan_context& ctx,
@@ -18,7 +18,7 @@ public:
                   sg::buffer_usage usage,
                   VkBuffer buffer,
                   VkDeviceMemory memory)
-      : sg::buffer(size_in_bytes, usage), _ctx(ctx), _creation_epoch(created_in), _buffer(buffer), _memory(memory)
+      : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _creation_epoch(created_in), _buffer(buffer), _memory(memory)
     {
     }
 

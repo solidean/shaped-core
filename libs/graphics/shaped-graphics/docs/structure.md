@@ -23,7 +23,7 @@ Update the tags as the API lands. This document is design intent, not a guarante
 ```text
 src/shaped-graphics/
   fwd.hh / all.hh / types.hh      [in progress]
-  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_buffer funneled via ctx.persistent
+  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_raw_buffer funneled via ctx.persistent
   context.persistent.hh/.cc       [in progress] context_persistent_scope: ctx.persistent resource factory (back-ref + friend of context)
   command_list.hh/.cc             [in progress] abstract; recording API planned
   buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done; as_* view factories
@@ -58,7 +58,7 @@ A backend is built only where it is available for the platform/build. The gates 
 (`d3d12 dxgi dxguid`), always present on the Windows path; vulkan gates on `find_package(Vulkan)` and
 links `Vulkan::Vulkan` (the loader + headers), so it builds wherever a Vulkan SDK is installed.
 
-Fallible creates (`create_*_context`, `create_command_list`, `create_buffer`) return `cc::result`;
+Fallible creates (`create_*_context`, `create_command_list`, `create_raw_buffer`) return `cc::result`;
 programmer misuse (e.g. `size <= 0`) asserts rather than returning an error. See the
 [coding-guidelines](coding-guidelines.md) and the repo error-handling policy.
 
@@ -78,7 +78,7 @@ storage). There are **no host-visible resources**; host↔device transfer is a g
 resource sg manages, driven through command lists. See the [coding-guidelines](coding-guidelines.md).
 
 Resource creation is reached through a **lifetime scope** on the context rather than the context
-directly: `ctx.persistent.create_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
+directly: `ctx.persistent.create_raw_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
 back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
 and the scope — a friend — funnels through it, tagging the request with its lifetime. Today only the
 persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `lifetime_scope`)
@@ -86,7 +86,7 @@ is the planned second one.
 
 ## Ownership & lifetime
 
-- **Resources are shared** (`buffer_handle` = `shared_ptr`); **command lists are move-only**
+- **Resources are shared** (`raw_buffer_handle` = `shared_ptr`); **command lists are move-only**
   (`std::unique_ptr<command_list>`, no handle typedef) — record once, submit once, passed by
   reference.
 - **Backend-typed create methods** (`create_dx12_buffer` → `dx12_buffer_handle`, …) are the real
