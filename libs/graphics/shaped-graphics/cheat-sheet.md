@@ -68,7 +68,8 @@ ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset=0)  // void 
 ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset=0)      // void — typed convenience; re-views the SAME pin as bytes (no copy). build the pin with cc::make_pinned_data / cc::as_pinned_data
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
-ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
+ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; explicit discard (same epoch). NB a list left to leave
+                                                   //   scope un-consumed auto-drops itself but PRINTS A WARNING — submit or drop it explicitly
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
 ctx.is_shut_down()                                 // bool
 // invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
@@ -114,7 +115,8 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 ```cpp
 #include <shaped-graphics/command_list.hh>
 // abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
-// -> std::unique_ptr; passed by reference (command_list&). record once, submit once, not reused.
+// -> std::unique_ptr; passed by reference (command_list&). record once; submit OR drop it once,
+// explicitly, in the epoch it opened in (not reused). Leaving it to go out of scope auto-drops it + warns.
 cmd.upload.bytes_to_buffer(buf, bytes, offset=0)     // void — stage host bytes into buf (needs copy_dst); empty = no-op
 cmd.upload.data_to_buffer(buf, range, offset=0)      // void — typed convenience (trivially-copyable contiguous range)
 cmd.download.bytes_from_buffer(buf, offset, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future

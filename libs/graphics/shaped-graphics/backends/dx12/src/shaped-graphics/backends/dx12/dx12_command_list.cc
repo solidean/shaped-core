@@ -2,6 +2,7 @@
 // fields); its create/submit/drop bodies live here. Allocators are epoch-gated (recycled once the
 // epoch retires); see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
+#include <clean-core/string/print.hh>
 #include <shaped-graphics/backend/access_inference.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
@@ -272,6 +273,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
     (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+    cmd->_consumed = true; // its dtor must not auto-drop it
     return token;
 }
 
@@ -280,24 +282,43 @@ void dx12_context::drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd
     CC_ASSERT(cmd != nullptr, "cannot drop a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be dropped in the epoch it was opened "
                                                           "in");
+    reclaim_unsubmitted_command_list(*cmd);
+}
+
+void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
+{
+    CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
+    cmd._consumed = true;
 
     // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
-    _download_inline.discard_unsubmitted(cmd->_pending_downloads);
+    _download_inline.discard_unsubmitted(cmd._pending_downloads);
 
     // The recorded work never runs, so its declared accesses leave no committed state: just clear each
     // touched buffer's slot (canonical unchanged), then release the slot.
-    for (auto const& b : cmd->_touched_buffers)
-        b->discard_slot(cmd->slot());
-    cmd->_touched_buffers.clear();
-    (void)_command_list_slots.release(cmd->slot());
+    for (auto const& b : cmd._touched_buffers)
+        b->discard_slot(cmd.slot());
+    cmd._touched_buffers.clear();
+    (void)_command_list_slots.release(cmd.slot());
 
     // Never submitted, so the GPU never touched this allocator. Close the list so it is poolable, then
     // return both to the pool: the list for reuse, the allocator straight to the free pool (it was
     // never executed, so no epoch gates it; reset happens at reuse).
-    HRESULT const closed = cmd->_list->Close();
+    HRESULT const closed = cmd._list->Close();
     CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
-    _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
-    _cmd_pool.return_free_allocator({cc::move(cmd->_allocator), cmd->_queue});
+    _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
+    _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+}
+
+dx12_command_list::~dx12_command_list()
+{
+    if (_consumed)
+        return; // submitted or dropped explicitly — nothing to reclaim
+
+    // Safety net: a list left neither submitted nor dropped. Reclaim it like a drop so the open-list
+    // count, its slot, and its allocator/list don't leak — but warn, since the explicit call is required.
+    cc::eprintln("[sg] command list destroyed without submit or drop — auto-dropping. Submit or drop every "
+                 "command list explicitly through the context.");
+    _ctx.reclaim_unsubmitted_command_list(*this);
 }
 } // namespace sg::backend::dx12

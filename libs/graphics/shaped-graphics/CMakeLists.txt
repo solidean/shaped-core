@@ -12,7 +12,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
-    src/shaped-graphics/command_list_slot.cc
+    src/shaped-graphics/backend/command_list_slot.cc
     src/shaped-graphics/binding_layout.cc
     src/shaped-graphics/compute_pipeline.cc
     src/shaped-graphics/binding_group.cc
@@ -42,9 +42,9 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
-    src/shaped-graphics/command_list_slot.hh
     src/shaped-graphics/buffer.hh
-    src/shaped-graphics/resource_access.hh
+    src/shaped-graphics/backend/command_list_slot.hh
+    src/shaped-graphics/backend/resource_access.hh
     src/shaped-graphics/backend/resource_access_state.hh
     src/shaped-graphics/backend/access_inference.hh
     src/shaped-graphics/backend/subresource.hh

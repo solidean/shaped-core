@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -21,15 +22,26 @@ public:
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
                       ComPtr<ID3D12GraphicsCommandList> list)
-      : sg::command_list(created_in, slot),
+      : sg::command_list(created_in),
         _ctx(ctx),
+        _slot(slot),
         _queue(queue),
         _allocator(cc::move(allocator)),
         _list(cc::move(list))
     {
     }
 
+    // Auto-drops (with a warning) a list left neither submitted nor dropped — the explicit path is
+    // submit_dx12_command_list / drop_dx12_command_list. No-op once either has run (they mark it consumed).
+    ~dx12_command_list() override;
+
+    /// The access-tracking slot this list holds for its lifetime — keys its private access-state entry in
+    /// every resource it touches, so concurrent lists don't share state (a backend helper, not sg API).
+    [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
+
     dx12_context& _ctx;             // creating context — outlives this list
+    sg::command_list_slot _slot;    // released to the context's slot allocator on submit/drop
+    bool _consumed = false;         // set by submit/drop; gates the destructor's auto-drop
     D3D12_COMMAND_LIST_TYPE _queue; // queue the allocator/list belong to — routes them back to the pool
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;

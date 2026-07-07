@@ -1,7 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/print.hh>
-#include <shaped-graphics/command_list_slot.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 
 namespace sg
 {

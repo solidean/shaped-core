@@ -2,11 +2,11 @@
 
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backend/resource_access_state.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/buffer.hh>
-#include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/fwd.hh>
 
 #include <atomic>

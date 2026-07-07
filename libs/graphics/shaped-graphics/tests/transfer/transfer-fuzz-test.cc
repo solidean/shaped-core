@@ -10,6 +10,10 @@
 
 // Backend-agnostic inline buffer transfer: upload / download over the public sg API, run against every
 // available backend (see tests/context/context-test.cc for the invocable/alias mechanism).
+//
+// This is an nx::fuzz API-sequence fuzz test — see libs/base/nexus/docs/fuzz-testing.md, especially
+// "Fuzzing over external, shared state": the `trace` below drops its open command list in its destructor
+// and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
 
 INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
@@ -17,19 +21,43 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
 
     auto test = nx::fuzz::test::create();
 
+    // Fuzz state threaded through the ops. Holds the context so it can DROP a still-open list explicitly
+    // when the engine discards a partial state — a command list must be submitted or dropped, never just
+    // let leak (see command_list's lifecycle contract). This keeps the fuzz a good citizen: no reliance
+    // on the destructor's auto-drop safety net (which would flood the output with warnings).
     struct trace
     {
+        sg::context_handle ctx;
         std::unique_ptr<sg::command_list> cmd;
         sg::buffer_handle buffer;
         cc::vector<cc::u32> data;
 
-        void ensure_open_cmd(sg::context_handle const& ctx)
+        trace() = default;
+        trace(trace&&) = default;
+        trace& operator=(trace&& o) noexcept
+        {
+            drop_open_cmd(); // never leak our own open list when overwritten
+            ctx = cc::move(o.ctx);
+            cmd = cc::move(o.cmd);
+            buffer = cc::move(o.buffer);
+            data = cc::move(o.data);
+            return *this;
+        }
+        ~trace() { drop_open_cmd(); }
+
+        void drop_open_cmd()
+        {
+            if (cmd)
+                ctx->drop_command_list(cc::move(cmd));
+        }
+
+        void ensure_open_cmd()
         {
             if (!cmd)
                 cmd = ctx->create_command_list().value();
         }
 
-        void ensure_submitted_cmd(sg::context_handle const& ctx)
+        void ensure_submitted_cmd()
         {
             if (cmd)
                 ctx->submit_command_list(cc::move(cmd));
@@ -44,6 +72,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                 cc::random rng;
 
                 trace t;
+                t.ctx = ctx;
                 t.buffer
                     = ctx->persistent.create_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst).value();
                 t.data = cc::vector<cc::u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(cc::u32));
@@ -59,18 +88,18 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
             })
         ->execute_once();
 
-    test->add_op("open cmd", [&](trace& t) { t.ensure_open_cmd(ctx); });
-    test->add_op("submit cmd", [&](trace& t) { t.ensure_submitted_cmd(ctx); });
+    test->add_op("open cmd", [&](trace& t) { t.ensure_open_cmd(); });
+    test->add_op("submit cmd", [&](trace& t) { t.ensure_submitted_cmd(); });
     test->add_op("advance epoch",
                  [&](trace& t)
                  {
-                     t.ensure_submitted_cmd(ctx); // no open cmdlist
+                     t.ensure_submitted_cmd(); // no open cmdlist
                      ctx->advance_epoch(cc::nullopt);
                  });
     test->add_op("advance epoch + wait",
                  [&](trace& t)
                  {
-                     t.ensure_submitted_cmd(ctx); // no open cmdlist
+                     t.ensure_submitted_cmd(); // no open cmdlist
                      ctx->advance_epoch_and_wait_for_idle();
                  });
 
@@ -90,7 +119,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      for (auto i = 0; i < cnt; ++i)
                          t.data[start + i] = data[i];
 
-                     t.ensure_open_cmd(ctx);
+                     t.ensure_open_cmd();
                      t.cmd->upload.data_to_buffer(t.buffer, data, start * sizeof(cc::u32));
                  });
 
@@ -104,9 +133,9 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
 
                      auto ref_data = cc::span<cc::u32>(t.data).subspan({.start = start, .end = end});
 
-                     t.ensure_open_cmd(ctx);
+                     t.ensure_open_cmd();
                      auto dl = t.cmd->download.data_from_buffer<cc::u32>(t.buffer, start * sizeof(cc::u32), end - start);
-                     t.ensure_submitted_cmd(ctx);
+                     t.ensure_submitted_cmd();
 
                      auto dl_data = ctx->wait_for(dl).value();
 

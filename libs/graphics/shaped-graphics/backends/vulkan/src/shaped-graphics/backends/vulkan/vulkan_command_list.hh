@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/command_list.hh>
@@ -18,13 +19,20 @@ public:
                         sg::command_list_slot slot,
                         VkCommandPool pool,
                         VkCommandBuffer buffer)
-      : sg::command_list(created_in, slot), _ctx(ctx), _pool(pool), _buffer(buffer)
+      : sg::command_list(created_in), _ctx(ctx), _slot(slot), _pool(pool), _buffer(buffer)
     {
     }
 
-    ~vulkan_command_list() override; // destroys _pool (and its buffer); body in vulkan_command_list.cc
+    // Auto-drops (with a warning) a list left neither submitted nor dropped; no-op once either has run
+    // (they mark it consumed). Body in vulkan_command_list.cc.
+    ~vulkan_command_list() override;
 
-    vulkan_context& _ctx; // creating context — outlives this list
+    /// The access-tracking slot this list holds for its lifetime (a backend helper, not sg API).
+    [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
+
+    vulkan_context& _ctx;        // creating context — outlives this list
+    sg::command_list_slot _slot; // released to the context's slot allocator on submit/drop
+    bool _consumed = false;      // set by submit/drop; gates the destructor's auto-drop
     VkCommandPool _pool = VK_NULL_HANDLE;
     VkCommandBuffer _buffer = VK_NULL_HANDLE; // owned by _pool, freed with it
 

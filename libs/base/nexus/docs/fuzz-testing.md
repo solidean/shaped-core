@@ -156,6 +156,33 @@ TEST("add1 never reaches 7")
 You can also pin specific behaviors directly with `eval_op_to<T>` /
 `eval_op_bool` in their own `SECTION`s, independent of any finding.
 
+## Fuzzing over external, shared state
+
+The engine drives your operations against whatever state they close over. When that state is an
+external, **shared** resource — a GPU context, a database handle, a global allocator — two properties
+of the engine become load-bearing:
+
+- **It runs thousands of programs against the same shared object.** Generation tries many random
+  sequences; minimization *replays* candidate after candidate. They all hit the one resource your ops
+  captured.
+- **It discards partial states constantly.** Each replay builds a fresh SSA state, runs some ops, then
+  destroys it — including any values your ops produced that are still "open".
+
+So every value threaded through the fuzz state must **clean up after itself on destruction** (RAII). A
+value that leaks a resource when its state is discarded — a GPU command list recorded but never
+submitted or dropped, a transaction left open, a lock not released — corrupts the *shared* object, and
+the corruption surfaces **later, on an unrelated operation**, often as a minimal reproducer that does
+**not** reproduce in isolation.
+
+> Worked example. A fuzz over an `sg::context` shrank to the reproducer `mk_trace; advance_epoch`. Run
+> alone it passes — `mk_trace` submits its list, so the advance sees no open lists. It only "failed"
+> because *earlier* discarded replays had left command lists open on the shared context, and the leaked
+> open-list count made a later `advance_epoch` assert. The bug was a missing RAII drop, not anything
+> about `mk_trace` + `advance`. Two lessons: (1) make fuzz-state values self-cleaning — that `trace`
+> struct now drops its open command list in its destructor *and* its move-assignment, so a discarded
+> replay never leaks onto the shared context; (2) when a minimal reproducer doesn't reproduce
+> standalone, suspect shared-state pollution from the churn around it, not the printed steps.
+
 ## Setup errors
 
 If some argument type can never be constructed (no value or operation produces

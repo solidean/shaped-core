@@ -1,6 +1,6 @@
 #include <nexus/test.hh>
+#include <shaped-graphics/backend/resource_access.hh>
 #include <shaped-graphics/backend/resource_access_state.hh>
-#include <shaped-graphics/resource_access.hh>
 
 // Pure, backend-free unit tests for the three-timeline access-state machine. These pin the freebie /
 // hazard logic (what makes barriers minimal) without needing a GPU. Buffers only, so layout stays

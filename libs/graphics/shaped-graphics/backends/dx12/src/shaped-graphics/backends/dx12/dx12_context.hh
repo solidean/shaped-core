@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/allocation_info.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -76,6 +77,11 @@ public:
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
+
+    // The drop cleanup on an unsubmitted list (reclaim its allocator/list/slot, discard its recorded
+    // downloads, drop the open-list count). Shared by drop_dx12_command_list and the list's destructor
+    // auto-drop — do not call directly; go through drop_dx12_command_list.
+    void reclaim_unsubmitted_command_list(dx12_command_list& cmd);
 
     // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
     // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
@@ -186,6 +192,11 @@ public:
     //    fence value backwards).
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
+
+    // Hands each open command list a dense access-tracking slot (a backend helper for concurrent
+    // recording); acquired at create, released at submit/drop. Its "returns to zero" release signal
+    // drives the revert-vs-promote decision. Internally synchronized.
+    sg::command_list_slot_allocator _command_list_slots;
 
     cc::mutex<dx12_epoch_state> _epoch_state;
 
