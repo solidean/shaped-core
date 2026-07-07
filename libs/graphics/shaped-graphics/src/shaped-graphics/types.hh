@@ -98,12 +98,12 @@ enum class buffer_usage : u32
 enum class texture_usage : u32
 {
     none = 0,
-    copy_src = 1u << 0,      // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
-    copy_dst = 1u << 1,      // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
-    sampled = 1u << 2,       // shader-read (SRV / sampled): Vk SAMPLED; DX12 no flag (default)
-    storage = 1u << 3,       // UAV / storage image: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
-    render_target = 1u << 4, // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
-    depth_stencil = 1u << 5, // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
+    copy_src = 1u << 0,          // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
+    copy_dst = 1u << 1,          // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
+    readonly_texture = 1u << 2,  // read-only sampled/SRV: Vk SAMPLED; DX12 no flag (default)
+    readwrite_texture = 1u << 3, // read-write UAV / storage image: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
+    render_target = 1u << 4,     // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
+    depth_stencil = 1u << 5,     // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
 };
 
 [[nodiscard]] constexpr texture_usage operator|(texture_usage a, texture_usage b)

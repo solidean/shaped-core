@@ -18,7 +18,7 @@ INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle ctx
     desc.width = 256;
     desc.height = 128;
     desc.mip_levels = 1;
-    desc.usage = sg::texture_usage::sampled | sg::texture_usage::copy_dst;
+    desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
 
     auto tex = ctx->persistent.create_raw_texture(desc);
     REQUIRE(tex.has_value());
@@ -44,7 +44,7 @@ INVOCABLE_TEST("sg - a single-slice 2D array is distinct from a 2D texture", (sg
     desc.width = 64;
     desc.height = 64;
     desc.array_layers = 1; // an array with one slice — not a plain 2D texture
-    desc.usage = sg::texture_usage::sampled;
+    desc.usage = sg::texture_usage::readonly_texture;
 
     auto tex = ctx->persistent.create_raw_texture(desc);
     REQUIRE(tex.has_value());
@@ -65,7 +65,7 @@ INVOCABLE_TEST("sg - allocates a persistent 3D texture", (sg::context_handle ctx
     desc.width = 32;
     desc.height = 32;
     desc.depth = 16;
-    desc.usage = sg::texture_usage::storage;
+    desc.usage = sg::texture_usage::readwrite_texture;
 
     auto tex = ctx->persistent.create_raw_texture(desc);
     REQUIRE(tex.has_value());

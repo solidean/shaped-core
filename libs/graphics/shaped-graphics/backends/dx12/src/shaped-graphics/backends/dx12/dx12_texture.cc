@@ -46,10 +46,11 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     desc.SampleDesc.Quality = 0;
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN; // driver-chosen optimal tiling
 
-    // Usage → creation flags. Sampled + copy need no flag (allowed by default); the writable/attachment
-    // usages each add one. DENY_SHADER_RESOURCE is left off so a depth/RT texture can also be sampled.
+    // Usage → creation flags. readonly_texture + copy need no flag (allowed by default); the
+    // writable/attachment usages each add one. DENY_SHADER_RESOURCE is left off so a depth/RT texture
+    // can also be sampled.
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    if (sg::has_flag(d.usage, sg::texture_usage::storage))
+    if (sg::has_flag(d.usage, sg::texture_usage::readwrite_texture))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     if (sg::has_flag(d.usage, sg::texture_usage::render_target))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;

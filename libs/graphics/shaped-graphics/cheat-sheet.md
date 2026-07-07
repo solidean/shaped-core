@@ -166,7 +166,7 @@ t->width()/height()/depth()  // int — extents (height/depth per dimension)
 t->mip_levels()/sample_count()/array_layers()  // int
 t->format()                  // sg::pixel_format
 t->is_array()/is_cube()/is_multisampled()      // bool  — derived shape queries
-sg::texture_usage            // flags: copy_src/copy_dst, sampled, storage, render_target, depth_stencil
+sg::texture_usage            // flags: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
 // create the raw resource (typed create_texture_2d/... factories come later):
 ctx.persistent.create_raw_texture(desc)        // -> cc::result<raw_texture_handle>  (dedicated)
 ctx.transient.create_raw_texture(desc)         // -> cc::result<raw_texture_handle>  (dedicated for now; auto-expires)
