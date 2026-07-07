@@ -4,7 +4,8 @@
 // dx12_context.cc.
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
-#include <shaped-graphics/buffer.hh>
+#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/raw_texture.hh>
 
 namespace sg::backend::dx12
 {
@@ -40,8 +41,8 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // the new epoch, so mark them expired now, which releases each resource into the deferred-deletion
     // staging area. Done before the staged drain below so those releases are attributed to `last`.
     // Outside any lock — expire() re-enters schedule_deferred_deletion, which takes _epoch_state.
-    cc::vector<std::weak_ptr<sg::buffer const>> const expiring_transient = _transient_expiring.lock(
-        [](cc::vector<std::weak_ptr<sg::buffer const>>& v)
+    cc::vector<std::weak_ptr<sg::raw_buffer const>> const expiring_transient = _transient_expiring.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v)
         {
             auto out = cc::move(v);
             v.clear();
@@ -50,6 +51,19 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     for (auto& w : expiring_transient)
         if (auto const b = w.lock())
             b->expire();
+
+    // Same for `last`'s transient textures (dedicated for now, but the transient contract still expires
+    // them here, staging their GPU resources for deferred deletion attributed to `last`).
+    cc::vector<std::weak_ptr<sg::raw_texture const>> const expiring_textures = _transient_expiring_textures.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+    for (auto& w : expiring_textures)
+        if (auto const t = w.lock())
+            t->expire();
 
     // Signal end-of-epoch: enqueues "epoch `last` finished" after all of its recorded GPU work.
     HRESULT const hr = _queue->Signal(_epoch_fence.Get(), cc::u64(last));

@@ -3,7 +3,7 @@
 
 namespace sg
 {
-void command_list_upload_scope::bytes_to_buffer(buffer_handle buffer,
+void command_list_upload_scope::bytes_to_buffer(raw_buffer_handle buffer,
                                                 cc::span<cc::byte const> data,
                                                 cc::isize offset_in_bytes)
 {

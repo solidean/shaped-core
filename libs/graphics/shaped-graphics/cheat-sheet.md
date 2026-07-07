@@ -18,7 +18,8 @@ comment giving the return type / intuition.
 ```cpp
 #include <shaped-graphics/fwd.hh>
 sg::context_handle        // std::shared_ptr<sg::context>        — shared, long-lived driver
-sg::buffer_handle         // std::shared_ptr<sg::buffer const>   — shared-immutable resource
+sg::raw_buffer_handle     // std::shared_ptr<sg::raw_buffer const>   — shared-immutable resource
+sg::raw_texture_handle    // std::shared_ptr<sg::raw_texture const>  — shared-immutable resource
 // command_list has NO handle: it's a move-only temporary — std::unique_ptr<sg::command_list>,
 // passed around by reference (command_list&). record once, submit once, not reused.
 ```
@@ -57,11 +58,11 @@ sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
-ctx.persistent.create_buffer(size, usage, alloc={}) // -> cc::result<buffer_handle>  (size>=0; 0 = empty, no alloc)
+ctx.persistent.create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (size>=0; 0 = empty, no alloc)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
 ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_handle>  (heap placed resources sub-allocate into)
-ctx.transient.create_buffer(size, usage)           // -> cc::result<buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
+ctx.transient.create_raw_buffer(size, usage)           // -> cc::result<raw_buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
                                                    //   using any transient resource past its epoch is a hard error (asserts)
@@ -119,11 +120,11 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // vulkan transfer is a TODO stub.
 ```
 
-## buffer — GPU-resident, immutable shape  (abstract)
+## raw_buffer — GPU-resident, immutable shape  (abstract)
 
 ```cpp
-#include <shaped-graphics/buffer.hh>
-// abstract; a backend subclasses it. protected ctor: buffer(size_in_bytes, usage)  (size 0 = empty)
+#include <shaped-graphics/raw_buffer.hh>
+// abstract; a backend subclasses it. protected ctor: raw_buffer(size_in_bytes, usage)  (size 0 = empty)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
 b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient auto-expires at advance_epoch
@@ -138,6 +139,44 @@ b.as_raw_readonly({.offset=,.size=})       // -> readonly_view<byte>    (raw / b
 b.as_raw_readwrite({.offset=,.size=})      // -> readwrite_view<byte>   (raw / byte-addressed; range in bytes; default = whole)
 ```
 
+## pixel_format — texel formats  (restrictive; all backends have an equivalent)
+
+```cpp
+#include <shaped-graphics/pixel_format.hh>
+sg::pixel_format             // enum: undefined, r8/rg8/rgba8/bgra8 (unorm/snorm/uint/sint/srgb),
+                             //   r/rg/rgba 16f & 32f & int, rgb10a2_unorm, rg11b10_float,
+                             //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
+sg::is_depth_format(f)       // bool  — depth or depth-stencil
+sg::has_stencil(f)           // bool  — carries a stencil plane
+sg::is_compressed_format(f)  // bool  — BC block-compressed (4x4 blocks)
+sg::format_block_size(f)     // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
+sg::format_block_extent(f)   // int   — 1 (uncompressed) or 4 (BC)
+```
+
+## texture — GPU-resident texture  (raw resource + typed wrapper)
+
+```cpp
+#include <shaped-graphics/raw_texture.hh>   // the raw resource + its description
+#include <shaped-graphics/texture.hh>       // the typed texture<Traits> wrapper + shape typedefs
+sg::texture_description      // { format, dimension(d1/d2/d3), width/height/depth, mip_levels,
+                             //   array_layers (cc::optional<int>; nullopt = not an array),
+                             //   sample_count (>1 = MSAA), is_cube, usage }
+sg::raw_texture_handle       // std::shared_ptr<sg::raw_texture const> — the general/raw resource
+t->width()/height()/depth()  // int — extents (height/depth per dimension)
+t->mip_levels()/sample_count()/array_layers()  // int
+t->format()                  // sg::pixel_format
+t->is_array()/is_cube()/is_multisampled()      // bool  — derived shape queries
+sg::texture_usage            // flags: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
+// create the raw resource (typed create_texture_2d/... factories come later):
+ctx.persistent.create_raw_texture(desc)        // -> cc::result<raw_texture_handle>  (dedicated)
+ctx.transient.create_raw_texture(desc)         // -> cc::result<raw_texture_handle>  (dedicated for now; auto-expires)
+// typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
+sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
+// typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
+//           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
+// NOTE: creation only — texture views (shader binding), barriers/layout transitions, and copies are future work.
+```
+
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
 
 ```cpp
@@ -147,13 +186,14 @@ sg::uniform_element<T>       // concept: view_element + size multiple of 16 and 
 sg::uniform_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
 sg::readonly_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
 sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
-// each holds a buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
+// each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
 sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage)
 sg::view_shape               // uniform_block | structured | raw (layout; derived from T)
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
 v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/size/element_count/stride }
 // backends switch on (access, shape) to build the native descriptor  (name raw_view is TBD)
-// buffer views only today; texture/texel views (dimension-typed) deferred until sg::texture + sg::format
+// buffer views only today; texture/texel views (dimension-typed) still deferred — the resource
+// (sg::raw_texture) and sg::pixel_format now exist, but binding a texture to a shader is future work
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -221,7 +261,7 @@ h.memory_requirements_for_buffer(size, usage)         // -> memory_requirements 
 h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info, const (validates offset alignment/bounds, mints handle back to h; no tracking)
 // protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
 // flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
-// create_buffer takes the allocation_info, but only dedicated (null heap) works today — placement asserts.
+// create_raw_buffer takes the allocation_info, but only dedicated (null heap) works today — placement asserts.
 // NOT yet wired: no context.create_memory_heap; placed allocations not implemented in the backends yet
 ```
 

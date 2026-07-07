@@ -53,7 +53,7 @@ void exercise_context(vulkan::vulkan_context& ctx)
     // command list, all through the base type.
     auto& base = static_cast<sg::context&>(ctx);
 
-    auto via_base = base.persistent.create_buffer(64, sg::buffer_usage::vertex_buffer);
+    auto via_base = base.persistent.create_raw_buffer(64, sg::buffer_usage::vertex_buffer);
     REQUIRE(via_base.has_value());
     CHECK(via_base.value()->size_in_bytes() == 64);
 

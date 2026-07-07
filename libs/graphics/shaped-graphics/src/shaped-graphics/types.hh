@@ -87,4 +87,38 @@ enum class buffer_usage : u32
 {
     return (u32(usage) & u32(flag)) == u32(flag);
 }
+
+/// How a texture may be used across the pipeline. Bit flags — combine with `|`, test with `has_flag`.
+/// Migrates to `cc::flags` once that clean-core type lands (same status as `buffer_usage`).
+///
+/// Modeled at Vulkan's granularity (one flag → one `VkImageUsageFlagBit`), since Vulkan is the finer of
+/// the two tier-1 backends and needs every usage declared at creation; D3D12 is coarser (a few
+/// `RESOURCE_FLAGS`, with sampled/copy implicit) and folds these as needed. Vulkan-only
+/// `INPUT_ATTACHMENT` / `TRANSIENT_ATTACHMENT` are intentionally omitted (no D3D12 analogue).
+enum class texture_usage : u32
+{
+    none = 0,
+    copy_src = 1u << 0,          // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
+    copy_dst = 1u << 1,          // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
+    readonly_texture = 1u << 2,  // read-only sampled/SRV: Vk SAMPLED; DX12 no flag (default)
+    readwrite_texture = 1u << 3, // read-write UAV / storage image: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
+    render_target = 1u << 4,     // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
+    depth_stencil = 1u << 5,     // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
+};
+
+[[nodiscard]] constexpr texture_usage operator|(texture_usage a, texture_usage b)
+{
+    return texture_usage(u32(a) | u32(b));
+}
+
+[[nodiscard]] constexpr texture_usage operator&(texture_usage a, texture_usage b)
+{
+    return texture_usage(u32(a) & u32(b));
+}
+
+/// True if every bit in `flag` is set in `usage`.
+[[nodiscard]] constexpr bool has_flag(texture_usage usage, texture_usage flag)
+{
+    return (u32(usage) & u32(flag)) == u32(flag);
+}
 } // namespace sg

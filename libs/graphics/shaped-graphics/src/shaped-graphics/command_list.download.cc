@@ -3,7 +3,7 @@
 
 namespace sg
 {
-bytes_future command_list_download_scope::bytes_from_buffer(buffer_handle buffer,
+bytes_future command_list_download_scope::bytes_from_buffer(raw_buffer_handle buffer,
                                                             cc::isize offset_in_bytes,
                                                             cc::isize size_in_bytes)
 {

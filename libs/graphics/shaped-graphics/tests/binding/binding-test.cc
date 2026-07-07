@@ -1,8 +1,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/raw_buffer.hh>
 
 #include <memory>
 #include <type_traits>
@@ -17,9 +17,9 @@ static_assert(std::is_same_v<sg::binding_group_handle, std::shared_ptr<sg::bindi
 
 namespace
 {
-struct test_buffer final : sg::buffer
+struct test_buffer final : sg::raw_buffer
 {
-    test_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) : sg::buffer(size_in_bytes, usage) {}
+    test_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) : sg::raw_buffer(size_in_bytes, usage) {}
 };
 
 struct particle

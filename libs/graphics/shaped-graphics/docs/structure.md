@@ -23,12 +23,15 @@ Update the tags as the API lands. This document is design intent, not a guarante
 ```text
 src/shaped-graphics/
   fwd.hh / all.hh / types.hh      [in progress]
-  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_buffer funneled via ctx.persistent
+  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_raw_buffer funneled via ctx.persistent
   context.persistent.hh/.cc       [in progress] context_persistent_scope: ctx.persistent resource factory (back-ref + friend of context)
   command_list.hh/.cc             [in progress] abstract; recording API planned
-  buffer.hh/.cc                   [in progress] abstract; protected shape (size/usage) done; as_* view factories
+  raw_buffer.hh/.cc               [in progress] abstract; protected shape (size/usage) done; as_* view factories
+  pixel_format.hh                 [in progress] restrictive texel-format enum + helpers (depth/compressed/block-size)
+  raw_texture.hh/.cc              [in progress] abstract; texture_description + protected shape; creation only (no views/barriers yet)
+  texture.hh                      [in progress] texture<Traits> typed wrapper (concept-gated getters) + shape typedefs
   views.hh                        [in progress] strongly-typed buffer views (uniform/readonly/readwrite<T>, byte=raw)
-                                                + erased raw_view; texture/texel views deferred (need texture/format)
+                                                + erased raw_view; texture/texel views deferred (resource + format exist; binding is future)
   binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
   compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
   binding_layout.hh/.cc           [in progress] abstract: the bindable-set schema (built from bindings); dx12 = root sig (vulkan stub)
@@ -58,7 +61,7 @@ A backend is built only where it is available for the platform/build. The gates 
 (`d3d12 dxgi dxguid`), always present on the Windows path; vulkan gates on `find_package(Vulkan)` and
 links `Vulkan::Vulkan` (the loader + headers), so it builds wherever a Vulkan SDK is installed.
 
-Fallible creates (`create_*_context`, `create_command_list`, `create_buffer`) return `cc::result`;
+Fallible creates (`create_*_context`, `create_command_list`, `create_raw_buffer`) return `cc::result`;
 programmer misuse (e.g. `size <= 0`) asserts rather than returning an error. See the
 [coding-guidelines](coding-guidelines.md) and the repo error-handling policy.
 
@@ -72,13 +75,13 @@ in without the core knowing it. See the [coding-guidelines](coding-guidelines.md
 
 ## Resource & transfer model
 
-Resources (`buffer`, planned `texture`) are **shared-immutable**: fixed shape, span-like over
+Resources (`raw_buffer`, `raw_texture`) are **shared-immutable**: fixed shape, span-like over
 mutable GPU memory, held via `*_handle`. A resource may be **empty** (size 0 — allocates no GPU
 storage). There are **no host-visible resources**; host↔device transfer is a globally shared
 resource sg manages, driven through command lists. See the [coding-guidelines](coding-guidelines.md).
 
 Resource creation is reached through a **lifetime scope** on the context rather than the context
-directly: `ctx.persistent.create_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
+directly: `ctx.persistent.create_raw_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
 back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
 and the scope — a friend — funnels through it, tagging the request with its lifetime. Today only the
 persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `lifetime_scope`)
@@ -86,7 +89,7 @@ is the planned second one.
 
 ## Ownership & lifetime
 
-- **Resources are shared** (`buffer_handle` = `shared_ptr`); **command lists are move-only**
+- **Resources are shared** (`raw_buffer_handle` = `shared_ptr`); **command lists are move-only**
   (`std::unique_ptr<command_list>`, no handle typedef) — record once, submit once, passed by
   reference.
 - **Backend-typed create methods** (`create_dx12_buffer` → `dx12_buffer_handle`, …) are the real
@@ -119,7 +122,8 @@ barriers             [in progress]  inferred access + state tracking + concurren
                                   barriers real for buffers, textures/subresources designed-in, vulkan pending
 views                [in progress]  strongly-typed resource views; buffer views done, binding path + texture/texel deferred
 bindings             [in progress]  compiled_shader + binding vocab; binding_layout/group + compute_pipeline (dx12 real, vulkan stub)
-texture              [planned]  GPU-resident images + views (texture/texel view family)
+texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation done (dx12 real, vulkan minimal);
+                                  views / layout barriers / copies remain
 pipeline             [in progress]  compute pipeline + bind path (dx12 real, vulkan stub); graphics pipelines + shader compiler planned
 sampler              [planned]
 swapchain / surface  [planned]  presentation
@@ -139,7 +143,7 @@ underpins safe resource reclamation and command-allocator recycling. See
 1. core types + backend bridge stubs + dx12/vulkan stubs   [in progress]  (this bootstrap)
 2. command_list buffer inline upload / download            [in progress]  dx12 real; copy + vulkan pending
 3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
-4. textures + views                                        [in progress]  buffer views done; textures + texture/texel views + binding path remain
+4. textures + views                                        [in progress]  texture resource + creation done (dx12 real, vulkan minimal); texture/texel views + binding path remain
 5. pipelines + shaders                                     [in progress]  compute bind path dx12-real (vulkan + graphics + shader compiler pending)
 6. presentation (swapchain/surface) + submission/sync      [planned]
 7. tier 2 backends (metal, webgpu)                         [planned]

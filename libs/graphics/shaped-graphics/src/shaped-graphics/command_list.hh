@@ -51,16 +51,16 @@ protected:
     friend class command_list_copy_scope;
     friend class command_list_compute_scope;
 
-    virtual void upload_bytes_to_buffer(buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
+    virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
         = 0;
 
-    [[nodiscard]] virtual bytes_future download_bytes_from_buffer(buffer_handle buffer,
+    [[nodiscard]] virtual bytes_future download_bytes_from_buffer(raw_buffer_handle buffer,
                                                                   cc::isize offset_in_bytes,
                                                                   cc::isize size_in_bytes)
         = 0;
 
-    virtual void copy_buffer_region(buffer_handle src,
-                                    buffer_handle dst,
+    virtual void copy_buffer_region(raw_buffer_handle src,
+                                    raw_buffer_handle dst,
                                     cc::isize src_offset_in_bytes,
                                     cc::isize dst_offset_in_bytes,
                                     cc::isize size_in_bytes)

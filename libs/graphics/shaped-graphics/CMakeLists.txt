@@ -5,7 +5,8 @@ project(shaped-graphics LANGUAGES CXX)
 # GPU resource types plus the pure-virtual backend bridge. Concrete backends live under
 # backends/ as their own static libraries and are added conditionally below.
 add_library(shaped-graphics
-    src/shaped-graphics/buffer.cc
+    src/shaped-graphics/raw_buffer.cc
+    src/shaped-graphics/raw_texture.cc
     src/shaped-graphics/bytes_future.cc
     src/shaped-graphics/command_list.cc
     src/shaped-graphics/command_list.upload.cc
@@ -41,7 +42,10 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
     src/shaped-graphics/command_list_slot.hh
-    src/shaped-graphics/buffer.hh
+    src/shaped-graphics/raw_buffer.hh
+    src/shaped-graphics/pixel_format.hh
+    src/shaped-graphics/raw_texture.hh
+    src/shaped-graphics/texture.hh
     src/shaped-graphics/resource_access.hh
     src/shaped-graphics/backend/resource_access_state.hh
     src/shaped-graphics/backend/access_inference.hh
@@ -104,6 +108,7 @@ endif()
 add_executable(shaped-graphics-test
     tests/main.cc
     tests/buffer/views-test.cc
+    tests/texture/texture-test.cc
     tests/transfer/bytes_future-test.cc
     tests/binding/binding-test.cc
     tests/barrier/access_state-test.cc
@@ -125,6 +130,7 @@ if(_sg_backends)
         tests/backends/backends.cc
         tests/context/context-test.cc
         tests/buffer/buffer-test.cc
+        tests/texture/texture-create-test.cc
         tests/command_list/command_list-test.cc
         tests/transfer/transfer-test.cc
         tests/copy/copy-test.cc

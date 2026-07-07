@@ -1,5 +1,5 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh>
+#include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/views.hh>
 
 #include <memory>
@@ -10,9 +10,9 @@
 
 namespace
 {
-struct test_buffer final : sg::buffer
+struct test_buffer final : sg::raw_buffer
 {
-    test_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) : sg::buffer(size_in_bytes, usage) {}
+    test_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) : sg::raw_buffer(size_in_bytes, usage) {}
 };
 
 // A 16-byte element (structured views require sizeof % 4 == 0).

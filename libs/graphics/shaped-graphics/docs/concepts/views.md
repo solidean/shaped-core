@@ -8,7 +8,7 @@ A **view** is a lightweight, strongly-typed value describing how a shader reads 
 resource — "this buffer, these elements, as a read-only array of `T`". A rendering routine takes the
 exact view it operates on (`readwrite_view<pixel>`), so a caller passes a slice of a resource without
 a soup of overloads and without a struct whose fields could be mis-set. A view owns a
-[`buffer_handle`](../../src/shaped-graphics/fwd.hh) (it may outlive the call that made it) but no GPU
+[`raw_buffer_handle`](../../src/shaped-graphics/fwd.hh) (it may outlive the call that made it) but no GPU
 memory of its own — it is a pure value, produced by a `buffer.as_*()` factory.
 
 ## Typed by the element type
@@ -97,5 +97,5 @@ reflection-driven validation above) is the eventual consumer of `raw_view` and i
 ## See also
 
 - [views.hh](../../src/shaped-graphics/views.hh) — the view types, `view_class` / `view_shape`, and `raw_view`.
-- [buffer.hh](../../src/shaped-graphics/buffer.hh) — the `buffer.as_*()` view factories.
+- [buffer.hh](../../src/shaped-graphics/raw_buffer.hh) — the `buffer.as_*()` view factories.
 - [memory](memory.md) — the resource-backing model views sit on top of.

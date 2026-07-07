@@ -30,7 +30,7 @@ Two rules for how we write sg comments and docs, on top of the repo-wide concise
 
 Every shared sg type `xyz` has a typedef `xyz_handle = std::shared_ptr<sg::xyz>` (see
 [fwd.hh](../src/shaped-graphics/fwd.hh)). Public factories return the handle, not the raw type:
-`create_context` returns `context_handle`, `create_buffer` returns `buffer_handle`. Callers
+`create_context` returns `context_handle`, `create_raw_buffer` returns `raw_buffer_handle`. Callers
 hold and pass handles; they don't construct these types by value.
 
 **Why** (not obvious): sg resources front GPU-resident objects with non-trivial lifetime and
@@ -97,7 +97,7 @@ invert the dependency — precisely what we avoid.
 
 ## The public types are abstract; backends derive from them directly
 
-`sg::context`, `sg::command_list`, and `sg::buffer` are **abstract interfaces**, and a backend
+`sg::context`, `sg::command_list`, and `sg::raw_buffer` are **abstract interfaces**, and a backend
 subclasses them **directly** (`sg::backend::vulkan::vulkan_context : public sg::context`). There
 is **no** separate bridge/impl layer mirroring the public API — a public type holding a
 `shared_ptr` to a parallel `backend_*` interface would duplicate the state (once in the public
@@ -105,9 +105,9 @@ type, once in the impl) and turn every public method into a thin forwarder. One 
 both.
 
 - **Cheap, shared metadata lives in the base as protected members**, with non-virtual accessors —
-  a buffer's `_size_in_bytes` / `_usage` sit "above the fold" in `sg::buffer`, so reading them
+  a buffer's `_size_in_bytes` / `_usage` sit "above the fold" in `sg::raw_buffer`, so reading them
   costs no virtual call and every backend buffer inherits exactly them. Operations that genuinely
-  need per-backend behavior are the pure-virtual methods (e.g. `context::create_buffer`).
+  need per-backend behavior are the pure-virtual methods (e.g. `context::create_raw_buffer`).
 - **Protected, not private.** Backends have full access to the base's state and set it directly.
   The coupling between a base and its own subclasses is fine and intended — this is **not** the
   Java-esque "defend my class against bad-actor subclasses" world. Don't wrap base state in
@@ -170,11 +170,11 @@ cases the blessed hatch doesn't cover.
 
 ## Backends expose backend-typed create methods; the virtuals are thin forwarders
 
-The abstract `sg::context` methods (`create_command_list`, `create_buffer`, `submit_command_list`,
+The abstract `sg::context` methods (`create_command_list`, `create_raw_buffer`, `submit_command_list`,
 …) are implemented in a backend as **one-line forwarders** to **non-virtual, backend-typed**
 methods: `dx12_context::create_dx12_buffer` returns a `dx12_buffer_handle`;
 `create_dx12_command_list` returns `std::unique_ptr<dx12_command_list>`. The `override` simply calls
-the backend-typed method and up-casts the result (`dx12_buffer_handle → buffer_handle`,
+the backend-typed method and up-casts the result (`dx12_buffer_handle → raw_buffer_handle`,
 `unique_ptr<dx12_command_list> → unique_ptr<command_list>`).
 
 - **Prefer the backend-typed method** whenever you already hold the concrete `dx12_context` (e.g.
@@ -190,7 +190,7 @@ for callers who genuinely hold the abstract `sg::context`.
 
 ## Handles: shared for resources, `unique_ptr` for command lists, references to operate
 
-- **Resources are shared** — `buffer` (and coming `texture`) use `buffer_handle`
+- **Resources are shared** — `buffer` (and coming `texture`) use `raw_buffer_handle`
   (`std::shared_ptr`), plus a **backend-typed** handle (`dx12_buffer_handle`) for backend code.
 - **Command lists are move-only temporaries** — `record once, submit once, not reused`. They are
   held by **`std::unique_ptr<command_list>`** (polymorphic, so not `cc::unique_ptr`), and there is
