@@ -47,6 +47,14 @@ Preserve these; the rest is tuning:
 2. **Space is reclaimed per epoch, gated on the epoch fence** — never freed while the GPU may still be
    reading the staged bytes.
 
+## Runtime resize
+
+`ctx.upload.set_inline_budget(bytes)` records a pending ring capacity, applied at the next
+`advance_epoch`: it drains every in-flight epoch (so no GPU work still reads the ring), then reallocates
+the ring at the new size and restarts its logical cursor at 0. Because reclaim is fence-gated (invariant
+2), draining the epoch fence is enough — no actor to wait out, unlike the [inline download](download.inline.md)
+ring. Rare (only after a `set_budget`), so the stall is acceptable.
+
 ## Current simplifications (deferred)
 
 Not invariants — v1 shortcuts, each with a known better route:

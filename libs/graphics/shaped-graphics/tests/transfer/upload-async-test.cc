@@ -8,6 +8,9 @@
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/types.hh>
 
+#include <atomic>
+#include <memory>
+
 // Backend-agnostic async buffer upload (ctx.upload): CPU→GPU streaming on a dedicated copy queue, run
 // against every available backend. These pin the public contract — automatic per-resource sync in BOTH
 // directions so the CPU timeline (submit → async upload → submit) mirrors GPU ordering — while the copy
@@ -224,4 +227,42 @@ INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_han
         if (bytes.value()[i] != pattern(0x40 + (i & 0xF)))
             matches = false;
     CHECK(matches);
+}
+
+// An async upload whose target's last handle is dropped before the actor stages it must still release the
+// buffer's storage. The copy is skipped, but its completion value V is still signaled — otherwise the
+// deferred-deletion gate (which holds the storage until the copy fence reaches V) would never release it.
+// We can't deterministically force the drop-before-stage race from the public API, but the release
+// invariant must hold whichever way it resolves. A second, kept buffer's download drives the copy fence
+// past V (the actor processes jobs in order), after which the retired epoch must free the dropped buffer.
+INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto released = std::make_shared<std::atomic<bool>>(false);
+    auto const keep = make_transfer_buffer(ctx, 256); // its download forces the copy fence to advance
+
+    {
+        auto const dropped = make_transfer_buffer(ctx, cc::isize(64) * 1024);
+        dropped->add_finalizer([released] { released->store(true, std::memory_order_release); });
+        // Large upload, then drop the only handle immediately so the actor is likely to find it gone.
+        ctx->upload.bytes_to_buffer(dropped, pinned_bytes(cc::isize(64) * 1024, [](cc::isize i) { return int(i); }));
+    } // `dropped`'s last handle released here → its storage is scheduled for deferred deletion, gated on V
+
+    // A later async upload + download on the kept buffer. The download auto-waits on this upload's value
+    // (> V), and the actor signals the copy fence in order, so completing it proves V was signaled too.
+    ctx->upload.bytes_to_buffer(keep, pinned_bytes(256, [](cc::isize i) { return int(i); }));
+    auto down = ctx->create_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download.bytes_from_buffer(keep, 0, 256);
+    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(ctx->wait_for(future).has_value());
+
+    // Retire the epoch the dropped buffer died in; with V signaled the deferred-deletion gate now releases
+    // its storage and runs the finalizer. Two advances so the death epoch is fully retired and swept.
+    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch_and_wait_for_idle();
+    ctx->process_completed_epochs();
+
+    CHECK(released->load(std::memory_order_acquire));
 }

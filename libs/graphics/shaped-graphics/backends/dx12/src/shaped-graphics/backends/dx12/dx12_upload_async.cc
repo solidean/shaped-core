@@ -45,6 +45,8 @@ protected:
 
     bool on_process() override
     {
+        maybe_resize_staging(); // adopt a pending set_window_bytes now, while no window is open
+
         if (_pending.empty())
             return false;
 
@@ -73,6 +75,25 @@ private:
     // spans several; a job finishing mid-window carries its completion value into that window.
     void stage_job(dx12_async_upload_job& job)
     {
+        // Resolve the destination now (weak → strong). If every handle was dropped, or its storage was
+        // expired, before the actor reached this job: skip the copy — a 1 GiB upload to a released buffer
+        // must not stage or block — but STILL advance the completion fence to this job's value. The
+        // lifetime gate holds the buffer's storage until _copy_fence reaches that value, and any forward
+        // reader stamped with it waits on the same value, so leaving a hole at it would hang both forever.
+        // An empty window still submits + signals, keeping _copy_fence monotonic and gap-free.
+        auto const strong = job.target.lock();
+        if (!strong || !strong->_resource)
+        {
+            if (job.copy_fence_value != dx12_copy_fence_value::none)
+            {
+                ensure_open_window();
+                cc::u64 const v = cc::u64(job.copy_fence_value);
+                if (v > _open_highest_finished)
+                    _open_highest_finished = v;
+            }
+            return; // no copy → no reverse-sync wait, so the acyclicity guard below is moot
+        }
+
         // A window issues its reverse-sync wait once, hoisted to the front (submit_window), so it must
         // never both promise a completion V and carry a reverse-wait that could depend on V — that
         // self-referential pair is the copy-actor deadlock (the window's Wait sits ahead of the very copy
@@ -85,7 +106,8 @@ private:
             submit_window();
         }
 
-        dx12_buffer_upload upload(job.dst_resource, job.dst_offset, job.src.span());
+        // `strong` holds the buffer alive across the whole staging loop (memcpy + record), released at return.
+        dx12_buffer_upload upload(strong->_resource.Get(), job.dst_offset, job.src.span());
         while (!upload.is_finished())
         {
             ensure_open_window();
@@ -197,6 +219,33 @@ private:
         ++_current_window;
     }
 
+    // Adopts a pending set_window_bytes if one differs from the current size. Called at the top of a
+    // process cycle, when no window is open (any open window is submitted first). Fully drains the copy
+    // queue so no in-flight window still reads the old staging buffer, then rebuilds it at the new size.
+    // The per-slot allocators and the reused command list survive — only staging memory changes.
+    void maybe_resize_staging()
+    {
+        cc::isize const desired = _sys._desired_window_bytes.load(std::memory_order_acquire);
+        if (desired == _sys._window_bytes)
+            return;
+        CC_ASSERT(desired > 0, "async upload staging window must be positive");
+
+        submit_window(); // close any open window before draining
+        if (_current_window > 0)
+            wait_for_window(_current_window - 1); // wait out every submitted window (drops all readers)
+
+        // Build the new staging buffer before releasing the old, so a failed allocation leaves the current
+        // one intact (the resize is then simply not applied; the next cycle retries).
+        auto ring = create_mapped_ring_buffer(_sys._ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD,
+                                              D3D12_RESOURCE_STATE_GENERIC_READ, desired * num_staging_windows);
+        CC_ASSERT(ring.has_value(), "async upload staging resize failed to allocate");
+
+        _sys._staging->Unmap(0, nullptr);
+        _sys._staging = cc::move(ring.value().resource);
+        _sys._mapped = static_cast<cc::byte*>(ring.value().mapped);
+        _sys._window_bytes = desired;
+    }
+
     // Blocks the actor until the copy queue has finished `window`.
     void wait_for_window(cc::u64 window)
     {
@@ -241,6 +290,7 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes
     _staging = cc::move(staging.value().resource);
     _mapped = static_cast<cc::byte*>(staging.value().mapped);
     _window_bytes = window_bytes;
+    _desired_window_bytes.store(window_bytes, std::memory_order_relaxed); // no resize pending yet
 
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async upload window) failed");
@@ -282,8 +332,10 @@ void dx12_upload_async_system::upload_buffer(sg::buffer_handle buffer,
     }
 
     dx12_async_upload_job job;
-    job.keep_alive = cc::move(buffer);
-    job.dst_resource = dst->_resource.Get();
+    // Weak ref, not strong: a caller may drop its last handle before the actor stages this. Resolving at
+    // stage time lets us skip the copy (and its staging cost) for a released buffer — see stage_job. The
+    // buffer's storage stays alive independently until the copy fence reaches `value` (the lifetime gate).
+    job.target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer)); // dst already dynamic_cast-verified
     job.dst_offset = offset;
     job.src = cc::move(data);
     job.copy_fence_value = dx12_copy_fence_value(value);
@@ -291,6 +343,13 @@ void dx12_upload_async_system::upload_buffer(sg::buffer_handle buffer,
     // overwrites bytes an earlier-submitted list still reads.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
+}
+
+void dx12_upload_async_system::set_window_bytes(cc::isize bytes)
+{
+    CC_ASSERT(bytes > 0, "async upload staging window must be positive");
+    // Record the request; the copy actor adopts it at the top of its next process cycle (before staging).
+    _desired_window_bytes.store(bytes, std::memory_order_release);
 }
 
 void dx12_upload_async_system::shutdown()

@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/context.download.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
 #include <shaped-graphics/context.upload.hh>
@@ -42,6 +43,10 @@ public:
     /// Async host→device upload facade: `ctx.upload.bytes_to_buffer(...)`. Streams buffer writes on a
     /// dedicated copy queue, off the frame path (the context-level mirror of the inline cmd.upload).
     context_upload_scope upload;
+
+    /// Inline download configuration facade: `ctx.download.set_budget(...)`. Downloads are recorded via
+    /// cmd.download; this scope sizes the shared readback ring they stage through.
+    context_download_scope download;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
@@ -122,6 +127,7 @@ protected:
     friend class context_persistent_scope;
     friend class context_transient_scope;
     friend class context_upload_scope;
+    friend class context_download_scope;
 
     /// Streams `data` into `buffer` at `offset_in_bytes` on a dedicated copy queue (reached via
     /// ctx.upload). The pin holds the source bytes alive until the copy consumes them; a later command
@@ -131,6 +137,19 @@ protected:
                                               cc::pinned_data<cc::byte const> data,
                                               isize offset_in_bytes)
         = 0;
+
+    // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
+    // change applied at a later safe point (an epoch boundary, or the copy actor between windows), never
+    // synchronously here. `bytes` must be > 0. Default: no-op — a backend without the path ignores it.
+
+    /// Resize the async-upload staging window (see ctx.upload.set_async_window_size).
+    virtual void set_async_upload_window_bytes(isize bytes) { (void)bytes; }
+
+    /// Resize the inline-upload ring (see ctx.upload.set_inline_budget).
+    virtual void set_inline_upload_budget(isize bytes) { (void)bytes; }
+
+    /// Resize the inline-download (readback) ring (see ctx.download.set_budget).
+    virtual void set_inline_download_budget(isize bytes) { (void)bytes; }
 
     /// Applies a pending `ctx.transient.set_budget()` at the current epoch boundary (draining in-flight
     /// epochs first, then resizing the transient heap). A backend calls this from advance_epoch once the

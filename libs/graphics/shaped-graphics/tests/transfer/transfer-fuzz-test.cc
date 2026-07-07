@@ -121,7 +121,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                          t.data[start + i] = data[i];
 
                      t.ensure_open_cmd();
-                     t.cmd->upload.data_to_buffer(t.buffer, data, start * sizeof(cc::u32));
+                     t.cmd->upload.data_to_buffer(t.buffer, data, start);
                  });
 
     // Async-upload op: mirror of "upload" onto the copy queue. Pick a random region, model it in t.data,
@@ -148,8 +148,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      // any open list first so the recorded GPU order matches our reference model — an open
                      // list's inline writes would race the async copy otherwise.
                      t.ensure_submitted_cmd();
-                     ctx->upload.data_to_buffer<cc::u32>(t.buffer, cc::make_pinned_data(cc::move(data)),
-                                                         start * sizeof(cc::u32));
+                     ctx->upload.data_to_buffer<cc::u32>(t.buffer, cc::make_pinned_data(cc::move(data)), start);
                  });
 
     test->add_op(
@@ -196,7 +195,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto ref_data = cc::span<cc::u32>(t.data).subspan({.start = start, .end = end});
 
                      t.ensure_open_cmd();
-                     auto dl = t.cmd->download.data_from_buffer<cc::u32>(t.buffer, start * sizeof(cc::u32), end - start);
+                     auto dl = t.cmd->download.data_from_buffer<cc::u32>(t.buffer, start, end - start);
                      t.ensure_submitted_cmd();
 
                      auto dl_data = ctx->wait_for(dl).value();

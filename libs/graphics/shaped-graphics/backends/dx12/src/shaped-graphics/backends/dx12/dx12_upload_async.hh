@@ -13,13 +13,14 @@
 namespace sg::backend::dx12
 {
 /// One async upload handed to the copy actor. `src`'s pin holds the source bytes alive until they have
-/// been staged (the job is then destroyed on the actor thread, off the submission path). `keep_alive`
-/// holds the destination buffer alive until its copy is recorded. `copy_fence_value` is reserved
-/// synchronously at enqueue; the completion fence reaches it once the copy has run on the GPU.
+/// been staged (the job is then destroyed on the actor thread, off the submission path). `target` is a
+/// weak ref resolved at stage time: if every handle to the destination was dropped before the actor ran,
+/// the copy is skipped — but its `copy_fence_value` is still signaled so the lifetime gate + any forward
+/// readers stamped with it never hang. `copy_fence_value` is reserved synchronously at enqueue; the
+/// completion fence reaches it once the copy has run (or the job was dropped).
 struct dx12_async_upload_job
 {
-    sg::buffer_handle keep_alive;           // holds the destination buffer alive
-    ID3D12Resource* dst_resource = nullptr; // destination GPU resource (owned by keep_alive)
+    std::weak_ptr<dx12_buffer const> target; // destination buffer; locked at stage time, may have expired
     cc::isize dst_offset = 0;
     cc::pinned_data<cc::byte const> src;                                  // source bytes + their pin
     dx12_copy_fence_value copy_fence_value = dx12_copy_fence_value::none; // completion value for this upload
@@ -57,18 +58,28 @@ public:
     /// a no-op. Preconditions: buffer non-null, a dx12 buffer, not expired, copy_dst usage, in bounds.
     void upload_buffer(sg::buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset);
 
+    /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
+    /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the
+    /// change is picked up before the next upload is staged, so in-flight uploads are unaffected.
+    void set_window_bytes(cc::isize bytes);
+
     /// Shuts the actor down (draining queued copies and waiting for the copy queue to idle), then unmaps
     /// and releases the staging buffer. Must run while the context's copy queue + completion fence and
     /// command-allocator pool are alive.
     void shutdown();
 
-    // Set once in initialize (before the actor starts) then immutable; read by the copy actor.
+    // Set in initialize, then touched only by the copy actor (_staging/_mapped/_window_bytes are also
+    // rebuilt by the actor when a set_window_bytes is applied) — the actor reads them lock-free.
     dx12_context& _ctx;
     ComPtr<ID3D12Resource> _staging;
     cc::byte* _mapped = nullptr;
     cc::isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's copy done
     HANDLE _wait_event = nullptr;      // actor-thread wait on the window fence
+
+    // A pending set_window_bytes request; the actor compares it to _window_bytes at the top of each
+    // process cycle and rebuilds staging when they differ. Written by any thread, read by the actor.
+    std::atomic<cc::isize> _desired_window_bytes = 0;
 
 private:
     // Reserved on the caller thread (fetch_add), handed out as dx12_copy_fence_value; the actor's

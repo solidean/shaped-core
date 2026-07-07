@@ -151,6 +151,12 @@ public:
         _upload_async.upload_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
     }
 
+    // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
+    // change on the owning system, applied at a later safe point (see the systems + advance_epoch).
+    void set_async_upload_window_bytes(cc::isize bytes) override { _upload_async.set_window_bytes(bytes); }
+    void set_inline_upload_budget(cc::isize bytes) override { _upload_inline.set_budget(bytes); }
+    void set_inline_download_budget(cc::isize bytes) override { _download_inline.set_budget(bytes); }
+
     // Epoch contract — bodies in dx12_epoch.cc. These return sg vocabulary types (no backend-typed
     // variant needed), so the whole body lives in the override.
 

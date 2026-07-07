@@ -31,14 +31,28 @@ public:
     /// the upload zero-copy, which is why it is passed rather than a plain span.
     void bytes_to_buffer(buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset_in_bytes = 0);
 
-    /// Streams a trivially-copyable pinned range, re-viewing the SAME pin as bytes (no copy). See
-    /// bytes_to_buffer.
+    /// Streams a trivially-copyable pinned range, re-viewing the SAME pin as bytes (no copy).
+    /// `offset_in_elements` is in elements of T. See bytes_to_buffer.
     template <class T>
-    void data_to_buffer(buffer_handle buffer, cc::pinned_data<T const> data, cc::isize offset_in_bytes = 0)
+    void data_to_buffer(buffer_handle buffer, cc::pinned_data<T const> data, cc::isize offset_in_elements = 0)
     {
         static_assert(std::is_trivially_copyable_v<T>, "upload element type must be trivially copyable");
-        bytes_to_buffer(cc::move(buffer), data.as_bytes(), offset_in_bytes); // as_bytes() shares the owner
+        bytes_to_buffer(cc::move(buffer), data.as_bytes(),
+                        offset_in_elements * cc::isize(sizeof(T))); // as_bytes() shares the owner
     }
+
+    /// Sets the size of one async-upload staging window in bytes (> 0); the staging buffer is triple-
+    /// buffered, so this many bytes times three. Bigger windows amortize submits, smaller ones cut latency
+    /// and memory. May be called any time: the copy actor adopts it between windows (draining outstanding
+    /// copies first), so in-flight uploads are unaffected. Distinct from set_inline_budget, which sizes the
+    /// separate inline (cmd.upload) ring.
+    void set_async_window_size(cc::isize bytes);
+
+    /// Sets the inline-upload (cmd.upload) ring capacity in bytes (> 0) — the ring inline uploads stage
+    /// through, bounding the per-epoch inline-upload volume. May be called any time, repeatedly: records a
+    /// *pending* budget applied at the next advance_epoch (which drains in-flight epochs, then reallocates).
+    /// Distinct from set_async_window_size, which sizes this async (ctx.upload) path's staging buffer.
+    void set_inline_budget(cc::isize bytes);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_upload_scope(context_upload_scope const&) = delete;

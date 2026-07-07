@@ -164,6 +164,20 @@ Not invariants — v1 shortcuts:
   `copy_deferred` list) until the copy fence reaches that value. See
   [`dx12_epoch.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.hh) /
   [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
+- **A dropped upload still signals its value.** The job holds only a `std::weak_ptr<dx12_buffer const>`,
+  locked at stage time. If every handle was dropped (or the storage expired) before the actor got there,
+  `stage_job` skips the copy — a large upload to a released buffer never stages or blocks — but still folds
+  the job's completion value into the window so `submit_window` signals the copy fence up to it. That is
+  mandatory: the completion fence is monotonic and both the lifetime gate above and any forward reader
+  stamped with the value wait on it, so leaving a hole would hang them. A window whose jobs were all
+  dropped still submits (an empty list) and signals; only the `CopyBufferRegion` and the reverse
+  `wait_token` fold are skipped (no copy → no reverse hazard).
+- **The staging window resizes at runtime.** `ctx.upload.set_async_window_size(bytes)` records a new
+  window size; the copy actor adopts it at the top of its next process cycle, between windows — it submits
+  any open window, fully drains the copy queue (so no in-flight window still reads the old buffer), then
+  rebuilds the triple-buffered staging buffer at `bytes * 3`. The per-slot allocators and the reused
+  command list survive; only staging memory changes. Applied before the next upload is staged, so
+  in-flight uploads are unaffected.
 - The public facade is [`context.upload.hh`](../../src/shaped-graphics/context.upload.hh) (`ctx.upload`).
 
 ## See also

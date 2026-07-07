@@ -109,6 +109,46 @@ void dx12_upload_inline_system::on_epochs_completed(sg::epoch completed)
         });
 }
 
+void dx12_upload_inline_system::set_budget(cc::isize capacity)
+{
+    CC_ASSERT(capacity > 0, "upload ring capacity must be positive");
+    // Record the request; it is applied at the next advance_epoch (see apply_pending_budget).
+    _ring.lock([&](ring_state& s) { s.pending_capacity = capacity; });
+}
+
+void dx12_upload_inline_system::apply_pending_budget()
+{
+    cc::isize const pending = _ring.lock([](ring_state& s) { return s.pending_capacity; });
+    if (pending <= 0)
+        return;
+
+    // Drain every in-flight epoch so no GPU work still reads the ring, then retire them so their ring
+    // space is reclaimed. After this the ring is empty (only the freshly-opened epoch remains, with no
+    // uploads yet), so it is safe to drop and rebuild.
+    while (cc::u64(_ctx.completed_epoch()) + 1 < cc::u64(_ctx.current_epoch()))
+        _ctx.wait_for_next_inflight_epoch();
+    _ctx.process_completed_epochs();
+
+    // Build the new ring before releasing the old, so a failed allocation leaves the current one intact.
+    auto ring = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                          pending);
+    CC_ASSERT(ring.has_value(), "inline upload ring resize failed to allocate");
+
+    if (_buffer)
+        _buffer->Unmap(0, nullptr);
+    _buffer = cc::move(ring.value().resource);
+    _mapped = static_cast<cc::byte*>(ring.value().mapped);
+    _capacity = pending;
+    _ring.lock(
+        [&](ring_state& s)
+        {
+            s.next_pos = 0;
+            s.freed_pos = 0;
+            s.checkpoints.clear(); // drained above; the fresh ring restarts its logical cursor at 0
+            s.pending_capacity = 0;
+        });
+}
+
 void dx12_upload_inline_system::shutdown()
 {
     if (_buffer)

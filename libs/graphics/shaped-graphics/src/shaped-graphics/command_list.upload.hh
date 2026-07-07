@@ -22,13 +22,14 @@ public:
     /// TODO: version with pinned_data that tries to copy it in parallel and blocks on submit?
     void bytes_to_buffer(buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes = 0);
 
-    /// Uploads a trivially-copyable contiguous range as raw bytes. See bytes_to_buffer.
+    /// Uploads a trivially-copyable contiguous range as raw bytes. `offset_in_elements` is in elements
+    /// of the range's value type. See bytes_to_buffer.
     template <std::ranges::contiguous_range RangeT>
-    void data_to_buffer(buffer_handle buffer, RangeT const& data, cc::isize offset_in_bytes = 0)
+    void data_to_buffer(buffer_handle buffer, RangeT const& data, cc::isize offset_in_elements = 0)
     {
         using element_t = std::remove_cvref_t<std::ranges::range_value_t<RangeT>>;
         static_assert(std::is_trivially_copyable_v<element_t>, "upload element type must be trivially copyable");
-        bytes_to_buffer(cc::move(buffer), cc::as_bytes(data), offset_in_bytes);
+        bytes_to_buffer(cc::move(buffer), cc::as_bytes(data), offset_in_elements * cc::isize(sizeof(element_t)));
     }
 
     // Pinned to its owning command list: neither copyable nor movable.

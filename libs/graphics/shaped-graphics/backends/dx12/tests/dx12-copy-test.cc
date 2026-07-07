@@ -160,7 +160,7 @@ TEST("sg dx12 - typed buffer_data_region copy with element offsets")
 
     auto down = c.create_dx12_command_list();
     REQUIRE(down.has_value());
-    auto future = down.value()->download.data_from_buffer<int>(dst.value(), cc::isize(4) * sizeof(int), 3);
+    auto future = down.value()->download.data_from_buffer<int>(dst.value(), 4, 3);
     c.submit_dx12_command_list(cc::move(down.value()));
 
     auto const data = c.wait_for(future);

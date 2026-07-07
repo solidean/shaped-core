@@ -130,6 +130,7 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
                 }
                 s.next_pos = end;
                 s.current_epoch_copies->fetch_add(1, std::memory_order_relaxed); // one more copy for this epoch
+                _outstanding.fetch_add(1, std::memory_order_relaxed);            // and one more globally (drain gate)
                 return reservation{offset, s.current_epoch_copies};
             });
 
@@ -202,6 +203,9 @@ void dx12_download_inline_system::discard_unsubmitted(cc::vector<dx12_download_c
         if (job.epoch_copies)
         {
             job.epoch_copies->fetch_sub(1, std::memory_order_acq_rel);
+            // Drop the global outstanding gate too; wake a resize possibly waiting on it reaching zero.
+            if (_outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1)
+                _outstanding.notify_all();
             released = true;
         }
     }
@@ -239,6 +243,62 @@ void dx12_download_inline_system::on_copy_done(std::shared_ptr<std::atomic<cc::i
 {
     epoch_copies->fetch_sub(1, std::memory_order_acq_rel);
     _ring.lock([&](ring_state& s) { s.reclaim(*this); });
+    // Drop the global outstanding gate after the reclaim; wake a resize waiting on it reaching zero.
+    if (_outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1)
+        _outstanding.notify_all();
+}
+
+void dx12_download_inline_system::wait_until_idle()
+{
+    // Wait-for-zero on the global counter: std::atomic::wait rechecks the value, so a decrement to zero
+    // between load and wait is not lost (unlike polling per-epoch checkpoints, which races the actor).
+    cc::isize cur = _outstanding.load(std::memory_order_acquire);
+    while (cur != 0)
+    {
+        _outstanding.wait(cur, std::memory_order_acquire);
+        cur = _outstanding.load(std::memory_order_acquire);
+    }
+}
+
+void dx12_download_inline_system::set_budget(cc::isize capacity)
+{
+    CC_ASSERT(capacity > 0, "download ring capacity must be positive");
+    // Record the request; it is applied at the next advance_epoch (see apply_pending_budget).
+    _ring.lock([&](ring_state& s) { s.pending_capacity = capacity; });
+}
+
+void dx12_download_inline_system::apply_pending_budget()
+{
+    cc::isize const pending = _ring.lock([](ring_state& s) { return s.pending_capacity; });
+    if (pending <= 0)
+        return;
+
+    // Drain every in-flight epoch (bounds the GPU wait), then wait for the actor to finish every
+    // outstanding readback copy — each memcpys out of the *current* ring, so the ring cannot be freed
+    // until they are all done. The freshly-opened epoch has no downloads yet, so this reaches zero.
+    while (cc::u64(_ctx.completed_epoch()) + 1 < cc::u64(_ctx.current_epoch()))
+        _ctx.wait_for_next_inflight_epoch();
+    _ctx.process_completed_epochs();
+    wait_until_idle();
+
+    // Build the new ring before releasing the old, so a failed allocation leaves the current one intact.
+    auto ring = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST,
+                                          pending);
+    CC_ASSERT(ring.has_value(), "inline download ring resize failed to allocate");
+
+    if (_buffer)
+        _buffer->Unmap(0, nullptr);
+    _buffer = cc::move(ring.value().resource);
+    _mapped = static_cast<cc::byte*>(ring.value().mapped);
+    _capacity = pending;
+    _freed_pos.store(0, std::memory_order_release);
+    _ring.lock(
+        [&](ring_state& s)
+        {
+            s.next_pos = 0;
+            s.checkpoints.clear();  // drained above; the fresh ring restarts its logical cursor at 0
+            s.pending_capacity = 0; // current_epoch_copies stays (a fresh 0 from the last on_epoch_advance)
+        });
 }
 
 void dx12_download_inline_system::shutdown()

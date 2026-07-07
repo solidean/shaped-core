@@ -127,6 +127,17 @@ Preserve these; the rest is tuning:
 5. **The blocking wait (`ctx.wait_for(future)`) cannot block before submission** — blocking a
    not-yet-submitted download would deadlock the submitting thread; it returns `nullopt` instead.
 
+## Runtime resize
+
+`ctx.download.set_budget(bytes)` records a pending readback-ring capacity, applied at the next
+`advance_epoch`. The apply cannot just wait on the epoch fence like the [inline upload](upload.inline.md)
+ring does: the actor's deferred copies read out of the *current* ring **after** GPU retire, so freeing it
+at the epoch fence would pull the memory out from under an in-flight memcpy. So the apply first drains the
+in-flight epochs (bounding the GPU wait), then waits for the actor to finish every outstanding readback —
+tracked by a single global outstanding-copy counter (`_outstanding`), waited on with a race-free
+wait-for-zero — and only then drops and rebuilds the ring. The freshly-opened epoch has no downloads yet,
+so the counter reaches zero.
+
 ## What's implemented today vs deferred
 
 **Today:** inline **buffer** download over the READBACK ring, the actor, epoch-granular reclaim,
