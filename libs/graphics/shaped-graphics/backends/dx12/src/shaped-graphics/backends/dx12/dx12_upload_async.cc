@@ -73,6 +73,18 @@ private:
     // spans several; a job finishing mid-window carries its completion value into that window.
     void stage_job(dx12_async_upload_job& job)
     {
+        // A window issues its reverse-sync wait once, hoisted to the front (submit_window), so it must
+        // never both promise a completion V and carry a reverse-wait that could depend on V — that
+        // self-referential pair is the copy-actor deadlock (the window's Wait sits ahead of the very copy
+        // whose signal the Wait transitively needs). If the open window already finished an upload and this
+        // job's reverse token is still pending on the direct queue, close the window now: this job's Wait
+        // then lands in a fresh window that can only point at prior, already-submitted windows.
+        if (_window_open && _open_highest_finished > 0
+            && cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
+        {
+            submit_window();
+        }
+
         dx12_buffer_upload upload(job.dst_resource, job.dst_offset, job.src.span());
         while (!upload.is_finished())
         {

@@ -5,6 +5,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
 // Per-epoch bookkeeping structs for the dx12 backend's epoch system. The epoch *concept* lives in
@@ -14,12 +15,17 @@
 namespace sg::backend::dx12
 {
 /// A GPU resource captured for deferred deletion. Its handle is released and its finalizers run only
-/// once the owning epoch has retired — i.e. the GPU is no longer using it. Future work hangs more
-/// here: pipeline/state-object handles, descriptor allocations, and async copy-queue pending syncs.
+/// once the GPU is no longer using it: both the owning epoch has retired (direct queue) *and* the async
+/// upload copy queue has passed `copy_wait`. Future work hangs more here: pipeline/state-object handles
+/// and descriptor allocations.
 struct dx12_expiring_resource
 {
     ComPtr<ID3D12Resource> resource;
     cc::vector<cc::unique_function<void()>> finalizers;
+    /// Copy-queue completion value that must be reached before release — the buffer's highest pending
+    /// async-upload value (`dx12_buffer::_pending_async_upload_value`). `none` (0) when no async upload
+    /// ever targeted it, so the copy gate is trivially satisfied.
+    dx12_copy_fence_value copy_wait = dx12_copy_fence_value::none;
 };
 
 /// Everything one epoch owns and must reclaim once its GPU work finishes. Built at advance, drained
@@ -39,6 +45,10 @@ struct dx12_epoch_state
 {
     cc::vector<dx12_epoch_data> in_flight;     // FIFO, oldest at the front
     cc::vector<dx12_expiring_resource> staged; // refcount-zero resources awaiting the next advance
+    // Resources whose epoch has retired but whose async copy-queue work (`copy_wait`) is still pending.
+    // Re-checked each process_completed_epochs sweep; released once the copy fence catches up. Normally
+    // empty and short-lived — the copy queue drains promptly behind the direct queue.
+    cc::vector<dx12_expiring_resource> copy_deferred;
 };
 
 /// Reclaims one expiring resource in the required order: null the GPU handle *first* (releasing GPU

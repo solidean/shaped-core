@@ -49,10 +49,18 @@ the buffer must finish before the copy overwrites it — otherwise the copy race
   the copy, it makes the **transfer queue wait on the main queue's submission fence** for that token
   first. One wait per window covers every buffer copied in it.
 
-Both waits point strictly **backward in the CPU submission order**, so the dependency graph is acyclic —
-no deadlock — and the timeline is easy to reason about. Multiple async uploads to the **same** buffer
-compose correctly: they are processed in order, their copies stay in order on the transfer queue, and
-each waits on a token ≥ the previous, so the last upload wins.
+Both waits point strictly **backward in the CPU submission order**, so *per operation* the dependency
+graph is acyclic — no deadlock — and the timeline is easy to reason about. Multiple async uploads to the
+**same** buffer compose correctly: they are processed in order, their copies stay in order on the transfer
+queue, and each waits on a token ≥ the previous, so the last upload wins.
+
+**One scheduling rule keeps that acyclic at the window level.** The reverse wait is issued once per
+*window*, on the max token over its copies, hoisted ahead of the window's execute. So a window must never
+*both* signal a completion `V` *and* carry a reverse-wait that (transitively) depends on `V` — the hoisted
+wait would then sit ahead of the very copy whose signal it needs, closing a cycle. The actor enforces this
+by **closing the open window before staging a job** whose reverse token is still pending on the direct
+queue once the window has already finished an upload. Each window's reverse-wait then points only at prior
+(already-submitted) windows or already-complete tokens.
 
 Over-waiting on a higher (monotonic) value is always safe, and neither stamp is ever reset (a stale value
 only ever yields a cheap already-satisfied wait). sg has **no per-resource state / access-tracking layer
@@ -146,6 +154,16 @@ Not invariants — v1 shortcuts:
   with the list's token. The forward wait is `_queue->Wait(_copy_fence, ...)` at command-list submit; the
   reverse wait is `_copy_queue->Wait(_submission_fence, ...)` before a window's copies in
   [`dx12_upload_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.cc).
+  `stage_job` there enforces the window-level acyclicity rule: it closes the open window before staging a
+  job whose reverse token is still pending (`_submission_fence` not yet at it) once the window has already
+  finished an upload, so a window never both signals a completion and waits on a token that depends on it.
+- **Resource lifetime spans the copy queue.** The copy queue is decoupled from epochs, so a buffer whose
+  last reference is dropped while an async upload to it is still in flight must not be freed when its epoch
+  (direct queue) retires. Deferred deletion carries a second gate: each expiring resource is tagged with
+  the buffer's `_pending_async_upload_value`, and `process_completed_epochs` holds it back (a re-checked
+  `copy_deferred` list) until the copy fence reaches that value. See
+  [`dx12_epoch.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.hh) /
+  [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 - The public facade is [`context.upload.hh`](../../src/shaped-graphics/context.upload.hh) (`ctx.upload`).
 
 ## See also

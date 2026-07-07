@@ -150,6 +150,54 @@ INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_h
     CHECK(second_won);
 }
 
+// Regression: the copy actor once deadlocked when one staging window batched two async uploads across an
+// inline list that read the buffer between them — the window issues its reverse-sync wait once, hoisted
+// ahead of its copies, so it ended up waiting on a submission token whose direct list waited on a copy the
+// same window had not yet run. Hammer that exact shape: async upload; inline write of the same region +
+// submit; ×256 (fast enough that the actor batches several async jobs per window), then advance and wait.
+// Pre-fix this blocks forever; it must now return. See
+// libs/graphics/shaped-graphics/docs/concepts/upload.async.md (the window-level acyclicity rule) and the
+// re-enabled "async upload" op in transfer-fuzz-test.cc.
+INVOCABLE_TEST("sg - async upload interleaved with inline writes does not deadlock", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    constexpr int n = 256;
+    auto const buf = make_transfer_buffer(ctx, n);
+
+    for (int it = 0; it < n; ++it)
+    {
+        // Async upload the whole region on the copy queue (ordered after already-submitted work).
+        ctx->upload.bytes_to_buffer(buf, pinned_bytes(n, [it](cc::isize i) { return int(i) ^ it; }));
+
+        // Inline write of the SAME region on the direct queue, submitted at once: it reads-after the async
+        // upload (forward sync) and its submission becomes the next iteration's async reverse token — the
+        // interlock that closed the cycle. Inline bytes are consumed during record, so a stack span is fine.
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd.has_value());
+        cc::byte inline_bytes[n];
+        for (int i = 0; i < n; ++i)
+            inline_bytes[i] = cc::byte((i + it) & 0xFF);
+        cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(inline_bytes, n));
+        ctx->submit_command_list(cc::move(cmd.value()));
+    }
+
+    // The pin: pre-fix the copy queue is deadlocked and this never returns.
+    ctx->advance_epoch_and_wait_for_idle();
+
+    // Bonus correctness: GPU order is A_0,B_0,…,A_255,B_255, so the last inline write wins the whole region.
+    auto down = ctx->create_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download.bytes_from_buffer(buf, 0, n);
+    ctx->submit_command_list(cc::move(down.value()));
+    auto const bytes = ctx->wait_for(future);
+    REQUIRE(bytes.has_value());
+    bool last_inline_won = true;
+    for (int i = 0; i < n; ++i)
+        if (bytes.value()[i] != cc::byte((i + (n - 1)) & 0xFF))
+            last_inline_won = false;
+    CHECK(last_inline_won);
+}
+
 // A later command list that reads the async-uploaded buffer via a device copy also auto-waits on it.
 INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_handle const& ctx))
 {

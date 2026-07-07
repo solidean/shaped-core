@@ -91,25 +91,50 @@ void dx12_context::process_completed_epochs()
     if (!_epoch_fence)
         return;
     cc::u64 const completed = _epoch_fence->GetCompletedValue();
+    // Second release gate: how far the async upload copy queue has drained. A resource an in-flight async
+    // upload still references must not be freed even after its epoch retired (the copy queue is decoupled
+    // from epochs). `~0` when there is no copy fence, so the gate is trivially open.
+    cc::u64 const copy_completed = _copy_fence ? _copy_fence->GetCompletedValue() : cc::u64(-1);
 
     // Reclaim inline upload ring space held by every epoch the GPU has now finished.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
     // Reclaim transient descriptor ring slots the same way — the epoch fence proves the slots are idle.
     _descriptor_heap.on_epochs_completed(sg::epoch(completed));
 
-    // Drain finished epochs (oldest first, FIFO is sorted) under the lock; reclaim outside it.
-    cc::vector<dx12_epoch_data> done = _epoch_state.lock(
+    // Under the lock: drain finished epochs, then partition every expiring resource (from those epochs and
+    // from the copy-deferred hold-back) by whether the copy queue has also passed its `copy_wait`. Ready
+    // ones are released outside the lock; the rest stay on `copy_deferred` for the next sweep.
+    cc::vector<dx12_epoch_data> done;
+    cc::vector<dx12_expiring_resource> ready;
+    _epoch_state.lock(
         [&](dx12_epoch_state& s)
         {
-            cc::vector<dx12_epoch_data> out;
             for (auto& d : s.in_flight)
             {
                 if (cc::u64(d.epoch_id) > completed)
                     break;
-                out.push_back(cc::move(d));
+                done.push_back(cc::move(d));
             }
-            s.in_flight.remove_from_to(0, out.size());
-            return out;
+            s.in_flight.remove_from_to(0, done.size());
+
+            auto const gate = [&](dx12_expiring_resource& r, cc::vector<dx12_expiring_resource>& not_ready)
+            {
+                if (cc::u64(r.copy_wait) <= copy_completed)
+                    ready.push_back(cc::move(r));
+                else
+                    not_ready.push_back(cc::move(r));
+            };
+
+            // Re-check the existing hold-back: release what the copy queue has finished, keep the rest.
+            cc::vector<dx12_expiring_resource> still_pending;
+            for (auto& r : s.copy_deferred)
+                gate(r, still_pending);
+            s.copy_deferred = cc::move(still_pending);
+
+            // Retired epochs' resources: release now, or hold back if the copy queue is still behind.
+            for (auto& e : done)
+                for (auto& r : e.expiring)
+                    gate(r, s.copy_deferred);
         });
 
     // Allocators are safe to reset now — every command list sourced from them has finished — so hand
@@ -118,9 +143,8 @@ void dx12_context::process_completed_epochs()
         _cmd_pool.reclaim_allocators(cc::move(e.allocators));
 
     cc::vector<cc::unique_function<void()>> finalizers;
-    for (auto& e : done)
-        for (auto& r : e.expiring)
-            release_expiring(r, finalizers);
+    for (auto& r : ready)
+        release_expiring(r, finalizers);
 
     // Run finalizers outside the lock — they may be slow or re-entrant, and the thread is not fixed.
     for (auto& f : finalizers)

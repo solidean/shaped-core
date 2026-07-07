@@ -23,6 +23,29 @@ void dx12_context::shutdown()
     // The async upload actor runs on the independent copy queue, which advance-and-wait did not drain, so
     // its shutdown waits for that queue to idle. Do it while the copy queue + completion fence are alive.
     _upload_async.shutdown();
+
+    // Both the direct and copy queues are idle now. The async actor's own shutdown may have dropped the
+    // last reference to a buffer (its in-flight upload) after the final advance already ran, staging a
+    // fresh deferred deletion, and copy-deferred hold-backs may still be waiting on the (now fully
+    // signaled) copy fence. Nothing else will sweep these, so release them here while the device is alive.
+    {
+        cc::vector<dx12_expiring_resource> leftover = _epoch_state.lock(
+            [](dx12_epoch_state& s)
+            {
+                cc::vector<dx12_expiring_resource> out = cc::move(s.staged);
+                for (auto& r : s.copy_deferred)
+                    out.push_back(cc::move(r));
+                s.staged = {};
+                s.copy_deferred = {};
+                return out;
+            });
+        cc::vector<cc::unique_function<void()>> finalizers;
+        for (auto& r : leftover)
+            release_expiring(r, finalizers);
+        for (auto& f : finalizers)
+            f();
+    }
+
     _cmd_pool.shutdown();
 
     _submission_fence.Reset();

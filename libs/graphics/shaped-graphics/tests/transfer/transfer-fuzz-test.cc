@@ -124,32 +124,10 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      t.cmd->upload.data_to_buffer(t.buffer, data, start * sizeof(cc::u32));
                  });
 
-    // HANDOVER — async-upload op DISABLED: it deterministically deadlocks the dx12 copy actor.
-    //
-    // The op itself is correct (mirror of "upload": pick a random region, model it in t.data, ensure the
-    // open list is submitted first so GPU order matches the model, then ctx->upload.data_to_buffer). Enabled
-    // in the fuzz vocabulary it hangs the suite — root-caused, not a mystery:
-    //
-    //   The dx12 copy actor applies its REVERSE-sync wait per staging WINDOW, not per job
-    //   (dx12_upload_async.cc: submit_window does one _copy_queue->Wait(_submission_fence,
-    //   _open_max_wait_token), where _open_max_wait_token is the max over all jobs batched into the window;
-    //   on_process flushes one window per actor wake-up, so a burst batches together). When one window holds
-    //   both upload J (signals copy fence V) and a later upload K whose reverse token T is an inline list
-    //   that reads the buffer after J — so T waits on V (dx12_command_list.cc: track_buffer_access folds
-    //   _pending_async_upload_value into _required_copy_wait) — the cycle is:
-    //     window waits submission_fence >= T  ->  T waits copy_fence >= V  ->  V only signals once the
-    //     window executes. Deadlock; advance_epoch_and_wait_for_idle then blocks forever.
-    //
-    //   Deterministic repro (removed, easy to rebuild): on ONE buffer, loop ~256x { async upload region;
-    //   open+inline upload same region; submit }, then advance_epoch_and_wait_for_idle -> hangs. A single
-    //   async->inline->advance does NOT hang (needs two async uploads batched across the inline dependency).
-    //
-    //   Likely fix (backend, not this test): in the actor, flush the open window before staging a job whose
-    //   reverse wait_token would exceed _open_max_wait_token while the window already promises a completion
-    //   (_open_highest_finished > 0) — so a window never both promises V and takes on a newer reverse-wait
-    //   that depends on V. Once the copy queue no longer deadlocks, re-register this op (and consider a copy
-    //   fuzz op that copies between two DIFFERENT buffers to exercise cross-buffer async ordering too).
-#if 0
+    // Async-upload op: mirror of "upload" onto the copy queue. Pick a random region, model it in t.data,
+    // submit any open list first so recorded GPU order matches the model, then ctx->upload.data_to_buffer.
+    // (The copy actor's window-level reverse-sync deadlock this once tripped is fixed in dx12_upload_async;
+    // upload-async-test.cc pins the exact shape as a deterministic regression test.)
     test->add_op("async upload",
                  [&](cc::random& rng, trace& t)
                  {
@@ -173,7 +151,6 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      ctx->upload.data_to_buffer<cc::u32>(t.buffer, cc::make_pinned_data(cc::move(data)),
                                                          start * sizeof(cc::u32));
                  });
-#endif
 
     test->add_op(
         "copy region",
