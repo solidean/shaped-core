@@ -65,6 +65,24 @@ The professional visualization library: a modern, RTX-enabled renderer with a de
 API, serving Shaped Code's visualization needs. Built on sr. Early-stage skeleton today. See
 the [shaped-viewer readme](../libs/graphics/shaped-viewer/readme.md).
 
+### shaped-shader-compiler-dxc — `ssc::dxc::`
+
+A side utility (not part of the sv→sr→sg chain): a lean wrapper over the DirectX Shader Compiler
+(DXC) that turns HLSL into an `sg::compiled_shader` — bytecode + reflected bindings + compute
+workgroup size — filling the "compilation is not part of sg yet" gap noted in
+[compiled_shader.hh](../libs/graphics/shaped-graphics/src/shaped-graphics/compiled_shader.hh). It
+depends only on **shaped-graphics**. Two-step API: `preprocess` (resolve `#include`s via a
+caller-supplied resolver) then `compile` (already-flattened source → DXIL + reflection).
+
+- **Windows-only** today: links DXC and uses the Windows SDK's `d3d12shader.h` reflection.
+- **DXC is downloaded on demand**, not vendored or built from source: the first Windows configure runs
+  [`extern/dxc/download-dxc.py`](../extern/dxc/download-dxc.py), which fetches the pinned official
+  release (`v1.9.2602.24`, SHA-256 verified) for the host arch into `extern/dxc/.install/` (a
+  few-second download; `SC_SKIP_DXC=1` skips it). The release ships `dxil.dll`, so emitted DXIL is
+  signed (runs on dx12 without developer mode), and includes `arm64` binaries.
+
+See the [shaped-shader-compiler-dxc readme](../libs/graphics/shaped-shader-compiler-dxc/readme.md).
+
 ## Building & testing
 
 All three build and test through the repo driver like every other library:

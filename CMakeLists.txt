@@ -45,6 +45,13 @@ add_subdirectory(libs/graphics/shaped-graphics)
 add_subdirectory(libs/graphics/shaped-rendering)
 add_subdirectory(libs/graphics/shaped-viewer)
 
+# shaped-shader-compiler-dxc (ssc): HLSL -> sg::compiled_shader via DXC. Windows-only, and only when
+# DXC has been built (extern/dxc adds the `dxc` target). Run `uv run extern/dxc/build-dxc.py` (dev.py
+# does this automatically) to enable it.
+if(WIN32 AND TARGET dxc)
+    add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
+endif()
+
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
 # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
 sc_finalize_web_runners()
