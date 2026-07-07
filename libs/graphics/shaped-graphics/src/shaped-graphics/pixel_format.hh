@@ -80,7 +80,6 @@ enum class pixel_format : u16
     bc6h_rgb_sfloat,     // DX12 BC6H_SF16      / Vk BC6H_SFLOAT_BLOCK
     bc7_rgba_unorm,      // DX12 BC7_UNORM      / Vk BC7_UNORM_BLOCK
     bc7_rgba_unorm_srgb, // DX12 BC7_UNORM_SRGB / Vk BC7_SRGB_BLOCK
-    // NOTE: BC formats are kept as the trailing contiguous run — is_compressed_format() relies on it.
 };
 
 /// True for the depth (and depth-stencil) formats.
@@ -105,7 +104,26 @@ enum class pixel_format : u16
 /// True for the BC block-compressed formats (4x4 texel blocks).
 [[nodiscard]] constexpr bool is_compressed_format(pixel_format f)
 {
-    return u16(f) >= u16(pixel_format::bc1_rgba_unorm) && u16(f) <= u16(pixel_format::bc7_rgba_unorm_srgb);
+    switch (f)
+    {
+    case pixel_format::bc1_rgba_unorm:
+    case pixel_format::bc1_rgba_unorm_srgb:
+    case pixel_format::bc2_unorm:
+    case pixel_format::bc2_unorm_srgb:
+    case pixel_format::bc3_unorm:
+    case pixel_format::bc3_unorm_srgb:
+    case pixel_format::bc4_r_unorm:
+    case pixel_format::bc4_r_snorm:
+    case pixel_format::bc5_rg_unorm:
+    case pixel_format::bc5_rg_snorm:
+    case pixel_format::bc6h_rgb_ufloat:
+    case pixel_format::bc6h_rgb_sfloat:
+    case pixel_format::bc7_rgba_unorm:
+    case pixel_format::bc7_rgba_unorm_srgb:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /// Edge length of a format's addressable block: 1 for uncompressed (one texel), 4 for BC.

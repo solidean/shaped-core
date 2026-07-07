@@ -28,7 +28,7 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     desc.Height = UINT(d.height);
 
     // DepthOrArraySize is the depth for 3D, else the array-slice count (a cube is 6 slices per cube).
-    UINT slices_or_depth;
+    UINT slices_or_depth = 0;
     if (d.dimension == sg::texture_dimension::d3)
         slices_or_depth = UINT(d.depth);
     else
