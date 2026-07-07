@@ -308,7 +308,7 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes
     return cc::unit{};
 }
 
-void dx12_upload_async_system::upload_buffer(sg::buffer_handle buffer,
+void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
                                              cc::pinned_data<cc::byte const> data,
                                              cc::isize offset)
 {

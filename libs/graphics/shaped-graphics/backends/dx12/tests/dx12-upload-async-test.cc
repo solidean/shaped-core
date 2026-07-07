@@ -66,7 +66,7 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
 
     int const count = 24;
     cc::isize const each = 1024;
-    cc::vector<sg::buffer_handle> bufs;
+    cc::vector<sg::raw_buffer_handle> bufs;
     for (int k = 0; k < count; ++k)
     {
         auto buf
@@ -106,7 +106,7 @@ TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
     // several windows so slots recycle. Byte k*13+7 keeps each buffer's pattern distinct.
     cc::isize const sizes[] = {700, 300, 900, 1500, 200, 1100, 640, 1300, 480, 760};
     int const count = 10;
-    cc::vector<sg::buffer_handle> bufs;
+    cc::vector<sg::raw_buffer_handle> bufs;
     for (int k = 0; k < count; ++k)
     {
         cc::isize const n = sizes[k];

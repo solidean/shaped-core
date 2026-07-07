@@ -29,12 +29,12 @@ public:
     /// buffer_usage::copy_dst. An empty pin is a no-op. Precondition: offset_in_bytes + data.size() <=
     /// buffer size. Build the pin with cc::make_pinned_data / cc::as_pinned_data; that pin is what keeps
     /// the upload zero-copy, which is why it is passed rather than a plain span.
-    void bytes_to_buffer(buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset_in_bytes = 0);
+    void bytes_to_buffer(raw_buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset_in_bytes = 0);
 
     /// Streams a trivially-copyable pinned range, re-viewing the SAME pin as bytes (no copy).
     /// `offset_in_elements` is in elements of T. See bytes_to_buffer.
     template <class T>
-    void data_to_buffer(buffer_handle buffer, cc::pinned_data<T const> data, cc::isize offset_in_elements = 0)
+    void data_to_buffer(raw_buffer_handle buffer, cc::pinned_data<T const> data, cc::isize offset_in_elements = 0)
     {
         static_assert(std::is_trivially_copyable_v<T>, "upload element type must be trivially copyable");
         bytes_to_buffer(cc::move(buffer), data.as_bytes(),

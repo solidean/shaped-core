@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -74,6 +75,8 @@ public:
     [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(cc::isize size_in_bytes,
                                                                     sg::buffer_usage usage,
                                                                     sg::allocation_info const& alloc);
+    [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
+                                                                      sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
@@ -107,11 +110,17 @@ public:
         return cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list());
     }
 
-    [[nodiscard]] cc::result<sg::buffer_handle> create_buffer(cc::isize size_in_bytes,
-                                                              sg::buffer_usage usage,
-                                                              sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> create_raw_buffer(cc::isize size_in_bytes,
+                                                                      sg::buffer_usage usage,
+                                                                      sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
+        return cc::result<sg::raw_buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
+    }
+
+    [[nodiscard]] cc::result<sg::raw_texture_handle> create_raw_texture(sg::texture_description const& desc,
+                                                                        sg::allocation_info const& alloc) override
+    {
+        return cc::result<sg::raw_texture_handle>(create_dx12_texture(desc, alloc));
     }
 
     [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize size_in_bytes) override
@@ -144,7 +153,7 @@ public:
 
     // Reached through ctx.upload — async CPU→GPU buffer streaming on the copy queue. Forwards to the
     // async upload system; later direct-queue lists reading the buffer auto-wait on the copy.
-    void async_upload_bytes_to_buffer(sg::buffer_handle buffer,
+    void async_upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                       cc::pinned_data<cc::byte const> data,
                                       cc::isize offset_in_bytes) override
     {
@@ -226,7 +235,11 @@ public:
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a
     // buffer alive. Guarded because create runs on any thread while advance runs on the driver thread.
-    cc::mutex<cc::vector<std::weak_ptr<sg::buffer const>>> _transient_expiring;
+    cc::mutex<cc::vector<std::weak_ptr<sg::raw_buffer const>>> _transient_expiring;
+
+    // Transient textures created in the open epoch, auto-expired at advance_epoch just like buffers.
+    // Dedicated for now (no bump storage to reuse), but expiry still honours the transient contract.
+    cc::mutex<cc::vector<std::weak_ptr<sg::raw_texture const>>> _transient_expiring_textures;
 
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.

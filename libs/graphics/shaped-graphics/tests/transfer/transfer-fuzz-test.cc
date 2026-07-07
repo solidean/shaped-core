@@ -3,9 +3,9 @@
 #include <clean-core/math/random.hh>
 #include <nexus/fuzz/test.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/context.hh>
+#include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 
@@ -35,7 +35,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
     {
         sg::context_handle ctx;
         std::unique_ptr<sg::command_list> cmd;
-        sg::buffer_handle buffer;
+        sg::raw_buffer_handle buffer;
         cc::vector<cc::u32> data;
 
         trace() = default;
@@ -71,27 +71,27 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
         }
     };
 
-    test->add_op(
-            "mk_trace",
-            [&]
-            {
-                cc::random rng;
+    test->add_op("mk_trace",
+                 [&]
+                 {
+                     cc::random rng;
 
-                trace t;
-                t.ctx = ctx;
-                t.buffer
-                    = ctx->persistent.create_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst).value();
-                t.data = cc::vector<cc::u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(cc::u32));
+                     trace t;
+                     t.ctx = ctx;
+                     t.buffer = ctx->persistent
+                                    .create_raw_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst)
+                                    .value();
+                     t.data = cc::vector<cc::u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(cc::u32));
 
-                // initial random data fill
-                for (auto& d : t.data)
-                    d = rng.next_u32();
-                auto cmd = ctx->create_command_list().value();
-                cmd->upload.data_to_buffer(t.buffer, t.data);
-                ctx->submit_command_list(cc::move(cmd));
+                     // initial random data fill
+                     for (auto& d : t.data)
+                         d = rng.next_u32();
+                     auto cmd = ctx->create_command_list().value();
+                     cmd->upload.data_to_buffer(t.buffer, t.data);
+                     ctx->submit_command_list(cc::move(cmd));
 
-                return t;
-            })
+                     return t;
+                 })
         ->execute_once();
 
     // Explicit open/submit just exercises small/empty command lists; every other op auto-opens as needed, so
@@ -236,7 +236,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
     enum class cmd_list_idx : uint32_t;
 
     struct trace {
-        cc::vector<sg::buffer_handle> buffers;
+        cc::vector<sg::raw_buffer_handle> buffers;
         cc::vector<sg::command_list> cmd_lists;
     };
 

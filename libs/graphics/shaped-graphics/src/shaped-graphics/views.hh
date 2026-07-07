@@ -51,7 +51,7 @@ struct raw_view
 {
     view_class access;
     view_shape shape;
-    buffer_handle buffer;      ///< the viewed buffer
+    raw_buffer_handle buffer;  ///< the viewed buffer
     isize offset_in_bytes = 0; ///< start of the view within the buffer
     isize size_in_bytes = 0;   ///< [uniform_block, raw] visible byte size
     isize element_count = 0;   ///< [structured] number of elements
@@ -64,7 +64,7 @@ struct uniform_view
 {
     static constexpr view_class access = view_class::uniform;
 
-    buffer_handle buffer;
+    raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
     isize size_in_bytes = isize(sizeof(T));
 
@@ -89,7 +89,7 @@ struct readonly_view
 {
     static constexpr view_class access = view_class::readonly;
 
-    buffer_handle buffer;
+    raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
     isize element_count = 0; ///< count of `T` (for `byte`, a count of bytes)
 
@@ -117,7 +117,7 @@ struct readwrite_view
 {
     static constexpr view_class access = view_class::readwrite;
 
-    buffer_handle buffer;
+    raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
     isize element_count = 0; ///< count of `T` (for `byte`, a count of bytes)
 

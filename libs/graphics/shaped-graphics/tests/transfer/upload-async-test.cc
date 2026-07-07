@@ -3,9 +3,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/context.hh>
+#include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 #include <atomic>
@@ -21,9 +21,9 @@ namespace
 {
 auto pattern = [](int i) { return cc::byte(i & 0xFF); };
 
-sg::buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
+sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
 {
-    auto buf = ctx->persistent.create_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     CC_ASSERT(buf.has_value(), "async upload test buffer allocation failed");
     return buf.value();
 }

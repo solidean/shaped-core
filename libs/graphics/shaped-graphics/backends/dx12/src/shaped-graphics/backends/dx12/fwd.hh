@@ -21,6 +21,8 @@ class dx12_command_list;
 class dx12_command_allocator_pool;
 class dx12_buffer;
 using dx12_buffer_handle = std::shared_ptr<dx12_buffer const>;
+class dx12_texture;
+using dx12_texture_handle = std::shared_ptr<dx12_texture const>;
 class dx12_memory_heap;
 using dx12_memory_heap_handle = std::shared_ptr<dx12_memory_heap const>;
 

@@ -20,12 +20,12 @@ public:
     /// or free them once this returns. The write is visible to later commands in the same list. An
     /// empty span is a no-op. Precondition: offset_in_bytes + data.size() <= buffer size.
     /// TODO: version with pinned_data that tries to copy it in parallel and blocks on submit?
-    void bytes_to_buffer(buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes = 0);
+    void bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes = 0);
 
     /// Uploads a trivially-copyable contiguous range as raw bytes. `offset_in_elements` is in elements
     /// of the range's value type. See bytes_to_buffer.
     template <std::ranges::contiguous_range RangeT>
-    void data_to_buffer(buffer_handle buffer, RangeT const& data, cc::isize offset_in_elements = 0)
+    void data_to_buffer(raw_buffer_handle buffer, RangeT const& data, cc::isize offset_in_elements = 0)
     {
         using element_t = std::remove_cvref_t<std::ranges::range_value_t<RangeT>>;
         static_assert(std::is_trivially_copyable_v<element_t>, "upload element type must be trivially copyable");

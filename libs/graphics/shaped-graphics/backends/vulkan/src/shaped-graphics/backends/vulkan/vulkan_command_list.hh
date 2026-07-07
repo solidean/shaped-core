@@ -38,15 +38,15 @@ public:
 
 protected:
     // TODO: inline buffer transfer for the vulkan backend (see the dx12 backend for the reference impl).
-    void upload_bytes_to_buffer(sg::buffer_handle, cc::span<cc::byte const>, cc::isize) override
+    void upload_bytes_to_buffer(sg::raw_buffer_handle, cc::span<cc::byte const>, cc::isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer upload is not implemented yet");
     }
-    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::buffer_handle, cc::isize, cc::isize) override
+    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
     }
-    void copy_buffer_region(sg::buffer_handle, sg::buffer_handle, cc::isize, cc::isize, cc::isize) override
+    void copy_buffer_region(sg::raw_buffer_handle, sg::raw_buffer_handle, cc::isize, cc::isize, cc::isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer copy is not implemented yet");
     }

@@ -101,7 +101,7 @@ closing epoch's payload. On retire the handle is nulled **first**, then finalize
 crucially **outside** the in-flight lock, because they may be slow or re-entrant and run on an
 unspecified thread.
 
-**Finalizers** ([`buffer::add_finalizer`](../../src/shaped-graphics/buffer.hh)) are callbacks that run
+**Finalizers** ([`buffer::add_finalizer`](../../src/shaped-graphics/raw_buffer.hh)) are callbacks that run
 once a resource's GPU handle is released *and* it is no longer in flight. They are the feedback point
 for reclaiming externally-owned backing memory — the mechanism that later enables **placed resources
 on custom allocators**, where the allocator needs a definite "the GPU is truly done with this" signal

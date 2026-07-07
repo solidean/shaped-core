@@ -3,8 +3,8 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/command_list.hh>
+#include <shaped-graphics/raw_buffer.hh>
 
 // Runtime resizing of the transfer resources (ctx.upload.set_async_window_size / set_inline_budget and
 // ctx.download.set_budget), on WARP. Each ring is created tiny, then grown, and a transfer that would not
@@ -18,7 +18,7 @@ namespace dx12 = sg::backend::dx12;
 // Fresh buffer, INLINE upload of `n` bytes (pattern (i+seed)), inline download, byte-exact check.
 bool inline_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
 {
-    auto buf = ctx->persistent.create_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto buf = ctx->persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     if (!buf.has_value())
         return false;
 
@@ -47,7 +47,7 @@ bool inline_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
 // Fresh buffer, ASYNC upload of `n` bytes (pattern (i+seed)), inline download, byte-exact check.
 bool async_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
 {
-    auto buf = ctx->persistent.create_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto buf = ctx->persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     if (!buf.has_value())
         return false;
 

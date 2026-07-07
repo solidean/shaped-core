@@ -19,12 +19,14 @@ public:
     /// once the submitted list has finished on the GPU and the bytes have been copied to the host. A
     /// zero-size read yields an already-ready, empty future. Precondition: offset_in_bytes +
     /// size_in_bytes <= buffer size.
-    [[nodiscard]] bytes_future bytes_from_buffer(buffer_handle buffer, cc::isize offset_in_bytes, cc::isize size_in_bytes);
+    [[nodiscard]] bytes_future bytes_from_buffer(raw_buffer_handle buffer,
+                                                 cc::isize offset_in_bytes,
+                                                 cc::isize size_in_bytes);
 
     /// Downloads `count` elements of a trivially-copyable type; `offset_in_elements` and `count` are in
     /// elements of T. See bytes_from_buffer.
     template <class T>
-    [[nodiscard]] data_future<T> data_from_buffer(buffer_handle buffer, cc::isize offset_in_elements, cc::isize count)
+    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, cc::isize offset_in_elements, cc::isize count)
     {
         static_assert(std::is_trivially_copyable_v<T>, "download element type must be trivially copyable");
         auto const stride = cc::isize(sizeof(T));

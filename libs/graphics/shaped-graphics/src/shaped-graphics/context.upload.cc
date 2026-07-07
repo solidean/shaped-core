@@ -4,7 +4,7 @@
 
 namespace sg
 {
-void context_upload_scope::bytes_to_buffer(buffer_handle buffer,
+void context_upload_scope::bytes_to_buffer(raw_buffer_handle buffer,
                                            cc::pinned_data<cc::byte const> data,
                                            cc::isize offset_in_bytes)
 {

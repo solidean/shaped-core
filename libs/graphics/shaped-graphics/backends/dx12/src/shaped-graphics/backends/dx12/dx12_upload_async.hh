@@ -56,7 +56,7 @@ public:
     /// Records an async upload of `data` into `buffer` at `offset`. Reserves a completion value, stamps
     /// the buffer so later direct-queue readers wait on it, and hands the job to the actor. Empty data is
     /// a no-op. Preconditions: buffer non-null, a dx12 buffer, not expired, copy_dst usage, in bounds.
-    void upload_buffer(sg::buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset);
+    void upload_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the

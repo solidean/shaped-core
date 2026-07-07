@@ -45,6 +45,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   three-timeline minimal-barrier state machine, and the concurrent-command-list slot model.
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the
   access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
+- [textures](concepts/textures.md) — the `raw_texture` resource vs the typed `texture<Traits>` wrapper,
+  the derived-not-flagged `texture_description` shape, and the restrictive `pixel_format` set.
 - [bindings](concepts/bindings.md) — `compiled_shader` reflection: the backend-agnostic `binding`
   vocabulary (`binding_type`, `(set, index)`) and how a binding validates a bound `raw_view`.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an

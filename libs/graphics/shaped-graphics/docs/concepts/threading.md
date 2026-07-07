@@ -30,7 +30,7 @@ when its underlying API or its own bookkeeping is not safe to touch from several
 **`multi_threaded`** — split into two tiers:
 
 - **Concurrency-safe:** resource and command-list operations — `create_command_list`,
-  `create_buffer`, `submit_command_list`, `drop_command_list` (and a resource's refcount reaching
+  `create_raw_buffer`, `submit_command_list`, `drop_command_list` (and a resource's refcount reaching
   zero, i.e. deferred deletion); the epoch **waits and retire** — `wait_for_epoch`,
   `wait_for_next_inflight_epoch`, `process_completed_epochs` (internally synchronized, because they
   double as ring back-pressure invoked from within concurrent recording); and `wait_for(future)`

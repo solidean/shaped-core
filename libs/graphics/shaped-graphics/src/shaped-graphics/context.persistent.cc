@@ -5,12 +5,19 @@
 
 namespace sg
 {
-cc::result<buffer_handle> context_persistent_scope::create_buffer(isize size_in_bytes,
-                                                                  buffer_usage usage,
-                                                                  allocation_info const& alloc)
+cc::result<raw_buffer_handle> context_persistent_scope::create_raw_buffer(isize size_in_bytes,
+                                                                          buffer_usage usage,
+                                                                          allocation_info const& alloc)
 {
     CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
-    return _ctx.create_buffer(size_in_bytes, usage, alloc);
+    return _ctx.create_raw_buffer(size_in_bytes, usage, alloc);
+}
+
+cc::result<raw_texture_handle> context_persistent_scope::create_raw_texture(texture_description const& desc,
+                                                                            allocation_info const& alloc)
+{
+    CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    return _ctx.create_raw_texture(desc, alloc);
 }
 
 cc::result<memory_heap_handle> context_persistent_scope::create_memory_heap(isize size_in_bytes)
