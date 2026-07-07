@@ -13,6 +13,13 @@ cc::result<raw_buffer_handle> context_persistent_scope::create_raw_buffer(isize 
     return _ctx.create_raw_buffer(size_in_bytes, usage, alloc);
 }
 
+cc::result<raw_texture_handle> context_persistent_scope::create_raw_texture(texture_description const& desc,
+                                                                            allocation_info const& alloc)
+{
+    CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    return _ctx.create_raw_texture(desc, alloc);
+}
+
 cc::result<memory_heap_handle> context_persistent_scope::create_memory_heap(isize size_in_bytes)
 {
     return _ctx.create_memory_heap(size_in_bytes);

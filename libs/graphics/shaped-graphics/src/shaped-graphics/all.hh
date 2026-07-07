@@ -20,6 +20,9 @@
 #include <shaped-graphics/context.transient.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory_heap.hh>
+#include <shaped-graphics/pixel_format.hh>
 #include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/texture.hh>
 #include <shaped-graphics/types.hh>
 #include <shaped-graphics/views.hh>

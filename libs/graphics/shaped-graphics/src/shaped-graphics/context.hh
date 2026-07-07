@@ -111,6 +111,13 @@ protected:
                                                                           allocation_info const& alloc)
         = 0;
 
+    /// Allocates a GPU-resident texture from a description. `alloc` selects the backing memory (see
+    /// allocation_info). This is the raw, general create — typed factories (create_texture_2d, …) that
+    /// return `texture<Traits>` wrappers layer on top of it later.
+    [[nodiscard]] virtual cc::result<raw_texture_handle> create_raw_texture(texture_description const& desc,
+                                                                            allocation_info const& alloc)
+        = 0;
+
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into. Size
     /// must be >= 0 (0 is a valid empty heap that holds no placements). A heap is persistent — it
     /// outlives the resources placed in it — so it is reached through ctx.persistent.create_memory_heap.

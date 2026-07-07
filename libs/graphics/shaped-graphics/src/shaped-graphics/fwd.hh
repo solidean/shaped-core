@@ -21,6 +21,11 @@ class command_list_download_scope;
 class command_list_copy_scope;
 class command_list_compute_scope;
 class raw_buffer;
+class raw_texture;
+struct texture_description;        // value type (see raw_texture.hh) — input to create_raw_texture
+enum class pixel_format : u16;     // texel format (see pixel_format.hh)
+enum class texture_usage : u32;    // texture usage flags (see types.hh)
+enum class texture_dimension : u8; // 1D / 2D / 3D (see raw_texture.hh)
 class bytes_waiter;
 class bytes_future;
 template <class T>
@@ -96,6 +101,7 @@ enum class submission_token : u64
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
+using raw_texture_handle = std::shared_ptr<raw_texture const>;         // shared-immutable: shape is fixed at creation
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_layout_handle = std::shared_ptr<binding_layout const>;   // immutable schema

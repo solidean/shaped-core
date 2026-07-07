@@ -18,11 +18,12 @@ upload/download/copy. See [docs/structure.md](docs/structure.md) for what is `[d
 - **Handles.** Every shared type `xyz` has `xyz_handle = std::shared_ptr<sg::xyz>`
   (`context_handle`, `command_list_handle`, `raw_buffer_handle`). Public factories return handles.
 - **Mutable drivers vs shared-immutable resources.** `context` and `command_list` are mutable,
-  stateful, single-threaded. `buffer` (and future `texture`) are immutable in *shape* and act
-  like a span over mutable GPU-resident memory.
+  stateful, single-threaded. `raw_buffer` and `raw_texture` are immutable in *shape* and act
+  like a span over mutable GPU-resident memory. A texture also has a typed `texture<Traits>`
+  wrapper (concept-gated getters) over the raw resource.
 - **No host-visible resources.** There are no CPU-mapped buffers/textures; host↔device transfer
   is a globally shared resource sg manages, driven through command lists.
-- **Abstract interfaces, backends derive directly.** `context`, `command_list`, and `buffer` are
+- **Abstract interfaces, backends derive directly.** `context`, `command_list`, `raw_buffer`, and `raw_texture` are
   abstract; a backend subclasses them directly (`sg::backend::vulkan::vulkan_context : sg::context`)
   — no separate bridge/impl layer. Cheap shared metadata (a buffer's size/usage) lives in the base
   as protected members with non-virtual accessors, so reading it costs no virtual call and every
@@ -43,7 +44,7 @@ Source lives in `src/shaped-graphics/`:
 
 | Path                | What's in it |
 |---------------------|--------------|
-| (root)              | `fwd.hh` (fwd decls + `*_handle` typedefs), `all.hh`, `types.hh`, and the abstract `context` / `command_list` / `buffer` |
+| (root)              | `fwd.hh` (fwd decls + `*_handle` typedefs), `all.hh`, `types.hh`, `pixel_format.hh`, and the abstract `context` / `command_list` / `raw_buffer` / `raw_texture` (+ typed `texture.hh`) |
 | `backends/<api>/`   | concrete per-backend static libraries (`dx12/`, `vulkan/`) that subclass the abstract types, each smurf-named in `sg::backend::<api>` |
 
 ## Building & testing

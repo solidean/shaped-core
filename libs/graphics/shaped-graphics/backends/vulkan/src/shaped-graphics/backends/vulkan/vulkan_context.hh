@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/context.hh>
 
 #include <atomic>
@@ -65,6 +66,8 @@ public:
     [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(cc::isize size_in_bytes,
                                                                         sg::buffer_usage usage,
                                                                         sg::allocation_info const& alloc);
+    [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
+                                                                          sg::allocation_info const& alloc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 
@@ -81,6 +84,12 @@ public:
                                                                       sg::allocation_info const& alloc) override
     {
         return cc::result<sg::raw_buffer_handle>(create_vulkan_buffer(size_in_bytes, usage, alloc));
+    }
+
+    [[nodiscard]] cc::result<sg::raw_texture_handle> create_raw_texture(sg::texture_description const& desc,
+                                                                        sg::allocation_info const& alloc) override
+    {
+        return cc::result<sg::raw_texture_handle>(create_vulkan_texture(desc, alloc));
     }
 
     [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize) override

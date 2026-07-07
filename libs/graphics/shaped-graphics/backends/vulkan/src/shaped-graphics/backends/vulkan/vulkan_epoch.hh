@@ -28,6 +28,7 @@ struct vulkan_command_pool
 struct vulkan_expiring_resource
 {
     VkBuffer buffer = VK_NULL_HANDLE;
+    VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     cc::vector<cc::unique_function<void()>> finalizers;
 };
@@ -72,9 +73,12 @@ inline void release_expiring(VkDevice device,
 {
     if (r.buffer != VK_NULL_HANDLE)
         vkDestroyBuffer(device, r.buffer, nullptr);
+    if (r.image != VK_NULL_HANDLE)
+        vkDestroyImage(device, r.image, nullptr);
     if (r.memory != VK_NULL_HANDLE)
         vkFreeMemory(device, r.memory, nullptr);
     r.buffer = VK_NULL_HANDLE;
+    r.image = VK_NULL_HANDLE;
     r.memory = VK_NULL_HANDLE;
     for (auto& f : r.finalizers)
         out_finalizers.push_back(cc::move(f));

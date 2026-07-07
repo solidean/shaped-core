@@ -27,6 +27,12 @@ public:
     /// current epoch's bump window; the storage is reused once the epoch changes.
     [[nodiscard]] cc::result<raw_buffer_handle> create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
+    /// Allocates a transient texture, recycled once this epoch retires. NOTE: the transient bump-heap is
+    /// buffers-only today, so a transient texture is currently a *dedicated* allocation auto-expired at the
+    /// next epoch — not bump-suballocated. A texture-capable transient memory_heap (placed transient
+    /// textures) is a deferred memory_heap extension.
+    [[nodiscard]] cc::result<raw_texture_handle> create_raw_texture(texture_description const& desc);
+
     /// Instantiates `layout` with the given name->view bindings as a transient binding_group (validated
     /// against the layout), whose descriptors are recycled when this epoch retires.
     [[nodiscard]] cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
