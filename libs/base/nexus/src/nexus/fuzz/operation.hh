@@ -42,14 +42,21 @@ struct fuzz_operation
 
     // ---- builder (chainable) ---------------------------------------------------------------------
 
+    // The two bounds must stay ordered (_at_least <= _at_most): the runner keeps scheduling while any op is
+    // below its at-least, but never runs one past its at-most, so an at-least above the at-most would loop
+    // forever. Each setter pulls the other bound along to preserve that.
     fuzz_operation* execute_at_least(int times)
     {
         _at_least = times;
+        if (_at_most < times)
+            _at_most = times;
         return this;
     }
     fuzz_operation* execute_at_most(int times)
     {
         _at_most = times;
+        if (_at_least > times)
+            _at_least = times;
         return this;
     }
     fuzz_operation* execute_once() { return execute_at_least(1)->execute_at_most(1); }

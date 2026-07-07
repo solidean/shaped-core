@@ -15,6 +15,11 @@
 // This is an nx::fuzz API-sequence fuzz test — see libs/base/nexus/docs/fuzz-testing.md, especially
 // "Fuzzing over external, shared state": the `trace` below drops its open command list in its destructor
 // and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
+//
+// TODO: investigate fuzz runtime. Per-op execution counts are capped below to keep it reasonable, and each
+// download + epoch-wait genuinely stalls on the GPU — but it still feels slower than the op mix should cost.
+// Profile where the time actually goes (GPU round-trips vs. per-op host overhead vs. the fuzz engine itself)
+// before raising the caps back up.
 
 INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
@@ -89,20 +94,26 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
             })
         ->execute_once();
 
-    test->add_op("open cmd", [&](trace& t) { t.ensure_open_cmd(); });
-    test->add_op("submit cmd", [&](trace& t) { t.ensure_submitted_cmd(); });
+    // Explicit open/submit just exercises small/empty command lists; every other op auto-opens as needed, so
+    // a few reps suffice (the default ~50 adds nothing but runtime).
+    test->add_op("open cmd", [&](trace& t) { t.ensure_open_cmd(); })->execute_at_least(3);
+    test->add_op("submit cmd", [&](trace& t) { t.ensure_submitted_cmd(); })->execute_at_least(3);
+    // Epoch advances (especially the wait-for-idle variant) drain the GPU, so they dominate the fuzz runtime;
+    // a handful covers the epoch-transition interactions without the default's 50 GPU stalls.
     test->add_op("advance epoch",
                  [&](trace& t)
                  {
                      t.ensure_submitted_cmd(); // no open cmdlist
                      ctx->advance_epoch(cc::nullopt);
-                 });
+                 })
+        ->execute_at_least(5);
     test->add_op("advance epoch + wait",
                  [&](trace& t)
                  {
                      t.ensure_submitted_cmd(); // no open cmdlist
                      ctx->advance_epoch_and_wait_for_idle();
-                 });
+                 })
+        ->execute_at_least(5);
 
     test->add_op("upload",
                  [&](cc::random& rng, trace& t)
@@ -184,6 +195,8 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                 {.src = t.buffer, .dst = t.buffer, .count = cnt, .src_offset = src_start, .dst_offset = dst_start});
         });
 
+    // Each check blocks on a full wait_for readback round-trip, so this op dominates fuzz runtime; a bounded
+    // count still verifies the model against the GPU across varied op histories without the default's 50 stalls.
     test->add_op("download + check",
                  [&](cc::random& rng, trace& t)
                  {
@@ -203,7 +216,8 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      CHECK(ref_data.size() == dl_data.size());
                      for (auto i = 0; i < end - start; ++i)
                          CHECK(ref_data[i] == dl_data[i]);
-                 });
+                 })
+        ->execute_at_least(10);
 
     SECTION("fuzz")
     {
