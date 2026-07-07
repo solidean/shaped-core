@@ -171,7 +171,7 @@ sg::texture_usage            // flags: copy_src/copy_dst, sampled, storage, rend
 ctx.persistent.create_raw_texture(desc)        // -> cc::result<raw_texture_handle>  (dedicated)
 ctx.transient.create_raw_texture(desc)         // -> cc::result<raw_texture_handle>  (dedicated for now; auto-expires)
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
-sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; implicit -> raw_texture_handle
+sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
 // NOTE: creation only — texture views (shader binding), barriers/layout transitions, and copies are future work.

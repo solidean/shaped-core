@@ -34,11 +34,18 @@ struct texture_traits
 /// A strongly-typed view onto a raw_texture whose shape is fixed at compile time by `Traits`. Privately
 /// holds a raw_texture_handle; adds shape-specific accessors gated by `requires` so, e.g., `depth()`
 /// exists only on 3D textures and `array_layers()` only on arrays — misuse is a compile error, not a
-/// runtime check. Convertible back to raw_texture_handle for the general (raw) API. Value type: copy is
-/// a cheap handle copy. Prefer the typedefs (`texture_2d`, `texture_cube_array`, …) over spelling Traits.
+/// runtime check. Reach the raw resource for the general (raw) API via `raw()`. Value type: copy is a
+/// cheap handle copy. Prefer the typedefs (`texture_2d`, `texture_cube_array`, …) over spelling Traits.
 template <texture_traits Traits>
 class texture
 {
+    // Compile-time shape, mirrored from Traits for convenient introspection.
+public:
+    static constexpr texture_dimension dimension = Traits.dimension;
+    static constexpr bool is_array = Traits.is_array;
+    static constexpr bool is_cube = Traits.is_cube;
+    static constexpr bool is_multisampled = Traits.is_multisampled;
+
 public:
     texture() = default;
 
@@ -49,16 +56,9 @@ public:
         CC_ASSERT(traits_of(_raw->description()) == Traits, "raw_texture shape does not match texture<Traits>");
     }
 
-    /// The underlying raw resource (never null unless default-constructed).
+    /// The underlying raw resource (never null unless default-constructed). Use this to reach the raw
+    /// (general) API; there is no implicit conversion to raw_texture_handle.
     [[nodiscard]] raw_texture_handle const& raw() const { return _raw; }
-    operator raw_texture_handle() const { return _raw; }
-    [[nodiscard]] explicit operator bool() const { return _raw != nullptr; }
-
-    // Compile-time shape, mirrored from Traits for convenient introspection.
-    static constexpr texture_dimension dimension = Traits.dimension;
-    static constexpr bool is_array = Traits.is_array;
-    static constexpr bool is_cube = Traits.is_cube;
-    static constexpr bool is_multisampled = Traits.is_multisampled;
 
     // Always-available runtime queries.
     [[nodiscard]] pixel_format format() const { return _raw->format(); }
