@@ -66,19 +66,19 @@ TEST("sg - texture_description shape is derived, not flagged")
     // A single-slice 2D array is distinct from a plain 2D texture purely via array_layers being set.
     sg::texture_description d2a = d2;
     d2a.array_layers = 1;
-    CHECK((sg::traits_of(d2a) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .array = true}));
+    CHECK((sg::traits_of(d2a) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .is_array = true}));
     CHECK(sg::traits_of(d2) != sg::traits_of(d2a));
 
     // Cube + multisampling fold into is_cube / sample_count, not extra dimensions.
     sg::texture_description cube;
     cube.format = sg::pixel_format::rgba8_unorm;
     cube.is_cube = true;
-    CHECK((sg::traits_of(cube) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .cube = true}));
+    CHECK((sg::traits_of(cube) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .is_cube = true}));
 
     sg::texture_description ms;
     ms.format = sg::pixel_format::rgba8_unorm;
     ms.sample_count = 4;
-    CHECK((sg::traits_of(ms) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .multisampled = true}));
+    CHECK((sg::traits_of(ms) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .is_multisampled = true}));
 }
 
 // The shape-gated accessors exist only where the shape has that axis — a compile-time contract.

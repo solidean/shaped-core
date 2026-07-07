@@ -12,9 +12,9 @@ namespace sg
 struct texture_traits
 {
     texture_dimension dimension = texture_dimension::d2;
-    bool array = false;
-    bool cube = false;
-    bool multisampled = false;
+    bool is_array = false;
+    bool is_cube = false;
+    bool is_multisampled = false;
 
     [[nodiscard]] constexpr bool operator==(texture_traits const&) const = default;
 };
@@ -25,9 +25,9 @@ struct texture_traits
 {
     return texture_traits{
         .dimension = d.dimension,
-        .array = d.array_layers.has_value(),
-        .cube = d.is_cube,
-        .multisampled = d.sample_count > 1,
+        .is_array = d.array_layers.has_value(),
+        .is_cube = d.is_cube,
+        .is_multisampled = d.sample_count > 1,
     };
 }
 
@@ -56,9 +56,9 @@ public:
 
     // Compile-time shape, mirrored from Traits for convenient introspection.
     static constexpr texture_dimension dimension = Traits.dimension;
-    static constexpr bool is_array = Traits.array;
-    static constexpr bool is_cube = Traits.cube;
-    static constexpr bool is_multisampled = Traits.multisampled;
+    static constexpr bool is_array = Traits.is_array;
+    static constexpr bool is_cube = Traits.is_cube;
+    static constexpr bool is_multisampled = Traits.is_multisampled;
 
     // Always-available runtime queries.
     [[nodiscard]] pixel_format format() const { return _raw->format(); }
@@ -77,12 +77,12 @@ public:
         return _raw->depth();
     }
     [[nodiscard]] int array_layers() const
-        requires(Traits.array)
+        requires(Traits.is_array)
     {
         return _raw->array_layers();
     }
     [[nodiscard]] int sample_count() const
-        requires(Traits.multisampled)
+        requires(Traits.is_multisampled)
     {
         return _raw->sample_count();
     }
@@ -96,16 +96,17 @@ private:
 using texture_1d = texture<texture_traits{.dimension = texture_dimension::d1}>;
 using texture_2d = texture<texture_traits{.dimension = texture_dimension::d2}>;
 using texture_3d = texture<texture_traits{.dimension = texture_dimension::d3}>;
-using texture_cube = texture<texture_traits{.dimension = texture_dimension::d2, .cube = true}>;
+using texture_cube = texture<texture_traits{.dimension = texture_dimension::d2, .is_cube = true}>;
 
-using texture_1d_array = texture<texture_traits{.dimension = texture_dimension::d1, .array = true}>;
-using texture_2d_array = texture<texture_traits{.dimension = texture_dimension::d2, .array = true}>;
-using texture_cube_array = texture<texture_traits{.dimension = texture_dimension::d2, .array = true, .cube = true}>;
+using texture_1d_array = texture<texture_traits{.dimension = texture_dimension::d1, .is_array = true}>;
+using texture_2d_array = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true}>;
+using texture_cube_array = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true, .is_cube = true}>;
 
-using texture_2d_ms = texture<texture_traits{.dimension = texture_dimension::d2, .multisampled = true}>;
+using texture_2d_ms = texture<texture_traits{.dimension = texture_dimension::d2, .is_multisampled = true}>;
 using texture_2d_array_ms
-    = texture<texture_traits{.dimension = texture_dimension::d2, .array = true, .multisampled = true}>;
-using texture_cube_ms = texture<texture_traits{.dimension = texture_dimension::d2, .cube = true, .multisampled = true}>;
+    = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true, .is_multisampled = true}>;
+using texture_cube_ms
+    = texture<texture_traits{.dimension = texture_dimension::d2, .is_cube = true, .is_multisampled = true}>;
 using texture_cube_array_ms
-    = texture<texture_traits{.dimension = texture_dimension::d2, .array = true, .cube = true, .multisampled = true}>;
+    = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true, .is_cube = true, .is_multisampled = true}>;
 } // namespace sg
