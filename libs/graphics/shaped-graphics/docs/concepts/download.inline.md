@@ -30,9 +30,22 @@ future becomes ready when the actor has moved the bytes.
    run, memcpy the readback bytes into the destination **if the pin is still alive**, mark the waiter
    ready, and release the job's hold on its epoch (see reclaim below).
 
-Blocking rules follow from this: `bytes_future::wait()` refuses to block until the list is *submitted*
-(otherwise it would stall the very thread that must submit), and the actor's per-job fence wait is what
-makes the readback bytes valid before the memcpy.
+Blocking rules follow from this. The completion-guaranteeing call is **`ctx.wait_for(future)`** (the
+future itself carries only the non-blocking `is_ready()` / `try_get_bytes()` polls — a blocking wait is
+a context-level effect, kept off the future). It refuses to block until the list is *submitted*
+(otherwise it would stall the very thread that must submit) and returns `nullopt` for an unsubmitted or
+cancelled download; the actor's per-job fence wait is what makes the readback bytes valid before the
+memcpy. A future is waitable as soon as its list is submitted — **before** its epoch ends, no
+`advance_epoch` required.
+
+**What epoch waits do not guarantee.** `advance_epoch(...)` and `advance_epoch_and_wait_for_idle()` wait
+on the **GPU epoch fence** only. Reaching idle means every readback `CopyBufferRegion` has finished on
+the GPU and the ring bytes are valid — but the actor thread may not yet have been scheduled to run the
+CPU memcpy and call `mark_ready()`. So `future.is_ready()` can be transiently **false** right after idle
+returns (a thread-scheduling race, not a bug). Only `ctx.wait_for(future)` — which blocks on the
+future's own waiter — guarantees the bytes have landed in the caller's destination. (The convergence in
+the next section is about a *fully-drained epoch's counter reaching zero*, which is driven by the actor
+calling `on_copy_done`, i.e. the actor's progress, not by reaching idle.)
 
 ## Why reclaim is epoch-granular (the load-bearing decision)
 
@@ -94,8 +107,9 @@ Dropping a recording list (`drop_command_list`) is distinct from dropping the *f
 - [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh)
   — the per-resource readback recorder + its **deferred CPU copy** (`dx12_buffer_download`), the closure
   the actor runs once the GPU copy has completed.
-- [`bytes_future.hh`](../../src/shaped-graphics/bytes_future.hh) — the future/waiter the caller polls or
-  waits on; `dx12_download_waiter` adds the *submitted* and *cancelled* gates.
+- [`bytes_future.hh`](../../src/shaped-graphics/bytes_future.hh) — the future/waiter the caller polls
+  (`is_ready` / `try_get_bytes`) or waits on via `ctx.wait_for(future)`; `dx12_download_waiter` adds the
+  *submitted* and *cancelled* gates.
 - The advance hook is called from [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 
 ## Load-bearing invariants
@@ -110,8 +124,8 @@ Preserve these; the rest is tuning:
 3. **The actor copies in submission order**, waiting on the submission fence before each memcpy.
 4. **A dead pin cancels the copy** (drop-the-future); **a dropped list cancels the futures** and
    releases their epoch counts (drop-the-list). Neither leaks ring space.
-5. **`wait()` cannot block before submission** — blocking a not-yet-submitted download would deadlock
-   the submitting thread.
+5. **The blocking wait (`ctx.wait_for(future)`) cannot block before submission** — blocking a
+   not-yet-submitted download would deadlock the submitting thread; it returns `nullopt` instead.
 
 ## What's implemented today vs deferred
 

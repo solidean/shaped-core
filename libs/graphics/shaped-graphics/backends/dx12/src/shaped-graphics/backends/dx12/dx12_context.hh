@@ -173,7 +173,8 @@ public:
     // the submission fence is a per-command-list timeline on the same queue.
     ComPtr<ID3D12Fence> _epoch_fence;
     ComPtr<ID3D12Fence> _submission_fence;
-    HANDLE _fence_event = nullptr; // reusable event for SetEventOnCompletion waits (driver thread only)
+    // Epoch-fence waits (wait_for_epoch) create a per-call event so they stay safe to invoke from any
+    // thread — no shared wait event to serialize on.
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;

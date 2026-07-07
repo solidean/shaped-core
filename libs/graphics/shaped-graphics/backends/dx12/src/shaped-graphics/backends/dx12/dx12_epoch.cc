@@ -129,14 +129,20 @@ void dx12_context::process_completed_epochs()
 
 void dx12_context::wait_for_epoch(sg::epoch e)
 {
-    if (_epoch_fence && _fence_event)
+    if (_epoch_fence)
     {
         cc::u64 const target = cc::u64(e);
         if (_epoch_fence->GetCompletedValue() < target)
         {
-            HRESULT const hr = _epoch_fence->SetEventOnCompletion(target, _fence_event);
+            // A per-call event, not a shared one: the wait/retire family is safe to call from any thread
+            // (e.g. ring back-pressure during concurrent recording), and a single reused event cannot
+            // serve concurrent waiters. A fence accepts many concurrent SetEventOnCompletion registrations.
+            HANDLE const event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            CC_ASSERT(event != nullptr, "CreateEventW failed for the epoch fence wait");
+            HRESULT const hr = _epoch_fence->SetEventOnCompletion(target, event);
             CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
-            WaitForSingleObject(_fence_event, INFINITE);
+            WaitForSingleObject(event, INFINITE);
+            CloseHandle(event);
         }
     }
     process_completed_epochs();

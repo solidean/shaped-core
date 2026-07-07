@@ -76,6 +76,11 @@ would map it onto shared events.
    swapchain back-buffer count). `advance_epoch_and_wait_for_idle()` is the spelled-out `advance(0)` —
    named in full so the advance is never hidden behind a "wait" call.
 
+Idle (and any `wait_for_*`) waits on the **GPU epoch fence** only. It does **not** guarantee an inline
+**download** future is delivered: the readback CPU copy runs on a separate actor thread the epoch
+machinery does not drain, so `future.is_ready()` can briefly lag idle. `ctx.wait_for(future)` is the
+completion guarantee for a download — see [download.inline](download.inline.md).
+
 **Retire** (`process_completed_epochs`) reclaims what the GPU has finished: read the fence once, drain
 every in-flight epoch whose value is `<= completed` (oldest first), and for each reclaim its payload —
 reset allocators back to the pool, and free expiring resources. Retire is safe to call at any time;

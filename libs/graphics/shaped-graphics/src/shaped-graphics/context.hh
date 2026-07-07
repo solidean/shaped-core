@@ -4,6 +4,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
@@ -74,19 +75,36 @@ public:
     virtual void advance_epoch(cc::optional<int> allowed_in_flight) = 0;
 
     /// Advance the epoch and block until the GPU is fully idle (equivalent to advance_epoch(0)).
+    /// Idle drains GPU work but not the readback actor — an inline-download future may still be
+    /// undelivered right after; use wait_for(future) to be certain.
     virtual void advance_epoch_and_wait_for_idle() = 0;
 
-    /// Reclaims everything owned by epochs the GPU has finished. Safe to call at any time; also
-    /// runs implicitly after the waits below.
+    /// Reclaims everything owned by epochs the GPU has finished. Safe to call at any time and from any
+    /// thread (but not concurrently with advance_epoch); also runs implicitly after the waits below.
     virtual void process_completed_epochs() = 0;
 
-    /// Blocks until the given epoch's GPU work has finished, then retires completed epochs. Does
-    /// not advance.
+    /// Blocks until the given epoch's GPU work has finished, then retires completed epochs. Does not
+    /// advance. Safe to call from any thread (used internally for ring back-pressure during recording).
     virtual void wait_for_epoch(epoch e) = 0;
 
-    /// Blocks on the oldest in-flight epoch, then retires — the standard back-pressure primitive
-    /// when a resource pool is exhausted. Returns immediately if nothing is in flight. Does not advance.
+    /// Blocks on the oldest in-flight epoch, then retires — the standard back-pressure primitive when a
+    /// resource pool is exhausted. Returns immediately if nothing is in flight. Does not advance; safe
+    /// to call from any thread.
     virtual void wait_for_next_inflight_epoch() = 0;
+
+    /// Blocks until a download future is delivered, then returns its bytes (nullopt if invalid,
+    /// unsubmitted, or cancelled). The only completion guarantee for a download — advance_epoch* drain
+    /// GPU work but not the readback actor. Waitable once submitted; safe to call from any thread.
+    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_for(bytes_future const& future)
+    {
+        return future.wait_get_bytes();
+    }
+
+    template <class T>
+    [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_for(data_future<T> const& future)
+    {
+        return future.wait_get_data();
+    }
 
     /// Whether the command list that produced this token has finished executing.
     [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;

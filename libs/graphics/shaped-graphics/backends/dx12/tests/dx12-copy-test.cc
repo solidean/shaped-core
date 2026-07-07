@@ -42,7 +42,7 @@ TEST("sg dx12 - buffer copy round-trips")
     auto future = down.value()->download.bytes_from_buffer(dst.value(), 0, 256);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -84,7 +84,7 @@ TEST("sg dx12 - buffer copy with offsets")
     auto future = down.value()->download.bytes_from_buffer(dst.value(), 128, 64);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
@@ -124,7 +124,7 @@ TEST("sg dx12 - typed buffer_data_region copy")
     auto future = down.value()->download.data_from_buffer<int>(dst.value(), 0, 4);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = c.wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -163,7 +163,7 @@ TEST("sg dx12 - typed buffer_data_region copy with element offsets")
     auto future = down.value()->download.data_from_buffer<int>(dst.value(), cc::isize(4) * sizeof(int), 3);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = c.wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 3);
     CHECK(data.value()[0] == 12); // src[2]
@@ -201,7 +201,7 @@ TEST("sg dx12 - same-buffer non-overlapping copy")
     auto future = down.value()->download.bytes_from_buffer(buf.value(), 128, 64);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;

@@ -39,7 +39,7 @@ INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ct
     auto future = cmd.value()->download.bytes_from_buffer(dst, 0, 256);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -74,7 +74,7 @@ INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle
     auto future = down.value()->download.bytes_from_buffer(dst, 0, 256);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[200] == pattern(200));
 }
@@ -98,7 +98,7 @@ INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const
     auto future = cmd.value()->download.bytes_from_buffer(dst, 128, 64);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
@@ -124,7 +124,7 @@ INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ct
     auto future = cmd.value()->download.data_from_buffer<int>(dst, 0, 4);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 3);
@@ -153,7 +153,7 @@ INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::cont
     auto future = cmd.value()->download.bytes_from_buffer(dst, 0, 16);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool untouched = true;
     for (int i = 0; i < 16; ++i)

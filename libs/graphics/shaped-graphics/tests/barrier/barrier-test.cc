@@ -52,8 +52,8 @@ INVOCABLE_TEST("sg - two concurrent command lists record and submit independentl
     ctx->submit_command_list(cc::move(c1.value()));
     ctx->submit_command_list(cc::move(c2.value()));
 
-    auto const da = fa.wait_get_data();
-    auto const db = fb.wait_get_data();
+    auto const da = ctx->wait_for(fa);
+    auto const db = ctx->wait_for(fb);
     REQUIRE(da.has_value());
     REQUIRE(db.has_value());
     CHECK(da.value()[0] == 0);
@@ -81,7 +81,7 @@ INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list",
     auto future = cmd.value()->download.bytes_from_buffer(buf, 128, 128);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 128);
     bool matches = true;

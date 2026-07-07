@@ -46,7 +46,7 @@ bool transient_round_trip(sg::context_handle const& ctx, int seed)
     auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     if (!bytes.has_value() || bytes.value().size() != 256)
         return false;
     for (int i = 0; i < 256; ++i)
@@ -117,8 +117,8 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     auto future_b = down.value()->download.bytes_from_buffer(b.value(), 0, 128);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes_a = future_a.wait_get_bytes();
-    auto const bytes_b = future_b.wait_get_bytes();
+    auto const bytes_a = ctx->wait_for(future_a);
+    auto const bytes_b = ctx->wait_for(future_b);
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
     bool ok = true;

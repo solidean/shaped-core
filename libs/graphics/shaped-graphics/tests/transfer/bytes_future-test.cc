@@ -4,8 +4,9 @@
 
 #include <memory>
 
-// Backend-agnostic tests for the sg download-result vocabulary (no GPU needed). Backend behaviour
-// (real readback, actor completion) is exercised in the dx12 backend test.
+// Backend-agnostic tests for the sg download-result vocabulary (no GPU needed). Only the non-blocking
+// polls live on the future; the blocking wait is ctx.wait_for(future), covered in the context-driven
+// suites (tests/transfer, backends/dx12/tests). Backend readback / actor completion is exercised there.
 
 TEST("sg bytes_future - default is invalid")
 {
@@ -13,7 +14,6 @@ TEST("sg bytes_future - default is invalid")
     CHECK(!f.is_valid());
     CHECK(!f.is_ready());
     CHECK(!f.try_get_bytes().has_value());
-    CHECK(!f.wait_get_bytes().has_value());
 }
 
 TEST("sg bytes_future - ready waiter yields its bytes")
@@ -29,10 +29,6 @@ TEST("sg bytes_future - ready waiter yields its bytes")
     REQUIRE(got.has_value());
     CHECK(got.value().size() == 3);
     CHECK(got.value()[1] == cc::byte(20));
-
-    auto const waited = f.wait_get_bytes();
-    REQUIRE(waited.has_value());
-    CHECK(waited.value().size() == 3);
 }
 
 TEST("sg data_future - typed view over the bytes")

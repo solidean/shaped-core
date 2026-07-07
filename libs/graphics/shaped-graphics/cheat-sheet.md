@@ -29,11 +29,11 @@ sg::buffer_handle         // std::shared_ptr<sg::buffer const>   — shared-immu
 #include <shaped-graphics/bytes_future.hh>
 sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, waiter}
 f.is_valid()                        // bool — backed by a real download (vs default-constructed)
-f.is_ready()                        // bool — polls the waiter; true once the bytes are valid
-f.try_get_bytes()                   // -> cc::optional<cc::span<cc::byte const>>  (polls; nullopt until ready)
-f.wait_get_bytes()                  // -> cc::optional<...>  blocks until ready; nullopt if not yet submitted
-sg::data_future<T>                  // typed wrapper: try_get_data()/wait_get_data() -> cc::optional<cc::span<T const>>
+f.is_ready()                        // bool — NON-BLOCKING poll; true once the actor copied the bytes back
+f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt until ready)
+sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
 sg::bytes_waiter                    // abstract poll handle a backend subclasses; sg::ready_bytes_waiter = ready-on-construction
+// to BLOCK until a download is delivered, use ctx.wait_for(future) (see epochs) — the future has no blocking wait
 ```
 
 ## Enums
@@ -96,9 +96,15 @@ ctx.advance_epoch_and_wait_for_idle()   // void — spelled-out advance_epoch(0)
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
 ctx.wait_for_epoch(e)                   // void — block until epoch e done, then retire (does NOT advance)
 ctx.wait_for_next_inflight_epoch()      // void — block on oldest in-flight epoch (back-pressure; no advance)
+ctx.wait_for(future)                    // -> cc::optional<cc::pinned_data<...>> (bytes/typed) — BLOCK until a download is
+                                        //   delivered, then return it; nullopt if invalid/unsubmitted/cancelled. The ONLY
+                                        //   guaranteed-complete call: advance_epoch* / wait_for_idle drain the GPU but NOT
+                                        //   the readback actor, so is_ready() can lag them. Waitable once its list is
+                                        //   submitted (no advance needed); touches no ctx state, safe from any thread.
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
 // command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
-// on multi_threaded backends: create/submit/drop are concurrency-safe; advance_*/wait_*/shutdown are NOT
+// on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
+//   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
 ```
@@ -117,8 +123,9 @@ cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 // cmd.upload = INLINE (recorded in this list, visible to later commands in it); ctx.upload = ASYNC (copy
 // queue, off the frame path — for bulk streaming). See docs/concepts/upload.async.md.
-// inline path: copy is recorded here; the download future is ready after the submitted list finishes on
-// the GPU (no advance_epoch needed). Uploading + downloading + copying the SAME buffer works in ONE list —
+// inline path: copy is recorded here; the download future is delivered by a separate actor after the
+// submitted list finishes on the GPU (no advance_epoch needed — but advance_epoch* / wait_for_idle do NOT
+// guarantee delivery either; use ctx.wait_for(future)). Uploading + downloading + copying the SAME buffer works in ONE list —
 // the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // vulkan transfer is a TODO stub.
 ```

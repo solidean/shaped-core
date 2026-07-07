@@ -11,26 +11,6 @@
 // Backend-agnostic inline buffer transfer: upload / download over the public sg API, run against every
 // available backend (see tests/context/context-test.cc for the invocable/alias mechanism).
 
-// ---------------------------------------------------------------------------------------------------
-// HANDOVER (next agent) — the `download + check` op's `REQUIRE(dl.is_ready())` after
-// `advance_epoch_and_wait_for_idle()` is a WRONG assumption, not a product bug. Root cause: readbacks
-// are delivered by a separate download-actor thread (dx12_download_inline.cc: on_message blocks on the
-// submission fence, runs the CPU copy, then mark_ready()). `advance_epoch_and_wait_for_idle()` waits only on the
-// GPU epoch fence — it does NOT wait for the actor to run mark_ready(), so is_ready() is transiently
-// false right after idle returns. Purely a thread-scheduling race (varying miss round/rate); a blocking
-// wait always succeeds. Minimal repro pinned in tests/transfer/transfer-test.cc ("sg - readback is
-// ready immediately after wait_for_idle").
-//
-// PLAN (decided): do NOT strengthen wait_for_idle to drain the actor. Instead add and bless an explicit
-//   sg::context::wait_for(sg::bytes_future const&)   // (+ typed/data_future overload)
-// that blocks until the future is delivered (thin wrapper over future.wait()). is_ready() stays a
-// non-blocking poll; the guaranteed-completion API becomes ctx.wait_for(future).
-// Then here: replace `advance_epoch_and_wait_for_idle(); REQUIRE(dl.is_ready());` with
-// `ctx->wait_for(dl);` (drop the is_ready REQUIRE), and update the transfer-test regression to assert
-// via ctx.wait_for / wait_get_data. Touch points: context.hh (virtual), dx12_context + vulkan_context,
-// cheat-sheet.md, docs/concepts/download.inline.md.
-// ---------------------------------------------------------------------------------------------------
-
 INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -128,9 +108,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto dl = t.cmd->download.data_from_buffer<cc::u32>(t.buffer, start * sizeof(cc::u32), end - start);
                      t.ensure_submitted_cmd(ctx);
 
-                     ctx->advance_epoch_and_wait_for_idle();
-                     REQUIRE(dl.is_ready());
-                     auto dl_data = dl.wait_get_data().value();
+                     auto dl_data = ctx->wait_for(dl).value();
 
                      CHECK(ref_data.size() == dl_data.size());
                      for (auto i = 0; i < end - start; ++i)

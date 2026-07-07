@@ -49,7 +49,7 @@ INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handl
     auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -77,7 +77,7 @@ INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle const&
     auto future = down.value()->download.data_from_buffer<int>(buf, 0, 4);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -118,7 +118,7 @@ INVOCABLE_TEST("sg - async upload composes after a list that wrote the buffer", 
     auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool async_won = true;
     for (int i = 0; i < 256; ++i)
@@ -141,7 +141,7 @@ INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_h
     auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool second_won = true;
     for (int i = 0; i < 256; ++i)
@@ -169,7 +169,7 @@ INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_han
     auto future = down.value()->download.bytes_from_buffer(dst, 0, 128);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool matches = true;
     for (int i = 0; i < 128; ++i)

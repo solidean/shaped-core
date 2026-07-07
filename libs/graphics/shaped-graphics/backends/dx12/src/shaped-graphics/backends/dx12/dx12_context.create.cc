@@ -142,10 +142,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&submission_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (submission) failed");
 
-    HANDLE fence_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (fence_event == nullptr)
-        return cc::error("CreateEventW failed for the epoch fence wait event");
-
     auto ctx = std::make_shared<dx12_context>();
     ctx->_factory = cc::move(factory);
     ctx->_device = cc::move(device);
@@ -154,7 +150,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_copy_fence = cc::move(copy_fence);
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
-    ctx->_fence_event = fence_event;
 
     // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
     // with its logic) off the now-populated device.

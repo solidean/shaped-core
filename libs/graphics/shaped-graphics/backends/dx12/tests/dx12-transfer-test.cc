@@ -38,7 +38,7 @@ TEST("sg dx12 - buffer upload then download round-trips")
     c.submit_dx12_command_list(cc::move(down.value()));
 
     // Ready after the submitted list finishes on the GPU — no advance_epoch needed.
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -69,7 +69,7 @@ TEST("sg dx12 - typed upload/download convenience")
     auto future = down.value()->download.data_from_buffer<int>(buf.value(), 0, 4);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = c.wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -120,7 +120,7 @@ TEST("sg dx12 - partial download with offset")
     auto future = down.value()->download.bytes_from_buffer(buf.value(), 64, 64);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
@@ -158,7 +158,7 @@ TEST("sg dx12 - multiple uploads in one list, last writer wins")
     auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 16);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
@@ -200,7 +200,7 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
     auto future = down2.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     c.submit_dx12_command_list(cc::move(down2.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     CHECK(bytes.value().size() == 256);
     CHECK(bytes.value()[100] == cc::byte(100));
@@ -231,7 +231,7 @@ TEST("sg dx12 - inline transfer reused across epochs")
         auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 1024);
         c.submit_dx12_command_list(cc::move(down.value()));
 
-        auto const bytes = future.wait_get_bytes();
+        auto const bytes = c.wait_for(future);
         REQUIRE(bytes.has_value());
         bool matches = true;
         for (int i = 0; i < 1024; ++i)
@@ -286,8 +286,8 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
     c.submit_dx12_command_list(cc::move(list_b.value()));
     c.submit_dx12_command_list(cc::move(list_a.value()));
 
-    auto const bytes_a = future_a.wait_get_bytes();
-    auto const bytes_b = future_b.wait_get_bytes();
+    auto const bytes_a = c.wait_for(future_a);
+    auto const bytes_b = c.wait_for(future_b);
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
     bool ok_a = true;
@@ -331,7 +331,7 @@ TEST("sg dx12 - dropping a recording list cancels its downloads")
     c.drop_dx12_command_list(cc::move(dropped.value()));
 
     CHECK(!cancelled.is_ready());
-    CHECK(!cancelled.wait_get_bytes().has_value()); // cancelled: fails, does not block
+    CHECK(!c.wait_for(cancelled).has_value()); // cancelled: fails, does not block
 
     c.advance_epoch_and_wait_for_idle(); // reclaims the dropped list's ring span with its epoch
 
@@ -341,7 +341,7 @@ TEST("sg dx12 - dropping a recording list cancels its downloads")
     auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[100] == cc::byte(100));
 }

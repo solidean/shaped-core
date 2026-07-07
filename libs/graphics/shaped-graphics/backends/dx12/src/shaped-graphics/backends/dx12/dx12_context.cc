@@ -13,7 +13,7 @@ void dx12_context::shutdown()
     // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing
     // every resource (in-flight and staged) and running finalizers — before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.
-    if (_queue && _epoch_fence && _fence_event)
+    if (_queue && _epoch_fence)
         advance_epoch_and_wait_for_idle();
 
     // Drain + join the download actor and release the ring buffers while the submission fence is still
@@ -25,11 +25,6 @@ void dx12_context::shutdown()
     _upload_async.shutdown();
     _cmd_pool.shutdown();
 
-    if (_fence_event)
-    {
-        CloseHandle(_fence_event);
-        _fence_event = nullptr;
-    }
     _submission_fence.Reset();
     _epoch_fence.Reset();
     _copy_fence.Reset();

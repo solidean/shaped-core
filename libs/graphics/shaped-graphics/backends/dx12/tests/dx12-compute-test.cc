@@ -82,7 +82,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     auto future = down.value()->download.data_from_buffer<sg::u32>(buf.value(), 0, count);
     c.submit_dx12_command_list(cc::move(down.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = c.wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == cc::isize(count));
     bool ok = true;
@@ -135,7 +135,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         auto future = down.value()->download.data_from_buffer<sg::u32>(buf.value(), 0, count);
         c.submit_dx12_command_list(cc::move(down.value()));
 
-        auto const data = future.wait_get_data();
+        auto const data = c.wait_for(future);
         REQUIRE(data.has_value());
         bool ok = true;
         for (int i = 0; i < count; ++i)

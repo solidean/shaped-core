@@ -40,7 +40,7 @@ INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::con
     auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -69,7 +69,7 @@ INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_ha
     auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     CHECK(bytes.value().size() == 256);
     CHECK(bytes.value()[100] == pattern(100));
@@ -87,7 +87,7 @@ INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle con
     auto future = cmd.value()->download.data_from_buffer<int>(buf, 0, 4);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const data = future.wait_get_data();
+    auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -114,7 +114,7 @@ INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::contex
     auto future = down.value()->download.bytes_from_buffer(buf, 64, 128);
     ctx->submit_command_list(cc::move(down.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 128);
     bool matches = true;
@@ -144,7 +144,7 @@ INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::conte
     auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 16);
     ctx->submit_command_list(cc::move(cmd.value()));
 
-    auto const bytes = future.wait_get_bytes();
+    auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
@@ -171,12 +171,11 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
     ctx->submit_command_list(cc::move(cmd.value()));
 }
 
-// Regression (found by transfer-fuzz-test, seed 1): after advance_epoch_and_wait_for_idle() a submitted
-// readback must be ready — idle means the copy completed and the future is fulfilled. It flakily isn't:
-// wait-for-idle drains the GPU but the future can briefly still report not-ready, so a single is_ready()
-// sample right after the wait misses. The race fires at a varying round with a varying rate, hence the
-// loop and the once-per-round sample (a re-check would let the future catch up and mask the bug).
-INVOCABLE_TEST("sg - readback is ready immediately after wait_for_idle", (sg::context_handle const& ctx))
+// A submitted readback is deliverable without advancing the epoch: ctx.wait_for blocks until the
+// download actor has copied the bytes back — no advance_epoch / wait_for_idle needed. (This replaces an
+// earlier is_ready()-after-wait_for_idle assumption that flaked under transfer-fuzz seed 1: idle drains
+// the GPU but not the actor, so is_ready() can lag it; wait_for is the actual completion guarantee.)
+INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -184,24 +183,34 @@ INVOCABLE_TEST("sg - readback is ready immediately after wait_for_idle", (sg::co
     cc::byte src[256];
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(i);
-    {
-        auto cmd = ctx->create_command_list();
-        REQUIRE(cmd.has_value());
-        cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
-        ctx->submit_command_list(cc::move(cmd.value()));
-    }
 
-    for (int round = 0; round < 256; ++round)
-    {
-        auto cmd = ctx->create_command_list();
-        REQUIRE(cmd.has_value());
-        auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 256);
-        ctx->submit_command_list(cc::move(cmd.value()));
+    auto up = ctx->create_command_list();
+    REQUIRE(up.has_value());
+    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    ctx->submit_command_list(cc::move(up.value()));
 
-        ctx->advance_epoch_and_wait_for_idle();
+    auto down = ctx->create_command_list();
+    REQUIRE(down.has_value());
+    auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down.value()));
 
-        REQUIRE(future.is_ready()); // idle means the readback completed
-    }
+    // No advance_epoch: the future is waitable as soon as its list is submitted.
+    auto const bytes = ctx->wait_for(future);
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == 256);
+    CHECK(future.is_ready()); // wait_for delivered -> the non-blocking poll now agrees
+    bool matches = true;
+    for (int i = 0; i < 256; ++i)
+        if (bytes.value()[i] != pattern(i))
+            matches = false;
+    CHECK(matches);
+}
+
+INVOCABLE_TEST("sg - wait_for on an invalid future yields nullopt", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    CHECK(!ctx->wait_for(sg::bytes_future{}).has_value());
+    CHECK(!ctx->wait_for(sg::data_future<int>{}).has_value());
 }
 
 INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle const& ctx))
@@ -218,7 +227,7 @@ INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle co
 
     ctx->advance_epoch_and_wait_for_idle(); // close the epoch and fully drain before reading back
 
-    auto const data = future.wait_get_data();
+    auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 8);
     CHECK(data.value()[0] == 10);
