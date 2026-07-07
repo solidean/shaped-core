@@ -15,6 +15,7 @@ using namespace cc::primitive_defines;
 class context;
 class context_persistent_scope;
 class context_transient_scope;
+class context_upload_scope;
 class command_list;
 class command_list_upload_scope;
 class command_list_download_scope;
@@ -51,8 +52,6 @@ enum class pipeline_stage_flags : u32;
 enum class texture_layout : u32;
 struct access_barrier;
 struct resource_access_state;
-enum class command_list_slot : int;
-class command_list_slot_allocator;
 
 // Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
 // (uniform_view/readonly_view/readwrite_view) are constrained, so only the enums and raw_view are

@@ -6,7 +6,7 @@
 // Backend-agnostic tests for persistent buffer allocation through `ctx->persistent.create_raw_buffer`. Each is an
 // INVOCABLE_TEST run against every available backend (see tests/context/context-test.cc for the mechanism).
 
-INVOCABLE_TEST("sg - allocates a persistent buffer", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - allocates a persistent buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -18,7 +18,7 @@ INVOCABLE_TEST("sg - allocates a persistent buffer", (sg::context_handle ctx))
     CHECK(!sg::has_flag(buf.value()->usage(), sg::buffer_usage::vertex_buffer));
 }
 
-INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -39,7 +39,7 @@ INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle ctx))
     }
 }
 
-INVOCABLE_TEST("sg - zero-size buffer allocates nothing", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - zero-size buffer allocates nothing", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -49,7 +49,7 @@ INVOCABLE_TEST("sg - zero-size buffer allocates nothing", (sg::context_handle ct
     CHECK(empty.value()->size_in_bytes() == 0);
 }
 
-INVOCABLE_TEST("sg - allocates a large buffer", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - allocates a large buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 

@@ -2,12 +2,14 @@
 
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backend/resource_access_state.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raw_buffer.hh>
+
+#include <atomic>
 
 namespace sg::backend::dx12
 {
@@ -43,6 +45,22 @@ public:
     sg::epoch _creation_epoch;                // epoch this buffer was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed buffer; null when dedicated
+
+    // Two per-resource cross-queue sync stamps that make the CPU timeline (submit → async upload → submit)
+    // mirror GPU ordering between the direct queue and the async-upload copy queue. Both only ever grow, are
+    // never reset (a stale value just yields a cheap already-satisfied wait), and are mutable+atomic (stamped
+    // through the const buffer handle from any thread). Distinct from the access-state tracking below: that
+    // orders direct-queue lists against each other; these order the copy queue against the direct queue.
+
+    // Forward: highest completion value an ASYNC upload (ctx.upload, not the inline cmd.upload) here will
+    // signal on the copy queue. A later direct-queue list that reads this buffer waits for it at submit,
+    // so it sees the async write.
+    mutable std::atomic<cc::u64> _pending_async_upload_value = 0;
+
+    // Reverse: highest direct-queue submission token of a command list that used this buffer. An async
+    // upload here defers its copy until this token completes, so it never overwrites the buffer while an
+    // earlier-submitted list still uses it.
+    mutable std::atomic<cc::u64> _last_used_submission_token = 0;
 
     // --- concurrent access-state tracking ------------------------------------------------------------
     // Each open command list keys its private access state by its command_list_slot; `canonical` is the

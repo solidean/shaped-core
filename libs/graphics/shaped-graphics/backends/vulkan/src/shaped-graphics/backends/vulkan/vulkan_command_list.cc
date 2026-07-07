@@ -1,16 +1,21 @@
 // vulkan_command_list: allocation, submission, drop, and teardown. The list type is header-only
 // (ctor + fields); its create/submit/drop bodies and destructor live here.
 
+#include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
 namespace sg::backend::vulkan
 {
 vulkan_command_list::~vulkan_command_list()
 {
-    // Safety net for a list neither submitted nor dropped: destroying the pool frees its command
-    // buffer. Submit/drop null _pool after handing it back, so in the normal path this does nothing.
-    if (_pool != VK_NULL_HANDLE)
-        vkDestroyCommandPool(_ctx._device, _pool, nullptr);
+    if (_consumed)
+        return; // submitted or dropped explicitly — nothing to reclaim
+
+    // Safety net: a list left neither submitted nor dropped. Reclaim it like a drop so the open-list
+    // count, its slot, and its pool don't leak — but warn, since the explicit call is required.
+    cc::eprintln("[sg] command list destroyed without submit or drop — auto-dropping. Submit or drop every "
+                 "command list explicitly through the context.");
+    _ctx.reclaim_unsubmitted_command_list(*this);
 }
 
 cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_command_list()
@@ -117,6 +122,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     cmd->_buffer = VK_NULL_HANDLE;
     (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+    cmd->_consumed = true; // its dtor must not auto-drop it
     return token;
 }
 
@@ -125,13 +131,20 @@ void vulkan_context::drop_vulkan_command_list(std::unique_ptr<vulkan_command_lis
     CC_ASSERT(cmd != nullptr, "cannot drop a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be dropped in the epoch it was opened "
                                                           "in");
+    reclaim_unsubmitted_command_list(*cmd);
+}
+
+void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
+{
+    CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
+    cmd._consumed = true;
 
     // Never submitted, so the GPU never touched this pool — return it straight to the free set (reset
-    // happens at reuse). Null the list's handles so its dtor doesn't destroy the pool.
-    _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd->_pool, cmd->_buffer}); });
-    cmd->_pool = VK_NULL_HANDLE;
-    cmd->_buffer = VK_NULL_HANDLE;
-    (void)_command_list_slots.release(cmd->slot());
+    // happens at reuse). Null the handles so nothing double-frees them.
+    _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd._pool, cmd._buffer}); });
+    cmd._pool = VK_NULL_HANDLE;
+    cmd._buffer = VK_NULL_HANDLE;
+    (void)_command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 } // namespace sg::backend::vulkan

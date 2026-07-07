@@ -31,7 +31,9 @@ nx::test_schedule_config with_filter(cc::string filter)
 {
     nx::test_schedule_config config;
     config.filters.push_back(cc::move(filter));
-    // A non-wildcard filter names things explicitly: match any bucket, run disabled too (mirrors create_from_args).
+    // A non-wildcard filter searches across buckets (mirrors create_from_args). run_disabled_tests is the bulk
+    // "disabled too" request (create_from_args no longer auto-sets it; an exact name is what enables a disabled
+    // test now) — set here so these alias tests exercise disabled drivers regardless.
     config.match_any_bucket = true;
     config.run_disabled_tests = true;
     return config;

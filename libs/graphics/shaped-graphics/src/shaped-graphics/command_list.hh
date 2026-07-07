@@ -6,7 +6,6 @@
 #include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.upload.hh>
-#include <shaped-graphics/command_list_slot.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace sg
@@ -14,6 +13,10 @@ namespace sg
 /// Records GPU work, submitted through the context that created it. Single-use and single-threaded:
 /// recorded by one thread, then submitted or dropped once — in the epoch it was opened in (command
 /// lists must not span epochs; see libs/graphics/shaped-graphics/docs/concepts/epochs.md).
+///
+/// Submit or drop every list explicitly through the context (`ctx.submit_command_list` /
+/// `ctx.drop_command_list`); after either it is consumed. Letting a list go out of scope un-consumed
+/// auto-drops it but prints a warning — a safety net, not the intended path.
 class command_list
 {
 public:
@@ -21,11 +24,6 @@ public:
 
     /// The epoch this list was opened in. It must be submitted or dropped before that epoch advances.
     [[nodiscard]] epoch created_in_epoch() const { return _epoch; }
-
-    /// The access-tracking slot this list holds for its lifetime — keys its private access-state entry in
-    /// every resource it touches, so concurrent lists don't share state. See
-    /// libs/graphics/shaped-graphics/docs/concepts/barriers.md.
-    [[nodiscard]] command_list_slot slot() const { return _slot; }
 
     // buffer transfer — host↔device copies recorded at this point in the list
 
@@ -42,7 +40,7 @@ public:
     command_list_compute_scope compute;
 
 protected:
-    command_list(epoch created_in, command_list_slot slot);
+    explicit command_list(epoch created_in);
 
     // Backend seams the upload/download/copy/compute scopes forward to (contracts documented there);
     // friends so the scopes can reach them.
@@ -80,6 +78,5 @@ protected:
         = 0;
 
     epoch _epoch = epoch::invalid;
-    command_list_slot _slot = command_list_slot::invalid;
 };
 } // namespace sg

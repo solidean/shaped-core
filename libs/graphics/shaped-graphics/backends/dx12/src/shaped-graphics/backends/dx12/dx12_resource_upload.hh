@@ -43,37 +43,52 @@ struct dx12_resource_upload
         = 0;
 };
 
-/// Buffer upload: a single CopyBufferRegion into `dst` at `dst_offset`. The source bytes are read
-/// during execute_next_job, so they need only outlive that call.
+/// Buffer upload: copies `data` into `dst` at `dst_offset` via CopyBufferRegion. Resumable — each
+/// execute_next_job stages as much as the window holds and records that chunk, so an upload larger than
+/// the staging window is split across successive calls (a buffer fits one job when the window is big
+/// enough; the async copy queue chunks large ones). The source bytes are read during execute_next_job,
+/// so they need only outlive the calls that consume them.
 struct dx12_buffer_upload final : dx12_resource_upload
 {
     dx12_buffer_upload(dx12_buffer const& dst, cc::isize dst_offset, cc::span<cc::byte const> data)
-      : _dst(dst._resource.Get()), _dst_offset(dst_offset), _data(data)
+      : dx12_buffer_upload(dst._resource.Get(), dst_offset, data)
+    {
+    }
+
+    // Raw-resource overload: the async path holds only the ID3D12Resource* (kept alive by the job's
+    // buffer handle), not a dx12_buffer reference.
+    dx12_buffer_upload(ID3D12Resource* dst, cc::isize dst_offset, cc::span<cc::byte const> data)
+      : _dst(dst), _dst_offset(dst_offset), _data(data)
     {
     }
 
     [[nodiscard]] cc::isize total_bytes() const override { return _data.size(); }
 
+    /// Bytes staged and recorded so far.
+    [[nodiscard]] cc::isize consumed() const { return _consumed; }
+
     // Buffers rely on D3D12 implicit state promotion/decay for copies, so no barrier is needed.
     // TODO: global-barrier placeholder — a real per-resource state-tracking barrier system lands later.
     void prepare(dx12_command_list&) override {}
 
-    [[nodiscard]] bool is_finished() const override { return _done; }
+    [[nodiscard]] bool is_finished() const override { return _consumed == _data.size(); }
 
     [[nodiscard]] cc::isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc) override
     {
-        CC_ASSERT(alloc.size >= _data.size(), "upload allocation smaller than the buffer upload");
-        std::memcpy(alloc.base + alloc.offset, _data.data(), std::size_t(_data.size()));
-        list.CopyBufferRegion(_dst, UINT64(_dst_offset), alloc.buffer, UINT64(alloc.offset), UINT64(_data.size()));
-        _done = true;
-        return _data.size();
+        cc::isize const remaining = _data.size() - _consumed;
+        cc::isize const n = remaining < alloc.size ? remaining : alloc.size;
+        CC_ASSERT(n > 0, "upload allocation too small to make progress");
+        std::memcpy(alloc.base + alloc.offset, _data.data() + _consumed, std::size_t(n));
+        list.CopyBufferRegion(_dst, UINT64(_dst_offset + _consumed), alloc.buffer, UINT64(alloc.offset), UINT64(n));
+        _consumed += n;
+        return n;
     }
 
 private:
     ID3D12Resource* _dst = nullptr;
     cc::isize _dst_offset = 0;
     cc::span<cc::byte const> _data;
-    bool _done = false;
+    cc::isize _consumed = 0;
 };
 
 // TODO: dx12_texture_upload — inline texture upload (row-padded CopyTextureRegion, chunked across

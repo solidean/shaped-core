@@ -98,6 +98,12 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     // Apply a pending ctx.transient.set_budget() now that the new epoch is open: this drains all in-flight
     // epochs and resizes the transient heap. Rare (only after a set_budget), so the stall is acceptable.
     apply_pending_transient_budget();
+
+    // Same for the inline upload/download ring budgets (ctx.upload.set_inline_budget / ctx.download.
+    // set_budget): each drains in-flight epochs — the download ring also waits out its actor — then
+    // reallocates. No-op unless a budget change is pending.
+    _upload_inline.apply_pending_budget();
+    _download_inline.apply_pending_budget();
 }
 
 void dx12_context::process_completed_epochs()
@@ -105,25 +111,50 @@ void dx12_context::process_completed_epochs()
     if (!_epoch_fence)
         return;
     cc::u64 const completed = _epoch_fence->GetCompletedValue();
+    // Second release gate: how far the async upload copy queue has drained. A resource an in-flight async
+    // upload still references must not be freed even after its epoch retired (the copy queue is decoupled
+    // from epochs). `~0` when there is no copy fence, so the gate is trivially open.
+    cc::u64 const copy_completed = _copy_fence ? _copy_fence->GetCompletedValue() : cc::u64(-1);
 
     // Reclaim inline upload ring space held by every epoch the GPU has now finished.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
     // Reclaim transient descriptor ring slots the same way — the epoch fence proves the slots are idle.
     _descriptor_heap.on_epochs_completed(sg::epoch(completed));
 
-    // Drain finished epochs (oldest first, FIFO is sorted) under the lock; reclaim outside it.
-    cc::vector<dx12_epoch_data> done = _epoch_state.lock(
+    // Under the lock: drain finished epochs, then partition every expiring resource (from those epochs and
+    // from the copy-deferred hold-back) by whether the copy queue has also passed its `copy_wait`. Ready
+    // ones are released outside the lock; the rest stay on `copy_deferred` for the next sweep.
+    cc::vector<dx12_epoch_data> done;
+    cc::vector<dx12_expiring_resource> ready;
+    _epoch_state.lock(
         [&](dx12_epoch_state& s)
         {
-            cc::vector<dx12_epoch_data> out;
             for (auto& d : s.in_flight)
             {
                 if (cc::u64(d.epoch_id) > completed)
                     break;
-                out.push_back(cc::move(d));
+                done.push_back(cc::move(d));
             }
-            s.in_flight.remove_from_to(0, out.size());
-            return out;
+            s.in_flight.remove_from_to(0, done.size());
+
+            auto const gate = [&](dx12_expiring_resource& r, cc::vector<dx12_expiring_resource>& not_ready)
+            {
+                if (cc::u64(r.copy_wait) <= copy_completed)
+                    ready.push_back(cc::move(r));
+                else
+                    not_ready.push_back(cc::move(r));
+            };
+
+            // Re-check the existing hold-back: release what the copy queue has finished, keep the rest.
+            cc::vector<dx12_expiring_resource> still_pending;
+            for (auto& r : s.copy_deferred)
+                gate(r, still_pending);
+            s.copy_deferred = cc::move(still_pending);
+
+            // Retired epochs' resources: release now, or hold back if the copy queue is still behind.
+            for (auto& e : done)
+                for (auto& r : e.expiring)
+                    gate(r, s.copy_deferred);
         });
 
     // Allocators are safe to reset now — every command list sourced from them has finished — so hand
@@ -132,9 +163,8 @@ void dx12_context::process_completed_epochs()
         _cmd_pool.reclaim_allocators(cc::move(e.allocators));
 
     cc::vector<cc::unique_function<void()>> finalizers;
-    for (auto& e : done)
-        for (auto& r : e.expiring)
-            release_expiring(r, finalizers);
+    for (auto& r : ready)
+        release_expiring(r, finalizers);
 
     // Run finalizers outside the lock — they may be slow or re-entrant, and the thread is not fixed.
     for (auto& f : finalizers)
@@ -143,14 +173,20 @@ void dx12_context::process_completed_epochs()
 
 void dx12_context::wait_for_epoch(sg::epoch e)
 {
-    if (_epoch_fence && _fence_event)
+    if (_epoch_fence)
     {
         cc::u64 const target = cc::u64(e);
         if (_epoch_fence->GetCompletedValue() < target)
         {
-            HRESULT const hr = _epoch_fence->SetEventOnCompletion(target, _fence_event);
+            // A per-call event, not a shared one: the wait/retire family is safe to call from any thread
+            // (e.g. ring back-pressure during concurrent recording), and a single reused event cannot
+            // serve concurrent waiters. A fence accepts many concurrent SetEventOnCompletion registrations.
+            HANDLE const event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            CC_ASSERT(event != nullptr, "CreateEventW failed for the epoch fence wait");
+            HRESULT const hr = _epoch_fence->SetEventOnCompletion(target, event);
             CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
-            WaitForSingleObject(_fence_event, INFINITE);
+            WaitForSingleObject(event, INFINITE);
+            CloseHandle(event);
         }
     }
     process_completed_epochs();

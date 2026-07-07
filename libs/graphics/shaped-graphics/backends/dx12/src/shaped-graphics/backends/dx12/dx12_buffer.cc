@@ -89,6 +89,10 @@ void dx12_buffer::release_storage() const
         dx12_expiring_resource expiring;
         expiring.resource = cc::move(_resource);
         expiring.finalizers = cc::move(_finalizers);
+        // Gate release on the async copy queue too: an in-flight upload to this buffer may still reference
+        // the resource after its epoch (direct queue) has retired. This is the buffer's highest pending
+        // async value; deferred deletion holds the resource until the copy fence reaches it.
+        expiring.copy_wait = dx12_copy_fence_value(_pending_async_upload_value.load(std::memory_order_acquire));
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }

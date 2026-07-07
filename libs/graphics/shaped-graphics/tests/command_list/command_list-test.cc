@@ -8,7 +8,7 @@
 // Backend-agnostic command-list lifecycle: create → submit / drop, epoch stamping, and submission-token
 // completion. Run against every available backend (see tests/context/context-test.cc for the mechanism).
 
-INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -19,7 +19,31 @@ INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (s
     ctx->drop_command_list(cc::move(cmd.value())); // dropping an unsubmitted list is safe
 }
 
-INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::context_handle ctx))
+// Regression (narrowed down from a transfer-fuzz finding): a command list left neither submitted nor
+// dropped must NOT leak the open-list count. If it did, a later advance_epoch would wrongly trip its
+// "every list must be submitted or dropped before advancing" assert — which is exactly how the fuzz's
+// shared context got polluted across replays and reported a false [mk_trace, advance] failure. Letting
+// a list leave scope auto-drops it (prints one warning to stderr, expected here), clearing the count.
+INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    {
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd.has_value());
+        // cmd leaves scope here, neither submitted nor dropped -> auto-dropped (with a warning), not leaked
+    }
+
+    // The open-list count is back to zero, so this must not assert "open lists before advancing".
+    ctx->advance_epoch_and_wait_for_idle();
+
+    // ...and the context is still fully usable afterwards.
+    auto next = ctx->create_command_list();
+    REQUIRE(next.has_value());
+    ctx->drop_command_list(cc::move(next.value()));
+}
+
+INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -34,7 +58,7 @@ INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::cont
     CHECK(ctx->is_submission_complete(token));
 }
 
-INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 

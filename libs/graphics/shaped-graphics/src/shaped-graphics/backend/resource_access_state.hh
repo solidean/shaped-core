@@ -1,7 +1,7 @@
 #pragma once
 
+#include <shaped-graphics/backend/resource_access.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/resource_access.hh>
 
 /// The per-resource (or per-subresource) access-state machine that turns a stream of declared accesses
 /// into a minimal set of barriers. A reusable, backend-neutral building block: a backend accumulates

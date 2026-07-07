@@ -23,12 +23,14 @@ public:
                                                  cc::isize offset_in_bytes,
                                                  cc::isize size_in_bytes);
 
-    /// Downloads `count` elements of a trivially-copyable type. See bytes_from_buffer.
+    /// Downloads `count` elements of a trivially-copyable type; `offset_in_elements` and `count` are in
+    /// elements of T. See bytes_from_buffer.
     template <class T>
-    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, cc::isize offset_in_bytes, cc::isize count)
+    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, cc::isize offset_in_elements, cc::isize count)
     {
         static_assert(std::is_trivially_copyable_v<T>, "download element type must be trivially copyable");
-        return data_future<T>(bytes_from_buffer(cc::move(buffer), offset_in_bytes, count * cc::isize(sizeof(T))));
+        auto const stride = cc::isize(sizeof(T));
+        return data_future<T>(bytes_from_buffer(cc::move(buffer), offset_in_elements * stride, count * stride));
     }
 
     // Pinned to its owning command list: neither copyable nor movable.

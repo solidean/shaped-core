@@ -45,7 +45,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
         auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
         c.submit_dx12_command_list(cc::move(down.value()));
 
-        auto const bytes = future.wait_get_bytes();
+        auto const bytes = c.wait_for(future);
         REQUIRE(bytes.has_value());
         bool matches = true;
         for (int i = 0; i < 256; ++i)

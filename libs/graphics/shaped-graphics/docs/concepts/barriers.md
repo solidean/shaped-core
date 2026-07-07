@@ -30,7 +30,7 @@ place, the texture path is stubbed until `sg::texture` lands.)
 
 ## The vocabulary is backend-neutral
 
-[resource_access.hh](../../src/shaped-graphics/resource_access.hh) defines `access_flags` (what an op
+[resource_access.hh](../../src/shaped-graphics/backend/resource_access.hh) defines `access_flags` (what an op
 does — `shader_read`, `transfer_write`, …), `pipeline_stage_flags` (where — `compute`, `transfer`, …),
 and `texture_layout` (buffers are always `general`). These are deliberately **not** any one backend's
 spelling; each value documents its D3D12 and Vulkan mapping. `is_unordered_write` marks the writes that
@@ -66,7 +66,7 @@ when `sg::texture` lands.
 ## Concurrent command lists (the concurrency model)
 
 Every command list is "concurrent": on creation it takes a **slot** from the context's
-[command_list_slot_allocator](../../src/shaped-graphics/command_list_slot.hh) (a mutex-guarded 64-bit free
+[command_list_slot_allocator](../../src/shaped-graphics/backend/command_list_slot.hh) (a mutex-guarded 64-bit free
 bitmask — lowest clear bit — with a heap free-list past 64, which warns since that many concurrent
 recorders usually means a leaked list). The slot keys the list's **private** access-state entry inside
 each resource it touches (a `cc::small_vector` of per-slot states, so a few parallel lists don't
@@ -108,8 +108,8 @@ lands.
 
 ## See also
 
-- [resource_access.hh](../../src/shaped-graphics/resource_access.hh) — the neutral vocabulary.
+- [resource_access.hh](../../src/shaped-graphics/backend/resource_access.hh) — the neutral vocabulary.
 - [resource_access_state.hh](../../src/shaped-graphics/backend/resource_access_state.hh) — the three-timeline machine.
 - [subresource.hh](../../src/shaped-graphics/backend/subresource.hh) — the covering partition.
-- [command_list_slot.hh](../../src/shaped-graphics/command_list_slot.hh) — the concurrency substrate.
+- [command_list_slot.hh](../../src/shaped-graphics/backend/command_list_slot.hh) — the concurrency substrate.
 - [threading](threading.md) — the thread model concurrent recording builds on.

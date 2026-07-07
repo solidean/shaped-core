@@ -13,13 +13,15 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
-    src/shaped-graphics/command_list_slot.cc
+    src/shaped-graphics/backend/command_list_slot.cc
     src/shaped-graphics/binding_layout.cc
     src/shaped-graphics/compute_pipeline.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/context.transient.cc
+    src/shaped-graphics/context.upload.cc
+    src/shaped-graphics/context.download.cc
     src/shaped-graphics/memory_heap.cc
 )
 
@@ -36,17 +38,19 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.hh
     src/shaped-graphics/context.persistent.hh
     src/shaped-graphics/context.transient.hh
+    src/shaped-graphics/context.upload.hh
+    src/shaped-graphics/context.download.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/command_list.upload.hh
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
-    src/shaped-graphics/command_list_slot.hh
     src/shaped-graphics/raw_buffer.hh
     src/shaped-graphics/pixel_format.hh
     src/shaped-graphics/raw_texture.hh
     src/shaped-graphics/texture.hh
-    src/shaped-graphics/resource_access.hh
+    src/shaped-graphics/backend/command_list_slot.hh
+    src/shaped-graphics/backend/resource_access.hh
     src/shaped-graphics/backend/resource_access_state.hh
     src/shaped-graphics/backend/access_inference.hh
     src/shaped-graphics/backend/subresource.hh
@@ -133,6 +137,8 @@ if(_sg_backends)
         tests/texture/texture-create-test.cc
         tests/command_list/command_list-test.cc
         tests/transfer/transfer-test.cc
+        tests/transfer/transfer-fuzz-test.cc
+        tests/transfer/upload-async-test.cc
         tests/copy/copy-test.cc
         tests/transient/transient-test.cc
         tests/barrier/barrier-test.cc

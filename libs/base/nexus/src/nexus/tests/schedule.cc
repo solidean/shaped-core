@@ -158,17 +158,18 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         }
     }
 
-    // A non-wildcard filter names a single test explicitly, which is enough to pull in an otherwise
-    // non-automatic test — disabled ones, and (unless a bucket was selected explicitly) tests of any bucket.
-    if (!config.filters.empty())
+    // A non-wildcard filter may name a test in another bucket (a manual/benchmark test given by name), so
+    // (unless a bucket was selected explicitly) search across buckets. Disabled tests are NOT pulled in here:
+    // a filter enables a disabled test only when it matches the name *exactly*, checked per-test in would_run
+    // — a substring filter like "sg " must not enable an unrelated disabled test. A bulk "run disabled too"
+    // request sets run_disabled_tests directly instead.
+    if (!config.filters.empty() && !explicit_bucket)
     {
         for (auto const& filter : config.filters)
         {
             if (!filter.contains('*'))
             {
-                config.run_disabled_tests = true;
-                if (!explicit_bucket)
-                    config.match_any_bucket = true;
+                config.match_any_bucket = true;
                 break;
             }
         }
@@ -195,6 +196,14 @@ bool nx::test_schedule_config::name_matches(test_declaration const& decl) const
     return false;
 }
 
+bool nx::test_schedule_config::name_matches_exact(test_declaration const& decl) const
+{
+    for (auto const& filter : filters)
+        if (!filter.empty() && cc::string_view(decl.name) == cc::string_view(filter))
+            return true;
+    return false;
+}
+
 bool nx::test_schedule_config::would_run(test_declaration const& decl) const
 {
     auto const& tc = decl.test_config;
@@ -202,11 +211,12 @@ bool nx::test_schedule_config::would_run(test_declaration const& decl) const
     // Eligibility by bucket + disabled status (filters are applied afterwards):
     //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket is excluded unless
     //    match_any_bucket is set (a non-wildcard filter without an explicit bucket flag names a test directly).
-    //  - disabled is orthogonal: a disabled test runs only when explicitly requested (run_disabled_tests).
+    //  - disabled is orthogonal: a disabled test runs only when the bulk run_disabled_tests flag is set OR a
+    //    filter names it *exactly* — a substring filter must not resurrect an unrelated disabled test.
     if (!match_any_bucket && tc.bucket != selected_bucket)
         return false;
 
-    if (!tc.enabled && !run_disabled_tests)
+    if (!tc.enabled && !run_disabled_tests && !name_matches_exact(decl))
         return false;
 
     return name_matches(decl);

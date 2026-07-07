@@ -32,6 +32,14 @@ public:
     /// Advances the free watermark past every epoch <= `completed` (called at retire).
     void on_epochs_completed(sg::epoch completed);
 
+    /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
+    void set_budget(cc::isize capacity);
+
+    /// Applies a pending set_budget at an epoch boundary: drains every in-flight epoch (so no GPU work
+    /// still reads the ring), then reallocates it at the new capacity. No-op if nothing is pending.
+    /// Called from advance_epoch once the new epoch is open.
+    void apply_pending_budget();
+
     /// Unmaps + releases the ring buffer.
     void shutdown();
 
@@ -59,6 +67,7 @@ private:
         cc::u64 next_pos = 0;                     // logical bump cursor over the u64 space
         cc::u64 freed_pos = 0;                    // everything logically below this is reclaimable
         cc::vector<epoch_checkpoint> checkpoints; // FIFO, oldest epoch at the front
+        cc::isize pending_capacity = 0;           // a set_budget awaiting the next epoch boundary (0 = none)
     };
     cc::mutex<ring_state> _ring;
 };

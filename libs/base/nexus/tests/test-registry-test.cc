@@ -583,18 +583,21 @@ TEST("test schedule config - bucket flags and non-wildcard filters")
         CHECK(cfg.selected_bucket == nx::config::test_bucket::normal);
     }
 
-    // A non-wildcard (exact) filter names a single test, matching any bucket and enabling disabled.
+    // A non-wildcard filter searches across buckets (it may name a manual/benchmark test). It does NOT flip
+    // run_disabled_tests: a disabled test is pulled in per-test by an exact name match (would_run), not a
+    // global flag — so a substring filter can't resurrect an unrelated disabled test.
     {
         char a0[] = "prog";
         char a1[] = "T_manual_bench";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
-        CHECK(cfg.run_disabled_tests);
+        CHECK(!cfg.run_disabled_tests);
         CHECK(cfg.match_any_bucket);
         CHECK(cfg.selected_bucket == nx::config::test_bucket::normal);
     }
 
-    // A non-wildcard filter with an explicit bucket flag stays restricted to that bucket.
+    // A non-wildcard filter with an explicit bucket flag stays restricted to that bucket, and still does not
+    // flip run_disabled_tests.
     {
         char a0[] = "prog";
         char a1[] = "--manual";
@@ -603,6 +606,6 @@ TEST("test schedule config - bucket flags and non-wildcard filters")
         auto const cfg = nx::test_schedule_config::create_from_args(3, argv);
         CHECK(cfg.selected_bucket == nx::config::test_bucket::manual);
         CHECK(!cfg.match_any_bucket);
-        CHECK(cfg.run_disabled_tests);
+        CHECK(!cfg.run_disabled_tests);
     }
 }

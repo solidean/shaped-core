@@ -30,11 +30,11 @@ sg::raw_texture_handle    // std::shared_ptr<sg::raw_texture const>  — shared-
 #include <shaped-graphics/bytes_future.hh>
 sg::bytes_future                    // returned by cmd.download.bytes_from_buffer; holds {span, pin, waiter}
 f.is_valid()                        // bool — backed by a real download (vs default-constructed)
-f.is_ready()                        // bool — polls the waiter; true once the bytes are valid
-f.try_get_bytes()                   // -> cc::optional<cc::span<cc::byte const>>  (polls; nullopt until ready)
-f.wait_get_bytes()                  // -> cc::optional<...>  blocks until ready; nullopt if not yet submitted
-sg::data_future<T>                  // typed wrapper: try_get_data()/wait_get_data() -> cc::optional<cc::span<T const>>
+f.is_ready()                        // bool — NON-BLOCKING poll; true once the actor copied the bytes back
+f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt until ready)
+sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
 sg::bytes_waiter                    // abstract poll handle a backend subclasses; sg::ready_bytes_waiter = ready-on-construction
+// to BLOCK until a download is delivered, use ctx.wait_for(future) (see epochs) — the future has no blocking wait
 ```
 
 ## Enums
@@ -65,9 +65,15 @@ ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_
 ctx.transient.create_raw_buffer(size, usage)           // -> cc::result<raw_buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
+ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset_in_bytes=0)  // void — ASYNC stream host bytes into buf on the copy queue (needs copy_dst); fire-and-forget, pin holds the bytes; later lists reading buf auto-wait; empty = no-op
+ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset_in_elements=0)   // void — typed convenience; re-views the SAME pin as bytes (no copy). offset in ELEMENTS of T. build the pin with cc::make_pinned_data / cc::as_pinned_data
+ctx.upload.set_async_window_size(bytes)            // void — resize the async staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
+ctx.upload.set_inline_budget(bytes)                // void — resize the inline (cmd.upload) ring; applied at the next advance_epoch; default 16 MiB
+ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); default 16 MiB
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
-ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; == letting it leave scope (same epoch)
+ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; explicit discard (same epoch). NB a list left to leave
+                                                   //   scope un-consumed auto-drops itself but PRINTS A WARNING — submit or drop it explicitly
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
 ctx.is_shut_down()                                 // bool
 // invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
@@ -95,9 +101,15 @@ ctx.advance_epoch_and_wait_for_idle()   // void — spelled-out advance_epoch(0)
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
 ctx.wait_for_epoch(e)                   // void — block until epoch e done, then retire (does NOT advance)
 ctx.wait_for_next_inflight_epoch()      // void — block on oldest in-flight epoch (back-pressure; no advance)
+ctx.wait_for(future)                    // -> cc::optional<cc::pinned_data<...>> (bytes/typed) — BLOCK until a download is
+                                        //   delivered, then return it; nullopt if invalid/unsubmitted/cancelled. The ONLY
+                                        //   guaranteed-complete call: advance_epoch* / wait_for_idle drain the GPU but NOT
+                                        //   the readback actor, so is_ready() can lag them. Waitable once its list is
+                                        //   submitted (no advance needed); touches no ctx state, safe from any thread.
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
 // command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
-// on multi_threaded backends: create/submit/drop are concurrency-safe; advance_*/wait_*/shutdown are NOT
+// on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
+//   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
 ```
@@ -107,15 +119,19 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 ```cpp
 #include <shaped-graphics/command_list.hh>
 // abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
-// -> std::unique_ptr; passed by reference (command_list&). record once, submit once, not reused.
-cmd.upload.bytes_to_buffer(buf, bytes, offset=0)     // void — stage host bytes into buf (needs copy_dst); empty = no-op
-cmd.upload.data_to_buffer(buf, range, offset=0)      // void — typed convenience (trivially-copyable contiguous range)
-cmd.download.bytes_from_buffer(buf, offset, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
-cmd.download.data_from_buffer<T>(buf, off, count)    // -> sg::data_future<T>
+// -> std::unique_ptr; passed by reference (command_list&). record once; submit OR drop it once,
+// explicitly, in the epoch it opened in (not reused). Leaving it to go out of scope auto-drops it + warns.
+cmd.upload.bytes_to_buffer(buf, bytes, offset_in_bytes=0)     // void — stage host bytes into buf (needs copy_dst); empty = no-op
+cmd.upload.data_to_buffer(buf, range, offset_in_elements=0)   // void — typed convenience (trivially-copyable contiguous range); offset in ELEMENTS
+cmd.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
+cmd.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
-// inline path: copy is recorded here; the download future is ready after the submitted list finishes on
-// the GPU (no advance_epoch needed). Uploading + downloading + copying the SAME buffer works in ONE list —
+// cmd.upload = INLINE (recorded in this list, visible to later commands in it); ctx.upload = ASYNC (copy
+// queue, off the frame path — for bulk streaming). See docs/concepts/upload.async.md.
+// inline path: copy is recorded here; the download future is delivered by a separate actor after the
+// submitted list finishes on the GPU (no advance_epoch needed — but advance_epoch* / wait_for_idle do NOT
+// guarantee delivery either; use ctx.wait_for(future)). Uploading + downloading + copying the SAME buffer works in ONE list —
 // the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // vulkan transfer is a TODO stub.
 ```

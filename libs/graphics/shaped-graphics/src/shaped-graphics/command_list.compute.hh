@@ -2,8 +2,8 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics/backend/resource_access.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/resource_access.hh>
 
 namespace sg
 {

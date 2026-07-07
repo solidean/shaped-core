@@ -105,6 +105,14 @@ public:
     /// copy counter, so the span frees once the actor drains those copies. Called at advance.
     void on_epoch_advance(sg::epoch closed);
 
+    /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
+    void set_budget(cc::isize capacity);
+
+    /// Applies a pending set_budget at an epoch boundary: drains every in-flight epoch, then waits for the
+    /// download actor to finish every outstanding readback copy (each reads the *old* ring) before dropping
+    /// and rebuilding it at the new capacity. No-op if nothing is pending. Called from advance_epoch.
+    void apply_pending_budget();
+
     /// Blocks the actor until `token` has completed on the submission fence.
     void wait_for_submission(sg::submission_token token);
 
@@ -126,6 +134,11 @@ private:
     };
     reservation reserve(cc::isize size);
 
+    /// Blocks the calling thread until the actor has drained every outstanding readback copy (i.e. every
+    /// reserve has been matched by an on_copy_done or a discard). Used by apply_pending_budget before it
+    /// frees the ring the actor's copies read from.
+    void wait_until_idle();
+
     /// A closed epoch's ring boundary + its outstanding-copy counter; its span [.., end_pos) frees
     /// once `outstanding` reaches zero.
     struct epoch_checkpoint
@@ -140,6 +153,7 @@ private:
         cc::u64 next_pos = 0;                                         // logical bump cursor over the u64 space
         std::shared_ptr<std::atomic<cc::isize>> current_epoch_copies; // counter for the open epoch
         cc::vector<epoch_checkpoint> checkpoints;                     // FIFO, oldest epoch at the front
+        cc::isize pending_capacity = 0; // a set_budget awaiting the next boundary (0 = none)
 
         /// Advances `sys`'s free watermark over every leading checkpoint whose copies have all drained,
         /// then wakes waiting reservers. Only reachable while the `_ring` lock is held (it takes a
@@ -155,6 +169,11 @@ private:
     HANDLE _wait_event = nullptr;
 
     std::atomic<cc::u64> _freed_pos = 0; // reclaim watermark; advanced by reclaim, waited on by reserve
+
+    // Total readback copies reserved but not yet drained (across all epochs). Bumped in reserve, dropped
+    // in on_copy_done / discard; a resize waits on it reaching zero to know the actor no longer reads the
+    // old ring. A single global counter makes wait_until_idle race-free (unlike polling per-epoch state).
+    std::atomic<cc::isize> _outstanding = 0;
 
     cc::mutex<ring_state> _ring;
 

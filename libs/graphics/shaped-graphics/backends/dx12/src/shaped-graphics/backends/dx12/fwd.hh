@@ -1,11 +1,21 @@
 #pragma once
 
+#include <clean-core/fwd.hh>
+
 #include <memory>
 
 /// Forward declarations for the DirectX 12 backend.
 
 namespace sg::backend::dx12
 {
+/// Monotonic value on the async-upload copy queue's completion fence (dx12_context::_copy_fence). Its
+/// own newtype so it can't be confused with the epoch / submission / staging fence timelines: a later
+/// direct-queue list waits on this value to see an async upload's writes. `none` == no pending upload.
+enum class dx12_copy_fence_value : cc::u64
+{
+    none = 0,
+};
+
 class dx12_context;
 class dx12_command_list;
 class dx12_command_allocator_pool;
@@ -34,4 +44,8 @@ struct dx12_resource_download;
 struct dx12_buffer_download;
 class dx12_download_waiter;
 struct dx12_download_copy_job;
+
+// Async buffer upload on a dedicated copy queue (see dx12_upload_async.hh).
+class dx12_upload_async_system;
+struct dx12_async_upload_job;
 } // namespace sg::backend::dx12

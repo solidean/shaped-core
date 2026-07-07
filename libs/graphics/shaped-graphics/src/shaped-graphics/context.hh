@@ -1,11 +1,14 @@
 #pragma once
 
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
-#include <shaped-graphics/command_list_slot.hh>
+#include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/context.download.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
+#include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
 
@@ -36,6 +39,14 @@ public:
     /// Transient-lifetime resource factory for per-frame scratch, recycled when the epoch retires:
     /// `ctx.transient.create_raw_buffer(...)`. See lifetime_scope.
     context_transient_scope transient;
+
+    /// Async host→device upload facade: `ctx.upload.bytes_to_buffer(...)`. Streams buffer writes on a
+    /// dedicated copy queue, off the frame path (the context-level mirror of the inline cmd.upload).
+    context_upload_scope upload;
+
+    /// Inline download configuration facade: `ctx.download.set_budget(...)`. Downloads are recorded via
+    /// cmd.download; this scope sizes the shared readback ring they stage through.
+    context_download_scope download;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
@@ -68,19 +79,36 @@ public:
     virtual void advance_epoch(cc::optional<int> allowed_in_flight) = 0;
 
     /// Advance the epoch and block until the GPU is fully idle (equivalent to advance_epoch(0)).
+    /// Idle drains GPU work but not the readback actor — an inline-download future may still be
+    /// undelivered right after; use wait_for(future) to be certain.
     virtual void advance_epoch_and_wait_for_idle() = 0;
 
-    /// Reclaims everything owned by epochs the GPU has finished. Safe to call at any time; also
-    /// runs implicitly after the waits below.
+    /// Reclaims everything owned by epochs the GPU has finished. Safe to call at any time and from any
+    /// thread (but not concurrently with advance_epoch); also runs implicitly after the waits below.
     virtual void process_completed_epochs() = 0;
 
-    /// Blocks until the given epoch's GPU work has finished, then retires completed epochs. Does
-    /// not advance.
+    /// Blocks until the given epoch's GPU work has finished, then retires completed epochs. Does not
+    /// advance. Safe to call from any thread (used internally for ring back-pressure during recording).
     virtual void wait_for_epoch(epoch e) = 0;
 
-    /// Blocks on the oldest in-flight epoch, then retires — the standard back-pressure primitive
-    /// when a resource pool is exhausted. Returns immediately if nothing is in flight. Does not advance.
+    /// Blocks on the oldest in-flight epoch, then retires — the standard back-pressure primitive when a
+    /// resource pool is exhausted. Returns immediately if nothing is in flight. Does not advance; safe
+    /// to call from any thread.
     virtual void wait_for_next_inflight_epoch() = 0;
+
+    /// Blocks until a download future is delivered, then returns its bytes (nullopt if invalid,
+    /// unsubmitted, or cancelled). The only completion guarantee for a download — advance_epoch* drain
+    /// GPU work but not the readback actor. Waitable once submitted; safe to call from any thread.
+    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_for(bytes_future const& future)
+    {
+        return future.wait_get_bytes();
+    }
+
+    template <class T>
+    [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_for(data_future<T> const& future)
+    {
+        return future.wait_get_data();
+    }
 
     /// Whether the command list that produced this token has finished executing.
     [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;
@@ -98,6 +126,30 @@ protected:
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     friend class context_persistent_scope;
     friend class context_transient_scope;
+    friend class context_upload_scope;
+    friend class context_download_scope;
+
+    /// Streams `data` into `buffer` at `offset_in_bytes` on a dedicated copy queue (reached via
+    /// ctx.upload). The pin holds the source bytes alive until the copy consumes them; a later command
+    /// list that reads the buffer automatically waits on the copy. Empty data is a no-op. Buffer must
+    /// have buffer_usage::copy_dst; offset_in_bytes + data.size() must be within the buffer.
+    virtual void async_upload_bytes_to_buffer(raw_buffer_handle buffer,
+                                              cc::pinned_data<cc::byte const> data,
+                                              isize offset_in_bytes)
+        = 0;
+
+    // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
+    // change applied at a later safe point (an epoch boundary, or the copy actor between windows), never
+    // synchronously here. `bytes` must be > 0. Default: no-op — a backend without the path ignores it.
+
+    /// Resize the async-upload staging window (see ctx.upload.set_async_window_size).
+    virtual void set_async_upload_window_bytes(isize bytes) { (void)bytes; }
+
+    /// Resize the inline-upload ring (see ctx.upload.set_inline_budget).
+    virtual void set_inline_upload_budget(isize bytes) { (void)bytes; }
+
+    /// Resize the inline-download (readback) ring (see ctx.download.set_budget).
+    virtual void set_inline_download_budget(isize bytes) { (void)bytes; }
 
     /// Applies a pending `ctx.transient.set_budget()` at the current epoch boundary (draining in-flight
     /// epochs first, then resizing the transient heap). A backend calls this from advance_epoch once the
@@ -143,11 +195,6 @@ protected:
                                                                                 cc::span<named_view const> views,
                                                                                 lifetime_scope scope)
         = 0;
-
-    /// Hands out the per-command-list slot that keys concurrent access-state tracking. A backend acquires
-    /// a slot when it opens a command list and releases it on submit/drop; the release's "returns to zero"
-    /// result drives the revert-vs-promote decision. Shared here so every backend uses the same substrate.
-    command_list_slot_allocator _command_list_slots;
 
     backend_kind _backend;
     thread_model _thread_model;

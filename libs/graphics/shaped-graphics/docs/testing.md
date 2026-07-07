@@ -29,7 +29,7 @@ and runs that single test body against **every backend the platform has and that
 The mechanism is nexus `INVOCABLE_TEST`: a test that takes a live `sg::context_handle` parameter.
 
 ```cpp
-INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     // ... drive ctx-> through the public API only ...

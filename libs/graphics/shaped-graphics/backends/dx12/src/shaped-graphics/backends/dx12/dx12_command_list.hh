@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -21,15 +22,26 @@ public:
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
                       ComPtr<ID3D12GraphicsCommandList> list)
-      : sg::command_list(created_in, slot),
+      : sg::command_list(created_in),
         _ctx(ctx),
+        _slot(slot),
         _queue(queue),
         _allocator(cc::move(allocator)),
         _list(cc::move(list))
     {
     }
 
+    // Auto-drops (with a warning) a list left neither submitted nor dropped — the explicit path is
+    // submit_dx12_command_list / drop_dx12_command_list. No-op once either has run (they mark it consumed).
+    ~dx12_command_list() override;
+
+    /// The access-tracking slot this list holds for its lifetime — keys its private access-state entry in
+    /// every resource it touches, so concurrent lists don't share state (a backend helper, not sg API).
+    [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
+
     dx12_context& _ctx;             // creating context — outlives this list
+    sg::command_list_slot _slot;    // released to the context's slot allocator on submit/drop
+    bool _consumed = false;         // set by submit/drop; gates the destructor's auto-drop
     D3D12_COMMAND_LIST_TYPE _queue; // queue the allocator/list belong to — routes them back to the pool
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;
@@ -38,10 +50,17 @@ public:
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
 
-    // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop) and the
-    // group currently bound to compute set 0 (whose views are declared at dispatch).
+    // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop, and so
+    // each gets the reverse async-upload stamp at submit) and the group currently bound to compute set 0
+    // (whose views are declared at dispatch).
     cc::vector<dx12_buffer_handle> _touched_buffers;
     dx12_binding_group const* _bound_group = nullptr;
+
+    // Highest async-upload completion value any buffer this list touches is waiting on. At submit the
+    // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
+    // means no touched buffer had a pending async upload. Maintained by track_buffer_access; the reverse
+    // stamp (defer a later async upload behind this list) is applied to _touched_buffers at submit.
+    dx12_copy_fence_value _required_copy_wait = dx12_copy_fence_value::none;
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
@@ -72,7 +91,8 @@ private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker
     // asks for (COPY_DEST→COPY_SOURCE and the like — precise, no bounce through COMMON), and record the
     // buffer so its slot is finalized at submit/drop. Cross-list ordering rides on D3D12's decay of buffers
-    // to COMMON at ExecuteCommandLists, so no trailing barrier is needed.
+    // to COMMON at ExecuteCommandLists, so no trailing barrier is needed. Also folds the buffer's pending
+    // async-upload value into _required_copy_wait (the forward cross-queue sync for ctx.upload).
     void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 };
 } // namespace sg::backend::dx12

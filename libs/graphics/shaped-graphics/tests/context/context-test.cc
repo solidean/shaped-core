@@ -9,13 +9,13 @@
 // backends, e.g. `uv run dev.py test "sg - context is live"`. To target one backend, run its driver:
 // `dev.py test "sg dx12 warp backend" -c dx12-warp "sg - context is live"`.
 
-INVOCABLE_TEST("sg - context is live", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - context is live", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     CHECK(!ctx->is_shut_down());
 }
 
-INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -25,7 +25,7 @@ INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle ctx))
     CHECK(cc::u64(ctx->completed_epoch()) >= cc::u64(before)); // the epoch we started in is now done
 }
 
-INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -41,7 +41,7 @@ INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::conte
     }
 }
 
-INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 

@@ -2,6 +2,7 @@
 // fields); its create/submit/drop bodies live here. Allocators are epoch-gated (recycled once the
 // epoch retires); see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
+#include <clean-core/string/print.hh>
 #include <shaped-graphics/backend/access_inference.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
@@ -18,11 +19,19 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     if (buffer->_resource == nullptr)
         return; // empty (size 0) buffer: no GPU storage, nothing to order
 
+    // Forward cross-queue sync: if an async upload (ctx.upload) is still writing this buffer on the copy
+    // queue, the direct queue must wait for that copy before this list runs. Fold its completion value into
+    // _required_copy_wait (idempotent max); the single wait is issued at submit.
+    cc::u64 const async_v = buffer->_pending_async_upload_value.load(std::memory_order_acquire);
+    if (async_v > cc::u64(_required_copy_wait))
+        _required_copy_wait = dx12_copy_fence_value(async_v);
+
     sg::access_barrier const barrier = buffer->declare_access(slot(), stages, access);
     if (barrier.needed)
         emit_buffer_barrier(_list.Get(), buffer->_resource.Get(), barrier);
 
-    // Record once so its slot is finalized at submit/drop (dedup — a buffer may be touched by many ops).
+    // Record once so its slot is finalized at submit/drop and it gets the reverse async-upload stamp at
+    // submit (dedup — a buffer may be touched by many ops).
     for (auto const& h : _touched_buffers)
         if (h == buffer)
             return;
@@ -52,7 +61,8 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
     CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
               "transient binding_group used past its epoch (its descriptors have been recycled)");
 
-    // Remember the bound group so its views' accesses are declared at dispatch (the point work runs).
+    // Remember the bound group so its views' accesses are declared at dispatch (the point work runs). The
+    // forward async-upload wait for each bound buffer is folded in there too, via track_buffer_access.
     _bound_group = dg;
     _list->SetComputeRootDescriptorTable(0, dg->table_start);
 }
@@ -106,8 +116,8 @@ void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
         return;
     CC_ASSERT(sg::has_flag(dst->usage(), sg::buffer_usage::copy_dst), "upload target buffer must have "
                                                                       "buffer_usage::copy_dst");
-    // Order this write against any prior use of the buffer in this list (precise, no bounce through COMMON),
-    // then record the copy.
+    // Order this write against any prior use of the buffer in this list (precise, no bounce through COMMON)
+    // and fold in the forward async-upload wait, then record the copy.
     track_buffer_access(dst, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_write);
     _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
 }
@@ -124,9 +134,12 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_ha
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= src->size_in_bytes(),
               "download range is out of the buffer's bounds");
     if (size_in_bytes > 0)
+    {
         CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "download source buffer must have "
                                                                           "buffer_usage::copy_src");
-    // Order this read against any prior write of the buffer in this list, then record the readback copy.
+    }
+    // Order this read against any prior write of the buffer in this list, and fold in the forward
+    // async-upload wait, then record the readback copy.
     if (size_in_bytes > 0)
         track_buffer_access(src, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_read);
     return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
@@ -206,7 +219,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     bool const promote = _command_list_slots.live_count() == 1;
     for (auto const& b : cmd->_touched_buffers)
         b->finalize_slot(cmd->slot(), promote);
-    cmd->_touched_buffers.clear();
+    // Kept populated for the reverse async-upload stamp below (it needs the submission token); cleared there.
 
     HRESULT const hr = cmd->_list->Close();
     CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");
@@ -217,6 +230,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next)
         {
+            // If this list reads a buffer an async upload is still writing, make the direct queue wait on
+            // the copy queue's completion fence before executing, so the copy is visible. Over-waiting on
+            // a higher value is safe; a stale/already-signaled value returns immediately.
+            if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
+                _queue->Wait(_copy_fence.Get(), cc::u64(cmd->_required_copy_wait));
+
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);
 
@@ -231,6 +250,22 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             return t;
         });
 
+    // Stamp every buffer this list touched with the token, so a later async upload to it defers its copy
+    // behind this list (the reverse per-resource cross-queue sync). Reuses the access tracker's touched-buffer
+    // set. Done after submit returns the token — the caller then issues the async upload, which reads this
+    // stamp, so the ordering holds.
+    for (auto const& buf : cmd->_touched_buffers)
+    {
+        cc::u64 prev = buf->_last_used_submission_token.load(std::memory_order_relaxed);
+        while (prev < cc::u64(token)
+               && !buf->_last_used_submission_token.compare_exchange_weak(
+                   prev, cc::u64(token), std::memory_order_release, std::memory_order_relaxed))
+        {
+            // CAS retries; `prev` is refreshed with the current value each time.
+        }
+    }
+    cmd->_touched_buffers.clear();
+
     // The allocator is in flight until this epoch retires — hand it to the pool's epoch capture. The
     // list is already closed and can be reused now (resetting an in-flight list onto a fresh, GPU-safe
     // allocator is legal), so return it to the pool for the next acquire.
@@ -238,6 +273,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
     (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+    cmd->_consumed = true; // its dtor must not auto-drop it
     return token;
 }
 
@@ -246,24 +282,43 @@ void dx12_context::drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd
     CC_ASSERT(cmd != nullptr, "cannot drop a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be dropped in the epoch it was opened "
                                                           "in");
+    reclaim_unsubmitted_command_list(*cmd);
+}
+
+void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
+{
+    CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
+    cmd._consumed = true;
 
     // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
-    _download_inline.discard_unsubmitted(cmd->_pending_downloads);
+    _download_inline.discard_unsubmitted(cmd._pending_downloads);
 
     // The recorded work never runs, so its declared accesses leave no committed state: just clear each
     // touched buffer's slot (canonical unchanged), then release the slot.
-    for (auto const& b : cmd->_touched_buffers)
-        b->discard_slot(cmd->slot());
-    cmd->_touched_buffers.clear();
-    (void)_command_list_slots.release(cmd->slot());
+    for (auto const& b : cmd._touched_buffers)
+        b->discard_slot(cmd.slot());
+    cmd._touched_buffers.clear();
+    (void)_command_list_slots.release(cmd.slot());
 
     // Never submitted, so the GPU never touched this allocator. Close the list so it is poolable, then
     // return both to the pool: the list for reuse, the allocator straight to the free pool (it was
     // never executed, so no epoch gates it; reset happens at reuse).
-    HRESULT const closed = cmd->_list->Close();
+    HRESULT const closed = cmd._list->Close();
     CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
-    _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
-    _cmd_pool.return_free_allocator({cc::move(cmd->_allocator), cmd->_queue});
+    _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
+    _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+}
+
+dx12_command_list::~dx12_command_list()
+{
+    if (_consumed)
+        return; // submitted or dropped explicitly — nothing to reclaim
+
+    // Safety net: a list left neither submitted nor dropped. Reclaim it like a drop so the open-list
+    // count, its slot, and its allocator/list don't leak — but warn, since the explicit call is required.
+    cc::eprintln("[sg] command list destroyed without submit or drop — auto-dropping. Submit or drop every "
+                 "command list explicitly through the context.");
+    _ctx.reclaim_unsubmitted_command_list(*this);
 }
 } // namespace sg::backend::dx12

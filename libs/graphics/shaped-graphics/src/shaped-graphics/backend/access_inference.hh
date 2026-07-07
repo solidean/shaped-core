@@ -1,6 +1,6 @@
 #pragma once
 
-#include <shaped-graphics/resource_access.hh>
+#include <shaped-graphics/backend/resource_access.hh>
 #include <shaped-graphics/views.hh>
 
 /// Shared inference policy: which access / layout an operation or a bound view implies. Backends call

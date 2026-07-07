@@ -71,6 +71,11 @@ public:
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 
+    // The drop cleanup on an unsubmitted list (return its pool, release its slot, drop the open-list
+    // count). Shared by drop_vulkan_command_list and the list's destructor auto-drop — do not call
+    // directly; go through drop_vulkan_command_list.
+    void reclaim_unsubmitted_command_list(vulkan_command_list& cmd);
+
     // sg::context overrides — forward to the backend-typed methods above. The static_cast down is
     // sound: backends never mix.
 
@@ -126,6 +131,12 @@ public:
         drop_vulkan_command_list(std::unique_ptr<vulkan_command_list>(static_cast<vulkan_command_list*>(cmd.release())));
     }
 
+    // Async upload (ctx.upload) — not implemented yet.
+    void async_upload_bytes_to_buffer(sg::raw_buffer_handle, cc::pinned_data<cc::byte const>, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan async upload is not implemented yet");
+    }
+
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once
     // that epoch retires. Called from ~vulkan_buffer; safe to call from any thread.
     void schedule_deferred_deletion(vulkan_expiring_resource expiring);
@@ -172,6 +183,10 @@ public:
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
     cc::mutex<vulkan_command_pool_set> _command_pools;
+
+    // Hands each open command list a dense access-tracking slot (a backend helper for concurrent
+    // recording); acquired at create, released at submit/drop. Internally synchronized.
+    sg::command_list_slot_allocator _command_list_slots;
 
     cc::mutex<vulkan_epoch_state> _epoch_state;
 

@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/allocation_info.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -12,6 +13,7 @@
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
+#include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/context.hh>
@@ -36,6 +38,11 @@ struct dx12_config
     /// Capacity of the inline READBACK ring buffer, in bytes. Bounds the in-flight inline download volume.
     cc::isize download_ring_bytes = cc::isize(16) * 1024 * 1024;
 
+    /// Size of one async-upload staging window, in bytes. The staging buffer is triple-buffered (three
+    /// of these), so CPU memcpy and GPU copy overlap; an upload larger than a window packs across
+    /// successive windows. Bigger windows amortize submits; smaller ones cut latency and memory.
+    cc::isize async_upload_window_bytes = cc::isize(16) * 1024 * 1024;
+
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
     int descriptor_heap_capacity = 1 << 16;
 
@@ -55,7 +62,8 @@ public:
       : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded),
         _cmd_pool(*this),
         _upload_inline(*this),
-        _download_inline(*this)
+        _download_inline(*this),
+        _upload_async(*this)
     {
     }
 
@@ -72,6 +80,11 @@ public:
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
+
+    // The drop cleanup on an unsubmitted list (reclaim its allocator/list/slot, discard its recorded
+    // downloads, drop the open-list count). Shared by drop_dx12_command_list and the list's destructor
+    // auto-drop — do not call directly; go through drop_dx12_command_list.
+    void reclaim_unsubmitted_command_list(dx12_command_list& cmd);
 
     // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
     // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
@@ -138,6 +151,21 @@ public:
         drop_dx12_command_list(std::unique_ptr<dx12_command_list>(static_cast<dx12_command_list*>(cmd.release())));
     }
 
+    // Reached through ctx.upload — async CPU→GPU buffer streaming on the copy queue. Forwards to the
+    // async upload system; later direct-queue lists reading the buffer auto-wait on the copy.
+    void async_upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
+                                      cc::pinned_data<cc::byte const> data,
+                                      cc::isize offset_in_bytes) override
+    {
+        _upload_async.upload_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
+    }
+
+    // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
+    // change on the owning system, applied at a later safe point (see the systems + advance_epoch).
+    void set_async_upload_window_bytes(cc::isize bytes) override { _upload_async.set_window_bytes(bytes); }
+    void set_inline_upload_budget(cc::isize bytes) override { _upload_inline.set_budget(bytes); }
+    void set_inline_download_budget(cc::isize bytes) override { _download_inline.set_budget(bytes); }
+
     // Epoch contract — bodies in dx12_epoch.cc. These return sg vocabulary types (no backend-typed
     // variant needed), so the whole body lives in the override.
 
@@ -156,11 +184,18 @@ public:
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
 
+    // Dedicated COPY queue for async uploads, decoupled from the epoch/direct queue. The completion
+    // fence is signaled by the copy queue when an async upload's copy has run; a later direct-queue
+    // command list waits on it at submit (see submit_dx12_command_list) so it observes the write.
+    ComPtr<ID3D12CommandQueue> _copy_queue;
+    ComPtr<ID3D12Fence> _copy_fence;
+
     // Epoch machinery. The epoch fence is signaled with the epoch value at the end of each epoch;
     // the submission fence is a per-command-list timeline on the same queue.
     ComPtr<ID3D12Fence> _epoch_fence;
     ComPtr<ID3D12Fence> _submission_fence;
-    HANDLE _fence_event = nullptr; // reusable event for SetEventOnCompletion waits (driver thread only)
+    // Epoch-fence waits (wait_for_epoch) create a per-call event so they stay safe to invoke from any
+    // thread — no shared wait event to serialize on.
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;
@@ -172,6 +207,11 @@ public:
     //    fence value backwards).
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
+
+    // Hands each open command list a dense access-tracking slot (a backend helper for concurrent
+    // recording); acquired at create, released at submit/drop. Its "returns to zero" release signal
+    // drives the revert-vs-promote decision. Internally synchronized.
+    sg::command_list_slot_allocator _command_list_slots;
 
     cc::mutex<dx12_epoch_state> _epoch_state;
 
@@ -187,6 +227,10 @@ public:
     // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
     dx12_upload_inline_system _upload_inline;
     dx12_download_inline_system _download_inline;
+
+    // Async CPU→GPU buffer streaming on the copy queue (reached via ctx.upload). Owns its staging ring +
+    // copy actor; initialized in create_dx12_context after the copy queue/fence exist.
+    dx12_upload_async_system _upload_async;
 
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a

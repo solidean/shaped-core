@@ -31,13 +31,16 @@ when its underlying API or its own bookkeeping is not safe to touch from several
 
 - **Concurrency-safe:** resource and command-list operations — `create_command_list`,
   `create_raw_buffer`, `submit_command_list`, `drop_command_list` (and a resource's refcount reaching
-  zero, i.e. deferred deletion) — may be called from several threads at once.
-- **Externally synchronized:** **epoch management** (`advance_epoch`,
-  `advance_epoch_and_wait_for_idle`, `wait_for_epoch`, `wait_for_next_inflight_epoch`,
-  `process_completed_epochs`) and **`shutdown`**. The caller must guarantee none of these overlaps any
-  other context operation. Advancing is a frame-boundary decision that closes an epoch and rewrites
-  the shared in-flight state, so it is the caller's job to fence it off — which is also why advancing
-  is a deliberate, rationed operation (see [epochs](epochs.md)).
+  zero, i.e. deferred deletion); the epoch **waits and retire** — `wait_for_epoch`,
+  `wait_for_next_inflight_epoch`, `process_completed_epochs` (internally synchronized, because they
+  double as ring back-pressure invoked from within concurrent recording); and `wait_for(future)`
+  (touches only the future's own waiter, no context state) — may all be called from several threads at
+  once.
+- **Externally synchronized:** **advancing** (`advance_epoch`, `advance_epoch_and_wait_for_idle`) and
+  **`shutdown`**. The caller must guarantee none of these overlaps any other context operation.
+  Advancing is a frame-boundary decision that closes an epoch and rewrites the shared in-flight state
+  (and the current-epoch counter every other op reads), so it is the caller's job to fence it off —
+  which is also why advancing is a deliberate, rationed operation (see [epochs](epochs.md)).
 
 A command list is still **single-threaded per instance** regardless of the model: one thread records
 it, then submits or drops it once, in the epoch it was opened in. But **several command lists may record

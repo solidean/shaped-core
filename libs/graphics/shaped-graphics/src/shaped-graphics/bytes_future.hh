@@ -58,6 +58,12 @@ public:
 /// and the waiter that tracks completion. Read the bytes with try_get_bytes() once ready.
 class bytes_future
 {
+    // ctx.wait_for(future) reaches the blocking wait — kept off the future's own public API.
+    friend class context;
+    // the typed wrapper forwards its blocking wait to the underlying bytes_future.
+    template <class>
+    friend class data_future;
+
     // ctors
 public:
     /// An invalid future — not backed by any download.
@@ -76,19 +82,22 @@ public:
     /// Whether this future is backed by a real download (vs default-constructed).
     [[nodiscard]] bool is_valid() const { return _waiter != nullptr; }
 
-    /// Whether the result is ready (polls the waiter). Prefer try_get_bytes if you also want the data.
+    /// Non-blocking poll: whether the bytes are ready. A download is ready only once its actor copy
+    /// has run — neither this nor an epoch advance forces that; ctx.wait_for(future) does.
     [[nodiscard]] bool is_ready() const { return _waiter != nullptr && _waiter->poll_ready(); }
 
-    /// Blocks until ready, then returns the bytes. Returns nullopt if invalid or if blocking cannot
-    /// make progress (the recording list is not yet submitted).
-    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_get_bytes() const;
-
     /// The result bytes if ready (polls), else nullopt. The returned pinned_data keeps the bytes alive
-    /// on its own, so it stays valid even past this future's lifetime.
+    /// on its own, so it stays valid even past this future's lifetime. To block until delivered, use
+    /// ctx.wait_for(future).
     [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> try_get_bytes() const;
 
     // members
 private:
+    /// Blocks until ready, then returns the bytes. Returns nullopt if invalid or if blocking cannot
+    /// make progress (the recording list is not yet submitted, or the download was cancelled). Reached
+    /// only through context::wait_for — a blocking wait is a context-level effect, not a future method.
+    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_get_bytes() const;
+
     cc::pinned_data<cc::byte const> _data; // destination bytes + owner; valid once the waiter is ready
     std::shared_ptr<bytes_waiter> _waiter;
 };
@@ -100,6 +109,9 @@ class data_future
 {
     static_assert(std::is_trivially_copyable_v<T>, "data_future element type must be trivially copyable");
 
+    // ctx.wait_for(future) reaches the blocking wait — kept off the future's own public API.
+    friend class context;
+
 public:
     data_future() = default;
     explicit data_future(bytes_future bytes) : _bytes(cc::move(bytes)) {}
@@ -107,7 +119,8 @@ public:
     [[nodiscard]] bool is_valid() const { return _bytes.is_valid(); }
     [[nodiscard]] bool is_ready() const { return _bytes.is_ready(); }
 
-    /// The typed result if ready (polls). Yields nullopt when the byte count is not a multiple of sizeof(T).
+    /// The typed result if ready (polls). Yields nullopt when the byte count is not a multiple of
+    /// sizeof(T). To block until delivered, use ctx.wait_for(future).
     [[nodiscard]] cc::optional<cc::pinned_data<T const>> try_get_data() const
     {
         auto const bytes = _bytes.try_get_bytes();
@@ -116,7 +129,8 @@ public:
         return bytes.value().template try_reinterpret_as<T const>();
     }
 
-    /// Blocks until ready, then returns the typed result. See bytes_future::wait_get_bytes.
+private:
+    /// Blocks until ready, then returns the typed result. Reached only through context::wait_for.
     [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_get_data() const
     {
         auto const bytes = _bytes.wait_get_bytes();
@@ -125,7 +139,6 @@ public:
         return bytes.value().template try_reinterpret_as<T const>();
     }
 
-private:
     bytes_future _bytes;
 };
 } // namespace sg

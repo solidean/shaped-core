@@ -1,5 +1,5 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list_slot.hh>
+#include <shaped-graphics/backend/command_list_slot.hh>
 
 // Pure unit tests for the command-list slot allocator: lowest-clear-bit allocation, the "returns to zero"
 // release signal, and the overflow path past 64 concurrent slots.

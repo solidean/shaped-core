@@ -51,6 +51,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   vocabulary (`binding_type`, `(set, index)`) and how a binding validates a bound `raw_view`.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
   epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
+- [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue
+  (`ctx.upload`), off the frame path, with automatic per-resource sync so later lists auto-wait.
 - [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK
   ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.
 
