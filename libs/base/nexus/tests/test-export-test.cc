@@ -79,15 +79,23 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
         CHECK(!cfg.would_run(gamma));
     }
 
-    // A non-wildcard filter names a test directly: it pulls in an otherwise-excluded disabled test, and only
-    // the name-matching test is selected.
+    // An EXACT filter names the disabled test directly: it pulls it in, and only the name-matching test runs.
     {
         char const* const args[] = {"prog", "beta"};
         auto const cfg = config_from(args);
         CHECK(!cfg.name_matches(alpha));
         CHECK(cfg.name_matches(beta));
-        CHECK(cfg.would_run(beta)); // run_disabled_tests set by the non-wildcard filter
+        CHECK(cfg.would_run(beta)); // exact name match pulls in the disabled test
         CHECK(!cfg.would_run(alpha));
+    }
+
+    // A SUBSTRING filter that happens to match a disabled test's name must NOT resurrect it — only an exact
+    // name (or the bulk run_disabled_tests flag) does. "et" is a substring of "beta" but not its whole name.
+    {
+        char const* const args[] = {"prog", "et"};
+        auto const cfg = config_from(args);
+        CHECK(cfg.name_matches(beta)); // substring matches the name
+        CHECK(!cfg.would_run(beta));   // ...but the disabled gate still excludes it
     }
 
     // Explicit bucket mode: a name in another bucket matches by name but is excluded by the bucket gate — the

@@ -26,7 +26,8 @@ struct test_schedule_config
     // selected_bucket: the bucket an automatic sweep selects (normal by default, manual via --manual,
     // guide_benchmark via --guide-benchmarks). match_any_bucket: a non-wildcard filter was given without an
     // explicit bucket flag, so the sweep is not restricted to selected_bucket — an explicitly named test runs
-    // regardless of its bucket (disabled ones too, via run_disabled_tests).
+    // regardless of its bucket. A disabled test is separate: it runs only on an exact name match (see
+    // name_matches_exact / would_run) or the bulk run_disabled_tests flag, never via a bare substring filter.
     nx::config::test_bucket selected_bucket = nx::config::test_bucket::normal;
     bool match_any_bucket = false;
     bool is_catch2_xml_discovery = false;
@@ -52,9 +53,15 @@ struct test_schedule_config
     // are ignored. Distinguishes "name didn't match" from "matched but excluded".
     bool name_matches(test_declaration const& decl) const;
 
+    // True if some non-empty filter equals the test name *exactly* (not a substring). An exact name is
+    // what pulls in an otherwise-excluded disabled test; a substring filter does not. Always false when
+    // filters is empty.
+    bool name_matches_exact(test_declaration const& decl) const;
+
     // True if the test would be scheduled under this config: name_matches() AND the
     // bucket gate (match_any_bucket, or same bucket) AND the disabled gate (enabled,
-    // or run_disabled_tests). This is exactly the predicate test_schedule::create uses.
+    // or run_disabled_tests, or an exact name match). This is exactly the predicate
+    // test_schedule::create uses.
     bool would_run(test_declaration const& decl) const;
 
     // True if some non-empty filter is a substring of the alias name. Always false when filters is empty: a
