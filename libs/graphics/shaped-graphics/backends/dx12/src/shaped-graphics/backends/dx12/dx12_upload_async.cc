@@ -202,8 +202,11 @@ private:
         ID3D12CommandList* lists[] = {_list.Get()};
         _sys._ctx._copy_queue->ExecuteCommandLists(1, lists);
 
-        cc::u64 const window = _current_window;
-        HRESULT const hs = _sys._ctx._copy_queue->Signal(_sys._window_fence.Get(), window);
+        // Window fence values are 1-based (window i completing signals i+1): the fence starts at 0, so a
+        // 0-based value for window 0 would be indistinguishable from "not yet started" and wait_for_window(0)
+        // would never block — recycling slot 0 before window 0's copy has drained it. wait_for_window applies
+        // the same +1, so callers pass window indices.
+        HRESULT const hs = _sys._ctx._copy_queue->Signal(_sys._window_fence.Get(), _current_window + 1);
         CC_ASSERT(SUCCEEDED(hs), "ID3D12CommandQueue::Signal (staging window) failed");
 
         // Completion fence is monotonic: only signal when this window finished a later upload than any
@@ -246,12 +249,14 @@ private:
         _sys._window_bytes = desired;
     }
 
-    // Blocks the actor until the copy queue has finished `window`.
+    // Blocks the actor until the copy queue has finished `window` (index). The fence is 1-based (see
+    // submit_window), so window i's completion is fence value i+1 — distinct from the initial 0.
     void wait_for_window(cc::u64 window)
     {
-        if (_sys._window_fence->GetCompletedValue() < window)
+        cc::u64 const target = window + 1;
+        if (_sys._window_fence->GetCompletedValue() < target)
         {
-            HRESULT const hr = _sys._window_fence->SetEventOnCompletion(window, _sys._wait_event);
+            HRESULT const hr = _sys._window_fence->SetEventOnCompletion(target, _sys._wait_event);
             CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
             WaitForSingleObject(_sys._wait_event, INFINITE);
         }
