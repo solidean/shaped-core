@@ -78,9 +78,9 @@ private:
         // Resolve the destination now (weak → strong). If every handle was dropped, or its storage was
         // expired, before the actor reached this job: skip the copy — a 1 GiB upload to a released buffer
         // must not stage or block — but STILL advance the completion fence to this job's value. The
-        // lifetime gate holds the buffer's storage until _copy_fence reaches that value, and any forward
-        // reader stamped with it waits on the same value, so leaving a hole at it would hang both forever.
-        // An empty window still submits + signals, keeping _copy_fence monotonic and gap-free.
+        // lifetime gate holds the buffer's storage until the completion fence reaches that value, and any
+        // forward reader stamped with it waits on the same value, so leaving a hole at it would hang both
+        // forever. An empty window still submits + signals, keeping the completion fence monotonic and gap-free.
         auto const strong = job.target.lock();
         if (!strong || !strong->_resource)
         {
@@ -213,7 +213,7 @@ private:
         // prior window. Windows carrying only a mid-upload chunk finish nothing and skip it.
         if (_open_highest_finished > _last_signaled_copy)
         {
-            HRESULT const hcf = _sys._ctx._copy_queue->Signal(_sys._ctx._copy_fence.Get(), _open_highest_finished);
+            HRESULT const hcf = _sys._ctx._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
             CC_ASSERT(SUCCEEDED(hcf), "ID3D12CommandQueue::Signal (completion) failed");
             _last_signaled_copy = _open_highest_finished;
         }
@@ -285,7 +285,7 @@ private:
 cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async upload staging window must be positive");
-    CC_ASSERT(_ctx._copy_queue && _ctx._copy_fence, "async upload needs the context copy queue + fence first");
+    CC_ASSERT(_ctx._copy_queue, "async upload needs the context's shared copy queue first");
 
     // UPLOAD heap, GENERIC_READ: the copy queue reads staged bytes from here via CopyBufferRegion. Three
     // windows back-to-back in one committed buffer, addressed by (window index % 3) * window_bytes.
@@ -299,6 +299,11 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes
 
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async upload window) failed");
+
+    // Upload completion fence: signaled by the shared copy queue when a window's copy has run; a later
+    // direct-queue reader waits on it at submit (see dx12_command_list).
+    if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_completion_fence)); FAILED(hr))
+        return dx12_error(hr, "ID3D12Device::CreateFence (async upload completion) failed");
 
     _wait_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (_wait_event == nullptr)
@@ -371,6 +376,7 @@ void dx12_upload_async_system::shutdown()
     }
     _mapped = nullptr;
     _window_fence.Reset();
+    _completion_fence.Reset();
     if (_wait_event)
     {
         CloseHandle(_wait_event);

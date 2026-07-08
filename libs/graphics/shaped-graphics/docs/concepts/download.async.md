@@ -141,8 +141,12 @@ Not invariants — v1 shortcuts:
   make it a clean cross-queue wait later.
 - **Coarser than per-buffer state**: the stamps are single monotonic values per buffer, a down-payment on
   the per-resource state-tracking layer landing separately, which should replace them.
-- **Wastes the window tail on a would-be wrap** and has **no fallback when a single read exceeds the ring**
-  — the same v1 shortcuts as the [inline download](download.inline.md) ring.
+- **Submits a partially-filled window early** (when the inbox drains) rather than claiming its unused
+  tail for the next job — a low-latency choice, not a size limit. Unlike the [inline download](download.inline.md)
+  ring, the staging is slot-based (three fixed windows, no ring cursor), so there is **no would-be-wrap
+  tail waste and no ring-exceed ceiling**: a read larger than a window — or larger than the whole
+  triple-buffered staging — simply packs across successive windows, each slot drained and reused, so bulk
+  readback of any size streams through. A future streaming system could claim the partial-window tail.
 
 ## dx12 implementation
 
@@ -152,10 +156,11 @@ Not invariants — v1 shortcuts:
   `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`dx12_context::_copy_queue`); the staging buffer is a
   persistently-mapped `D3D12_HEAP_TYPE_READBACK` committed buffer of `window_bytes * 3`; the read is
   `ID3D12GraphicsCommandList::CopyBufferRegion`. The **staging fence** is the system's own `_window_fence`;
-  the **completion fence** is the context's `_download_copy_fence`.
-- The **download completion fence** is created alongside the copy queue in
-  [`dx12_context.create.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc)
-  and torn down (actor drained, copy queue idled) in
+  the **completion fence** is the system's own `_completion_fence` (download-only).
+- The **download completion fence** is created in the system's `initialize`, off the context's shared copy
+  queue (`dx12_context::_copy_queue`, created in
+  [`dx12_context.create.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc)),
+  and torn down (actor drained, copy queue idled) in the system's `shutdown`, called from
   [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`. The
   system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per
   window slot, cycled on the window fence — deliberately **not** the shared epoch-gated pool.
@@ -164,7 +169,8 @@ Not invariants — v1 shortcuts:
   `_last_used_submission_token` (forward). `track_buffer_access` in
   [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds
   the reverse value into `_required_download_wait` **only for write accesses** (`sg::is_unordered_write`).
-  The reverse wait is `_queue->Wait(_download_copy_fence, ...)` at command-list submit; the forward wait is
+  The reverse wait is `_queue->Wait(_download_async._completion_fence, ...)` at command-list submit; the
+  forward wait is
   `_copy_queue->Wait(_submission_fence, ...)` before a window's reads in
   [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc),
   which also enforces the window-level acyclicity rule (close the open window before staging a job whose

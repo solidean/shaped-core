@@ -58,7 +58,7 @@ struct dx12_async_download_job
 /// actor waits on that window's staging fence, memcpys its chunks into their destinations, and marks their
 /// waiters ready — which it does before reusing the window's slot and for every remaining window when the
 /// inbox empties (so a future always becomes ready without an epoch advance). A separate **completion
-/// fence** (the context's `_download_copy_fence`) is signaled with the highest finished read value each
+/// fence** (this system's own `_completion_fence`) is signaled with the highest finished read value each
 /// window, and the submit path makes a later direct-queue list that WRITES the buffer wait on it, so it
 /// never overwrites bytes the read is still reading. The system owns one copy command list (reused across
 /// windows) plus one allocator per window slot, cycled on the window fence — not the epoch-gated pool,
@@ -70,8 +70,9 @@ public:
     explicit dx12_download_async_system(dx12_context& ctx) : _ctx(ctx) {}
 
     /// Creates + persistently maps the READBACK staging buffer (three windows of `window_bytes` > 0), the
-    /// window fence and its wait event, and starts the copy actor. Called once during context bring-up,
-    /// after the context's copy queue and download completion fence exist. Returns a dx12 error on failure.
+    /// window fence, the completion fence, and the actor's wait event, then starts the copy actor. Called
+    /// once during context bring-up, after the context's shared copy queue exists. Returns a dx12 error on
+    /// failure.
     [[nodiscard]] cc::result<cc::unit> initialize(cc::isize window_bytes);
 
     /// Records an async readback of [offset, offset+size) from `buffer` and returns the pending future.
@@ -86,8 +87,7 @@ public:
     void set_window_bytes(cc::isize bytes);
 
     /// Shuts the actor down (draining queued readbacks and waiting for the copy queue to idle), then unmaps
-    /// and releases the staging buffer. Must run while the context's copy queue + completion fence and
-    /// device are alive.
+    /// and releases the staging buffer. Must run while the context's shared copy queue and device are alive.
     void shutdown();
 
     // Set in initialize, then touched only by the copy actor (_staging/_mapped/_window_bytes are also
@@ -97,7 +97,13 @@ public:
     cc::byte* _mapped = nullptr;
     cc::isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's read done
-    HANDLE _wait_event = nullptr;      // actor-thread wait on the window fence
+    // Async-download completion fence, owned here (the copy queue that signals it is shared, but this fence
+    // is download-only). Signaled by the copy queue up to the highest finished read value each window; a
+    // later direct-queue list that WRITES the buffer waits on it at submit so it never overwrites bytes the
+    // read is still reading. Read externally only by dx12_command_list (reverse wait). Created in
+    // initialize; empty until then.
+    ComPtr<ID3D12Fence> _completion_fence;
+    HANDLE _wait_event = nullptr; // actor-thread wait on the window fence
 
     // A pending set_window_bytes request; the actor compares it to _window_bytes at the top of each
     // process cycle and rebuilds staging when they differ. Written by any thread, read by the actor.

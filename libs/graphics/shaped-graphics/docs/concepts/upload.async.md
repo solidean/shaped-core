@@ -138,10 +138,11 @@ Not invariants — v1 shortcuts:
   `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue`; the staging buffer is a persistently-mapped
   `D3D12_HEAP_TYPE_UPLOAD` committed buffer of `window_bytes * 3`; the copy is
   `ID3D12GraphicsCommandList::CopyBufferRegion`. The **staging fence** is the system's own
-  `_window_fence`; the **completion fence** is the context's `_copy_fence`.
-- The **copy queue + completion fence** are created in
-  [`dx12_context.create.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc)
-  and torn down (actor drained, copy queue idled) in
+  `_window_fence`; the **completion fence** is the system's own `_completion_fence` (upload-only).
+- The **completion fence** is created in the system's `initialize`, alongside the staging buffer, off the
+  context's shared copy queue (`dx12_context::_copy_queue`, created in
+  [`dx12_context.create.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc)),
+  and torn down (actor drained, copy queue idled) in the system's `shutdown`, called from
   [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`.
   The system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one
   `ID3D12CommandAllocator` per window slot, cycled on the window fence — deliberately **not** the shared
@@ -151,7 +152,8 @@ Not invariants — v1 shortcuts:
   (reverse). `note_buffer_use` in
   [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc)
   reads the forward one into `_required_copy_wait` and records the buffer so submit stamps the reverse one
-  with the list's token. The forward wait is `_queue->Wait(_copy_fence, ...)` at command-list submit; the
+  with the list's token. The forward wait is `_queue->Wait(_upload_async._completion_fence, ...)` at
+  command-list submit; the
   reverse wait is `_copy_queue->Wait(_submission_fence, ...)` before a window's copies in
   [`dx12_upload_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.cc).
   `stage_job` there enforces the window-level acyclicity rule: it closes the open window before staging a

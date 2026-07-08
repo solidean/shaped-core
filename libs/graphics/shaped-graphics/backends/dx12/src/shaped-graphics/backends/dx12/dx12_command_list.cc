@@ -244,12 +244,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // the copy queue's completion fence before executing, so the copy is visible. Over-waiting on
             // a higher value is safe; a stale/already-signaled value returns immediately.
             if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
-                _queue->Wait(_copy_fence.Get(), cc::u64(cmd->_required_copy_wait));
+                _queue->Wait(_upload_async._completion_fence.Get(), cc::u64(cmd->_required_copy_wait));
 
             // Symmetric reverse sync: if this list WRITES a buffer an async readback is still reading, wait
             // on the download completion fence first, so the write never overwrites bytes the read consumes.
             if (cmd->_required_download_wait != dx12_download_fence_value::none)
-                _queue->Wait(_download_copy_fence.Get(), cc::u64(cmd->_required_download_wait));
+                _queue->Wait(_download_async._completion_fence.Get(), cc::u64(cmd->_required_download_wait));
 
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);

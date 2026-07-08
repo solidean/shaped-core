@@ -64,9 +64,9 @@ public:
     mutable std::atomic<cc::u64> _last_used_submission_token = 0;
 
     // Forward for the async DOWNLOAD (ctx.download): highest completion value a pending async readback here
-    // will signal on the download completion fence (dx12_context::_download_copy_fence) once its copy-queue
-    // read has finished. A later direct-queue list that WRITES this buffer waits for it at submit, so it
-    // never overwrites bytes the readback is still reading. `0` == no pending async download.
+    // will signal on the download completion fence (dx12_download_async_system::_completion_fence) once its
+    // copy-queue read has finished. A later direct-queue list that WRITES this buffer waits for it at
+    // submit, so it never overwrites bytes the readback is still reading. `0` == no pending async download.
     mutable std::atomic<cc::u64> _pending_async_download_value = 0;
 
     // --- concurrent access-state tracking ------------------------------------------------------------

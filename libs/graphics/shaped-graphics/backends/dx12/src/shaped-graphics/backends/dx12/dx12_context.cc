@@ -51,8 +51,7 @@ void dx12_context::shutdown()
 
     _submission_fence.Reset();
     _epoch_fence.Reset();
-    _copy_fence.Reset();
-    _download_copy_fence.Reset();
+    // The two async completion fences are owned + reset by their subsystems' shutdown() above.
 
     // Release the device-level COM objects (live-object tracking will unwind here later too).
     _copy_queue.Reset();

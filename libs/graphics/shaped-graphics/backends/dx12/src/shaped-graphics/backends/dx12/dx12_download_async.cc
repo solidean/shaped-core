@@ -239,8 +239,7 @@ private:
         // window. Windows carrying only a mid-read chunk finish nothing and skip it.
         if (_open_highest_finished > _last_signaled_download)
         {
-            HRESULT const hcf
-                = _sys._ctx._copy_queue->Signal(_sys._ctx._download_copy_fence.Get(), _open_highest_finished);
+            HRESULT const hcf = _sys._ctx._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
             CC_ASSERT(SUCCEEDED(hcf), "ID3D12CommandQueue::Signal (download completion) failed");
             _last_signaled_download = _open_highest_finished;
         }
@@ -347,8 +346,7 @@ private:
 cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async download staging window must be positive");
-    CC_ASSERT(_ctx._copy_queue && _ctx._download_copy_fence, "async download needs the copy queue + completion fence "
-                                                             "first");
+    CC_ASSERT(_ctx._copy_queue, "async download needs the context's shared copy queue first");
 
     // READBACK heap, COPY_DEST: the copy queue writes read bytes here via CopyBufferRegion, the actor reads
     // them back out on the CPU. Three windows back-to-back, addressed by (window index % 3) * window_bytes.
@@ -362,6 +360,11 @@ cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_byt
 
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async download window) failed");
+
+    // Download completion fence: signaled by the shared copy queue when a window's read has finished; a
+    // later direct-queue writer waits on it at submit (see dx12_command_list).
+    if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_completion_fence)); FAILED(hr))
+        return dx12_error(hr, "ID3D12Device::CreateFence (async download completion) failed");
 
     _wait_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (_wait_event == nullptr)
@@ -433,7 +436,9 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
 void dx12_download_async_system::wait_for_pending_async_upload(dx12_buffer const& src)
 {
     cc::u64 const v = src._pending_async_upload_value.load(std::memory_order_acquire);
-    if (v == 0 || _ctx._copy_fence->GetCompletedValue() >= v)
+    // The upload system owns the upload completion fence; both subsystems share the context's copy queue.
+    ID3D12Fence* const upload_fence = _ctx._upload_async._completion_fence.Get();
+    if (v == 0 || upload_fence->GetCompletedValue() >= v)
         return;
 
     cc::eprintln("[sg] async download from a buffer with a pending async upload — blocking the calling thread on the "
@@ -441,7 +446,7 @@ void dx12_download_async_system::wait_for_pending_async_upload(dx12_buffer const
 
     HANDLE const ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     CC_ASSERT(ev != nullptr, "CreateEventW failed for the async download upload-wait");
-    HRESULT const hr = _ctx._copy_fence->SetEventOnCompletion(v, ev);
+    HRESULT const hr = upload_fence->SetEventOnCompletion(v, ev);
     CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
     WaitForSingleObject(ev, INFINITE);
     CloseHandle(ev);
@@ -468,6 +473,7 @@ void dx12_download_async_system::shutdown()
     }
     _mapped = nullptr;
     _window_fence.Reset();
+    _completion_fence.Reset();
     if (_wait_event)
     {
         CloseHandle(_wait_event);

@@ -201,16 +201,10 @@ public:
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
 
-    // Dedicated COPY queue for async uploads + downloads, decoupled from the epoch/direct queue. The
-    // upload completion fence is signaled by the copy queue when an async upload's copy has run; a later
-    // direct-queue list waits on it at submit (see submit_dx12_command_list) so it observes the write.
+    // Dedicated COPY queue shared by async uploads + downloads, decoupled from the epoch/direct queue.
+    // The two completion fences it signals live on the owning subsystems (upload-only vs download-only):
+    // see dx12_upload_async_system::_completion_fence and dx12_download_async_system::_completion_fence.
     ComPtr<ID3D12CommandQueue> _copy_queue;
-    ComPtr<ID3D12Fence> _copy_fence;
-
-    // Async-download completion fence, signaled by the copy queue when an async readback has finished
-    // reading a buffer; a later direct-queue list that WRITES that buffer waits on it at submit so it
-    // never overwrites bytes the read is still reading (the reverse of _copy_fence).
-    ComPtr<ID3D12Fence> _download_copy_fence;
 
     // Epoch machinery. The epoch fence is signaled with the epoch value at the end of each epoch;
     // the submission fence is a per-command-list timeline on the same queue.

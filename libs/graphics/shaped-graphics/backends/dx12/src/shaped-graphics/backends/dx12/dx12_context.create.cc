@@ -120,23 +120,13 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandQueue failed");
 
-    // Dedicated COPY queue for async uploads, plus its completion fence (signaled by the copy queue when
-    // an upload's copy has run; the direct queue waits on it so later lists observe the write).
+    // Dedicated COPY queue shared by async uploads + downloads. Each subsystem owns and creates its own
+    // completion fence in initialize() below (upload-only vs download-only); only the queue is shared.
     D3D12_COMMAND_QUEUE_DESC copy_queue_desc = {};
     copy_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
     ComPtr<ID3D12CommandQueue> copy_queue;
     if (HRESULT hr = device->CreateCommandQueue(&copy_queue_desc, IID_PPV_ARGS(&copy_queue)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandQueue (copy) failed");
-
-    ComPtr<ID3D12Fence> copy_fence;
-    if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copy_fence)); FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateFence (async upload completion) failed");
-
-    // Async-download completion fence (signaled by the copy queue when a readback has finished reading a
-    // buffer; a later direct-queue writer waits on it so it never overwrites bytes the read is still reading).
-    ComPtr<ID3D12Fence> download_copy_fence;
-    if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&download_copy_fence)); FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateFence (async download completion) failed");
 
     // Epoch system fences (both timelines on the direct queue) + a reusable wait event. The epoch
     // fence gates resource reclamation; the submission fence tracks per-command-list completion.
@@ -153,8 +143,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_device = cc::move(device);
     ctx->_queue = cc::move(queue);
     ctx->_copy_queue = cc::move(copy_queue);
-    ctx->_copy_fence = cc::move(copy_fence);
-    ctx->_download_copy_fence = cc::move(download_copy_fence);
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 
@@ -163,10 +151,12 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 
-    // Async upload staging windows + copy actor (needs the copy queue + completion fence above).
+    // Async upload staging windows + copy actor (needs the shared copy queue above; creates its own
+    // upload completion fence).
     CC_RETURN_IF_ERROR(ctx->_upload_async.initialize(config.async_upload_window_bytes));
 
-    // Async download readback staging windows + copy actor (needs the copy queue + download fence above).
+    // Async download readback staging windows + copy actor (needs the shared copy queue above; creates
+    // its own download completion fence).
     CC_RETURN_IF_ERROR(ctx->_download_async.initialize(config.async_download_window_bytes));
 
     // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a
