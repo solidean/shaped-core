@@ -5,8 +5,16 @@ included by full path from `src/`: `#include <shaped-graphics/<name>.hh>`.
 
 > **Scope note:** this sheet covers the small surface that exists today. The **dx12** backend is
 > real (device / command list / GPU buffer); the sg core abstract API and the **vulkan** backend are
-> still stubs. Fallible creates return `cc::result`.
+> still stubs.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+
+> **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): resource creates
+> come in two flavors — a throwing default `create_*` (returns the handle, raises a typed
+> `sg::exception` on failure) and a fallible `try_create_*` (returns `cc::result`, for exception-free
+> callers / local fallback). `create_command_list()` is infallible (returns the handle; throws only on
+> device loss). Contract violations (bad size, missing usage, null args, using a transient resource past
+> its epoch) `CC_ASSERT` — they are bugs, not runtime failures. Device loss is sticky: `is_device_lost()`
+> / `device_loss_reason()`, and submit / advance / fence waits throw `sg::device_lost_exception`.
 
 How to read this: each block leads with the include; one symbol per line with a trailing
 comment giving the return type / intuition.
@@ -57,14 +65,16 @@ sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 #include <shaped-graphics/context.hh>
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
-ctx.create_command_list()                          // -> cc::result<std::unique_ptr<command_list>> (already recording)
-ctx.persistent.create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (size>=0; 0 = empty, no alloc)
+ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
+ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
+ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
+ctx.persistent.try_create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (fallible core; every create_* has a try_ twin)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
-ctx.persistent.create_memory_heap(size)            // -> cc::result<memory_heap_handle>  (heap placed resources sub-allocate into)
-ctx.transient.create_raw_buffer(size, usage)           // -> cc::result<raw_buffer_handle>  per-epoch scratch (bump-reset heap); expires at advance_epoch
+ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into; try_create_memory_heap for the result form)
+ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
-ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch
+ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
 ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset_in_bytes=0)  // void — ASYNC stream host bytes into buf on the copy queue (needs copy_dst); fire-and-forget, pin holds the bytes; later lists reading buf auto-wait; empty = no-op
 ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset_in_elements=0)   // void — typed convenience; re-views the SAME pin as bytes (no copy). offset in ELEMENTS of T. build the pin with cc::make_pinned_data / cc::as_pinned_data
 ctx.upload.set_async_window_size(bytes)            // void — resize the async staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
@@ -74,7 +84,7 @@ ctx.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_fut
 ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
 ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); default 16 MiB
                                                    //   using any transient resource past its epoch is a hard error (asserts)
-ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in)
+ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in); throws sg::device_lost_exception on device loss
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; explicit discard (same epoch). NB a list left to leave
                                                    //   scope un-consumed auto-drops itself but PRINTS A WARNING — submit or drop it explicitly
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
@@ -88,6 +98,18 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
 // dx12_config { bool enable_debug_layer=false; bool use_warp=false; }  (independent flags)
 // create errors on environment failure (no adapter, device refused); misuse asserts
+```
+
+## exceptions — thrown by the create_* façades + submit/advance  (see docs/error-handling.md)
+
+```cpp
+#include <shaped-graphics/exceptions.hh>
+sg::exception                    // base; .message() -> cc::string_view. catch this for "any sg failure"
+sg::device_lost_exception        // device lost (sticky); .reason(). from submit/advance/fence waits + throwing creates
+sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_bytes()
+sg::pipeline_creation_exception  // binding_layout / compute_pipeline build failure; .entry_point()
+sg::binding_group_exception      // binding_group wiring error (unknown/missing binding, kind mismatch) or descriptor exhaustion
+// only the throwing create_* and submit/advance raise these; the try_create_* surface never throws
 ```
 
 ## epochs — frame-level GPU lifetime + CPU↔GPU sync  (see docs/concepts/epochs.md)
@@ -187,8 +209,8 @@ t->format()                  // sg::pixel_format
 t->is_array()/is_cube()/is_multisampled()      // bool  — derived shape queries
 sg::texture_usage            // flags: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
 // create the raw resource (typed create_texture_2d/... factories come later):
-ctx.persistent.create_raw_texture(desc)        // -> cc::result<raw_texture_handle>  (dedicated)
-ctx.transient.create_raw_texture(desc)         // -> cc::result<raw_texture_handle>  (dedicated for now; auto-expires)
+ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedicated; throws sg::allocation_exception; + try_ twin)
+ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
 sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
@@ -243,10 +265,10 @@ sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; bac
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
 sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
 // creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
-ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema)
-ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle
-ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout)
-ctx.transient.create_binding_group(layout, span<named_view const>)        // -> binding_group_handle    per-epoch (ring-allocated); layout/pipeline stay persistent
+ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema; throws sg::pipeline_creation_exception; + try_ twin)
+ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle (throws sg::pipeline_creation_exception; + try_ twin)
+ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout; throws sg::binding_group_exception; + try_ twin)
+ctx.transient.create_binding_group(layout, span<named_view const>)        // -> binding_group_handle    per-epoch (ring-allocated); layout/pipeline stay persistent (+ try_ twin)
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
