@@ -215,6 +215,24 @@ struct threaded_actor_impl;
 
 
 //
+// Async / dataflow
+//
+
+struct async_error;
+struct async_node_base;
+struct async_scheduler;
+struct async_worker_scope;
+struct inline_scheduler;
+struct async_context;
+template <class T>
+struct async_result;
+template <class T>
+struct async;
+template <class T>
+struct once_async;
+
+
+//
 // Hashing
 //
 
