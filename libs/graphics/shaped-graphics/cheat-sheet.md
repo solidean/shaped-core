@@ -220,6 +220,7 @@ tex.as_readonly_view({.mips={.start=1}})       // -> texture_readonly_view  (who
 tex.as_readonly_2d_view({.slice=3})            // array/cube -> Texture2D: one slice/.face/{.cube,.face}
 tex.as_readonly_1d_view({.slice=3})            // 1D array -> Texture1D
 tex.as_readonly_cube_view({.cube=2})           // cube array -> one TextureCube
+tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
 // storage (UAV) — needs readwrite_texture; single mip; not on MS (a cube UAV is a 2D array):
 tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
 //   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)

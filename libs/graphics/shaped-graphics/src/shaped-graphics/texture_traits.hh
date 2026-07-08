@@ -66,6 +66,11 @@ struct readonly_cube_of_array_params ///< one cube of a cube array -> TextureCub
     int cube = 0;
     view_range mips;
 };
+struct readonly_2d_array_of_cube_params ///< a cube's faces as a Texture2DArray (all faces, or a sub-range)
+{
+    view_range slices; ///< in face/slice units (a cube array is 6 per cube)
+    view_range mips;
+};
 
 // Read-write (storage / UAV) natural-dimension params. Always a single mip level.
 struct readwrite_params
@@ -164,6 +169,15 @@ consteval auto pick_read_only_cube_params()
 }
 
 template <texture_dimension Dim, bool Array, bool Cube, bool MS>
+consteval auto pick_read_only_2d_array_params()
+{
+    if constexpr (Cube && !MS) // a cube / cube array's faces reinterpreted as a plain 2D array
+        return readonly_2d_array_of_cube_params{};
+    else
+        return no_params{};
+}
+
+template <texture_dimension Dim, bool Array, bool Cube, bool MS>
 consteval auto pick_read_write_2d_params()
 {
     if constexpr (MS)
@@ -214,6 +228,7 @@ struct texture_traits
     using read_only_2d_params = decltype(detail::pick_read_only_2d_params<Dim, Array, Cube, Multisampled>());
     using read_only_1d_params = decltype(detail::pick_read_only_1d_params<Dim, Array, Cube, Multisampled>());
     using read_only_cube_params = decltype(detail::pick_read_only_cube_params<Dim, Array, Cube, Multisampled>());
+    using read_only_2d_array_params = decltype(detail::pick_read_only_2d_array_params<Dim, Array, Cube, Multisampled>());
     using read_write_2d_params = decltype(detail::pick_read_write_2d_params<Dim, Array, Cube, Multisampled>());
     using read_write_1d_params = decltype(detail::pick_read_write_1d_params<Dim, Array, Cube, Multisampled>());
 };

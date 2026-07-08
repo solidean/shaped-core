@@ -118,9 +118,10 @@ the end", so the whole-axis default is `{}`.
   range since a whole 3D mip is one subresource for hazard purposes).
 - **Reinterpreting views** — bind one slice / face / cube as a lower dimension, each with its own params
   bag: `as_readonly_2d_view` / `as_readwrite_2d_view` (one slice/face → `Texture2D`), `as_readonly_1d_view`
-  / `as_readwrite_1d_view` (one slice of a 1D array → `Texture1D`), and `as_readonly_cube_view` (one cube
-  of a cube array → `TextureCube`). These are what make "slice 3 as `Texture2D`" distinct from a size-1
-  array window.
+  / `as_readwrite_1d_view` (one slice of a 1D array → `Texture1D`), `as_readonly_cube_view` (one cube of a
+  cube array → `TextureCube`), and `as_readonly_2d_array_view` (a cube / cube array's faces as a flat
+  `Texture2DArray` — the sampled counterpart to how a cube's storage view already binds). These are what
+  make "slice 3 as `Texture2D`" distinct from a size-1 array window.
 
 Multisampled textures **are** sampleable (`Texture2DMS…`) — their params just have no separate mip axis
 (one mip level), and a multisampled cube samples as a `Texture2DMSArray` (there is no `TextureCubeMS`).

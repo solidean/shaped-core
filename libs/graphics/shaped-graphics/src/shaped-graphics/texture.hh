@@ -29,6 +29,7 @@ public:
     using read_only_2d_params = typename Traits::read_only_2d_params;
     using read_only_1d_params = typename Traits::read_only_1d_params;
     using read_only_cube_params = typename Traits::read_only_cube_params;
+    using read_only_2d_array_params = typename Traits::read_only_2d_array_params;
     using read_write_2d_params = typename Traits::read_write_2d_params;
     using read_write_1d_params = typename Traits::read_write_1d_params;
 
@@ -75,60 +76,68 @@ public:
     // Shader-facing views. `as_readonly_view` / `as_readwrite_view` are the natural views (the texture's
     // own dimension); the `_2d` / `_1d` / `cube` variants reinterpret one slice / face / cube as a lower
     // dimension, so binding one slice is a *different binding* than a size-1 array window. Each takes a
-    // shape-specific parameter bag (`Traits::*_params`) naming only the axes that shape has, and asserts
-    // the matching texture_usage.
+    // shape-specific parameter bag (the `*_params` typedefs above) naming only the axes that shape has,
+    // and asserts the matching texture_usage.
 
     /// Sampled (SRV) view over the whole texture in its natural dimension.
-    [[nodiscard]] texture_readonly_view as_readonly_view(typename Traits::read_only_params const& p = {}) const
+    [[nodiscard]] texture_readonly_view as_readonly_view(read_only_params const& params = {}) const
     {
-        return _make_readonly(_srv_whole_dim(), _natural_array_range(p), _mips(p));
+        return _make_readonly(_srv_whole_dim(), _natural_array_range(params), _mips(params));
     }
 
     /// Sampled view of one array slice, bound as a Texture2D (or Texture2DMS). Only on 2D array shapes.
-    [[nodiscard]] texture_readonly_view as_readonly_2d_view(typename Traits::read_only_2d_params const& p = {}) const
+    [[nodiscard]] texture_readonly_view as_readonly_2d_view(read_only_2d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
         auto const dim = Traits::is_multisampled ? texture_view_dimension::tex_2d_ms : texture_view_dimension::tex_2d;
-        return _make_readonly(dim, _single(_pick_slice(p)), _mips(p));
+        return _make_readonly(dim, _single(_pick_slice(params)), _mips(params));
     }
 
     /// Sampled view of one array slice, bound as a Texture1D. Only on 1D array textures.
-    [[nodiscard]] texture_readonly_view as_readonly_1d_view(typename Traits::read_only_1d_params const& p = {}) const
+    [[nodiscard]] texture_readonly_view as_readonly_1d_view(read_only_1d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _make_readonly(texture_view_dimension::tex_1d, _single(_pick_slice(p)), _mips(p));
+        return _make_readonly(texture_view_dimension::tex_1d, _single(_pick_slice(params)), _mips(params));
     }
 
     /// Sampled view of one cube (all 6 faces) of a cube array, bound as a TextureCube. Only on cube arrays.
-    [[nodiscard]] texture_readonly_view as_readonly_cube_view(typename Traits::read_only_cube_params const& p = {}) const
+    [[nodiscard]] texture_readonly_view as_readonly_cube_view(read_only_cube_params const& params = {}) const
         requires(Traits::is_cube && Traits::is_array && !Traits::is_multisampled)
     {
-        CC_ASSERT(p.cube >= 0 && p.cube < _raw->array_layers(), "cube index out of range");
-        return _make_readonly(texture_view_dimension::cube, {.start = isize(p.cube) * 6, .end = isize(p.cube) * 6 + 6},
-                              _mips(p));
+        CC_ASSERT(params.cube >= 0 && params.cube < _raw->array_layers(), "cube index out of range");
+        return _make_readonly(texture_view_dimension::cube,
+                              {.start = isize(params.cube) * 6, .end = isize(params.cube) * 6 + 6}, _mips(params));
+    }
+
+    /// Sampled view of a cube's faces as a plain Texture2DArray (all faces, or a slice sub-range). Only on
+    /// cubes — the alternative to the natural TextureCube view.
+    [[nodiscard]] texture_readonly_view as_readonly_2d_array_view(read_only_2d_array_params const& params = {}) const
+        requires(Traits::is_cube && !Traits::is_multisampled)
+    {
+        return _make_readonly(texture_view_dimension::tex_2d_array, _natural_array_range(params), _mips(params));
     }
 
     /// Storage (UAV) view over the whole texture at one mip level. Not on multisampled textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_view(typename Traits::read_write_params const& p = {}) const
+    [[nodiscard]] texture_readwrite_view as_readwrite_view(read_write_params const& params = {}) const
         requires(!Traits::is_multisampled)
     {
-        return _make_readwrite(_uav_whole_dim(), _natural_array_range(p), p.mip, _depth_slices(p));
+        return _make_readwrite(_uav_whole_dim(), _natural_array_range(params), params.mip, _depth_slices(params));
     }
 
     /// Storage view of one array slice / cube face, bound as a Texture2D. Only on non-MS 2D array shapes.
-    [[nodiscard]] texture_readwrite_view as_readwrite_2d_view(typename Traits::read_write_2d_params const& p = {}) const
+    [[nodiscard]] texture_readwrite_view as_readwrite_2d_view(read_write_2d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
                  && (Traits::is_array || Traits::is_cube))
     {
-        return _make_readwrite(texture_view_dimension::tex_2d, _single(_pick_slice(p)), p.mip,
+        return _make_readwrite(texture_view_dimension::tex_2d, _single(_pick_slice(params)), params.mip,
                                _whole_depth_slice_range());
     }
 
     /// Storage view of one array slice, bound as a Texture1D. Only on non-MS 1D array textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_1d_view(typename Traits::read_write_1d_params const& p = {}) const
+    [[nodiscard]] texture_readwrite_view as_readwrite_1d_view(read_write_1d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _make_readwrite(texture_view_dimension::tex_1d, _single(_pick_slice(p)), p.mip,
+        return _make_readwrite(texture_view_dimension::tex_1d, _single(_pick_slice(params)), params.mip,
                                _whole_depth_slice_range());
     }
 

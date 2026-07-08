@@ -81,6 +81,8 @@ concept has_ro_1d = requires(T t) { t.as_readonly_1d_view(); };
 template <class T>
 concept has_ro_cube = requires(T t) { t.as_readonly_cube_view(); };
 template <class T>
+concept has_ro_2d_array = requires(T t) { t.as_readonly_2d_array_view(); };
+template <class T>
 concept has_rw_2d = requires(T t) { t.as_readwrite_2d_view(); };
 template <class T>
 concept ro_has_slices = requires(typename T::read_only_params p) { p.slices; };
@@ -104,6 +106,9 @@ static_assert(has_ro_2d<sg::texture_2d_array> && has_ro_2d<sg::texture_cube> && 
 static_assert(!has_ro_2d<sg::texture_2d> && !has_ro_2d<sg::texture_3d>);
 static_assert(has_ro_1d<sg::texture_1d_array> && !has_ro_1d<sg::texture_2d_array>);
 static_assert(has_ro_cube<sg::texture_cube_array> && !has_ro_cube<sg::texture_cube>);
+// A cube's faces can also be sampled as a plain 2D array (both cube shapes, non-MS).
+static_assert(has_ro_2d_array<sg::texture_cube> && has_ro_2d_array<sg::texture_cube_array>);
+static_assert(!has_ro_2d_array<sg::texture_2d_array> && !has_ro_2d_array<sg::texture_cube_ms>);
 static_assert(has_rw_2d<sg::texture_2d_array> && has_rw_2d<sg::texture_cube>);
 static_assert(!has_rw_2d<sg::texture_2d_array_ms>); // MSAA forbids UAV
 
@@ -170,6 +175,26 @@ TEST("sg - sampled cube views: whole cube and single face")
     CHECK(face.view_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(face.range.array_range.start == 4);
     CHECK(face.range.array_range.end == 5);
+}
+
+TEST("sg - a cube's faces can be sampled as a plain 2D array")
+{
+    sg::texture_cube cube(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
+
+    auto const whole = cube.as_readonly_2d_array_view().to_raw();
+    CHECK(whole.view_dimension == sg::texture_view_dimension::tex_2d_array); // not TextureCube
+    CHECK(whole.range.array_range.start == 0);
+    CHECK(whole.range.array_range.end == 6); // all 6 faces
+
+    auto const range = cube.as_readonly_2d_array_view({.slices = {.start = 2, .count = 3}}).to_raw();
+    CHECK(range.range.array_range.start == 2);
+    CHECK(range.range.array_range.end == 5);
+
+    // A cube array's 6*N faces likewise reinterpret as one flat 2D array.
+    sg::texture_cube_array arr(std::make_shared<test_texture>(desc_cube_array(sg::texture_usage::readonly_texture, 3)));
+    auto const arr_whole = arr.as_readonly_2d_array_view().to_raw();
+    CHECK(arr_whole.view_dimension == sg::texture_view_dimension::tex_2d_array);
+    CHECK(arr_whole.range.array_range.end == 18); // 3 cubes * 6 faces
 }
 
 TEST("sg - sampled cube-array views: whole / cube-range / single cube / single face")
