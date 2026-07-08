@@ -58,6 +58,7 @@ struct resource_access_state;
 // forward-declared here; include views.hh for the views themselves.
 enum class view_class;
 enum class view_shape;
+enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
 struct raw_view;
 
 // Compiled shaders + reflected bindings (see compiled_shader.hh / binding.hh) — value types.

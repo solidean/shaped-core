@@ -85,17 +85,48 @@ in the typed views; users never touch `raw_view`, only the backend does.
 Textures have views too, but they don't fit the buffer `<T>` slot (there is no element type — a texel
 `pixel_format` and a subresource range instead). So they are distinct, non-templated types —
 `texture_readonly_view` (sampled / SRV) and `texture_readwrite_view` (storage / UAV) — each carrying
-`{raw_texture_handle, pixel_format, subresource_range}` and erasing to a `raw_view` with `shape ==
-texture`. The factories live on the typed `texture<Traits>` wrapper (`as_readonly_view()` on any shape,
-`as_readwrite_view(mip)` only where `!Traits.is_multisampled`), so shape gating is a compile-time contract,
-mirroring the wrapper's `height()`/`depth()`. `binding_type::sampled_texture` / `storage_texture` map to
-`(readonly, texture)` / `(readwrite, texture)`; the backend reads the bound texture's description for the
-SRV/UAV dimension. When a texture is bound to a compute dispatch, the barrier system transitions it to the
-layout its access implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of`.
+`{raw_texture_handle, texture_view_dimension, pixel_format, subresource_range}` (plus a
+`depth_slice_range` on the storage view for 3D) and erasing to a `raw_view` with `shape == texture`.
 
-Deferred: **render_target / depth_stencil** views (a graphics pipeline / render pass consumes them),
-**samplers** (a separate descriptor heap), and **texel buffers** (`Buffer<T>` / `samplerBuffer` — a
-format-decoded linear buffer).
+### The view *dimension* is a reinterpretation, not the texture's shape
+
+A view carries an explicit `texture_view_dimension` — the shader-facing declaration (HLSL
+`Texture2D` / `Texture2DArray` / `TextureCube` / `Texture2DMS…`; Vulkan `VkImageViewType`; D3D
+`SRV/UAV_DIMENSION`) — because several selections *change what the shader sees*, not just which
+subresources are visible. Binding one slice of a 2D array as `Texture2D` is a **different binding** than a
+one-layer `Texture2DArray` window; likewise a single cube face → `Texture2D`, or one cube of a cube array
+→ `TextureCube`. A subresource range alone can't tell those apart, so the backend switches on
+`view_dimension` rather than re-deriving from the texture's `description`. (D3D12 caveat: the non-array
+dimensions have no base-slice field, so a *non-zero* first slice promotes to the size-1 array form — same
+texels, still declared as the requested dimension in the shader.)
+
+### The factory surface
+
+The factories live on the typed `texture<Traits>` wrapper, `requires`-gated by shape so misuse is a
+compile error (mirroring the wrapper's `height()` / `depth()`):
+
+- **Sampled (SRV):** `as_readonly_view(first_mip, mip_count)` on any shape (whole, natural dimension);
+  `as_readonly_view(array_range)` and `as_readonly_slice_view(slice)` on non-cube arrays;
+  `as_readonly_face_view(face)` on cubes; `as_readonly_cube_view(cube)`,
+  `as_readonly_cube_range_view(cube_range)` and `as_readonly_face_view(cube, face)` on cube arrays. A mip
+  *range* is selectable (default: all mips). Multisampled textures **are** sampleable (`Texture2DMS…`) —
+  they just carry no mip range, and a multisampled cube samples as a `Texture2DMSArray` (there is no
+  `TextureCubeMS`).
+- **Storage (UAV):** only where `!Traits.is_multisampled` (D3D12 forbids MSAA UAVs), always a **single mip
+  level**, and a cube is written as a 2D array (no cube UAV). `as_readwrite_view(mip)` /
+  `as_readwrite_view(mip, array_range)` / `as_readwrite_slice_view` / `as_readwrite_face_view`, plus
+  `as_readwrite_depth_slice_view(depth_slice_range)` on 3D textures (the depth / W/Z axis — D3D12's
+  `FirstWSlice`/`WSize` window — a UAV-only axis with no SRV analog, tracked separately from the
+  subresource range since a whole 3D mip is one subresource for hazard purposes).
+
+`binding_type::sampled_texture` / `storage_texture` map to `(readonly, texture)` / `(readwrite, texture)`.
+When a texture is bound to a compute dispatch, the barrier system transitions it to the layout its access
+implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of`.
+
+Deferred: **aspect (depth/stencil) selection + format reinterpretation** on sampled views (depth-as-SRV
+needs a typeless resource), **render_target / depth_stencil** views (a graphics pipeline / render pass
+consumes them), **samplers** (a separate descriptor heap), and **texel buffers** (`Buffer<T>` /
+`samplerBuffer` — a format-decoded linear buffer).
 
 ## See also
 

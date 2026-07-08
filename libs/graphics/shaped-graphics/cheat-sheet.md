@@ -213,8 +213,17 @@ ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedica
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
 sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
-tex.as_readonly_view()                         // -> sg::texture_readonly_view  (sampled/SRV; needs readonly_texture usage)
-tex.as_readwrite_view(mip=0)                   // -> sg::texture_readwrite_view (storage/UAV; needs readwrite_texture; not on MS)
+// sampled (SRV) views — needs readonly_texture usage; first_mip/mip_count narrow mips (default all):
+tex.as_readonly_view(first_mip=0, mip_count=all_mips)  // -> texture_readonly_view  (whole, natural dimension)
+tex.as_readonly_view(array_range, ...)         // array (non-cube) only: sub-range of slices, keeps *_array dim
+tex.as_readonly_slice_view(slice, ...)         // array (non-cube): one slice -> Texture2D/1D (≠ a size-1 array)
+tex.as_readonly_face_view(face, ...)           // cube: one face -> Texture2D   (cube array: (cube, face))
+tex.as_readonly_cube_view(cube, ...)           // cube array: one cube -> TextureCube
+tex.as_readonly_cube_range_view(cube_range, ...) // cube array: sub-range of cubes -> TextureCubeArray
+// storage (UAV) views — needs readwrite_texture; single mip; not on MS (a cube UAV is a 2D array):
+tex.as_readwrite_view(mip=0)                   // -> texture_readwrite_view  (whole, natural dimension)
+tex.as_readwrite_view(mip, array_range) / as_readwrite_slice_view(slice,mip) / as_readwrite_face_view(face,mip)
+tex.as_readwrite_depth_slice_view(depth_slice_range, mip=0) // 3D only: sub-range of depth (W/Z) slices
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
 // bind a texture view in a compute dispatch → it auto-transitions to shader_read (SRV) / storage (UAV).
