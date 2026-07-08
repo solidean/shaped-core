@@ -26,44 +26,79 @@ D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usa
     return desc;
 }
 
-sg::access_barrier dx12_buffer::declare_access(sg::command_list_slot slot,
-                                               sg::pipeline_stage_flags stages,
-                                               sg::access_flags access) const
+void dx12_buffer::declare_access(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access) const
 {
-    return _access.lock(
-        [&](access_tracking& t) -> sg::access_barrier
+    _access.lock(
+        [&](access_tracking& t)
         {
             int const i = int(slot);
             CC_ASSERT(i >= 0, "declare_access with an invalid command_list_slot");
             while (t.slots.size() <= i)
                 t.slots.push_back(access_slot{});
             auto& e = t.slots[i];
-            if (!e.active)
-            {
-                e.active = true;
-                e.state = t.canonical; // start from the committed state (general layout for buffers)
-            }
-            e.state.declare(stages, access); // layout defaults to general — buffers never transition
-            return e.state.flush();
+            e.active = true; // a fresh state on first touch (access_slot{} default); no between-lists seed
+            e.state.declare(stages, access); // accumulate only — layout defaults to general (buffers never transition)
         });
 }
 
-void dx12_buffer::finalize_slot(sg::command_list_slot slot, bool promote) const
+bool dx12_buffer::mark_pending_barrier(sg::command_list_slot slot) const
+{
+    return _access.lock(
+        [&](access_tracking& t) -> bool
+        {
+            // Only ever called right after declare_access, so the slot exists and is active.
+            int const i = int(slot);
+            CC_ASSERT(i < t.slots.size() && t.slots[i].active, "mark_pending_barrier before declare_access");
+            auto& e = t.slots[i];
+            if (e.pending_barrier)
+                return false;
+            e.pending_barrier = true;
+            return true;
+        });
+}
+
+sg::access_barrier dx12_buffer::flush_access(sg::command_list_slot slot) const
+{
+    return _access.lock(
+        [&](access_tracking& t) -> sg::access_barrier
+        {
+            // Only ever called for a slot that was just declared (so it exists and is active).
+            int const i = int(slot);
+            CC_ASSERT(i < t.slots.size() && t.slots[i].active, "flush_access of a buffer this list never declared");
+            t.slots[i].pending_barrier = false; // this op's declares are being flushed
+            return t.slots[i].state.flush();
+        });
+}
+
+bool dx12_buffer::mark_recorded(sg::command_list_slot slot) const
+{
+    return _access.lock(
+        [&](access_tracking& t) -> bool
+        {
+            int const i = int(slot);
+            CC_ASSERT(i >= 0, "mark_recorded with an invalid command_list_slot");
+            while (t.slots.size() <= i)
+                t.slots.push_back(access_slot{});
+            auto& e = t.slots[i];
+            if (e.recorded)
+                return false;
+            e.recorded = true;
+            return true;
+        });
+}
+
+void dx12_buffer::finalize_slot(sg::command_list_slot slot) const
 {
     _access.lock(
         [&](access_tracking& t)
         {
+            // Only ever called for a buffer this list touched (declare_access set the slot active), so it
+            // exists and is active — see the command list's submit path. A buffer has no layout and no
+            // between-lists state, so finalize just frees the slot (its state is discarded, not carried).
             int const i = int(slot);
-            if (i >= t.slots.size() || !t.slots[i].active)
-                return; // this list never touched the buffer
-            auto& e = t.slots[i];
-            CC_ASSERT(!e.state.has_pending_declares(), "a declared access was never flushed by a GPU op");
-            if (promote)
-                t.canonical = e.state; // committed state carries into the next command list
-            // else: roll back to canonical. For buffers this emits nothing (layout is always general); the
-            // revert transition + its hidden-cost warning arrive with textures.
-            e.active = false;
-            e.state = sg::resource_access_state{};
+            CC_ASSERT(i < t.slots.size() && t.slots[i].active, "finalize of a buffer this list never touched");
+            CC_ASSERT(!t.slots[i].state.has_pending_declares(), "a declared access was never flushed by a GPU op");
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
         });
 }
 
@@ -72,11 +107,10 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
     _access.lock(
         [&](access_tracking& t)
         {
+            // Like finalize, only ever called for a buffer this list touched (its slot is active).
             int const i = int(slot);
-            if (i >= t.slots.size())
-                return;
-            t.slots[i].active = false;
-            t.slots[i].state = sg::resource_access_state{};
+            CC_ASSERT(i < t.slots.size() && t.slots[i].active, "discard of a buffer this list never touched");
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
         });
 }
 

@@ -251,8 +251,8 @@ public:
     cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
 
     // Hands each open command list a dense access-tracking slot (a backend helper for concurrent
-    // recording); acquired at create, released at submit/drop. Its "returns to zero" release signal
-    // drives the revert-vs-promote decision. Internally synchronized.
+    // recording); acquired at create, released at submit/drop. Each resource separately tracks how many
+    // open lists are using it and promotes when its last active slot finalizes. Internally synchronized.
     sg::command_list_slot_allocator _command_list_slots;
 
     cc::mutex<dx12_epoch_state> _epoch_state;

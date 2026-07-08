@@ -93,6 +93,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-compute-test.cc
     tests/dx12-placed-test.cc
     tests/dx12-transient-test.cc
+    tests/dx12-texture-barrier-test.cc
 )
 
 target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)

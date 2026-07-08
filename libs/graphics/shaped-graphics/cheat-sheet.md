@@ -277,7 +277,7 @@ cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / wor
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them)
-// Access is inferred from each op (upload⇒transfer_write, dispatch⇒bound views' access); no public
+// Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
 // declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```
 

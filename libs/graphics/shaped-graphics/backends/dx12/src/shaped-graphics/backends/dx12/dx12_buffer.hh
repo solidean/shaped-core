@@ -70,37 +70,52 @@ public:
     mutable std::atomic<cc::u64> _pending_async_download_value = 0;
 
     // --- concurrent access-state tracking ------------------------------------------------------------
-    // Each open command list keys its private access state by its command_list_slot; `canonical` is the
-    // committed state between lists. Mutable: a buffer's shape is fixed (shared-immutable) but its tracked
-    // GPU state changes as lists record against it. Guarded by a mutex because concurrent command lists may
-    // record against the same buffer. A dx12 buffer's layout is always `general` — D3D12 decays buffers to
-    // COMMON at ExecuteCommandLists — so cross-list ordering rides on that decay and only intra-list
-    // hazards ever produce barriers.
+    // Each open command list keys its private intra-list access state by its command_list_slot. Guarded by a
+    // mutex because concurrent command lists may record against the same buffer. Unlike a texture there is no
+    // canonical between-lists state and no promote/revert: a dx12 buffer's layout is always `general` (D3D12
+    // decays buffers to COMMON at ExecuteCommandLists), so cross-list ordering rides on that decay and only
+    // *intra-list* hazards ever produce a barrier — each list seeds a fresh state and clears its slot at
+    // submit/drop.
     struct access_slot
     {
         sg::resource_access_state state;
-        bool active = false; // this slot's command list has touched the buffer since it started tracking
+        bool active = false;          // this slot's command list has touched the buffer since it started tracking
+        bool recorded = false;        // this slot's command list has added the buffer to its finalize set (dedup)
+        bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
     };
     struct access_tracking
     {
         cc::small_vector<access_slot, 4> slots; // indexed by command_list_slot; SVO for a few concurrent lists
-        sg::resource_access_state canonical;    // committed state between command lists (layout always general)
     };
     mutable cc::mutex<access_tracking> _access;
 
-    /// Declare `stages`/`access` for `slot` (lazily starting from canonical on first touch) and return the
-    /// intra-list barrier to emit before the op — `needed == false` when it is a freebie. Thread-safe.
-    [[nodiscard]] sg::access_barrier declare_access(sg::command_list_slot slot,
-                                                    sg::pipeline_stage_flags stages,
-                                                    sg::access_flags access) const;
+    /// Accumulate one declared `stages`/`access` for `slot` (a fresh state on first touch) into the next-op
+    /// state, without emitting anything. Call once per binding — a buffer bound several times to the same op
+    /// declares several times; `flush_access` then merges them into one barrier. Thread-safe.
+    void declare_access(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access) const;
 
-    /// Finalize `slot` when its command list is submitted: promote its final state to canonical if this was
-    /// the last open list (`promote`), else roll back to canonical (a no-op layout-wise for buffers). Clears
-    /// the slot for reuse. No barriers are needed for buffers (layout is always general). Thread-safe.
-    void finalize_slot(sg::command_list_slot slot, bool promote) const;
+    /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last
+    /// flush, false after. The command list uses it to enqueue the buffer for the pre-op barrier flush
+    /// exactly once, no matter how many times it is bound. `flush_access` clears it. Thread-safe.
+    [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot) const;
 
-    /// Discard `slot` when its command list is dropped: the recorded work never runs, so just clear the
-    /// slot (canonical is unchanged). Thread-safe.
+    /// Flush the accesses declared for `slot` since the last flush and return the single intra-list barrier
+    /// that satisfies their union — `needed == false` when it is a freebie. Called once per op, before it,
+    /// after all its bindings are declared; also clears the pending-barrier flag. Thread-safe.
+    [[nodiscard]] sg::access_barrier flush_access(sg::command_list_slot slot) const;
+
+    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false
+    /// after (until the slot is cleared by finalize/discard). The command list uses it to add the buffer to
+    /// its touched set exactly once, in O(1) — replacing a linear scan. Thread-safe.
+    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot) const;
+
+    /// Finalize `slot` when its command list is submitted: just clear the slot (frees the tracking slot for a
+    /// future list; a buffer has no layout to promote or revert, and no between-lists state to carry). No
+    /// barriers are needed for buffers. Thread-safe.
+    void finalize_slot(sg::command_list_slot slot) const;
+
+    /// Discard `slot` when its command list is dropped: the recorded work never runs, so just clear the slot.
+    /// Identical to `finalize_slot` for a buffer (nothing to promote or revert). Thread-safe.
     void discard_slot(sg::command_list_slot slot) const;
 
 protected:

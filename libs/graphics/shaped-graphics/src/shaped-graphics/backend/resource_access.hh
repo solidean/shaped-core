@@ -22,14 +22,14 @@ namespace sg
 enum class access_flags : u32
 {
     none = 0,
-    uniform_read = 1u << 0,   // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
-    index_read = 1u << 1,     // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
-    vertex_read = 1u << 2,    // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
-    shader_read = 1u << 3,    // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
-    shader_write = 1u << 4,   // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
-    transfer_read = 1u << 5,  // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
-    transfer_write = 1u << 6, // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
-    indirect_read = 1u << 7,  // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
+    uniform_read = 1u << 0,  // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
+    index_read = 1u << 1,    // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
+    vertex_read = 1u << 2,   // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
+    shader_read = 1u << 3,   // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
+    shader_write = 1u << 4,  // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
+    copy_read = 1u << 5,     // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
+    copy_write = 1u << 6,    // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
+    indirect_read = 1u << 7, // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
 
     // Designed-in for later resource families (textures / render targets / raytracing); unused for buffers.
     color_write = 1u << 8,  // render-target write:     DX12 RENDER_TARGET   / Vk COLOR_ATTACHMENT_WRITE
@@ -49,7 +49,7 @@ enum class pipeline_stage_flags : u32
     vertex = 1u << 1,        // vertex-processing stages: DX12 VERTEX_SHADING / Vk VERTEX_SHADER (+ pre-raster)
     fragment = 1u << 2,      // DX12 PIXEL_SHADING / Vk FRAGMENT_SHADER
     compute = 1u << 3,       // DX12 COMPUTE_SHADING / Vk COMPUTE_SHADER
-    transfer = 1u << 4,      // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
+    copy = 1u << 4,          // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
     attachment = 1u << 5,    // render-target + depth output: DX12 RENDER_TARGET|DEPTH_STENCIL / Vk COLOR|DS_ATTACHMENT
     raytracing = 1u << 6,    // DX12 RAYTRACING / Vk RAY_TRACING_SHADER
     accel_build = 1u << 7,   // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
@@ -60,16 +60,16 @@ enum class pipeline_stage_flags : u32
 /// is complete.
 enum class texture_layout : u32
 {
-    undefined,    // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
-    general,      // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
-    shader_read,  // sampled/SRV: DX12 LAYOUT_SHADER_RESOURCE / Vk SHADER_READ_ONLY_OPTIMAL
-    storage,      // UAV: DX12 LAYOUT_UNORDERED_ACCESS / Vk IMAGE_LAYOUT_GENERAL (storage)
-    color,        // render target: DX12 LAYOUT_RENDER_TARGET / Vk COLOR_ATTACHMENT_OPTIMAL
-    depth_read,   // DX12 LAYOUT_DEPTH_STENCIL_READ / Vk DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    depth_write,  // DX12 LAYOUT_DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-    transfer_src, // copy source: DX12 LAYOUT_COPY_SOURCE / Vk TRANSFER_SRC_OPTIMAL
-    transfer_dst, // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
-    present,      // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
+    undefined,        // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
+    general,          // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
+    shader_readonly,  // sampled/SRV: DX12 LAYOUT_SHADER_RESOURCE / Vk SHADER_READ_ONLY_OPTIMAL
+    shader_readwrite, // UAV / storage: DX12 LAYOUT_UNORDERED_ACCESS / Vk IMAGE_LAYOUT_GENERAL
+    render_target,    // color attachment: DX12 LAYOUT_RENDER_TARGET / Vk COLOR_ATTACHMENT_OPTIMAL
+    depth_readonly,   // DX12 LAYOUT_DEPTH_STENCIL_READ / Vk DEPTH_STENCIL_READ_ONLY_OPTIMAL
+    depth_readwrite,  // DX12 LAYOUT_DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    copy_src,         // copy source: DX12 LAYOUT_COPY_SOURCE / Vk TRANSFER_SRC_OPTIMAL
+    copy_dst,         // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
+    present,          // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
 };
 
 // access_flags bit ops
@@ -142,6 +142,6 @@ constexpr pipeline_stage_flags& operator|=(pipeline_stage_flags& a, pipeline_sta
 /// they are ROP-ordered (globally serialized) and act as ordered "freebies".
 [[nodiscard]] constexpr bool is_unordered_write(access_flags a)
 {
-    return has_any(a & (access_flags::shader_write | access_flags::transfer_write | access_flags::accel_write));
+    return has_any(a & (access_flags::shader_write | access_flags::copy_write | access_flags::accel_write));
 }
 } // namespace sg

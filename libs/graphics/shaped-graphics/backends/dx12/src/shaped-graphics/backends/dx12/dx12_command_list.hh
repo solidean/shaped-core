@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backend/command_list_slot.hh>
+#include <shaped-graphics/backend/subresource.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -39,6 +40,11 @@ public:
     /// every resource it touches, so concurrent lists don't share state (a backend helper, not sg API).
     [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
 
+    /// Record the barriers collected since the last flush (all the buffer + texture hazards an operation's
+    /// bound/touched resources implied), in one `Barrier` call, then clear the pending set. Called just
+    /// before every GPU op that consumes them, and by the context at submit for the finalize reverts.
+    void flush_barriers();
+
     dx12_context& _ctx;             // creating context — outlives this list
     sg::command_list_slot _slot;    // released to the context's slot allocator on submit/drop
     bool _consumed = false;         // set by submit/drop; gates the destructor's auto-drop
@@ -50,11 +56,29 @@ public:
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
 
+    // Resources whose access has been declared for the *next* GPU op but not yet flushed. track_*_access
+    // appends a resource here on its first binding to the op only (declare reports that), so each appears at
+    // most once; flush_barriers() flushes each to merge its declares into one barrier, then clears these.
+    // Empty between ops.
+    cc::vector<dx12_buffer_handle> _pending_barrier_buffers;
+    cc::vector<dx12_texture_handle> _pending_barrier_textures;
+
+    // Barriers collected for the *next* GPU op: flush_barriers() flushes the pending-barrier resources above
+    // into these, then records the whole batch in one Barrier call just before the op. Empty between ops.
+    // Public so the context can stage the finalize reverts here at submit.
+    cc::vector<D3D12_BUFFER_BARRIER> _pending_buffer_barriers;
+    cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
+
     // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop, and so
     // each gets the reverse async-upload stamp at submit) and the group currently bound to compute set 0
     // (whose views are declared at dispatch).
     cc::vector<dx12_buffer_handle> _touched_buffers;
     dx12_binding_group const* _bound_group = nullptr;
+
+    // Textures this list has touched, so their per-list subresource slots are finalized at submit/drop. A
+    // texture finalize can return revert barriers (transitions back to its entry layout on a non-final
+    // submit) that are emitted before Close — unlike buffers, which are teeth-free.
+    cc::vector<dx12_texture_handle> _touched_textures;
 
     // Highest async-upload completion value any buffer this list touches is waiting on. At submit the
     // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
@@ -100,5 +124,15 @@ private:
     // to COMMON at ExecuteCommandLists, so no trailing barrier is needed. Also folds the buffer's pending
     // async-upload value into _required_copy_wait (the forward cross-queue sync for ctx.upload).
     void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
+
+    // Declare `stages`/`access`/`layout` over `range` on `texture` for this list's slot, emit the per-box
+    // layout-transition barriers the tracker asks for, and record the texture so its slot is finalized at
+    // submit/drop. No public op calls this yet — it is the wired, tested bridge a future texture copy /
+    // upload / dispatch op will use.
+    void track_texture_access(dx12_texture_handle const& texture,
+                              sg::subresource_range range,
+                              sg::pipeline_stage_flags stages,
+                              sg::access_flags access,
+                              sg::texture_layout layout);
 };
 } // namespace sg::backend::dx12
