@@ -21,8 +21,8 @@ enum class binding_type
     readwrite_structured_buffer, ///< rw array of T   — UAV structured / rw SSBO
     readonly_raw_buffer,         ///< read raw bytes  — SRV byte-addressed
     readwrite_raw_buffer,        ///< rw raw bytes    — UAV byte-addressed
-    sampled_texture,             ///< sampled texture — SRV (readonly, shape texture)
-    storage_texture,             ///< storage texture — UAV (readwrite, shape texture)
+    readonly_texture,            ///< sampled texture — SRV (readonly, shape texture)
+    readwrite_texture,           ///< storage texture — UAV (readwrite, shape texture)
     // Future (with a graphics pipeline / samplers): sampler, acceleration_structure.
 };
 
@@ -39,9 +39,9 @@ enum class binding_type
     case binding_type::readwrite_structured_buffer:
     case binding_type::readwrite_raw_buffer:
         return view_class::readwrite;
-    case binding_type::sampled_texture:
+    case binding_type::readonly_texture:
         return view_class::readonly;
-    case binding_type::storage_texture:
+    case binding_type::readwrite_texture:
         return view_class::readwrite;
     }
     return view_class::uniform; // unreachable for the closed set above
@@ -60,8 +60,8 @@ enum class binding_type
     case binding_type::readonly_raw_buffer:
     case binding_type::readwrite_raw_buffer:
         return view_shape::raw;
-    case binding_type::sampled_texture:
-    case binding_type::storage_texture:
+    case binding_type::readonly_texture:
+    case binding_type::readwrite_texture:
         return view_shape::texture;
     }
     return view_shape::uniform_block; // unreachable for the closed set above

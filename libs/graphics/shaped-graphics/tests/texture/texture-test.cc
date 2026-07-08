@@ -55,30 +55,33 @@ TEST("sg - pixel_format block size")
 
 TEST("sg - texture_description shape is derived, not flagged")
 {
+    using sg::texture_dimension;
+
     // A plain 2D texture: no array, no cube, single-sampled.
     sg::texture_description d2;
     d2.format = sg::pixel_format::rgba8_unorm;
-    d2.dimension = sg::texture_dimension::d2;
+    d2.dimension = texture_dimension::d2;
     d2.width = 64;
     d2.height = 32;
-    CHECK(sg::traits_of(d2) == sg::texture_traits{.dimension = sg::texture_dimension::d2});
+    CHECK(sg::texture_traits<texture_dimension::d2>::matches(d2));
 
     // A single-slice 2D array is distinct from a plain 2D texture purely via array_layers being set.
     sg::texture_description d2a = d2;
     d2a.array_layers = 1;
-    CHECK((sg::traits_of(d2a) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .is_array = true}));
-    CHECK(sg::traits_of(d2) != sg::traits_of(d2a));
+    CHECK((sg::texture_traits<texture_dimension::d2, /*array*/ true>::matches(d2a)));
+    CHECK(!sg::texture_traits<texture_dimension::d2>::matches(d2a));        // the array shape isn't the plain one
+    CHECK((!sg::texture_traits<texture_dimension::d2, true>::matches(d2))); // and vice versa
 
     // Cube + multisampling fold into is_cube / sample_count, not extra dimensions.
     sg::texture_description cube;
     cube.format = sg::pixel_format::rgba8_unorm;
     cube.is_cube = true;
-    CHECK((sg::traits_of(cube) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .is_cube = true}));
+    CHECK((sg::texture_traits<texture_dimension::d2, /*array*/ false, /*cube*/ true>::matches(cube)));
 
     sg::texture_description ms;
     ms.format = sg::pixel_format::rgba8_unorm;
     ms.sample_count = 4;
-    CHECK((sg::traits_of(ms) == sg::texture_traits{.dimension = sg::texture_dimension::d2, .is_multisampled = true}));
+    CHECK((sg::texture_traits<texture_dimension::d2, false, false, /*ms*/ true>::matches(ms)));
 }
 
 // The shape-gated accessors exist only where the shape has that axis — a compile-time contract.

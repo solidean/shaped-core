@@ -40,7 +40,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
     {
         auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::readwrite_texture), sg::allocation_info{});
         REQUIRE(tex.has_value());
-        sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::storage_texture};
+        sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
         auto layout = c.create_dx12_binding_layout(cc::span<sg::binding const>(&b, 1), sg::lifetime_scope::persistent);
         REQUIRE(layout.has_value());
 
@@ -55,7 +55,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
     {
         auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::readonly_texture), sg::allocation_info{});
         REQUIRE(tex.has_value());
-        sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampled_texture};
+        sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
         auto layout = c.create_dx12_binding_layout(cc::span<sg::binding const>(&b, 1), sg::lifetime_scope::persistent);
         REQUIRE(layout.has_value());
 
@@ -90,7 +90,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
                                           .count = 1,
                                           .type = sg::binding_type::readwrite_structured_buffer});
     shader.bindings.push_back(
-        sg::binding{.name = "Tex", .set = 0, .index = 1, .count = 1, .type = sg::binding_type::storage_texture});
+        sg::binding{.name = "Tex", .set = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_texture});
 
     auto buf
         = c.create_dx12_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),

@@ -103,23 +103,31 @@ texels, still declared as the requested dimension in the shader.)
 ### The factory surface
 
 The factories live on the typed `texture<Traits>` wrapper, `requires`-gated by shape so misuse is a
-compile error (mirroring the wrapper's `height()` / `depth()`):
+compile error (mirroring the wrapper's `height()` / `depth()`). Rather than a positional overload set,
+each factory takes **one shape-specific parameter bag** — `Traits::read_only_params`,
+`Traits::read_write_2d_params`, … — an aggregate that names only the axes that shape has. A plain 2D
+texture's `read_only_params` is `{ view_range mips; }`; a 2D array's adds `slices`; a cube array's adds
+`cubes`. Selecting a nonsensical axis (e.g. `.slices` on a non-array) is a compile error, not a
+silently-ignored field. A `view_range` is `{ int start = 0; int count = -1 }` where `count < 0` means "to
+the end", so the whole-axis default is `{}`.
 
-- **Sampled (SRV):** `as_readonly_view(first_mip, mip_count)` on any shape (whole, natural dimension);
-  `as_readonly_view(array_range)` and `as_readonly_slice_view(slice)` on non-cube arrays;
-  `as_readonly_face_view(face)` on cubes; `as_readonly_cube_view(cube)`,
-  `as_readonly_cube_range_view(cube_range)` and `as_readonly_face_view(cube, face)` on cube arrays. A mip
-  *range* is selectable (default: all mips). Multisampled textures **are** sampleable (`Texture2DMS…`) —
-  they just carry no mip range, and a multisampled cube samples as a `Texture2DMSArray` (there is no
-  `TextureCubeMS`).
-- **Storage (UAV):** only where `!Traits.is_multisampled` (D3D12 forbids MSAA UAVs), always a **single mip
-  level**, and a cube is written as a 2D array (no cube UAV). `as_readwrite_view(mip)` /
-  `as_readwrite_view(mip, array_range)` / `as_readwrite_slice_view` / `as_readwrite_face_view`, plus
-  `as_readwrite_depth_slice_view(depth_slice_range)` on 3D textures (the depth / W/Z axis — D3D12's
-  `FirstWSlice`/`WSize` window — a UAV-only axis with no SRV analog, tracked separately from the
-  subresource range since a whole 3D mip is one subresource for hazard purposes).
+- **Natural views** — the texture's own dimension: `as_readonly_view(params = {})` on any shape,
+  `as_readwrite_view(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
+  sub-selection: a mip range (sampled) or single mip (storage), an array-slice range, a cube range, or a
+  3D depth-slice window (`depth_slices`, D3D12's `FirstWSlice`/`WSize` — tracked outside the subresource
+  range since a whole 3D mip is one subresource for hazard purposes).
+- **Reinterpreting views** — bind one slice / face / cube as a lower dimension, each with its own params
+  bag: `as_readonly_2d_view` / `as_readwrite_2d_view` (one slice/face → `Texture2D`), `as_readonly_1d_view`
+  / `as_readwrite_1d_view` (one slice of a 1D array → `Texture1D`), and `as_readonly_cube_view` (one cube
+  of a cube array → `TextureCube`). These are what make "slice 3 as `Texture2D`" distinct from a size-1
+  array window.
 
-`binding_type::sampled_texture` / `storage_texture` map to `(readonly, texture)` / `(readwrite, texture)`.
+Multisampled textures **are** sampleable (`Texture2DMS…`) — their params just have no separate mip axis
+(one mip level), and a multisampled cube samples as a `Texture2DMSArray` (there is no `TextureCubeMS`).
+Storage views never apply to MSAA (D3D12 forbids MSAA UAVs) and a cube is written as a 2D array (no cube
+UAV).
+
+`binding_type::readonly_texture` / `readwrite_texture` map to `(readonly, texture)` / `(readwrite, texture)`.
 When a texture is bound to a compute dispatch, the barrier system transitions it to the layout its access
 implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of`.
 

@@ -1,64 +1,44 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/common/utility.hh> // cc::move, cc::start_end
 #include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/texture_traits.hh> // texture_traits<…> + the view-factory parameter bags
 #include <shaped-graphics/views.hh>
 
 namespace sg
 {
-/// Sentinel `mip_count` for the sampled-view factories: "all remaining mips from the start index". A
-/// `mip_count >= 0` selects exactly that many mips instead.
-inline constexpr int all_mips = -1;
-
-/// The compile-time shape of a texture: the axes that are variable across the typedefs below, bundled
-/// into one structural value so `texture<Traits>` takes a single template parameter. Extents, mip count,
-/// format etc. are runtime (they live on texture_description); only the *kind* of texture is encoded here.
-struct texture_traits
-{
-    texture_dimension dimension = texture_dimension::d2;
-    bool is_array = false;
-    bool is_cube = false;
-    bool is_multisampled = false;
-
-    [[nodiscard]] constexpr bool operator==(texture_traits const&) const = default;
-};
-
-/// The compile-time traits of a runtime description — the bridge used to shape-check a raw_texture
-/// against a `texture<Traits>` wrapper.
-[[nodiscard]] constexpr texture_traits traits_of(texture_description const& d)
-{
-    return texture_traits{
-        .dimension = d.dimension,
-        .is_array = d.array_layers.has_value(),
-        .is_cube = d.is_cube,
-        .is_multisampled = d.sample_count > 1,
-    };
-}
-
-/// A strongly-typed view onto a raw_texture whose shape is fixed at compile time by `Traits`. Privately
-/// holds a raw_texture_handle; adds shape-specific accessors gated by `requires` so, e.g., `depth()`
-/// exists only on 3D textures and `array_layers()` only on arrays — misuse is a compile error, not a
-/// runtime check. Reach the raw resource for the general (raw) API via `raw()`. Value type: copy is a
-/// cheap handle copy. Prefer the typedefs (`texture_2d`, `texture_cube_array`, …) over spelling Traits.
-template <texture_traits Traits>
+/// A strongly-typed view onto a raw_texture whose shape is fixed at compile time by `Traits` (a
+/// `texture_traits`). Privately holds a raw_texture_handle; adds shape-specific accessors gated by
+/// `requires` so, e.g., `depth()` exists only on 3D textures — misuse is a compile error, not a runtime
+/// check. Reach the raw resource for the general (raw) API via `raw()`. Value type: copy is a cheap
+/// handle copy. Prefer the typedefs (`texture_2d`, `texture_cube_array`, …) over spelling Traits.
+template <class Traits>
 class texture
 {
+public:
     // Compile-time shape, mirrored from Traits for convenient introspection.
-public:
-    static constexpr texture_dimension dimension = Traits.dimension;
-    static constexpr bool is_array = Traits.is_array;
-    static constexpr bool is_cube = Traits.is_cube;
-    static constexpr bool is_multisampled = Traits.is_multisampled;
+    static constexpr texture_dimension dimension = Traits::dimension;
+    static constexpr bool is_array = Traits::is_array;
+    static constexpr bool is_cube = Traits::is_cube;
+    static constexpr bool is_multisampled = Traits::is_multisampled;
 
-public:
+    // The parameter bag each view factory takes, surfaced for call sites and introspection.
+    using read_only_params = typename Traits::read_only_params;
+    using read_write_params = typename Traits::read_write_params;
+    using read_only_2d_params = typename Traits::read_only_2d_params;
+    using read_only_1d_params = typename Traits::read_only_1d_params;
+    using read_only_cube_params = typename Traits::read_only_cube_params;
+    using read_write_2d_params = typename Traits::read_write_2d_params;
+    using read_write_1d_params = typename Traits::read_write_1d_params;
+
     texture() = default;
 
     /// Wraps a raw_texture, asserting its runtime shape matches `Traits`. The handle must be non-null.
     explicit texture(raw_texture_handle raw) : _raw(cc::move(raw))
     {
         CC_ASSERT(_raw != nullptr, "texture<Traits> wraps a non-null raw_texture");
-        CC_ASSERT(traits_of(_raw->description()) == Traits, "raw_texture shape does not match texture<Traits>");
+        CC_ASSERT(Traits::matches(_raw->description()), "raw_texture shape does not match texture<Traits>");
     }
 
     /// The underlying raw resource (never null unless default-constructed). Use this to reach the raw
@@ -72,233 +52,201 @@ public:
 
     // Shape-gated queries — present only where the shape has that axis.
     [[nodiscard]] int height() const
-        requires(Traits.dimension != texture_dimension::d1)
+        requires(Traits::dimension != texture_dimension::d1)
     {
         return _raw->height();
     }
     [[nodiscard]] int depth() const
-        requires(Traits.dimension == texture_dimension::d3)
+        requires(Traits::dimension == texture_dimension::d3)
     {
         return _raw->depth();
     }
     [[nodiscard]] int array_layers() const
-        requires(Traits.is_array)
+        requires(Traits::is_array)
     {
         return _raw->array_layers();
     }
     [[nodiscard]] int sample_count() const
-        requires(Traits.is_multisampled)
+        requires(Traits::is_multisampled)
     {
         return _raw->sample_count();
     }
 
-    // Shader-facing views — strongly-typed descriptors a binding_group binds. Each asserts the texture
-    // carries the matching usage. A sampled view spans a mip range; a storage view is a single mip level.
-    // `dimension` is a reinterpretation (single slice → 2D, single face → 2D, single cube → cube), so
-    // selecting one slice is a *different binding* than a size-1 array window.
+    // Shader-facing views. `as_readonly_view` / `as_readwrite_view` are the natural views (the texture's
+    // own dimension); the `_2d` / `_1d` / `cube` variants reinterpret one slice / face / cube as a lower
+    // dimension, so binding one slice is a *different binding* than a size-1 array window. Each takes a
+    // shape-specific parameter bag (`Traits::*_params`) naming only the axes that shape has, and asserts
+    // the matching texture_usage.
 
-    // -- Sampled (read-only / SRV) views. `first_mip`/`mip_count` narrow the mip range; the default is all
-    //    mips, and a `mip_count < 0` (all_mips) means "to the last mip".
-
-    /// Sampled view over the whole texture in its natural dimension. Requires readonly_texture usage.
-    [[nodiscard]] texture_readonly_view as_readonly_view(int first_mip = 0, int mip_count = all_mips) const
+    /// Sampled (SRV) view over the whole texture in its natural dimension.
+    [[nodiscard]] texture_readonly_view as_readonly_view(typename Traits::read_only_params const& p = {}) const
     {
-        return _readonly(_srv_whole_dim(), _whole_array_range(), _resolve_mips(first_mip, mip_count));
+        return _make_readonly(_srv_whole_dim(), _natural_array_range(p), _mips(p));
     }
 
-    /// Sampled view over a sub-range of array slices (in slice units), keeping the array dimension. Only on
-    /// non-cube array textures.
-    [[nodiscard]] texture_readonly_view as_readonly_view(cc::start_end array_range,
-                                                         int first_mip = 0,
-                                                         int mip_count = all_mips) const
-        requires(Traits.is_array && !Traits.is_cube)
+    /// Sampled view of one array slice, bound as a Texture2D (or Texture2DMS). Only on 2D array shapes.
+    [[nodiscard]] texture_readonly_view as_readonly_2d_view(typename Traits::read_only_2d_params const& p = {}) const
+        requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
-        return _readonly(_srv_whole_dim(), _checked_array(array_range), _resolve_mips(first_mip, mip_count));
+        auto const dim = Traits::is_multisampled ? texture_view_dimension::tex_2d_ms : texture_view_dimension::tex_2d;
+        return _make_readonly(dim, _single(_pick_slice(p)), _mips(p));
     }
 
-    /// Sampled view of a single array slice, bound as a non-array texture (Texture1D/Texture2D). Only on
-    /// non-cube array textures.
-    [[nodiscard]] texture_readonly_view as_readonly_slice_view(int slice, int first_mip = 0, int mip_count = all_mips) const
-        requires(Traits.is_array && !Traits.is_cube)
+    /// Sampled view of one array slice, bound as a Texture1D. Only on 1D array textures.
+    [[nodiscard]] texture_readonly_view as_readonly_1d_view(typename Traits::read_only_1d_params const& p = {}) const
+        requires(Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _readonly(_element_dim(), _single(slice), _resolve_mips(first_mip, mip_count));
+        return _make_readonly(texture_view_dimension::tex_1d, _single(_pick_slice(p)), _mips(p));
     }
 
-    /// Sampled view of a single cube face, bound as a Texture2D. Only on (non-array) cube textures; `face`
-    /// in [0, 6).
-    [[nodiscard]] texture_readonly_view as_readonly_face_view(int face, int first_mip = 0, int mip_count = all_mips) const
-        requires(Traits.is_cube && !Traits.is_array)
+    /// Sampled view of one cube (all 6 faces) of a cube array, bound as a TextureCube. Only on cube arrays.
+    [[nodiscard]] texture_readonly_view as_readonly_cube_view(typename Traits::read_only_cube_params const& p = {}) const
+        requires(Traits::is_cube && Traits::is_array && !Traits::is_multisampled)
     {
-        CC_ASSERT(face >= 0 && face < 6, "cube face index out of range");
-        return _readonly(_element_dim(), _single(face), _resolve_mips(first_mip, mip_count));
+        CC_ASSERT(p.cube >= 0 && p.cube < _raw->array_layers(), "cube index out of range");
+        return _make_readonly(texture_view_dimension::cube, {.start = isize(p.cube) * 6, .end = isize(p.cube) * 6 + 6},
+                              _mips(p));
     }
 
-    /// Sampled view of a single cube (all 6 faces) of a cube array, bound as a TextureCube. Only on cube
-    /// arrays.
-    [[nodiscard]] texture_readonly_view as_readonly_cube_view(int cube, int first_mip = 0, int mip_count = all_mips) const
-        requires(Traits.is_cube && Traits.is_array)
+    /// Storage (UAV) view over the whole texture at one mip level. Not on multisampled textures.
+    [[nodiscard]] texture_readwrite_view as_readwrite_view(typename Traits::read_write_params const& p = {}) const
+        requires(!Traits::is_multisampled)
     {
-        CC_ASSERT(cube >= 0 && cube < _raw->array_layers(), "cube index out of range");
-        return _readonly(texture_view_dimension::cube, {.start = isize(cube) * 6, .end = isize(cube) * 6 + 6},
-                         _resolve_mips(first_mip, mip_count));
+        return _make_readwrite(_uav_whole_dim(), _natural_array_range(p), p.mip, _depth_slices(p));
     }
 
-    /// Sampled view over a sub-range of cubes (in cube units), bound as a TextureCubeArray. Only on cube
-    /// arrays.
-    [[nodiscard]] texture_readonly_view as_readonly_cube_range_view(cc::start_end cube_range,
-                                                                    int first_mip = 0,
-                                                                    int mip_count = all_mips) const
-        requires(Traits.is_cube && Traits.is_array)
+    /// Storage view of one array slice / cube face, bound as a Texture2D. Only on non-MS 2D array shapes.
+    [[nodiscard]] texture_readwrite_view as_readwrite_2d_view(typename Traits::read_write_2d_params const& p = {}) const
+        requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
+                 && (Traits::is_array || Traits::is_cube))
     {
-        CC_ASSERT(cube_range.start >= 0 && cube_range.end > cube_range.start && cube_range.end <= _raw->array_layers(),
-                  "cube range out of range");
-        return _readonly(texture_view_dimension::cube_array, {.start = cube_range.start * 6, .end = cube_range.end * 6},
-                         _resolve_mips(first_mip, mip_count));
+        return _make_readwrite(texture_view_dimension::tex_2d, _single(_pick_slice(p)), p.mip,
+                               _whole_depth_slice_range());
     }
 
-    /// Sampled view of a single face of a single cube of a cube array, bound as a Texture2D. Only on cube
-    /// arrays; `face` in [0, 6).
-    [[nodiscard]] texture_readonly_view as_readonly_face_view(int cube,
-                                                              int face,
-                                                              int first_mip = 0,
-                                                              int mip_count = all_mips) const
-        requires(Traits.is_cube && Traits.is_array)
+    /// Storage view of one array slice, bound as a Texture1D. Only on non-MS 1D array textures.
+    [[nodiscard]] texture_readwrite_view as_readwrite_1d_view(typename Traits::read_write_1d_params const& p = {}) const
+        requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        CC_ASSERT(cube >= 0 && cube < _raw->array_layers(), "cube index out of range");
-        CC_ASSERT(face >= 0 && face < 6, "cube face index out of range");
-        return _readonly(_element_dim(), _single(cube * 6 + face), _resolve_mips(first_mip, mip_count));
-    }
-
-    // -- Storage (read-write / UAV) views. Always a single mip level (a UAV targets one mip); requires
-    //    readwrite_texture usage and a non-multisampled texture (D3D12 forbids MSAA UAVs, and a cube UAV is
-    //    a 2D array).
-
-    /// Storage view over the whole texture at one mip level. Cube/array targets all slices; 3D all depth.
-    [[nodiscard]] texture_readwrite_view as_readwrite_view(int mip = 0) const
-        requires(!Traits.is_multisampled)
-    {
-        return _readwrite(_uav_whole_dim(), _whole_array_range(), mip, _whole_depth_slice_range());
-    }
-
-    /// Storage view over a sub-range of array slices (in slice units) at one mip. Only on array textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_view(int mip, cc::start_end array_range) const
-        requires(!Traits.is_multisampled && Traits.is_array)
-    {
-        return _readwrite(_uav_whole_dim(), _checked_array(array_range), mip, _whole_depth_slice_range());
-    }
-
-    /// Storage view of a single array slice, bound as a non-array texture. Only on array textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_slice_view(int slice, int mip = 0) const
-        requires(!Traits.is_multisampled && Traits.is_array)
-    {
-        return _readwrite(_element_dim(), _single(slice), mip, _whole_depth_slice_range());
-    }
-
-    /// Storage view of a single cube face, bound as a Texture2D. Only on (non-array) cube textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_face_view(int face, int mip = 0) const
-        requires(!Traits.is_multisampled && Traits.is_cube && !Traits.is_array)
-    {
-        CC_ASSERT(face >= 0 && face < 6, "cube face index out of range");
-        return _readwrite(_element_dim(), _single(face), mip, _whole_depth_slice_range());
-    }
-
-    /// Storage view of a single face of one cube of a cube array, bound as a Texture2D. Only on cube arrays.
-    [[nodiscard]] texture_readwrite_view as_readwrite_face_view(int cube, int face, int mip = 0) const
-        requires(!Traits.is_multisampled && Traits.is_cube && Traits.is_array)
-    {
-        CC_ASSERT(cube >= 0 && cube < _raw->array_layers(), "cube index out of range");
-        CC_ASSERT(face >= 0 && face < 6, "cube face index out of range");
-        return _readwrite(_element_dim(), _single(cube * 6 + face), mip, _whole_depth_slice_range());
-    }
-
-    /// Storage view over a sub-range of depth slices (the 3D texture's W/Z axis) at one mip. Only on 3D
-    /// textures; `depth_slice_range` is half-open, in slices.
-    [[nodiscard]] texture_readwrite_view as_readwrite_depth_slice_view(cc::start_end depth_slice_range, int mip = 0) const
-        requires(!Traits.is_multisampled && Traits.dimension == texture_dimension::d3)
-    {
-        CC_ASSERT(depth_slice_range.start >= 0 && depth_slice_range.end > depth_slice_range.start
-                      && depth_slice_range.end <= _raw->depth(),
-                  "depth slice range out of range");
-        return _readwrite(texture_view_dimension::tex_3d, _whole_array_range(), mip, depth_slice_range);
+        return _make_readwrite(texture_view_dimension::tex_1d, _single(_pick_slice(p)), p.mip,
+                               _whole_depth_slice_range());
     }
 
 private:
-    // The shader-facing dimension a whole-texture sampled view binds as, from the compile-time shape.
+    // -- Dimension mapping (compile-time from the shape). --
+
+    // The dimension a whole-texture sampled view binds as.
     [[nodiscard]] static constexpr texture_view_dimension _srv_whole_dim()
     {
         using d = texture_view_dimension;
-        if constexpr (Traits.dimension == texture_dimension::d1)
-            return Traits.is_array ? d::tex_1d_array : d::tex_1d;
-        else if constexpr (Traits.dimension == texture_dimension::d3)
+        if constexpr (Traits::dimension == texture_dimension::d1)
+            return Traits::is_array ? d::tex_1d_array : d::tex_1d;
+        else if constexpr (Traits::dimension == texture_dimension::d3)
             return d::tex_3d;
-        else if constexpr (Traits.is_multisampled) // d2, no TextureCubeMS: a cube samples as a 2D MS array
-            return (Traits.is_array || Traits.is_cube) ? d::tex_2d_ms_array : d::tex_2d_ms;
-        else if constexpr (Traits.is_cube)
-            return Traits.is_array ? d::cube_array : d::cube;
+        else if constexpr (Traits::is_multisampled) // d2, no TextureCubeMS: a cube samples as a 2D-MS array
+            return (Traits::is_array || Traits::is_cube) ? d::tex_2d_ms_array : d::tex_2d_ms;
+        else if constexpr (Traits::is_cube)
+            return Traits::is_array ? d::cube_array : d::cube;
         else
-            return Traits.is_array ? d::tex_2d_array : d::tex_2d;
+            return Traits::is_array ? d::tex_2d_array : d::tex_2d;
     }
 
     // The dimension a whole-texture storage view binds as: no cube / no MSAA — a cube UAV is a 2D array.
     [[nodiscard]] static constexpr texture_view_dimension _uav_whole_dim()
     {
         using d = texture_view_dimension;
-        if constexpr (Traits.dimension == texture_dimension::d1)
-            return Traits.is_array ? d::tex_1d_array : d::tex_1d;
-        else if constexpr (Traits.dimension == texture_dimension::d3)
+        if constexpr (Traits::dimension == texture_dimension::d1)
+            return Traits::is_array ? d::tex_1d_array : d::tex_1d;
+        else if constexpr (Traits::dimension == texture_dimension::d3)
             return d::tex_3d;
         else // d2, incl. cube (a 2D array of 6 faces)
-            return (Traits.is_array || Traits.is_cube) ? d::tex_2d_array : d::tex_2d;
+            return (Traits::is_array || Traits::is_cube) ? d::tex_2d_array : d::tex_2d;
     }
 
-    // The dimension a single-slice / single-face view drops to: the array-less element form.
-    [[nodiscard]] static constexpr texture_view_dimension _element_dim()
-    {
-        using d = texture_view_dimension;
-        if constexpr (Traits.dimension == texture_dimension::d1)
-            return d::tex_1d;
-        else
-            return Traits.is_multisampled ? d::tex_2d_ms : d::tex_2d;
-    }
+    // -- Range resolution from parameter bags (fields are detected structurally). --
 
-    // The whole array-slice range in slice units (a cube is 6 slices per cube).
-    [[nodiscard]] cc::start_end _whole_array_range() const
-    {
-        return {.start = 0, .end = isize(_raw->array_layers()) * (_raw->is_cube() ? 6 : 1)};
-    }
-    // The whole depth-slice (W/Z) range of a 3D texture; degenerate for other shapes (unused there).
+    // The whole array-slice count in slice units (a cube is 6 slices per cube).
+    [[nodiscard]] int _whole_slice_count() const { return _raw->array_layers() * (Traits::is_cube ? 6 : 1); }
+    [[nodiscard]] cc::start_end _whole_array_range() const { return {.start = 0, .end = _whole_slice_count()}; }
     [[nodiscard]] cc::start_end _whole_depth_slice_range() const
     {
-        if constexpr (Traits.dimension == texture_dimension::d3)
+        if constexpr (Traits::dimension == texture_dimension::d3)
             return {.start = 0, .end = _raw->depth()};
         else
             return {.start = 0, .end = 0};
     }
+
+    // Resolve a view_range against an axis total (count < 0 = to the end), bounds-checked.
+    [[nodiscard]] cc::start_end _resolve(view_range sel, int total) const
+    {
+        CC_ASSERT(sel.start >= 0 && sel.start < total, "view range start out of range");
+        int const end = sel.count < 0 ? total : sel.start + sel.count;
+        CC_ASSERT(end > sel.start && end <= total, "view range out of range");
+        return {.start = sel.start, .end = end};
+    }
     // A single array slice, bounds-checked against the whole array range.
     [[nodiscard]] cc::start_end _single(int slice) const
     {
-        CC_ASSERT(slice >= 0 && slice < _whole_array_range().end, "array slice out of range");
+        CC_ASSERT(slice >= 0 && slice < _whole_slice_count(), "array slice out of range");
         return {.start = slice, .end = slice + 1};
     }
-    // An array sub-range (slice units), bounds-checked against the whole array range.
-    [[nodiscard]] cc::start_end _checked_array(cc::start_end r) const
+
+    // The mip range a params bag selects: `p.mips` if present, else the whole range. MSAA has one mip.
+    template <class P>
+    [[nodiscard]] cc::start_end _mips(P const& p) const
     {
-        CC_ASSERT(r.start >= 0 && r.end > r.start && r.end <= _whole_array_range().end, "array range out of range");
-        return r;
+        if constexpr (requires { p.mips; })
+            return _resolve(p.mips, _raw->mip_levels());
+        else
+            return {.start = 0, .end = _raw->mip_levels()};
     }
-    // Resolve first_mip/mip_count (all_mips = to the last mip) to a checked half-open mip range.
-    [[nodiscard]] cc::start_end _resolve_mips(int first_mip, int mip_count) const
+    // The natural-view array range a params bag selects (cubes in cube units, slices in slice units).
+    template <class P>
+    [[nodiscard]] cc::start_end _natural_array_range(P const& p) const
     {
-        int const total = _raw->mip_levels();
-        CC_ASSERT(first_mip >= 0 && first_mip < total, "mip range start out of range");
-        int const end = mip_count < 0 ? total : first_mip + mip_count;
-        CC_ASSERT(end > first_mip && end <= total, "mip range out of range");
-        return {.start = first_mip, .end = end};
+        if constexpr (requires { p.cubes; })
+        {
+            auto const c = _resolve(p.cubes, _raw->array_layers());
+            return {.start = c.start * 6, .end = c.end * 6};
+        }
+        else if constexpr (requires { p.slices; })
+            return _resolve(p.slices, _whole_slice_count());
+        else
+            return _whole_array_range();
+    }
+    // The depth (W/Z) slice range a 3D storage params bag selects, else the whole depth.
+    template <class P>
+    [[nodiscard]] cc::start_end _depth_slices(P const& p) const
+    {
+        if constexpr (requires { p.depth_slices; })
+            return _resolve(p.depth_slices, _raw->depth());
+        else
+            return _whole_depth_slice_range();
+    }
+    // The single slice a reinterpret params bag names: a plain slice, a cube face, or (cube, face).
+    template <class P>
+    [[nodiscard]] int _pick_slice(P const& p) const
+    {
+        if constexpr (requires { p.cube; })
+        {
+            CC_ASSERT(p.cube >= 0 && p.cube < _raw->array_layers(), "cube index out of range");
+            CC_ASSERT(p.face >= 0 && p.face < 6, "cube face index out of range");
+            return p.cube * 6 + p.face;
+        }
+        else if constexpr (requires { p.face; })
+        {
+            CC_ASSERT(p.face >= 0 && p.face < 6, "cube face index out of range");
+            return p.face;
+        }
+        else
+            return p.slice;
     }
 
-    [[nodiscard]] texture_readonly_view _readonly(texture_view_dimension dim,
-                                                  cc::start_end array_range,
-                                                  cc::start_end mip_range) const
+    // -- View assembly (assert usage, fill the subresource range). --
+
+    [[nodiscard]] texture_readonly_view _make_readonly(texture_view_dimension dim,
+                                                       cc::start_end array_range,
+                                                       cc::start_end mip_range) const
     {
         CC_ASSERT(has_flag(_raw->usage(), texture_usage::readonly_texture), "texture lacks readonly_texture usage");
         subresource_range r;
@@ -308,10 +256,10 @@ private:
         return texture_readonly_view{.texture = _raw, .dimension = dim, .format = _raw->format(), .range = r};
     }
 
-    [[nodiscard]] texture_readwrite_view _readwrite(texture_view_dimension dim,
-                                                    cc::start_end array_range,
-                                                    int mip,
-                                                    cc::start_end depth_slice_range) const
+    [[nodiscard]] texture_readwrite_view _make_readwrite(texture_view_dimension dim,
+                                                         cc::start_end array_range,
+                                                         int mip,
+                                                         cc::start_end depth_slice_range) const
     {
         CC_ASSERT(has_flag(_raw->usage(), texture_usage::readwrite_texture), "texture lacks readwrite_texture usage");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "readwrite view mip level out of range");
@@ -331,20 +279,17 @@ private:
 
 // Shape typedefs — the ergonomic names. Anything not spelled is defaulted (non-array, non-cube,
 // single-sampled).
-using texture_1d = texture<texture_traits{.dimension = texture_dimension::d1}>;
-using texture_2d = texture<texture_traits{.dimension = texture_dimension::d2}>;
-using texture_3d = texture<texture_traits{.dimension = texture_dimension::d3}>;
-using texture_cube = texture<texture_traits{.dimension = texture_dimension::d2, .is_cube = true}>;
+using texture_1d = texture<texture_traits<texture_dimension::d1>>;
+using texture_2d = texture<texture_traits<texture_dimension::d2>>;
+using texture_3d = texture<texture_traits<texture_dimension::d3>>;
+using texture_cube = texture<texture_traits<texture_dimension::d2, /*array*/ false, /*cube*/ true>>;
 
-using texture_1d_array = texture<texture_traits{.dimension = texture_dimension::d1, .is_array = true}>;
-using texture_2d_array = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true}>;
-using texture_cube_array = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true, .is_cube = true}>;
+using texture_1d_array = texture<texture_traits<texture_dimension::d1, true>>;
+using texture_2d_array = texture<texture_traits<texture_dimension::d2, true>>;
+using texture_cube_array = texture<texture_traits<texture_dimension::d2, true, true>>;
 
-using texture_2d_ms = texture<texture_traits{.dimension = texture_dimension::d2, .is_multisampled = true}>;
-using texture_2d_array_ms
-    = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true, .is_multisampled = true}>;
-using texture_cube_ms
-    = texture<texture_traits{.dimension = texture_dimension::d2, .is_cube = true, .is_multisampled = true}>;
-using texture_cube_array_ms
-    = texture<texture_traits{.dimension = texture_dimension::d2, .is_array = true, .is_cube = true, .is_multisampled = true}>;
+using texture_2d_ms = texture<texture_traits<texture_dimension::d2, false, false, true>>;
+using texture_2d_array_ms = texture<texture_traits<texture_dimension::d2, true, false, true>>;
+using texture_cube_ms = texture<texture_traits<texture_dimension::d2, false, true, true>>;
+using texture_cube_array_ms = texture<texture_traits<texture_dimension::d2, true, true, true>>;
 } // namespace sg
