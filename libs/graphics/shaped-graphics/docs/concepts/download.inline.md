@@ -152,6 +152,7 @@ profiling shows the single-counter coarsening costs pipelining.
 ## See also
 
 - [inline upload](upload.inline.md) — the CPU→GPU mirror; its reclaim is fence-gated, not actor-driven.
+- [async download](download.async.md) — the copy-queue, off-frame sibling (`ctx.download`) for bulk readback.
 - [epochs](epochs.md) — the epoch/submission timelines this builds on.
 - [threading](threading.md) — why recording is concurrency-safe (and thus why reclaim must be
   epoch-granular).

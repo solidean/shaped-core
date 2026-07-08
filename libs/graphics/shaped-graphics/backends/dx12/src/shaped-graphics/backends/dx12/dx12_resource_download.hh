@@ -52,12 +52,22 @@ struct dx12_resource_download
         = 0;
 };
 
-/// Buffer download: a single CopyBufferRegion from `src` into the readback window, then a memcpy into
-/// `dst`. `dst` must outlive the deferred copy (kept alive via the future's pin).
+/// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into
+/// `dst`. Resumable — each execute_next_job reads as much as the window holds and yields that chunk's
+/// deferred copy, so a download larger than the readback window is split across successive calls (it fits
+/// one job when the window is big enough; the async copy queue chunks large ones). `dst` must outlive
+/// every deferred copy (kept alive via the future's pin).
 struct dx12_buffer_download final : dx12_resource_download
 {
     dx12_buffer_download(dx12_buffer const& src, cc::isize src_offset, cc::span<cc::byte> dst)
-      : _src(src._resource.Get()), _src_offset(src_offset), _dst(dst)
+      : dx12_buffer_download(src._resource.Get(), src_offset, dst)
+    {
+    }
+
+    // Raw-resource overload: the async path holds only the ID3D12Resource* (kept alive by the job's
+    // buffer handle), not a dx12_buffer reference.
+    dx12_buffer_download(ID3D12Resource* src, cc::isize src_offset, cc::span<cc::byte> dst)
+      : _src(src), _src_offset(src_offset), _dst(dst)
     {
     }
 
@@ -66,26 +76,28 @@ struct dx12_buffer_download final : dx12_resource_download
     // See dx12_buffer_upload::prepare — buffers need no explicit barrier for copies.
     void prepare(dx12_command_list&) override {}
 
-    [[nodiscard]] bool is_finished() const override { return _done; }
+    [[nodiscard]] bool is_finished() const override { return _consumed == _dst.size(); }
 
     [[nodiscard]] dx12_pending_copy execute_next_job(ID3D12GraphicsCommandList& list,
                                                      dx12_download_allocation const& alloc) override
     {
-        CC_ASSERT(alloc.size >= _dst.size(), "readback allocation smaller than the buffer download");
-        list.CopyBufferRegion(alloc.buffer, UINT64(alloc.offset), _src, UINT64(_src_offset), UINT64(_dst.size()));
+        cc::isize const remaining = _dst.size() - _consumed;
+        cc::isize const n = remaining < alloc.size ? remaining : alloc.size;
+        CC_ASSERT(n > 0, "readback allocation too small to make progress");
+        list.CopyBufferRegion(alloc.buffer, UINT64(alloc.offset), _src, UINT64(_src_offset + _consumed), UINT64(n));
 
         cc::byte const* const src_ptr = alloc.base + alloc.offset;
-        cc::span<cc::byte> const dst = _dst;
-        auto const size = std::size_t(_dst.size());
-        _done = true;
-        return dx12_pending_copy{[dst, src_ptr, size] { std::memcpy(dst.data(), src_ptr, size); }, _dst.size()};
+        cc::byte* const dst_ptr = _dst.data() + _consumed;
+        auto const size = std::size_t(n);
+        _consumed += n;
+        return dx12_pending_copy{[dst_ptr, src_ptr, size] { std::memcpy(dst_ptr, src_ptr, size); }, n};
     }
 
 private:
     ID3D12Resource* _src = nullptr;
     cc::isize _src_offset = 0;
     cc::span<cc::byte> _dst;
-    bool _done = false;
+    cc::isize _consumed = 0;
 };
 
 // TODO: dx12_texture_download — inline texture readback (row-unpadding in the deferred copy, chunked

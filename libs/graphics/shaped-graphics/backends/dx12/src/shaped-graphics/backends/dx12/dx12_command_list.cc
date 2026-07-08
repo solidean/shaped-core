@@ -26,6 +26,16 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     if (async_v > cc::u64(_required_copy_wait))
         _required_copy_wait = dx12_copy_fence_value(async_v);
 
+    // Reverse cross-queue sync for ctx.download: if this op WRITES a buffer an async readback is still
+    // reading on the copy queue, the direct queue must wait for that read to finish before overwriting it.
+    // Only writes conflict (two reads don't), so fold the download value only for a write access.
+    if (sg::is_unordered_write(access))
+    {
+        cc::u64 const dl_v = buffer->_pending_async_download_value.load(std::memory_order_acquire);
+        if (dl_v > cc::u64(_required_download_wait))
+            _required_download_wait = dx12_download_fence_value(dl_v);
+    }
+
     sg::access_barrier const barrier = buffer->declare_access(slot(), stages, access);
     if (barrier.needed)
         emit_buffer_barrier(_list.Get(), buffer->_resource.Get(), barrier);
@@ -235,6 +245,11 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // a higher value is safe; a stale/already-signaled value returns immediately.
             if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
                 _queue->Wait(_copy_fence.Get(), cc::u64(cmd->_required_copy_wait));
+
+            // Symmetric reverse sync: if this list WRITES a buffer an async readback is still reading, wait
+            // on the download completion fence first, so the write never overwrites bytes the read consumes.
+            if (cmd->_required_download_wait != dx12_download_fence_value::none)
+                _queue->Wait(_download_copy_fence.Get(), cc::u64(cmd->_required_download_wait));
 
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);

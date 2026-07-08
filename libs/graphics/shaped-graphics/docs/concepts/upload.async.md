@@ -183,6 +183,8 @@ Not invariants — v1 shortcuts:
 ## See also
 
 - [inline upload](upload.inline.md) — the main-queue, record-in-list sibling; async's counterpart.
+- [async download](download.async.md) — the GPU→CPU mirror; reuses these per-buffer stamps with the
+  forward/reverse roles swapped, plus a CPU memcpy completion step.
 - [inline download](download.inline.md) — why its ring needs per-epoch counters that async does not.
 - [epochs](epochs.md) — the main-queue timeline; async upload is deliberately decoupled from it.
 - [threading](threading.md) — the `cc::threaded_actor` the copy runs on.

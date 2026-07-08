@@ -132,6 +132,12 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copy_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async upload completion) failed");
 
+    // Async-download completion fence (signaled by the copy queue when a readback has finished reading a
+    // buffer; a later direct-queue writer waits on it so it never overwrites bytes the read is still reading).
+    ComPtr<ID3D12Fence> download_copy_fence;
+    if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&download_copy_fence)); FAILED(hr))
+        return dx12_error(hr, "ID3D12Device::CreateFence (async download completion) failed");
+
     // Epoch system fences (both timelines on the direct queue) + a reusable wait event. The epoch
     // fence gates resource reclamation; the submission fence tracks per-command-list completion.
     ComPtr<ID3D12Fence> epoch_fence;
@@ -148,6 +154,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_queue = cc::move(queue);
     ctx->_copy_queue = cc::move(copy_queue);
     ctx->_copy_fence = cc::move(copy_fence);
+    ctx->_download_copy_fence = cc::move(download_copy_fence);
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 
@@ -158,6 +165,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     // Async upload staging windows + copy actor (needs the copy queue + completion fence above).
     CC_RETURN_IF_ERROR(ctx->_upload_async.initialize(config.async_upload_window_bytes));
+
+    // Async download readback staging windows + copy actor (needs the copy queue + download fence above).
+    CC_RETURN_IF_ERROR(ctx->_download_async.initialize(config.async_download_window_bytes));
 
     // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a
     // per-epoch-reclaimed transient ring (leading fraction) and a persistent bump region (the rest).

@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
@@ -43,6 +44,11 @@ struct dx12_config
     /// successive windows. Bigger windows amortize submits; smaller ones cut latency and memory.
     cc::isize async_upload_window_bytes = cc::isize(16) * 1024 * 1024;
 
+    /// Size of one async-download (readback) staging window, in bytes. Triple-buffered like the upload
+    /// window; a read larger than a window packs across successive windows. Bigger windows amortize
+    /// submits; smaller ones cut latency and memory.
+    cc::isize async_download_window_bytes = cc::isize(16) * 1024 * 1024;
+
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
     int descriptor_heap_capacity = 1 << 16;
 
@@ -63,7 +69,8 @@ public:
         _cmd_pool(*this),
         _upload_inline(*this),
         _download_inline(*this),
-        _upload_async(*this)
+        _upload_async(*this),
+        _download_async(*this)
     {
     }
 
@@ -160,9 +167,19 @@ public:
         _upload_async.upload_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
     }
 
+    // Reached through ctx.download — async GPU→CPU buffer readback on the copy queue. Forwards to the async
+    // download system; a later direct-queue list writing the buffer auto-waits on the read.
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                    cc::isize offset_in_bytes,
+                                                                    cc::isize size_in_bytes) override
+    {
+        return _download_async.download_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
+    }
+
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
     // change on the owning system, applied at a later safe point (see the systems + advance_epoch).
     void set_async_upload_window_bytes(cc::isize bytes) override { _upload_async.set_window_bytes(bytes); }
+    void set_async_download_window_bytes(cc::isize bytes) override { _download_async.set_window_bytes(bytes); }
     void set_inline_upload_budget(cc::isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(cc::isize bytes) override { _download_inline.set_budget(bytes); }
 
@@ -184,11 +201,16 @@ public:
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
 
-    // Dedicated COPY queue for async uploads, decoupled from the epoch/direct queue. The completion
-    // fence is signaled by the copy queue when an async upload's copy has run; a later direct-queue
-    // command list waits on it at submit (see submit_dx12_command_list) so it observes the write.
+    // Dedicated COPY queue for async uploads + downloads, decoupled from the epoch/direct queue. The
+    // upload completion fence is signaled by the copy queue when an async upload's copy has run; a later
+    // direct-queue list waits on it at submit (see submit_dx12_command_list) so it observes the write.
     ComPtr<ID3D12CommandQueue> _copy_queue;
     ComPtr<ID3D12Fence> _copy_fence;
+
+    // Async-download completion fence, signaled by the copy queue when an async readback has finished
+    // reading a buffer; a later direct-queue list that WRITES that buffer waits on it at submit so it
+    // never overwrites bytes the read is still reading (the reverse of _copy_fence).
+    ComPtr<ID3D12Fence> _download_copy_fence;
 
     // Epoch machinery. The epoch fence is signaled with the epoch value at the end of each epoch;
     // the submission fence is a per-command-list timeline on the same queue.
@@ -231,6 +253,10 @@ public:
     // Async CPU→GPU buffer streaming on the copy queue (reached via ctx.upload). Owns its staging ring +
     // copy actor; initialized in create_dx12_context after the copy queue/fence exist.
     dx12_upload_async_system _upload_async;
+
+    // Async GPU→CPU buffer readback on the copy queue (reached via ctx.download). Owns its readback staging
+    // ring + copy actor; initialized in create_dx12_context after the copy queue + download fence exist.
+    dx12_download_async_system _download_async;
 
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a

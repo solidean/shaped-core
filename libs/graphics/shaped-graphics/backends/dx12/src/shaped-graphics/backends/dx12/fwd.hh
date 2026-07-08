@@ -16,6 +16,15 @@ enum class dx12_copy_fence_value : cc::u64
     none = 0,
 };
 
+/// Monotonic value on the async-download copy queue's completion fence (dx12_context::_download_copy_fence).
+/// Its own newtype so it can't be confused with the other fence timelines: a later direct-queue list that
+/// WRITES a buffer waits on this value to know the async readback has finished reading it. `none` == no
+/// pending async download.
+enum class dx12_download_fence_value : cc::u64
+{
+    none = 0,
+};
+
 class dx12_context;
 class dx12_command_list;
 class dx12_command_allocator_pool;
@@ -48,4 +57,9 @@ struct dx12_download_copy_job;
 // Async buffer upload on a dedicated copy queue (see dx12_upload_async.hh).
 class dx12_upload_async_system;
 struct dx12_async_upload_job;
+
+// Async buffer download on a dedicated copy queue (see dx12_download_async.hh).
+class dx12_download_async_system;
+struct dx12_async_download_job;
+class dx12_async_download_waiter;
 } // namespace sg::backend::dx12
