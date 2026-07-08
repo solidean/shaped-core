@@ -51,22 +51,37 @@ public:
     // Thin forwarders return the barriers the command list must emit (dx12 owns barrier tracking + emission).
     mutable cc::mutex<dx12_texture_access> _access;
 
-    /// Declare `stages`/`access`/`layout` over `range` for `slot` and return the intra-list barriers to
-    /// emit before the op (empty = all freebies). Thread-safe.
-    [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> declare_texture_access(sg::command_list_slot slot,
-                                                                                       sg::subresource_range range,
-                                                                                       sg::pipeline_stage_flags stages,
-                                                                                       sg::access_flags access,
-                                                                                       sg::texture_layout layout) const
+    /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state
+    /// (no barrier emitted). Call once per binding; `flush_texture_access` merges them. Thread-safe.
+    void declare_texture_access(sg::command_list_slot slot,
+                                sg::subresource_range range,
+                                sg::pipeline_stage_flags stages,
+                                sg::access_flags access,
+                                sg::texture_layout layout) const
     {
-        return _access.lock([&](dx12_texture_access& t) { return t.declare(slot, range, stages, access, layout); });
+        _access.lock([&](dx12_texture_access& t) { t.declare(slot, range, stages, access, layout); });
     }
 
-    /// Finalize `slot` at submit: promote its final layout to the committed state (last open list) or revert
-    /// the texture to its entry layout, returning the transitions to emit. Thread-safe.
-    [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot, bool promote) const
+    /// Test-and-set `slot`'s pending-barrier flag (see dx12_texture_access::mark_pending_barrier): true the
+    /// first binding this op, false after; `flush_texture_access` clears it. Thread-safe.
+    [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot) const
     {
-        return _access.lock([&](dx12_texture_access& t) { return t.finalize(slot, promote); });
+        return _access.lock([&](dx12_texture_access& t) { return t.mark_pending_barrier(slot); });
+    }
+
+    /// Flush the accesses declared for `slot` since the last flush and return the per-box barriers to emit
+    /// before the op (empty = all freebies), merging multiple declares of the same box. Thread-safe.
+    [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> flush_texture_access(sg::command_list_slot slot) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.flush(slot); });
+    }
+
+    /// Finalize `slot` at submit: promote its final layout to the canonical state if this was the last list
+    /// touching the texture, else revert it to the canonical layout — returning the transitions to emit.
+    /// Thread-safe.
+    [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.finalize(slot); });
     }
 
     /// Discard `slot` at drop: the recorded work never runs, so just clear the slot. Thread-safe.

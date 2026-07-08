@@ -56,9 +56,16 @@ public:
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
 
-    // Barriers collected for the *next* GPU op: track_*_access appends to these as each resource an op
-    // touches is declared, and flush_barriers() records the whole batch in one Barrier call just before the
-    // op. Empty between ops. Public so the context can stage the finalize reverts here at submit.
+    // Resources whose access has been declared for the *next* GPU op but not yet flushed. track_*_access
+    // appends a resource here on its first binding to the op only (declare reports that), so each appears at
+    // most once; flush_barriers() flushes each to merge its declares into one barrier, then clears these.
+    // Empty between ops.
+    cc::vector<dx12_buffer_handle> _pending_barrier_buffers;
+    cc::vector<dx12_texture_handle> _pending_barrier_textures;
+
+    // Barriers collected for the *next* GPU op: flush_barriers() flushes the pending-barrier resources above
+    // into these, then records the whole batch in one Barrier call just before the op. Empty between ops.
+    // Public so the context can stage the finalize reverts here at submit.
     cc::vector<D3D12_BUFFER_BARRIER> _pending_buffer_barriers;
     cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 

@@ -63,7 +63,7 @@ the whole domain. Declaring an access to a sub-range *splits* boxes so the range
 (keeping the tiling exact), then touches only the covered boxes; `try_merge` collapses back to one box
 when every box's state is equal. This is the improvement over the legacy tracker's flat per-subresource
 array — range-boxes instead of one entry per subresource. It is now exercised by dx12 textures (see
-below); a backend keeps one partition per open command-list slot plus a committed one.
+below); a backend keeps one partition per open command-list slot plus a canonical one.
 
 ## Concurrent command lists (the concurrency model)
 
@@ -74,21 +74,32 @@ recorders usually means a leaked list). The slot keys the list's **private** acc
 each resource it touches (a `cc::small_vector` of per-slot states, so a few parallel lists don't
 allocate). Several lists can therefore record against the same resource at once without sharing state.
 
-Each resource also has a **canonical** state — the committed state between command lists. A list starts a
-resource's slot from canonical on first touch, tracks intra-list hazards privately, and on **submit**:
+Each resource also has a **canonical** state — the shared state between command lists. A list starts a
+resource's slot from canonical on first touch, tracks intra-list hazards privately, and each resource
+separately counts how many open lists are currently using it. On **submit**, per touched resource:
 
-- if its slot release brings the live count to **0** (it was the last open list), it **promotes** its
-  final state to canonical;
-- otherwise it **reverts** the resource to the layout it entered with — the committed state it seeded from,
-  which is stable while other lists are open (for a texture this emits the transitions back to that entry
+- if this list's finalize drops that resource's live-user count to **0** (it was the last list using it),
+  the list **promotes** its final state to canonical;
+- otherwise it **reverts** the resource to the canonical layout it seeded from — stable while other lists
+  use it, since a user count ≥ 1 blocks any promote (for a texture this emits the transitions back to that
   layout and warns, because the revert is a hidden cost of concurrent recording).
 
-So **only the count→0 submit may leave a texture in a new committed layout**; every other submit hands the
-texture back exactly as it found it. The invariant: while any list is open, canonical is stable (every
-submit-while-others-open reverts to it); canonical only advances when a submit brings the count to 0. Correct under any submit order — the last
-submit both starts from and hands off canonical, and earlier lists reverted. In the fully-serial case
-(one list open at a time) every submit hits 0, so there are no reverts — zero overhead. On **drop**, the
-recorded work never runs, so the list just clears its slots (canonical unchanged).
+The decision is **per resource, not global**: one list can be the last user of texture A (and promote it)
+while still sharing texture B with another open list (and revert B). Each resource makes the call under its
+own mutex. So **only the last-user submit may leave a resource in a new canonical layout**; every other
+submit hands it back exactly as it found it. In the fully-serial case (one list open at a time) every
+finalize is a last user, so there are no reverts — zero overhead. On **drop**, the recorded work never runs,
+so the list just drops each resource's user count and clears its slots (canonical unchanged).
+
+**Buffers skip all of this.** A buffer has no layout, and D3D12 decays it to `COMMON` at
+`ExecuteCommandLists`, so cross-list ordering is free and only *intra-list* hazards ever need a barrier. A
+buffer therefore keeps **no** canonical state and **no** user count — each list seeds a fresh state and just
+clears its slot at submit/drop. The canonical / promote / revert machinery above is a texture concern.
+
+The one *global* requirement is ordering: a submit's finalize writes the canonical layout and its
+`ExecuteCommandLists` realizes it, so finalize order must equal execute order. dx12 gets that for free by
+running finalize + execute under the one lock that already serializes queue submission + fence signal
+(`_next_submission`) — no extra submit-wide lock is needed.
 
 Fine-grained data hazards *between* concurrently-recorded lists on the same resource remain the caller's
 responsibility (as in Vulkan): the model orders gross execution by submit order + the epoch fence and
@@ -103,12 +114,14 @@ old stopgap that bounced every buffer through `COMMON` after each copy: uploadin
 self-copying) the **same** buffer now works in one command list with a precise
 `COPY_DEST→COPY_SOURCE`-style transition.
 
-**Barriers are batched per operation.** An operation declares access on *every* resource it touches — a
-copy's src + dst, or a dispatch's whole bound group of buffers and textures — before it runs. Each
-`track_*_access` only *builds* the barrier structs (`make_buffer_barrier` / `make_texture_barrier`) and
-appends them to the command list's pending set; `flush_barriers()` then submits the whole batch in a single
-`Barrier` call (one `D3D12_BARRIER_GROUP` per type) immediately before the copy / dispatch. So a dispatch
-binding many resources pays one barrier call, not one per binding.
+**Access is declared, then flushed, then emitted — batched per operation.** An operation first *declares*
+access on every resource it touches — a copy's src + dst, or a dispatch's whole bound group — which only
+accumulates into each resource's next-op state (no barrier yet). `flush_barriers()`, just before the op,
+then flushes each declared resource (turning its accumulated declares into barriers) and submits the whole
+batch in one `Barrier` call (one `D3D12_BARRIER_GROUP` per type). Two payoffs: a dispatch binding many
+resources pays one barrier call, not one per binding; and a resource bound *more than once* to the same op
+(e.g. two views of one texture) merges its declares into a single barrier carrying the **union** of the
+accesses, rather than emitting a redundant barrier per binding.
 
 For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always
 `general` (D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`), so revert emits nothing and
@@ -116,10 +129,10 @@ cross-list ordering rides on that decay — no trailing barriers.
 
 **Textures give the machinery teeth.** Each `dx12_texture` owns a per-command-list covering partition
 ([dx12_texture_access](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_texture_access.hh)):
-`declare` rolls the covered subresource boxes through the state machine and returns the per-box
-`D3D12_TEXTURE_BARRIER`s (scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`, `LayoutBefore→LayoutAfter`) the
-command list collects into its pending batch and flushes before the op; a non-final submit returns the
-reverse transitions back to the entry layout (flushed before `Close`), and warns.
+`declare` accumulates the covered subresource boxes' access, and `flush` rolls them through the state
+machine and returns the per-box `D3D12_TEXTURE_BARRIER`s (scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`,
+`LayoutBefore→LayoutAfter`) the command list batches and emits before the op; a non-last-user submit returns
+the reverse transitions back to the canonical layout (flushed before `Close`), and warns.
 This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine + partition;
 barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each
 owns its tracking + emission. No public op records against a texture yet, so the tracking is wired + tested
