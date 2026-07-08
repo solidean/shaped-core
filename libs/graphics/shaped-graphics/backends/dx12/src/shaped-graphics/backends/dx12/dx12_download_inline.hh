@@ -123,15 +123,38 @@ public:
     /// Shuts the actor down (draining pending copies), then unmaps + releases the ring buffer.
     void shutdown();
 
+    // --- test-only escape hatches --------------------------------------------------------------------
+    // Backend tests peel the abstraction to assert ring-cursor behavior (e.g. seam-splitting). See
+    // libs/graphics/shaped-graphics/docs/testing.md. Not part of the production surface.
+
+    /// A snapshot of the ring's logical cursors and physical capacity.
+    struct debug_cursor_snapshot
+    {
+        cc::u64 next_pos = 0;
+        cc::u64 freed_pos = 0;
+        cc::isize capacity = 0;
+    };
+    [[nodiscard]] debug_cursor_snapshot debug_cursor();
+
+    /// Repositions the logical cursor at `pos` (so the next reserve starts at physical `pos % capacity`)
+    /// on an already-drained ring: sets next_pos == freed_pos == pos and clears checkpoints, so the ring
+    /// reads as empty at that seam-relative position. Call only after a full drain (no outstanding copies).
+    void debug_set_cursor(cc::u64 pos);
+
 private:
-    /// Reserves a contiguous, non-wrapping window and returns its physical offset plus a share of the
-    /// open epoch's copy counter (incremented for this download). Blocks on the reclaim watermark when
+    /// A contiguous, non-wrapping ring slice: physical `offset`, the `granted` bytes there (capped at
+    /// the seam, so a wrapping request is handed back in pieces the caller loops over), and a share of
+    /// the open epoch's copy counter (incremented for this chunk). Blocks on the reclaim watermark when
     /// space is held by earlier, still-in-flight epochs.
     struct reservation
     {
         cc::isize offset = 0;
+        cc::isize granted = 0;
         std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
     };
+
+    /// Reserves up to `size` bytes at the current cursor, never crossing the physical seam (the result
+    /// may be smaller than `size`). Each reservation counts one copy against the open epoch.
     reservation reserve(cc::isize size);
 
     /// Blocks the calling thread until the actor has drained every outstanding readback copy (i.e. every

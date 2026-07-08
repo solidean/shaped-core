@@ -27,8 +27,9 @@ overwritten until the GPU is done reading it. That "is the GPU done?" question i
 [epochs](epochs.md) answer cheaply, so the upload ring reclaims space at **epoch granularity**:
 
 - The ring is a single **logical cursor** over an unbounded byte count, mapped onto the physical buffer
-  via modulo. Windows never wrap — a would-be wrap wastes the tail and restarts at 0, keeping every
-  window contiguous for a single copy command.
+  via modulo. A copy that would straddle the wrap is **split at the seam** — the reservation is capped
+  at the ring end and the recorder loops for the remainder — so every recorded copy is contiguous with
+  no wasted tail.
 - At **epoch advance**, the cursor is snapshotted as the closing epoch's boundary.
 - At **epoch retire**, a free watermark advances past every epoch the GPU has finished. Those bytes are
   now reclaimable.
@@ -59,10 +60,6 @@ ring. Rare (only after a `set_budget`), so the stall is acceptable.
 
 Not invariants — v1 shortcuts, each with a known better route:
 
-- **Windows never wrap: a would-be wrap wastes the tail and restarts at 0.** Keeps every window
-  contiguous for one copy command, at the cost of some slack near the seam. Splitting a staged copy
-  across the seam into two copies (as the earlier prototype does) removes the waste — a straightforward
-  improvement, deferred.
 - **A single epoch's inline uploads must currently fit the ring** — over-budget asserts today. The
   intended fix is a fallback route that always works (e.g. a one-off dedicated staging buffer for the
   overflow), trading peak throughput for correctness rather than failing.

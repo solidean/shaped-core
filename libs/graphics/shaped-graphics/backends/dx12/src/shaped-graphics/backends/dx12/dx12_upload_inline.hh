@@ -43,11 +43,39 @@ public:
     /// Unmaps + releases the ring buffer.
     void shutdown();
 
+    // --- test-only escape hatches --------------------------------------------------------------------
+    // Backend tests peel the abstraction to assert ring-cursor behavior (e.g. seam-splitting). See
+    // libs/graphics/shaped-graphics/docs/testing.md. Not part of the production surface.
+
+    /// A snapshot of the ring's logical cursors and physical capacity.
+    struct debug_cursor_snapshot
+    {
+        cc::u64 next_pos = 0;
+        cc::u64 freed_pos = 0;
+        cc::isize capacity = 0;
+    };
+    [[nodiscard]] debug_cursor_snapshot debug_cursor();
+
+    /// Repositions the logical cursor at `pos` (so the next reserve starts at physical `pos % capacity`)
+    /// on an already-drained ring: sets next_pos == freed_pos == pos and clears checkpoints, so the ring
+    /// reads as empty at that seam-relative position. Call only after a full drain.
+    void debug_set_cursor(cc::u64 pos);
+
 private:
-    /// Reserves a contiguous, non-wrapping window of `size` bytes and returns its physical offset into
-    /// the mapped buffer. Blocks (retiring in-flight epochs) when the space is still held by earlier
-    /// epochs. Asserts if a single upload exceeds the ring capacity.
-    cc::isize reserve(cc::isize size);
+    /// A contiguous, non-wrapping slice of the ring: physical `offset` and the `granted` bytes there.
+    /// `granted` is capped at the seam (`_capacity - offset`), so a request straddling the wrap is
+    /// handed back in pieces the caller loops over — no wasted tail.
+    struct reservation
+    {
+        cc::isize offset = 0;
+        cc::isize granted = 0;
+    };
+
+    /// Reserves up to `size` bytes at the current cursor, never crossing the physical seam (so the
+    /// result may be smaller than `size` — the caller reserves again for the remainder). Blocks
+    /// (retiring in-flight epochs) when the space is still held by earlier epochs. Asserts if a single
+    /// upload exceeds the ring capacity.
+    reservation reserve(cc::isize size);
 
     dx12_context& _ctx;
 

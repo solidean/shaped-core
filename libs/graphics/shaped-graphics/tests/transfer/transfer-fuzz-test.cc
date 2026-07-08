@@ -219,6 +219,38 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                  })
         ->execute_at_least(10);
 
+    // Async-download + check: the copy-queue mirror of "download + check" (ctx->download vs cmd->download).
+    // Exercises the reverse cross-queue sync (a later direct-queue write waits on the in-flight read) and the
+    // forward wait vs a pending async upload — paths a purely-inline download never touches, and both clean
+    // GPU cross-queue waits now that async upload and download own separate copy queues (see
+    // libs/graphics/shaped-graphics/docs/concepts/download.async.md; a shared queue FIFO-deadlocked here).
+    // Submit any open list first so the read is
+    // ordered after the recorded writes it must observe; the read auto-waits on the last submitted writer
+    // (and on any pending async upload), so the issue-time snapshot of t.data is the correct reference.
+    test->add_op("async download + check",
+                 [&](cc::random& rng, trace& t)
+                 {
+                     auto v0 = rng.uniform(0, int(t.data.size() - 1));
+                     auto v1 = rng.uniform(0, int(t.data.size() - 1));
+                     auto start = cc::min(v0, v1);
+                     auto end = cc::max(v0, v1);
+                     auto cnt = end - start;
+
+                     t.ensure_submitted_cmd();
+
+                     auto ref = cc::vector<cc::u32>::create_uninitialized(cnt);
+                     for (auto i = 0; i < cnt; ++i)
+                         ref[i] = t.data[start + i];
+
+                     auto dl = ctx->download.data_from_buffer<cc::u32>(t.buffer, start, cnt);
+                     auto dl_data = ctx->wait_for(dl).value();
+
+                     CHECK(cc::isize(cnt) == dl_data.size());
+                     for (auto i = 0; i < cnt; ++i)
+                         CHECK(ref[i] == dl_data[i]);
+                 })
+        ->execute_at_least(10);
+
     SECTION("fuzz")
     {
         CHECK(test->execute_fuzz_test());

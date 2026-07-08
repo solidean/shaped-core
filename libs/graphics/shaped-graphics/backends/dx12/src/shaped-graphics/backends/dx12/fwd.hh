@@ -8,10 +8,20 @@
 
 namespace sg::backend::dx12
 {
-/// Monotonic value on the async-upload copy queue's completion fence (dx12_context::_copy_fence). Its
-/// own newtype so it can't be confused with the epoch / submission / staging fence timelines: a later
-/// direct-queue list waits on this value to see an async upload's writes. `none` == no pending upload.
+/// Monotonic value on the async-upload completion fence (dx12_upload_async_system::_completion_fence).
+/// Its own newtype so it can't be confused with the epoch / submission / staging fence timelines: a
+/// later direct-queue list waits on this value to see an async upload's writes. `none` == no pending
+/// upload.
 enum class dx12_copy_fence_value : cc::u64
+{
+    none = 0,
+};
+
+/// Monotonic value on the async-download completion fence (dx12_download_async_system::_completion_fence).
+/// Its own newtype so it can't be confused with the other fence timelines: a later direct-queue list that
+/// WRITES a buffer waits on this value to know the async readback has finished reading it. `none` == no
+/// pending async download.
+enum class dx12_download_fence_value : cc::u64
 {
     none = 0,
 };
@@ -48,4 +58,9 @@ struct dx12_download_copy_job;
 // Async buffer upload on a dedicated copy queue (see dx12_upload_async.hh).
 class dx12_upload_async_system;
 struct dx12_async_upload_job;
+
+// Async buffer download on a dedicated copy queue (see dx12_download_async.hh).
+class dx12_download_async_system;
+struct dx12_async_download_job;
+class dx12_async_download_waiter;
 } // namespace sg::backend::dx12

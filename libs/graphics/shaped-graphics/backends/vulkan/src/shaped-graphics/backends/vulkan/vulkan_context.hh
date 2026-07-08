@@ -137,6 +137,12 @@ public:
         CC_UNREACHABLE("vulkan async upload is not implemented yet");
     }
 
+    // Async download (ctx.download) — not implemented yet.
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan async download is not implemented yet");
+    }
+
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once
     // that epoch retires. Called from ~vulkan_buffer; safe to call from any thread.
     void schedule_deferred_deletion(vulkan_expiring_resource expiring);

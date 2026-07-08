@@ -18,6 +18,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_upload_inline.cc
     src/shaped-graphics/backends/dx12/dx12_download_inline.cc
     src/shaped-graphics/backends/dx12/dx12_upload_async.cc
+    src/shaped-graphics/backends/dx12/dx12_download_async.cc
     src/shaped-graphics/backends/dx12/dx12_binding_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
@@ -48,6 +49,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_upload_inline.hh
     src/shaped-graphics/backends/dx12/dx12_download_inline.hh
     src/shaped-graphics/backends/dx12/dx12_upload_async.hh
+    src/shaped-graphics/backends/dx12/dx12_download_async.hh
     src/shaped-graphics/backends/dx12/dx12_descriptor_heap.hh
     src/shaped-graphics/backends/dx12/dx12_view_desc.hh
     src/shaped-graphics/backends/dx12/dx12_binding_layout.hh
@@ -84,7 +86,9 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-command-pool-test.cc
     tests/dx12-transfer-test.cc
     tests/dx12-transfer-resize-test.cc
+    tests/dx12-transfer-wrap-test.cc
     tests/dx12-upload-async-test.cc
+    tests/dx12-download-async-test.cc
     tests/dx12-copy-test.cc
     tests/dx12-compute-test.cc
     tests/dx12-placed-test.cc

@@ -1,7 +1,9 @@
 // dx12_upload_inline_system: the inline UPLOAD ring buffer and its epoch-gated free watermark. The
-// ring is a linear u64 cursor mapped onto the physical buffer via modulo; windows never wrap (a would-
-// be wrap wastes the tail and restarts at 0). Space is reclaimed per epoch: at advance we snapshot the
-// cursor for the closing epoch, and at retire we free everything up to the highest finished epoch.
+// ring is a linear u64 cursor mapped onto the physical buffer via modulo; a window never wraps, but a
+// copy that would straddle the seam is split at it — reserve hands back only up to the seam and the
+// driver loops the resumable recorder for the remainder, so no tail is wasted. Space is reclaimed per
+// epoch: at advance we snapshot the cursor for the closing epoch, and at retire we free everything up
+// to the highest finished epoch.
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/optional.hh>
@@ -26,34 +28,30 @@ cc::result<cc::unit> dx12_upload_inline_system::initialize(cc::isize capacity)
     return cc::unit{};
 }
 
-cc::isize dx12_upload_inline_system::reserve(cc::isize size)
+dx12_upload_inline_system::reservation dx12_upload_inline_system::reserve(cc::isize size)
 {
     CC_ASSERT(size > 0, "reserve size must be positive");
     CC_ASSERT(size <= _capacity, "a single inline upload exceeds the upload ring capacity");
 
     for (;;)
     {
-        cc::optional<cc::isize> phys = _ring.lock(
-            [&](ring_state& s) -> cc::optional<cc::isize>
+        cc::optional<reservation> r = _ring.lock(
+            [&](ring_state& s) -> cc::optional<reservation>
             {
-                cc::u64 start = s.next_pos;
-                cc::isize offset = cc::isize(start % cc::u64(_capacity));
-                // TODO: split the copy across the seam instead of wasting the tail (see
-                // libs/graphics/shaped-graphics/docs/concepts/upload.inline.md).
-                if (offset + size > _capacity) // would wrap: waste the tail, restart at 0
-                {
-                    start += cc::u64(_capacity - offset);
-                    offset = 0;
-                }
-                cc::u64 const end = start + cc::u64(size);
+                cc::u64 const start = s.next_pos;
+                cc::isize const offset = cc::isize(start % cc::u64(_capacity));
+                // Never cross the seam: grant only up to the ring end. A request that would wrap is
+                // split here — the caller loops and reserves the remainder from offset 0. No tail waste.
+                cc::isize const granted = cc::min(size, _capacity - offset);
+                cc::u64 const end = start + cc::u64(granted);
                 if (end - s.freed_pos > cc::u64(_capacity)) // space still held by in-flight epochs
                     return {};
                 s.next_pos = end;
-                return offset;
+                return reservation{offset, granted};
             });
 
-        if (phys.has_value())
-            return phys.value();
+        if (r.has_value())
+            return r.value();
 
         // Not enough free space: retire the oldest in-flight epoch to advance the watermark. If nothing
         // is in flight, this single epoch's uploads exceed the ring — a hard budget error.
@@ -76,12 +74,13 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
     dx12_buffer_upload upload(dst, dst_offset, data);
     upload.prepare(cmd);
 
-    // Buffers stage in one job; the loop is here for chunked resources (textures) later.
+    // One pass per contiguous ring slice: a buffer that fits without wrapping is a single job; one that
+    // straddles the seam (or a chunked texture later) is split across successive reservations.
     while (!upload.is_finished())
     {
-        cc::isize const remaining = upload.total_bytes(); // single job for buffers
-        cc::isize const offset = reserve(remaining);
-        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, offset, remaining};
+        cc::isize const remaining = upload.total_bytes() - upload.consumed();
+        reservation const res = reserve(remaining);
+        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, res.offset, res.granted};
         cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
         CC_ASSERT(consumed > 0, "inline upload made no progress");
     }
@@ -146,6 +145,22 @@ void dx12_upload_inline_system::apply_pending_budget()
             s.freed_pos = 0;
             s.checkpoints.clear(); // drained above; the fresh ring restarts its logical cursor at 0
             s.pending_capacity = 0;
+        });
+}
+
+dx12_upload_inline_system::debug_cursor_snapshot dx12_upload_inline_system::debug_cursor()
+{
+    return _ring.lock([&](ring_state& s) { return debug_cursor_snapshot{s.next_pos, s.freed_pos, _capacity}; });
+}
+
+void dx12_upload_inline_system::debug_set_cursor(cc::u64 pos)
+{
+    _ring.lock(
+        [&](ring_state& s)
+        {
+            s.next_pos = pos;
+            s.freed_pos = pos;
+            s.checkpoints.clear();
         });
 }
 

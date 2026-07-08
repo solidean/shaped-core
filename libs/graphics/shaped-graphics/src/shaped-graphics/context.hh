@@ -44,8 +44,9 @@ public:
     /// dedicated copy queue, off the frame path (the context-level mirror of the inline cmd.upload).
     context_upload_scope upload;
 
-    /// Inline download configuration facade: `ctx.download.set_budget(...)`. Downloads are recorded via
-    /// cmd.download; this scope sizes the shared readback ring they stage through.
+    /// Async device→host download facade: `ctx.download.bytes_from_buffer(...)`. Streams buffer readback on
+    /// the copy queue, off the frame path (the context-level mirror of the inline cmd.download); also sizes
+    /// the shared readback ring the inline downloads stage through.
     context_download_scope download;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once.
@@ -138,12 +139,25 @@ protected:
                                               isize offset_in_bytes)
         = 0;
 
+    /// Streams `size_in_bytes` from `buffer` at `offset_in_bytes` back to the host on a dedicated copy queue
+    /// (reached via ctx.download). Returns a bytes_future delivered once the readback lands in the host
+    /// destination. The read waits on the last command list that wrote the buffer; a later command list that
+    /// writes the buffer waits on the read. Dropping the future cancels the copy. Zero size yields a ready,
+    /// empty future. Buffer must have buffer_usage::copy_src; offset_in_bytes + size_in_bytes within bounds.
+    [[nodiscard]] virtual bytes_future async_download_bytes_from_buffer(raw_buffer_handle buffer,
+                                                                        isize offset_in_bytes,
+                                                                        isize size_in_bytes)
+        = 0;
+
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
     // change applied at a later safe point (an epoch boundary, or the copy actor between windows), never
     // synchronously here. `bytes` must be > 0. Default: no-op — a backend without the path ignores it.
 
     /// Resize the async-upload staging window (see ctx.upload.set_async_window_size).
     virtual void set_async_upload_window_bytes(isize bytes) { (void)bytes; }
+
+    /// Resize the async-download staging window (see ctx.download.set_async_window_size).
+    virtual void set_async_download_window_bytes(isize bytes) { (void)bytes; }
 
     /// Resize the inline-upload ring (see ctx.upload.set_inline_budget).
     virtual void set_inline_upload_budget(isize bytes) { (void)bytes; }

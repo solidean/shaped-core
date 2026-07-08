@@ -55,6 +55,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   (`ctx.upload`), off the frame path, with automatic per-resource sync so later lists auto-wait.
 - [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK
   ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.
+- [async download](concepts/download.async.md) — bulk GPU→CPU readback on a dedicated copy queue
+  (`ctx.download`), off the frame path, with automatic per-resource sync in both directions.
 
 ## Conventions
 
