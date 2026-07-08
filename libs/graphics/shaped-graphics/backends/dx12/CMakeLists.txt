@@ -86,6 +86,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-command-pool-test.cc
     tests/dx12-transfer-test.cc
     tests/dx12-transfer-resize-test.cc
+    tests/dx12-transfer-wrap-test.cc
     tests/dx12-upload-async-test.cc
     tests/dx12-download-async-test.cc
     tests/dx12-copy-test.cc
