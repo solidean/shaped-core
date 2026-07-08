@@ -143,6 +143,7 @@ if(_sg_backends)
         tests/copy/copy-test.cc
         tests/transient/transient-test.cc
         tests/barrier/barrier-test.cc
+        tests/error-handling/error-handling-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
