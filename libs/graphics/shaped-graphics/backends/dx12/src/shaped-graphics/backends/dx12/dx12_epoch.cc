@@ -4,6 +4,7 @@
 // dx12_context.cc.
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/raw_texture.hh>
 
@@ -67,7 +68,12 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
 
     // Signal end-of-epoch: enqueues "epoch `last` finished" after all of its recorded GPU work.
     HRESULT const hr = _queue->Signal(_epoch_fence.Get(), cc::u64(last));
-    CC_ASSERT(SUCCEEDED(hr), "ID3D12CommandQueue::Signal failed");
+    if (FAILED(hr))
+    {
+        if (note_device_removed_if_lost(hr, "epoch Signal"))
+            throw sg::device_lost_exception(device_loss_reason());
+        CC_ASSERT(false, "ID3D12CommandQueue::Signal failed");
+    }
 
     // Package everything `last` owns and push it onto the in-flight FIFO. (Externally synchronized, so
     // no submit races the allocator drain; the lock is for correctness, not contention.)
@@ -189,6 +195,12 @@ void dx12_context::wait_for_epoch(sg::epoch e)
             CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
             WaitForSingleObject(event, INFINITE);
             CloseHandle(event);
+
+            // A removed device completes every pending fence wait immediately (the fence jumps to
+            // UINT64_MAX). Detect that here so a blocked frame surfaces device loss instead of racing on
+            // past a bogus fence value.
+            if (note_device_removed_if_lost(S_OK, "epoch fence wait"))
+                throw sg::device_lost_exception(device_loss_reason());
         }
     }
     process_completed_epochs();

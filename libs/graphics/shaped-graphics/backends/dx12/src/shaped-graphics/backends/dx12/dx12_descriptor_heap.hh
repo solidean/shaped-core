@@ -67,7 +67,8 @@ struct dx12_descriptor_heap
     [[nodiscard]] cc::result<cc::unit> initialize(dx12_context& ctx, int capacity, float transient_fraction);
 
     /// Allocates `count` contiguous PERSISTENT descriptors from the free list. Free the returned
-    /// reservation with free_persistent when the group is released.
+    /// reservation with free_persistent when the group is released. Returns an EMPTY reservation
+    /// (is_empty()) when the region is exhausted — a recoverable failure the caller reports as an error.
     [[nodiscard]] dx12_descriptor_alloc allocate_persistent(int count);
 
     /// Returns a persistent reservation (as from allocate_persistent) to the free list, coalescing
