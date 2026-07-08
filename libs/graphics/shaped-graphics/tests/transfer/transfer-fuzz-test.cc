@@ -60,7 +60,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
         void ensure_open_cmd()
         {
             if (!cmd)
-                cmd = ctx->create_command_list().value();
+                cmd = ctx->create_command_list();
         }
 
         void ensure_submitted_cmd()
@@ -78,15 +78,14 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
 
                      trace t;
                      t.ctx = ctx;
-                     t.buffer = ctx->persistent
-                                    .create_raw_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst)
-                                    .value();
+                     t.buffer = ctx->persistent.create_raw_buffer(
+                         4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
                      t.data = cc::vector<cc::u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(cc::u32));
 
                      // initial random data fill
                      for (auto& d : t.data)
                          d = rng.next_u32();
-                     auto cmd = ctx->create_command_list().value();
+                     auto cmd = ctx->create_command_list();
                      cmd->upload.data_to_buffer(t.buffer, t.data);
                      ctx->submit_command_list(cc::move(cmd));
 
@@ -216,6 +215,38 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      CHECK(ref_data.size() == dl_data.size());
                      for (auto i = 0; i < end - start; ++i)
                          CHECK(ref_data[i] == dl_data[i]);
+                 })
+        ->execute_at_least(10);
+
+    // Async-download + check: the copy-queue mirror of "download + check" (ctx->download vs cmd->download).
+    // Exercises the reverse cross-queue sync (a later direct-queue write waits on the in-flight read) and the
+    // forward wait vs a pending async upload — paths a purely-inline download never touches, and both clean
+    // GPU cross-queue waits now that async upload and download own separate copy queues (see
+    // libs/graphics/shaped-graphics/docs/concepts/download.async.md; a shared queue FIFO-deadlocked here).
+    // Submit any open list first so the read is
+    // ordered after the recorded writes it must observe; the read auto-waits on the last submitted writer
+    // (and on any pending async upload), so the issue-time snapshot of t.data is the correct reference.
+    test->add_op("async download + check",
+                 [&](cc::random& rng, trace& t)
+                 {
+                     auto v0 = rng.uniform(0, int(t.data.size() - 1));
+                     auto v1 = rng.uniform(0, int(t.data.size() - 1));
+                     auto start = cc::min(v0, v1);
+                     auto end = cc::max(v0, v1);
+                     auto cnt = end - start;
+
+                     t.ensure_submitted_cmd();
+
+                     auto ref = cc::vector<cc::u32>::create_uninitialized(cnt);
+                     for (auto i = 0; i < cnt; ++i)
+                         ref[i] = t.data[start + i];
+
+                     auto dl = ctx->download.data_from_buffer<cc::u32>(t.buffer, start, cnt);
+                     auto dl_data = ctx->wait_for(dl).value();
+
+                     CHECK(cc::isize(cnt) == dl_data.size());
+                     for (auto i = 0; i < cnt; ++i)
+                         CHECK(ref[i] == dl_data[i]);
                  })
         ->execute_at_least(10);
 

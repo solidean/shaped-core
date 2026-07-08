@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
@@ -43,6 +44,11 @@ struct dx12_config
     /// successive windows. Bigger windows amortize submits; smaller ones cut latency and memory.
     cc::isize async_upload_window_bytes = cc::isize(16) * 1024 * 1024;
 
+    /// Size of one async-download (readback) staging window, in bytes. Triple-buffered like the upload
+    /// window; a read larger than a window packs across successive windows. Bigger windows amortize
+    /// submits; smaller ones cut latency and memory.
+    cc::isize async_download_window_bytes = cc::isize(16) * 1024 * 1024;
+
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
     int descriptor_heap_capacity = 1 << 16;
 
@@ -63,7 +69,8 @@ public:
         _cmd_pool(*this),
         _upload_inline(*this),
         _download_inline(*this),
-        _upload_async(*this)
+        _upload_async(*this),
+        _download_async(*this)
     {
     }
 
@@ -105,39 +112,70 @@ public:
     // ever a dx12 one here (backends never mix), so the downcast is sound; a CC_ASSERT'd dynamic_cast
     // guards against a foreign command list slipping in (compiled out in release).
 
-    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> create_command_list() override
+    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> try_create_command_list() override
     {
-        return cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list());
+        return note_device_loss_on_error(cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list()),
+                                         "create_command_list");
     }
 
-    [[nodiscard]] cc::result<sg::raw_buffer_handle> create_raw_buffer(cc::isize size_in_bytes,
-                                                                      sg::buffer_usage usage,
-                                                                      sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(cc::isize size_in_bytes,
+                                                                          sg::buffer_usage usage,
+                                                                          sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::raw_buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
+        return note_device_loss_on_error(
+            cc::result<sg::raw_buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc)), "create_raw_buffer");
     }
 
-    [[nodiscard]] cc::result<sg::raw_texture_handle> create_raw_texture(sg::texture_description const& desc,
-                                                                        sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_texture_handle> try_create_raw_texture(sg::texture_description const& desc,
+                                                                            sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::raw_texture_handle>(create_dx12_texture(desc, alloc));
+        return note_device_loss_on_error(cc::result<sg::raw_texture_handle>(create_dx12_texture(desc, alloc)),
+                                         "create_raw_texture");
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(cc::isize size_in_bytes) override
     {
-        return cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes));
+        return note_device_loss_on_error(cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes)),
+                                         "create_memory_heap");
     }
 
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
     // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const> bindings,
-                                                                              sg::lifetime_scope scope) override;
-    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compute_pipeline_description const& desc,
+    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(cc::span<sg::binding const> bindings,
                                                                                   sg::lifetime_scope scope) override;
-    [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle layout,
-                                                                            cc::span<sg::named_view const> views,
-                                                                            sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
+        sg::compute_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle layout,
+                                                                                cc::span<sg::named_view const> views,
+                                                                                sg::lifetime_scope scope) override;
 
+    // Device-loss detection (see is_device_lost). Records the sticky loss reason and returns true if the
+    // device is removed — either `hr` is a removed/reset code, or the device reports a non-S_OK removed
+    // reason. `what` labels the failing op. Call after any HRESULT failure on the device timeline.
+private:
+    bool note_device_removed_if_lost(HRESULT hr, char const* what)
+    {
+        HRESULT reason = (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) ? hr : S_OK;
+        if (reason == S_OK && _device)
+            reason = _device->GetDeviceRemovedReason();
+        if (reason == S_OK)
+            return false;
+        mark_device_lost(cc::format("{} (device removed, reason=0x{:08X})", what, cc::u32(reason)));
+        return true;
+    }
+
+    // Consults GetDeviceRemovedReason when a create returned an error, so a device-loss-during-create is
+    // marked before the throwing façade classifies the failure. Passes the result through unchanged.
+    template <class T>
+    cc::result<T> note_device_loss_on_error(cc::result<T> r, char const* what)
+    {
+        if (r.has_error())
+            note_device_removed_if_lost(S_OK, what);
+        return r;
+    }
+
+public:
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");
@@ -160,9 +198,19 @@ public:
         _upload_async.upload_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
     }
 
+    // Reached through ctx.download — async GPU→CPU buffer readback on the copy queue. Forwards to the async
+    // download system; a later direct-queue list writing the buffer auto-waits on the read.
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
+                                                                    cc::isize offset_in_bytes,
+                                                                    cc::isize size_in_bytes) override
+    {
+        return _download_async.download_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
+    }
+
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
     // change on the owning system, applied at a later safe point (see the systems + advance_epoch).
     void set_async_upload_window_bytes(cc::isize bytes) override { _upload_async.set_window_bytes(bytes); }
+    void set_async_download_window_bytes(cc::isize bytes) override { _download_async.set_window_bytes(bytes); }
     void set_inline_upload_budget(cc::isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(cc::isize bytes) override { _download_inline.set_budget(bytes); }
 
@@ -183,12 +231,6 @@ public:
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
-
-    // Dedicated COPY queue for async uploads, decoupled from the epoch/direct queue. The completion
-    // fence is signaled by the copy queue when an async upload's copy has run; a later direct-queue
-    // command list waits on it at submit (see submit_dx12_command_list) so it observes the write.
-    ComPtr<ID3D12CommandQueue> _copy_queue;
-    ComPtr<ID3D12Fence> _copy_fence;
 
     // Epoch machinery. The epoch fence is signaled with the epoch value at the end of each epoch;
     // the submission fence is a per-command-list timeline on the same queue.
@@ -231,6 +273,10 @@ public:
     // Async CPU→GPU buffer streaming on the copy queue (reached via ctx.upload). Owns its staging ring +
     // copy actor; initialized in create_dx12_context after the copy queue/fence exist.
     dx12_upload_async_system _upload_async;
+
+    // Async GPU→CPU buffer readback on the copy queue (reached via ctx.download). Owns its readback staging
+    // ring + copy actor; initialized in create_dx12_context after the copy queue + download fence exist.
+    dx12_download_async_system _download_async;
 
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a

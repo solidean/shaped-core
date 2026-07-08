@@ -53,7 +53,10 @@ dx12_descriptor_alloc dx12_descriptor_heap::allocate_persistent(int count)
                     f.remove_at(i);
                 return {offset, count};
             }
-            CC_UNREACHABLE("persistent descriptor region exhausted (no free span fits)");
+            // No span fits: the fixed persistent region is exhausted. This is a recoverable, runtime
+            // failure (esp. for bindless / large binding sets), not a contract violation — return the
+            // empty reservation so create_binding_group turns it into a cc::error / throw.
+            return dx12_descriptor_alloc{};
         });
 }
 

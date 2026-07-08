@@ -117,22 +117,22 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
     {
         auto buf = c.transient.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
-        REQUIRE(buf.has_value());
+        REQUIRE(buf != nullptr);
 
-        sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
+        sg::named_view const out{.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()};
         auto group = c.transient.create_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1));
-        REQUIRE(group.has_value());
+        REQUIRE(group != nullptr);
 
         auto disp = c.create_dx12_command_list();
         REQUIRE(disp.has_value());
         disp.value()->compute.bind_pipeline(*pipeline.value());
-        disp.value()->compute.bind_group(0, *group.value());
+        disp.value()->compute.bind_group(0, *group);
         disp.value()->compute.dispatch_threads(count);
         c.submit_dx12_command_list(cc::move(disp.value()));
 
         auto down = c.create_dx12_command_list();
         REQUIRE(down.has_value());
-        auto future = down.value()->download.data_from_buffer<sg::u32>(buf.value(), 0, count);
+        auto future = down.value()->download.data_from_buffer<sg::u32>(buf, 0, count);
         c.submit_dx12_command_list(cc::move(down.value()));
 
         auto const data = c.wait_for(future);
@@ -163,11 +163,11 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
     REQUIRE(layout.has_value());
 
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
-    REQUIRE(buf.has_value());
+    REQUIRE(buf != nullptr);
 
     for (int i = 0; i < 50; ++i)
     {
-        sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
+        sg::named_view const out{.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()};
         auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1),
                                                  sg::lifetime_scope::persistent);
         REQUIRE(group.has_value());          // never exhausts: released ranges are reclaimed

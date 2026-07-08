@@ -139,9 +139,11 @@ if(_sg_backends)
         tests/transfer/transfer-test.cc
         tests/transfer/transfer-fuzz-test.cc
         tests/transfer/upload-async-test.cc
+        tests/transfer/download-async-test.cc
         tests/copy/copy-test.cc
         tests/transient/transient-test.cc
         tests/barrier/barrier-test.cc
+        tests/error-handling/error-handling-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)

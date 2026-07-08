@@ -19,6 +19,7 @@
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
 #include <shaped-graphics/context.upload.hh>
+#include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory_heap.hh>
 #include <shaped-graphics/pixel_format.hh>

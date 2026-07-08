@@ -11,11 +11,11 @@ INVOCABLE_TEST("sg - allocates a persistent buffer", (sg::context_handle const& 
     REQUIRE(ctx != nullptr);
 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    REQUIRE(buf.has_value());
-    CHECK(buf.value()->size_in_bytes() == 256);
-    CHECK(sg::has_flag(buf.value()->usage(), sg::buffer_usage::copy_src));
-    CHECK(sg::has_flag(buf.value()->usage(), sg::buffer_usage::copy_dst));
-    CHECK(!sg::has_flag(buf.value()->usage(), sg::buffer_usage::vertex_buffer));
+    REQUIRE(buf != nullptr);
+    CHECK(buf->size_in_bytes() == 256);
+    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::copy_src));
+    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::copy_dst));
+    CHECK(!sg::has_flag(buf->usage(), sg::buffer_usage::vertex_buffer));
 }
 
 INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle const& ctx))
@@ -33,9 +33,9 @@ INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle const
     for (auto const u : usages)
     {
         auto buf = ctx->persistent.create_raw_buffer(1024, u);
-        REQUIRE(buf.has_value());
-        CHECK(buf.value()->size_in_bytes() == 1024);
-        CHECK(buf.value()->usage() == u);
+        REQUIRE(buf != nullptr);
+        CHECK(buf->size_in_bytes() == 1024);
+        CHECK(buf->usage() == u);
     }
 }
 
@@ -45,8 +45,8 @@ INVOCABLE_TEST("sg - zero-size buffer allocates nothing", (sg::context_handle co
 
     // A zero-size buffer is valid and allocates nothing.
     auto empty = ctx->persistent.create_raw_buffer(0, sg::buffer_usage::none);
-    REQUIRE(empty.has_value());
-    CHECK(empty.value()->size_in_bytes() == 0);
+    REQUIRE(empty != nullptr);
+    CHECK(empty->size_in_bytes() == 0);
 }
 
 INVOCABLE_TEST("sg - allocates a large buffer", (sg::context_handle const& ctx))
@@ -56,6 +56,6 @@ INVOCABLE_TEST("sg - allocates a large buffer", (sg::context_handle const& ctx))
     // A few MiB — comfortably past the inline rings, exercising a real dedicated allocation.
     auto const size = cc::isize(8) * 1024 * 1024;
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::readwrite_buffer);
-    REQUIRE(buf.has_value());
-    CHECK(buf.value()->size_in_bytes() == size);
+    REQUIRE(buf != nullptr);
+    CHECK(buf->size_in_bytes() == size);
 }

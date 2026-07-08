@@ -144,14 +144,15 @@ so the counter reaches zero.
 drop-to-cancel for both the future and the list.
 
 **Deferred:** inline **texture** readback (row-unpadding in the deferred copy, chunked across several
-jobs); splitting a window across the ring seam instead of wasting the tail on a would-be wrap (the
-current v1 shortcut, mirroring [inline upload](upload.inline.md)); a fallback path when a single epoch's
-downloads exceed the ring; and the finer split GPU/CPU watermarks noted in [epochs.md](epochs.md) if
-profiling shows the single-counter coarsening costs pipelining.
+jobs); a fallback path when a single epoch's downloads exceed the ring; and the finer split GPU/CPU
+watermarks noted in [epochs.md](epochs.md) if profiling shows the single-counter coarsening costs
+pipelining. (A read that straddles the ring seam is already split into two contiguous copies rather than
+wasting the tail — as is [inline upload](upload.inline.md).)
 
 ## See also
 
 - [inline upload](upload.inline.md) — the CPU→GPU mirror; its reclaim is fence-gated, not actor-driven.
+- [async download](download.async.md) — the copy-queue, off-frame sibling (`ctx.download`) for bulk readback.
 - [epochs](epochs.md) — the epoch/submission timelines this builds on.
 - [threading](threading.md) — why recording is concurrency-safe (and thus why reclaim must be
   epoch-granular).

@@ -19,8 +19,8 @@ auto pattern = [](int i) { return cc::byte(i & 0xFF); };
 sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    CC_ASSERT(buf.has_value(), "transfer test buffer allocation failed");
-    return buf.value();
+    CC_ASSERT(buf != nullptr, "transfer test buffer allocation failed");
+    return buf;
 }
 } // namespace
 
@@ -35,10 +35,10 @@ INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::con
 
     // Single command list: the backend must order the download read after the upload write.
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
-    auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 256);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    auto future = cmd->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -60,14 +60,14 @@ INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_ha
         src[i] = pattern(i);
 
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -82,10 +82,10 @@ INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle con
 
     int const in[4] = {5, 6, 7, 8};
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.data_to_buffer(buf, cc::span<int const>(in, 4));
-    auto future = cmd.value()->download.data_from_buffer<int>(buf, 0, 4);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.data_to_buffer(buf, cc::span<int const>(in, 4));
+    auto future = cmd->download.data_from_buffer<int>(buf, 0, 4);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
@@ -105,14 +105,14 @@ INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::contex
         mid[i] = pattern(0x40 + i);
 
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(mid, 128), 64);
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(mid, 128), 64);
+    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 64, 128);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 64, 128);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -138,11 +138,11 @@ INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::conte
     }
 
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 16));
-    cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(second, 16)); // overwrites
-    auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 16);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 16));
+    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(second, 16)); // overwrites
+    auto future = cmd->download.bytes_from_buffer(buf, 0, 16);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -159,16 +159,16 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
     auto const buf = make_transfer_buffer(ctx, 16);
 
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>()); // no-op
-    auto future = cmd.value()->download.bytes_from_buffer(buf, 0, 0);
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>()); // no-op
+    auto future = cmd->download.bytes_from_buffer(buf, 0, 0);
     CHECK(future.is_valid());
     CHECK(future.is_ready()); // zero-size read is immediately ready
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value().empty());
-    ctx->submit_command_list(cc::move(cmd.value()));
+    ctx->submit_command_list(cc::move(cmd));
 }
 
 // A submitted readback is deliverable without advancing the epoch: ctx.wait_for blocks until the
@@ -185,14 +185,14 @@ INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch adv
         src[i] = pattern(i);
 
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     // No advance_epoch: the future is waitable as soon as its list is submitted.
     auto const bytes = ctx->wait_for(future);
@@ -220,10 +220,10 @@ INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle co
 
     int const in[8] = {10, 20, 30, 40, 50, 60, 70, 80};
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.data_to_buffer(buf, cc::span<int const>(in, 8));
-    auto future = cmd.value()->download.data_from_buffer<int>(buf, 0, 8);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.data_to_buffer(buf, cc::span<int const>(in, 8));
+    auto future = cmd->download.data_from_buffer<int>(buf, 0, 8);
+    ctx->submit_command_list(cc::move(cmd));
 
     ctx->advance_epoch_and_wait_for_idle(); // close the epoch and fully drain before reading back
 

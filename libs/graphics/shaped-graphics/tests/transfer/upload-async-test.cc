@@ -24,8 +24,8 @@ auto pattern = [](int i) { return cc::byte(i & 0xFF); };
 sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    CC_ASSERT(buf.has_value(), "async upload test buffer allocation failed");
-    return buf.value();
+    CC_ASSERT(buf != nullptr, "async upload test buffer allocation failed");
+    return buf;
 }
 
 // A pinned byte buffer filled by fn(i), moved into the pin (owns it, zero-copy).
@@ -48,9 +48,9 @@ INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handl
     ctx->upload.bytes_to_buffer(buf, pinned_bytes(256, [](cc::isize i) { return int(i); }));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -76,9 +76,9 @@ INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle const&
     ctx->upload.data_to_buffer(buf, pin); // re-views the same pin as bytes, no copy
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.data_from_buffer<int>(buf, 0, 4);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.data_from_buffer<int>(buf, 0, 4);
+    ctx->submit_command_list(cc::move(down));
 
     auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
@@ -109,17 +109,17 @@ INVOCABLE_TEST("sg - async upload composes after a list that wrote the buffer", 
     for (int i = 0; i < 256; ++i)
         first[i] = cc::byte(0xAA);
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 256));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 256));
+    ctx->submit_command_list(cc::move(up));
 
     // Async upload of a distinct pattern, issued after the submit → must land after it.
     ctx->upload.bytes_to_buffer(buf, pinned_bytes(256, [](cc::isize i) { return int(i); }));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -140,9 +140,9 @@ INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_h
     ctx->upload.bytes_to_buffer(buf, pinned_bytes(256, [](cc::isize i) { return int(i); })); // overwrites
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -176,12 +176,12 @@ INVOCABLE_TEST("sg - async upload interleaved with inline writes does not deadlo
         // upload (forward sync) and its submission becomes the next iteration's async reverse token — the
         // interlock that closed the cycle. Inline bytes are consumed during record, so a stack span is fine.
         auto cmd = ctx->create_command_list();
-        REQUIRE(cmd.has_value());
+        REQUIRE(cmd != nullptr);
         cc::byte inline_bytes[n];
         for (int i = 0; i < n; ++i)
             inline_bytes[i] = cc::byte((i + it) & 0xFF);
-        cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(inline_bytes, n));
-        ctx->submit_command_list(cc::move(cmd.value()));
+        cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(inline_bytes, n));
+        ctx->submit_command_list(cc::move(cmd));
     }
 
     // The pin: pre-fix the copy queue is deadlocked and this never returns.
@@ -189,9 +189,9 @@ INVOCABLE_TEST("sg - async upload interleaved with inline writes does not deadlo
 
     // Bonus correctness: GPU order is A_0,B_0,…,A_255,B_255, so the last inline write wins the whole region.
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, n);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, n);
+    ctx->submit_command_list(cc::move(down));
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool last_inline_won = true;
@@ -211,14 +211,14 @@ INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_han
     ctx->upload.bytes_to_buffer(src, pinned_bytes(128, [](cc::isize i) { return 0x40 + (int(i) & 0xF); }));
 
     auto copy = ctx->create_command_list();
-    REQUIRE(copy.has_value());
-    copy.value()->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 128});
-    ctx->submit_command_list(cc::move(copy.value()));
+    REQUIRE(copy != nullptr);
+    copy->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 128});
+    ctx->submit_command_list(cc::move(copy));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(dst, 0, 128);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(dst, 0, 128);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -253,9 +253,9 @@ INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::c
     // (> V), and the actor signals the copy fence in order, so completing it proves V was signaled too.
     ctx->upload.bytes_to_buffer(keep, pinned_bytes(256, [](cc::isize i) { return int(i); }));
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(keep, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(keep, 0, 256);
+    ctx->submit_command_list(cc::move(down));
     REQUIRE(ctx->wait_for(future).has_value());
 
     // Retire the epoch the dropped buffer died in; with V signaled the deferred-deletion gate now releases

@@ -79,45 +79,47 @@ public:
     // sg::context overrides — forward to the backend-typed methods above. The static_cast down is
     // sound: backends never mix.
 
-    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> create_command_list() override
+    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> try_create_command_list() override
     {
         return cc::result<std::unique_ptr<sg::command_list>>(create_vulkan_command_list());
     }
 
-    [[nodiscard]] cc::result<sg::raw_buffer_handle> create_raw_buffer(cc::isize size_in_bytes,
-                                                                      sg::buffer_usage usage,
-                                                                      sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(cc::isize size_in_bytes,
+                                                                          sg::buffer_usage usage,
+                                                                          sg::allocation_info const& alloc) override
     {
         return cc::result<sg::raw_buffer_handle>(create_vulkan_buffer(size_in_bytes, usage, alloc));
     }
 
-    [[nodiscard]] cc::result<sg::raw_texture_handle> create_raw_texture(sg::texture_description const& desc,
-                                                                        sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_texture_handle> try_create_raw_texture(sg::texture_description const& desc,
+                                                                            sg::allocation_info const& alloc) override
     {
         return cc::result<sg::raw_texture_handle>(create_vulkan_texture(desc, alloc));
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize) override
+    // Not implemented yet — return a not-implemented error (rather than aborting) so the sg throwing
+    // façade turns it into a clean typed exception. Fill in with the real body when the path lands.
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(cc::isize) override
     {
-        CC_UNREACHABLE("vulkan memory_heap creation is not implemented yet");
+        return cc::error("vulkan memory_heap creation is not implemented yet");
     }
 
     // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const>,
-                                                                              sg::lifetime_scope) override
-    {
-        CC_UNREACHABLE("vulkan binding_layout creation is not implemented yet");
-    }
-    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compute_pipeline_description const&,
+    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(cc::span<sg::binding const>,
                                                                                   sg::lifetime_scope) override
     {
-        CC_UNREACHABLE("vulkan compute_pipeline creation is not implemented yet");
+        return cc::error("vulkan binding_layout creation is not implemented yet");
     }
-    [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle,
-                                                                            cc::span<sg::named_view const>,
-                                                                            sg::lifetime_scope) override
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(sg::compute_pipeline_description const&,
+                                                                                      sg::lifetime_scope) override
     {
-        CC_UNREACHABLE("vulkan binding_group creation is not implemented yet");
+        return cc::error("vulkan compute_pipeline creation is not implemented yet");
+    }
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle,
+                                                                                cc::span<sg::named_view const>,
+                                                                                sg::lifetime_scope) override
+    {
+        return cc::error("vulkan binding_group creation is not implemented yet");
     }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
@@ -135,6 +137,12 @@ public:
     void async_upload_bytes_to_buffer(sg::raw_buffer_handle, cc::pinned_data<cc::byte const>, cc::isize) override
     {
         CC_UNREACHABLE("vulkan async upload is not implemented yet");
+    }
+
+    // Async download (ctx.download) — not implemented yet.
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
+    {
+        CC_UNREACHABLE("vulkan async download is not implemented yet");
     }
 
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once
@@ -159,6 +167,12 @@ public:
     // Helper: index of a device memory type satisfying `type_bits` (from a requirements mask) and all
     // of `properties`. Returns UINT32_MAX if none matches.
     [[nodiscard]] cc::u32 find_memory_type(cc::u32 type_bits, VkMemoryPropertyFlags properties) const;
+
+    // Device-loss detection (mirror of the dx12 path; see sg::context::is_device_lost). If `r` is
+    // VK_ERROR_DEVICE_LOST, records the sticky loss reason and returns true. `what` labels the failing
+    // op. Call after any VkResult on the device timeline (submit / fence wait); the caller then raises
+    // sg::device_lost_exception at the public boundary. Body in vulkan_context.cc.
+    bool note_device_lost_if_lost(VkResult r, char const* what);
 
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed

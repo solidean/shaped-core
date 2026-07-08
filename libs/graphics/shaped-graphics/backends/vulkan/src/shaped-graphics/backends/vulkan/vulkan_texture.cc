@@ -184,6 +184,10 @@ vulkan_texture::~vulkan_texture()
 cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::texture_description const& desc,
                                                                         sg::allocation_info const& alloc)
 {
+    // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point
+    // rather than surfacing as a driver error (mirrors the dx12 path).
+    sg::raw_texture::validate_description(desc);
+
     // TEMPORARY: dedicated allocations only. Placement into a memory_heap (vkBindImageMemory at an offset
     // into a shared VkDeviceMemory) is not wired up yet — same status as vulkan_buffer.
     CC_ASSERT(alloc.is_dedicated(), "placed textures (non-null memory_heap) not implemented yet");

@@ -86,6 +86,12 @@ public:
     // stamp (defer a later async upload behind this list) is applied to _touched_buffers at submit.
     dx12_copy_fence_value _required_copy_wait = dx12_copy_fence_value::none;
 
+    // Highest async-download completion value any buffer this list WRITES is waiting on. At submit the
+    // direct queue waits on the download fence for this value, so the write never overwrites bytes an async
+    // readback is still reading. `none` means no written buffer had a pending async download. Only writes
+    // fold in (two reads don't conflict). Maintained by track_buffer_access.
+    dx12_download_fence_value _required_download_wait = dx12_download_fence_value::none;
+
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
     void upload_bytes_to_buffer(sg::raw_buffer_handle buffer,

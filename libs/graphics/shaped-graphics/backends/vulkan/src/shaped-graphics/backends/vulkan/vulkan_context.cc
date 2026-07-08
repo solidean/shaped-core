@@ -76,6 +76,14 @@ cc::u32 vulkan_context::find_memory_type(cc::u32 type_bits, VkMemoryPropertyFlag
     return UINT32_MAX;
 }
 
+bool vulkan_context::note_device_lost_if_lost(VkResult r, char const* what)
+{
+    if (r != VK_ERROR_DEVICE_LOST)
+        return false;
+    mark_device_lost(cc::format("{} ({})", what, vk_result_name(r)));
+    return true;
+}
+
 void vulkan_context::shutdown()
 {
     if (_is_shut_down)

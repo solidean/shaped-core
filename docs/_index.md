@@ -16,6 +16,8 @@ The entry point for repo-wide documentation. (Library-local docs live next to th
 - [coding-guidelines.md](coding-guidelines.md) — coding standards and design principles for the
   shaped-core libraries. `.clang-format` / `.clang-tidy` / `.clangd` are authoritative for
   formatting.
+- [error-handling.md](error-handling.md) — when to use `CC_ASSERT` vs `cc::result` / `optional` vs
+  exceptions, and the `try_*` + throwing-façade pattern. Repo-wide; affects all libs.
 - [dev-py-driver.md](dev-py-driver.md) — the design & philosophy behind the `dev.py` build/test
   driver and its `tools/dev/` layers, and how to extend it or adapt it downstream (rationale, not
   a how-to — usage lives in the building-and-testing guide).

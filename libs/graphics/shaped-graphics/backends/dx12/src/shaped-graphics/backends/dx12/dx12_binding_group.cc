@@ -42,6 +42,13 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     // persistent range even if creation fails partway.
     group->table = group->transient ? ctx._descriptor_heap.allocate_transient(layout->descriptor_count)
                                     : ctx._descriptor_heap.allocate_persistent(layout->descriptor_count);
+
+    // A persistent allocation of a non-empty layout can come back empty when the fixed persistent
+    // descriptor region is exhausted (bindless / many long-lived groups). Recoverable: report it.
+    if (!group->transient && layout->descriptor_count > 0 && group->table.is_empty())
+        return cc::error("binding_group: persistent descriptor heap exhausted (no free span fits the "
+                         "requested table)");
+
     int const base = group->table.offset;
     group->table_start = ctx._descriptor_heap.gpu_at(base);
 

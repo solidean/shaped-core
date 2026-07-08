@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12
 {
@@ -25,6 +26,16 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     cc::u64 const async_v = buffer->_pending_async_upload_value.load(std::memory_order_acquire);
     if (async_v > cc::u64(_required_copy_wait))
         _required_copy_wait = dx12_copy_fence_value(async_v);
+
+    // Reverse cross-queue sync for ctx.download: if this op WRITES a buffer an async readback is still
+    // reading on the copy queue, the direct queue must wait for that read to finish before overwriting it.
+    // Only writes conflict (two reads don't), so fold the download value only for a write access.
+    if (sg::is_unordered_write(access))
+    {
+        cc::u64 const dl_v = buffer->_pending_async_download_value.load(std::memory_order_acquire);
+        if (dl_v > cc::u64(_required_download_wait))
+            _required_download_wait = dx12_download_fence_value(dl_v);
+    }
 
     // Accumulate the access (no barrier yet). Declaring — not flushing — here is what lets a buffer bound
     // several times to one op merge into a single barrier with the union of its stages/access; flush_barriers()
@@ -268,7 +279,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // this one lock is what guarantees that (submit is thread-safe / multi_threaded). The revert-vs-promote
     // decision itself is per-resource — the last list to finalize a resource commits its layout — and is made
     // under each resource's own mutex. Work that neither changes a layout nor needs the ordering (the reverse
-    // upload stamp, pool returns, slot release) runs after the lock.
+    // upload/download stamp, pool returns, slot release) runs after the lock.
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next) -> sg::submission_token
         {
@@ -289,13 +300,26 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             cmd->flush_barriers();
 
             HRESULT const hr = cmd->_list->Close();
-            CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");
+            if (FAILED(hr))
+            {
+                // A lost device surfaces here as a removed HRESULT — throw so the caller tears down and
+                // rebuilds (submit is a device-timeline checkpoint). Any other Close failure is an internal
+                // bug. Throwing unwinds this lambda and releases _next_submission via its guard.
+                if (note_device_removed_if_lost(hr, "command list Close"))
+                    throw sg::device_lost_exception(device_loss_reason());
+                CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
+            }
 
             // If this list reads a buffer an async upload is still writing, make the direct queue wait on the
             // copy queue's completion fence before executing, so the copy is visible. Over-waiting on a higher
             // value is safe; a stale/already-signaled value returns immediately.
             if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
-                _queue->Wait(_copy_fence.Get(), cc::u64(cmd->_required_copy_wait));
+                _queue->Wait(_upload_async._completion_fence.Get(), cc::u64(cmd->_required_copy_wait));
+
+            // Symmetric reverse sync: if this list WRITES a buffer an async readback is still reading, wait
+            // on the download completion fence first, so the write never overwrites bytes the read consumes.
+            if (cmd->_required_download_wait != dx12_download_fence_value::none)
+                _queue->Wait(_download_async._completion_fence.Get(), cc::u64(cmd->_required_download_wait));
 
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);
@@ -306,13 +330,20 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             sg::submission_token const t = next;
             next = sg::submission_token(cc::u64(next) + 1);
             HRESULT const sig = _queue->Signal(_submission_fence.Get(), cc::u64(t));
-            CC_ASSERT(SUCCEEDED(sig), "ID3D12CommandQueue::Signal failed");
+            // Record device loss here but don't throw inside the lock; the throw happens after it releases.
+            if (FAILED(sig) && !note_device_removed_if_lost(sig, "queue Signal"))
+                CC_ASSERT(false, "ID3D12CommandQueue::Signal failed");
 
             // Stamp this list's deferred downloads with the token and hand them to the actor under the same
             // lock, so the actor's copy order matches submission (and thus ring-allocation) order.
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
             return t;
         });
+
+    // The Signal above may have observed device removal (marked, not thrown, inside the lock). Surface it
+    // now that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
 
     // Stamp every buffer this list touched with the token, so a later async upload to it defers its copy
     // behind this list (the reverse per-resource cross-queue sync). Reuses the access tracker's touched-buffer

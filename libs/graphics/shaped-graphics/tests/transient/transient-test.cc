@@ -27,7 +27,7 @@ sg::buffer_usage const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage
 bool transient_round_trip(sg::context_handle const& ctx, int seed)
 {
     auto buf = ctx->transient.create_raw_buffer(256, copy_both);
-    if (!buf.has_value())
+    if (!buf)
         return false;
 
     cc::byte src[256];
@@ -35,16 +35,16 @@ bool transient_round_trip(sg::context_handle const& ctx, int seed)
         src[i] = pattern(seed + i);
 
     auto up = ctx->create_command_list();
-    if (!up.has_value())
+    if (!up)
         return false;
-    up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
-    ctx->submit_command_list(cc::move(up.value()));
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
-    if (!down.has_value())
+    if (!down)
         return false;
-    auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     if (!bytes.has_value() || bytes.value().size() != 256)
@@ -66,10 +66,10 @@ INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_han
     REQUIRE(ctx != nullptr);
 
     auto buf = ctx->transient.create_raw_buffer(1024, sg::buffer_usage::uniform_buffer);
-    REQUIRE(buf.has_value());
-    CHECK(buf.value()->size_in_bytes() == 1024);
-    CHECK(sg::has_flag(buf.value()->usage(), sg::buffer_usage::uniform_buffer));
-    CHECK(buf.value()->is_valid()); // fresh: created in the current epoch
+    REQUIRE(buf != nullptr);
+    CHECK(buf->size_in_bytes() == 1024);
+    CHECK(sg::has_flag(buf->usage(), sg::buffer_usage::uniform_buffer));
+    CHECK(buf->is_valid()); // fresh: created in the current epoch
 }
 
 INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context_handle const& ctx))
@@ -77,9 +77,9 @@ INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context
     REQUIRE(ctx != nullptr);
 
     auto buf = ctx->transient.create_raw_buffer(0, sg::buffer_usage::none);
-    REQUIRE(buf.has_value());
-    CHECK(buf.value()->size_in_bytes() == 0);
-    CHECK(buf.value()->is_valid());
+    REQUIRE(buf != nullptr);
+    CHECK(buf->size_in_bytes() == 0);
+    CHECK(buf->is_valid());
 }
 
 INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle const& ctx))
@@ -94,8 +94,8 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
 
     auto a = ctx->transient.create_raw_buffer(128, copy_both);
     auto b = ctx->transient.create_raw_buffer(128, copy_both);
-    REQUIRE(a.has_value());
-    REQUIRE(b.has_value());
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
 
     cc::byte src_a[128];
     cc::byte src_b[128];
@@ -106,16 +106,16 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     }
 
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(a.value(), cc::span<cc::byte const>(src_a, 128));
-    up.value()->upload.bytes_to_buffer(b.value(), cc::span<cc::byte const>(src_b, 128));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(a, cc::span<cc::byte const>(src_a, 128));
+    up->upload.bytes_to_buffer(b, cc::span<cc::byte const>(src_b, 128));
+    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future_a = down.value()->download.bytes_from_buffer(a.value(), 0, 128);
-    auto future_b = down.value()->download.bytes_from_buffer(b.value(), 0, 128);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future_a = down->download.bytes_from_buffer(a, 0, 128);
+    auto future_b = down->download.bytes_from_buffer(b, 0, 128);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes_a = ctx->wait_for(future_a);
     auto const bytes_b = ctx->wait_for(future_b);
@@ -137,13 +137,13 @@ INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::conte
     REQUIRE(ctx != nullptr);
 
     auto buf = ctx->transient.create_raw_buffer(256, copy_both);
-    REQUIRE(buf.has_value());
-    CHECK(buf.value()->is_valid());
-    CHECK(!buf.value()->is_expired());
+    REQUIRE(buf != nullptr);
+    CHECK(buf->is_valid());
+    CHECK(!buf->is_expired());
 
     ctx->advance_epoch_and_wait_for_idle(); // its epoch has passed -> auto-expired at advance
-    CHECK(buf.value()->is_expired());       // using it now (transfer / binding) would be a hard error
-    CHECK(!buf.value()->is_valid());
+    CHECK(buf->is_expired());               // using it now (transfer / binding) would be a hard error
+    CHECK(!buf->is_valid());
 }
 
 // The transient heap resets its bump head each epoch, so successive epochs alias the same storage. Every
@@ -208,15 +208,15 @@ INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", 
         .type = sg::binding_type::readwrite_structured_buffer,
     };
     auto layout = ctx->persistent.create_binding_layout(cc::span<sg::binding const>(&b, 1));
-    REQUIRE(layout.has_value());
+    REQUIRE(layout != nullptr);
 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
-    REQUIRE(buf.has_value());
+    REQUIRE(buf != nullptr);
 
-    sg::named_view const nv{.name = "Data", .view = buf.value()->as_readwrite_buffer<particle>()};
-    auto group = ctx->transient.create_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1));
-    REQUIRE(group.has_value());
-    CHECK(group.value() != nullptr);
+    sg::named_view const nv{.name = "Data", .view = buf->as_readwrite_buffer<particle>()};
+    auto group = ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
+    REQUIRE(group != nullptr);
+    CHECK(group != nullptr);
 }
 
 INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (sg::context_handle const& ctx))
@@ -231,13 +231,15 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
         .type = sg::binding_type::readwrite_structured_buffer,
     };
     auto layout = ctx->persistent.create_binding_layout(cc::span<sg::binding const>(&b, 1));
-    REQUIRE(layout.has_value());
+    REQUIRE(layout != nullptr);
 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
-    REQUIRE(buf.has_value());
+    REQUIRE(buf != nullptr);
 
-    // A view bound to a name the layout does not declare is rejected, not silently ignored.
-    sg::named_view const wrong{.name = "Nope", .view = buf.value()->as_readwrite_buffer<particle>()};
-    auto group = ctx->transient.create_binding_group(layout.value(), cc::span<sg::named_view const>(&wrong, 1));
+    // A view bound to a name the layout does not declare is rejected, not silently ignored. The fallible
+    // core surfaces it as an error; the throwing façade (create_binding_group) would raise
+    // sg::binding_group_exception instead (see tests/error-handling).
+    sg::named_view const wrong{.name = "Nope", .view = buf->as_readwrite_buffer<particle>()};
+    auto group = ctx->transient.try_create_binding_group(layout, cc::span<sg::named_view const>(&wrong, 1));
     CHECK(group.has_error());
 }

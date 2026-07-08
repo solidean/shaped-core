@@ -304,15 +304,17 @@ T& operator=(T&&) = default;
 
 ## Error Handling
 
-Clean-core uses a tiered error handling philosophy:
+Tiered error handling philosophy — the full authority (decision guide, the `try_*` + throwing-façade
+pattern, why device resets / alloc failures are *not* assertions) lives in
+[error-handling.md](error-handling.md):
 
 | Mechanism                 | Use Case                                                             |
 |---------------------------|----------------------------------------------------------------------|
-| `CC_ASSERT`               | Invariant violations, preconditions, postconditions (programmer bugs) |
+| `CC_ASSERT`               | Contract violations — preconditions, postconditions, invariants (programmer bugs) |
+| `cc::result` / `optional` | Frequent or expected failures the caller can handle locally          |
 | Exceptions                | Exceptional errors requiring non-local control flow                  |
-| `cc::result` / `optional` | Frequent or expected failures                                        |
 
-**Assertions:** Use `CC_ASSERT(cond, msg)` liberally in headers and `.cc` files to check preconditions, postconditions, and invariants. Assertions must be side-effect free (the expression must not be load-bearing for correctness; temporary debug output is fine).
+**Assertions:** Use `CC_ASSERT(cond, msg)` liberally in headers and `.cc` files to check preconditions, postconditions, and invariants. Assertions must be side-effect free (the expression must not be load-bearing for correctness; temporary debug output is fine) and **must never fire on user input or environment** — those are `result`/exceptions, since a release build (assertions compiled out) must still handle them.
 
 **Undefined behavior:** Avoid relying on UB. Each explicit UB usage must be heavily documented and justified.
 

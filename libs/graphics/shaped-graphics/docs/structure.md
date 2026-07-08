@@ -23,7 +23,8 @@ Update the tags as the API lands. This document is design intent, not a guarante
 ```text
 src/shaped-graphics/
   fwd.hh / all.hh / types.hh      [in progress]
-  context.hh/.cc                  [in progress] abstract; pure-virtual create_command_list; create_raw_buffer funneled via ctx.persistent
+  context.hh/.cc                  [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; creates funneled via ctx.persistent
+  exceptions.hh                   [in progress] typed sg exceptions (device_lost / allocation / pipeline_creation / binding_group)
   context.persistent.hh/.cc       [in progress] context_persistent_scope: ctx.persistent resource factory (back-ref + friend of context)
   command_list.hh/.cc             [in progress] abstract; recording API planned
   raw_buffer.hh/.cc               [in progress] abstract; protected shape (size/usage) done; as_* view factories
@@ -61,9 +62,15 @@ A backend is built only where it is available for the platform/build. The gates 
 (`d3d12 dxgi dxguid`), always present on the Windows path; vulkan gates on `find_package(Vulkan)` and
 links `Vulkan::Vulkan` (the loader + headers), so it builds wherever a Vulkan SDK is installed.
 
-Fallible creates (`create_*_context`, `create_command_list`, `create_raw_buffer`) return `cc::result`;
-programmer misuse (e.g. `size <= 0`) asserts rather than returning an error. See the
-[coding-guidelines](coding-guidelines.md) and the repo error-handling policy.
+Error handling follows the repo policy in [docs/error-handling.md](../../../../docs/error-handling.md):
+resource creates offer a throwing default (`create_raw_buffer` → returns the handle, raises a typed
+`sg::exception` — see `exceptions.hh`) plus a fallible `try_create_*` returning `cc::result` (the only
+thing backends implement). `create_command_list()` is infallible (returns the handle; throws only on
+device loss); `create_<backend>_context` still returns `cc::result` (environment failure). Programmer
+misuse (e.g. `size < 0`, missing usage, using a transient resource past its epoch) asserts rather than
+returning an error. Device loss is a sticky, global status (`ctx.is_device_lost()`) surfaced by a throw
+at submit / advance / fence waits — deliberately kept off the `try_*` channel. See the
+[coding-guidelines](coding-guidelines.md).
 
 ## Context creation & backend decoupling
 

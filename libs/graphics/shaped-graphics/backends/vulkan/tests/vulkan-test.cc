@@ -54,12 +54,12 @@ void exercise_context(vulkan::vulkan_context& ctx)
     auto& base = static_cast<sg::context&>(ctx);
 
     auto via_base = base.persistent.create_raw_buffer(64, sg::buffer_usage::vertex_buffer);
-    REQUIRE(via_base.has_value());
-    CHECK(via_base.value()->size_in_bytes() == 64);
+    REQUIRE(via_base != nullptr);
+    CHECK(via_base->size_in_bytes() == 64);
 
     auto base_cmd = base.create_command_list();
-    REQUIRE(base_cmd.has_value());
-    base.drop_command_list(cc::move(base_cmd.value()));
+    REQUIRE(base_cmd != nullptr);
+    base.drop_command_list(cc::move(base_cmd));
 }
 } // namespace
 

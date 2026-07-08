@@ -59,8 +59,15 @@ public:
 
     // Reverse: highest direct-queue submission token of a command list that used this buffer. An async
     // upload here defers its copy until this token completes, so it never overwrites the buffer while an
-    // earlier-submitted list still uses it.
+    // earlier-submitted list still uses it. The async download (ctx.download) reuses it too: its readback
+    // defers behind this token so it reads the buffer only after the last direct-queue writer has finished.
     mutable std::atomic<cc::u64> _last_used_submission_token = 0;
+
+    // Forward for the async DOWNLOAD (ctx.download): highest completion value a pending async readback here
+    // will signal on the download completion fence (dx12_download_async_system::_completion_fence) once its
+    // copy-queue read has finished. A later direct-queue list that WRITES this buffer waits for it at
+    // submit, so it never overwrites bytes the readback is still reading. `0` == no pending async download.
+    mutable std::atomic<cc::u64> _pending_async_download_value = 0;
 
     // --- concurrent access-state tracking ------------------------------------------------------------
     // Each open command list keys its private intra-list access state by its command_list_slot. Guarded by a
