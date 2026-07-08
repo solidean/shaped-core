@@ -12,8 +12,8 @@ the operation, and the concurrency model lets several command lists record at on
 
 There is no public `declare_access`. What a resource is used as follows from the operation:
 
-- `cmd.upload` ⇒ `transfer_write` on the destination; `cmd.download` ⇒ `transfer_read` on the source;
-  `cmd.copy` ⇒ `transfer_read` on src + `transfer_write` on dst (a self-copy is one combined access);
+- `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source;
+  `cmd.copy` ⇒ `copy_read` on src + `copy_write` on dst (a self-copy is one combined access);
 - a compute `dispatch` ⇒ each bound view's access class: `readonly` ⇒ `shader_read`, `readwrite` ⇒
   `shader_write`, `uniform` ⇒ `uniform_read` (the inferred replacement for a per-binding declaration).
 
@@ -31,10 +31,12 @@ place, the texture path is stubbed until `sg::texture` lands.)
 ## The vocabulary is backend-neutral
 
 [resource_access.hh](../../src/shaped-graphics/backend/resource_access.hh) defines `access_flags` (what an op
-does — `shader_read`, `transfer_write`, …), `pipeline_stage_flags` (where — `compute`, `transfer`, …),
-and `texture_layout` (buffers are always `general`). These are deliberately **not** any one backend's
-spelling; each value documents its D3D12 and Vulkan mapping. `is_unordered_write` marks the writes that
-need a hazard barrier (shader/transfer/accel writes) — color/depth *targets* are ROP-ordered freebies.
+does — `shader_read`, `copy_write`, …), `pipeline_stage_flags` (where — `compute`, `copy`, …), and
+`texture_layout` (buffers are always `general`; textures use `shader_readonly` / `shader_readwrite` /
+`render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`). These are
+deliberately **not** any one backend's spelling; each value documents its D3D12 and Vulkan mapping.
+`is_unordered_write` marks the writes that need a hazard barrier (shader/copy/accel writes) — color/depth
+*targets* are ROP-ordered freebies.
 
 ## Minimal barriers: the three-timeline state
 
@@ -95,11 +97,18 @@ keeps each list's layout bookkeeping consistent, but it cannot see across two li
 ## dx12: buffer barriers + texture layout transitions
 
 dx12 tracks intra-list hazards with the shared state machine and emits **enhanced barriers**
-(`ID3D12GraphicsCommandList7::Barrier`, batched into a `D3D12_BARRIER_GROUP`) — see
+(`ID3D12GraphicsCommandList7::Barrier`) — see
 [dx12_barrier.hh](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_barrier.hh). This replaced the
-old stopgap that bounced every buffer through `COMMON` after each transfer: uploading then downloading (or
+old stopgap that bounced every buffer through `COMMON` after each copy: uploading then downloading (or
 self-copying) the **same** buffer now works in one command list with a precise
 `COPY_DEST→COPY_SOURCE`-style transition.
+
+**Barriers are batched per operation.** An operation declares access on *every* resource it touches — a
+copy's src + dst, or a dispatch's whole bound group of buffers and textures — before it runs. Each
+`track_*_access` only *builds* the barrier structs (`make_buffer_barrier` / `make_texture_barrier`) and
+appends them to the command list's pending set; `flush_barriers()` then submits the whole batch in a single
+`Barrier` call (one `D3D12_BARRIER_GROUP` per type) immediately before the copy / dispatch. So a dispatch
+binding many resources pays one barrier call, not one per binding.
 
 For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always
 `general` (D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`), so revert emits nothing and
@@ -109,7 +118,8 @@ cross-list ordering rides on that decay — no trailing barriers.
 ([dx12_texture_access](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_texture_access.hh)):
 `declare` rolls the covered subresource boxes through the state machine and returns the per-box
 `D3D12_TEXTURE_BARRIER`s (scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`, `LayoutBefore→LayoutAfter`) the
-command list emits; a non-final submit returns the reverse transitions back to the entry layout, and warns.
+command list collects into its pending batch and flushes before the op; a non-final submit returns the
+reverse transitions back to the entry layout (flushed before `Close`), and warns.
 This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine + partition;
 barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each
 owns its tracking + emission. No public op records against a texture yet, so the tracking is wired + tested

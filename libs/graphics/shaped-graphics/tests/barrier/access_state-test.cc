@@ -12,21 +12,21 @@ using sg::pipeline_stage_flags;
 namespace
 {
 constexpr auto compute = pipeline_stage_flags::compute;
-constexpr auto transfer = pipeline_stage_flags::transfer;
+constexpr auto copy = pipeline_stage_flags::copy;
 constexpr auto fragment = pipeline_stage_flags::fragment;
 
 constexpr auto shader_write = access_flags::shader_write;
 constexpr auto shader_read = access_flags::shader_read;
-constexpr auto transfer_read = access_flags::transfer_read;
-constexpr auto transfer_write = access_flags::transfer_write;
+constexpr auto copy_read = access_flags::copy_read;
+constexpr auto copy_write = access_flags::copy_write;
 } // namespace
 
 TEST("sg access_state - is_unordered_write predicate")
 {
     CHECK(sg::is_unordered_write(shader_write));
-    CHECK(sg::is_unordered_write(transfer_write));
+    CHECK(sg::is_unordered_write(copy_write));
     CHECK(!sg::is_unordered_write(shader_read));
-    CHECK(!sg::is_unordered_write(transfer_read));
+    CHECK(!sg::is_unordered_write(copy_read));
     CHECK(!sg::is_unordered_write(access_flags::color_write)); // ROP-ordered, not an unordered write
 }
 
@@ -48,13 +48,13 @@ TEST("sg access_state - read after write emits a RAW barrier")
     s.declare(compute, shader_write);
     (void)s.flush();
 
-    s.declare(transfer, transfer_read);
+    s.declare(copy, copy_read);
     auto const b = s.flush();
     REQUIRE(b.needed);
     CHECK(sg::has_all(b.src_access, shader_write));
-    CHECK(sg::has_all(b.dst_access, transfer_read));
+    CHECK(sg::has_all(b.dst_access, copy_read));
     CHECK(sg::has_all(b.src_stages, compute));
-    CHECK(sg::has_all(b.dst_stages, transfer));
+    CHECK(sg::has_all(b.dst_stages, copy));
 }
 
 TEST("sg access_state - read after read is free, new stage syncs only the delta")
@@ -63,11 +63,11 @@ TEST("sg access_state - read after read is free, new stage syncs only the delta"
     s.declare(compute, shader_write);
     (void)s.flush();
 
-    s.declare(transfer, transfer_read);
+    s.declare(copy, copy_read);
     REQUIRE(s.flush().needed); // RAW
 
     // Same read again: already barriered -> no barrier.
-    s.declare(transfer, transfer_read);
+    s.declare(copy, copy_read);
     CHECK(!s.flush().needed);
 
     // A new reader stage: only the delta needs syncing (still against the last write).
@@ -75,7 +75,7 @@ TEST("sg access_state - read after read is free, new stage syncs only the delta"
     auto const b = s.flush();
     REQUIRE(b.needed);
     CHECK(sg::has_all(b.dst_stages, fragment));
-    CHECK(!sg::has_all(b.dst_stages, transfer)); // transfer read was already barriered
+    CHECK(!sg::has_all(b.dst_stages, copy)); // copy read was already barriered
     CHECK(sg::has_all(b.src_access, shader_write));
 }
 

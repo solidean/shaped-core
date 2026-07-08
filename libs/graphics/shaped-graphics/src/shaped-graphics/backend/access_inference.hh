@@ -26,18 +26,18 @@ namespace sg
 }
 
 /// The layout a bound texture view of this class needs (the single inference point for the texture bind
-/// path): a sampled/read view wants `shader_read`, a read-write storage view wants `storage`. Unused until
-/// the texture bind path lands — buffers have no layout and never call this.
+/// path): a sampled/read view wants `shader_readonly`, a read-write storage view wants `shader_readwrite`.
+/// Unused until the texture bind path lands — buffers have no layout and never call this.
 [[nodiscard]] constexpr texture_layout shader_layout_of(view_class c)
 {
     switch (c)
     {
     case view_class::uniform:
     case view_class::readonly:
-        return texture_layout::shader_read;
+        return texture_layout::shader_readonly;
     case view_class::readwrite:
-        return texture_layout::storage;
+        return texture_layout::shader_readwrite;
     }
-    return texture_layout::shader_read; // unreachable for the closed set above
+    return texture_layout::shader_readonly; // unreachable for the closed set above
 }
 } // namespace sg

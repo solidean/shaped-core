@@ -28,7 +28,7 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
 
     sg::access_barrier const barrier = buffer->declare_access(slot(), stages, access);
     if (barrier.needed)
-        emit_buffer_barrier(_list.Get(), buffer->_resource.Get(), barrier);
+        _pending_buffer_barriers.push_back(make_buffer_barrier(buffer->_resource.Get(), barrier));
 
     // Record once so its slot is finalized at submit/drop and it gets the reverse async-upload stamp at
     // submit (dedup — a buffer may be touched by many ops).
@@ -47,16 +47,24 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     if (texture->_resource == nullptr)
         return; // no GPU storage, nothing to order
 
-    // Declare over the range and emit the per-box layout transition the tracker asks for (precise
-    // subresource barriers — undefined→copy-dest, copy-dest→shader-resource, and the like).
+    // Declare over the range and collect the per-box layout transitions the tracker asks for (precise
+    // subresource barriers — undefined→copy-dest, copy-dest→shader-resource, and the like) into the pending
+    // batch, flushed with the rest of the op's hazards just before it runs.
     for (auto const& sb : texture->declare_texture_access(slot(), range, stages, access, layout))
-        emit_texture_barrier(_list.Get(), texture->_resource.Get(), sb.range, sb.barrier);
+        _pending_texture_barriers.push_back(make_texture_barrier(texture->_resource.Get(), sb.range, sb.barrier));
 
     // Record once so its slot is finalized at submit/drop (dedup — a texture may be touched by many ops).
     for (auto const& h : _touched_textures)
         if (h == texture)
             return;
     _touched_textures.push_back(texture);
+}
+
+void dx12_command_list::flush_barriers()
+{
+    submit_barriers(_list.Get(), _pending_buffer_barriers, _pending_texture_barriers);
+    _pending_buffer_barriers.clear();
+    _pending_texture_barriers.clear();
 }
 
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
@@ -93,13 +101,15 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
 
     // Declare each bound resource's shader access before the dispatch: the tracker emits any intra-list
-    // hazard barrier (e.g. a prior transfer_write → shader_read RAW, or a WAW between two dispatches).
+    // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
     if (_bound_group != nullptr)
         for (auto const& view : _bound_group->hazard_views)
             if (view.buffer)
                 track_buffer_access(view.buffer, sg::pipeline_stage_flags::compute, sg::shader_access_of(view.access));
 
+    // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
+    flush_barriers();
     _list->Dispatch(UINT(x), UINT(y), UINT(z));
 }
 
@@ -139,7 +149,8 @@ void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                                                       "buffer_usage::copy_dst");
     // Order this write against any prior use of the buffer in this list (precise, no bounce through COMMON)
     // and fold in the forward async-upload wait, then record the copy.
-    track_buffer_access(dst, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_write);
+    track_buffer_access(dst, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write);
+    flush_barriers();
     _ctx._upload_inline.upload_buffer(*this, *dst, data, offset_in_bytes);
 }
 
@@ -162,7 +173,8 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_ha
     // Order this read against any prior write of the buffer in this list, and fold in the forward
     // async-upload wait, then record the readback copy.
     if (size_in_bytes > 0)
-        track_buffer_access(src, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_read);
+        track_buffer_access(src, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read);
+    flush_barriers();
     return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
 }
 
@@ -199,14 +211,15 @@ void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
     // Order the copy against prior use of each buffer. A self-copy reads and writes one resource, so it is
     // declared as a single combined access (one barrier); distinct buffers are ordered independently.
     if (same_resource)
-        track_buffer_access(s, sg::pipeline_stage_flags::transfer,
-                            sg::access_flags::transfer_read | sg::access_flags::transfer_write);
+        track_buffer_access(s, sg::pipeline_stage_flags::copy,
+                            sg::access_flags::copy_read | sg::access_flags::copy_write);
     else
     {
-        track_buffer_access(s, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_read);
-        track_buffer_access(d, sg::pipeline_stage_flags::transfer, sg::access_flags::transfer_write);
+        track_buffer_access(s, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read);
+        track_buffer_access(d, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write);
     }
 
+    flush_barriers();
     _list->CopyBufferRegion(d->_resource.Get(), UINT64(dst_offset_in_bytes), s->_resource.Get(),
                             UINT64(src_offset_in_bytes), UINT64(size_in_bytes));
 }
@@ -243,8 +256,10 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // Kept populated for the reverse async-upload stamp below (it needs the submission token); cleared there.
     for (auto const& t : cmd->_touched_textures)
         for (auto const& sb : t->finalize_slot(cmd->slot(), promote))
-            emit_texture_barrier(cmd->_list.Get(), t->_resource.Get(), sb.range, sb.barrier);
+            cmd->_pending_texture_barriers.push_back(make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
     cmd->_touched_textures.clear();
+    // Record the finalize reverts (the only barriers left pending — every op flushed its own) before Close.
+    cmd->flush_barriers();
 
     HRESULT const hr = cmd->_list->Close();
     CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");

@@ -40,6 +40,11 @@ public:
     /// every resource it touches, so concurrent lists don't share state (a backend helper, not sg API).
     [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
 
+    /// Record the barriers collected since the last flush (all the buffer + texture hazards an operation's
+    /// bound/touched resources implied), in one `Barrier` call, then clear the pending set. Called just
+    /// before every GPU op that consumes them, and by the context at submit for the finalize reverts.
+    void flush_barriers();
+
     dx12_context& _ctx;             // creating context — outlives this list
     sg::command_list_slot _slot;    // released to the context's slot allocator on submit/drop
     bool _consumed = false;         // set by submit/drop; gates the destructor's auto-drop
@@ -50,6 +55,12 @@ public:
     // Deferred readback copies recorded into this list; stamped with the submission token and handed
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
+
+    // Barriers collected for the *next* GPU op: track_*_access appends to these as each resource an op
+    // touches is declared, and flush_barriers() records the whole batch in one Barrier call just before the
+    // op. Empty between ops. Public so the context can stage the finalize reverts here at submit.
+    cc::vector<D3D12_BUFFER_BARRIER> _pending_buffer_barriers;
+    cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 
     // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop, and so
     // each gets the reverse async-upload stamp at submit) and the group currently bound to compute set 0
