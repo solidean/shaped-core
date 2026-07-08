@@ -44,6 +44,9 @@ struct dx12_async_download_job
     std::shared_ptr<dx12_async_download_waiter> waiter; // marked ready after the memcpy
     dx12_download_fence_value completion_value = dx12_download_fence_value::none; // reverse-sync value for this read
     sg::submission_token wait_token = sg::submission_token::invalid; // defer the read until this token completes
+    // Forward cross-queue sync vs a pending async upload to the same buffer: the read waits on the upload
+    // completion fence for this value, so it observes the upload (their two copy queues are independent).
+    dx12_copy_fence_value upload_wait_value = dx12_copy_fence_value::none;
 };
 
 /// Async GPU→CPU buffer readback on the dedicated COPY queue, decoupled from epochs. Reached via
@@ -69,10 +72,9 @@ class dx12_download_async_system
 public:
     explicit dx12_download_async_system(dx12_context& ctx) : _ctx(ctx) {}
 
-    /// Creates + persistently maps the READBACK staging buffer (three windows of `window_bytes` > 0), the
-    /// window fence, the completion fence, and the actor's wait event, then starts the copy actor. Called
-    /// once during context bring-up, after the context's shared copy queue exists. Returns a dx12 error on
-    /// failure.
+    /// Creates its own COPY queue, persistently maps the READBACK staging buffer (three windows of
+    /// `window_bytes` > 0), the window fence, the completion fence, and the actor's wait event, then starts
+    /// the copy actor. Called once during context bring-up. Returns a dx12 error on failure.
     [[nodiscard]] cc::result<cc::unit> initialize(cc::isize window_bytes);
 
     /// Records an async readback of [offset, offset+size) from `buffer` and returns the pending future.
@@ -86,13 +88,17 @@ public:
     /// change is picked up before the next download is staged, so in-flight downloads are unaffected.
     void set_window_bytes(cc::isize bytes);
 
-    /// Shuts the actor down (draining queued readbacks and waiting for the copy queue to idle), then unmaps
-    /// and releases the staging buffer. Must run while the context's shared copy queue and device are alive.
+    /// Shuts the actor down (draining queued readbacks and waiting for its copy queue to idle), then
+    /// releases the copy queue and unmaps + releases the staging buffer.
     void shutdown();
 
     // Set in initialize, then touched only by the copy actor (_staging/_mapped/_window_bytes are also
     // rebuilt by the actor when a set_window_bytes is applied) — the actor reads them lock-free.
     dx12_context& _ctx;
+    // This system's own dedicated COPY queue, separate from the upload system's, so their windows never
+    // FIFO-block each other on a shared queue (see
+    // libs/graphics/shaped-graphics/docs/concepts/download.async.md). Created in initialize.
+    ComPtr<ID3D12CommandQueue> _copy_queue;
     ComPtr<ID3D12Resource> _staging;
     cc::byte* _mapped = nullptr;
     cc::isize _window_bytes = 0;
@@ -110,10 +116,6 @@ public:
     std::atomic<cc::isize> _desired_window_bytes = 0;
 
 private:
-    // Fringe: block the caller until a pending async upload to `src` (highest value on the context copy
-    // fence) has completed, so the readback observes it. Warns; a documented v1 simplification.
-    void wait_for_pending_async_upload(dx12_buffer const& src);
-
     // Reserved on the caller thread (fetch_add), handed out as dx12_download_fence_value; the actor's
     // windows signal the context completion fence up to the highest finished read value.
     std::atomic<cc::u64> _next_download_value = 0;

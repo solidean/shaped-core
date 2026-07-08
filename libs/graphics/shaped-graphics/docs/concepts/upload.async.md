@@ -134,15 +134,14 @@ Not invariants — v1 shortcuts:
 
 - [`dx12_upload_async.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.hh)
   / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.cc) — the copy
-  actor, the three-window packing, and the two fences. The transfer queue is a
-  `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue`; the staging buffer is a persistently-mapped
-  `D3D12_HEAP_TYPE_UPLOAD` committed buffer of `window_bytes * 3`; the copy is
+  actor, the three-window packing, and the two fences. The transfer queue is the system's **own**
+  `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`_copy_queue`, separate from the download system's so
+  their windows never FIFO-block each other — see [async download](download.async.md)); the staging buffer
+  is a persistently-mapped `D3D12_HEAP_TYPE_UPLOAD` committed buffer of `window_bytes * 3`; the copy is
   `ID3D12GraphicsCommandList::CopyBufferRegion`. The **staging fence** is the system's own
   `_window_fence`; the **completion fence** is the system's own `_completion_fence` (upload-only).
-- The **completion fence** is created in the system's `initialize`, alongside the staging buffer, off the
-  context's shared copy queue (`dx12_context::_copy_queue`, created in
-  [`dx12_context.create.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc)),
-  and torn down (actor drained, copy queue idled) in the system's `shutdown`, called from
+- The **copy queue + completion fence** are created in the system's `initialize`, alongside the staging
+  buffer, and torn down (actor drained, copy queue idled) in the system's `shutdown`, called from
   [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`.
   The system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one
   `ID3D12CommandAllocator` per window slot, cycled on the window fence — deliberately **not** the shared

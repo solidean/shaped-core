@@ -9,7 +9,7 @@
 // download completes only once the CPU memcpy has run, each submitted window is kept in flight until it is
 // drained — the actor waits on that window's staging fence, memcpys its chunks, and marks their waiters
 // ready — which happens before its slot is reused and for every remaining window when the inbox empties (so
-// a future always becomes ready without an epoch advance). A second fence, the context's download
+// a future always becomes ready without an epoch advance). A second fence, this system's download
 // completion fence, is signaled with the highest finished read value each window; the submit path makes a
 // later direct-queue list that WRITES the buffer wait on it, so it never overwrites bytes the read is still
 // reading (the reverse cross-queue sync). The system owns one copy command list (reused across windows) and
@@ -20,7 +20,6 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
-#include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
@@ -114,16 +113,19 @@ private:
             return;
         }
 
-        // A window issues its forward-sync wait once, hoisted ahead of its reads (submit_window), so it must
-        // never both promise a completion V and carry a forward-wait that could depend on V — that self-
-        // referential pair is the copy-actor deadlock. If the open window already finished a read and this
-        // job's forward token is still pending on the direct queue, close the window now: this job's Wait
-        // then lands in a fresh window that can only point at prior, already-submitted work.
-        if (_window_open && _open_highest_finished > 0
-            && cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
-        {
+        // A window issues its cross-queue waits once, hoisted ahead of its reads (submit_window), so it must
+        // never both promise a completion V and carry a wait that could depend on V — that self-referential
+        // pair is the copy-actor deadlock. Two such waits per read: the forward direct-queue token, and the
+        // upload completion value (the async upload this read waits on may reverse-wait on a direct writer
+        // that itself waits on this window's V). If the open window already finished a read and either wait
+        // for this job is still pending, close the window now: this job's waits then land in a fresh window
+        // that can only point at prior, already-submitted work.
+        bool const forward_pending = cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
+        bool const upload_pending
+            = job.upload_wait_value != dx12_copy_fence_value::none
+           && cc::u64(job.upload_wait_value) > _sys._ctx._upload_async._completion_fence->GetCompletedValue();
+        if (_window_open && _open_highest_finished > 0 && (forward_pending || upload_pending))
             submit_window();
-        }
 
         dx12_buffer_download download(job.source->_resource.Get(), job.src_offset, job.dst);
         while (!download.is_finished())
@@ -139,9 +141,12 @@ private:
             _window_used += chunk.bytes;
 
             // This chunk reads the buffer, so its window must first wait for the last direct-queue list that
-            // used it (forward sync). Max over the window; the submission fence is monotonic.
+            // used it (forward sync) and for any pending async upload to it. Max over the window; both fences
+            // are monotonic.
             if (cc::u64(job.wait_token) > _open_max_wait_token)
                 _open_max_wait_token = cc::u64(job.wait_token);
+            if (cc::u64(job.upload_wait_value) > _open_max_upload_wait)
+                _open_max_upload_wait = cc::u64(job.upload_wait_value);
 
             // The window holding a read's last byte is the one whose completion satisfies a later writer's
             // reverse wait. Values are monotonic in enqueue order, so max keeps the window's value correct.
@@ -204,6 +209,7 @@ private:
         _window_used = 0;
         _open_highest_finished = 0;
         _open_max_wait_token = 0;
+        _open_max_upload_wait = 0;
         _open_mem_jobs.clear();
         _window_open = true;
     }
@@ -224,22 +230,29 @@ private:
         // buffers has finished, so the read sees committed bytes and never races an in-flight writer.
         // Over-waiting on a higher (monotonic) token is safe; an already-completed token returns at once.
         if (_open_max_wait_token > 0)
-            _sys._ctx._copy_queue->Wait(_sys._ctx._submission_fence.Get(), _open_max_wait_token);
+            _sys._copy_queue->Wait(_sys._ctx._submission_fence.Get(), _open_max_wait_token);
+
+        // Forward cross-queue sync vs a pending async upload: hold this (download) queue until the upload
+        // completion fence reaches the highest upload value the window's reads must observe, so a read never
+        // races an in-flight upload to the same buffer. The acyclicity guard above keeps this hoisted wait
+        // from ever preceding a read whose completion the upload transitively depends on.
+        if (_open_max_upload_wait > 0)
+            _sys._copy_queue->Wait(_sys._ctx._upload_async._completion_fence.Get(), _open_max_upload_wait);
 
         ID3D12CommandList* lists[] = {_list.Get()};
-        _sys._ctx._copy_queue->ExecuteCommandLists(1, lists);
+        _sys._copy_queue->ExecuteCommandLists(1, lists);
 
         // Window fence is 1-based (window i completing signals i+1): the fence starts at 0, so a 0-based
         // value for window 0 would be indistinguishable from "not yet started" and wait_for_window(0) would
         // never block. wait_for_window applies the same +1, so callers pass window indices.
-        HRESULT const hs = _sys._ctx._copy_queue->Signal(_sys._window_fence.Get(), _current_window + 1);
+        HRESULT const hs = _sys._copy_queue->Signal(_sys._window_fence.Get(), _current_window + 1);
         CC_ASSERT(SUCCEEDED(hs), "ID3D12CommandQueue::Signal (download window) failed");
 
         // Completion fence is monotonic: only signal when this window finished a later read than any prior
         // window. Windows carrying only a mid-read chunk finish nothing and skip it.
         if (_open_highest_finished > _last_signaled_download)
         {
-            HRESULT const hcf = _sys._ctx._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
+            HRESULT const hcf = _sys._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
             CC_ASSERT(SUCCEEDED(hcf), "ID3D12CommandQueue::Signal (download completion) failed");
             _last_signaled_download = _open_highest_finished;
         }
@@ -337,6 +350,7 @@ private:
     cc::isize _window_used = 0;                  // bytes read into the open window so far
     cc::u64 _open_highest_finished = 0;          // highest completion value of reads finished in the open window
     cc::u64 _open_max_wait_token = 0;            // highest direct-queue token the open window's reads must wait for
+    cc::u64 _open_max_upload_wait = 0;           // highest async-upload value the open window's reads must wait for
     cc::vector<download_mem_job> _open_mem_jobs; // memcpies accumulated for the open window
 
     cc::vector<inflight_window> _inflight; // submitted, not-yet-drained windows (FIFO, oldest at the front)
@@ -346,7 +360,11 @@ private:
 cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async download staging window must be positive");
-    CC_ASSERT(_ctx._copy_queue, "async download needs the context's shared copy queue first");
+
+    D3D12_COMMAND_QUEUE_DESC copy_queue_desc = {};
+    copy_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+    if (HRESULT hr = _ctx._device->CreateCommandQueue(&copy_queue_desc, IID_PPV_ARGS(&_copy_queue)); FAILED(hr))
+        return dx12_error(hr, "ID3D12Device::CreateCommandQueue (async download copy) failed");
 
     // READBACK heap, COPY_DEST: the copy queue writes read bytes here via CopyBufferRegion, the actor reads
     // them back out on the CPU. Three windows back-to-back, addressed by (window index % 3) * window_bytes.
@@ -361,7 +379,7 @@ cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_byt
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async download window) failed");
 
-    // Download completion fence: signaled by the shared copy queue when a window's read has finished; a
+    // Download completion fence: signaled by this system's copy queue when a window's read has finished; a
     // later direct-queue writer waits on it at submit (see dx12_command_list).
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_completion_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async download completion) failed");
@@ -393,11 +411,10 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
                                                                       "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    // Fringe: a pending async UPLOAD to this buffer must be visible to the read. Upload + download share the
-    // copy queue but run on independent actors, so they can't be cheaply ordered on the GPU — block on the
-    // upload's completion value (a documented v1 simplification; see
-    // libs/graphics/shaped-graphics/docs/concepts/download.async.md).
-    wait_for_pending_async_upload(*src);
+    // Forward cross-queue sync vs a pending async UPLOAD to the same buffer: the read must observe it.
+    // Upload and download own independent copy queues, so the read's window waits on the upload completion
+    // fence for this value (issued on the download queue in submit_window) — a clean GPU wait, no CPU stall.
+    cc::u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
 
     // Destination the read bytes land in; the pinned_data keeps it alive until the copy runs (or cancels).
     auto dst = cc::pinned_data<cc::byte>::create_uninitialized(size);
@@ -428,28 +445,10 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     // Forward sync: defer the read behind the last direct-queue list that used the buffer, so it reads
     // committed bytes and never races an earlier-submitted writer.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
+    job.upload_wait_value = dx12_copy_fence_value(upload_wait); // 0 == none: no pending async upload
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(waiter));
-}
-
-void dx12_download_async_system::wait_for_pending_async_upload(dx12_buffer const& src)
-{
-    cc::u64 const v = src._pending_async_upload_value.load(std::memory_order_acquire);
-    // The upload system owns the upload completion fence; both subsystems share the context's copy queue.
-    ID3D12Fence* const upload_fence = _ctx._upload_async._completion_fence.Get();
-    if (v == 0 || upload_fence->GetCompletedValue() >= v)
-        return;
-
-    cc::eprintln("[sg] async download from a buffer with a pending async upload — blocking the calling thread on the "
-                 "upload. Prefer an intervening command-list op, or wait for uploads before downloading.");
-
-    HANDLE const ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    CC_ASSERT(ev != nullptr, "CreateEventW failed for the async download upload-wait");
-    HRESULT const hr = upload_fence->SetEventOnCompletion(v, ev);
-    CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
-    WaitForSingleObject(ev, INFINITE);
-    CloseHandle(ev);
 }
 
 void dx12_download_async_system::set_window_bytes(cc::isize bytes)
@@ -474,6 +473,7 @@ void dx12_download_async_system::shutdown()
     _mapped = nullptr;
     _window_fence.Reset();
     _completion_fence.Reset();
+    _copy_queue.Reset();
     if (_wait_event)
     {
         CloseHandle(_wait_event);

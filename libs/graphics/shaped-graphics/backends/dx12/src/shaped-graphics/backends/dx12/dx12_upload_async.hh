@@ -49,10 +49,9 @@ class dx12_upload_async_system
 public:
     explicit dx12_upload_async_system(dx12_context& ctx) : _ctx(ctx) {}
 
-    /// Creates + persistently maps the UPLOAD staging buffer (three windows of `window_bytes` > 0), the
-    /// staging fence, the completion fence, and the actor's wait event, then starts the copy actor.
-    /// Called once during context bring-up, after the context's shared copy queue exists. Returns a dx12
-    /// error on failure.
+    /// Creates its own COPY queue, persistently maps the UPLOAD staging buffer (three windows of
+    /// `window_bytes` > 0), the staging fence, the completion fence, and the actor's wait event, then starts
+    /// the copy actor. Called once during context bring-up. Returns a dx12 error on failure.
     [[nodiscard]] cc::result<cc::unit> initialize(cc::isize window_bytes);
 
     /// Records an async upload of `data` into `buffer` at `offset`. Reserves a completion value, stamps
@@ -65,14 +64,18 @@ public:
     /// change is picked up before the next upload is staged, so in-flight uploads are unaffected.
     void set_window_bytes(cc::isize bytes);
 
-    /// Shuts the actor down (draining queued copies and waiting for the copy queue to idle), then unmaps
-    /// and releases the staging buffer. Must run while the context's shared copy queue and command-
-    /// allocator pool are alive.
+    /// Shuts the actor down (draining queued copies and waiting for its copy queue to idle), then releases
+    /// the copy queue and unmaps + releases the staging buffer.
     void shutdown();
 
     // Set in initialize, then touched only by the copy actor (_staging/_mapped/_window_bytes are also
     // rebuilt by the actor when a set_window_bytes is applied) — the actor reads them lock-free.
     dx12_context& _ctx;
+    // This system's own dedicated COPY queue. Async upload and download each own a separate queue so their
+    // windows never FIFO-block each other: a Wait on a shared queue stalls all work behind it, which with
+    // interleaved upload/download dependencies deadlocks (see
+    // libs/graphics/shaped-graphics/docs/concepts/download.async.md). Created in initialize.
+    ComPtr<ID3D12CommandQueue> _copy_queue;
     ComPtr<ID3D12Resource> _staging;
     cc::byte* _mapped = nullptr;
     cc::isize _window_bytes = 0;

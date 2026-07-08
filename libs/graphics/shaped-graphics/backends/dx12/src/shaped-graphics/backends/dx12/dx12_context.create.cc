@@ -120,14 +120,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandQueue failed");
 
-    // Dedicated COPY queue shared by async uploads + downloads. Each subsystem owns and creates its own
-    // completion fence in initialize() below (upload-only vs download-only); only the queue is shared.
-    D3D12_COMMAND_QUEUE_DESC copy_queue_desc = {};
-    copy_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
-    ComPtr<ID3D12CommandQueue> copy_queue;
-    if (HRESULT hr = device->CreateCommandQueue(&copy_queue_desc, IID_PPV_ARGS(&copy_queue)); FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateCommandQueue (copy) failed");
-
     // Epoch system fences (both timelines on the direct queue) + a reusable wait event. The epoch
     // fence gates resource reclamation; the submission fence tracks per-command-list completion.
     ComPtr<ID3D12Fence> epoch_fence;
@@ -142,7 +134,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_factory = cc::move(factory);
     ctx->_device = cc::move(device);
     ctx->_queue = cc::move(queue);
-    ctx->_copy_queue = cc::move(copy_queue);
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 
@@ -151,12 +142,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 
-    // Async upload staging windows + copy actor (needs the shared copy queue above; creates its own
-    // upload completion fence).
+    // Async upload + download staging windows and copy actors; each creates its own copy queue +
+    // completion fence.
     CC_RETURN_IF_ERROR(ctx->_upload_async.initialize(config.async_upload_window_bytes));
-
-    // Async download readback staging windows + copy actor (needs the shared copy queue above; creates
-    // its own download completion fence).
     CC_RETURN_IF_ERROR(ctx->_download_async.initialize(config.async_download_window_bytes));
 
     // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a

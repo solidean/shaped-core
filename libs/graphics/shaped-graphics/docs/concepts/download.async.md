@@ -41,6 +41,12 @@ must finish before the read runs, or the read observes stale bytes.
   holding the read, it makes the **transfer queue wait on the main queue's submission fence** for that
   token first. One wait per window covers every buffer read in it.
 
+**Forward — the read also waits on a pending async upload.** An async *upload* to the same buffer runs on a
+**separate** transfer queue (see below), so it is not covered by the submission-fence wait. The download
+reads the buffer's pending-async-upload value when recorded and carries it; the window holding the read
+**waits on the upload completion fence** for that value before executing — a clean cross-queue GPU wait, so
+`submit-upload → async-download` of the same buffer just works with no CPU stall.
+
 **Reverse — a later writer waits on the read.** A command list that **writes** the buffer after the
 download must not overwrite the bytes while the transfer queue is still reading them.
 
@@ -56,12 +62,21 @@ Both waits point strictly **backward in the CPU submission order**, so *per oper
 graph is acyclic — no deadlock. Multiple async downloads of the **same** buffer are independent reads; two
 reads never conflict, so they need no ordering against each other.
 
-**One scheduling rule keeps that acyclic at the window level.** The forward wait is issued once per
-*window*, on the max token over its reads, hoisted ahead of the window's execute. So a window must never
-*both* signal a completion `V` (that a later writer waits on) *and* carry a forward-wait that (transitively)
-depends on `V` — the hoisted wait would then sit ahead of the very read whose signal it needs, closing a
-cycle. The actor enforces this exactly as async upload does: it **closes the open window before staging a
-job** whose forward token is still pending on the main queue once the window has already finished a read.
+**One scheduling rule keeps that acyclic at the window level.** Each forward wait (submission token *and*
+upload-completion value) is issued once per *window*, on the max over its reads, hoisted ahead of the
+window's execute. So a window must never *both* signal a completion `V` (that a later writer waits on) *and*
+carry a forward wait that (transitively) depends on `V` — the hoisted wait would then sit ahead of the very
+read whose signal it needs, closing a cycle. The actor enforces this exactly as async upload does: it
+**closes the open window before staging a job** whose forward token *or* upload-completion value is still
+pending once the window has already finished a read.
+
+**Why upload and download own separate transfer queues.** A `Wait` on a GPU queue blocks *all* work behind
+it in that queue's FIFO. If upload and download shared one queue, an upload window waiting on a direct-queue
+token and a download window (queued behind it) that would release that token could **deadlock** — the
+per-window acyclicity rule above only reasons about one actor's own windows, not the other actor's work
+sharing the queue. Giving each system its own queue removes that cross-actor coupling: the only ordering
+between them is the explicit upload-completion wait above, which points strictly backward. (On backends
+where a second transfer queue is not guaranteed — see the vulkan note below — this needs a fallback.)
 
 ## Why a download completes with a CPU memcpy (and how windows drain)
 
@@ -130,15 +145,9 @@ Not invariants — v1 shortcuts:
 
 - **Buffers only** (textures deferred), **persistent buffers only**, and **single-writer**: an async
   download of a buffer concurrently written by an in-flight list is the caller's hazard to avoid.
-- **In-order reads (head-of-line blocking).** Reads run strictly in submission order on the transfer queue
-  (shared with async upload), so a forward wait on a slow command list stalls all later async copies behind
-  it — a deferred optimization, as with upload.
-- **A pending async *upload* to the same buffer** with no intervening main-queue op is resolved by a **CPU
-  block** (the caller waits on the upload's completion value) and a warning, rather than a cross-queue GPU
-  wait — upload and download share one transfer queue and run on independent actors, so they can't be
-  cheaply ordered on the GPU without a deadlock risk. A fringe case ("who uploads then immediately
-  async-downloads the same buffer without touching it on the main queue?"); a separate download queue could
-  make it a clean cross-queue wait later.
+- **In-order reads (head-of-line blocking).** Reads run strictly in submission order on the download's own
+  transfer queue, so a forward wait on a slow command list stalls all later async reads behind it — a
+  deferred optimization, as with upload.
 - **Coarser than per-buffer state**: the stamps are single monotonic values per buffer, a down-payment on
   the per-resource state-tracking layer landing separately, which should replace them.
 - **Submits a partially-filled window early** (when the inbox drains) rather than claiming its unused
@@ -152,18 +161,22 @@ Not invariants — v1 shortcuts:
 
 - [`dx12_download_async.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.hh)
   / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) — the copy actor,
-  the three-window packing, the in-flight-window drain, and the two fences. The transfer queue is the shared
-  `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`dx12_context::_copy_queue`); the staging buffer is a
+  the three-window packing, the in-flight-window drain, and the two fences. The transfer queue is the
+  system's **own** `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`_copy_queue`, separate from the
+  upload system's — see "Why upload and download own separate transfer queues"); the staging buffer is a
   persistently-mapped `D3D12_HEAP_TYPE_READBACK` committed buffer of `window_bytes * 3`; the read is
   `ID3D12GraphicsCommandList::CopyBufferRegion`. The **staging fence** is the system's own `_window_fence`;
   the **completion fence** is the system's own `_completion_fence` (download-only).
-- The **download completion fence** is created in the system's `initialize`, off the context's shared copy
-  queue (`dx12_context::_copy_queue`, created in
-  [`dx12_context.create.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc)),
-  and torn down (actor drained, copy queue idled) in the system's `shutdown`, called from
+- The **copy queue + download completion fence** are created in the system's `initialize` and torn down
+  (actor drained, copy queue idled) in the system's `shutdown`, called from
   [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`. The
   system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per
   window slot, cycled on the window fence — deliberately **not** the shared epoch-gated pool.
+- The **forward wait vs a pending async upload** is `_copy_queue->Wait(_upload_async._completion_fence, ...)`,
+  hoisted per window in `submit_window` on the max `_pending_async_upload_value` over its reads. The
+  acyclicity guard extends to it: the actor closes the open window before staging a read whose pending-upload
+  value is still unsatisfied once the window has finished a read. This replaces an earlier CPU block (which,
+  on the old shared queue, could deadlock — see the fuzz op in `tests/transfer/transfer-fuzz-test.cc`).
 - The per-resource stamps live on `dx12_buffer`: `_pending_async_download_value` (reverse, a
   `dx12_download_fence_value` distinct from the epoch / submission / async-upload fences) and the shared
   `_last_used_submission_token` (forward). `track_buffer_access` in
@@ -183,6 +196,19 @@ Not invariants — v1 shortcuts:
   actor).
 - The public facade is [`context.download.hh`](../../src/shaped-graphics/context.download.hh)
   (`ctx.download`), which also carries the inline readback ring's `set_budget`.
+
+## Backend note: vulkan needs a second-transfer-queue fallback
+
+The separate-queue design assumes async upload and async download can each hold their **own** transfer
+queue. dx12 grants this freely — `CreateCommandQueue` makes as many `COPY` queues as wanted (WARP included).
+Vulkan does **not**: queues come from **queue families fixed at device creation**, and a dedicated
+transfer family often exposes `queueCount == 1`, so two independent transfer queues are not guaranteed. A
+vulkan backend must select capability-driven with a fallback — a second queue from a transfer-capable family
+(graphics/compute queues implicitly support transfer) when available, else route one stream onto another
+queue, or fall back to a single shared queue. **A single shared transfer queue reintroduces the FIFO
+deadlock above**, so the shared-queue fallback must serialize upload/download differently (e.g. the old CPU
+block, or one actor for both) rather than run two independent actors on it. This is unimplemented — the
+vulkan backend is still a stub — but the constraint is load-bearing for its design.
 
 ## See also
 
