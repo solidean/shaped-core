@@ -31,11 +31,9 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
         _pending_buffer_barriers.push_back(make_buffer_barrier(buffer->_resource.Get(), barrier));
 
     // Record once so its slot is finalized at submit/drop and it gets the reverse async-upload stamp at
-    // submit (dedup — a buffer may be touched by many ops).
-    for (auto const& h : _touched_buffers)
-        if (h == buffer)
-            return;
-    _touched_buffers.push_back(buffer);
+    // submit. The per-slot recorded flag makes the dedup O(1) — no scan of _touched_buffers.
+    if (buffer->mark_recorded(slot()))
+        _touched_buffers.push_back(buffer);
 }
 
 void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
@@ -53,11 +51,10 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     for (auto const& sb : texture->declare_texture_access(slot(), range, stages, access, layout))
         _pending_texture_barriers.push_back(make_texture_barrier(texture->_resource.Get(), sb.range, sb.barrier));
 
-    // Record once so its slot is finalized at submit/drop (dedup — a texture may be touched by many ops).
-    for (auto const& h : _touched_textures)
-        if (h == texture)
-            return;
-    _touched_textures.push_back(texture);
+    // Record once so its slot is finalized at submit/drop. The per-slot recorded flag makes the dedup O(1) —
+    // no scan of _touched_textures.
+    if (texture->mark_recorded(slot()))
+        _touched_textures.push_back(texture);
 }
 
 void dx12_command_list::flush_barriers()

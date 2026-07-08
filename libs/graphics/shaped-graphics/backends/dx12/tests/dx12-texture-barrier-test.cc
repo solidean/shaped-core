@@ -76,6 +76,23 @@ TEST("sg dx12 - texture access declares layout transitions")
     CHECK(b1[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
 }
 
+TEST("sg dx12 - mark_recorded reports the slot's first record")
+{
+    // The command list uses mark_recorded to add a texture to its finalize set exactly once (O(1), no scan):
+    // true the first time per slot, false after, and true again once the slot is cleared.
+    auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
+    dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
+    auto const s0 = sg::command_list_slot(0);
+    auto const s1 = sg::command_list_slot(1);
+
+    CHECK(acc.mark_recorded(s0));  // first record of slot 0
+    CHECK(!acc.mark_recorded(s0)); // already recorded
+    CHECK(acc.mark_recorded(s1));  // a different slot is independent
+
+    acc.discard(s0); // clearing slot 0 makes its next record first again
+    CHECK(acc.mark_recorded(s0));
+}
+
 TEST("sg dx12 - texture access fragments per subresource range")
 {
     // Two mips; touch each separately with a different layout, then the whole texture at once.

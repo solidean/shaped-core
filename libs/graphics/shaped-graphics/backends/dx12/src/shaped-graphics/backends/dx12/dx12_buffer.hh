@@ -72,7 +72,8 @@ public:
     struct access_slot
     {
         sg::resource_access_state state;
-        bool active = false; // this slot's command list has touched the buffer since it started tracking
+        bool active = false;   // this slot's command list has touched the buffer since it started tracking
+        bool recorded = false; // this slot's command list has added the buffer to its finalize set (dedup)
     };
     struct access_tracking
     {
@@ -86,6 +87,11 @@ public:
     [[nodiscard]] sg::access_barrier declare_access(sg::command_list_slot slot,
                                                     sg::pipeline_stage_flags stages,
                                                     sg::access_flags access) const;
+
+    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false
+    /// after (until the slot is cleared by finalize/discard). The command list uses it to add the buffer to
+    /// its touched set exactly once, in O(1) — replacing a linear scan. Thread-safe.
+    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot) const;
 
     /// Finalize `slot` when its command list is submitted: promote its final state to canonical if this was
     /// the last open list (`promote`), else roll back to canonical (a no-op layout-wise for buffers). Clears

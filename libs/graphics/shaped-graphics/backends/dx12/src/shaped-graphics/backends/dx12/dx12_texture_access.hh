@@ -97,6 +97,22 @@ public:
             _slots[i] = slot_state{};
     }
 
+    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false
+    /// after (until the slot is cleared by finalize/discard). The command list uses it to add the texture to
+    /// its touched set exactly once, in O(1) — replacing a linear scan.
+    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot)
+    {
+        int const i = int(slot);
+        CC_ASSERT(i >= 0, "mark_recorded with an invalid command_list_slot");
+        while (_slots.size() <= i)
+            _slots.push_back(slot_state{});
+        auto& s = _slots[i];
+        if (s.recorded)
+            return false;
+        s.recorded = true;
+        return true;
+    }
+
 private:
     struct slot_state
     {
@@ -105,6 +121,7 @@ private:
         sg::subresource_partition partition{}; // this list's private state (extent set when seeded)
         sg::subresource_partition entry{};     // committed snapshot the list seeded from (revert target)
         bool active = false;
+        bool recorded = false; // this slot's command list has added the texture to its finalize set (dedup)
     };
 
     slot_state& slot_for(sg::command_list_slot slot)

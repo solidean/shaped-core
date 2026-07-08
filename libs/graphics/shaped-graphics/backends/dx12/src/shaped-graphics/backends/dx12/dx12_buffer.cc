@@ -48,6 +48,23 @@ sg::access_barrier dx12_buffer::declare_access(sg::command_list_slot slot,
         });
 }
 
+bool dx12_buffer::mark_recorded(sg::command_list_slot slot) const
+{
+    return _access.lock(
+        [&](access_tracking& t) -> bool
+        {
+            int const i = int(slot);
+            CC_ASSERT(i >= 0, "mark_recorded with an invalid command_list_slot");
+            while (t.slots.size() <= i)
+                t.slots.push_back(access_slot{});
+            auto& e = t.slots[i];
+            if (e.recorded)
+                return false;
+            e.recorded = true;
+            return true;
+        });
+}
+
 void dx12_buffer::finalize_slot(sg::command_list_slot slot, bool promote) const
 {
     _access.lock(
@@ -62,8 +79,7 @@ void dx12_buffer::finalize_slot(sg::command_list_slot slot, bool promote) const
                 t.canonical = e.state; // committed state carries into the next command list
             // else: roll back to canonical. For buffers this emits nothing (layout is always general); the
             // revert transition + its hidden-cost warning arrive with textures.
-            e.active = false;
-            e.state = sg::resource_access_state{};
+            e = access_slot{}; // clears active + recorded + state, freeing the slot for reuse
         });
 }
 
@@ -75,8 +91,7 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
             int const i = int(slot);
             if (i >= t.slots.size())
                 return;
-            t.slots[i].active = false;
-            t.slots[i].state = sg::resource_access_state{};
+            t.slots[i] = access_slot{}; // clears active + recorded + state
         });
 }
 

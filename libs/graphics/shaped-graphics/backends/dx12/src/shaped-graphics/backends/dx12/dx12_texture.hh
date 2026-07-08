@@ -75,6 +75,13 @@ public:
         _access.lock([&](dx12_texture_access& t) { t.discard(slot); });
     }
 
+    /// Test-and-set `slot`'s finalize-recorded flag (see dx12_texture_access::mark_recorded): true the first
+    /// time per slot, false after. Lets the command list record the texture for finalization once. Thread-safe.
+    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.mark_recorded(slot); });
+    }
+
 protected:
     // Release the GPU storage (deferred to epoch retire) when the texture is expired — see sg::raw_texture.
     void on_expired() const override;
