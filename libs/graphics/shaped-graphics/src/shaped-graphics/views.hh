@@ -1,6 +1,8 @@
 #pragma once
 
+#include <shaped-graphics/backend/subresource.hh> // subresource_range (texture view sub-selection)
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/pixel_format.hh>
 
 #include <type_traits>
 
@@ -30,19 +32,21 @@ concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(siz
 enum class view_class
 {
     uniform,   ///< uniform block — constant buffer / UBO (read-only)
-    readonly,  ///< read-only storage — SRV / read SSBO
-    readwrite, ///< read-write storage — UAV / read-write SSBO
-    // Future (with textures / samplers): render_target, depth_stencil, sampler, acceleration_structure.
+    readonly,  ///< read-only storage — SRV / read SSBO / sampled texture
+    readwrite, ///< read-write storage — UAV / read-write SSBO / storage texture
+    // Future (with a graphics pipeline / samplers): render_target, depth_stencil, sampler, acceleration_structure.
 };
 
 /// How a view's bytes are laid out. `raw` is byte-addressed (element type `byte`); `structured` is an
-/// array strided by the element type; `uniform_block` is a single struct block.
+/// array strided by the element type; `uniform_block` is a single struct block; `texture` is a texel grid
+/// (dimension / array / cube / samples come from the bound raw_texture's description).
 enum class view_shape
 {
     uniform_block,
     structured,
     raw,
-    // Future (with textures / formats): texel, texture_1d, texture_2d, texture_2d_array, texture_3d, ...
+    texture,
+    // Future (with formats): texel (a typed buffer view).
 };
 
 /// The erased form every typed view converts into — the value a backend reads (via `(access, shape)`)
@@ -51,11 +55,18 @@ struct raw_view
 {
     view_class access;
     view_shape shape;
+
+    // Buffer views (shape uniform_block / structured / raw). `buffer` is null for a texture view.
     raw_buffer_handle buffer;  ///< the viewed buffer
     isize offset_in_bytes = 0; ///< start of the view within the buffer
     isize size_in_bytes = 0;   ///< [uniform_block, raw] visible byte size
     isize element_count = 0;   ///< [structured] number of elements
     isize stride_in_bytes = 0; ///< [structured] element stride (= sizeof(T))
+
+    // Texture views (shape texture). `texture` is null for a buffer view.
+    raw_texture_handle texture;                    ///< the viewed texture
+    pixel_format format = pixel_format::undefined; ///< the format the descriptor reads/writes as
+    subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
 };
 
 /// A uniform block of `T` — a constant buffer / UBO binding (read-only). {buffer, offset, sizeof(T)}.
@@ -133,6 +144,43 @@ struct readwrite_view
             .element_count = is_raw ? 0 : element_count,
             .stride_in_bytes = is_raw ? 0 : isize(sizeof(T)),
         };
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
+/// A read-only (sampled / SRV) texture view over a subresource range. Unlike buffer views it is not
+/// templated on an element type — the texel format is a runtime `pixel_format`, and dimension / array /
+/// cube / samples come from the bound texture. Built via `texture<Traits>::as_readonly_view()`.
+struct texture_readonly_view
+{
+    static constexpr view_class access = view_class::readonly;
+
+    raw_texture_handle texture;
+    pixel_format format = pixel_format::undefined;
+    subresource_range range;
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_view{.access = access, .shape = view_shape::texture, .texture = texture, .format = format, .range = range};
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
+/// A read-write (storage / UAV) texture view over a subresource range (a single mip level). Built via
+/// `texture<Traits>::as_readwrite_view()`.
+struct texture_readwrite_view
+{
+    static constexpr view_class access = view_class::readwrite;
+
+    raw_texture_handle texture;
+    pixel_format format = pixel_format::undefined;
+    subresource_range range;
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_view{.access = access, .shape = view_shape::texture, .texture = texture, .format = format, .range = range};
     }
 
     operator raw_view() const { return to_raw(); }

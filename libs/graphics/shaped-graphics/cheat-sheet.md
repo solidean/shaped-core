@@ -213,9 +213,12 @@ ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedica
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
 sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
+tex.as_readonly_view()                         // -> sg::texture_readonly_view  (sampled/SRV; needs readonly_texture usage)
+tex.as_readwrite_view(mip=0)                   // -> sg::texture_readwrite_view (storage/UAV; needs readwrite_texture; not on MS)
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
-// NOTE: creation only — texture views (shader binding), barriers/layout transitions, and copies are future work.
+// bind a texture view in a compute dispatch → it auto-transitions to shader_read (SRV) / storage (UAV).
+// NOTE: SRV/UAV only — render_target/depth_stencil views + samplers + texture upload/download/copy remain future work.
 ```
 
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
@@ -228,13 +231,15 @@ sg::uniform_view<T>          // uniform block of T   (cbuffer/UBO)          — 
 sg::readonly_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
 sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
-sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage)
-sg::view_shape               // uniform_block | structured | raw (layout; derived from T)
+sg::texture_readonly_view    // sampled texture (SRV) — view_class::readonly,  shape texture
+sg::texture_readwrite_view   // storage texture (UAV) — view_class::readwrite, shape texture
+// each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view().
+sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage / texture_usage)
+sg::view_shape               // uniform_block | structured | raw | texture   (layout)
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
-v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/size/element_count/stride }
-// backends switch on (access, shape) to build the native descriptor  (name raw_view is TBD)
-// buffer views only today; texture/texel views (dimension-typed) still deferred — the resource
-// (sg::raw_texture) and sg::pixel_format now exist, but binding a texture to a shader is future work
+v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, offset/size/... | format+range }
+// backends switch on (access, shape) to build the native descriptor (SRV/UAV/CBV/texture SRV/UAV)
+// deferred: render_target/depth_stencil views, samplers, and texel buffers (typed linear buffers)
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)

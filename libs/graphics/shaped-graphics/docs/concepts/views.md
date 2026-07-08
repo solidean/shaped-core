@@ -80,19 +80,22 @@ Every typed view converts (`to_raw()`, or implicitly) into one plain
 params) that a backend `switch`es on to build its native descriptor. The type safety lives entirely
 in the typed views; users never touch `raw_view`, only the backend does.
 
-## Scope today, and what's deferred
+## Texture views
 
-Only **buffer** views exist. Deferred, and each its own future family (they don't fit the `<T>` slot):
+Textures have views too, but they don't fit the buffer `<T>` slot (there is no element type — a texel
+`pixel_format` and a subresource range instead). So they are distinct, non-templated types —
+`texture_readonly_view` (sampled / SRV) and `texture_readwrite_view` (storage / UAV) — each carrying
+`{raw_texture_handle, pixel_format, subresource_range}` and erasing to a `raw_view` with `shape ==
+texture`. The factories live on the typed `texture<Traits>` wrapper (`as_readonly_view()` on any shape,
+`as_readwrite_view(mip)` only where `!Traits.is_multisampled`), so shape gating is a compile-time contract,
+mirroring the wrapper's `height()`/`depth()`. `binding_type::sampled_texture` / `storage_texture` map to
+`(readonly, texture)` / `(readwrite, texture)`; the backend reads the bound texture's description for the
+SRV/UAV dimension. When a texture is bound to a compute dispatch, the barrier system transitions it to the
+layout its access implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of`.
 
-- **Texture views** — need `sg::texture` + a pixel-`format`; typed by dimension (1d / 2d / 2d-array /
-  3d / cube / cube-array) with mip / array-slice / aspect ranges, plus `render_target` /
-  `depth_stencil` access. This is where "pass a 2D texture, one array slice, or one cube face into the
-  same routine" lands: those all construct one 2D texture view.
-- **Texel buffers** — format-decoded linear buffers (`Buffer<T>` / `samplerBuffer`); need a format,
-  not just `T`.
-
-The **bind path** (pipelines, descriptor groups/layouts, `command_list` binding, and the
-reflection-driven validation above) is the eventual consumer of `raw_view` and is not built yet.
+Deferred: **render_target / depth_stencil** views (a graphics pipeline / render pass consumes them),
+**samplers** (a separate descriptor heap), and **texel buffers** (`Buffer<T>` / `samplerBuffer` — a
+format-decoded linear buffer).
 
 ## See also
 

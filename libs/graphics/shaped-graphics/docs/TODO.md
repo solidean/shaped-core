@@ -17,9 +17,11 @@ Running list of known follow-ups. Bigger design intent lives in
   downloading / self-copying the *same* buffer now works in one command list. **Textures** are now tracked
   too: each `dx12_texture` owns a per-command-list covering partition and emits subresource-range
   `D3D12_TEXTURE_BARRIER` layout transitions (with entry-layout revert on a non-final submit) — dx12-owned
-  tracking + emission, since barrier models differ across backends. Still open: no **public texture op**
-  (copy/upload/dispatch) drives the texture tracking yet; **texture views + shader-bound auto access**
-  (`shader_layout_of` goes live then); **vulkan** barrier emission (lands with its compute/transfer
+  tracking + emission, since barrier models differ across backends. A bound texture in a compute dispatch
+  now *drives* it: SRV/UAV texture views (`texture<Traits>::as_*_view`) transition to `shader_read` /
+  `storage` at dispatch via `shader_layout_of`. Still open: **texture copy / upload / download** ops (so a
+  sampled texture can be populated; the barrier system will order those too); render-target/depth-stencil
+  views; **vulkan** barrier emission (lands with its compute/transfer
   milestone; it reuses the shared vocabulary + state machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs
   an array binding path + a binding-name→resource reflection map); migrating `access_flags` /
   `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables

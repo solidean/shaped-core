@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/views.hh>
 
 namespace sg
 {
@@ -87,7 +88,39 @@ public:
         return _raw->sample_count();
     }
 
+    // Shader-facing views — strongly-typed descriptors a binding_group binds. Each asserts the texture
+    // carries the matching usage. The view spans the whole texture (a UAV spans a single mip level).
+
+    /// A read-only (sampled / SRV) view over the whole texture. Requires readonly_texture usage.
+    [[nodiscard]] texture_readonly_view as_readonly_view() const
+    {
+        CC_ASSERT(has_flag(_raw->usage(), texture_usage::readonly_texture), "texture lacks readonly_texture usage");
+        return texture_readonly_view{.texture = _raw, .format = _raw->format(), .range = whole_range()};
+    }
+
+    /// A read-write (storage / UAV) view over one mip level (default 0). Requires readwrite_texture usage
+    /// and a non-multisampled texture (D3D12 forbids MSAA UAVs).
+    [[nodiscard]] texture_readwrite_view as_readwrite_view(int mip = 0) const
+        requires(!Traits.is_multisampled)
+    {
+        CC_ASSERT(has_flag(_raw->usage(), texture_usage::readwrite_texture), "texture lacks readwrite_texture usage");
+        CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "readwrite view mip level out of range");
+        subresource_range r = whole_range();
+        r.mip_range = {.start = mip, .end = mip + 1}; // a UAV targets a single mip level
+        return texture_readwrite_view{.texture = _raw, .format = _raw->format(), .range = r};
+    }
+
 private:
+    // The whole-texture subresource range: all mips, all array slices (a cube is 6 per cube), all aspects.
+    [[nodiscard]] subresource_range whole_range() const
+    {
+        subresource_range r;
+        r.mip_range = {.start = 0, .end = _raw->mip_levels()};
+        r.array_range = {.start = 0, .end = isize(_raw->array_layers()) * (_raw->is_cube() ? 6 : 1)};
+        r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
+        return r;
+    }
+
     raw_texture_handle _raw = nullptr;
 };
 
