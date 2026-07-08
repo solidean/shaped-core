@@ -86,6 +86,10 @@ dx12_texture::~dx12_texture()
 cc::result<dx12_texture_handle> dx12_context::create_dx12_texture(sg::texture_description const& desc,
                                                                   sg::allocation_info const& alloc)
 {
+    // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point
+    // rather than surfacing as a CreateCommittedResource driver error.
+    sg::raw_texture::validate_description(desc);
+
     // Dedicated committed resources only for now — placed textures need a texture-capable memory_heap
     // (the current heap is buffers-only). The transient scope also routes here with a dedicated alloc.
     CC_ASSERT(alloc.is_dedicated(), "placed textures are not supported yet (texture-capable heap is future work)");

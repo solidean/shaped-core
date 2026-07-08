@@ -59,6 +59,12 @@ class raw_texture : public std::enable_shared_from_this<raw_texture>
 public:
     virtual ~raw_texture();
 
+    /// Asserts `desc` satisfies the shape contract (concrete format, extents >= 1, mip/sample >= 1, and
+    /// the valid dimension/array/cube/MSAA combinations). Runs from the constructor; a backend also calls
+    /// it at the top of its create path so the contract is enforced before any fallible GPU work (rather
+    /// than a bad desc surfacing as a driver error).
+    static void validate_description(texture_description const& desc);
+
     /// The full shape this texture was created with.
     [[nodiscard]] texture_description const& description() const { return _desc; }
 

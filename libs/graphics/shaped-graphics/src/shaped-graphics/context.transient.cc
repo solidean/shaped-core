@@ -3,6 +3,7 @@
 #include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/context.transient.hh>
+#include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/memory_heap.hh>
 
 namespace sg
@@ -46,7 +47,17 @@ void context_transient_scope::apply_pending_budget_at_epoch_boundary()
         });
 }
 
-cc::result<raw_buffer_handle> context_transient_scope::create_raw_buffer(isize size_in_bytes, buffer_usage usage)
+raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes, buffer_usage usage)
+{
+    auto r = try_create_raw_buffer(size_in_bytes, usage);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw allocation_exception("transient buffer allocation failed", size_in_bytes, r.error());
+}
+
+cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isize size_in_bytes, buffer_usage usage)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
 
@@ -62,7 +73,7 @@ cc::result<raw_buffer_handle> context_transient_scope::create_raw_buffer(isize s
             {
                 if (!s.heap) // lazily create the backing heap on first use
                 {
-                    auto heap = _ctx.create_memory_heap(s.budget);
+                    auto heap = _ctx.try_create_memory_heap(s.budget);
                     CC_RETURN_IF_ERROR(heap);
                     s.heap = heap.value();
                     s.budget = s.heap->size_in_bytes();
@@ -88,22 +99,43 @@ cc::result<raw_buffer_handle> context_transient_scope::create_raw_buffer(isize s
         alloc = reserved.value();
     }
 
-    return _ctx.create_raw_buffer(size_in_bytes, usage, alloc);
+    return _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
 }
 
-cc::result<raw_texture_handle> context_transient_scope::create_raw_texture(texture_description const& desc)
+raw_texture_handle context_transient_scope::create_raw_texture(texture_description const& desc)
+{
+    auto r = try_create_raw_texture(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw allocation_exception("transient texture allocation failed", 0, r.error());
+}
+
+cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(texture_description const& desc)
 {
     // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated
     // allocation tagged transient (the backend auto-expires it at the next epoch). Placed/bump-allocated
     // transient textures wait on a texture-capable transient memory_heap. See the header note.
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
-    return _ctx.create_raw_texture(desc, alloc);
+    return _ctx.try_create_raw_texture(desc, alloc);
 }
 
-cc::result<binding_group_handle> context_transient_scope::create_binding_group(binding_layout_handle layout,
-                                                                               cc::span<named_view const> views)
+binding_group_handle context_transient_scope::create_binding_group(binding_layout_handle layout,
+                                                                   cc::span<named_view const> views)
 {
-    return _ctx.create_binding_group(cc::move(layout), views, lifetime_scope::transient);
+    auto r = try_create_binding_group(cc::move(layout), views);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw binding_group_exception(r.error());
+}
+
+cc::result<binding_group_handle> context_transient_scope::try_create_binding_group(binding_layout_handle layout,
+                                                                                   cc::span<named_view const> views)
+{
+    return _ctx.try_create_binding_group(cc::move(layout), views, lifetime_scope::transient);
 }
 } // namespace sg

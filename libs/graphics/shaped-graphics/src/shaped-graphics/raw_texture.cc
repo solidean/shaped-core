@@ -7,6 +7,11 @@ raw_texture::~raw_texture() = default;
 
 raw_texture::raw_texture(texture_description const& desc) : _desc(desc)
 {
+    validate_description(desc);
+}
+
+void raw_texture::validate_description(texture_description const& desc)
+{
     CC_ASSERT(desc.format != pixel_format::undefined, "texture needs a concrete pixel_format");
     CC_ASSERT(desc.width >= 1 && desc.height >= 1 && desc.depth >= 1, "texture extents must be >= 1");
     CC_ASSERT(desc.mip_levels >= 1, "texture needs at least one mip level");

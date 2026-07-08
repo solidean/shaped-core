@@ -112,39 +112,70 @@ public:
     // ever a dx12 one here (backends never mix), so the downcast is sound; a CC_ASSERT'd dynamic_cast
     // guards against a foreign command list slipping in (compiled out in release).
 
-    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> create_command_list() override
+    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> try_create_command_list() override
     {
-        return cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list());
+        return note_device_loss_on_error(cc::result<std::unique_ptr<sg::command_list>>(create_dx12_command_list()),
+                                         "create_command_list");
     }
 
-    [[nodiscard]] cc::result<sg::raw_buffer_handle> create_raw_buffer(cc::isize size_in_bytes,
-                                                                      sg::buffer_usage usage,
-                                                                      sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(cc::isize size_in_bytes,
+                                                                          sg::buffer_usage usage,
+                                                                          sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::raw_buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc));
+        return note_device_loss_on_error(
+            cc::result<sg::raw_buffer_handle>(create_dx12_buffer(size_in_bytes, usage, alloc)), "create_raw_buffer");
     }
 
-    [[nodiscard]] cc::result<sg::raw_texture_handle> create_raw_texture(sg::texture_description const& desc,
-                                                                        sg::allocation_info const& alloc) override
+    [[nodiscard]] cc::result<sg::raw_texture_handle> try_create_raw_texture(sg::texture_description const& desc,
+                                                                            sg::allocation_info const& alloc) override
     {
-        return cc::result<sg::raw_texture_handle>(create_dx12_texture(desc, alloc));
+        return note_device_loss_on_error(cc::result<sg::raw_texture_handle>(create_dx12_texture(desc, alloc)),
+                                         "create_raw_texture");
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> create_memory_heap(cc::isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(cc::isize size_in_bytes) override
     {
-        return cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes));
+        return note_device_loss_on_error(cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes)),
+                                         "create_memory_heap");
     }
 
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
     // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> create_binding_layout(cc::span<sg::binding const> bindings,
-                                                                              sg::lifetime_scope scope) override;
-    [[nodiscard]] cc::result<sg::compute_pipeline_handle> create_compute_pipeline(sg::compute_pipeline_description const& desc,
+    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(cc::span<sg::binding const> bindings,
                                                                                   sg::lifetime_scope scope) override;
-    [[nodiscard]] cc::result<sg::binding_group_handle> create_binding_group(sg::binding_layout_handle layout,
-                                                                            cc::span<sg::named_view const> views,
-                                                                            sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
+        sg::compute_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle layout,
+                                                                                cc::span<sg::named_view const> views,
+                                                                                sg::lifetime_scope scope) override;
 
+    // Device-loss detection (see is_device_lost). Records the sticky loss reason and returns true if the
+    // device is removed — either `hr` is a removed/reset code, or the device reports a non-S_OK removed
+    // reason. `what` labels the failing op. Call after any HRESULT failure on the device timeline.
+private:
+    bool note_device_removed_if_lost(HRESULT hr, char const* what)
+    {
+        HRESULT reason = (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) ? hr : S_OK;
+        if (reason == S_OK && _device)
+            reason = _device->GetDeviceRemovedReason();
+        if (reason == S_OK)
+            return false;
+        mark_device_lost(cc::format("{} (device removed, reason=0x{:08X})", what, cc::u32(reason)));
+        return true;
+    }
+
+    // Consults GetDeviceRemovedReason when a create returned an error, so a device-loss-during-create is
+    // marked before the throwing façade classifies the failure. Passes the result through unchanged.
+    template <class T>
+    cc::result<T> note_device_loss_on_error(cc::result<T> r, char const* what)
+    {
+        if (r.has_error())
+            note_device_removed_if_lost(S_OK, what);
+        return r;
+    }
+
+public:
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");

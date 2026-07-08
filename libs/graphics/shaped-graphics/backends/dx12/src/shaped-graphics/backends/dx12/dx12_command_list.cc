@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12
 {
@@ -232,7 +233,14 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // Kept populated for the reverse async-upload stamp below (it needs the submission token); cleared there.
 
     HRESULT const hr = cmd->_list->Close();
-    CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");
+    if (FAILED(hr))
+    {
+        // A lost device surfaces here as a removed HRESULT — throw so the caller tears down and rebuilds
+        // (submit is a device-timeline checkpoint). Any other Close failure is an internal bug.
+        if (note_device_removed_if_lost(hr, "command list Close"))
+            throw sg::device_lost_exception(device_loss_reason());
+        CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
+    }
 
     // Execute, take a monotonic completion token, and signal it — all under one lock so token order
     // equals queue submission and signal order. (The queue is free-threaded, but out-of-order signals
@@ -257,13 +265,20 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             sg::submission_token const t = next;
             next = sg::submission_token(cc::u64(next) + 1);
             HRESULT const sig = _queue->Signal(_submission_fence.Get(), cc::u64(t));
-            CC_ASSERT(SUCCEEDED(sig), "ID3D12CommandQueue::Signal failed");
+            // Record device loss here but don't throw inside the lock; the throw happens after it releases.
+            if (FAILED(sig) && !note_device_removed_if_lost(sig, "queue Signal"))
+                CC_ASSERT(false, "ID3D12CommandQueue::Signal failed");
 
             // Stamp this list's deferred downloads with the token and hand them to the actor under the
             // same lock, so the actor's copy order matches submission (and thus ring-allocation) order.
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
             return t;
         });
+
+    // The Signal above may have observed device removal (marked, not thrown, inside the lock). Surface it
+    // now that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
 
     // Stamp every buffer this list touched with the token, so a later async upload to it defers its copy
     // behind this list (the reverse per-resource cross-queue sync). Reuses the access tracker's touched-buffer

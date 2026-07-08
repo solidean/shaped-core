@@ -18,8 +18,8 @@ auto pattern = [](int i) { return cc::byte(i & 0xFF); };
 sg::raw_buffer_handle make_buffer(sg::context_handle const& ctx, cc::isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    CC_ASSERT(buf.has_value(), "barrier test buffer allocation failed");
-    return buf.value();
+    CC_ASSERT(buf != nullptr, "barrier test buffer allocation failed");
+    return buf;
 }
 } // namespace
 
@@ -41,16 +41,16 @@ INVOCABLE_TEST("sg - two concurrent command lists record and submit independentl
     // open (not the last list); c2 submits last. Both must round-trip their own buffer correctly.
     auto c1 = ctx->create_command_list();
     auto c2 = ctx->create_command_list();
-    REQUIRE(c1.has_value());
-    REQUIRE(c2.has_value());
+    REQUIRE(c1 != nullptr);
+    REQUIRE(c2 != nullptr);
 
-    c1.value()->upload.data_to_buffer(a, cc::span<int const>(va, 16));
-    c2.value()->upload.data_to_buffer(b, cc::span<int const>(vb, 16));
-    auto fa = c1.value()->download.data_from_buffer<int>(a, 0, 16);
-    auto fb = c2.value()->download.data_from_buffer<int>(b, 0, 16);
+    c1->upload.data_to_buffer(a, cc::span<int const>(va, 16));
+    c2->upload.data_to_buffer(b, cc::span<int const>(vb, 16));
+    auto fa = c1->download.data_from_buffer<int>(a, 0, 16);
+    auto fb = c2->download.data_from_buffer<int>(b, 0, 16);
 
-    ctx->submit_command_list(cc::move(c1.value()));
-    ctx->submit_command_list(cc::move(c2.value()));
+    ctx->submit_command_list(cc::move(c1));
+    ctx->submit_command_list(cc::move(c2));
 
     auto const da = ctx->wait_for(fa);
     auto const db = ctx->wait_for(fb);
@@ -74,12 +74,12 @@ INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list",
     // upload → first half; self-copy first half → second half (read+write the same buffer); download the
     // second half. The tracker must order the copy after the upload and the download after the copy.
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 128), 0);
-    cmd.value()->copy.buffer_bytes_region(
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 128), 0);
+    cmd->copy.buffer_bytes_region(
         {.src = buf, .dst = buf, .size_in_bytes = 128, .src_offset_in_bytes = 0, .dst_offset_in_bytes = 128});
-    auto future = cmd.value()->download.bytes_from_buffer(buf, 128, 128);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    auto future = cmd->download.bytes_from_buffer(buf, 128, 128);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());

@@ -60,7 +60,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
         void ensure_open_cmd()
         {
             if (!cmd)
-                cmd = ctx->create_command_list().value();
+                cmd = ctx->create_command_list();
         }
 
         void ensure_submitted_cmd()
@@ -78,15 +78,14 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
 
                      trace t;
                      t.ctx = ctx;
-                     t.buffer = ctx->persistent
-                                    .create_raw_buffer(4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst)
-                                    .value();
+                     t.buffer = ctx->persistent.create_raw_buffer(
+                         4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
                      t.data = cc::vector<cc::u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(cc::u32));
 
                      // initial random data fill
                      for (auto& d : t.data)
                          d = rng.next_u32();
-                     auto cmd = ctx->create_command_list().value();
+                     auto cmd = ctx->create_command_list();
                      cmd->upload.data_to_buffer(t.buffer, t.data);
                      ctx->submit_command_list(cc::move(cmd));
 

@@ -19,7 +19,7 @@ namespace dx12 = sg::backend::dx12;
 bool inline_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
 {
     auto buf = ctx->persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    if (!buf.has_value())
+    if (!buf)
         return false;
 
     cc::vector<cc::byte> src;
@@ -28,12 +28,12 @@ bool inline_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
         src.push_back(cc::byte((i + seed) & 0xFF));
 
     auto up = ctx->create_command_list();
-    up.value()->upload.bytes_to_buffer(buf.value(), src);
-    ctx->submit_command_list(cc::move(up.value()));
+    up->upload.bytes_to_buffer(buf, src);
+    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
-    auto fut = down.value()->download.bytes_from_buffer(buf.value(), 0, n);
-    ctx->submit_command_list(cc::move(down.value()));
+    auto fut = down->download.bytes_from_buffer(buf, 0, n);
+    ctx->submit_command_list(cc::move(down));
 
     auto bytes = ctx->wait_for(fut);
     if (!bytes.has_value() || bytes.value().size() != n)
@@ -48,18 +48,18 @@ bool inline_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
 bool async_round_trip(sg::context_handle const& ctx, cc::isize n, int seed)
 {
     auto buf = ctx->persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    if (!buf.has_value())
+    if (!buf)
         return false;
 
     cc::vector<cc::byte> src;
     src.reserve(n);
     for (cc::isize i = 0; i < n; ++i)
         src.push_back(cc::byte((i + seed) & 0xFF));
-    ctx->upload.bytes_to_buffer(buf.value(), cc::make_pinned_data(cc::move(src)));
+    ctx->upload.bytes_to_buffer(buf, cc::make_pinned_data(cc::move(src)));
 
     auto down = ctx->create_command_list();
-    auto fut = down.value()->download.bytes_from_buffer(buf.value(), 0, n);
-    ctx->submit_command_list(cc::move(down.value()));
+    auto fut = down->download.bytes_from_buffer(buf, 0, n);
+    ctx->submit_command_list(cc::move(down));
 
     auto bytes = ctx->wait_for(fut);
     if (!bytes.has_value() || bytes.value().size() != n)

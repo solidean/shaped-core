@@ -4,6 +4,7 @@
 // (shutdown) lives in vulkan_context.cc.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
 {
@@ -43,7 +44,12 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
         .pSignalSemaphores = &_epoch_timeline,
     };
     VkResult const r = vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE);
-    CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (epoch signal) failed");
+    if (r != VK_SUCCESS)
+    {
+        if (note_device_lost_if_lost(r, "epoch signal vkQueueSubmit"))
+            throw sg::device_lost_exception(device_loss_reason());
+        CC_ASSERT(false, "vkQueueSubmit (epoch signal) failed");
+    }
 
     // Package everything `last` owns and push it onto the in-flight FIFO. (Externally synchronized, so
     // no submit races the pool drain; the lock is for correctness, not contention.)
@@ -138,7 +144,9 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
                 .pSemaphores = &_epoch_timeline,
                 .pValues = &target,
             };
-            vkWaitSemaphores(_device, &wait, UINT64_MAX);
+            VkResult const wr = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+            if (note_device_lost_if_lost(wr, "epoch semaphore wait"))
+                throw sg::device_lost_exception(device_loss_reason());
         }
     }
     process_completed_epochs();

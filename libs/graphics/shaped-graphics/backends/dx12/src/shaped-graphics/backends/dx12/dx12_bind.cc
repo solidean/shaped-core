@@ -46,26 +46,33 @@ cc::result<dx12_binding_group_handle> dx12_context::create_dx12_binding_group(dx
 
 // --- sg::context override forwarders --------------------------------------------------------------
 
-cc::result<sg::binding_layout_handle> dx12_context::create_binding_layout(cc::span<sg::binding const> bindings,
-                                                                          sg::lifetime_scope scope)
+cc::result<sg::binding_layout_handle> dx12_context::try_create_binding_layout(cc::span<sg::binding const> bindings,
+                                                                              sg::lifetime_scope scope)
 {
-    return cc::result<sg::binding_layout_handle>(create_dx12_binding_layout(bindings, scope));
+    return note_device_loss_on_error(cc::result<sg::binding_layout_handle>(create_dx12_binding_layout(bindings, scope)),
+                                     "create_binding_layout");
 }
 
-cc::result<sg::compute_pipeline_handle> dx12_context::create_compute_pipeline(sg::compute_pipeline_description const& desc,
-                                                                              sg::lifetime_scope scope)
+cc::result<sg::compute_pipeline_handle> dx12_context::try_create_compute_pipeline(sg::compute_pipeline_description const& desc,
+                                                                                  sg::lifetime_scope scope)
 {
     auto dx = std::dynamic_pointer_cast<dx12_binding_layout const>(desc.layout);
     CC_ASSERT(dx != nullptr, "binding_layout is not a dx12 binding_layout");
-    return cc::result<sg::compute_pipeline_handle>(create_dx12_compute_pipeline(desc.shader, cc::move(dx), scope));
+    return note_device_loss_on_error(
+        cc::result<sg::compute_pipeline_handle>(create_dx12_compute_pipeline(desc.shader, cc::move(dx), scope)),
+        "create_compute_pipeline");
 }
 
-cc::result<sg::binding_group_handle> dx12_context::create_binding_group(sg::binding_layout_handle layout,
-                                                                        cc::span<sg::named_view const> views,
-                                                                        sg::lifetime_scope scope)
+cc::result<sg::binding_group_handle> dx12_context::try_create_binding_group(sg::binding_layout_handle layout,
+                                                                            cc::span<sg::named_view const> views,
+                                                                            sg::lifetime_scope scope)
 {
     auto dx = std::dynamic_pointer_cast<dx12_binding_layout const>(cc::move(layout));
     CC_ASSERT(dx != nullptr, "binding_layout is not a dx12 binding_layout");
-    return cc::result<sg::binding_group_handle>(create_dx12_binding_group(cc::move(dx), views, scope));
+    // NOTE: a binding_group cc::error is usually a wiring/exhaustion failure, not device loss — but
+    // consult the device anyway so a loss during descriptor writes is still recorded.
+    return note_device_loss_on_error(
+        cc::result<sg::binding_group_handle>(create_dx12_binding_group(cc::move(dx), views, scope)), "create_binding_"
+                                                                                                     "group");
 }
 } // namespace sg::backend::dx12

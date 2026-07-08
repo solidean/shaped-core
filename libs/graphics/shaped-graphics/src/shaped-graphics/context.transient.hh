@@ -20,23 +20,43 @@ namespace sg
 /// behaviour). Requests larger than the budget fall back to a dedicated (committed) allocation. This is
 /// all built on the public create_memory_heap + create_raw_buffer; the backend only sees a transient,
 /// heap-placed allocation_info.
+/// Each create comes in a throwing default (`create_*`, returns the handle, raises a typed sg exception
+/// on failure) and a fallible core (`try_create_*`, returns cc::result). See docs/error-handling.md and
+/// context_persistent_scope. Contract violations assert in either flavor.
 class context_transient_scope
 {
+    // buffers
 public:
     /// Allocates a transient buffer of `size_in_bytes` (>= 0, 0 is a valid empty buffer) from the
-    /// current epoch's bump window; the storage is reused once the epoch changes.
-    [[nodiscard]] cc::result<raw_buffer_handle> create_raw_buffer(isize size_in_bytes, buffer_usage usage);
+    /// current epoch's bump window; the storage is reused once the epoch changes. Throws
+    /// sg::allocation_exception on allocation failure.
+    [[nodiscard]] raw_buffer_handle create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
-    /// Allocates a transient texture, recycled once this epoch retires. NOTE: the transient bump-heap is
-    /// buffers-only today, so a transient texture is currently a *dedicated* allocation auto-expired at the
-    /// next epoch — not bump-suballocated. A texture-capable transient memory_heap (placed transient
-    /// textures) is a deferred memory_heap extension.
-    [[nodiscard]] cc::result<raw_texture_handle> create_raw_texture(texture_description const& desc);
+    /// Fallible core of create_raw_buffer — returns an error instead of throwing.
+    [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
+    // textures
+public:
+    /// Allocates a transient texture, recycled once this epoch retires. Throws sg::allocation_exception
+    /// on allocation failure. NOTE: the transient bump-heap is buffers-only today, so a transient texture
+    /// is currently a *dedicated* allocation auto-expired at the next epoch — not bump-suballocated. A
+    /// texture-capable transient memory_heap (placed transient textures) is a deferred memory_heap extension.
+    [[nodiscard]] raw_texture_handle create_raw_texture(texture_description const& desc);
+
+    /// Fallible core of create_raw_texture — returns an error instead of throwing.
+    [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc);
+
+    // bind path
+public:
     /// Instantiates `layout` with the given name->view bindings as a transient binding_group (validated
-    /// against the layout), whose descriptors are recycled when this epoch retires.
-    [[nodiscard]] cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
-                                                                        cc::span<named_view const> views);
+    /// against the layout), whose descriptors are recycled when this epoch retires. Throws
+    /// sg::binding_group_exception on a wiring error or descriptor-heap exhaustion.
+    [[nodiscard]] binding_group_handle create_binding_group(binding_layout_handle layout,
+                                                            cc::span<named_view const> views);
+
+    /// Fallible core of create_binding_group — returns an error instead of throwing.
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
+                                                                            cc::span<named_view const> views);
 
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources
     /// (buffers today, textures in future). May be called any time, repeatedly: it records a *pending*

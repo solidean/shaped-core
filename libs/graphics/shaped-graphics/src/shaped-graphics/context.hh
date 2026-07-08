@@ -4,6 +4,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/context.download.hh>
 #include <shaped-graphics/context.persistent.hh>
@@ -32,6 +34,16 @@ public:
     /// The threading guarantees this backend provides (see the threading concept doc).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
 
+    /// Whether the GPU device has been lost (driver reset / TDR / removed adapter). Sticky once set:
+    /// the context is unusable and must be torn down and recreated. Submit / advance / fence waits and
+    /// the throwing create façades raise sg::device_lost_exception once this is true; a caller polling
+    /// the `try_*` surface breaks its retry loop by checking this (device loss never comes through that
+    /// channel).
+    [[nodiscard]] bool is_device_lost() const { return _device_lost; }
+
+    /// Backend-provided reason the device was lost; empty while the device is healthy.
+    [[nodiscard]] cc::string_view device_loss_reason() const { return _device_loss_reason; }
+
     /// Persistent-lifetime resource factory. Create long-lived GPU resources through it:
     /// `ctx.persistent.create_raw_buffer(...)`.
     context_persistent_scope persistent;
@@ -49,8 +61,11 @@ public:
     /// the shared readback ring the inline downloads stage through.
     context_download_scope download;
 
-    /// Opens a new command list, already recording. Single-use: submit or drop it once.
-    [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> create_command_list() = 0;
+    /// Opens a new command list, already recording. Single-use: submit or drop it once. Infallible in
+    /// the ordinary sense — a correct program on a healthy device always gets a list. Throws
+    /// sg::device_lost_exception if the device has been lost; any other internal creation failure is a
+    /// bug and aborts.
+    [[nodiscard]] std::unique_ptr<command_list> create_command_list();
 
     /// Submits a command list for execution and consumes it, returning a token for its completion.
     /// A command list must be submitted (or dropped) in the same epoch it was opened in.
@@ -130,6 +145,16 @@ protected:
     friend class context_upload_scope;
     friend class context_download_scope;
 
+    /// The fallible core behind the public create_command_list(): backends open a recording list here.
+    /// Failure is device loss (mark_device_lost is called) or an internal bug; the public wrapper turns
+    /// the former into a throw and the latter into a fatal.
+    [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> try_create_command_list() = 0;
+
+    /// Marks the device permanently lost with a backend-provided reason. Idempotent — the first reason
+    /// sticks. Backends call this the moment they observe removal (a create failure, a bad submit
+    /// signal, or a failed fence wait), then raise sg::device_lost_exception at the public boundary.
+    void mark_device_lost(cc::string reason);
+
     /// Streams `data` into `buffer` at `offset_in_bytes` on a dedicated copy queue (reached via
     /// ctx.upload). The pin holds the source bytes alive until the copy consumes them; a later command
     /// list that reads the buffer automatically waits on the copy. Empty data is a no-op. Buffer must
@@ -171,17 +196,18 @@ protected:
     void apply_pending_transient_budget() { transient.apply_pending_budget_at_epoch_boundary(); }
 
     /// Allocates a GPU-resident buffer. Size must be >= 0 (0 is a valid empty buffer). `alloc` selects
-    /// the backing memory (see allocation_info).
-    [[nodiscard]] virtual cc::result<raw_buffer_handle> create_raw_buffer(isize size_in_bytes,
-                                                                          buffer_usage usage,
-                                                                          allocation_info const& alloc)
+    /// the backing memory (see allocation_info). The fallible core the backends implement; the public
+    /// façades (ctx.persistent / ctx.transient) wrap this into try_create_raw_buffer / create_raw_buffer.
+    [[nodiscard]] virtual cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
+                                                                              buffer_usage usage,
+                                                                              allocation_info const& alloc)
         = 0;
 
     /// Allocates a GPU-resident texture from a description. `alloc` selects the backing memory (see
     /// allocation_info). This is the raw, general create — typed factories (create_texture_2d, …) that
     /// return `texture<Traits>` wrappers layer on top of it later.
-    [[nodiscard]] virtual cc::result<raw_texture_handle> create_raw_texture(texture_description const& desc,
-                                                                            allocation_info const& alloc)
+    [[nodiscard]] virtual cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
+                                                                                allocation_info const& alloc)
         = 0;
 
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into. Size
@@ -189,29 +215,32 @@ protected:
     /// outlives the resources placed in it — so it is reached through ctx.persistent.create_memory_heap.
     /// ctx.transient also builds on it: a transient buffer is just create_raw_buffer with a transient,
     /// heap-placed allocation_info picked by ctx.transient's per-epoch bump allocator.
-    [[nodiscard]] virtual cc::result<memory_heap_handle> create_memory_heap(isize size_in_bytes) = 0;
+    [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes) = 0;
 
     // The bind-path creates carry an explicit lifetime_scope (persistent vs transient); the
     // ctx.persistent / ctx.transient facades append it. (Buffers carry it inside allocation_info instead.)
 
     /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings.
-    [[nodiscard]] virtual cc::result<binding_layout_handle> create_binding_layout(cc::span<binding const> bindings,
-                                                                                  lifetime_scope scope)
-        = 0;
-
-    /// Builds a compute_pipeline from a description (compute shader + layout).
-    [[nodiscard]] virtual cc::result<compute_pipeline_handle> create_compute_pipeline(compute_pipeline_description const& desc,
+    [[nodiscard]] virtual cc::result<binding_layout_handle> try_create_binding_layout(cc::span<binding const> bindings,
                                                                                       lifetime_scope scope)
         = 0;
 
+    /// Builds a compute_pipeline from a description (compute shader + layout).
+    [[nodiscard]] virtual cc::result<compute_pipeline_handle>
+    try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
+
     /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
-    [[nodiscard]] virtual cc::result<binding_group_handle> create_binding_group(binding_layout_handle layout,
-                                                                                cc::span<named_view const> views,
-                                                                                lifetime_scope scope)
+    [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
+                                                                                    cc::span<named_view const> views,
+                                                                                    lifetime_scope scope)
         = 0;
 
     backend_kind _backend;
     thread_model _thread_model;
     bool _is_shut_down = false;
+
+    // Sticky device-loss state (see is_device_lost). Set once via mark_device_lost, never cleared.
+    bool _device_lost = false;
+    cc::string _device_loss_reason;
 };
 } // namespace sg

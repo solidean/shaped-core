@@ -26,8 +26,8 @@ TEST("sg dx12 - two placed buffers share one heap without aliasing")
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
     auto heap_r = c.persistent.create_memory_heap(cc::isize(1) << 20); // 1 MiB, ample for two buffers
-    REQUIRE(heap_r.has_value());
-    auto const heap = heap_r.value();
+    REQUIRE(heap_r != nullptr);
+    auto const heap = heap_r;
 
     // Query each buffer's footprint, then lay them out back-to-back: A at 0, B after A's occupied size.
     auto const reqs_a = heap->memory_requirements_for_buffer(256, usage);
@@ -88,13 +88,13 @@ TEST("sg dx12 - placed buffer keeps its heap alive")
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
     auto heap_r = c.persistent.create_memory_heap(cc::isize(1) << 20);
-    REQUIRE(heap_r.has_value());
+    REQUIRE(heap_r != nullptr);
 
-    auto const buf = c.create_dx12_buffer(256, usage, heap_r.value()->acquire_allocation_for_buffer(256, usage, 0));
+    auto const buf = c.create_dx12_buffer(256, usage, heap_r->acquire_allocation_for_buffer(256, usage, 0));
     REQUIRE(buf.has_value());
 
     // Drop our heap handle: the placement must keep the heap's ID3D12Heap alive, so the buffer stays usable.
-    heap_r.value().reset();
+    heap_r.reset();
 
     cc::byte src[256];
     for (int i = 0; i < 256; ++i)
@@ -125,9 +125,9 @@ TEST("sg dx12 - placed read-write (UAV) buffer creates")
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
 
     auto heap_r = c.persistent.create_memory_heap(cc::isize(1) << 20);
-    REQUIRE(heap_r.has_value());
+    REQUIRE(heap_r != nullptr);
 
-    auto const buf = c.create_dx12_buffer(1024, usage, heap_r.value()->acquire_allocation_for_buffer(1024, usage, 0));
+    auto const buf = c.create_dx12_buffer(1024, usage, heap_r->acquire_allocation_for_buffer(1024, usage, 0));
     REQUIRE(buf.has_value());
     CHECK(buf.value()->size_in_bytes() == 1024);
 }

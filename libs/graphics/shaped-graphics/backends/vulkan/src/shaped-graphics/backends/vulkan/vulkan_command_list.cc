@@ -3,6 +3,7 @@
 
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
 {
@@ -111,9 +112,16 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 .pSignalSemaphores = &_submission_timeline,
             };
             VkResult const sr = vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE);
-            CC_ASSERT(sr == VK_SUCCESS, "vkQueueSubmit failed");
+            // Record device loss here but don't throw inside the lock; the throw happens after it releases.
+            if (sr != VK_SUCCESS && !note_device_lost_if_lost(sr, "vkQueueSubmit"))
+                CC_ASSERT(false, "vkQueueSubmit failed");
             return t;
         });
+
+    // The submit above may have observed device loss (marked, not thrown, inside the lock). Surface it now
+    // that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
 
     // The pool is in flight until this epoch retires — hand it to the current epoch. Null the list's
     // handles so its dtor doesn't destroy the pool we just handed off.
