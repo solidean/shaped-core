@@ -14,11 +14,13 @@ Running list of known follow-ups. Bigger design intent lives in
 - **Barriers + access tracking — remaining:** the access-tracking system is in for **buffers** (inferred
   access, the three-timeline `resource_access_state`, the command-list slot model with revert/promote, and
   dx12 enhanced-barrier emission — see [concepts/barriers.md](concepts/barriers.md)). Uploading then
-  downloading / self-copying the *same* buffer now works in one command list. Still open: **textures** —
-  the covering-partition subresource tracking is defined + unit-tested but not exercised (needs
-  `sg::texture` + layouts), and the revert/promote machinery is teeth-free for buffers until then;
-  **vulkan** barrier emission (lands with its compute/transfer milestone; it reuses the shared vocabulary
-  + state machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs
+  downloading / self-copying the *same* buffer now works in one command list. **Textures** are now tracked
+  too: each `dx12_texture` owns a per-command-list covering partition and emits subresource-range
+  `D3D12_TEXTURE_BARRIER` layout transitions (with entry-layout revert on a non-final submit) — dx12-owned
+  tracking + emission, since barrier models differ across backends. Still open: no **public texture op**
+  (copy/upload/dispatch) drives the texture tracking yet; **texture views + shader-bound auto access**
+  (`shader_layout_of` goes live then); **vulkan** barrier emission (lands with its compute/transfer
+  milestone; it reuses the shared vocabulary + state machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs
   an array binding path + a binding-name→resource reflection map); migrating `access_flags` /
   `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables
   automatic transitions for callers that know their resources are already in the right layout; and folding

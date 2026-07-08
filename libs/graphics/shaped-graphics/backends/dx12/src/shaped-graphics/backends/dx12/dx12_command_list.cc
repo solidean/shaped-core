@@ -38,6 +38,27 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     _touched_buffers.push_back(buffer);
 }
 
+void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
+                                             sg::subresource_range range,
+                                             sg::pipeline_stage_flags stages,
+                                             sg::access_flags access,
+                                             sg::texture_layout layout)
+{
+    if (texture->_resource == nullptr)
+        return; // no GPU storage, nothing to order
+
+    // Declare over the range and emit the per-box layout transition the tracker asks for (precise
+    // subresource barriers — undefined→copy-dest, copy-dest→shader-resource, and the like).
+    for (auto const& sb : texture->declare_texture_access(slot(), range, stages, access, layout))
+        emit_texture_barrier(_list.Get(), texture->_resource.Get(), sb.range, sb.barrier);
+
+    // Record once so its slot is finalized at submit/drop (dedup — a texture may be touched by many ops).
+    for (auto const& h : _touched_textures)
+        if (h == texture)
+            return;
+    _touched_textures.push_back(texture);
+}
+
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
 {
     auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
@@ -212,14 +233,18 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                                                           "in (it cannot span epochs)");
 
     // Finalize access tracking before closing. `promote` when this is the only open list: its final state
-    // becomes the resources' canonical state; otherwise each resource rolls back to canonical (a no-op for
-    // buffers, whose layout is always general — the revert transitions + hidden-cost warning arrive with
-    // textures). Any revert barriers would be recorded here, before Close. (The live-count peek is a benign
-    // approximation while buffers are teeth-free; it tightens when textures make reverts observable.)
+    // becomes the resources' committed state (the one case that may leave a texture in a new layout);
+    // otherwise each resource rolls back to its entry state. For buffers this is a no-op (layout always
+    // general); for textures the rollback returns transitions back to the entry layout, recorded here
+    // before Close, plus a hidden-cost warning.
     bool const promote = _command_list_slots.live_count() == 1;
     for (auto const& b : cmd->_touched_buffers)
         b->finalize_slot(cmd->slot(), promote);
     // Kept populated for the reverse async-upload stamp below (it needs the submission token); cleared there.
+    for (auto const& t : cmd->_touched_textures)
+        for (auto const& sb : t->finalize_slot(cmd->slot(), promote))
+            emit_texture_barrier(cmd->_list.Get(), t->_resource.Get(), sb.range, sb.barrier);
+    cmd->_touched_textures.clear();
 
     HRESULT const hr = cmd->_list->Close();
     CC_ASSERT(SUCCEEDED(hr), "ID3D12GraphicsCommandList::Close failed");
@@ -298,6 +323,9 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     for (auto const& b : cmd._touched_buffers)
         b->discard_slot(cmd.slot());
     cmd._touched_buffers.clear();
+    for (auto const& t : cmd._touched_textures)
+        t->discard_slot(cmd.slot());
+    cmd._touched_textures.clear();
     (void)_command_list_slots.release(cmd.slot());
 
     // Never submitted, so the GPU never touched this allocator. Close the list so it is poolable, then

@@ -109,3 +109,21 @@ TEST("sg subresource - try_merge keeps distinct states apart")
     CHECK(p.box_count() == 2); // differing states must not merge
     CHECK(is_exact_cover(p));
 }
+
+TEST("sg subresource - for_each_box_in passes each covered box's range")
+{
+    sg::subresource_extent const e{4, 1, 1};
+    sg::subresource_partition p(e);
+
+    // Touch mip 1..3; the callback must see box ranges contained in [1,3), covering it exactly.
+    int covered_mips = 0;
+    p.for_each_box_in(sg::subresource_range{.mip_range = {1, 3}, .array_range = {0, 1}, .aspect_range = {0, 1}},
+                      [&](sg::subresource_range const& box_range, sg::resource_access_state&)
+                      {
+                          CHECK(box_range.mip_range.start >= 1);
+                          CHECK(box_range.mip_range.end <= 3);
+                          covered_mips += box_range.mip_range.end - box_range.mip_range.start;
+                      });
+    CHECK(covered_mips == 2); // the two mips in [1,3) were each visited exactly once
+    CHECK(is_exact_cover(p));
+}

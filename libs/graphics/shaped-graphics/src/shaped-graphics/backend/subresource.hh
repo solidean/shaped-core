@@ -101,6 +101,26 @@ struct subresource_partition
                 fn(box.state);
     }
 
+    /// Same as `for_each_in`, but `fn` also receives each covered box's range — a backend needs it to scope
+    /// the barrier it emits to that box's subresources. (A distinct name, not an overload: `cc::function_ref`
+    /// isn't arity-constrained, so overloading by callback signature is ambiguous.)
+    void for_each_box_in(subresource_range range,
+                         cc::function_ref<void(subresource_range const&, resource_access_state&)> fn)
+    {
+        if (range.is_empty())
+            return;
+        _split_mip(range.mip_range.start);
+        _split_mip(range.mip_range.end);
+        _split_array(range.array_range.start);
+        _split_array(range.array_range.end);
+        _split_aspect(range.aspect_range.start);
+        _split_aspect(range.aspect_range.end);
+
+        for (auto& box : _boxes)
+            if (_contained(box.range, range))
+                fn(box.range, box.state);
+    }
+
     /// Collapse the partition back to a single whole-domain box iff every box's state is equivalent (same
     /// full-timeline state). No-op otherwise. Call after flushing so an all-uniform texture stops paying
     /// per-box cost.

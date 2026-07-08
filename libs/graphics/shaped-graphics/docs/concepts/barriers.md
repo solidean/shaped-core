@@ -60,8 +60,8 @@ tracks per-subresource state as a **covering partition**: a set of range-boxes t
 the whole domain. Declaring an access to a sub-range *splits* boxes so the range aligns to box boundaries
 (keeping the tiling exact), then touches only the covered boxes; `try_merge` collapses back to one box
 when every box's state is equal. This is the improvement over the legacy tracker's flat per-subresource
-array — range-boxes instead of one entry per subresource. It is defined and unit-tested now, exercised
-when `sg::texture` lands.
+array — range-boxes instead of one entry per subresource. It is now exercised by dx12 textures (see
+below); a backend keeps one partition per open command-list slot plus a committed one.
 
 ## Concurrent command lists (the concurrency model)
 
@@ -77,11 +77,13 @@ resource's slot from canonical on first touch, tracks intra-list hazards private
 
 - if its slot release brings the live count to **0** (it was the last open list), it **promotes** its
   final state to canonical;
-- otherwise it **reverts** the resource to canonical (for a texture this emits the transitions back to the
-  canonical layout — and warns, because that revert is a hidden cost of concurrent recording).
+- otherwise it **reverts** the resource to the layout it entered with — the committed state it seeded from,
+  which is stable while other lists are open (for a texture this emits the transitions back to that entry
+  layout and warns, because the revert is a hidden cost of concurrent recording).
 
-The invariant: while any list is open, canonical is stable (every submit-while-others-open reverts to it);
-canonical only advances when a submit brings the count to 0. Correct under any submit order — the last
+So **only the count→0 submit may leave a texture in a new committed layout**; every other submit hands the
+texture back exactly as it found it. The invariant: while any list is open, canonical is stable (every
+submit-while-others-open reverts to it); canonical only advances when a submit brings the count to 0. Correct under any submit order — the last
 submit both starts from and hands off canonical, and earlier lists reverted. In the fully-serial case
 (one list open at a time) every submit hits 0, so there are no reverts — zero overhead. On **drop**, the
 recorded work never runs, so the list just clears its slots (canonical unchanged).
@@ -90,7 +92,7 @@ Fine-grained data hazards *between* concurrently-recorded lists on the same reso
 responsibility (as in Vulkan): the model orders gross execution by submit order + the epoch fence and
 keeps each list's layout bookkeeping consistent, but it cannot see across two lists recording at once.
 
-## dx12: teeth-free for buffers today
+## dx12: buffer barriers + texture layout transitions
 
 dx12 tracks intra-list hazards with the shared state machine and emits **enhanced barriers**
 (`ID3D12GraphicsCommandList7::Barrier`, batched into a `D3D12_BARRIER_GROUP`) — see
@@ -101,10 +103,18 @@ self-copying) the **same** buffer now works in one command list with a precise
 
 For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always
 `general` (D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`), so revert emits nothing and
-cross-list ordering rides on that decay — no trailing barriers. The slot/canonical/revert-promote
-machinery is built and validated but its emitted transitions arrive with textures. The **vulkan** backend
-reuses the shared vocabulary + state machine with its own emission when its compute/transfer milestone
-lands.
+cross-list ordering rides on that decay — no trailing barriers.
+
+**Textures give the machinery teeth.** Each `dx12_texture` owns a per-command-list covering partition
+([dx12_texture_access](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_texture_access.hh)):
+`declare` rolls the covered subresource boxes through the state machine and returns the per-box
+`D3D12_TEXTURE_BARRIER`s (scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`, `LayoutBefore→LayoutAfter`) the
+command list emits; a non-final submit returns the reverse transitions back to the entry layout, and warns.
+This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine + partition;
+barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each
+owns its tracking + emission. No public op records against a texture yet, so the tracking is wired + tested
+but not yet driven by a copy / upload / dispatch. The **vulkan** backend reuses the shared vocabulary +
+state machine with its own emission when its compute/transfer milestone lands.
 
 ## See also
 

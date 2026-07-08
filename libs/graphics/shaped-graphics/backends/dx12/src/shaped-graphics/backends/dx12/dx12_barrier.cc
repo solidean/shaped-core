@@ -83,4 +83,73 @@ void emit_buffer_barrier(ID3D12GraphicsCommandList* list, ID3D12Resource* resour
     group.pBufferBarriers = &bb;
     list7->Barrier(1, &group);
 }
+
+D3D12_BARRIER_LAYOUT d3d12_layout_from(sg::texture_layout layout)
+{
+    switch (layout)
+    {
+    case sg::texture_layout::undefined:
+        return D3D12_BARRIER_LAYOUT_UNDEFINED;
+    case sg::texture_layout::general:
+        return D3D12_BARRIER_LAYOUT_COMMON;
+    case sg::texture_layout::shader_read:
+        return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+    case sg::texture_layout::storage:
+        return D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+    case sg::texture_layout::color:
+        return D3D12_BARRIER_LAYOUT_RENDER_TARGET;
+    case sg::texture_layout::depth_read:
+        return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_READ;
+    case sg::texture_layout::depth_write:
+        return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
+    case sg::texture_layout::transfer_src:
+        return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
+    case sg::texture_layout::transfer_dst:
+        return D3D12_BARRIER_LAYOUT_COPY_DEST;
+    case sg::texture_layout::present:
+        return D3D12_BARRIER_LAYOUT_PRESENT;
+    }
+    CC_ASSERT(false, "unhandled texture_layout in d3d12_layout_from");
+    return D3D12_BARRIER_LAYOUT_COMMON;
+}
+
+void emit_texture_barrier(ID3D12GraphicsCommandList* list,
+                          ID3D12Resource* resource,
+                          sg::subresource_range const& range,
+                          sg::access_barrier const& b)
+{
+    CC_ASSERT(b.needed, "emit_texture_barrier called with no barrier to emit");
+
+    ComPtr<ID3D12GraphicsCommandList7> list7;
+    HRESULT const hr = list->QueryInterface(IID_PPV_ARGS(&list7));
+    CC_ASSERT(SUCCEEDED(hr) && list7, "enhanced barriers require ID3D12GraphicsCommandList7 (SDK/driver too old)");
+
+    D3D12_TEXTURE_BARRIER tb = {};
+    tb.SyncBefore = d3d12_sync_from(b.src_stages);
+    tb.SyncAfter = d3d12_sync_from(b.dst_stages);
+    // D3D12 rule: SYNC_NONE pairs with ACCESS_NO_ACCESS (a layout-only transition at the end of a list has
+    // no subsequent access). With a real stage set we translate the access.
+    tb.AccessBefore
+        = tb.SyncBefore == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.src_access);
+    tb.AccessAfter
+        = tb.SyncAfter == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.dst_access);
+    tb.LayoutBefore = d3d12_layout_from(b.src_layout);
+    tb.LayoutAfter = d3d12_layout_from(b.dst_layout);
+    tb.pResource = resource;
+    tb.Subresources.IndexOrFirstMipLevel = UINT(range.mip_range.start);
+    tb.Subresources.NumMipLevels = UINT(range.mip_range.end - range.mip_range.start);
+    tb.Subresources.FirstArraySlice = UINT(range.array_range.start);
+    tb.Subresources.NumArraySlices = UINT(range.array_range.end - range.array_range.start);
+    tb.Subresources.FirstPlane = UINT(range.aspect_range.start);
+    tb.Subresources.NumPlanes = UINT(range.aspect_range.end - range.aspect_range.start);
+    // An `undefined` source layout means prior contents are not preserved — discard for a cheaper transition.
+    tb.Flags = b.src_layout == sg::texture_layout::undefined ? D3D12_TEXTURE_BARRIER_FLAG_DISCARD
+                                                             : D3D12_TEXTURE_BARRIER_FLAG_NONE;
+
+    D3D12_BARRIER_GROUP group = {};
+    group.Type = D3D12_BARRIER_TYPE_TEXTURE;
+    group.NumBarriers = 1;
+    group.pTextureBarriers = &tb;
+    list7->Barrier(1, &group);
+}
 } // namespace sg::backend::dx12

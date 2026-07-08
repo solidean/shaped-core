@@ -25,10 +25,19 @@ namespace sg
     return access_flags::shader_read; // unreachable for the closed set above
 }
 
-/// The layout a bound view of this class needs. Buffers are always `general`; textures will map
-/// readonly→shader_read and readwrite→storage once they land (kept here as the single inference point).
-[[nodiscard]] constexpr texture_layout shader_layout_of(view_class /*c*/)
+/// The layout a bound texture view of this class needs (the single inference point for the texture bind
+/// path): a sampled/read view wants `shader_read`, a read-write storage view wants `storage`. Unused until
+/// the texture bind path lands — buffers have no layout and never call this.
+[[nodiscard]] constexpr texture_layout shader_layout_of(view_class c)
 {
-    return texture_layout::general;
+    switch (c)
+    {
+    case view_class::uniform:
+    case view_class::readonly:
+        return texture_layout::shader_read;
+    case view_class::readwrite:
+        return texture_layout::storage;
+    }
+    return texture_layout::shader_read; // unreachable for the closed set above
 }
 } // namespace sg

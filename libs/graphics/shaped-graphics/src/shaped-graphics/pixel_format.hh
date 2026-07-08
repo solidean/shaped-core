@@ -101,6 +101,13 @@ enum class pixel_format : u16
     return is_depth_format(f) && has_stencil(f);
 }
 
+/// Number of aspect planes a format exposes as subresources: 2 for a combined depth+stencil format
+/// (depth and stencil are separately tracked planes), 1 otherwise.
+[[nodiscard]] constexpr int format_aspect_count(pixel_format f)
+{
+    return is_depth_stencil_format(f) ? 2 : 1;
+}
+
 /// True for the BC block-compressed formats (4x4 texel blocks).
 [[nodiscard]] constexpr bool is_compressed_format(pixel_format f)
 {

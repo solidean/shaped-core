@@ -1,7 +1,10 @@
 #pragma once
 
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/small_vector.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_access.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raw_texture.hh>
@@ -13,11 +16,10 @@ namespace sg::backend::dx12
 [[nodiscard]] D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& desc);
 
 /// DirectX 12 implementation of sg::raw_texture. Holds the ID3D12Resource (GPU-resident, default heap).
-/// For a placed texture it also holds a handle to its backing memory_heap so the heap outlives it.
-///
-/// No per-command-list access-state tracking yet (unlike dx12_buffer): a texture is creatable but not
-/// usable in command lists until layout transitions land — see
-/// libs/graphics/shaped-graphics/docs/concepts/textures.md.
+/// For a placed texture it also holds a handle to its backing memory_heap so the heap outlives it. Also
+/// owns the per-command-list subresource access tracking that drives layout-transition barriers (see
+/// dx12_texture_access) — no public op records against a texture yet, so the tracking is wired + tested
+/// but not driven end-to-end.
 class dx12_texture final : public sg::raw_texture
 {
 public:
@@ -26,7 +28,12 @@ public:
                  sg::texture_description const& desc,
                  ComPtr<ID3D12Resource> resource,
                  sg::memory_heap_handle heap = nullptr)
-      : sg::raw_texture(desc), _ctx(ctx), _creation_epoch(created_in), _resource(cc::move(resource)), _heap(cc::move(heap))
+      : sg::raw_texture(desc),
+        _ctx(ctx),
+        _creation_epoch(created_in),
+        _resource(cc::move(resource)),
+        _heap(cc::move(heap)),
+        _access(subresource_extent_of(desc))
     {
     }
 
@@ -38,6 +45,35 @@ public:
     sg::epoch _creation_epoch;                // epoch this texture was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed texture; null when dedicated
+
+    // Per-command-list subresource access tracking. Mutable: a texture's shape is fixed but its tracked GPU
+    // state changes as lists record against it; guarded because concurrent lists may record the same texture.
+    // Thin forwarders return the barriers the command list must emit (dx12 owns barrier tracking + emission).
+    mutable cc::mutex<dx12_texture_access> _access;
+
+    /// Declare `stages`/`access`/`layout` over `range` for `slot` and return the intra-list barriers to
+    /// emit before the op (empty = all freebies). Thread-safe.
+    [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> declare_texture_access(sg::command_list_slot slot,
+                                                                                       sg::subresource_range range,
+                                                                                       sg::pipeline_stage_flags stages,
+                                                                                       sg::access_flags access,
+                                                                                       sg::texture_layout layout) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.declare(slot, range, stages, access, layout); });
+    }
+
+    /// Finalize `slot` at submit: promote its final layout to the committed state (last open list) or revert
+    /// the texture to its entry layout, returning the transitions to emit. Thread-safe.
+    [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot, bool promote) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.finalize(slot, promote); });
+    }
+
+    /// Discard `slot` at drop: the recorded work never runs, so just clear the slot. Thread-safe.
+    void discard_slot(sg::command_list_slot slot) const
+    {
+        _access.lock([&](dx12_texture_access& t) { t.discard(slot); });
+    }
 
 protected:
     // Release the GPU storage (deferred to epoch retire) when the texture is expired — see sg::raw_texture.
