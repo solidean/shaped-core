@@ -35,7 +35,7 @@ TEST("sg dx12 - inline upload splits across the ring seam")
     auto& c = static_cast<dx12::dx12_context&>(*ctx);
 
     auto buf = ctx->persistent.create_raw_buffer(xfer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    REQUIRE(buf.has_value());
+    REQUIRE(buf != nullptr);
 
     // Drain, then park the upload ring cursor `seam_gap` bytes before the physical seam.
     ctx->advance_epoch_and_wait_for_idle();
@@ -52,8 +52,8 @@ TEST("sg dx12 - inline upload splits across the ring seam")
         src.push_back(cc::byte((i * 7 + 3) & 0xFF));
 
     auto up = ctx->create_command_list();
-    up.value()->upload.bytes_to_buffer(buf.value(), src);
-    ctx->submit_command_list(cc::move(up.value()));
+    up->upload.bytes_to_buffer(buf, src);
+    ctx->submit_command_list(cc::move(up));
 
     // Split, not tail-waste: the cursor advanced by exactly the transfer size (a wasted tail would add
     // the skipped `seam_gap` bytes on top).
@@ -62,8 +62,8 @@ TEST("sg dx12 - inline upload splits across the ring seam")
 
     // The seam-straddling copy is byte-correct.
     auto down = ctx->create_command_list();
-    auto fut = down.value()->download.bytes_from_buffer(buf.value(), 0, xfer_bytes);
-    ctx->submit_command_list(cc::move(down.value()));
+    auto fut = down->download.bytes_from_buffer(buf, 0, xfer_bytes);
+    ctx->submit_command_list(cc::move(down));
 
     auto bytes = ctx->wait_for(fut);
     REQUIRE(bytes.has_value());
@@ -80,7 +80,7 @@ TEST("sg dx12 - inline download splits across the ring seam")
     auto& c = static_cast<dx12::dx12_context&>(*ctx);
 
     auto buf = ctx->persistent.create_raw_buffer(xfer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    REQUIRE(buf.has_value());
+    REQUIRE(buf != nullptr);
 
     // Seed the buffer with a known pattern (default upload ring, no wrap here).
     cc::vector<cc::byte> src;
@@ -88,8 +88,8 @@ TEST("sg dx12 - inline download splits across the ring seam")
     for (cc::isize i = 0; i < xfer_bytes; ++i)
         src.push_back(cc::byte((i * 5 + 1) & 0xFF));
     auto up = ctx->create_command_list();
-    up.value()->upload.bytes_to_buffer(buf.value(), src);
-    ctx->submit_command_list(cc::move(up.value()));
+    up->upload.bytes_to_buffer(buf, src);
+    ctx->submit_command_list(cc::move(up));
 
     // Drain (so the readback ring is empty), then park its cursor `seam_gap` bytes before the seam.
     ctx->advance_epoch_and_wait_for_idle();
@@ -101,12 +101,12 @@ TEST("sg dx12 - inline download splits across the ring seam")
 
     // Record a wrapping readback. Reservation happens at record time, so the cursor is observable now.
     auto down = ctx->create_command_list();
-    auto fut = down.value()->download.bytes_from_buffer(buf.value(), 0, xfer_bytes);
+    auto fut = down->download.bytes_from_buffer(buf, 0, xfer_bytes);
 
     auto const after = c._download_inline.debug_cursor();
     CHECK(after.next_pos - before.next_pos == cc::u64(xfer_bytes)); // split, not tail-waste
 
-    ctx->submit_command_list(cc::move(down.value()));
+    ctx->submit_command_list(cc::move(down));
 
     auto bytes = ctx->wait_for(fut);
     REQUIRE(bytes.has_value());

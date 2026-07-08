@@ -16,8 +16,8 @@ auto pattern = [](int i) { return cc::byte(i & 0xFF); };
 sg::raw_buffer_handle make_copy_buffer(sg::context_handle const& ctx, cc::isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    CC_ASSERT(buf.has_value(), "copy test buffer allocation failed");
-    return buf.value();
+    CC_ASSERT(buf != nullptr, "copy test buffer allocation failed");
+    return buf;
 }
 } // namespace
 
@@ -33,11 +33,11 @@ INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ct
 
     // Single list: upload into src, copy src→dst, read dst back — the backend orders all three.
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(src, cc::span<cc::byte const>(data, 256));
-    cmd.value()->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 256});
-    auto future = cmd.value()->download.bytes_from_buffer(dst, 0, 256);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(src, cc::span<cc::byte const>(data, 256));
+    cmd->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 256});
+    auto future = cmd->download.bytes_from_buffer(dst, 0, 256);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -60,19 +60,19 @@ INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle
         data[i] = pattern(i);
 
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(src, cc::span<cc::byte const>(data, 256));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(src, cc::span<cc::byte const>(data, 256));
+    ctx->submit_command_list(cc::move(up));
 
     auto cp = ctx->create_command_list();
-    REQUIRE(cp.has_value());
-    cp.value()->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 256});
-    ctx->submit_command_list(cc::move(cp.value()));
+    REQUIRE(cp != nullptr);
+    cp->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 256});
+    ctx->submit_command_list(cc::move(cp));
 
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(dst, 0, 256);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(dst, 0, 256);
+    ctx->submit_command_list(cc::move(down));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -91,12 +91,12 @@ INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const
 
     // Copy src[64,128) into dst[128,192); read back exactly that window.
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(src, cc::span<cc::byte const>(data, 256));
-    cmd.value()->copy.buffer_bytes_region(
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(src, cc::span<cc::byte const>(data, 256));
+    cmd->copy.buffer_bytes_region(
         {.src = src, .dst = dst, .size_in_bytes = 64, .src_offset_in_bytes = 64, .dst_offset_in_bytes = 128});
-    auto future = cmd.value()->download.bytes_from_buffer(dst, 128, 64);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    auto future = cmd->download.bytes_from_buffer(dst, 128, 64);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
@@ -118,11 +118,11 @@ INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ct
 
     // Copy in[2,6) into dst[0,4): count / offsets are in elements of int.
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.data_to_buffer(src, cc::span<int const>(in, 8));
-    cmd.value()->copy.buffer_data_region<int>({.src = src, .dst = dst, .count = 4, .src_offset = 2, .dst_offset = 0});
-    auto future = cmd.value()->download.data_from_buffer<int>(dst, 0, 4);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.data_to_buffer(src, cc::span<int const>(in, 8));
+    cmd->copy.buffer_data_region<int>({.src = src, .dst = dst, .count = 4, .src_offset = 2, .dst_offset = 0});
+    auto future = cmd->download.data_from_buffer<int>(dst, 0, 4);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
@@ -146,12 +146,12 @@ INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::cont
     }
 
     auto cmd = ctx->create_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_buffer(src, cc::span<cc::byte const>(src_data, 16));
-    cmd.value()->upload.bytes_to_buffer(dst, cc::span<cc::byte const>(dst_data, 16));
-    cmd.value()->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 0}); // no-op
-    auto future = cmd.value()->download.bytes_from_buffer(dst, 0, 16);
-    ctx->submit_command_list(cc::move(cmd.value()));
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(src, cc::span<cc::byte const>(src_data, 16));
+    cmd->upload.bytes_to_buffer(dst, cc::span<cc::byte const>(dst_data, 16));
+    cmd->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 0}); // no-op
+    auto future = cmd->download.bytes_from_buffer(dst, 0, 16);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());

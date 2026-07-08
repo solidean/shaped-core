@@ -22,8 +22,8 @@ auto pattern = [](int i) { return cc::byte(i & 0xFF); };
 sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-    CC_ASSERT(buf.has_value(), "async download test buffer allocation failed");
-    return buf.value();
+    CC_ASSERT(buf != nullptr, "async download test buffer allocation failed");
+    return buf;
 }
 
 // Seeds `buf` with fn(i) via an inline command-list upload (direct queue) and submits it. Returns the
@@ -37,9 +37,9 @@ void seed_buffer(sg::context_handle const& ctx, sg::raw_buffer_handle const& buf
         data.push_back(cc::byte(fn(i)));
 
     auto cmd = ctx->create_command_list();
-    CC_ASSERT(cmd.has_value(), "seed command list creation failed");
-    cmd.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(data)); // copied during record
-    ctx->submit_command_list(cc::move(cmd.value()));
+    CC_ASSERT(cmd != nullptr, "seed command list creation failed");
+    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(data)); // copied during record
+    ctx->submit_command_list(cc::move(cmd));
 }
 } // namespace
 
@@ -74,9 +74,9 @@ INVOCABLE_TEST("sg - async typed download round-trips", (sg::context_handle cons
     in.push_back(8);
     {
         auto cmd = ctx->create_command_list();
-        REQUIRE(cmd.has_value());
-        cmd.value()->upload.data_to_buffer(buf, in);
-        ctx->submit_command_list(cc::move(cmd.value()));
+        REQUIRE(cmd != nullptr);
+        cmd->upload.data_to_buffer(buf, in);
+        ctx->submit_command_list(cc::move(cmd));
     }
 
     auto future = ctx->download.data_from_buffer<int>(buf, 0, 4);
@@ -112,9 +112,9 @@ INVOCABLE_TEST("sg - async download shares a buffer with a later reader", (sg::c
 
     // A copy that READS src into dst, submitted after the async read was issued.
     auto copy = ctx->create_command_list();
-    REQUIRE(copy.has_value());
-    copy.value()->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 128});
-    ctx->submit_command_list(cc::move(copy.value()));
+    REQUIRE(copy != nullptr);
+    copy->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 128});
+    ctx->submit_command_list(cc::move(copy));
 
     auto const bytes = ctx->wait_for(down);
     REQUIRE(bytes.has_value());
@@ -143,9 +143,9 @@ INVOCABLE_TEST("sg - a later write waits on an in-flight async download", (sg::c
     for (int i = 0; i < n; ++i)
         overwrite[i] = cc::byte(0xBB);
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(overwrite, n));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(overwrite, n));
+    ctx->submit_command_list(cc::move(up));
 
     // The async read observes the seeded bytes, not 0xBB.
     auto const bytes = ctx->wait_for(down);
@@ -158,9 +158,9 @@ INVOCABLE_TEST("sg - a later write waits on an in-flight async download", (sg::c
 
     // ...and the write still landed: an inline re-download shows 0xBB.
     auto again = ctx->create_command_list();
-    REQUIRE(again.has_value());
-    auto after = again.value()->download.bytes_from_buffer(buf, 0, n);
-    ctx->submit_command_list(cc::move(again.value()));
+    REQUIRE(again != nullptr);
+    auto after = again->download.bytes_from_buffer(buf, 0, n);
+    ctx->submit_command_list(cc::move(again));
     auto const after_bytes = ctx->wait_for(after);
     REQUIRE(after_bytes.has_value());
     bool write_landed = true;
@@ -214,18 +214,18 @@ INVOCABLE_TEST("sg - dropping an async download future never hangs a later write
     for (int i = 0; i < n; ++i)
         overwrite.push_back(fill);
     auto up = ctx->create_command_list();
-    REQUIRE(up.has_value());
-    up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(overwrite));
-    ctx->submit_command_list(cc::move(up.value()));
+    REQUIRE(up != nullptr);
+    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(overwrite));
+    ctx->submit_command_list(cc::move(up));
 
     // Pre-fix (cancelled read leaves a hole in the download fence) this never returns.
     ctx->advance_epoch_and_wait_for_idle();
 
     // The write still landed.
     auto down = ctx->create_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf, 0, n);
-    ctx->submit_command_list(cc::move(down.value()));
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, n);
+    ctx->submit_command_list(cc::move(down));
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
     bool write_landed = true;

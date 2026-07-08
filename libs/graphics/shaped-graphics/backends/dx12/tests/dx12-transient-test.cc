@@ -29,7 +29,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
     for (int e = 0; e < 30; ++e)
     {
         auto buf = c.transient.create_raw_buffer(256, usage);
-        REQUIRE(buf.has_value());
+        REQUIRE(buf != nullptr);
 
         cc::byte src[256];
         for (int i = 0; i < 256; ++i)
@@ -37,12 +37,12 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
 
         auto up = c.create_dx12_command_list();
         REQUIRE(up.has_value());
-        up.value()->upload.bytes_to_buffer(buf.value(), cc::span<cc::byte const>(src, 256));
+        up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
         c.submit_dx12_command_list(cc::move(up.value()));
 
         auto down = c.create_dx12_command_list();
         REQUIRE(down.has_value());
-        auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, 256);
+        auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
         c.submit_dx12_command_list(cc::move(down.value()));
 
         auto const bytes = c.wait_for(future);
