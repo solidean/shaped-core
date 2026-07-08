@@ -219,6 +219,63 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                  })
         ->execute_at_least(10);
 
+    // Async-download + check: the copy-queue mirror of "download + check" (ctx->download vs cmd->download),
+    // exercising the reverse cross-queue sync (a later direct-queue write waits on the in-flight read) that a
+    // purely-inline download never touches.
+    //
+    // HANDOVER — disabled (#if 0) because it exposes a real DEADLOCK on the shared copy queue, not just the
+    // documented CPU-block fringe. Symptom: with this op enabled the fuzz hangs the full 60s and is killed
+    // (dx12 WARP + real adapter — the only backends that run this invocable; vulkan is a stub and does not).
+    // It is a hang, not slowness: stderr shows a *nondeterministic* handful of the "pending async upload"
+    // warnings (23 one run, 158 another) and then goes silent for the entire remaining timeout — a few
+    // millisecond CPU blocks cannot sum to 60s. The op's own checks never fail; nothing is miscomputed.
+    //
+    // Mechanism: async upload and async download run on independent actors but submit to ONE shared copy
+    // queue (dx12_context::_copy_queue) in strict FIFO order. The fuzz interleaves them against the single
+    // shared buffer, so a cross-actor cycle forms: a direct-queue writer W waits on the download completion
+    // fence (reverse sync) for read R; a later async upload A's window reverse-waits on W's submission token;
+    // but A's window and R's window sit on the same copy queue, and if A's is enqueued ahead of R's, R can
+    // never run to signal the fence W waits on, so W never runs, A's token never signals, A's window never
+    // completes — and the caller's wait_for_pending_async_upload (the last warning printed) blocks forever on
+    // A's upload fence. The per-actor window-level acyclicity guard only reasons about its own windows vs the
+    // direct-queue submission fence; it cannot see the *other* actor's windows queued on the shared copy
+    // queue. This is exactly the shared-transfer-queue hazard called out in
+    // libs/graphics/shaped-graphics/docs/concepts/download.async.md ("upload and download share one transfer
+    // queue … can't be cheaply ordered on the GPU without a deadlock risk").
+    //
+    // To enable: the real fix is a separate copy queue for downloads (or a proper GPU ordering between the
+    // two actors on the shared queue) so upload and download windows can't FIFO-block each other — the same
+    // fix that would turn the upload->download fringe into a clean cross-queue wait. Until then this stays
+    // off; the other follow-ups had priority.
+#if 0
+    test->add_op("async download + check",
+                 [&](cc::random& rng, trace& t)
+                 {
+                     auto v0 = rng.uniform(0, int(t.data.size() - 1));
+                     auto v1 = rng.uniform(0, int(t.data.size() - 1));
+                     auto start = cc::min(v0, v1);
+                     auto end = cc::max(v0, v1);
+                     auto cnt = end - start;
+
+                     // Submit any open list first so the read is ordered after the recorded writes it must
+                     // observe. The read auto-waits on the last submitted writer, so the issue-time snapshot
+                     // of t.data is the correct reference.
+                     t.ensure_submitted_cmd();
+
+                     auto ref = cc::vector<cc::u32>::create_uninitialized(cnt);
+                     for (auto i = 0; i < cnt; ++i)
+                         ref[i] = t.data[start + i];
+
+                     auto dl = ctx->download.data_from_buffer<cc::u32>(t.buffer, start, cnt);
+                     auto dl_data = ctx->wait_for(dl).value();
+
+                     CHECK(cc::isize(cnt) == dl_data.size());
+                     for (auto i = 0; i < cnt; ++i)
+                         CHECK(ref[i] == dl_data[i]);
+                 })
+        ->execute_at_least(10);
+#endif
+
     SECTION("fuzz")
     {
         CHECK(test->execute_fuzz_test());
