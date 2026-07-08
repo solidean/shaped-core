@@ -108,16 +108,12 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
             {
                 s.reclaim(*this); // pick up epochs the actor has drained since we last looked
 
-                cc::u64 start = s.next_pos;
-                cc::isize offset = cc::isize(start % cc::u64(_capacity));
-                // TODO: split the copy across the seam instead of wasting the tail (see
-                // libs/graphics/shaped-graphics/docs/concepts/download.inline.md).
-                if (offset + size > _capacity) // would wrap: waste the tail, restart at 0
-                {
-                    start += cc::u64(_capacity - offset);
-                    offset = 0;
-                }
-                cc::u64 const end = start + cc::u64(size);
+                cc::u64 const start = s.next_pos;
+                cc::isize const offset = cc::isize(start % cc::u64(_capacity));
+                // Never cross the seam: grant only up to the ring end. A request that would wrap is
+                // split here — the caller loops and reserves the remainder from offset 0. No tail waste.
+                cc::isize const granted = cc::min(size, _capacity - offset);
+                cc::u64 const end = start + cc::u64(granted);
                 if (end - _freed_pos.load(std::memory_order_acquire) > cc::u64(_capacity))
                 {
                     // The window overlaps space still held by earlier epochs. Only closed epochs
@@ -131,7 +127,7 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
                 s.next_pos = end;
                 s.current_epoch_copies->fetch_add(1, std::memory_order_relaxed); // one more copy for this epoch
                 _outstanding.fetch_add(1, std::memory_order_relaxed);            // and one more globally (drain gate)
-                return reservation{offset, s.current_epoch_copies};
+                return reservation{offset, granted, s.current_epoch_copies};
             });
 
         if (r.has_value())
@@ -160,19 +156,27 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     cc::span<cc::byte> const dst_span = dst.span();
     auto waiter = std::make_shared<dx12_download_waiter>();
 
-    reservation res = reserve(size);
     dx12_buffer_download download(src, offset, dst_span);
     download.prepare(cmd);
-    dx12_download_allocation const alloc{_buffer.Get(), _mapped, res.offset, size};
-    dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
-    CC_ASSERT(download.is_finished(), "buffer download did not complete in one job");
 
-    dx12_download_copy_job job;
-    job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
-    job.pin = std::weak_ptr<void const>(dst.pin());
-    job.waiter = waiter;
-    job.epoch_copies = cc::move(res.epoch_copies);
-    cmd._pending_downloads.push_back(cc::move(job));
+    // One pass per contiguous ring slice: a read that fits without wrapping is a single chunk; one that
+    // straddles the seam is split across successive reservations. Each chunk gets its own deferred
+    // memcpy and its own epoch-copy count; only the last chunk carries the waiter, so the future
+    // becomes ready once every chunk has drained (the actor copies in enqueue order).
+    while (!download.is_finished())
+    {
+        cc::isize const remaining = download.total_bytes() - download.consumed();
+        reservation res = reserve(remaining);
+        dx12_download_allocation const alloc{_buffer.Get(), _mapped, res.offset, res.granted};
+        dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
+
+        dx12_download_copy_job job;
+        job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
+        job.pin = std::weak_ptr<void const>(dst.pin());
+        job.waiter = download.is_finished() ? waiter : nullptr;
+        job.epoch_copies = cc::move(res.epoch_copies);
+        cmd._pending_downloads.push_back(cc::move(job));
+    }
 
     return sg::bytes_future(cc::move(dst), cc::move(waiter));
 }
@@ -298,6 +302,23 @@ void dx12_download_inline_system::apply_pending_budget()
             s.next_pos = 0;
             s.checkpoints.clear();  // drained above; the fresh ring restarts its logical cursor at 0
             s.pending_capacity = 0; // current_epoch_copies stays (a fresh 0 from the last on_epoch_advance)
+        });
+}
+
+dx12_download_inline_system::debug_cursor_snapshot dx12_download_inline_system::debug_cursor()
+{
+    cc::u64 const freed = _freed_pos.load(std::memory_order_acquire);
+    return _ring.lock([&](ring_state& s) { return debug_cursor_snapshot{s.next_pos, freed, _capacity}; });
+}
+
+void dx12_download_inline_system::debug_set_cursor(cc::u64 pos)
+{
+    _freed_pos.store(pos, std::memory_order_release);
+    _ring.lock(
+        [&](ring_state& s)
+        {
+            s.next_pos = pos;
+            s.checkpoints.clear();
         });
 }
 

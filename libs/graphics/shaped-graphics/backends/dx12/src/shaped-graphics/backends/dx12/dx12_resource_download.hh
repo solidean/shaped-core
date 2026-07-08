@@ -73,6 +73,9 @@ struct dx12_buffer_download final : dx12_resource_download
 
     [[nodiscard]] cc::isize total_bytes() const override { return _dst.size(); }
 
+    /// Bytes read and recorded so far.
+    [[nodiscard]] cc::isize consumed() const { return _consumed; }
+
     // See dx12_buffer_upload::prepare — buffers need no explicit barrier for copies.
     void prepare(dx12_command_list&) override {}
 
