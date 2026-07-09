@@ -116,8 +116,8 @@ Preserve these; the rest is tuning:
 
 Not invariants — v1 shortcuts:
 
-- **Buffers only** (textures deferred), **persistent buffers only**, and **single-writer**: an async
-  upload to a buffer concurrently used by an in-flight list is the caller's hazard to avoid.
+- **Persistent buffers only** and **single-writer**: an async upload to a buffer concurrently used by an
+  in-flight list is the caller's hazard to avoid.
 - **In-order copies (head-of-line blocking).** Copies run strictly in submission order on the transfer
   queue, so a reverse wait on a slow command list stalls *all* later async copies behind it, not just the
   ones on that buffer. The prototype avoided this by pulling blocked jobs out of order (carefully, to keep
@@ -158,6 +158,10 @@ Not invariants — v1 shortcuts:
   `stage_job` there enforces the window-level acyclicity rule: it closes the open window before staging a
   job whose reverse token is still pending (`_submission_fence` not yet at it) once the window has already
   finished an upload, so a window never both signals a completion and waits on a token that depends on it.
+- **Async texture copies assume the texture is already in the COMMON layout** — the copy queue can't run
+  layout barriers. A freshly-created texture qualifies; one last left in a shader/attachment layout by a
+  direct-queue list must be transitioned back first, or uploaded inline (`cmd.upload.bytes_to_texture`
+  drives the barrier).
 - **Resource lifetime spans the copy queue.** The copy queue is decoupled from epochs, so a buffer whose
   last reference is dropped while an async upload to it is still in flight must not be freed when its epoch
   (direct queue) retires. Deferred deletion carries a second gate: each expiring resource is tagged with

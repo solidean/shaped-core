@@ -11,6 +11,13 @@ bytes_future context_download_scope::bytes_from_buffer(raw_buffer_handle buffer,
     return _ctx.async_download_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
 
+bytes_future context_download_scope::bytes_from_texture(raw_texture_handle texture,
+                                                        subresource_index subresource,
+                                                        texture_region region)
+{
+    return _ctx.async_download_bytes_from_texture(cc::move(texture), subresource, region);
+}
+
 void context_download_scope::set_async_window_size(cc::isize bytes)
 {
     _ctx.set_async_download_window_bytes(bytes);

@@ -8,6 +8,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
@@ -92,6 +93,14 @@ public:
                                                    cc::isize offset,
                                                    cc::isize size);
 
+    /// Records a readback of one texture region (per `fp`) from `src`, packing it into 512-aligned readback
+    /// windows row/slice-wise (a region larger than the free ring, or one straddling the seam, splits into
+    /// several copies), and returns the pending future. Each chunk's deferred CPU copy un-pads its rows into
+    /// the future's tightly-packed host buffer. The caller emits the copy_src layout barrier first.
+    [[nodiscard]] sg::bytes_future download_texture(dx12_command_list& cmd,
+                                                    ID3D12Resource* src,
+                                                    dx12_texture_footprint const& fp);
+
     /// Stamps `jobs` with `token`, marks their waiters submitted, and enqueues them on the actor in
     /// order. Called from submit while the submission order is held.
     void enqueue_submitted(sg::submission_token token, cc::vector<dx12_download_copy_job>& jobs);
@@ -143,9 +152,9 @@ public:
 
 private:
     /// A contiguous, non-wrapping ring slice: physical `offset`, the `granted` bytes there (capped at
-    /// the seam, so a wrapping request is handed back in pieces the caller loops over), and a share of
-    /// the open epoch's copy counter (incremented for this chunk). Blocks on the reclaim watermark when
-    /// space is held by earlier, still-in-flight epochs.
+    /// the seam, so a wrapping request is handed back in pieces the caller loops over), and a handle to
+    /// the open epoch's copy counter (not yet incremented — see account_pending_copy). Blocks on the
+    /// reclaim watermark when space is held by earlier, still-in-flight epochs.
     struct reservation
     {
         cc::isize offset = 0;
@@ -153,9 +162,29 @@ private:
         std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
     };
 
+    /// A one-shot span reservation (see reserve_span): the start cursor of `total` contiguous logical bytes
+    /// (may wrap the seam) plus the open epoch's copy counter its chunks are accounted against.
+    struct span_reservation
+    {
+        cc::u64 start = 0;
+        std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
+    };
+
     /// Reserves up to `size` bytes at the current cursor, never crossing the physical seam (the result
-    /// may be smaller than `size`). Each reservation counts one copy against the open epoch.
+    /// may be smaller than `size`). Does not itself count a copy — call account_pending_copy once the
+    /// reservation actually yields a pushed copy job (a self-aligning texture readback may reserve a seam
+    /// tail that makes no progress, which must not be counted).
     reservation reserve(cc::isize size);
+
+    /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
+    /// returns its start cursor + the open epoch's counter; the caller walks it, handing a resumable readback
+    /// to-seam windows. Used by the texture path, which needs one window big enough to self-align + make
+    /// progress. `total` must fit the capacity. Blocks like reserve().
+    span_reservation reserve_span(cc::isize total);
+
+    /// Counts one copy against the open epoch's tally (`epoch_copies`) and the global drain gate. Call
+    /// exactly once per pushed dx12_download_copy_job; on_copy_done / discard_unsubmitted release it.
+    void account_pending_copy(std::shared_ptr<std::atomic<cc::isize>> const& epoch_copies);
 
     /// Blocks the calling thread until the actor has drained every outstanding readback copy (i.e. every
     /// reserve has been matched by an on_copy_done or a discard). Used by apply_pending_budget before it

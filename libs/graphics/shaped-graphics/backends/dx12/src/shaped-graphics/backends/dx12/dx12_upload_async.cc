@@ -19,6 +19,8 @@
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_upload.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 
 namespace sg::backend::dx12
@@ -29,6 +31,13 @@ namespace
 // the CPU. Fewer than three would reintroduce a sync bubble (the CPU would stall on the window it just
 // handed the GPU); more only adds staging memory.
 constexpr int num_staging_windows = 3;
+
+// A window size is rounded up to the texture placement alignment (512) so each window's base is 512-aligned
+// — a texture copy's placed footprint must start there. Buffers are unaffected by the rounding.
+[[nodiscard]] cc::isize round_window(cc::isize bytes)
+{
+    return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
+}
 
 /// The async-upload copy actor: one thread that packs jobs into staging windows and submits copy work.
 /// All window / job / command-list state lives here and is touched only on the actor thread, so it needs
@@ -71,62 +80,88 @@ protected:
     }
 
 private:
-    // Packs one upload into staging windows, submitting each as it fills. An upload larger than a window
-    // spans several; a job finishing mid-window carries its completion value into that window.
+    // A dropped upload (every handle released / storage expired before the actor reached it): skip the copy
+    // — a 1 GiB upload to a released buffer must not stage or block — but STILL advance the completion fence
+    // to this job's value. The lifetime gate holds the storage until the completion fence reaches that value,
+    // and any forward reader stamped with it waits on the same value, so leaving a hole would hang both. An
+    // empty window still submits + signals, keeping the completion fence monotonic and gap-free.
+    void fold_dropped_completion(dx12_async_upload_job& job)
+    {
+        if (job.copy_fence_value != dx12_copy_fence_value::none)
+        {
+            ensure_open_window();
+            cc::u64 const v = cc::u64(job.copy_fence_value);
+            if (v > _open_highest_finished)
+                _open_highest_finished = v;
+        }
+    }
+
+    // Resolves one upload's destination (buffer or texture) and stages it. The strong handle is held across
+    // the whole staging loop (memcpy + record), released at return.
     void stage_job(dx12_async_upload_job& job)
     {
-        // Resolve the destination now (weak → strong). If every handle was dropped, or its storage was
-        // expired, before the actor reached this job: skip the copy — a 1 GiB upload to a released buffer
-        // must not stage or block — but STILL advance the completion fence to this job's value. The
-        // lifetime gate holds the buffer's storage until the completion fence reaches that value, and any
-        // forward reader stamped with it waits on the same value, so leaving a hole at it would hang both
-        // forever. An empty window still submits + signals, keeping the completion fence monotonic and gap-free.
-        auto const strong = job.target.lock();
-        if (!strong || !strong->_resource)
+        if (job.is_texture)
         {
-            if (job.copy_fence_value != dx12_copy_fence_value::none)
+            auto const strong = job.texture_target.lock();
+            if (!strong || !strong->_resource)
             {
-                ensure_open_window();
-                cc::u64 const v = cc::u64(job.copy_fence_value);
-                if (v > _open_highest_finished)
-                    _open_highest_finished = v;
+                fold_dropped_completion(job);
+                return;
             }
-            return; // no copy → no reverse-sync wait, so the acyclicity guard below is moot
+            CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row exceeds "
+                                                                                      "one staging window");
+            dx12_texture_upload upload(strong->_resource.Get(), job.footprint, job.src.span());
+            stage_resource(upload, job);
         }
+        else
+        {
+            auto const strong = job.target.lock();
+            if (!strong || !strong->_resource)
+            {
+                fold_dropped_completion(job);
+                return;
+            }
+            dx12_buffer_upload upload(strong->_resource.Get(), job.dst_offset, job.src.span());
+            stage_resource(upload, job);
+        }
+    }
 
-        // A window issues its reverse-sync wait once, hoisted to the front (submit_window), so it must
-        // never both promise a completion V and carry a reverse-wait that could depend on V — that
-        // self-referential pair is the copy-actor deadlock (the window's Wait sits ahead of the very copy
-        // whose signal the Wait transitively needs). If the open window already finished an upload and this
-        // job's reverse token is still pending on the direct queue, close the window now: this job's Wait
-        // then lands in a fresh window that can only point at prior, already-submitted windows.
+    // Packs one resource upload (buffer or texture) into staging windows, submitting each as it fills. An
+    // upload larger than a window spans several; a texture job self-aligns each window and returns 0 when a
+    // window tail can't fit its next aligned row, which rolls to a fresh window (buffers never return 0).
+    void stage_resource(dx12_resource_upload& upload, dx12_async_upload_job& job)
+    {
+        // A window issues its reverse-sync wait once, hoisted to the front (submit_window), so it must never
+        // both promise a completion V and carry a reverse-wait that could depend on V — that self-referential
+        // pair is the copy-actor deadlock (the window's Wait sits ahead of the very copy whose signal the Wait
+        // transitively needs). If the open window already finished an upload and this job's reverse token is
+        // still pending on the direct queue, close the window now: this job's Wait then lands in a fresh
+        // window that can only point at prior, already-submitted windows.
         if (_window_open && _open_highest_finished > 0
             && cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
-        {
             submit_window();
-        }
 
-        // `strong` holds the buffer alive across the whole staging loop (memcpy + record), released at return.
-        dx12_buffer_upload upload(strong->_resource.Get(), job.dst_offset, job.src.span());
         while (!upload.is_finished())
         {
             ensure_open_window();
             cc::isize const avail = _sys._window_bytes - _window_used;
-            CC_ASSERT(avail > 0, "open staging window has no room"); // ensure_open_window guarantees room
             cc::isize const base = cc::isize(_current_window % cc::u64(num_staging_windows)) * _sys._window_bytes;
             dx12_upload_allocation const alloc{_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
             cc::isize const consumed = upload.execute_next_job(*_list.Get(), alloc);
-            CC_ASSERT(consumed > 0, "async upload made no progress");
+            if (consumed == 0) // window tail too small for the next aligned texture row → roll to a fresh window
+            {
+                submit_window();
+                continue;
+            }
             _window_used += consumed;
 
-            // This chunk writes the destination, so its window must first wait for the last direct-queue
-            // list that used it (reverse sync). Max over the window; the submission fence is monotonic.
+            // This chunk writes the destination, so its window must first wait for the last direct-queue list
+            // that used it (reverse sync). Max over the window; the submission fence is monotonic.
             if (cc::u64(job.wait_token) > _open_max_wait_token)
                 _open_max_wait_token = cc::u64(job.wait_token);
 
-            // The window holding a job's last byte is the one whose completion satisfies the reader wait.
-            // Values are monotonic in enqueue order, so max keeps the window's signal value correct.
+            // The window holding the upload's last byte is the one whose completion satisfies the reader wait.
             if (upload.is_finished() && job.copy_fence_value != dx12_copy_fence_value::none)
             {
                 cc::u64 const v = cc::u64(job.copy_fence_value);
@@ -228,7 +263,7 @@ private:
     // The per-slot allocators and the reused command list survive — only staging memory changes.
     void maybe_resize_staging()
     {
-        cc::isize const desired = _sys._desired_window_bytes.load(std::memory_order_acquire);
+        cc::isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
         if (desired == _sys._window_bytes)
             return;
         CC_ASSERT(desired > 0, "async upload staging window must be positive");
@@ -285,6 +320,7 @@ private:
 cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async upload staging window must be positive");
+    window_bytes = round_window(window_bytes); // keep every window's base 512-aligned for texture copies
 
     D3D12_COMMAND_QUEUE_DESC copy_queue_desc = {};
     copy_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
@@ -355,6 +391,47 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
     job.copy_fence_value = dx12_copy_fence_value(value);
     // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never
     // overwrites bytes an earlier-submitted list still reads.
+    job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    _actor->enqueue_message(cc::move(job));
+}
+
+void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
+                                              cc::pinned_data<cc::byte const> data,
+                                              sg::subresource_index subresource,
+                                              sg::texture_region region)
+{
+    CC_ASSERT(texture != nullptr, "async upload target texture is null");
+    auto const* const dst = dynamic_cast<dx12_texture const*>(texture.get());
+    CC_ASSERT(dst != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!dst->is_expired(), "async upload target is a transient texture used past its epoch (expired)");
+    CC_ASSERT(dst->_resource, "async upload target texture has no storage");
+    CC_ASSERT(sg::has_flag(dst->usage(), sg::texture_usage::copy_dst), "async upload target texture must have "
+                                                                       "texture_usage::copy_dst");
+    CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
+    CC_ASSERT(data.size() == fp.tight_size(), "async upload pixel data size does not match the copy region");
+    if (data.empty())
+        return;
+
+    // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command
+    // list that reads the texture already sees a value to wait on.
+    cc::u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    cc::u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
+    while (prev < value
+           && !dst->_pending_async_upload_value.compare_exchange_weak(prev, value, std::memory_order_release,
+                                                                      std::memory_order_relaxed))
+    {
+        // CAS retries; `prev` refreshed each time.
+    }
+
+    dx12_async_upload_job job;
+    job.texture_target = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.footprint = fp;
+    job.is_texture = true;
+    job.src = cc::move(data);
+    job.copy_fence_value = dx12_copy_fence_value(value);
+    // Reverse sync: defer the copy behind the last direct-queue list that used this texture.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
 }

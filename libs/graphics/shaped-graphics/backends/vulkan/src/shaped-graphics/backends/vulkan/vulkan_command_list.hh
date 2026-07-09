@@ -42,9 +42,22 @@ protected:
     {
         CC_UNREACHABLE("vulkan inline buffer upload is not implemented yet");
     }
+    void upload_bytes_to_texture(sg::raw_texture_handle,
+                                 cc::span<cc::byte const>,
+                                 sg::subresource_index,
+                                 sg::texture_region) override
+    {
+        CC_UNREACHABLE("vulkan inline texture upload is not implemented yet");
+    }
     [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
+    }
+    [[nodiscard]] sg::bytes_future download_bytes_from_texture(sg::raw_texture_handle,
+                                                               sg::subresource_index,
+                                                               sg::texture_region) override
+    {
+        CC_UNREACHABLE("vulkan inline texture download is not implemented yet");
     }
     void copy_buffer_region(sg::raw_buffer_handle, sg::raw_buffer_handle, cc::isize, cc::isize, cc::isize) override
     {

@@ -67,12 +67,11 @@ allocate a real GPU texture — **dx12** via a committed `ID3D12Resource`, **vul
 `VkImage` (minimal, matching its buffer path). The typed factories (`create_texture_2d`, … returning
 `texture<Traits>`) come later.
 
-Deliberately **not** here yet, and why the tracking infrastructure ([subresource
-partition](../../src/shaped-graphics/backend/subresource.hh), `texture_layout`) stays idle:
+Since first landing, textures have grown views ([views.md](views.md)), per-command-list layout tracking
+([barriers.md](barriers.md)), and host↔device copies ([upload.inline.md](upload.inline.md) /
+[download.inline.md](download.inline.md) and their async siblings). Still deliberately **not** here yet:
 
-- **Texture views** — binding a texture to a shader (SRV/UAV/RTV/DSV) extends `raw_view` / `view_shape`.
-- **Layout transitions / barriers** — `dx12_texture` carries no per-command-list access tracking (unlike
-  `dx12_buffer`); a texture is creatable but not yet usable in a command list.
-- **Copies / uploads** for textures.
 - **Placed / transient-bump textures** — the transient scope allocates *dedicated* for now; a
   texture-capable transient `memory_heap` is the missing piece.
+- **Device→device texture copies** (texture→texture `CopyTextureRegion`) — only host↔device copies exist.
+- **Mip generation / format conversion** — belongs in shaped-rendering (sr), on top of these copies.

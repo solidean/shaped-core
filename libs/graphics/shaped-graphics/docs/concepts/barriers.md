@@ -140,9 +140,11 @@ machine and returns the per-box `D3D12_TEXTURE_BARRIER`s (scoped to a `D3D12_BAR
 the reverse transitions back to the canonical layout (flushed before `Close`), and warns.
 This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine + partition;
 barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each
-owns its tracking + emission. No public op records against a texture yet, so the tracking is wired + tested
-but not yet driven by a copy / upload / dispatch. The **vulkan** backend reuses the shared vocabulary +
-state machine with its own emission when its compute/transfer milestone lands.
+owns its tracking + emission. Its first driver is the inline texture copy: `cmd.upload.bytes_to_texture` /
+`cmd.download.bytes_from_texture` record a `copy_dst` / `copy_src` access against the region before staging,
+so the layout transition is emitted ahead of the `CopyTextureRegion` (binding a texture to a dispatch is
+the next driver). The **vulkan** backend reuses the shared vocabulary + state machine with its own emission
+when its compute/copy milestone lands.
 
 ## See also
 

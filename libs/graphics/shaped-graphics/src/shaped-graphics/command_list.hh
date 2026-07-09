@@ -52,9 +52,20 @@ protected:
     virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
         = 0;
 
+    virtual void upload_bytes_to_texture(raw_texture_handle texture,
+                                         cc::span<cc::byte const> pixels,
+                                         subresource_index subresource,
+                                         texture_region region)
+        = 0;
+
     [[nodiscard]] virtual bytes_future download_bytes_from_buffer(raw_buffer_handle buffer,
                                                                   cc::isize offset_in_bytes,
                                                                   cc::isize size_in_bytes)
+        = 0;
+
+    [[nodiscard]] virtual bytes_future download_bytes_from_texture(raw_texture_handle texture,
+                                                                   subresource_index subresource,
+                                                                   texture_region region)
         = 0;
 
     virtual void copy_buffer_region(raw_buffer_handle src,

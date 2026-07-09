@@ -6,9 +6,11 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/texture_region.hh>
 
 #include <atomic>
 #include <memory>
@@ -36,7 +38,12 @@ public:
 /// the read behind the last direct-queue list that used the buffer (so it reads committed bytes).
 struct dx12_async_download_job
 {
-    std::shared_ptr<dx12_buffer const> source; // read source; held strong across the read
+    // Exactly one source is set: a buffer (via `source` + `src_offset`/`size`) or a texture (via
+    // `source_texture` + `footprint`). Both are held strong across the read so the storage survives it.
+    std::shared_ptr<dx12_buffer const> source;          // read source buffer, or empty for a texture read
+    std::shared_ptr<dx12_texture const> source_texture; // read source texture, or empty for a buffer read
+    dx12_texture_footprint footprint;                   // the texture region's copy footprint (texture reads)
+    bool is_texture = false;                            // discriminant: texture read vs buffer read
     cc::isize src_offset = 0;
     cc::isize size = 0;
     cc::span<cc::byte> dst;                             // destination bytes (valid while `pin` is)
@@ -82,6 +89,13 @@ public:
     /// the job to the actor. A zero-size read returns an already-ready, empty future. Preconditions: buffer
     /// non-null, a dx12 buffer, not expired, copy_src usage, in bounds.
     [[nodiscard]] sg::bytes_future download_buffer(sg::raw_buffer_handle buffer, cc::isize offset, cc::isize size);
+
+    /// Records an async readback of one region of `texture` and returns the pending future of tightly-packed
+    /// bytes. The texture must be in the COMMON layout on the copy queue; a large region packs across
+    /// staging windows row/slice-wise. Preconditions: non-null, a dx12 texture, not expired, copy_src usage.
+    [[nodiscard]] sg::bytes_future download_texture(sg::raw_texture_handle texture,
+                                                    sg::subresource_index subresource,
+                                                    sg::texture_region region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the

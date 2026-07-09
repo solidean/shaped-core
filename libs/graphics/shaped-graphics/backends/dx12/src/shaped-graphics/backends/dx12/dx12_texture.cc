@@ -69,6 +69,9 @@ void dx12_texture::release_storage() const
         dx12_expiring_resource expiring;
         expiring.resource = cc::move(_resource);
         expiring.finalizers = cc::move(_finalizers);
+        // Hold the storage until any in-flight async copy queue upload that references it has finished,
+        // even past the direct-queue epoch retire (mirrors dx12_buffer).
+        expiring.copy_wait = dx12_copy_fence_value(_pending_async_upload_value.load(std::memory_order_acquire));
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }
 }

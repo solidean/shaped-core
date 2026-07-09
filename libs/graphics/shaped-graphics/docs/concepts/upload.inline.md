@@ -80,8 +80,9 @@ per-epoch **actor-drain** signal, not at GPU retire. See [inline download](downl
   off the context's device; the "copy command" is `ID3D12GraphicsCommandList::CopyBufferRegion`, on the
   single DIRECT queue.
 - [`dx12_resource_upload.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_upload.hh)
-  — the per-resource copy recorder (`dx12_buffer_upload`), hiding buffer vs texture behind a job loop so
-  the ring code is resource-agnostic (buffers stage in one job; chunked textures will use the loop).
+  — the per-resource copy recorder (`dx12_buffer_upload` / `dx12_texture_upload`), hiding buffer vs
+  texture behind a resumable job loop so the ring stays a plain byte allocator. A buffer or texture larger
+  than the free ring splits across the seam; the texture split is at row/slice granularity.
 - The epoch hooks `on_epoch_advance` / `on_epochs_completed` are called from
   [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc)
   `advance_epoch` / `process_completed_epochs`.

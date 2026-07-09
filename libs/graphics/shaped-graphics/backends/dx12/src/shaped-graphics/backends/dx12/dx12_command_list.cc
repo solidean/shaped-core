@@ -9,6 +9,8 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12
@@ -59,6 +61,19 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
 {
     if (texture->_resource == nullptr)
         return; // no GPU storage, nothing to order
+
+    // Cross-queue forward waits, mirroring track_buffer_access: if a ctx.upload wrote this texture on the
+    // copy queue, this list must wait for that copy; and if this access WRITES and a ctx.download is still
+    // reading it, wait for the readback first. Both fold into a single per-list wait issued at submit.
+    cc::u64 const async_up = texture->_pending_async_upload_value.load(std::memory_order_acquire);
+    if (async_up > cc::u64(_required_copy_wait))
+        _required_copy_wait = dx12_copy_fence_value(async_up);
+    if (sg::is_unordered_write(access))
+    {
+        cc::u64 const async_dl = texture->_pending_async_download_value.load(std::memory_order_acquire);
+        if (async_dl > cc::u64(_required_download_wait))
+            _required_download_wait = dx12_download_fence_value(async_dl);
+    }
 
     // Accumulate the access over the range (no barrier yet). Declaring — not flushing — here is what lets a
     // texture bound several times to one op merge its declares into one barrier per subresource box;
@@ -217,6 +232,50 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_ha
     return _ctx._download_inline.download_buffer(*this, *src, offset_in_bytes, size_in_bytes);
 }
 
+void dx12_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
+                                                cc::span<cc::byte const> pixels,
+                                                sg::subresource_index subresource,
+                                                sg::texture_region region)
+{
+    CC_ASSERT(texture != nullptr, "upload target texture is null");
+    auto const dst = std::dynamic_pointer_cast<dx12_texture const>(texture);
+    CC_ASSERT(dst != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!dst->is_expired(), "upload target is a transient texture used past its epoch (expired)");
+    CC_ASSERT(sg::has_flag(dst->usage(), sg::texture_usage::copy_dst), "upload target texture must have "
+                                                                       "texture_usage::copy_dst");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
+    CC_ASSERT(pixels.size() == fp.tight_size(), "pixel data size does not match the copy region");
+    if (pixels.empty())
+        return;
+
+    // Transition the target subresource to copy_dst (from whatever it was last used as), then record the copy.
+    track_texture_access(dst, subresource, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write,
+                         sg::texture_layout::copy_dst);
+    flush_barriers();
+    _ctx._upload_inline.upload_texture(*this, dst->_resource.Get(), fp, pixels);
+}
+
+sg::bytes_future dx12_command_list::download_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                sg::subresource_index subresource,
+                                                                sg::texture_region region)
+{
+    CC_ASSERT(texture != nullptr, "download source texture is null");
+    auto const src = std::dynamic_pointer_cast<dx12_texture const>(texture);
+    CC_ASSERT(src != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!src->is_expired(), "download source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(sg::has_flag(src->usage(), sg::texture_usage::copy_src), "download source texture must have "
+                                                                       "texture_usage::copy_src");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
+
+    // Transition the source subresource to copy_src, then record the readback copy.
+    track_texture_access(src, subresource, sg::pipeline_stage_flags::copy, sg::access_flags::copy_read,
+                         sg::texture_layout::copy_src);
+    flush_barriers();
+    return _ctx._download_inline.download_texture(*this, src->_resource.Get(), fp);
+}
+
 void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
                                            sg::raw_buffer_handle dst,
                                            cc::isize src_offset_in_bytes,
@@ -302,12 +361,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // canonical layout, recorded here before Close, plus a hidden-cost warning.
             for (auto const& b : cmd->_touched_buffers)
                 b->finalize_slot(cmd->slot());
-            // Kept populated for the reverse async-upload stamp below (it needs the submission token); cleared there.
+            // Both sets stay populated for the reverse async-copy stamp below (it needs the submission
+            // token); cleared there.
             for (auto const& t : cmd->_touched_textures)
                 for (auto const& sb : t->finalize_slot(cmd->slot()))
                     cmd->_pending_texture_barriers.push_back(
                         make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
-            cmd->_touched_textures.clear();
             // Record the finalize reverts (the only barriers left pending — every op flushed its own) before Close.
             cmd->flush_barriers();
 
@@ -361,17 +420,21 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // behind this list (the reverse per-resource cross-queue sync). Reuses the access tracker's touched-buffer
     // set. Done after submit returns the token — the caller then issues the async upload, which reads this
     // stamp, so the ordering holds.
-    for (auto const& buf : cmd->_touched_buffers)
+    auto const stamp_token = [token](std::atomic<cc::u64>& stamp)
     {
-        cc::u64 prev = buf->_last_used_submission_token.load(std::memory_order_relaxed);
+        cc::u64 prev = stamp.load(std::memory_order_relaxed);
         while (prev < cc::u64(token)
-               && !buf->_last_used_submission_token.compare_exchange_weak(
-                   prev, cc::u64(token), std::memory_order_release, std::memory_order_relaxed))
+               && !stamp.compare_exchange_weak(prev, cc::u64(token), std::memory_order_release, std::memory_order_relaxed))
         {
             // CAS retries; `prev` is refreshed with the current value each time.
         }
-    }
+    };
+    for (auto const& buf : cmd->_touched_buffers)
+        stamp_token(buf->_last_used_submission_token);
+    for (auto const& tex : cmd->_touched_textures)
+        stamp_token(tex->_last_used_submission_token);
     cmd->_touched_buffers.clear();
+    cmd->_touched_textures.clear();
 
     // The allocator is in flight until this epoch retires — hand it to the pool's epoch capture. The
     // list is already closed and can be reused now (resetting an in-flight list onto a fresh, GPU-safe

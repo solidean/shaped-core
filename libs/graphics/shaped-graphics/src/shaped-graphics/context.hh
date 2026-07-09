@@ -14,6 +14,7 @@
 #include <shaped-graphics/context.uncached.hh>
 #include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/texture_region.hh>
 #include <shaped-graphics/types.hh>
 
 #include <memory>
@@ -178,6 +179,14 @@ protected:
                                               isize offset_in_bytes)
         = 0;
 
+    /// Streams tightly-packed `data` into one region of `texture` off the frame path (reached via
+    /// ctx.upload). See libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
+    virtual void async_upload_bytes_to_texture(raw_texture_handle texture,
+                                               cc::pinned_data<cc::byte const> data,
+                                               subresource_index subresource,
+                                               texture_region region)
+        = 0;
+
     /// Streams `size_in_bytes` from `buffer` at `offset_in_bytes` back to the host on a dedicated copy queue
     /// (reached via ctx.download). Returns a bytes_future delivered once the readback lands in the host
     /// destination. The read waits on the last command list that wrote the buffer; a later command list that
@@ -186,6 +195,14 @@ protected:
     [[nodiscard]] virtual bytes_future async_download_bytes_from_buffer(raw_buffer_handle buffer,
                                                                         isize offset_in_bytes,
                                                                         isize size_in_bytes)
+        = 0;
+
+    /// Streams one region of `texture` back to the host off the frame path (reached via ctx.download),
+    /// returning a bytes_future of tightly-packed bytes. See
+    /// libs/graphics/shaped-graphics/docs/concepts/download.async.md.
+    [[nodiscard]] virtual bytes_future async_download_bytes_from_texture(raw_texture_handle texture,
+                                                                         subresource_index subresource,
+                                                                         texture_region region)
         = 0;
 
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending

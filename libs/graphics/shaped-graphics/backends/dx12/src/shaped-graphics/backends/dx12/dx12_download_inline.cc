@@ -125,8 +125,6 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
                     return {};
                 }
                 s.next_pos = end;
-                s.current_epoch_copies->fetch_add(1, std::memory_order_relaxed); // one more copy for this epoch
-                _outstanding.fetch_add(1, std::memory_order_relaxed);            // and one more globally (drain gate)
                 return reservation{offset, granted, s.current_epoch_copies};
             });
 
@@ -139,6 +137,99 @@ dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc
         cc::u64 const seen = _freed_pos.load(std::memory_order_acquire);
         _freed_pos.wait(seen, std::memory_order_acquire);
     }
+}
+
+void dx12_download_inline_system::account_pending_copy(std::shared_ptr<std::atomic<cc::isize>> const& epoch_copies)
+{
+    // One more outstanding copy, counted only for a reservation that actually produces a copy job (a
+    // seam-skip window makes no progress and is not counted). Bumped here rather than in reserve() so the
+    // counts pair 1:1 with pushed jobs — each is released in on_copy_done / discard_unsubmitted.
+    epoch_copies->fetch_add(1, std::memory_order_relaxed); // this epoch's tally (gates ring reclaim)
+    _outstanding.fetch_add(1, std::memory_order_relaxed);  // and the global drain gate
+}
+
+dx12_download_inline_system::span_reservation dx12_download_inline_system::reserve_span(cc::isize total)
+{
+    CC_ASSERT(total > 0, "reserve size must be positive");
+    CC_ASSERT(total <= _capacity, "a single inline readback (with staging slack) exceeds the readback ring capacity");
+
+    for (;;)
+    {
+        cc::optional<span_reservation> r = _ring.lock(
+            [&](ring_state& s) -> cc::optional<span_reservation>
+            {
+                s.reclaim(*this); // pick up epochs the actor has drained since we last looked
+
+                cc::u64 const start = s.next_pos;
+                cc::u64 const end = start + cc::u64(total);
+                if (end - _freed_pos.load(std::memory_order_acquire) > cc::u64(_capacity))
+                {
+                    CC_ASSERT(!s.checkpoints.empty(), "inline downloads in one epoch exceed the readback ring "
+                                                      "capacity");
+                    return {};
+                }
+                s.next_pos = end;
+                return span_reservation{start, s.current_epoch_copies};
+            });
+
+        if (r.has_value())
+            return cc::move(r.value());
+
+        cc::u64 const seen = _freed_pos.load(std::memory_order_acquire);
+        _freed_pos.wait(seen, std::memory_order_acquire);
+    }
+}
+
+sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list& cmd,
+                                                               ID3D12Resource* src,
+                                                               dx12_texture_footprint const& fp)
+{
+    cc::isize const tight = fp.tight_size();
+    if (tight == 0)
+        return sg::bytes_future(cc::pinned_data<cc::byte const>(), std::make_shared<sg::ready_bytes_waiter>());
+
+    CC_ASSERT(_mapped != nullptr, "download system used before initialization");
+
+    auto dst = cc::pinned_data<cc::byte>::create_uninitialized(tight);
+    cc::span<cc::byte> const dst_span = dst.span();
+    auto waiter = std::make_shared<dx12_download_waiter>();
+
+    dx12_texture_download download(src, fp, dst_span);
+
+    // The job self-aligns each byte window and returns bytes-consumed-including-alignment; the ring stays a
+    // plain byte allocator. Reserve the whole region once, plus slack for the self-alignment (512) and the one
+    // partial row a seam wrap pushes past the boundary (padded), then walk it with to-seam windows (mirroring
+    // the inline upload / the legacy gfx backend). Each chunk is its own deferred un-pad copy; a window too
+    // small for an aligned row yields an empty copy we skip; only the last real chunk carries the waiter.
+    cc::isize const total = download.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
+    CC_ASSERT(total <= _capacity, "an inline texture readback (with staging slack) exceeds the readback ring capacity");
+
+    span_reservation const span = reserve_span(total);
+    cc::u64 cursor = span.start;
+    while (!download.is_finished())
+    {
+        cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
+        cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
+        dx12_download_allocation const alloc{_buffer.Get(), _mapped, offset, budget};
+        dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
+        if (pending.bytes == 0) // tail too small for an aligned row → skip to the seam
+        {
+            cursor += cc::u64(budget);
+            continue;
+        }
+        cursor += cc::u64(pending.bytes);
+
+        account_pending_copy(span.epoch_copies);
+
+        dx12_download_copy_job job;
+        job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
+        job.pin = std::weak_ptr<void const>(dst.pin());
+        job.waiter = download.is_finished() ? waiter : nullptr;
+        job.epoch_copies = span.epoch_copies;
+        cmd._pending_downloads.push_back(cc::move(job));
+    }
+
+    return sg::bytes_future(cc::move(dst), cc::move(waiter));
 }
 
 sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list& cmd,
@@ -169,6 +260,7 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
         reservation res = reserve(remaining);
         dx12_download_allocation const alloc{_buffer.Get(), _mapped, res.offset, res.granted};
         dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
+        account_pending_copy(res.epoch_copies);
 
         dx12_download_copy_job job;
         job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);

@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/texture_region.hh>
 
 #include <type_traits>
 
@@ -40,6 +41,14 @@ public:
         bytes_to_buffer(cc::move(buffer), data.as_bytes(),
                         offset_in_elements * cc::isize(sizeof(T))); // as_bytes() shares the owner
     }
+
+    /// Streams tightly-packed pinned `data` into one region of `texture` (the async mirror of
+    /// cmd.upload.bytes_to_texture). The pin keeps the source alive until the copy consumes it; a later
+    /// command list that reads the texture waits on the copy automatically. Needs texture_usage::copy_dst.
+    void bytes_to_texture(raw_texture_handle texture,
+                          cc::pinned_data<cc::byte const> data,
+                          subresource_index subresource = {},
+                          texture_region region = {});
 
     /// Sets the size of one async-upload staging window in bytes (> 0); the staging buffer is triple-
     /// buffered, so this many bytes times three. Bigger windows amortize submits, smaller ones cut latency

@@ -61,6 +61,66 @@ dx12_upload_inline_system::reservation dx12_upload_inline_system::reserve(cc::is
     }
 }
 
+cc::u64 dx12_upload_inline_system::reserve_span(cc::isize total)
+{
+    CC_ASSERT(total > 0, "reserve size must be positive");
+    CC_ASSERT(total <= _capacity, "a single inline upload (with staging slack) exceeds the upload ring capacity");
+
+    for (;;)
+    {
+        cc::optional<cc::u64> r = _ring.lock(
+            [&](ring_state& s) -> cc::optional<cc::u64>
+            {
+                cc::u64 const start = s.next_pos;
+                cc::u64 const end = start + cc::u64(total);
+                if (end - s.freed_pos > cc::u64(_capacity)) // space still held by in-flight epochs
+                    return {};
+                s.next_pos = end;
+                return start;
+            });
+
+        if (r.has_value())
+            return r.value();
+
+        bool const any_in_flight = _ctx._epoch_state.lock([](dx12_epoch_state& s) { return !s.in_flight.empty(); });
+        CC_ASSERT(any_in_flight, "inline uploads in one epoch exceed the upload ring capacity");
+        _ctx.wait_for_next_inflight_epoch();
+    }
+}
+
+void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
+                                               ID3D12Resource* dst,
+                                               dx12_texture_footprint const& fp,
+                                               cc::span<cc::byte const> data)
+{
+    if (fp.staged_size() == 0)
+        return;
+
+    CC_ASSERT(_mapped != nullptr, "upload system used before initialization");
+
+    dx12_texture_upload upload(dst, fp, data);
+    upload.prepare(cmd); // no-op; the caller emitted the copy_dst layout barrier
+
+    // The job self-aligns each byte window and returns bytes-consumed-including-alignment; the ring stays a
+    // plain byte allocator. Reserve the whole region once, plus slack for the self-alignment (512) and the one
+    // partial row a seam wrap pushes past the boundary (padded) — so the job always gets a contiguous window
+    // big enough to make progress (a per-chunk reserve could hand it a sub-row tail and stall). Then hand it
+    // to-seam windows, walking the reserved span; a window too small for an aligned row returns 0 (skip to the
+    // seam). See UploadResourceDataInline in the legacy gfx backend.
+    cc::isize const total = upload.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
+    CC_ASSERT(total <= _capacity, "an inline texture upload (with staging slack) exceeds the upload ring capacity");
+
+    cc::u64 cursor = reserve_span(total);
+    while (!upload.is_finished())
+    {
+        cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
+        cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
+        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, offset, budget};
+        cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
+        cursor += cc::u64(consumed == 0 ? budget : consumed); // 0 = tail too small for an aligned row → skip to the seam
+    }
+}
+
 void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
                                               dx12_buffer const& dst,
                                               cc::span<cc::byte const> data,
@@ -75,7 +135,8 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
     upload.prepare(cmd);
 
     // One pass per contiguous ring slice: a buffer that fits without wrapping is a single job; one that
-    // straddles the seam (or a chunked texture later) is split across successive reservations.
+    // straddles the seam is split across successive reservations (textures split similarly, but row-wise —
+    // see upload_texture).
     while (!upload.is_finished())
     {
         cc::isize const remaining = upload.total_bytes() - upload.consumed();

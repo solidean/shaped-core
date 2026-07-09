@@ -5,8 +5,10 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/texture_region.hh>
 
 #include <atomic>
 
@@ -20,9 +22,15 @@ namespace sg::backend::dx12
 /// completion fence reaches it once the copy has run (or the job was dropped).
 struct dx12_async_upload_job
 {
-    std::weak_ptr<dx12_buffer const> target; // destination buffer; locked at stage time, may have expired
-    cc::isize dst_offset = 0;
-    cc::pinned_data<cc::byte const> src;                                  // source bytes + their pin
+    // Exactly one destination is set: a buffer (via `target` + `dst_offset`) or a texture (via
+    // `texture_target` + `footprint`). Both are weak refs, locked at stage time — a dropped destination
+    // skips the copy but still signals its completion value (see stage_job).
+    std::weak_ptr<dx12_buffer const> target;          // destination buffer, or empty for a texture copy
+    std::weak_ptr<dx12_texture const> texture_target; // destination texture, or empty for a buffer copy
+    dx12_texture_footprint footprint;                 // the texture region's copy footprint (texture copies)
+    bool is_texture = false;                          // discriminant: texture copy vs buffer copy
+    cc::isize dst_offset = 0;                         // destination byte offset (buffer copies)
+    cc::pinned_data<cc::byte const> src;              // source bytes + their pin
     dx12_copy_fence_value copy_fence_value = dx12_copy_fence_value::none; // completion value for this upload
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
@@ -58,6 +66,16 @@ public:
     /// the buffer so later direct-queue readers wait on it, and hands the job to the actor. Empty data is
     /// a no-op. Preconditions: buffer non-null, a dx12 buffer, not expired, copy_dst usage, in bounds.
     void upload_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset);
+
+    /// Records an async upload of `data` (tightly packed) into one region of `texture`. Reserves a
+    /// completion value + stamps the texture (later direct-queue readers wait on it), and hands the job to
+    /// the copy actor. The texture must be in the COMMON layout on the copy queue (freshly created, or not
+    /// left in a shader/attachment layout by a prior direct-queue op); a large region packs across staging
+    /// windows row/slice-wise. Preconditions: non-null, a dx12 texture, not expired, copy_dst usage, data == region size.
+    void upload_texture(sg::raw_texture_handle texture,
+                        cc::pinned_data<cc::byte const> data,
+                        sg::subresource_index subresource,
+                        sg::texture_region region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the

@@ -11,6 +11,14 @@ void context_upload_scope::bytes_to_buffer(raw_buffer_handle buffer,
     _ctx.async_upload_bytes_to_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
 }
 
+void context_upload_scope::bytes_to_texture(raw_texture_handle texture,
+                                            cc::pinned_data<cc::byte const> data,
+                                            subresource_index subresource,
+                                            texture_region region)
+{
+    _ctx.async_upload_bytes_to_texture(cc::move(texture), cc::move(data), subresource, region);
+}
+
 void context_upload_scope::set_async_window_size(cc::isize bytes)
 {
     _ctx.set_async_upload_window_bytes(bytes);

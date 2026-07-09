@@ -57,6 +57,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/texture.hh
     src/shaped-graphics/texture_traits.hh
     src/shaped-graphics/sampler.hh
+    src/shaped-graphics/texture_region.hh
     src/shaped-graphics/backend/command_list_slot.hh
     src/shaped-graphics/backend/resource_access.hh
     src/shaped-graphics/backend/resource_access_state.hh
