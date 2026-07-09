@@ -54,8 +54,10 @@ D3D12_SHADER_INPUT_BIND_DESC        ->  sg::binding
   BindCount  -> count                                       //   (see shaped-graphics binding.hh)
   Name       -> name
   Type -> binding_type: CBUFFER->uniform_buffer(+block_size); STRUCTURED->readonly_structured;
-          BYTEADDRESS->readonly_raw; UAV_RWSTRUCTURED->readwrite_structured; UAV_RWBYTEADDRESS->readwrite_raw
+          BYTEADDRESS->readonly_raw; UAV_RWSTRUCTURED->readwrite_structured; UAV_RWBYTEADDRESS->readwrite_raw;
+          TEXTURE->readonly_texture; UAV_RWTYPED->readwrite_texture; SAMPLER->sampler
+          (TEXTURE/RWTYPED with a BUFFER dimension = a typed/texel buffer -> unsupported, see below)
 // no remapping — each backend reinterprets (set,index,type). Recorded faithfully.
-// unsupported kinds (texture/sampler/typed-UAV/accel) -> cc::error until sg::binding_type grows.
+// unsupported kinds (texel/typed buffers, append/consume/counter buffers, accel) -> cc::error until sg grows.
 // GOTCHA: DXC's DXIL reflection drops declared-but-unused bindings (a SPIR-V pass would keep them).
 ```

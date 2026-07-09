@@ -18,7 +18,8 @@ struct reflected_shader
 
 /// Extracts bindings (+ compute workgroup size) from a DXC compile result via DXC_OUT_REFLECTION.
 /// The DXC (register, space, kind) is recorded faithfully as sg's (index, set, type) — no remapping;
-/// each backend reinterprets it (see docs). Fails on a resource kind sg has no binding_type for yet
-/// (textures/samplers/typed-UAVs/acceleration structures).
+/// each backend reinterprets it (see docs). Buffers, textures (SRV/UAV), and samplers map to the matching
+/// sg::binding_type; it fails on a kind sg has no vocabulary for yet (texel/typed buffers,
+/// append/consume/counter buffers, acceleration structures).
 [[nodiscard]] cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::shader_stage stage);
 } // namespace ssc::dxc::impl
