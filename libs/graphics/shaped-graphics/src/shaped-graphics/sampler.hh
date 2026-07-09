@@ -51,13 +51,13 @@ enum class compare_op
     always,
 };
 
-/// Sentinel `max_lod` meaning "no upper mip clamp" (FLT_MAX).
-inline constexpr float sampler_lod_max = 3.4028235e38f;
-
 /// An immutable sampler state. Defaults are a trilinear repeating sampler with no anisotropy and no depth
 /// comparison — the common case. Value type: cheap to copy and compare.
-struct sampler_description
+struct sampler
 {
+    /// Sentinel `max_lod` meaning "no upper mip clamp" (FLT_MAX).
+    static constexpr float lod_max = 3.4028235e38f;
+
     sampler_filter min_filter = sampler_filter::linear; ///< minification filter
     sampler_filter mag_filter = sampler_filter::linear; ///< magnification filter
     sampler_filter mip_filter = sampler_filter::linear; ///< filtering between mip levels
@@ -66,10 +66,10 @@ struct sampler_description
     sampler_address_mode address_v = sampler_address_mode::repeat;
     sampler_address_mode address_w = sampler_address_mode::repeat;
 
-    float mip_lod_bias = 0.0f;       ///< added to the computed mip level
-    u32 max_anisotropy = 1;          ///< 1 = anisotropy off; > 1 enables anisotropic filtering (capped per backend)
-    float min_lod = 0.0f;            ///< lower mip-level clamp
-    float max_lod = sampler_lod_max; ///< upper mip-level clamp (sampler_lod_max = unclamped)
+    float mip_lod_bias = 0.0f; ///< added to the computed mip level
+    u32 max_anisotropy = 1;    ///< 1 = anisotropy off; > 1 enables anisotropic filtering (capped per backend)
+    float min_lod = 0.0f;      ///< lower mip-level clamp
+    float max_lod = lod_max;   ///< upper mip-level clamp (lod_max = unclamped)
 
     /// Set for a comparison ("shadow") sampler — the filters then apply to the comparison result.
     cc::optional<compare_op> compare = {};
@@ -77,6 +77,6 @@ struct sampler_description
     /// Border texel returned by `clamp_border` addressing; ignored by the other address modes.
     sampler_border_color border_color = sampler_border_color::transparent_black;
 
-    [[nodiscard]] bool operator==(sampler_description const&) const = default;
+    [[nodiscard]] bool operator==(sampler const&) const = default;
 };
 } // namespace sg

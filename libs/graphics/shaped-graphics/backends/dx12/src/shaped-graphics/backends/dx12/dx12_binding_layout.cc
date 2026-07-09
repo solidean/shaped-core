@@ -31,7 +31,7 @@ cc::result<dx12_binding_layout_handle> dx12_binding_layout::create(ID3D12Device*
 
     // A sampler binding is *static* (baked into the root signature) iff its name appears in static_samplers;
     // otherwise it is a *dynamic* sampler-table entry supplied per binding_group.
-    auto const find_static = [&](cc::string_view name) -> sg::sampler_description const*
+    auto const find_static = [&](cc::string_view name) -> sg::sampler const*
     {
         for (auto const& ns : static_samplers)
             if (ns.name == name)

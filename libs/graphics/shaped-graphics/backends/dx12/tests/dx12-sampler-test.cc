@@ -8,7 +8,7 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/sampler.hh>
 
-// dx12 samplers: the sampler_description -> D3D12 translation (pure) and, on WARP, that a root signature
+// dx12 samplers: the sampler -> D3D12 translation (pure) and, on WARP, that a root signature
 // with a static + a dynamic sampler and a binding group with a dynamic sampler are accepted by the debug
 // layer. No sampling shader is dispatched — this covers the descriptor/root-signature wiring only.
 
@@ -28,10 +28,10 @@ sg::texture_description sampled_tex()
 }
 } // namespace
 
-TEST("sg dx12 - sampler_description translates to a D3D12 sampler desc")
+TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
 {
     // A trilinear clamping sampler with 4x anisotropy.
-    sg::sampler_description s;
+    sg::sampler s;
     s.address_u = sg::sampler_address_mode::clamp_edge;
     s.address_v = sg::sampler_address_mode::clamp_border;
     s.address_w = sg::sampler_address_mode::mirror_repeat;
@@ -49,7 +49,7 @@ TEST("sg dx12 - sampler_description translates to a D3D12 sampler desc")
     CHECK(d.BorderColor[3] == 1.0f);
 
     // A point-sampled comparison ("shadow") sampler encodes the comparison reduction.
-    sg::sampler_description shadow;
+    sg::sampler shadow;
     shadow.min_filter = sg::sampler_filter::nearest;
     shadow.mag_filter = sg::sampler_filter::nearest;
     shadow.mip_filter = sg::sampler_filter::nearest;

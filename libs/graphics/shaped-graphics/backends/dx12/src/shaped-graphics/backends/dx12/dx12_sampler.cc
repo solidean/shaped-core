@@ -13,7 +13,7 @@ namespace
 
 // The D3D12_FILTER encodes min/mag/mip filter, the anisotropy flag, and the reduction (standard vs
 // comparison). Anisotropy overrides the per-axis min/mag/mip choice on D3D12.
-[[nodiscard]] D3D12_FILTER to_filter(sg::sampler_description const& s)
+[[nodiscard]] D3D12_FILTER to_filter(sg::sampler const& s)
 {
     D3D12_FILTER_REDUCTION_TYPE const reduction
         = s.compare.has_value() ? D3D12_FILTER_REDUCTION_TYPE_COMPARISON : D3D12_FILTER_REDUCTION_TYPE_STANDARD;
@@ -94,7 +94,7 @@ void fill_border(float (&out)[4], sg::sampler_border_color c)
 }
 } // namespace
 
-D3D12_SAMPLER_DESC to_d3d12_sampler_desc(sg::sampler_description const& s)
+D3D12_SAMPLER_DESC to_d3d12_sampler_desc(sg::sampler const& s)
 {
     D3D12_SAMPLER_DESC desc = {};
     desc.Filter = to_filter(s);
@@ -110,7 +110,7 @@ D3D12_SAMPLER_DESC to_d3d12_sampler_desc(sg::sampler_description const& s)
     return desc;
 }
 
-D3D12_STATIC_SAMPLER_DESC to_d3d12_static_sampler_desc(sg::sampler_description const& s,
+D3D12_STATIC_SAMPLER_DESC to_d3d12_static_sampler_desc(sg::sampler const& s,
                                                        UINT shader_register,
                                                        UINT register_space,
                                                        D3D12_SHADER_VISIBILITY visibility)

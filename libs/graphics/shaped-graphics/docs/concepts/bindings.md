@@ -41,16 +41,17 @@ bound view without a backend — and it is why `binding_type`'s view kinds mirro
 
 A `sampler` binding (`is_sampler(binding_type)`) has no view — a sampler carries no memory and no
 `(access, shape)`, so `accepts` rejects any view for it. It is matched instead to a
-[`sampler_description`](../../src/shaped-graphics/sampler.hh) — an immutable filtering/addressing/LOD
+[`sampler`](../../src/shaped-graphics/sampler.hh) — an immutable filtering/addressing/LOD
 state — via a `named_sampler`. There are two ways in, and *which one* is a layout-time decision:
 
-- **static** — a `named_sampler` passed to `create_binding_layout` is baked into the layout's native
-  root signature (D3D12 `D3D12_STATIC_SAMPLER_DESC`); it is fixed for every group and consumes no heap
-  slot. A sampler binding named in the layout's `static_samplers` must not be supplied per group.
-- **dynamic** — a sampler binding *not* named static is a table entry; each `binding_group` supplies its
-  `named_sampler`, written into a separate sampler descriptor heap. D3D12 keeps samplers in their own
-  heap and their own root descriptor table (one of each type bound at a time), so a group with dynamic
-  samplers binds two tables at dispatch.
+- **static** — a `named_sampler` passed to `create_binding_layout` is baked into the layout itself; it is
+  fixed for every group and costs no per-group descriptor. A sampler binding named in the layout's
+  `static_samplers` must not be supplied per group. (dx12: a `D3D12_STATIC_SAMPLER_DESC` in the root
+  signature.)
+- **dynamic** — a sampler binding *not* named static is supplied per group: each `binding_group` provides
+  its `named_sampler`, so the sampler state can vary group to group. (dx12: samplers occupy their own
+  descriptor heap and root descriptor table, so a group with dynamic samplers binds a second heap and
+  table at dispatch — see the dx12 section below.)
 
 ## Where this is headed
 

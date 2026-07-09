@@ -256,9 +256,9 @@ v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, o
 
 ```cpp
 #include <shaped-graphics/sampler.hh>
-sg::sampler_description      // { min/mag/mip_filter; address_u/v/w; mip_lod_bias; max_anisotropy;
+sg::sampler                 // { min/mag/mip_filter; address_u/v/w; mip_lod_bias; max_anisotropy;
                             //   min/max_lod; cc::optional<compare_op> compare; sampler_border_color }  — value type, ==
-                            //   defaults = trilinear, repeat, no anisotropy, no comparison (max_lod = sampler_lod_max)
+                            //   defaults = trilinear, repeat, no anisotropy, no comparison (max_lod = sampler::lod_max)
 sg::sampler_filter          // nearest | linear
 sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge | clamp_border | mirror_clamp_edge
 sg::sampler_border_color    // transparent_black | opaque_black | opaque_white   (clamp_border only)
@@ -278,7 +278,7 @@ sg::binding                 // { cc::string name; u32 set, index, count; binding
                             //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
-sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler_description, not a view)
+sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
 
 #include <shaped-graphics/compiled_shader.hh>
 sg::shader_stage            // vertex | fragment | compute (+ more later)
@@ -295,7 +295,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 #include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
 sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; backend subclasses; *_handle = shared_ptr<T const>
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
-sg::named_sampler           // { cc::string name; sampler_description sampler }  — static (on layout) or dynamic (on group)
+sg::named_sampler           // { cc::string name; sampler sampler }  — static (on layout) or dynamic (on group)
 sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
 // creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
 ctx.persistent.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)

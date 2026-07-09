@@ -3,13 +3,13 @@
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/sampler.hh>
 
-// Pure value/vocabulary tests for samplers: the backend-neutral sampler_description, the sampler
+// Pure value/vocabulary tests for samplers: the backend-neutral sampler, the sampler
 // binding_type, and named_sampler. No GPU — the dx12 translation + heap wiring live in
 // backends/dx12/tests/dx12-sampler-test.cc.
 
 TEST("sg sampler - description defaults are a trilinear repeating sampler")
 {
-    sg::sampler_description const s;
+    sg::sampler const s;
     CHECK(s.min_filter == sg::sampler_filter::linear);
     CHECK(s.mag_filter == sg::sampler_filter::linear);
     CHECK(s.mip_filter == sg::sampler_filter::linear);
@@ -19,19 +19,19 @@ TEST("sg sampler - description defaults are a trilinear repeating sampler")
     CHECK(s.max_anisotropy == 1u); // anisotropy off
     CHECK(!s.compare.has_value()); // not a comparison sampler
     CHECK(s.min_lod == 0.0f);
-    CHECK(s.max_lod == sg::sampler_lod_max); // unclamped
+    CHECK(s.max_lod == sg::sampler::lod_max); // unclamped
 }
 
 TEST("sg sampler - descriptions compare by value")
 {
-    sg::sampler_description const a;
-    sg::sampler_description b;
+    sg::sampler const a;
+    sg::sampler b;
     CHECK(a == b);
 
     b.address_u = sg::sampler_address_mode::clamp_edge;
     CHECK(a != b);
 
-    sg::sampler_description shadow;
+    sg::sampler shadow;
     shadow.compare = sg::compare_op::less_equal;
     CHECK(a != shadow);
 }

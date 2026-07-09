@@ -136,7 +136,7 @@ Deferred: **aspect (depth/stencil) selection + format reinterpretation** on samp
 needs a typeless resource), **render_target / depth_stencil** views (a graphics pipeline / render pass
 consumes them) and **texel buffers** (`Buffer<T>` / `samplerBuffer` — a format-decoded linear buffer).
 **Samplers** are supported (see [bindings](bindings.md) and `sampler.hh`) — they are not views, so they
-live outside this concept: a `sampler_description` bound static (baked into a layout's root signature) or
+live outside this concept: a `sampler` bound static (baked into a layout's root signature) or
 dynamic (per binding_group, in a separate sampler descriptor heap).
 
 ## See also

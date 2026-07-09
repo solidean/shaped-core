@@ -28,7 +28,7 @@ enum class binding_type
 };
 
 /// Whether a binding is a sampler rather than a resource view. Sampler bindings carry no view (no access
-/// class / layout), so they are matched to a `sampler_description`, not a `raw_view`.
+/// class / layout), so they are matched to a `sampler`, not a `raw_view`.
 [[nodiscard]] constexpr bool is_sampler(binding_type t)
 {
     return t == binding_type::sampler;
@@ -83,7 +83,7 @@ enum class binding_type
 [[nodiscard]] inline bool accepts(binding_type t, raw_view const& v)
 {
     if (is_sampler(t))
-        return false; // samplers are bound as sampler_descriptions, never as views
+        return false; // samplers are bound as samplers, never as views
     return v.access == access_of(t) && v.shape == shape_of(t);
 }
 

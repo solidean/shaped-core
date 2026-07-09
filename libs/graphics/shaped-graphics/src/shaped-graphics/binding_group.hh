@@ -21,7 +21,7 @@ struct named_view
 struct named_sampler
 {
     cc::string name;
-    sampler_description sampler;
+    sampler sampler;
 };
 
 /// A binding_layout instance with concrete resources bound: each named view is matched to a layout
