@@ -5,12 +5,35 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/binding.hh>
+#include <shaped-graphics/binding_group.hh> // named_sampler
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/context.hh>
+#include <shaped-graphics/sampler.hh>
 
 namespace sg
 {
+namespace
+{
+// Hash a sampler field by field (not add_pod on the whole struct — padding bytes would make the hash
+// nondeterministic for logically-equal samplers).
+void add_sampler(cc::byte_stream_builder& b, sampler const& s)
+{
+    b.add_pod(s.min_filter);
+    b.add_pod(s.mag_filter);
+    b.add_pod(s.mip_filter);
+    b.add_pod(s.address_u);
+    b.add_pod(s.address_v);
+    b.add_pod(s.address_w);
+    b.add_pod(s.mip_lod_bias);
+    b.add_pod(s.max_anisotropy);
+    b.add_pod(s.min_lod);
+    b.add_pod(s.max_lod);
+    b.add_optional(s.compare);
+    b.add_pod(s.border_color);
+}
+} // namespace
+
 void pipeline_cache::add_binding_layout_provider(
     std::shared_ptr<cc::key_value_provider<cc::hash128, binding_layout_handle>> provider)
 {
@@ -35,7 +58,8 @@ void pipeline_cache::apply_bookkeeping()
     _compute_cache.apply_bookkeeping();
 }
 
-cc::hash128 pipeline_cache::compute_binding_layout_key(cc::span<binding const> bindings) const
+cc::hash128 pipeline_cache::compute_binding_layout_key(cc::span<binding const> bindings,
+                                                       cc::span<named_sampler const> static_samplers) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_pod(cc::u64(bindings.size()));
@@ -47,6 +71,12 @@ cc::hash128 pipeline_cache::compute_binding_layout_key(cc::span<binding const> b
         b.add_pod(bnd.count);
         b.add_pod(bnd.type);
         b.add_optional(bnd.block_size);
+    }
+    b.add_pod(cc::u64(static_samplers.size()));
+    for (auto const& ns : static_samplers)
+    {
+        b.add_string(ns.name);
+        add_sampler(b, ns.sampler);
     }
     return cc::hash128::create(b.written_bytes(), 0);
 }
@@ -63,10 +93,12 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
-binding_layout_handle pipeline_cache::acquire_binding_layout(context& ctx, cc::span<binding const> bindings)
+binding_layout_handle pipeline_cache::acquire_binding_layout(context& ctx,
+                                                             cc::span<binding const> bindings,
+                                                             cc::span<named_sampler const> static_samplers)
 {
-    auto const key = this->compute_binding_layout_key(bindings);
-    return _layout_cache.acquire(key, [&] { return ctx.persistent.create_binding_layout(bindings); });
+    auto const key = this->compute_binding_layout_key(bindings, static_samplers);
+    return _layout_cache.acquire(key, [&] { return ctx.persistent.create_binding_layout(bindings, static_samplers); });
 }
 
 async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc)

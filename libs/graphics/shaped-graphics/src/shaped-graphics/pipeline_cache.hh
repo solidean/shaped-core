@@ -41,9 +41,12 @@ public:
 
     // acquire (get-or-create)
 public:
-    /// The cached binding_layout for these bindings, created via ctx.persistent on a miss. Identical
-    /// bindings map to one shared handle. Throws sg::pipeline_creation_exception on a creation failure.
-    [[nodiscard]] binding_layout_handle acquire_binding_layout(context& ctx, cc::span<binding const> bindings);
+    /// The cached binding_layout for these bindings + static samplers, created via ctx.persistent on a
+    /// miss. Identical (bindings, static_samplers) map to one shared handle — the static samplers are part
+    /// of the key, since they are baked into the layout. Throws sg::pipeline_creation_exception on failure.
+    [[nodiscard]] binding_layout_handle acquire_binding_layout(context& ctx,
+                                                               cc::span<binding const> bindings,
+                                                               cc::span<named_sampler const> static_samplers = {});
 
     /// The async compute_pipeline for `desc`, built via ctx.persistent on a miss. The key combines the
     /// shader's content with the layout handle's identity, so acquire the layout THROUGH the cache to
@@ -57,7 +60,8 @@ public:
     void apply_bookkeeping();
 
 private:
-    [[nodiscard]] cc::hash128 compute_binding_layout_key(cc::span<binding const> bindings) const;
+    [[nodiscard]] cc::hash128 compute_binding_layout_key(cc::span<binding const> bindings,
+                                                         cc::span<named_sampler const> static_samplers) const;
     [[nodiscard]] cc::hash128 compute_compute_pipeline_key(compute_pipeline_description const& desc) const;
 
     cc::key_value_cache<cc::hash128, binding_layout_handle> _layout_cache;

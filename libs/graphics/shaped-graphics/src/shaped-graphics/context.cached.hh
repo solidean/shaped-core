@@ -14,9 +14,11 @@ namespace sg
 class context_cached_scope
 {
 public:
-    /// The cached binding_layout for these bindings, created on a miss. Throws
+    /// The cached binding_layout for these bindings + static samplers, created on a miss. The static
+    /// samplers are part of the cache key (they are baked into the layout). Throws
     /// sg::pipeline_creation_exception on a creation failure.
-    [[nodiscard]] binding_layout_handle acquire_binding_layout(cc::span<binding const> bindings);
+    [[nodiscard]] binding_layout_handle acquire_binding_layout(cc::span<binding const> bindings,
+                                                               cc::span<named_sampler const> static_samplers = {});
 
     /// The async compute_pipeline for `desc`, built on a miss. Drive with cc::async_blocking_get, or
     /// poll .is_ready() / .try_value(); a build failure surfaces as an async error. Acquire the layout

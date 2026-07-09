@@ -91,6 +91,30 @@ TEST("sg pipeline_cache - ctx.cached dedups layout + async compute pipeline")
     CHECK(ok);
 }
 
+TEST("sg pipeline_cache - static samplers participate in the layout key")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
+
+    // A texture SRV (t0) plus one static sampler (s0). The sampler is baked into the layout, so it must
+    // be part of the cache key: the same bindings with a different static sampler is a different layout.
+    sg::binding const bindings[] = {
+        {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Samp", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+    };
+    sg::named_sampler const clamp[] = {{.name = "Samp", .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}}};
+    sg::named_sampler const repeat[] = {{.name = "Samp", .sampler = {.address_u = sg::sampler_address_mode::repeat}}};
+
+    auto a = ctx.cached.acquire_binding_layout(bindings, clamp);
+    auto a_again = ctx.cached.acquire_binding_layout(bindings, clamp);
+    auto b = ctx.cached.acquire_binding_layout(bindings, repeat);
+
+    REQUIRE(a != nullptr);
+    CHECK(a.get() == a_again.get()); // identical (bindings, static samplers) => one shared handle
+    CHECK(a.get() != b.get());       // a different static sampler => a different cached layout
+}
+
 TEST("sg pipeline_cache - a different shader yields a different pipeline node")
 {
     auto handle = dx12::make_warp_context();

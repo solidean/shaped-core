@@ -324,11 +324,11 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
 #include <shaped-graphics/context.cached.hh>   // (via context.hh) — the ctx.cached scope
 #include <shaped-graphics/pipeline_cache.hh>   // the cache itself
 // Every context has a built-in pipeline_cache (default in-memory tiers installed). "acquire" = get-or-create.
-ctx.cached.acquire_binding_layout(span<binding const>)          // -> binding_layout_handle  SYNC; identical bindings => one shared handle
+ctx.cached.acquire_binding_layout(span<binding const>, static_samplers={}) // -> binding_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})       // -> sg::async_compute_pipeline  async PSO build; identical (shader,layout) => one node
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
-// key = hash128 over the logical args (bindings; shader bytecode+entry+signature + layout handle identity).
+// key = hash128 over the logical args (bindings + static samplers; shader bytecode+entry+signature + layout handle identity).
 // For full pipeline dedup, acquire the layout THROUGH the cache first (so identical layouts share one handle).
 // Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
 // pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
