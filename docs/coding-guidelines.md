@@ -322,8 +322,14 @@ pattern, why device resets / alloc failures are *not* assertions) lives in
 
 ## Integer & Numeric Types
 
-- Use `int` when the size is unimportant (magnitude < millions).
-- Use explicitly sized types (`i32`, `u64`, `f32`, etc.) when bit width or precision matters.
+- **`int` is the vocabulary type for small integers.** Reach for it by default for any
+  integer that is reasonably small (comfortably within the 31/32-bit range — counts,
+  loop counters, worker/thread counts, sizes of small collections) *and* is not
+  data-layout relevant. Don't use a sized type like `i32` there just because it looks
+  more precise — `int` is the intent-carrying choice and the sized alias adds noise.
+- Use explicitly sized types (`i32`, `u64`, `f32`, etc.) only when bit width or precision
+  actually matters: serialized/ABI layout, hashing, bit manipulation, values that can
+  straddle the 32-bit limit, or GPU/interop structs.
 - Avoid "magic sentinels" like `-1` for invalid states. Prefer `optional` or `variant` unless there's a justified performance or memory reason.
 - Give each distinct index / handle / id role its own strong enum:
   `enum class name : int { invalid = -1 };`. The compiler then rejects mixing roles
