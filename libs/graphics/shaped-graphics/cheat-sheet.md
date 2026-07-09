@@ -301,11 +301,12 @@ sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; bac
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
 sg::named_sampler           // { cc::string name; sampler sampler }  — static (on layout) or dynamic (on group)
 sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
-// creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
-ctx.persistent.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)
-ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle (throws sg::pipeline_creation_exception; + try_ twin)
+// layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
+ctx.uncached.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)
+ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (blocking build; throws sg::pipeline_creation_exception; + try_ twin)
+// binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient:
 ctx.persistent.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs layout; + try_ twin)
-ctx.transient.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layout/pipeline stay persistent (+ try_ twin)
+ctx.transient.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layout/pipeline come from ctx.uncached (+ try_ twin)
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`

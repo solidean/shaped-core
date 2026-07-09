@@ -59,25 +59,9 @@ public:
     [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes);
 
     // bind path
+    // NOTE: binding_layout and compute_pipeline creation are NOT here — they are schemas / PSOs, not
+    // lifetime-scoped GPU resources. They live on the raw `ctx.uncached` scope (prefer `ctx.cached`).
 public:
-    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings. Sampler
-    /// bindings named in `static_samplers` are baked into the layout; the rest are dynamic (supplied per
-    /// binding_group). Throws sg::pipeline_creation_exception on failure.
-    [[nodiscard]] binding_layout_handle create_binding_layout(cc::span<binding const> bindings,
-                                                              cc::span<named_sampler const> static_samplers = {});
-
-    /// Fallible core of create_binding_layout — returns an error instead of throwing.
-    [[nodiscard]] cc::result<binding_layout_handle> try_create_binding_layout(cc::span<binding const> bindings,
-                                                                              cc::span<named_sampler const> static_samplers
-                                                                              = {});
-
-    /// Builds a compute_pipeline from a description (compute shader + layout). Throws
-    /// sg::pipeline_creation_exception on failure.
-    [[nodiscard]] compute_pipeline_handle create_compute_pipeline(compute_pipeline_description const& desc);
-
-    /// Fallible core of create_compute_pipeline — returns an error instead of throwing.
-    [[nodiscard]] cc::result<compute_pipeline_handle> try_create_compute_pipeline(compute_pipeline_description const& desc);
-
     /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
     /// Throws sg::binding_group_exception on a wiring error (unknown/missing binding, kind mismatch) or
     /// descriptor-heap exhaustion.

@@ -36,6 +36,7 @@ context::context(backend_kind backend, thread_model threading)
     transient(*this),
     upload(*this),
     download(*this),
+    uncached(*this),
     cached(*this),
     _backend(backend),
     _thread_model(threading),

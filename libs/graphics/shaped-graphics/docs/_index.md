@@ -49,6 +49,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   the derived-not-flagged `texture_description` shape, and the restrictive `pixel_format` set.
 - [bindings](concepts/bindings.md) — `compiled_shader` reflection: the backend-agnostic `binding`
   vocabulary (`binding_type`, `(set, index)`) and how a binding validates a bound `raw_view`.
+- [caches](concepts/caches.md) — the content-addressed get-or-create caches for binding layouts,
+  compute pipelines (async), and compiled shaders: `ctx.uncached` (raw) vs `ctx.cached`, keys, and tiers.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
   epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue

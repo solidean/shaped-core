@@ -98,7 +98,7 @@ binding_layout_handle pipeline_cache::acquire_binding_layout(context& ctx,
                                                              cc::span<named_sampler const> static_samplers)
 {
     auto const key = this->compute_binding_layout_key(bindings, static_samplers);
-    return _layout_cache.acquire(key, [&] { return ctx.persistent.create_binding_layout(bindings, static_samplers); });
+    return _layout_cache.acquire(key, [&] { return ctx.uncached.create_binding_layout(bindings, static_samplers); });
 }
 
 async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc)
@@ -113,8 +113,8 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
                                           [ctx_ptr = &ctx, shader = compiled_shader(desc.shader), layout = desc.layout](
                                               cc::async_context& actx) -> cc::async_result<compute_pipeline_handle>
                                           {
-                                              compute_pipeline_description d{.shader = shader, .layout = layout};
-                                              auto res = ctx_ptr->persistent.try_create_compute_pipeline(d);
+                                              compute_pipeline_description const d{.shader = shader, .layout = layout};
+                                              auto res = ctx_ptr->uncached.try_create_compute_pipeline(d);
                                               if (res.has_error())
                                                   return actx.error(cc::move(res.error()));
                                               return actx.success(cc::move(res.value()));

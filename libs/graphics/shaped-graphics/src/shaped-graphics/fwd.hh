@@ -17,6 +17,7 @@ class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;
 class context_download_scope;
+class context_uncached_scope;
 class context_cached_scope;
 class pipeline_cache;
 class command_list;

@@ -63,8 +63,11 @@ compiled_shader.bindings ─▶ binding_layout ─▶ binding_group (name → ra
    (reflection)              (the schema)       (the first raw_view consumer; backend → native descriptor)
 ```
 
-`binding_layout` and `compute_pipeline` are cached schemas — always `ctx.persistent.create_*`.
-A `binding_group`, being a per-instance set of bound resources, comes in both lifetimes:
+`binding_layout` and `compute_pipeline` are schemas / PSOs, not lifetime-scoped resources — they are
+built through the raw [`ctx.uncached.create_*`](../../src/shaped-graphics/context.uncached.hh) scope, or
+(almost always preferred) deduplicated and built asynchronously through
+[`ctx.cached.acquire_*`](../../src/shaped-graphics/context.cached.hh). See [caches](caches.md).
+A `binding_group`, being a per-instance set of bound resources, is genuinely lifetime-scoped:
 `ctx.persistent.create_binding_group` for one that lives until released, `ctx.transient.create_binding_group`
 for per-frame scratch recycled when its epoch retires. The `command_list` recording that binds and
 dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) is lifetime-agnostic.
