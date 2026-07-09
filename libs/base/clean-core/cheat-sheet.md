@@ -369,7 +369,16 @@ actx.success(v);  actx.error(async_error|any_error);  actx.wait_for_dependencies
 cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind scheduler to this thread
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // pump; interleave external push here
 cc::once_async<T>                 // single-consumer owned child (2nd subscription asserts); not a default type
-// Not here yet: work-stealing pool, co_await, plain (non-async) dep args, nested once deps, typed/shared errors.
+
+// concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
+cc::async_thread_pool pool(cc::num_hardware_threads());  // >=1 workers serving general (bit 0) by default
+cc::install_default_async_pool(pool);                    // general-compute nodes route here
+int v = pool.blocking_get(root);                         // submit + block THIS (foreign) thread; not from a worker
+// affinity: typed u32 mask, overlap => eligible; bit 0 = general (default). One pool per class:
+cc::async_thread_pool rpool(2, cc::async_affinity{0b10});     // serves bit 1
+auto t = cc::make_async_lazy([]{ ... });                      // create LAZY, then:
+t->set_affinity(cc::async_affinity{0b10}, &route_to_rpool);   // freeze-on-schedule; route = raw fn ptr to its pool
+// Not here yet: co_await, plain (non-async) dep args, nested once deps, typed/shared errors, eager child reclaim.
 ```
 
 ## Strings — encoding conversion

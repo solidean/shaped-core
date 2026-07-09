@@ -3,12 +3,25 @@
 
 // Untemplated core of the async runtime: the per-thread scheduler binding, the inline scheduler pump, and
 // the node state machine / poll loop. See async_node.hh for the shape and invariants.
+//
+// Concurrency model (safe to drive from many threads):
+//   * a per-node spinlock (_lock) serializes state transitions and continuation/subscription bookkeeping;
+//   * the state word stays atomic for lock-free is_ready()/is_cold() reads;
+//   * at most one thread polls a node (try_begin_running); a completing dependency that wakes a running node
+//     sets _wake_pending instead of enqueuing a second copy, and the active poller re-polls;
+//   * the lock is never held across the user compute frame;
+//   * continuations are weak_ptrs, so a wake can never touch a dependent torn down concurrently.
 
 namespace
 {
-// The scheduler bound to the calling thread (set by async_worker_scope). thread_local even without threads:
-// a single-threaded build just has one slot. nullptr means "no worker scope active".
+// The scheduler + served affinity bound to the calling thread (set by async_worker_scope). thread_local even
+// without threads: a single-threaded build just has one slot. nullptr scheduler => no worker scope active.
 thread_local cc::async_scheduler* s_current_scheduler = nullptr;
+thread_local cc::async_affinity s_current_affinity = cc::async_affinity::none();
+
+// Process-wide default scheduler for general-compute nodes that cannot run on the current thread. Read-mostly:
+// installed once at startup. Atomic so installation is visible to worker threads without extra synchronization.
+std::atomic<cc::async_scheduler*> s_default_scheduler{nullptr};
 } // namespace
 
 // ============================================================================
@@ -26,14 +39,44 @@ cc::async_scheduler* cc::async_scheduler::current_or_null()
     return s_current_scheduler;
 }
 
-cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(s_current_scheduler)
+cc::async_affinity cc::async_scheduler::current_affinity()
+{
+    return s_current_affinity;
+}
+
+void cc::async_scheduler::set_default(async_scheduler* sched)
+{
+    s_default_scheduler.store(sched, std::memory_order_release);
+}
+
+cc::async_scheduler* cc::async_scheduler::default_or_null()
+{
+    return s_default_scheduler.load(std::memory_order_acquire);
+}
+
+void cc::async_default_reschedule(std::shared_ptr<async_node_base> node)
+{
+    // general-compute route: the installed default pool if any, else the current worker (inline driving).
+    if (auto* d = async_scheduler::default_or_null())
+        d->submit(cc::move(node));
+    else if (auto* c = async_scheduler::current_or_null())
+        c->enqueue(cc::move(node));
+    else
+        CC_ASSERT(false, "no scheduler to route a general-compute async: install a default async pool or drive "
+                         "it inside an async_worker_scope");
+}
+
+cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler, cc::async_affinity served)
+  : _previous(s_current_scheduler), _previous_affinity(s_current_affinity)
 {
     s_current_scheduler = &scheduler;
+    s_current_affinity = served;
 }
 
 cc::async_worker_scope::~async_worker_scope()
 {
     s_current_scheduler = _previous;
+    s_current_affinity = _previous_affinity;
 }
 
 bool cc::inline_scheduler::run_one()
@@ -55,49 +98,115 @@ void cc::inline_scheduler::run_until(cc::function_ref<bool()> done)
 }
 
 // ============================================================================
+// async_node_base — affinity
+// ============================================================================
+
+void cc::async_node_base::set_affinity(async_affinity a, async_reschedule_fn route)
+{
+    CC_ASSERT(_state.load(std::memory_order_relaxed) == async_node_state::cold, "affinity may only be set before the "
+                                                                                "async is scheduled");
+    CC_ASSERT(route != nullptr, "a user-defined affinity needs a reschedule route to its pool");
+    _affinity = a;
+    _reschedule = route;
+}
+
+// ============================================================================
 // async_node_base — state transitions
 // ============================================================================
 
 void cc::async_node_base::schedule()
 {
-    auto s = _state.load(std::memory_order_acquire);
-    for (;;)
     {
-        // already terminal, or already runnable/queued
-        if (s == async_node_state::ready || s == async_node_state::scheduled)
+        impl::async_spinlock_guard g(_lock);
+        auto const s = _state.load(std::memory_order_relaxed);
+
+        // terminal, already runnable, or a manual node (only external completion makes those ready)
+        if (s == async_node_state::ready || s == async_node_state::scheduled || s == async_node_state::external_pending)
             return;
 
-        // cold / running / blocked / external_pending -> make runnable and enqueue.
-        // Note: scheduling a currently-running node just enqueues it; the running poller reconciles at its
-        // next park/yield/complete. Single-threaded, this is race-free; a future threaded scheduler must
-        // additionally prevent a second poller from popping a logically-running node.
-        if (_state.compare_exchange_weak(s, async_node_state::scheduled))
+        if (s == async_node_state::running)
         {
-            if (auto* sched = async_scheduler::current_or_null())
-                sched->enqueue(shared_from_this()); // the queue co-owns the node until it is polled
+            // a second poller must never run this node: record a re-poll request; the active poller reconciles
+            // at its next park point instead of parking.
+            _wake_pending = true;
             return;
         }
+
+        // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
+        _state.store(async_node_state::scheduled, std::memory_order_release);
     }
+
+    route_after_schedule();
+}
+
+void cc::async_node_base::schedule_on(async_scheduler& target)
+{
+    bool do_submit = false;
+    {
+        impl::async_spinlock_guard g(_lock);
+        auto const s = _state.load(std::memory_order_relaxed);
+
+        if (s == async_node_state::ready || s == async_node_state::scheduled || s == async_node_state::external_pending)
+            return; // terminal, already runnable elsewhere, or a manual node
+
+        if (s == async_node_state::running)
+        {
+            _wake_pending = true;
+            return;
+        }
+
+        _state.store(async_node_state::scheduled, std::memory_order_release);
+        do_submit = true;
+    }
+
+    if (do_submit)
+        target.submit(shared_from_this());
+}
+
+void cc::async_node_base::route_after_schedule()
+{
+    // State is `scheduled` and nobody else will enqueue it (schedule() is idempotent on `scheduled`), so we
+    // route exactly once. Local hot path when a compatible worker scope is active here; else the node's own
+    // affinity route (thread-independent), which is what makes cross-thread wakeups correct.
+    auto self = shared_from_this();
+    if (auto* sched = async_scheduler::current_or_null();
+        sched != nullptr && _affinity.overlaps(async_scheduler::current_affinity()))
+    {
+        sched->enqueue(cc::move(self));
+        return;
+    }
+
+    CC_ASSERT(_reschedule != nullptr, "a schedulable async must have a reschedule route (compute nodes get a "
+                                      "default; a push/manual node must not be scheduled)");
+    _reschedule(cc::move(self));
 }
 
 bool cc::async_node_base::try_begin_running()
 {
-    auto s = _state.load(std::memory_order_acquire);
-    for (;;)
-    {
-        // another poller owns it, it is terminal, or it awaits external completion -> not runnable here
-        if (s == async_node_state::ready || s == async_node_state::running || s == async_node_state::external_pending)
-            return false;
+    impl::async_spinlock_guard g(_lock);
+    auto const s = _state.load(std::memory_order_relaxed);
 
-        if (_state.compare_exchange_weak(s, async_node_state::running))
-            return true;
-    }
+    // another poller owns it, it is terminal, or it awaits external completion -> not runnable here
+    if (s == async_node_state::ready || s == async_node_state::running || s == async_node_state::external_pending)
+        return false;
+
+    _state.store(async_node_state::running, std::memory_order_release);
+    _wake_pending = false; // start fresh; any wake during this run re-sets it
+    return true;
 }
 
 void cc::async_node_base::reschedule_self()
 {
-    // yield: become runnable again for a later turn
-    schedule();
+    // yield: the one legitimate self-driven running -> scheduled transition. Bypasses the wake-suppression in
+    // schedule() (which would leave a running node un-enqueued). A yield stays on the current, compatible
+    // worker, so route_after_schedule takes the local hot path.
+    {
+        impl::async_spinlock_guard g(_lock);
+        CC_ASSERT(_state.load(std::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
+        _state.store(async_node_state::scheduled, std::memory_order_release);
+        _wake_pending = false;
+    }
+    route_after_schedule();
 }
 
 // ============================================================================
@@ -109,14 +218,28 @@ void cc::async_node_base::drop_ready_pending_deps()
     _pending_deps.remove_all_where([](async_node_base* d) { return d->is_ready(); });
 }
 
-void cc::async_node_base::subscribe_to_pending_deps()
+bool cc::async_node_base::try_subscribe(async_node_base* dependent)
+{
+    impl::async_spinlock_guard g(_lock);
+    if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
+        return false; // already ready under the lock: the dependent must not park on us
+    CC_ASSERT(!_single_consumer || _continuations.empty(), "once_async allows only a single dependent (it is "
+                                                           "single-consumer)");
+    _continuations.push_back(dependent->weak_from_this());
+    return true;
+}
+
+bool cc::async_node_base::subscribe_to_pending_deps()
 {
     _subscribed.clear();
     for (auto* dep : _pending_deps)
     {
-        dep->add_continuation(this);
-        _subscribed.push_back(dep);
+        if (dep->try_subscribe(this))
+            _subscribed.push_back(dep);
+        else
+            return true; // a dep is already ready: abort parking, re-evaluate from scratch
     }
+    return false;
 }
 
 void cc::async_node_base::unsubscribe_all()
@@ -128,14 +251,22 @@ void cc::async_node_base::unsubscribe_all()
 
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
+    impl::async_spinlock_guard g(_lock);
     CC_ASSERT(!_single_consumer || _continuations.empty(), "once_async allows only a single dependent (it is "
                                                            "single-consumer)");
-    _continuations.push_back(dependent);
+    _continuations.push_back(dependent->weak_from_this());
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
 {
-    _continuations.remove_all_value(dependent);
+    impl::async_spinlock_guard g(_lock);
+    // drop the target, and opportunistically prune any dependents that have since expired
+    _continuations.remove_all_where(
+        [&](std::weak_ptr<async_node_base> const& w)
+        {
+            auto sp = w.lock();
+            return !sp || sp.get() == dependent;
+        });
 }
 
 // ============================================================================
@@ -158,22 +289,53 @@ void cc::async_node_base::destroy_children()
     _children.clear();
 }
 
+bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
+{
+    impl::async_spinlock_guard g(_lock);
+    if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
+        return true; // already done: caller must not wait
+    _on_complete = fn;
+    _on_complete_ctx = ctx;
+    return false;
+}
+
 void cc::async_node_base::mark_ready_and_notify()
 {
     _pending_deps.clear();
-    _state.store(async_node_state::ready, std::memory_order_release);
 
-    // detach then wake: a woken dependent may re-poll and re-subscribe elsewhere
-    auto continuations = cc::move(_continuations);
-    _continuations.clear();
-    for (auto* c : continuations)
-        c->schedule();
+    cc::small_vector<std::weak_ptr<async_node_base>, 1> continuations;
+    void (*on_complete)(void*) = nullptr;
+    void* on_complete_ctx = nullptr;
+    {
+        impl::async_spinlock_guard g(_lock);
+        _state.store(async_node_state::ready, std::memory_order_release); // ready store under the lock (I1)
+
+        // detach then wake: a woken dependent may re-poll and re-subscribe elsewhere
+        continuations = cc::move(_continuations);
+        _continuations.clear();
+        on_complete = _on_complete;
+        on_complete_ctx = _on_complete_ctx;
+    }
+
+    // outside the lock: waking a dependent takes its lock, so we must not hold ours (no two node locks at once)
+    for (auto const& w : continuations)
+        if (auto c = w.lock()) // skips any dependent that is being torn down
+            c->schedule();
+
+    if (on_complete != nullptr)
+        on_complete(on_complete_ctx);
 }
 
 void cc::async_node_base::complete_from_compute()
 {
-    unsubscribe_all();
+    unsubscribe_all(); // still valid: our frame (destroyed below) pins the deps we are unsubscribing from
     _pending_deps.clear();
+
+    // structured completion: a frame must await every child it spawns, so no child frame outlives the parent
+    // frame it may borrow from. Under threads an un-awaited child could still be running here.
+    for (auto const& child : _children)
+        CC_ASSERT(child->is_ready(), "a compute frame completed with an unfinished spawned child (await every "
+                                     "spawn_child)");
 
     // release captures: owned children first, then this frame (a child may borrow parent-frame state)
     destroy_children();
@@ -210,19 +372,30 @@ void cc::async_node_base::poll()
 
         if (!_pending_deps.empty())
         {
-            // Not-ready dependencies remain (require() already scheduled any cold ones, so they are runnable
-            // and will be driven by the scheduler). Install wakeup continuations late, then park.
-            subscribe_to_pending_deps();
+            // Not-ready dependencies remain (require() already scheduled any cold ones). Install wakeup
+            // continuations late, then decide whether to park.
+            bool const found_ready = subscribe_to_pending_deps();
 
-            auto expected = async_node_state::running;
-            if (_state.compare_exchange_strong(expected, async_node_state::blocked))
-                return; // parked; a completing dependency will schedule us
+            bool parked = false;
+            if (!found_ready)
+            {
+                impl::async_spinlock_guard g(_lock);
+                if (_wake_pending)
+                    _wake_pending = false; // a dependency woke us mid-subscribe: don't park, re-evaluate
+                else
+                {
+                    _state.store(async_node_state::blocked, std::memory_order_release);
+                    parked = true;
+                }
+            }
 
-            // a wake raced in during subscription (we were re-scheduled and enqueued): unwind and let the
-            // scheduler re-poll us. This is the block-vs-wake race; it cannot lose the wakeup.
-            CC_ASSERT(expected == async_node_state::scheduled, "unexpected state while parking");
+            if (parked)
+                return; // continuations installed; a completing dependency will schedule us
+
+            // a dep became ready, or a wake raced in during subscription: unwind and re-evaluate. This is the
+            // block-vs-wake race; it cannot lose the wakeup.
             unsubscribe_all();
-            return;
+            continue;
         }
 
         switch (poll_compute_step(ctx))

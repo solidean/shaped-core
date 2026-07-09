@@ -2,6 +2,21 @@
 #include <clean-core/thread/thread.hh>
 
 #if CC_HAS_THREADS
+#include <thread>
+
+int cc::num_hardware_threads()
+{
+    unsigned const n = std::thread::hardware_concurrency();
+    return n == 0 ? 1 : int(n);
+}
+#else
+int cc::num_hardware_threads()
+{
+    return 1;
+}
+#endif
+
+#if CC_HAS_THREADS
 
 #if defined(CC_OS_WINDOWS)
 

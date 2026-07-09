@@ -30,6 +30,7 @@ add_library(clean-core
     src/clean-core/thread/thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/async.cc
+    src/clean-core/thread/async_thread_pool.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -113,6 +114,7 @@ target_sources(clean-core
     src/clean-core/thread/threaded_actor.hh
     src/clean-core/thread/async_node.hh
     src/clean-core/thread/async.hh
+    src/clean-core/thread/async_thread_pool.hh
 )
 
 # Libraries should not set a global C++ standard here.
@@ -206,6 +208,7 @@ add_executable(clean-core-test
     tests/thread-test.cc
     tests/threaded_actor-test.cc
     tests/async-test.cc
+    tests/async-pool-test.cc
     tests/to_debug_string-test.cc
     tests/format-test.cc
     tests/print-test.cc

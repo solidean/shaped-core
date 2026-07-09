@@ -5,9 +5,9 @@
 
 #include <memory>
 
-// All tests drive the graph inline on the calling thread (cc::async_blocking_get or an explicit inline_scheduler +
-// async_worker_scope) — deterministic and thread-free, matching the threaded_actor test philosophy. The
-// threaded work-stealing scheduler is a future layer, so there is no CC_HAS_THREADS section here yet.
+// These tests drive the graph inline on the calling thread (cc::async_blocking_get or an explicit
+// inline_scheduler + async_worker_scope) — deterministic and thread-free, matching the threaded_actor test
+// philosophy. The concurrent work-stealing scheduler and its tests live in async-pool-test.cc (threads only).
 
 using cc::async_context;
 using cc::async_result;

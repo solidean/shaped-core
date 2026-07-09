@@ -189,8 +189,8 @@ public:
 
     // manual / promise-style completion (for externally produced values)
 public:
-    /// Mark this node as awaiting external completion (no compute frame). See cc::make_async_manual.
-    void set_manual() { this->set_state(cc::async_node_state::external_pending); }
+    /// Mark this node as awaiting external completion (no compute frame; empty affinity). See make_async_manual.
+    void set_manual() { this->mark_external_pending(); }
 
     /// Complete externally with a value; wakes any parked dependents. Call at most once.
     void push_value(T v)
@@ -421,6 +421,10 @@ auto async_context::spawn_child(F&& f) const
     auto child = std::make_shared<once_async<child_value_t>>();
     child->set_frame(impl::async_make_frame<child_value_t>(cc::forward<F>(f)));
     auto* raw = child.get();
+
+    // A child is an anonymous sub-task of the parent, so it runs on the parent's pool: inherit affinity+route
+    // before scheduling (children of a render-affinity task are render-affinity too).
+    raw->inherit_affinity_from(*current);
 
     // The child is owned by the parent (and transitively pinned by the root shared_async), so it can be freely
     // scheduled: the scheduler co-owns it while queued. Register it as a dependency and make it runnable; the

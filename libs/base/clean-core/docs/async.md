@@ -133,9 +133,9 @@ The async graph is **decoupled from any executor**. A worker binds a scheduler t
 worker-local LIFO stack pumped on the calling thread — the shipped default, and what makes the whole system
 testable without threads.
 
-The `*_blocking_get` drivers **block the calling thread** (with the inline scheduler they pump work here;
-against a future concurrent scheduler they would busy-wait). They are a top-level / test convenience — never
-call them from inside a frame. Their names say so deliberately.
+The `async_blocking_get` / `try_async_blocking_get` drivers **block the calling thread**, pumping the graph
+here on an inline scheduler. They are a top-level / test convenience for self-contained graphs — never call
+them from inside a frame. Their names say so deliberately.
 
 ```cpp
 // convenience: drive a self-contained graph to completion on this thread (BLOCKS)
@@ -168,12 +168,67 @@ bool r = a->is_ready(); bool ok = a->has_value(); bool bad = a->has_error();
 `try_value()` aliases the node's own `shared_ptr` onto the stored value, so it is copy-free and keeps the node
 alive on its own.
 
+## Concurrent execution: `async_thread_pool`
+
+`cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../src/clean-core/thread/async_thread_pool.hh))
+is a **work-stealing** scheduler that runs graphs on real threads. Each worker has a private LIFO deque (freshly
+spawned children stay hot) and steals from siblings when idle; a shared injection queue takes work from foreign
+threads and cross-affinity wakeups.
+
+```cpp
+cc::async_thread_pool pool(cc::num_hardware_threads());
+cc::install_default_async_pool(pool);            // general-compute nodes now route here
+auto root = build_graph();
+int v = pool.blocking_get(root);                 // submit to the pool, block THIS (foreign) thread
+```
+
+`pool.blocking_get` / `try_blocking_get` submit the root and block the calling thread on a one-shot completion
+hook. Call them only from a **foreign** thread — calling from inside a worker of the same pool asserts (it
+would park a pool thread on its own work).
+
+The node machinery is thread-safe under this: a per-node spinlock serializes state transitions and
+continuation bookkeeping, at most one thread polls a node, a completing dependency that wakes a running node
+records a re-poll instead of enqueuing a second copy, and continuations are held as `weak_ptr`s so a wake can
+never touch a dependent being torn down concurrently.
+
+### Affinity — pinning task classes to pools
+
+An `async_affinity` is a typed `u32` bitmask of task classes. A node runs on a worker iff their masks
+**overlap**; bit 0 is general-purpose compute and the default for every compute node and plain worker. Work
+stealing is allowed only between overlapping masks.
+
+Build one pool per task class and coexist them. General nodes route to the installed default pool. For a
+user-defined class, create the async **lazy**, set its affinity + the route to its pool, then schedule
+(affinity is frozen once scheduled — changing it asserts). The route is a raw fn pointer (allocation-free;
+long-lived graphs), so the pool it names must outlive the nodes routed to it. Push/manual nodes carry the
+empty mask (nothing to run).
+
+```cpp
+cc::async_thread_pool render_pool(2, cc::async_affinity{0b10}); // serves bit 1
+auto t = cc::make_async_lazy([] { return render_tile(); });
+t->set_affinity(cc::async_affinity{0b10}, &route_to_render_pool); // route enqueues onto render_pool
+// ... schedule / require t: it now only ever runs on render_pool's workers.
+```
+
+### v1 tradeoffs (node size & locking)
+
+The concurrency-safe node is **deliberately a v1**: correctness and a stable API first, leanness second. A
+node now carries a per-node spinlock, a `_wake_pending` flag, an affinity mask, a reschedule fn pointer, a
+one-shot completion hook (two words), and `weak_ptr` continuations — and it is cacheline-aligned (64 B) to
+avoid false sharing. That makes `async<T>` noticeably heavier than the data it computes.
+
+This is a known cost, not a settled design. The **semantics and the public API are the contract**; the node
+layout is not. Leaner designs with the same guarantees are expected to be possible (e.g. folding the flags
+into the state word, a hybrid spin-then-block lock — see the REVIEW note on `async_spinlock` — externalizing
+the completion hook, or shrinking the continuation representation). These can change under the hood as the
+system matures without breaking callers.
+
 ## Not yet here (follow-ups)
 
-* A real **work-stealing thread pool** implementing `async_scheduler` (worker-local LIFO + opposite-end steal,
-  a global injection queue, and a worker-aware help/wait loop). The seam and the shared-ownership pinning are
-  designed for it; the remaining threaded-only work is guarding a logically-running node against a second
-  poller and reclaiming completed owned children eagerly rather than at root teardown.
+* **Reclaim completed owned children eagerly** rather than at root teardown (long-lived graphs hold finished
+  `spawn_child` nodes until the root drops).
+* A **lock-free** per-worker deque (Chase-Lev) and finer routing (worker affinity subsets within one pool);
+  today the deques are mutex-guarded and every worker in a pool serves the same mask.
 * Typed and **shared errors** (today error propagation re-materializes the message; the failure channel will
   grow typed errors and shared error payloads), plus cancellation propagation through a graph.
 * `co_await` integration layered on top of the raw frame API; plain (non-async) arguments in the variadic
