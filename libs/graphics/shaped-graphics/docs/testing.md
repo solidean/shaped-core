@@ -76,6 +76,29 @@ adapter where possible (dx12 → WARP) so it also runs on headless CI. Two kinds
    recycling. These `static_cast` the handle to the concrete context and inspect its guts — the legitimate
    "here be dragons" escape hatch, valid precisely *because* the test is deliberately coupled to one backend.
 
+### Drive through the abstract API; cast only to inspect
+
+Even a tier-2 test **drives the work through the abstract `sg::context` API** — `ctx.uncached` /
+`ctx.persistent` / `ctx.cached` for resources and schemas, `ctx.create_command_list` /
+`ctx.submit_command_list` / `ctx.wait_for` for recording. Casting the handle to the concrete backend
+context is reserved for **reading internal state in an assertion** (case 2 above), never for driving the
+test.
+
+The anti-pattern is casting up front and then using the backend context as the main driver:
+
+```cpp
+auto& c = static_cast<dx12::dx12_context&>(*ctx.value());   // WRONG as a driver
+auto buf = c.create_dx12_buffer(size, usage, {});           // bypasses the public contract
+c.submit_dx12_command_list(...);
+```
+
+Written this way the test exercises the backend's private API instead of the contract every backend must
+honour, and silently stops being portable. Prefer the public form — `ctx.persistent.create_raw_buffer(...)`,
+`ctx.submit_command_list(...)` — and cast late and narrowly (`auto& c = static_cast<dx12_context&>(ctx);
+CHECK(c._descriptor_heap.watermark == ...)`) only where you must read backend guts. The same rule holds for
+integration tests in dependent libraries (e.g. `shaped-shader-compiler-dxc/tests`): create the concrete
+context as the entry point, then drive it as a plain `sg::context&`.
+
 See [concepts/backends.md](concepts/backends.md) for the backend-side rationale and the dx12 topic layout.
 
 ---

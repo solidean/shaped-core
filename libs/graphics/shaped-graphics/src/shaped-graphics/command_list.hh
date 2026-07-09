@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list.compute.hh>
 #include <shaped-graphics/command_list.copy.hh>
@@ -67,6 +68,7 @@ protected:
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
     virtual void compute_bind_group(int set, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;
+    virtual void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) = 0;
 
     // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
     // Split by resource family: buffers carry no layout, textures do.

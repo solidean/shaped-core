@@ -107,6 +107,17 @@ cc::hash128 pipeline_cache::compute_pipeline_layout_key(pipeline_layout_descript
         b.add_pod(bs.binding.type);
         add_sampler(b, bs.sampler);
     }
+    // inline constants add a 32-bit-constants root parameter, so they are part of the identity too
+    b.add_pod(desc.inline_constants.has_value());
+    if (desc.inline_constants.has_value())
+    {
+        auto const& ic = desc.inline_constants.value();
+        b.add_pod(ic.set);
+        b.add_pod(ic.index);
+        b.add_pod(ic.count);
+        b.add_pod(ic.type);
+        b.add_optional(ic.block_size);
+    }
     return cc::hash128::create(b.written_bytes(), 0);
 }
 

@@ -31,8 +31,21 @@ struct pipeline_layout_description
     // into the root signature alongside the group layouts' own (name-matched) static samplers.
     cc::vector<bound_sampler> static_samplers;
 
-    // TODO: inline_constants — a cc::optional<binding> (uniform_buffer binding) for dx12 root constants /
-    //       vulkan push constants, excluded from the group layouts. See .tmp/handover-inline-constants.md.
+    /// An optional constant buffer binding that provides inline (root/push) constants, allowing fast
+    /// per-draw parameter updates without allocating separate descriptor space. Set directly via
+    /// `cmd.compute.set_inline_constants(...)` and similar. Maps to dx12 root constants / vulkan push
+    /// constants.
+    ///
+    /// This binding must be a constant buffer (no other type permitted) and must be excluded from the
+    /// group layouts to avoid allocation conflicts. `block_size` must be set and a multiple of 4.
+    ///
+    /// Sizing guidance:
+    /// - 0–64 bytes (16 floats / 1 mat4): always preferable to separate buffers.
+    /// - Up to 128 bytes (32 floats / 2 mat4): acceptable but avoid changing every draw; reserve for
+    ///   pass-level data or other parameters that update infrequently.
+    /// - Beyond 128 bytes: usually a mistake, use inline-uploaded buffers instead.
+    /// Reserve inline constants for small data that genuinely varies per invocation.
+    cc::optional<binding> inline_constants;
 };
 
 /// The binding interface a pipeline is compiled against: an ordered set of binding_group_layouts (+, in

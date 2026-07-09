@@ -1,15 +1,12 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
-#include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh>
-#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-shader-compiler-dxc/all.hh>
 
 // The whole chain, end to end: HLSL through the DXC wrapper (which now reflects texture + sampler
 // bindings), a binding_group_layout + pipeline_layout built straight from that reflection, a real texture + a dynamic sampler
-// bound to a compute dispatch on WARP, and the sampled result read back and verified.
+// bound to a compute dispatch on WARP, and the sampled result read back and verified. Everything is driven
+// through the backend-agnostic sg::context API — the dx12 WARP device is only how the context is created.
 //
 // Two passes, because texture upload isn't implemented yet: pass 1 writes a known pattern into the texture
 // as a storage image (UAV); pass 2 samples it as a sampled texture (SRV) through a point/clamp sampler.
@@ -17,8 +14,6 @@
 
 namespace
 {
-namespace dx12 = sg::backend::dx12;
-
 constexpr int N = 8; // 8x8 texture / dispatch
 
 // Pass 1: write Dst[x,y] = y*N + x. RWTexture2D<float> -> an R32_FLOAT storage texture (typed UAV store).
@@ -62,9 +57,9 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx = sg::create_dx12_context({.use_warp = true});
-    REQUIRE(ctx.has_value());
-    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+    auto ctx_r = sg::create_dx12_context({.use_warp = true});
+    REQUIRE(ctx_r.has_value());
+    sg::context& ctx = *ctx_r.value();
 
     constexpr int count = N * N;
 
@@ -94,42 +89,37 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
     td.width = N;
     td.height = N;
     td.usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture;
-    auto tex_r = c.create_dx12_texture(td, sg::allocation_info{});
-    REQUIRE(tex_r.has_value());
-    sg::texture_2d const tex(tex_r.value());
+    auto tex_h = ctx.persistent.create_raw_texture(td);
+    REQUIRE(tex_h != nullptr);
+    sg::texture_2d const tex(tex_h);
 
-    auto buf_r
-        = c.create_dx12_buffer(cc::isize(count) * cc::isize(sizeof(float)),
-                               sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src, sg::allocation_info{});
-    REQUIRE(buf_r.has_value());
+    auto buf = ctx.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(float)),
+                                                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    REQUIRE(buf != nullptr);
 
     // Pipelines + layouts, built straight from the reflected bindings.
-    auto fill_group_layout = c.create_dx12_binding_group_layout(fill.bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(fill_group_layout.has_value());
-    auto fill_pipeline_layout = c.create_dx12_pipeline_layout(
-        sg::pipeline_layout_description{.groups = {fill_group_layout.value()}}, sg::lifetime_scope::persistent);
-    REQUIRE(fill_pipeline_layout.has_value());
-    auto fill_pipe = c.create_dx12_compute_pipeline(fill, fill_pipeline_layout.value(), sg::lifetime_scope::persistent);
-    REQUIRE(fill_pipe.has_value());
+    auto fill_group_layout = ctx.uncached.create_binding_group_layout(fill.bindings);
+    REQUIRE(fill_group_layout != nullptr);
+    auto fill_pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {fill_group_layout}});
+    REQUIRE(fill_pipeline_layout != nullptr);
+    auto fill_pipe = ctx.uncached.create_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout});
+    REQUIRE(fill_pipe != nullptr);
 
-    auto sample_group_layout = c.create_dx12_binding_group_layout(sample.bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(sample_group_layout.has_value());
-    auto sample_pipeline_layout = c.create_dx12_pipeline_layout(
-        sg::pipeline_layout_description{.groups = {sample_group_layout.value()}}, sg::lifetime_scope::persistent);
-    REQUIRE(sample_pipeline_layout.has_value());
-    auto sample_pipe
-        = c.create_dx12_compute_pipeline(sample, sample_pipeline_layout.value(), sg::lifetime_scope::persistent);
-    REQUIRE(sample_pipe.has_value());
+    auto sample_group_layout = ctx.uncached.create_binding_group_layout(sample.bindings);
+    REQUIRE(sample_group_layout != nullptr);
+    auto sample_pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {sample_group_layout}});
+    REQUIRE(sample_pipeline_layout != nullptr);
+    auto sample_pipe = ctx.uncached.create_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout});
+    REQUIRE(sample_pipe != nullptr);
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.
     sg::named_view const fill_views[] = {{.name = "Dst", .view = tex.as_readwrite_view()}};
-    auto fill_group
-        = c.create_dx12_binding_group(fill_group_layout.value(), fill_views, {}, sg::lifetime_scope::persistent);
-    REQUIRE(fill_group.has_value());
+    auto fill_group = ctx.persistent.create_binding_group(fill_group_layout, fill_views);
+    REQUIRE(fill_group != nullptr);
 
     sg::named_view const sample_views[] = {
         {.name = "Src", .view = tex.as_readonly_view()},
-        {.name = "Out", .view = buf_r.value()->as_readwrite_buffer<float>()},
+        {.name = "Out", .view = buf->as_readwrite_buffer<float>()},
     };
     sg::named_sampler const sample_samplers[] = {{.name = "Samp",
                                                   .sampler = {.min_filter = sg::sampler_filter::nearest,
@@ -137,28 +127,25 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
                                                               .mip_filter = sg::sampler_filter::nearest,
                                                               .address_u = sg::sampler_address_mode::clamp_edge,
                                                               .address_v = sg::sampler_address_mode::clamp_edge}}};
-    auto sample_group = c.create_dx12_binding_group(sample_group_layout.value(), sample_views, sample_samplers,
-                                                    sg::lifetime_scope::persistent);
-    REQUIRE(sample_group.has_value());
+    auto sample_group = ctx.persistent.create_binding_group(sample_group_layout, sample_views, sample_samplers);
+    REQUIRE(sample_group != nullptr);
 
     // Record both passes; the barrier system transitions the texture storage -> shader_read between them.
-    auto disp = c.create_dx12_command_list();
-    REQUIRE(disp.has_value());
-    disp.value()->compute.bind_pipeline(*fill_pipe.value());
-    disp.value()->compute.bind_group(0, *fill_group.value());
-    disp.value()->compute.dispatch_threads(N, N, 1);
-    disp.value()->compute.bind_pipeline(*sample_pipe.value());
-    disp.value()->compute.bind_group(0, *sample_group.value());
-    disp.value()->compute.dispatch_threads(N, N, 1);
-    c.submit_dx12_command_list(cc::move(disp.value()));
+    auto disp = ctx.create_command_list();
+    disp->compute.bind_pipeline(*fill_pipe);
+    disp->compute.bind_group(0, *fill_group);
+    disp->compute.dispatch_threads(N, N, 1);
+    disp->compute.bind_pipeline(*sample_pipe);
+    disp->compute.bind_group(0, *sample_group);
+    disp->compute.dispatch_threads(N, N, 1);
+    ctx.submit_command_list(cc::move(disp));
 
     // Read the sampled values back.
-    auto down = c.create_dx12_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.data_from_buffer<float>(buf_r.value(), 0, count);
-    c.submit_dx12_command_list(cc::move(down.value()));
+    auto down = ctx.create_command_list();
+    auto future = down->download.data_from_buffer<float>(buf, 0, count);
+    ctx.submit_command_list(cc::move(down));
 
-    auto const data = c.wait_for(future);
+    auto const data = ctx.wait_for(future);
     REQUIRE(data.has_value());
 
     // Point-sampling texel centers reproduces exactly what pass 1 wrote: Out[i] == i.

@@ -177,3 +177,41 @@ TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipe
     CHECK(a.get() == a_again.get()); // identical static sampler => one shared pipeline layout
     CHECK(a.get() != b.get());       // a different static sampler => a different cached pipeline layout
 }
+
+TEST("sg pipeline_cache - inline constants participate in the pipeline-layout key")
+{
+    auto handle = dx12::make_warp_context();
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
+
+    sg::binding const bindings[] = {
+        {.name = "Out", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
+    };
+    auto gl = ctx.cached.acquire_binding_group_layout(bindings);
+    REQUIRE(gl != nullptr);
+
+    // Same group layout, but an inline-constants block adds a 32-bit-constants root parameter that changes
+    // the root signature — so it (and its block_size) must be part of the pipeline-layout key.
+    auto make_desc = [&](cc::isize block_size)
+    {
+        sg::pipeline_layout_description d;
+        d.groups = {gl};
+        d.inline_constants = sg::binding{.name = "Params",
+                                         .set = 0,
+                                         .index = 0,
+                                         .count = 1,
+                                         .type = sg::binding_type::uniform_buffer,
+                                         .block_size = block_size};
+        return d;
+    };
+
+    auto no_ic = ctx.cached.acquire_pipeline_layout({.groups = {gl}});
+    auto ic8 = ctx.cached.acquire_pipeline_layout(make_desc(8));
+    auto ic8_again = ctx.cached.acquire_pipeline_layout(make_desc(8));
+    auto ic16 = ctx.cached.acquire_pipeline_layout(make_desc(16));
+
+    REQUIRE(no_ic != nullptr);
+    CHECK(ic8.get() == ic8_again.get()); // identical inline constants => one shared pipeline layout
+    CHECK(ic8.get() != ic16.get());      // a different block_size => a different cached pipeline layout
+    CHECK(ic8.get() != no_ic.get());     // presence of inline constants => a different cached layout
+}

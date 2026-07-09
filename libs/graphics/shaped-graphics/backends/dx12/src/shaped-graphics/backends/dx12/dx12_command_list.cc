@@ -142,6 +142,26 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
         _list->SetComputeRootDescriptorTable(UINT(gslot.sampler_root_param), dg->sampler_table_start);
 }
 
+void dx12_command_list::compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+{
+    CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before setting inline constants");
+    CC_ASSERT(_bound_pipeline_layout->inline_constants_root_param >= 0, "the bound pipeline layout declares no "
+                                                                        "inline_constants block");
+    CC_ASSERT(data.size() % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
+
+    cc::isize const off = offset.value_or(0);
+    CC_ASSERT(off >= 0 && off % 4 == 0, "inline-constants offset must be non-negative and a multiple of 4");
+    if (offset.has_value())
+        CC_ASSERT(off + data.size() <= cc::isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
+                  "partial inline-constants update exceeds the declared block size");
+    else
+        CC_ASSERT(data.size() == cc::isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
+                  "full inline-constants replace must match the declared block size");
+
+    _list->SetComputeRoot32BitConstants(UINT(_bound_pipeline_layout->inline_constants_root_param),
+                                        UINT(data.size() / 4), data.data(), UINT(off / 4));
+}
+
 void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");

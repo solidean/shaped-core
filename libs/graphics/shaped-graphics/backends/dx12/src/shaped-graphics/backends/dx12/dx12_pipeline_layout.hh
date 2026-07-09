@@ -27,13 +27,19 @@ public:
     };
 
     /// Builds the root signature from `groups` (each an sg::binding_group_layout_handle downcast to the
-    /// dx12 type). At most sg::max_binding_groups groups.
+    /// dx12 type). At most sg::max_binding_groups groups. `inline_constants`, when present, adds a
+    /// 32-bit-constants root parameter (dx12 root constants); its binding must be a uniform_buffer with
+    /// a block_size that is set and a multiple of 4.
     [[nodiscard]] static cc::result<dx12_pipeline_layout_handle> create(
         ID3D12Device* device,
         cc::span<sg::binding_group_layout_handle const> groups,
-        cc::span<sg::bound_sampler const> static_samplers);
+        cc::span<sg::bound_sampler const> static_samplers,
+        cc::optional<sg::binding> const& inline_constants);
 
     ComPtr<ID3D12RootSignature> root_signature;
     cc::vector<group_slot> groups; // one per bind slot, in order
+
+    int inline_constants_root_param = -1; ///< root-parameter index of the 32-bit-constants param, -1 if none
+    int inline_constants_num_32bit = 0;   ///< block_size / 4, for full-replace size validation
 };
 } // namespace sg::backend::dx12

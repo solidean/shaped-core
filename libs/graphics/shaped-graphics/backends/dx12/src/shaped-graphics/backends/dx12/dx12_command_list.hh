@@ -120,6 +120,7 @@ protected:
                                              cc::span<sg::array_buffer_access const> elements) override;
     void compute_declare_array_texture_access(cc::string_view binding_name,
                                               cc::span<sg::array_texture_access const> elements) override;
+    void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
 
 private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker
