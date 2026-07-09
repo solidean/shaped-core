@@ -16,6 +16,9 @@ class context;
 class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;
+class context_download_scope;
+class context_cached_scope;
+class pipeline_cache;
 class command_list;
 class command_list_upload_scope;
 class command_list_download_scope;
@@ -106,4 +109,14 @@ using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immuta
 using binding_layout_handle = std::shared_ptr<binding_layout const>;   // immutable schema
 using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
+
+// Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
+// pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). cc::async<T> cannot hold a const T
+// (its internal cc::optional<T> forbids it), so const arrives at the read side: an async's try_value()
+// yields the matching const *_handle above.
+using async_compiled_shader = std::shared_ptr<cc::async<compiled_shader>>; // try_value() -> compiled_shader_handle
+using async_compute_pipeline
+    = std::shared_ptr<cc::async<compute_pipeline_handle>>; // blocking_get -> compute_pipeline_handle
+using async_binding_layout
+    = std::shared_ptr<cc::async<binding_layout_handle>>; // defined for future/graphics use — layout acquire is SYNC today
 } // namespace sg

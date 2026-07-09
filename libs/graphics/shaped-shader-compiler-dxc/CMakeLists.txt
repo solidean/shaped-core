@@ -7,6 +7,7 @@ project(shaped-shader-compiler-dxc LANGUAGES CXX)
 # The enclosing add_subdirectory (root CMakeLists) gates this on WIN32 + the `dxc` target existing.
 add_library(shaped-shader-compiler-dxc
     src/shaped-shader-compiler-dxc/compiler.cc
+    src/shaped-shader-compiler-dxc/shader_cache.cc
     src/shaped-shader-compiler-dxc/impl/command_line_args.cc
     src/shaped-shader-compiler-dxc/impl/include_handler.cc
     src/shaped-shader-compiler-dxc/impl/reflection.cc
@@ -26,6 +27,7 @@ target_sources(shaped-shader-compiler-dxc
     src/shaped-shader-compiler-dxc/shader_description.hh
     src/shaped-shader-compiler-dxc/preprocessed_source.hh
     src/shaped-shader-compiler-dxc/compiler.hh
+    src/shaped-shader-compiler-dxc/shader_cache.hh
 )
 
 target_compile_features(shaped-shader-compiler-dxc PUBLIC cxx_std_23)
@@ -50,6 +52,7 @@ add_executable(shaped-shader-compiler-dxc-test
     tests/main.cc
     tests/preprocess-test.cc
     tests/compile-test.cc
+    tests/shader_cache-test.cc
 )
 
 target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-shader-compiler-dxc nexus)

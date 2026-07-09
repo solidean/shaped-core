@@ -15,6 +15,7 @@
 #include <shaped-graphics/command_list.upload.hh>
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/compute_pipeline.hh>
+#include <shaped-graphics/context.cached.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
@@ -22,6 +23,7 @@
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory_heap.hh>
+#include <shaped-graphics/pipeline_cache.hh>
 #include <shaped-graphics/pixel_format.hh>
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/raw_texture.hh>

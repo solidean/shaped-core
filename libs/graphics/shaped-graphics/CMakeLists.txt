@@ -17,11 +17,13 @@ add_library(shaped-graphics
     src/shaped-graphics/binding_layout.cc
     src/shaped-graphics/compute_pipeline.cc
     src/shaped-graphics/binding_group.cc
+    src/shaped-graphics/pipeline_cache.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/context.transient.cc
     src/shaped-graphics/context.upload.cc
     src/shaped-graphics/context.download.cc
+    src/shaped-graphics/context.cached.cc
     src/shaped-graphics/memory_heap.cc
 )
 
@@ -40,6 +42,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.transient.hh
     src/shaped-graphics/context.upload.hh
     src/shaped-graphics/context.download.hh
+    src/shaped-graphics/context.cached.hh
+    src/shaped-graphics/pipeline_cache.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/command_list.upload.hh
     src/shaped-graphics/command_list.download.hh

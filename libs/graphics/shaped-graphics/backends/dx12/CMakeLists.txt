@@ -91,6 +91,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-download-async-test.cc
     tests/dx12-copy-test.cc
     tests/dx12-compute-test.cc
+    tests/dx12-pipeline-cache-test.cc
     tests/dx12-placed-test.cc
     tests/dx12-transient-test.cc
     tests/dx12-texture-barrier-test.cc

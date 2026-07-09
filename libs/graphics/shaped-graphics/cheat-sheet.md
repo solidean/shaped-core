@@ -30,6 +30,10 @@ sg::raw_buffer_handle     // std::shared_ptr<sg::raw_buffer const>   — shared-
 sg::raw_texture_handle    // std::shared_ptr<sg::raw_texture const>  — shared-immutable resource
 // command_list has NO handle: it's a move-only temporary — std::unique_ptr<sg::command_list>,
 // passed around by reference (command_list&). record once, submit once, not reused.
+sg::async_compiled_shader   // std::shared_ptr<cc::async<compiled_shader>>   — async compile result (try_value() -> compiled_shader_handle)
+sg::async_compute_pipeline  // std::shared_ptr<cc::async<compute_pipeline_handle>> — async PSO build (blocking_get -> compute_pipeline_handle)
+sg::async_binding_layout    // std::shared_ptr<cc::async<binding_layout_handle>>   — for future/graphics use; layout acquire is SYNC today
+// cc::async<T> can't hold a const T, so const lands at the read side (try_value yields the const *_handle).
 ```
 
 ## bytes_future / bytes_waiter — download results
@@ -279,6 +283,26 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
                                                          // (scalar bindings are inferred; arrays can't be — declare them)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
 // declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
+```
+
+## cached layouts + pipelines — the built-in cache  (ctx.cached / pipeline_cache)
+
+```cpp
+#include <shaped-graphics/context.cached.hh>   // (via context.hh) — the ctx.cached scope
+#include <shaped-graphics/pipeline_cache.hh>   // the cache itself
+// Every context has a built-in pipeline_cache (default in-memory tiers installed). "acquire" = get-or-create.
+ctx.cached.acquire_binding_layout(span<binding const>)          // -> binding_layout_handle  SYNC; identical bindings => one shared handle
+ctx.cached.acquire_compute_pipeline({.shader=, .layout=})       // -> sg::async_compute_pipeline  async PSO build; identical (shader,layout) => one node
+                                                               //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
+// key = hash128 over the logical args (bindings; shader bytecode+entry+signature + layout handle identity).
+// For full pipeline dedup, acquire the layout THROUGH the cache first (so identical layouts share one handle).
+// Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
+// pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
+pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
+pc.acquire_binding_layout(ctx, bindings);  pc.acquire_compute_pipeline(ctx, desc);
+pc.add_default_in_memory_providers(max=4096);  pc.add_binding_layout_provider(p);  pc.apply_bookkeeping();
+// TODO: graphics / raytracing pipeline caching once those pipeline types land in sg.
 ```
 
 ## memory placement — heaps & alloc-info  (stub)

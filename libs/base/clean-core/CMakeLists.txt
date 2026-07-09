@@ -27,6 +27,8 @@ add_library(clean-core
     src/clean-core/string/string_view.cc
     src/clean-core/string/conversion.cc
     src/clean-core/container/vector.cc
+    src/clean-core/container/byte_stream_builder.cc
+    src/clean-core/container/key_value_cache.cc
     src/clean-core/thread/thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/async.cc
@@ -76,6 +78,8 @@ target_sources(clean-core
     src/clean-core/container/unique_vector.hh
     src/clean-core/container/map.hh
     src/clean-core/container/set.hh
+    src/clean-core/container/key_value_cache.hh
+    src/clean-core/container/byte_stream_builder.hh
     src/clean-core/container/ringbuffer.hh
     src/clean-core/container/bitset.hh
     src/clean-core/container/fixed_bitset.hh
@@ -208,6 +212,8 @@ add_executable(clean-core-test
     tests/container/strided_span-test.cc
     tests/container/pinned_data-test.cc
     tests/container/vector-test.cc
+    tests/container/byte_stream_builder-test.cc
+    tests/container/key_value_cache-test.cc
 
     tests/string/conversion-test.cc
     tests/string/format-test.cc

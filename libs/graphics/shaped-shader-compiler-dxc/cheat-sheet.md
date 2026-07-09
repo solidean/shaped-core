@@ -45,6 +45,21 @@ c.compile(desc, opts={})                    // -> cc::result<sg::compiled_shader
 // workgroup_size from reflection; compiler = {"dxc", version, joined-args signature}
 ```
 
+## shader_cache — async + cached compilation
+
+```cpp
+#include <shaped-shader-compiler-dxc/shader_cache.hh>
+ssc::dxc::shader_cache           // thread-safe, hash-keyed get-or-create over compiler::compile
+cache.add_default_in_memory_provider(max=4096) // or add_provider(shared_ptr<key_value_provider<hash128, async_compiled_shader>>)
+cache.compile(desc, opts={})     // -> sg::async_compiled_shader  (same key => SAME node, never recompiled)
+                           //   key = hash128 over source + entry_point + stage + model + all options
+cache.apply_bookkeeping()        // in-memory eviction on all tiers
+// drive: cc::async_blocking_get(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
+// a compile failure surfaces as an async error (sh->has_error()); DXC diagnostics carried through.
+// runs on the installed default async pool (cc::install_default_async_pool); inline if none installed.
+// each worker uses its own thread-local compiler (compiler is one-per-thread). Cache preprocessed source.
+```
+
 ## reflection mapping (DXC -> sg::binding)
 
 ```

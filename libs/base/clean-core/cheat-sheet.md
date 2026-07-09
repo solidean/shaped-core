@@ -84,6 +84,26 @@ sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 ```
 
+## Caching & byte serialization
+
+```cpp
+#include <clean-core/container/byte_stream_builder.hh>   // cc::byte_stream_builder — build a blob to hash
+cc::byte_stream_builder b;                        // backed by cc::vector<byte>; clear() reuses the allocation
+b.add(span<byte const>);  b.add_pod(v);           // raw bytes / one trivially-copyable value
+b.add_pod_span(range);  b.add_pod_span_sized(r);  // elems' bytes  /  u64 count prefix + elems
+b.add_string(sv);  b.add_optional(opt);  b.add_bool(x); // length-prefixed / presence byte + value / one byte
+b.written_bytes();                                // -> span<byte const>; feed to cc::hash128::create(...)
+cc::byte_stream_builder::thread_local_scratch();  // per-thread instance, cleared on fetch (don't nest)
+
+#include <clean-core/container/key_value_cache.hh>   // cc::key_value_cache<K,V> — thread-safe tiered get-or-create
+cc::key_value_cache<cc::hash128, V> cache;        // serialized under cc::mutex; K hashed via cc::make_hash_finalized
+cache.add_default_in_memory_provider(max=4096);   // or add_provider(shared_ptr<key_value_provider<K,V>>) (front=fastest)
+V v = cache.acquire(key, [&]{ return make(); });  // first tier to hit backfills faster tiers; full miss runs factory
+cache.apply_bookkeeping();                        // e.g. in-memory eviction (clear past max_entries)
+// tiers: cc::key_value_provider<K,V> (try_get/set/apply_bookkeeping) — extension seam for disk/network caches.
+// TODO(clean-core): std::unordered_map inside, to migrate to cc::map when it lands.
+```
+
 ## Views — non-owning (must not outlive their data)
 
 ```cpp
