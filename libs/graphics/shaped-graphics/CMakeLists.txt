@@ -113,6 +113,7 @@ add_executable(shaped-graphics-test
     tests/main.cc
     tests/buffer/views-test.cc
     tests/texture/texture-test.cc
+    tests/texture/texture-view-test.cc
     tests/transfer/bytes_future-test.cc
     tests/binding/binding-test.cc
     tests/barrier/access_state-test.cc

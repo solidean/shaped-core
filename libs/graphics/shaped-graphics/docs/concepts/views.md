@@ -80,19 +80,62 @@ Every typed view converts (`to_raw()`, or implicitly) into one plain
 params) that a backend `switch`es on to build its native descriptor. The type safety lives entirely
 in the typed views; users never touch `raw_view`, only the backend does.
 
-## Scope today, and what's deferred
+## Texture views
 
-Only **buffer** views exist. Deferred, and each its own future family (they don't fit the `<T>` slot):
+Textures have views too, but they don't fit the buffer `<T>` slot (there is no element type — a texel
+`pixel_format` and a subresource range instead). So they are distinct, non-templated types —
+`texture_readonly_view` (sampled / SRV) and `texture_readwrite_view` (storage / UAV) — each carrying
+`{raw_texture_handle, texture_view_dimension, pixel_format, subresource_range}` (plus a
+`depth_slice_range` on the storage view for 3D) and erasing to a `raw_view` with `shape == texture`.
 
-- **Texture views** — need `sg::texture` + a pixel-`format`; typed by dimension (1d / 2d / 2d-array /
-  3d / cube / cube-array) with mip / array-slice / aspect ranges, plus `render_target` /
-  `depth_stencil` access. This is where "pass a 2D texture, one array slice, or one cube face into the
-  same routine" lands: those all construct one 2D texture view.
-- **Texel buffers** — format-decoded linear buffers (`Buffer<T>` / `samplerBuffer`); need a format,
-  not just `T`.
+### The view *dimension* is a reinterpretation, not the texture's shape
 
-The **bind path** (pipelines, descriptor groups/layouts, `command_list` binding, and the
-reflection-driven validation above) is the eventual consumer of `raw_view` and is not built yet.
+A view carries an explicit `texture_view_dimension` — the shader-facing declaration (HLSL
+`Texture2D` / `Texture2DArray` / `TextureCube` / `Texture2DMS…`; Vulkan `VkImageViewType`; D3D
+`SRV/UAV_DIMENSION`) — because several selections *change what the shader sees*, not just which
+subresources are visible. Binding one slice of a 2D array as `Texture2D` is a **different binding** than a
+one-layer `Texture2DArray` window; likewise a single cube face → `Texture2D`, or one cube of a cube array
+→ `TextureCube`. A subresource range alone can't tell those apart, so the backend switches on
+`view_dimension` rather than re-deriving from the texture's `description`. (D3D12 caveat: the non-array
+dimensions have no base-slice field, so a *non-zero* first slice promotes to the size-1 array form — same
+texels, still declared as the requested dimension in the shader.)
+
+### The factory surface
+
+The factories live on the typed `texture<Traits>` wrapper, `requires`-gated by shape so misuse is a
+compile error (mirroring the wrapper's `height()` / `depth()`). Rather than a positional overload set,
+each factory takes **one shape-specific parameter bag** — `Traits::read_only_params`,
+`Traits::read_write_2d_params`, … — an aggregate that names only the axes that shape has. A plain 2D
+texture's `read_only_params` is `{ view_range mips; }`; a 2D array's adds `slices`; a cube array's adds
+`cubes`. Selecting a nonsensical axis (e.g. `.slices` on a non-array) is a compile error, not a
+silently-ignored field. A `view_range` is `{ int start = 0; int count = -1 }` where `count < 0` means "to
+the end", so the whole-axis default is `{}`.
+
+- **Natural views** — the texture's own dimension: `as_readonly_view(params = {})` on any shape,
+  `as_readwrite_view(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
+  sub-selection: a mip range (sampled) or single mip (storage), an array-slice range, a cube range, or a
+  3D depth-slice window (`depth_slices`, D3D12's `FirstWSlice`/`WSize` — tracked outside the subresource
+  range since a whole 3D mip is one subresource for hazard purposes).
+- **Reinterpreting views** — bind one slice / face / cube as a lower dimension, each with its own params
+  bag: `as_readonly_2d_view` / `as_readwrite_2d_view` (one slice/face → `Texture2D`), `as_readonly_1d_view`
+  / `as_readwrite_1d_view` (one slice of a 1D array → `Texture1D`), `as_readonly_cube_view` (one cube of a
+  cube array → `TextureCube`), and `as_readonly_2d_array_view` (a cube / cube array's faces as a flat
+  `Texture2DArray` — the sampled counterpart to how a cube's storage view already binds). These are what
+  make "slice 3 as `Texture2D`" distinct from a size-1 array window.
+
+Multisampled textures **are** sampleable (`Texture2DMS…`) — their params just have no separate mip axis
+(one mip level), and a multisampled cube samples as a `Texture2DMSArray` (there is no `TextureCubeMS`).
+Storage views never apply to MSAA (D3D12 forbids MSAA UAVs) and a cube is written as a 2D array (no cube
+UAV).
+
+`binding_type::readonly_texture` / `readwrite_texture` map to `(readonly, texture)` / `(readwrite, texture)`.
+When a texture is bound to a compute dispatch, the barrier system transitions it to the layout its access
+implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of`.
+
+Deferred: **aspect (depth/stencil) selection + format reinterpretation** on sampled views (depth-as-SRV
+needs a typeless resource), **render_target / depth_stencil** views (a graphics pipeline / render pass
+consumes them), **samplers** (a separate descriptor heap), and **texel buffers** (`Buffer<T>` /
+`samplerBuffer` — a format-decoded linear buffer).
 
 ## See also
 

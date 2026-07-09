@@ -110,6 +110,52 @@ TEST("sg dx12 - multiple declares before one flush merge into a single barrier")
     CHECK(sg::has_all(b[0].barrier.dst_access, sg::access_flags::shader_read | sg::access_flags::shader_write));
 }
 
+TEST("sg dx12 - combine_layouts folds sampled+storage to COMMON and flags real conflicts")
+{
+    using sg::texture_layout;
+    // Equal layouts combine cleanly.
+    CHECK(dx12::combine_layouts(texture_layout::shader_readonly, texture_layout::shader_readonly).result
+          == dx12::layout_combine::ok);
+    // Sampled (SRV) + storage (UAV): no specialized layout serves both, so COMMON, degraded (order-independent).
+    auto const c = dx12::combine_layouts(texture_layout::shader_readonly, texture_layout::shader_readwrite);
+    CHECK(c.layout == texture_layout::general);
+    CHECK(c.result == dx12::layout_combine::degraded);
+    CHECK(dx12::combine_layouts(texture_layout::shader_readwrite, texture_layout::shader_readonly).layout
+          == texture_layout::general);
+    // general/COMMON already serves any access.
+    CHECK(dx12::combine_layouts(texture_layout::general, texture_layout::shader_readwrite).result
+          == dx12::layout_combine::ok);
+    // A copy dest that is also sampled in one op is a real hazard.
+    CHECK(dx12::combine_layouts(texture_layout::copy_dst, texture_layout::shader_readonly).result
+          == dx12::layout_combine::conflict);
+}
+
+TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to COMMON")
+{
+    // Two views of one texture in the same op — shader_readonly (SRV) and shader_readwrite (UAV) — combine to
+    // the COMMON (general) layout, in a single barrier carrying both accesses. (Emits a one-time perf warning.)
+    auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
+    dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
+    auto const slot = sg::command_list_slot(0);
+
+    // First put the texture in a non-general layout, so the combined transition is observable (a fresh
+    // texture is already general, so SRV+UAV -> general would be a freebie).
+    acc.declare(slot, whole_of(d), sg::pipeline_stage_flags::copy, sg::access_flags::copy_write,
+                sg::texture_layout::copy_dst);
+    (void)acc.flush(slot);
+
+    acc.declare(slot, whole_of(d), sg::pipeline_stage_flags::compute, sg::access_flags::shader_read,
+                sg::texture_layout::shader_readonly);
+    acc.declare(slot, whole_of(d), sg::pipeline_stage_flags::compute, sg::access_flags::shader_write,
+                sg::texture_layout::shader_readwrite);
+    auto b = acc.flush(slot);
+
+    REQUIRE(b.size() == 1);
+    CHECK(b[0].barrier.src_layout == sg::texture_layout::copy_dst);
+    CHECK(b[0].barrier.dst_layout == sg::texture_layout::general); // combined SRV+UAV -> COMMON
+    CHECK(sg::has_all(b[0].barrier.dst_access, sg::access_flags::shader_read | sg::access_flags::shader_write));
+}
+
 TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly once per op")
 {
     // The command list enqueues a texture for the pre-op barrier flush only when mark_pending_barrier returns

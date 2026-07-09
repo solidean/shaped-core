@@ -76,13 +76,25 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         CC_ASSERT(filled[slot_index] == char(0), "binding_group: a binding was provided more than once");
         filled[slot_index] = char(1);
 
-        create_buffer_view(ctx._device.Get(), nv.view, ctx._descriptor_heap.cpu_at(base + s.table_offset));
-        if (nv.view.buffer)
+        auto const dst = ctx._descriptor_heap.cpu_at(base + s.table_offset);
+        if (nv.view.shape == sg::view_shape::texture)
         {
-            auto dx = std::dynamic_pointer_cast<dx12_buffer const>(nv.view.buffer);
-            CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
-            group->referenced.push_back(dx);
-            group->hazard_views.push_back({dx, nv.view.access}); // (buffer, access class) → dispatch hazard declare
+            create_texture_view(ctx._device.Get(), nv.view, dst);
+            auto dx = std::dynamic_pointer_cast<dx12_texture const>(nv.view.texture);
+            CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
+            group->referenced_textures.push_back(dx);
+            group->texture_hazard_views.push_back({dx, nv.view.range, nv.view.access}); // → dispatch hazard declare
+        }
+        else
+        {
+            create_buffer_view(ctx._device.Get(), nv.view, dst);
+            if (nv.view.buffer)
+            {
+                auto dx = std::dynamic_pointer_cast<dx12_buffer const>(nv.view.buffer);
+                CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
+                group->referenced.push_back(dx);
+                group->hazard_views.push_back({dx, nv.view.access}); // (buffer, access class) → dispatch hazard declare
+            }
         }
     }
 

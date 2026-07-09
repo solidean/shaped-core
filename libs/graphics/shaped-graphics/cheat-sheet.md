@@ -213,9 +213,22 @@ ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedica
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
 sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
+// Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count<0=all}.
+// sampled (SRV) — needs readonly_texture usage. Natural dimension:
+tex.as_readonly_view({.mips={.start=1}})       // -> texture_readonly_view  (whole; params name only this shape's axes)
+//   read_only_params fields: .mips always; .slices (arrays); .cubes (cube arrays)
+tex.as_readonly_2d_view({.slice=3})            // array/cube -> Texture2D: one slice/.face/{.cube,.face}
+tex.as_readonly_1d_view({.slice=3})            // 1D array -> Texture1D
+tex.as_readonly_cube_view({.cube=2})           // cube array -> one TextureCube
+tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
+// storage (UAV) — needs readwrite_texture; single mip; not on MS (a cube UAV is a 2D array):
+tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
+//   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
+tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
-// NOTE: creation only — texture views (shader binding), barriers/layout transitions, and copies are future work.
+// bind a texture view in a compute dispatch → it auto-transitions to shader_read (SRV) / storage (UAV).
+// NOTE: SRV/UAV only — render_target/depth_stencil views + samplers + texture upload/download/copy remain future work.
 ```
 
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
@@ -228,13 +241,15 @@ sg::uniform_view<T>          // uniform block of T   (cbuffer/UBO)          — 
 sg::readonly_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
 sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
-sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage)
-sg::view_shape               // uniform_block | structured | raw (layout; derived from T)
+sg::texture_readonly_view    // sampled texture (SRV) — view_class::readonly,  shape texture
+sg::texture_readwrite_view   // storage texture (UAV) — view_class::readwrite, shape texture
+// each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view().
+sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage / texture_usage)
+sg::view_shape               // uniform_block | structured | raw | texture   (layout)
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
-v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/size/element_count/stride }
-// backends switch on (access, shape) to build the native descriptor  (name raw_view is TBD)
-// buffer views only today; texture/texel views (dimension-typed) still deferred — the resource
-// (sg::raw_texture) and sg::pixel_format now exist, but binding a texture to a shader is future work
+v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, offset/size/... | format+range }
+// backends switch on (access, shape) to build the native descriptor (SRV/UAV/CBV/texture SRV/UAV)
+// deferred: render_target/depth_stencil views, samplers, and texel buffers (typed linear buffers)
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
