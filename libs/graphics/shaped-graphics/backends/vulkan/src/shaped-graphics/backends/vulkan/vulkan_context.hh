@@ -106,6 +106,7 @@ public:
 
     // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet.
     [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(cc::span<sg::binding const>,
+                                                                                  cc::span<sg::named_sampler const>,
                                                                                   sg::lifetime_scope) override
     {
         return cc::error("vulkan binding_layout creation is not implemented yet");
@@ -117,6 +118,7 @@ public:
     }
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle,
                                                                                 cc::span<sg::named_view const>,
+                                                                                cc::span<sg::named_sampler const>,
                                                                                 sg::lifetime_scope) override
     {
         return cc::error("vulkan binding_group creation is not implemented yet");

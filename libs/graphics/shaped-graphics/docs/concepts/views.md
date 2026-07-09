@@ -134,8 +134,10 @@ implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of
 
 Deferred: **aspect (depth/stencil) selection + format reinterpretation** on sampled views (depth-as-SRV
 needs a typeless resource), **render_target / depth_stencil** views (a graphics pipeline / render pass
-consumes them), **samplers** (a separate descriptor heap), and **texel buffers** (`Buffer<T>` /
-`samplerBuffer` — a format-decoded linear buffer).
+consumes them) and **texel buffers** (`Buffer<T>` / `samplerBuffer` — a format-decoded linear buffer).
+**Samplers** are supported (see [bindings](bindings.md) and `sampler.hh`) — they are not views, so they
+live outside this concept: a `sampler` bound static (baked into a layout's root signature) or
+dynamic (per binding_group, in a separate sampler descriptor heap).
 
 ## See also
 

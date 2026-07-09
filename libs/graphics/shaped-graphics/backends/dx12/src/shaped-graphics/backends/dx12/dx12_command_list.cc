@@ -99,9 +99,10 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
     CC_ASSERT(dp != nullptr, "compute_pipeline is not a dx12 compute_pipeline");
 
-    // The shader-visible heap must be set before any root descriptor table is bound.
-    ID3D12DescriptorHeap* heaps[] = {_ctx._descriptor_heap.heap.Get()};
-    _list->SetDescriptorHeaps(1, heaps);
+    // The shader-visible heaps must be set before any root descriptor table is bound — one CBV/SRV/UAV
+    // heap and one SAMPLER heap (D3D12 allows at most one of each bound at a time).
+    ID3D12DescriptorHeap* heaps[] = {_ctx._descriptor_heap.heap.Get(), _ctx._sampler_heap.heap.Get()};
+    _list->SetDescriptorHeaps(2, heaps);
     _list->SetComputeRootSignature(dp->layout->root_signature.Get());
     _list->SetPipelineState(dp->pipeline_state.Get());
 }
@@ -120,7 +121,10 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
     // Remember the bound group so its views' accesses are declared at dispatch (the point work runs). The
     // forward async-upload wait for each bound buffer is folded in there too, via track_buffer_access.
     _bound_group = dg;
-    _list->SetComputeRootDescriptorTable(0, dg->table_start);
+    if (dg->layout->resource_root_param >= 0)
+        _list->SetComputeRootDescriptorTable(UINT(dg->layout->resource_root_param), dg->table_start);
+    if (dg->layout->sampler_root_param >= 0)
+        _list->SetComputeRootDescriptorTable(UINT(dg->layout->sampler_root_param), dg->sampler_table_start);
 }
 
 void dx12_command_list::compute_dispatch(int x, int y, int z)

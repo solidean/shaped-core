@@ -23,8 +23,16 @@ enum class binding_type
     readwrite_raw_buffer,        ///< rw raw bytes    — UAV byte-addressed
     readonly_texture,            ///< sampled texture — SRV (readonly, shape texture)
     readwrite_texture,           ///< storage texture — UAV (readwrite, shape texture)
-    // Future (with a graphics pipeline / samplers): sampler, acceleration_structure.
+    sampler,                     ///< texture sampler — not a view; bound as a static or dynamic sampler
+    // Future (with a graphics pipeline): acceleration_structure.
 };
+
+/// Whether a binding is a sampler rather than a resource view. Sampler bindings carry no view (no access
+/// class / layout), so they are matched to a `sampler`, not a `raw_view`.
+[[nodiscard]] constexpr bool is_sampler(binding_type t)
+{
+    return t == binding_type::sampler;
+}
 
 /// The access class a bound view must have to satisfy a binding of this type.
 [[nodiscard]] constexpr view_class access_of(binding_type t)
@@ -43,8 +51,10 @@ enum class binding_type
         return view_class::readonly;
     case binding_type::readwrite_texture:
         return view_class::readwrite;
+    case binding_type::sampler:
+        break; // a sampler is not a view — callers gate on is_sampler() first
     }
-    return view_class::uniform; // unreachable for the closed set above
+    return view_class::uniform; // unreachable for the view kinds above
 }
 
 /// The layout a bound view must have to satisfy a binding of this type.
@@ -63,13 +73,17 @@ enum class binding_type
     case binding_type::readonly_texture:
     case binding_type::readwrite_texture:
         return view_shape::texture;
+    case binding_type::sampler:
+        break; // a sampler is not a view — callers gate on is_sampler() first
     }
-    return view_shape::uniform_block; // unreachable for the closed set above
+    return view_shape::uniform_block; // unreachable for the view kinds above
 }
 
 /// Whether a bound view satisfies a binding of this type — its access and layout must match.
 [[nodiscard]] inline bool accepts(binding_type t, raw_view const& v)
 {
+    if (is_sampler(t))
+        return false; // samplers are bound as samplers, never as views
     return v.access == access_of(t) && v.shape == shape_of(t);
 }
 

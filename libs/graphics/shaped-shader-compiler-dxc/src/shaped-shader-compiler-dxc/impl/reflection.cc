@@ -4,12 +4,14 @@ namespace ssc::dxc::impl
 {
 namespace
 {
-/// Maps a DXC resource kind onto the sg binding_type with the matching (view_class, view_shape).
+/// Maps a reflected resource binding onto the sg binding_type with the matching (view_class, view_shape).
 /// nullopt for kinds sg has no vocabulary for yet — the caller turns that into an error naming the
-/// resource, so growing sg::binding_type (sampler/texture/accel) is a deliberate, visible step.
-[[nodiscard]] cc::optional<sg::binding_type> map_binding_type(D3D_SHADER_INPUT_TYPE t)
+/// resource, so growing sg::binding_type is a deliberate, visible step. The `Dimension` distinguishes a
+/// texture from a typed/texel buffer: both a `Texture2D` and a `Buffer<T>` reflect as a TEXTURE / RWTYPED
+/// kind, but the typed-buffer case reports a BUFFER dimension, which sg has no texel-buffer view for yet.
+[[nodiscard]] cc::optional<sg::binding_type> map_binding_type(D3D12_SHADER_INPUT_BIND_DESC const& bd)
 {
-    switch (t)
+    switch (bd.Type)
     {
     case D3D_SIT_CBUFFER:
         return sg::binding_type::uniform_buffer;
@@ -21,6 +23,16 @@ namespace
         return sg::binding_type::readwrite_structured_buffer;
     case D3D_SIT_UAV_RWBYTEADDRESS:
         return sg::binding_type::readwrite_raw_buffer;
+    case D3D_SIT_SAMPLER:
+        return sg::binding_type::sampler;
+    case D3D_SIT_TEXTURE:
+        if (bd.Dimension == D3D_SRV_DIMENSION_BUFFER)
+            return {}; // Buffer<T> — a typed/texel buffer, not a texture
+        return sg::binding_type::readonly_texture;
+    case D3D_SIT_UAV_RWTYPED:
+        if (bd.Dimension == D3D_SRV_DIMENSION_BUFFER)
+            return {}; // RWBuffer<T> — a typed/texel buffer, not a storage texture
+        return sg::binding_type::readwrite_texture;
     default:
         return {};
     }
@@ -51,12 +63,12 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
         if (HRESULT hr = reflection->GetResourceBindingDesc(i, &bd); FAILED(hr))
             return dxc_error(hr, "ID3D12ShaderReflection::GetResourceBindingDesc");
 
-        cc::optional<sg::binding_type> const type = map_binding_type(bd.Type);
+        cc::optional<sg::binding_type> const type = map_binding_type(bd);
         if (!type.has_value())
-            return cc::error(cc::format("shaped-shader-compiler-dxc: resource '{}' has kind D3D_SHADER_INPUT_TYPE={} "
-                                        "which has no sg::binding_type yet (textures/samplers/typed-UAVs/acceleration "
-                                        "structures need sg::binding_type to grow)",
-                                        bd.Name, int(bd.Type)));
+            return cc::error(cc::format("shaped-shader-compiler-dxc: resource '{}' is a binding kind shaped-graphics "
+                                        "does not model yet (texel / typed buffers, append/consume/counter buffers, "
+                                        "and acceleration structures are not supported)",
+                                        bd.Name));
 
         // Faithful (register, space, kind) -> (index, set, type). No remapping; see reflection.hh.
         sg::binding b;

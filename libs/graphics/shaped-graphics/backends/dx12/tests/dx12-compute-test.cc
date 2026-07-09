@@ -56,14 +56,14 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
                                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src, sg::allocation_info{});
     REQUIRE(buf.has_value());
 
-    auto layout = c.create_dx12_binding_layout(shader.bindings, sg::lifetime_scope::persistent);
+    auto layout = c.create_dx12_binding_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
     auto pipeline = c.create_dx12_compute_pipeline(shader, layout.value(), sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
     // Bind the output buffer's read-write structured view to "Output".
     sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
-    auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1),
+    auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1), {},
                                              sg::lifetime_scope::persistent);
     REQUIRE(group.has_value());
 
@@ -108,7 +108,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
     sg::compiled_shader const shader = make_double_shader();
 
     // Layout + pipeline are cached schemas — always persistent, built once.
-    auto layout = c.create_dx12_binding_layout(shader.bindings, sg::lifetime_scope::persistent);
+    auto layout = c.create_dx12_binding_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
     auto pipeline = c.create_dx12_compute_pipeline(shader, layout.value(), sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
@@ -159,7 +159,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
     auto& c = static_cast<dx12::dx12_context&>(*handle);
 
     sg::compiled_shader const shader = make_double_shader();
-    auto layout = c.create_dx12_binding_layout(shader.bindings, sg::lifetime_scope::persistent);
+    auto layout = c.create_dx12_binding_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
 
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
@@ -168,7 +168,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
     for (int i = 0; i < 50; ++i)
     {
         sg::named_view const out{.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()};
-        auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1),
+        auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&out, 1), {},
                                                  sg::lifetime_scope::persistent);
         REQUIRE(group.has_value());          // never exhausts: released ranges are reclaimed
         group.value().reset();               // drop -> schedules the range's deferred free

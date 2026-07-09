@@ -49,6 +49,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/pixel_format.hh
     src/shaped-graphics/raw_texture.hh
     src/shaped-graphics/texture.hh
+    src/shaped-graphics/texture_traits.hh
+    src/shaped-graphics/sampler.hh
     src/shaped-graphics/backend/command_list_slot.hh
     src/shaped-graphics/backend/resource_access.hh
     src/shaped-graphics/backend/resource_access_state.hh
@@ -116,6 +118,7 @@ add_executable(shaped-graphics-test
     tests/texture/texture-view-test.cc
     tests/transfer/bytes_future-test.cc
     tests/binding/binding-test.cc
+    tests/sampler/sampler-test.cc
     tests/barrier/access_state-test.cc
     tests/barrier/subresource-test.cc
     tests/barrier/slot-test.cc
