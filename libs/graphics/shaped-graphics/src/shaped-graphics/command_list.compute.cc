@@ -47,4 +47,9 @@ void command_list_compute_scope::declare_array_texture_access(cc::string_view bi
 {
     _cmd.compute_declare_array_texture_access(binding_name, elements);
 }
+
+void command_list_compute_scope::set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+{
+    _cmd.compute_set_inline_constants(data, offset);
+}
 } // namespace sg

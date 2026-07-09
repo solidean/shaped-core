@@ -68,7 +68,10 @@ compiled_shader.bindings ─▶ binding_group_layout ─▶ binding_group (name 
 ```
 
 A `pipeline_layout` composes an ordered list of `binding_group_layout`s (index = bind slot), so an entire
-group can be rebound at one slot without disturbing the others. `binding_group_layout`, `pipeline_layout`,
+group can be rebound at one slot without disturbing the others. It may also carry an optional
+**inline-constants** block — a single uniform-buffer binding, excluded from the group layouts, written
+directly on the command list via `cmd.compute.set_inline_constants(...)` for fast per-dispatch parameters
+without descriptor allocation (dx12 root constants / vulkan push constants). `binding_group_layout`, `pipeline_layout`,
 and `compute_pipeline` are schemas / PSOs, not lifetime-scoped resources — they are built through the raw
 [`ctx.uncached.create_*`](../../src/shaped-graphics/context.uncached.hh) scope, or (almost always preferred)
 deduplicated and built asynchronously through
@@ -79,7 +82,8 @@ for per-frame scratch recycled when its epoch retires. The `command_list` record
 dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) is lifetime-agnostic.
 
 The **dx12** backend implements the full chain — a `pipeline_layout` becomes the root signature (composed
-from its group layouts' descriptor tables + baked static samplers), a `binding_group` allocates a range in
+from its group layouts' descriptor tables + baked static samplers, plus a trailing 32-bit-constants root
+parameter when the layout declares inline constants), a `binding_group` allocates a range in
 the single shader-visible descriptor heap and translates each `raw_view` into a native CBV/SRV/UAV, and a
 dispatch binds each slot's table and runs. That heap is **split by lifetime**, and the two halves use
 different allocators because their hazard models differ:
@@ -100,9 +104,11 @@ embeds a precompiled DXIL blob).
 
 ## Deferred
 
-Constant-buffer member layouts, root/push constants, a content hash for caching, and input/output
-(vertex / render-target) signatures are all future additions to `compiled_shader`; the binding vocabulary
-still gains an acceleration-structure kind. (The DXC shader compiler reflects buffer / texture / sampler
+Constant-buffer member layouts, a content hash for caching, and input/output (vertex / render-target)
+signatures are all future additions to `compiled_shader`; the binding vocabulary still gains an
+acceleration-structure kind. Inline (root/push) constants exist on the `pipeline_layout` for compute;
+per-member payload validation (a reflected constant-buffer layout) and the graphics / raytracing scopes
+are deferred. (The DXC shader compiler reflects buffer / texture / sampler
 bindings; texel/typed buffers and acceleration structures are the remaining unsupported kinds.)
 
 ## See also

@@ -1,9 +1,13 @@
 #pragma once
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backend/resource_access.hh>
 #include <shaped-graphics/fwd.hh>
+
+#include <type_traits>
 
 namespace sg
 {
@@ -59,6 +63,23 @@ public:
     /// Declares per-element access for a *texture* array / bindless binding — like the buffer form (next
     /// dispatch only), but each element also names the layout it must be in.
     void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
+
+    /// Writes inline constants into the bound pipeline layout's `inline_constants` block (dx12 root
+    /// constants / vulkan push constants) — small per-dispatch data, no descriptor space. A pipeline
+    /// whose layout declares inline_constants must be bound first. `offset` unset => full replace, and
+    /// `data.size()` must equal the declared block_size; a value => partial update at that byte offset.
+    /// Both `data.size()` and `offset` must be multiples of 4.
+    void set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset = {});
+
+    /// POD convenience: bit-copies `value` as the inline-constants payload. `T` must be trivially
+    /// copyable with a size that is a multiple of 4 bytes.
+    template <class T>
+    void set_inline_constants(T const& value, cc::optional<cc::isize> offset = {})
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "inline-constants payload must be trivially copyable");
+        static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
+        set_inline_constants(cc::as_bytes(cc::span<T const>(&value, 1)), offset);
+    }
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_compute_scope(command_list_compute_scope const&) = delete;

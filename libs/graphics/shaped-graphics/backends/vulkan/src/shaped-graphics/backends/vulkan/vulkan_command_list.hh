@@ -69,5 +69,9 @@ protected:
     {
         CC_UNREACHABLE("vulkan compute declare_array_texture_access is not implemented yet");
     }
+    void compute_set_inline_constants(cc::span<cc::byte const>, cc::optional<cc::isize>) override
+    {
+        CC_UNREACHABLE("vulkan compute set_inline_constants is not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan
