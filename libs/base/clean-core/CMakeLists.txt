@@ -179,44 +179,54 @@ endif()
 # Test executable
 add_executable(clean-core-test
     tests/main.cc
+
     tests/benchmarks/string-hash-bench.cc
     tests/benchmarks/hash-benchmark.cc
     tests/benchmarks/allocation-benchmark.cc
-    tests/allocation-test.cc
-    tests/array-test.cc
-    tests/assert-test.cc
-    tests/bit-test.cc
-    tests/conversion-test.cc
-    tests/fixed-array-test.cc
-    tests/function_ref-test.cc
-    tests/hash-test.cc
-    tests/hash-types-test.cc
-    tests/hash128-test.cc
-    tests/invocable-test.cc
-    tests/macros-test.cc
-    tests/mutex-test.cc
-    tests/node_allocation-test.cc
-    tests/optional-test.cc
-    tests/pinned_data-test.cc
-    tests/random-test.cc
-    tests/result-test.cc
-    tests/small_vector-test.cc
-    tests/span-test.cc
-    tests/strided_span-test.cc
-    tests/string-test.cc
-    tests/string_view-test.cc
-    tests/thread-test.cc
-    tests/threaded_actor-test.cc
-    tests/async-test.cc
-    tests/async-pool-test.cc
-    tests/to_debug_string-test.cc
-    tests/format-test.cc
-    tests/print-test.cc
-    tests/unique_function-test.cc
-    tests/unique_ptr-test.cc
-    tests/utility-test.cc
-    tests/vector-test.cc
-    tests/wide_arith-test.cc
+
+    # tests grouped by topic, mirroring src/clean-core/
+    tests/common/assert-test.cc
+    tests/common/hash-test.cc
+    tests/common/hash-types-test.cc
+    tests/common/hash128-test.cc
+    tests/common/invocable-test.cc
+    tests/common/macros-test.cc
+    tests/common/utility-test.cc
+
+    tests/math/bit-test.cc
+    tests/math/random-test.cc
+    tests/math/wide_arith-test.cc
+
+    tests/memory/allocation-test.cc
+    tests/memory/node_allocation-test.cc
+    tests/memory/unique_ptr-test.cc
+
+    tests/container/array-test.cc
+    tests/container/fixed-array-test.cc
+    tests/container/small_vector-test.cc
+    tests/container/span-test.cc
+    tests/container/strided_span-test.cc
+    tests/container/pinned_data-test.cc
+    tests/container/vector-test.cc
+
+    tests/string/conversion-test.cc
+    tests/string/format-test.cc
+    tests/string/print-test.cc
+    tests/string/string-test.cc
+    tests/string/string_view-test.cc
+    tests/string/to_debug_string-test.cc
+
+    tests/function/function_ref-test.cc
+    tests/function/unique_function-test.cc
+
+    tests/error/optional-test.cc
+    tests/error/result-test.cc
+
+    tests/thread/async-test.cc
+    tests/thread/async-pool-test.cc
+    tests/thread/mutex-test.cc
+    tests/thread/thread-test.cc
+    tests/thread/threaded_actor-test.cc
 )
 
 target_link_libraries(clean-core-test
