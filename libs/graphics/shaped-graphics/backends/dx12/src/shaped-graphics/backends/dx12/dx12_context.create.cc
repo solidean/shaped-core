@@ -149,8 +149,13 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a
     // per-epoch-reclaimed transient ring (leading fraction) and a persistent bump region (the rest).
-    CC_RETURN_IF_ERROR(
-        ctx->_descriptor_heap.initialize(*ctx, config.descriptor_heap_capacity, config.descriptor_transient_fraction));
+    CC_RETURN_IF_ERROR(ctx->_descriptor_heap.initialize(*ctx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                                                        config.descriptor_heap_capacity,
+                                                        config.descriptor_transient_fraction));
+
+    // The separate shader-visible SAMPLER heap dynamic samplers are written into (same lifetime split).
+    CC_RETURN_IF_ERROR(ctx->_sampler_heap.initialize(
+        *ctx, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, config.sampler_heap_capacity, config.descriptor_transient_fraction));
 
     return context_handle(cc::move(ctx));
 }

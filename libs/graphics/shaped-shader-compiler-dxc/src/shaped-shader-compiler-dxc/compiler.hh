@@ -45,7 +45,8 @@ public:
 
     /// Compiles fully-preprocessed source into an sg::compiled_shader. `desc.source` must not
     /// contain `#include`s (they are rejected). Error carries DXC diagnostics; a resource kind sg
-    /// has no binding_type for yet (texture/sampler/...) is also reported as an error.
+    /// has no binding_type for yet (texel/typed buffers, acceleration structures, …) is also reported
+    /// as an error.
     [[nodiscard]] cc::result<sg::compiled_shader> compile(shader_description const& desc,
                                                           compile_options const& options = {});
 

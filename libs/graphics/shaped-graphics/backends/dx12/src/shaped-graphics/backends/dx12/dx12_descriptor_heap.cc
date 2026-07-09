@@ -10,22 +10,25 @@
 
 namespace sg::backend::dx12
 {
-cc::result<cc::unit> dx12_descriptor_heap::initialize(dx12_context& ctx, int descriptor_capacity, float transient_fraction)
+cc::result<cc::unit> dx12_descriptor_heap::initialize(dx12_context& ctx,
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE heap_type,
+                                                      int descriptor_capacity,
+                                                      float transient_fraction)
 {
     CC_ASSERT(descriptor_capacity > 0, "descriptor heap capacity must be positive");
     CC_ASSERT(transient_fraction >= 0.0f && transient_fraction < 1.0f, "transient fraction must be in [0, 1)");
 
     D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-    desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    desc.Type = heap_type;
     desc.NumDescriptors = UINT(descriptor_capacity);
     desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if (HRESULT hr = ctx._device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr))
-        return dx12_error(hr, "CreateDescriptorHeap (shader-visible CBV/SRV/UAV) failed");
+        return dx12_error(hr, "CreateDescriptorHeap (shader-visible) failed");
 
     _ctx = &ctx;
     cpu_start = heap->GetCPUDescriptorHandleForHeapStart();
     gpu_start = heap->GetGPUDescriptorHandleForHeapStart();
-    increment = int(ctx._device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+    increment = int(ctx._device->GetDescriptorHandleIncrementSize(heap_type));
     capacity = descriptor_capacity;
     transient_capacity = int(float(descriptor_capacity) * transient_fraction);
 

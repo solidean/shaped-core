@@ -20,6 +20,15 @@ struct dx12_hazard_view
     sg::view_class access;
 };
 
+/// A bound texture paired with the subresource range + access class it is used as — the texture analogue
+/// of dx12_hazard_view, declared for layout-transition barriers at dispatch.
+struct dx12_texture_hazard_view
+{
+    dx12_texture_handle texture;
+    sg::subresource_range range;
+    sg::view_class access;
+};
+
 /// dx12 binding_group: a contiguous range of descriptors in the context's shader-visible heap, one
 /// per layout binding, created from the bound views. `table_start` is the GPU handle the command list
 /// binds as a root descriptor table.
@@ -33,6 +42,7 @@ public:
     [[nodiscard]] static cc::result<dx12_binding_group_handle> create(dx12_context& ctx,
                                                                       dx12_binding_layout_handle layout,
                                                                       cc::span<sg::named_view const> views,
+                                                                      cc::span<sg::named_sampler const> samplers,
                                                                       sg::lifetime_scope scope);
 
     dx12_binding_group() = default;
@@ -44,9 +54,13 @@ public:
     dx12_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
     dx12_binding_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
-    dx12_descriptor_alloc table; // the group's descriptor range (its start feeds table_start; count for freeing)
-    cc::vector<dx12_buffer_handle> referenced; // keeps the bound buffers alive while the group lives
-    cc::vector<dx12_hazard_view> hazard_views; // (buffer + access class) — declared for hazards at dispatch
+    dx12_descriptor_alloc table; // the group's CBV/SRV/UAV range (its start feeds table_start; count for freeing)
+    D3D12_GPU_DESCRIPTOR_HANDLE sampler_table_start{};
+    dx12_descriptor_alloc sampler_table; // the group's SAMPLER range (empty if the layout has no dynamic samplers)
+    cc::vector<dx12_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
+    cc::vector<dx12_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
+    cc::vector<dx12_hazard_view> hazard_views;           // (buffer + access class) — declared for hazards at dispatch
+    cc::vector<dx12_texture_hazard_view> texture_hazard_views; // (texture + range + access) — declared at dispatch
 
     // Transient groups expire when their epoch passes: the ring recycles their descriptor slots, so
     // binding one afterwards is a hard error (checked at bind). Both are inert for a persistent group.

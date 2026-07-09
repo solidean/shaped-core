@@ -58,6 +58,63 @@ TEST("ssc::dxc compile - compute shader -> DXIL + reflection")
     CHECK(shader.compiler.name == cc::string_view("dxc"));
 }
 
+namespace
+{
+// Samples a texture through a sampler and writes a storage texture — exercises the texture-SRV, sampler,
+// and storage-texture (UAV) reflection kinds. SampleLevel (not Sample) so it is valid in compute.
+constexpr char const* sampled_compute_hlsl = R"(
+Texture2D<float4> Tex     : register(t0);
+SamplerState      Samp    : register(s0);
+RWTexture2D<float4> Output : register(u0);
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    Output[tid.xy] = Tex.SampleLevel(Samp, (float2(tid.xy) + 0.5) / 64.0, 0);
+}
+)";
+
+sg::binding const* find_binding(sg::compiled_shader const& s, cc::string_view name)
+{
+    for (auto const& b : s.bindings)
+        if (b.name == name)
+            return &b;
+    return nullptr;
+}
+} // namespace
+
+TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to sg vocabulary")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    ssc::dxc::shader_description desc;
+    desc.stage = sg::shader_stage::compute;
+    desc.entry_point = "main";
+    desc.model = ssc::dxc::shader_model::sm_6_8;
+    desc.source = sampled_compute_hlsl;
+
+    auto result = comp.value().compile(desc);
+    REQUIRE(result.has_value());
+    sg::compiled_shader const& shader = result.value();
+
+    auto const* tex = find_binding(shader, "Tex");
+    REQUIRE(tex != nullptr);
+    CHECK(tex->type == sg::binding_type::readonly_texture); // Texture2D -> sampled texture SRV
+    CHECK(tex->index == 0u);                                // t0
+
+    auto const* samp = find_binding(shader, "Samp");
+    REQUIRE(samp != nullptr);
+    CHECK(samp->type == sg::binding_type::sampler); // SamplerState -> sampler
+    CHECK(sg::is_sampler(samp->type));
+    CHECK(samp->index == 0u); // s0
+
+    auto const* out = find_binding(shader, "Output");
+    REQUIRE(out != nullptr);
+    CHECK(out->type == sg::binding_type::readwrite_texture); // RWTexture2D -> storage texture UAV
+    CHECK(out->index == 0u);                                 // u0
+}
+
 TEST("ssc::dxc compile - a syntax error surfaces a diagnostic")
 {
     auto comp = ssc::dxc::compiler::create();

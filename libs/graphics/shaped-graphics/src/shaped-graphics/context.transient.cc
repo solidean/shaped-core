@@ -123,9 +123,10 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
 }
 
 binding_group_handle context_transient_scope::create_binding_group(binding_layout_handle layout,
-                                                                   cc::span<named_view const> views)
+                                                                   cc::span<named_view const> views,
+                                                                   cc::span<named_sampler const> samplers)
 {
-    auto r = try_create_binding_group(cc::move(layout), views);
+    auto r = try_create_binding_group(cc::move(layout), views, samplers);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -134,8 +135,9 @@ binding_group_handle context_transient_scope::create_binding_group(binding_layou
 }
 
 cc::result<binding_group_handle> context_transient_scope::try_create_binding_group(binding_layout_handle layout,
-                                                                                   cc::span<named_view const> views)
+                                                                                   cc::span<named_view const> views,
+                                                                                   cc::span<named_sampler const> samplers)
 {
-    return _ctx.try_create_binding_group(cc::move(layout), views, lifetime_scope::transient);
+    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 } // namespace sg
