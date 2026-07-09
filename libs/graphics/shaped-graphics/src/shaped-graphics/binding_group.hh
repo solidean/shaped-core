@@ -21,7 +21,7 @@ struct named_view
 struct named_sampler
 {
     cc::string name;
-    sampler sampler;
+    sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
 };
 
 /// A binding_layout instance with concrete resources bound: each named view is matched to a layout
