@@ -7,10 +7,10 @@
 
 namespace sg
 {
-binding_layout_handle context_uncached_scope::create_binding_layout(cc::span<binding const> bindings,
-                                                                    cc::span<named_sampler const> static_samplers)
+binding_group_layout_handle context_uncached_scope::create_binding_group_layout(cc::span<binding const> bindings,
+                                                                                cc::span<named_sampler const> static_samplers)
 {
-    auto r = try_create_binding_layout(bindings, static_samplers);
+    auto r = try_create_binding_group_layout(bindings, static_samplers);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -18,12 +18,28 @@ binding_layout_handle context_uncached_scope::create_binding_layout(cc::span<bin
     throw pipeline_creation_exception("", r.error());
 }
 
-cc::result<binding_layout_handle> context_uncached_scope::try_create_binding_layout(
+cc::result<binding_group_layout_handle> context_uncached_scope::try_create_binding_group_layout(
     cc::span<binding const> bindings,
     cc::span<named_sampler const> static_samplers)
 {
     // Layouts have no transient variant — always persistent.
-    return _ctx.try_create_binding_layout(bindings, static_samplers, lifetime_scope::persistent);
+    return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
+}
+
+pipeline_layout_handle context_uncached_scope::create_pipeline_layout(pipeline_layout_description const& desc)
+{
+    auto r = try_create_pipeline_layout(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw pipeline_creation_exception("", r.error());
+}
+
+cc::result<pipeline_layout_handle> context_uncached_scope::try_create_pipeline_layout(pipeline_layout_description const& desc)
+{
+    // Layouts have no transient variant — always persistent.
+    return _ctx.try_create_pipeline_layout(desc, lifetime_scope::persistent);
 }
 
 compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_pipeline_description const& desc)

@@ -1,15 +1,15 @@
 #include <clean-core/common/assert.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
+#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/compiled_shader.hh>
 
 namespace sg::backend::dx12
 {
 cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Device* device,
-                                                                       dx12_binding_layout_handle layout,
+                                                                       dx12_pipeline_layout_handle layout,
                                                                        sg::compiled_shader const& shader)
 {
-    CC_ASSERT(layout != nullptr, "compute pipeline requires a binding_layout");
+    CC_ASSERT(layout != nullptr, "compute pipeline requires a pipeline_layout");
     CC_ASSERT(shader.stage == sg::shader_stage::compute, "compute pipeline requires a compute shader");
     CC_ASSERT(shader.format == sg::shader_format::dxil, "the dx12 backend requires DXIL bytecode");
     CC_ASSERT(!shader.bytecode.empty(), "compute shader has no bytecode");

@@ -32,7 +32,7 @@ sg::raw_texture_handle    // std::shared_ptr<sg::raw_texture const>  — shared-
 // passed around by reference (command_list&). record once, submit once, not reused.
 sg::async_compiled_shader   // std::shared_ptr<cc::async<compiled_shader>>   — async compile result (try_value() -> compiled_shader_handle)
 sg::async_compute_pipeline  // std::shared_ptr<cc::async<compute_pipeline_handle>> — async PSO build (blocking_get -> compute_pipeline_handle)
-sg::async_binding_layout    // std::shared_ptr<cc::async<binding_layout_handle>>   — for future/graphics use; layout acquire is SYNC today
+// layout acquires (group + pipeline) are SYNC (cheap) — no async_* typedef for them.
 // cc::async<T> can't hold a const T, so const lands at the read side (try_value yields the const *_handle).
 ```
 
@@ -111,7 +111,7 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 sg::exception                    // base; .message() -> cc::string_view. catch this for "any sg failure"
 sg::device_lost_exception        // device lost (sticky); .reason(). from submit/advance/fence waits + throwing creates
 sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_bytes()
-sg::pipeline_creation_exception  // binding_layout / compute_pipeline build failure; .entry_point()
+sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute_pipeline build failure; .entry_point()
 sg::binding_group_exception      // binding_group wiring error (unknown/missing binding, kind mismatch) or descriptor exhaustion
 // only the throwing create_* and submit/advance raise these; the try_create_* surface never throws
 ```
@@ -267,7 +267,7 @@ sg::sampler_filter          // nearest | linear
 sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge | clamp_border | mirror_clamp_edge
 sg::sampler_border_color    // transparent_black | opaque_black | opaque_white   (clamp_border only)
 sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
-// two ways in (see the bind path): STATIC = named_sampler on create_binding_layout (baked into the root sig);
+// two ways in (see the bind path): STATIC = named_sampler on create_binding_group_layout (baked into the pipeline layout's root sig);
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
 // dx12 only; a cube UAV analogue — samplers live in their own descriptor heap + root table.
 ```
@@ -293,23 +293,27 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 // data model only: no compiler yet (construct by hand / future loader)
 ```
 
-## bind path — layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
+## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
 
 ```cpp
-#include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
-sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; backend subclasses; *_handle = shared_ptr<T const>
+#include <shaped-graphics/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
+sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
-sg::named_sampler           // { cc::string name; sampler sampler }  — static (on layout) or dynamic (on group)
-sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
+sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
+sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
+sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)
+sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle, max_binding_groups> groups; cc::vector<bound_sampler> static_samplers }  — groups ordered; index = bind slot
+sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout }
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
-ctx.uncached.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)
-ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (blocking build; throws sg::pipeline_creation_exception; + try_ twin)
-// binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient:
-ctx.persistent.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs layout; + try_ twin)
-ctx.transient.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layout/pipeline come from ctx.uncached (+ try_ twin)
+ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
+ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
+ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
+// binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
+ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
+ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
 // recording (on a command_list, via the cmd.compute scope):
-cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
-cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
+cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
+cmd.compute.bind_group(set, group)       // void — bind a binding_group at slot `set` (indexes the pipeline layout's groups)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
@@ -325,17 +329,19 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
 #include <shaped-graphics/context.cached.hh>   // (via context.hh) — the ctx.cached scope
 #include <shaped-graphics/pipeline_cache.hh>   // the cache itself
 // Every context has a built-in pipeline_cache (default in-memory tiers installed). "acquire" = get-or-create.
-ctx.cached.acquire_binding_layout(span<binding const>, static_samplers={}) // -> binding_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
-ctx.cached.acquire_compute_pipeline({.shader=, .layout=})       // -> sg::async_compute_pipeline  async PSO build; identical (shader,layout) => one node
+ctx.cached.acquire_binding_group_layout(span<binding const>, static_samplers={}) // -> binding_group_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
+ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_layout_handle  SYNC; keyed on the ordered group-layout identities => one shared handle
+ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
-// key = hash128 over the logical args (bindings + static samplers; shader bytecode+entry+signature + layout handle identity).
-// For full pipeline dedup, acquire the layout THROUGH the cache first (so identical layouts share one handle).
+// keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: ordered group-layout
+//   identities; compute pipeline: shader bytecode+entry+signature + pipeline-layout handle identity).
+// For full dedup, acquire the group layouts THROUGH the cache, then the pipeline layout, then the pipeline.
 // Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
 // pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
-pc.acquire_binding_layout(ctx, bindings);  pc.acquire_compute_pipeline(ctx, desc);
-pc.add_default_in_memory_providers(max=4096);  pc.add_binding_layout_provider(p);  pc.apply_bookkeeping();
+pc.acquire_binding_group_layout(ctx, bindings);  pc.acquire_pipeline_layout(ctx, {.groups={gl}});  pc.acquire_compute_pipeline(ctx, desc);
+pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provider(p);  pc.apply_bookkeeping();
 // TODO: graphics / raytracing pipeline caching once those pipeline types land in sg.
 ```
 

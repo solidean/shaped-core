@@ -205,7 +205,7 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
         .count = 1,
         .type = sg::binding_type::readwrite_structured_buffer,
     };
-    auto layout = ctx->uncached.create_binding_layout(cc::span<sg::binding const>(&b, 1));
+    auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 
     // The buffer carries both accesses so we can build a matching AND a mismatched view.

@@ -1,14 +1,17 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh>
+#include <shaped-graphics/binding_group_layout.hh>
 #include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/pipeline_layout.hh>
 #include <shaped-graphics/raw_buffer.hh>
 
 #include <memory>
 #include <type_traits>
 
 // The bind-path handles are shared_ptr to immutable backend objects.
-static_assert(std::is_same_v<sg::binding_layout_handle, std::shared_ptr<sg::binding_layout const>>);
+static_assert(std::is_same_v<sg::binding_group_layout_handle, std::shared_ptr<sg::binding_group_layout const>>);
+static_assert(std::is_same_v<sg::pipeline_layout_handle, std::shared_ptr<sg::pipeline_layout const>>);
 static_assert(std::is_same_v<sg::compute_pipeline_handle, std::shared_ptr<sg::compute_pipeline const>>);
 static_assert(std::is_same_v<sg::binding_group_handle, std::shared_ptr<sg::binding_group const>>);
 

@@ -122,7 +122,7 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
     return _ctx.try_create_raw_texture(desc, alloc);
 }
 
-binding_group_handle context_transient_scope::create_binding_group(binding_layout_handle layout,
+binding_group_handle context_transient_scope::create_binding_group(binding_group_layout_handle layout,
                                                                    cc::span<named_view const> views,
                                                                    cc::span<named_sampler const> samplers)
 {
@@ -134,7 +134,7 @@ binding_group_handle context_transient_scope::create_binding_group(binding_layou
     throw binding_group_exception(r.error());
 }
 
-cc::result<binding_group_handle> context_transient_scope::try_create_binding_group(binding_layout_handle layout,
+cc::result<binding_group_handle> context_transient_scope::try_create_binding_group(binding_group_layout_handle layout,
                                                                                    cc::span<named_view const> views,
                                                                                    cc::span<named_sampler const> samplers)
 {

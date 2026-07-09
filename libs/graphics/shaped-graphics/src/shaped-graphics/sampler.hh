@@ -6,7 +6,7 @@
 /// Backend-neutral texture **sampler** description: how a shader reads a texture (filtering, addressing,
 /// LOD, optional depth comparison). A sampler is a small immutable state value, not a GPU resource that
 /// owns memory. It reaches a shader two ways (see libs/graphics/shaped-graphics/docs/concepts/bindings.md):
-///   - **static** — baked into a binding_layout's root signature (fixed for every group of that layout);
+///   - **static** — declared on a binding_group_layout and baked into the pipeline layout's root signature;
 ///   - **dynamic** — supplied per binding_group (a `named_sampler`), written into a sampler descriptor heap.
 
 namespace sg

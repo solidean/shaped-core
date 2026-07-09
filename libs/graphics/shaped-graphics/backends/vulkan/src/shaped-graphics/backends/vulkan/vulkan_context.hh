@@ -104,19 +104,25 @@ public:
         return cc::error("vulkan memory_heap creation is not implemented yet");
     }
 
-    // Bind path (binding_layout / compute_pipeline / binding_group) — not implemented yet.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(cc::span<sg::binding const>,
-                                                                                  cc::span<sg::named_sampler const>,
-                                                                                  sg::lifetime_scope) override
+    // Bind path (binding_group_layout / pipeline_layout / compute_pipeline / binding_group) — not implemented yet.
+    [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
+        cc::span<sg::binding const>,
+        cc::span<sg::named_sampler const>,
+        sg::lifetime_scope) override
     {
-        return cc::error("vulkan binding_layout creation is not implemented yet");
+        return cc::error("vulkan binding_group_layout creation is not implemented yet");
+    }
+    [[nodiscard]] cc::result<sg::pipeline_layout_handle> try_create_pipeline_layout(sg::pipeline_layout_description const&,
+                                                                                    sg::lifetime_scope) override
+    {
+        return cc::error("vulkan pipeline_layout creation is not implemented yet");
     }
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(sg::compute_pipeline_description const&,
                                                                                       sg::lifetime_scope) override
     {
         return cc::error("vulkan compute_pipeline creation is not implemented yet");
     }
-    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle,
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle,
                                                                                 cc::span<sg::named_view const>,
                                                                                 cc::span<sg::named_sampler const>,
                                                                                 sg::lifetime_scope) override

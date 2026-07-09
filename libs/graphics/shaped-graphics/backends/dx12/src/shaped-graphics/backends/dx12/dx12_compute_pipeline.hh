@@ -8,18 +8,19 @@
 
 namespace sg::backend::dx12
 {
-/// dx12 compute pipeline: an ID3D12PipelineState compiled from a compute shader against a layout's
-/// root signature. Holds the layout to keep the root signature alive and reachable at bind time.
+/// dx12 compute pipeline: an ID3D12PipelineState compiled from a compute shader against a pipeline
+/// layout's root signature. Holds the pipeline layout to keep the root signature alive and reachable at
+/// bind time.
 class dx12_compute_pipeline final : public sg::compute_pipeline
 {
 public:
     explicit dx12_compute_pipeline(sg::compute_dimensions workgroup_size) : sg::compute_pipeline(workgroup_size) {}
 
     [[nodiscard]] static cc::result<dx12_compute_pipeline_handle> create(ID3D12Device* device,
-                                                                         dx12_binding_layout_handle layout,
+                                                                         dx12_pipeline_layout_handle layout,
                                                                          sg::compiled_shader const& shader);
 
-    dx12_binding_layout_handle layout;
+    dx12_pipeline_layout_handle layout;
     ComPtr<ID3D12PipelineState> pipeline_state;
 };
 } // namespace sg::backend::dx12

@@ -6,7 +6,7 @@
 #include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/binding_layout.hh>
+#include <shaped-graphics/binding_group_layout.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list.compute.hh>
 #include <shaped-graphics/command_list.copy.hh>
@@ -25,6 +25,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory_heap.hh>
 #include <shaped-graphics/pipeline_cache.hh>
+#include <shaped-graphics/pipeline_layout.hh>
 #include <shaped-graphics/pixel_format.hh>
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/raw_texture.hh>
