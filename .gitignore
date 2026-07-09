@@ -1,9 +1,15 @@
+# NOTE: git does NOT support inline (trailing) comments in .gitignore. Only a line whose FIRST
+# non-space character is `#` is a comment; a `# ...` placed after a pattern becomes part of the
+# pattern (along with the spaces before it), so e.g. `foo/   # bar` matches nothing. Keep every
+# comment on its own line and every pattern clean.
+
 # ─── Build output ───────────────────────────────────────────
 bin/
 build/
 build_vs/
 build-vs/
-target/            # rust
+# rust
+target/
 
 # ─── Compiled artifacts ─────────────────────────────────────
 # Object files
@@ -36,9 +42,12 @@ target/            # rust
 *.profraw
 
 # ─── CMake ──────────────────────────────────────────────────
-CMakeLists.txt.user        # qtcreator
-CMakeUserPresets.json      # user-local presets
-compile_commands.json      # emitted by generator, consumed by clangd
+# qtcreator
+CMakeLists.txt.user
+# user-local presets
+CMakeUserPresets.json
+# emitted by generator, consumed by clangd
+compile_commands.json
 
 # ─── Editors & IDEs ─────────────────────────────────────────
 .vscode
@@ -46,7 +55,8 @@ compile_commands.json      # emitted by generator, consumed by clangd
 *.code-workspace
 .clj-kondo
 .lsp
-.cache/                    # used by clangd
+# used by clangd
+.cache/
 
 # ─── Languages ──────────────────────────────────────────────
 # rust
@@ -56,11 +66,16 @@ __pycache__/
 *.pyc
 
 # ─── Vendored dependencies ──────────────────────────────────
-.clone/                    # transient shallow clone made by extern/*/vendor-*.py
+# transient shallow clone made by extern/*/vendor-*.py
+.clone/
 
 # ─── Misc ───────────────────────────────────────────────────
-imgui.ini                  # workdir spam
-*.DS_Store                 # macos
+# workdir spam
+imgui.ini
+# macos
+*.DS_Store
+# local scratch: handover notes, throwaway experiments
+.tmp/
 
 # ─── Explicitly committed binary tools ─────────────────────
 # Checked in on purpose; re-included despite the build/binary rules above.

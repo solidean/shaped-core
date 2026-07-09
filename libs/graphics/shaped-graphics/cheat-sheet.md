@@ -30,6 +30,10 @@ sg::raw_buffer_handle     // std::shared_ptr<sg::raw_buffer const>   — shared-
 sg::raw_texture_handle    // std::shared_ptr<sg::raw_texture const>  — shared-immutable resource
 // command_list has NO handle: it's a move-only temporary — std::unique_ptr<sg::command_list>,
 // passed around by reference (command_list&). record once, submit once, not reused.
+sg::async_compiled_shader   // std::shared_ptr<cc::async<compiled_shader>>   — async compile result (try_value() -> compiled_shader_handle)
+sg::async_compute_pipeline  // std::shared_ptr<cc::async<compute_pipeline_handle>> — async PSO build (blocking_get -> compute_pipeline_handle)
+sg::async_binding_layout    // std::shared_ptr<cc::async<binding_layout_handle>>   — for future/graphics use; layout acquire is SYNC today
+// cc::async<T> can't hold a const T, so const lands at the read side (try_value yields the const *_handle).
 ```
 
 ## bytes_future / bytes_waiter — download results
@@ -297,11 +301,12 @@ sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; bac
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
 sg::named_sampler           // { cc::string name; sampler sampler }  — static (on layout) or dynamic (on group)
 sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
-// creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
-ctx.persistent.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)
-ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle (throws sg::pipeline_creation_exception; + try_ twin)
+// layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
+ctx.uncached.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)
+ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (blocking build; throws sg::pipeline_creation_exception; + try_ twin)
+// binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient:
 ctx.persistent.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs layout; + try_ twin)
-ctx.transient.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layout/pipeline stay persistent (+ try_ twin)
+ctx.transient.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layout/pipeline come from ctx.uncached (+ try_ twin)
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`
@@ -312,6 +317,26 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
                                                          // (scalar bindings are inferred; arrays can't be — declare them)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
 // declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
+```
+
+## cached layouts + pipelines — the built-in cache  (ctx.cached / pipeline_cache)
+
+```cpp
+#include <shaped-graphics/context.cached.hh>   // (via context.hh) — the ctx.cached scope
+#include <shaped-graphics/pipeline_cache.hh>   // the cache itself
+// Every context has a built-in pipeline_cache (default in-memory tiers installed). "acquire" = get-or-create.
+ctx.cached.acquire_binding_layout(span<binding const>, static_samplers={}) // -> binding_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
+ctx.cached.acquire_compute_pipeline({.shader=, .layout=})       // -> sg::async_compute_pipeline  async PSO build; identical (shader,layout) => one node
+                                                               //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
+// key = hash128 over the logical args (bindings + static samplers; shader bytecode+entry+signature + layout handle identity).
+// For full pipeline dedup, acquire the layout THROUGH the cache first (so identical layouts share one handle).
+// Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
+// pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
+pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
+pc.acquire_binding_layout(ctx, bindings);  pc.acquire_compute_pipeline(ctx, desc);
+pc.add_default_in_memory_providers(max=4096);  pc.add_binding_layout_provider(p);  pc.apply_bookkeeping();
+// TODO: graphics / raytracing pipeline caching once those pipeline types land in sg.
 ```
 
 ## memory placement — heaps & alloc-info  (stub)

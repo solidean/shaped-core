@@ -148,6 +148,15 @@ struct map;
 template <class T>
 struct set;
 
+template <class K, class V>
+struct key_value_provider;
+template <class K, class V, class Hash>
+struct in_memory_key_value_provider;
+template <class K, class V>
+struct key_value_cache;
+
+class byte_stream_builder;
+
 template <class T>
 struct ringbuffer;
 

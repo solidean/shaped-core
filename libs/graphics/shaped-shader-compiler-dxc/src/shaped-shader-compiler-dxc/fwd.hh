@@ -6,6 +6,7 @@
 namespace ssc::dxc
 {
 class compiler;
+class shader_cache;
 
 struct shader_description;
 struct compile_options;

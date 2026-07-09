@@ -7,9 +7,11 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/context.cached.hh>
 #include <shaped-graphics/context.download.hh>
 #include <shaped-graphics/context.persistent.hh>
 #include <shaped-graphics/context.transient.hh>
+#include <shaped-graphics/context.uncached.hh>
 #include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
@@ -60,6 +62,16 @@ public:
     /// the copy queue, off the frame path (the context-level mirror of the inline cmd.download); also sizes
     /// the shared readback ring the inline downloads stage through.
     context_download_scope download;
+
+    /// Raw, uncached factory for binding layouts and compute pipelines (schemas / PSOs, not lifetime-scoped
+    /// resources): `ctx.uncached.create_binding_layout(...)` / `create_compute_pipeline(...)`. Prefer
+    /// `ctx.cached` — most code wants the deduplicated + async version.
+    context_uncached_scope uncached;
+
+    /// Built-in pipeline/layout cache facade: `ctx.cached.acquire_binding_layout(...)` and
+    /// `ctx.cached.acquire_compute_pipeline(...)`. Get-or-create over the context's pipeline_cache
+    /// (default in-memory tiers installed); reach the cache via `ctx.cached.cache()` to add tiers.
+    context_cached_scope cached;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once. Infallible in
     /// the ordinary sense — a correct program on a healthy device always gets a list. Throws
@@ -144,6 +156,8 @@ protected:
     friend class context_transient_scope;
     friend class context_upload_scope;
     friend class context_download_scope;
+    friend class context_uncached_scope;
+    friend class context_cached_scope;
 
     /// The fallible core behind the public create_command_list(): backends open a recording list here.
     /// Failure is device loss (mark_device_lost is called) or an internal bug; the public wrapper turns
@@ -217,8 +231,10 @@ protected:
     /// heap-placed allocation_info picked by ctx.transient's per-epoch bump allocator.
     [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes) = 0;
 
-    // The bind-path creates carry an explicit lifetime_scope (persistent vs transient); the
-    // ctx.persistent / ctx.transient facades append it. (Buffers carry it inside allocation_info instead.)
+    // The bind-path creates carry an explicit lifetime_scope. binding_group is a real per-scope descriptor
+    // allocation (ctx.persistent / ctx.transient append the scope); binding_layout / compute_pipeline are
+    // schemas / PSOs with no transient variant — ctx.uncached always passes persistent. (Buffers carry the
+    // scope inside allocation_info instead.)
 
     /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings. Any sampler
     /// binding named in `static_samplers` is baked into the layout; other sampler bindings are dynamic.
@@ -247,5 +263,12 @@ protected:
     // Sticky device-loss state (see is_device_lost). Set once via mark_device_lost, never cleared.
     bool _device_lost = false;
     cc::string _device_loss_reason;
+
+    // Built-in pipeline/layout cache reached via ctx.cached. Heap-held so this central header stays
+    // light (the cache pulls in std::unordered_map); the out-of-line dtor sees the complete type.
+    std::unique_ptr<pipeline_cache> _pipeline_cache;
+
+    /// The built-in pipeline cache (used by context_cached_scope).
+    [[nodiscard]] pipeline_cache& pipeline_cache_ref();
 };
 } // namespace sg

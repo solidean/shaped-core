@@ -3,6 +3,9 @@
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/pipeline_cache.hh>
+
+#include <memory>
 
 namespace sg
 {
@@ -29,9 +32,24 @@ void context::mark_device_lost(cc::string reason)
 }
 
 context::context(backend_kind backend, thread_model threading)
-  : persistent(*this), transient(*this), upload(*this), download(*this), _backend(backend), _thread_model(threading)
+  : persistent(*this),
+    transient(*this),
+    upload(*this),
+    download(*this),
+    uncached(*this),
+    cached(*this),
+    _backend(backend),
+    _thread_model(threading),
+    _pipeline_cache(std::make_unique<pipeline_cache>())
 {
     // The scope members only store a back-reference; they don't touch any not-yet-constructed member.
+    // Give the built-in cache default in-memory tiers so ctx.cached memoizes out of the box.
+    _pipeline_cache->add_default_in_memory_providers();
+}
+
+pipeline_cache& context::pipeline_cache_ref()
+{
+    return *_pipeline_cache;
 }
 
 context::~context()
