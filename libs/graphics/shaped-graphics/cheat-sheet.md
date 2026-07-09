@@ -217,9 +217,22 @@ ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedica
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
 sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
+// Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count<0=all}.
+// sampled (SRV) — needs readonly_texture usage. Natural dimension:
+tex.as_readonly_view({.mips={.start=1}})       // -> texture_readonly_view  (whole; params name only this shape's axes)
+//   read_only_params fields: .mips always; .slices (arrays); .cubes (cube arrays)
+tex.as_readonly_2d_view({.slice=3})            // array/cube -> Texture2D: one slice/.face/{.cube,.face}
+tex.as_readonly_1d_view({.slice=3})            // 1D array -> Texture1D
+tex.as_readonly_cube_view({.cube=2})           // cube array -> one TextureCube
+tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
+// storage (UAV) — needs readwrite_texture; single mip; not on MS (a cube UAV is a 2D array):
+tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
+//   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
+tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
-// NOTE: creation only — texture views (shader binding), barriers/layout transitions, and copies are future work.
+// bind a texture view in a compute dispatch → it auto-transitions to shader_read (SRV) / storage (UAV).
+// NOTE: SRV/UAV + samplers — render_target/depth_stencil views + texture upload/download/copy remain future work.
 ```
 
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
@@ -232,13 +245,31 @@ sg::uniform_view<T>          // uniform block of T   (cbuffer/UBO)          — 
 sg::readonly_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
 sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
-sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage)
-sg::view_shape               // uniform_block | structured | raw (layout; derived from T)
+sg::texture_readonly_view    // sampled texture (SRV) — view_class::readonly,  shape texture
+sg::texture_readwrite_view   // storage texture (UAV) — view_class::readwrite, shape texture
+// each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view().
+sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage / texture_usage)
+sg::view_shape               // uniform_block | structured | raw | texture   (layout)
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
-v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/size/element_count/stride }
-// backends switch on (access, shape) to build the native descriptor  (name raw_view is TBD)
-// buffer views only today; texture/texel views (dimension-typed) still deferred — the resource
-// (sg::raw_texture) and sg::pixel_format now exist, but binding a texture to a shader is future work
+v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, offset/size/... | format+range }
+// backends switch on (access, shape) to build the native descriptor (SRV/UAV/CBV/texture SRV/UAV)
+// deferred: render_target/depth_stencil views and texel buffers (typed linear buffers). samplers: see sampler.hh
+```
+
+## samplers — how a shader reads a texture  (see docs/concepts/bindings.md)
+
+```cpp
+#include <shaped-graphics/sampler.hh>
+sg::sampler                 // { min/mag/mip_filter; address_u/v/w; mip_lod_bias; max_anisotropy;
+                            //   min/max_lod; cc::optional<compare_op> compare; sampler_border_color }  — value type, ==
+                            //   defaults = trilinear, repeat, no anisotropy, no comparison (max_lod = sampler::lod_max)
+sg::sampler_filter          // nearest | linear
+sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge | clamp_border | mirror_clamp_edge
+sg::sampler_border_color    // transparent_black | opaque_black | opaque_white   (clamp_border only)
+sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
+// two ways in (see the bind path): STATIC = named_sampler on create_binding_layout (baked into the root sig);
+//                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
+// dx12 only; a cube UAV analogue — samplers live in their own descriptor heap + root table.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -246,11 +277,12 @@ v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer, offset/si
 ```cpp
 #include <shaped-graphics/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
-                            //   backend-agnostic reflection kind (replaces D3D_SHADER_INPUT_TYPE); +sampler/texture/accel later
+                            //   | read{only,write}_texture | sampler   (backend-agnostic; replaces D3D_SHADER_INPUT_TYPE; +accel later)
 sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
                             //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
+sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
 
 #include <shaped-graphics/compiled_shader.hh>
 sg::shader_stage            // vertex | fragment | compute (+ more later)
@@ -267,12 +299,13 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 #include <shaped-graphics/binding_layout.hh>   // + compute_pipeline.hh / binding_group.hh
 sg::binding_layout / sg::compute_pipeline / sg::binding_group   // abstract; backend subclasses; *_handle = shared_ptr<T const>
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
+sg::named_sampler           // { cc::string name; sampler sampler }  — static (on layout) or dynamic (on group)
 sg::compute_pipeline_description  // { compiled_shader const& shader; binding_layout_handle layout }
 // creation (on ctx.persistent -> persistent lifetime_scope; the context virtuals take the scope explicitly):
-ctx.persistent.create_binding_layout(span<binding const>)                 // -> binding_layout_handle   (the set schema; throws sg::pipeline_creation_exception; + try_ twin)
+ctx.persistent.create_binding_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_layout_handle (statics baked into the root sig; + try_ twin)
 ctx.persistent.create_compute_pipeline({.shader=, .layout=})              // -> compute_pipeline_handle (throws sg::pipeline_creation_exception; + try_ twin)
-ctx.persistent.create_binding_group(layout, span<named_view const>)       // -> binding_group_handle    (validated vs layout; throws sg::binding_group_exception; + try_ twin)
-ctx.transient.create_binding_group(layout, span<named_view const>)        // -> binding_group_handle    per-epoch (ring-allocated); layout/pipeline stay persistent (+ try_ twin)
+ctx.persistent.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs layout; + try_ twin)
+ctx.transient.create_binding_group(layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layout/pipeline stay persistent (+ try_ twin)
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size)
 cmd.compute.bind_group(set, group)       // void — bind a binding_group to descriptor set `set`

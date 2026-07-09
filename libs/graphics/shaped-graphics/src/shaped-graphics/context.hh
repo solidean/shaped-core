@@ -227,18 +227,23 @@ protected:
     // The bind-path creates carry an explicit lifetime_scope (persistent vs transient); the
     // ctx.persistent / ctx.transient facades append it. (Buffers carry it inside allocation_info instead.)
 
-    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings.
-    [[nodiscard]] virtual cc::result<binding_layout_handle> try_create_binding_layout(cc::span<binding const> bindings,
-                                                                                      lifetime_scope scope)
+    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings. Any sampler
+    /// binding named in `static_samplers` is baked into the layout; other sampler bindings are dynamic.
+    [[nodiscard]] virtual cc::result<binding_layout_handle> try_create_binding_layout(
+        cc::span<binding const> bindings,
+        cc::span<named_sampler const> static_samplers,
+        lifetime_scope scope)
         = 0;
 
     /// Builds a compute_pipeline from a description (compute shader + layout).
     [[nodiscard]] virtual cc::result<compute_pipeline_handle>
     try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
 
-    /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
+    /// Instantiates `layout` with the given name→view bindings (validated against the layout) and dynamic
+    /// `samplers` (one per non-static sampler binding).
     [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
                                                                                     cc::span<named_view const> views,
+                                                                                    cc::span<named_sampler const> samplers,
                                                                                     lifetime_scope scope)
         = 0;
 

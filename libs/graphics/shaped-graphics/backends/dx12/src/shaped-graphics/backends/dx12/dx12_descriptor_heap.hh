@@ -61,10 +61,14 @@ struct dx12_descriptor_alloc
 /// binds it as a root descriptor table.
 struct dx12_descriptor_heap
 {
-    /// Initializes the heap with `capacity` descriptors; the leading `transient_fraction` share (0..1)
-    /// backs the transient ring, the rest the persistent free list. `ctx` is used to retire in-flight
-    /// epochs when the transient ring is full. Body in dx12_descriptor_heap.cc.
-    [[nodiscard]] cc::result<cc::unit> initialize(dx12_context& ctx, int capacity, float transient_fraction);
+    /// Initializes a shader-visible heap of `heap_type` (CBV/SRV/UAV or SAMPLER) with `capacity`
+    /// descriptors; the leading `transient_fraction` share (0..1) backs the transient ring, the rest the
+    /// persistent free list. `ctx` is used to retire in-flight epochs when the transient ring is full.
+    /// Body in dx12_descriptor_heap.cc.
+    [[nodiscard]] cc::result<cc::unit> initialize(dx12_context& ctx,
+                                                  D3D12_DESCRIPTOR_HEAP_TYPE heap_type,
+                                                  int capacity,
+                                                  float transient_fraction);
 
     /// Allocates `count` contiguous PERSISTENT descriptors from the free list. Free the returned
     /// reservation with free_persistent when the group is released. Returns an EMPTY reservation

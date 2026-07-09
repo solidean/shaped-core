@@ -123,6 +123,11 @@ resources pays one barrier call, not one per binding; and a resource bound *more
 (e.g. two views of one texture) merges its declares into a single barrier carrying the **union** of the
 accesses, rather than emitting a redundant barrier per binding.
 
+When those bindings need *different* layouts — a texture bound as both a sampled (`shader_readonly`/SRV) and
+a storage (`shader_readwrite`/UAV) view — `combine_layouts` picks one that serves both. No specialized D3D12
+layout serves both an SRV and a UAV, so it falls back to `general` (COMMON) and warns once (sampling in
+COMMON is slower). A genuinely incompatible pair (e.g. copy-dest + sampled in one op) asserts.
+
 For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always
 `general` (D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`), so revert emits nothing and
 cross-list ordering rides on that decay — no trailing barriers.

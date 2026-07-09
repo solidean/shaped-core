@@ -32,6 +32,44 @@ struct dx12_subresource_barrier
     };
 }
 
+/// How two required layouts for one subresource-in-one-op combined: cleanly, into a slower fallback, or not
+/// at all (a hazard).
+enum class layout_combine
+{
+    ok,       ///< a single layout serves both (or they were equal) — no cost
+    degraded, ///< no specialized layout serves both, so COMMON (`general`) is used — correct but slower
+    conflict, ///< the two accesses can't coexist in one op (e.g. copy-dest + sampled) — caller error
+};
+
+struct combined_layout
+{
+    sg::texture_layout layout;
+    layout_combine result;
+};
+
+/// Combine the two layouts a subresource is required to be in within a single operation (a texture bound as
+/// more than one view). D3D12-specific policy: the only mismatch a compute binding group can legitimately
+/// produce is a texture bound as both a sampled (`shader_readonly`/SRV) and a storage
+/// (`shader_readwrite`/UAV) view — no specialized layout serves both an SRV and a UAV, so it falls back to
+/// COMMON (`general`) and reports `degraded` (sampling in COMMON is slower). `general` already serves any
+/// access, so combining with it is free. Anything else (a copy/render-target/depth layout mixed with a
+/// different one) is a real hazard and reports `conflict`.
+[[nodiscard]] inline combined_layout combine_layouts(sg::texture_layout a, sg::texture_layout b)
+{
+    if (a == b)
+        return {a, layout_combine::ok};
+
+    auto const is_shader = [](sg::texture_layout l)
+    { return l == sg::texture_layout::shader_readonly || l == sg::texture_layout::shader_readwrite; };
+    if (is_shader(a) && is_shader(b))
+        return {sg::texture_layout::general, layout_combine::degraded};
+
+    if (a == sg::texture_layout::general || b == sg::texture_layout::general)
+        return {sg::texture_layout::general, layout_combine::ok};
+
+    return {sg::texture_layout::general, layout_combine::conflict};
+}
+
 /// Per-texture, per-command-list access tracking — the dx12 realization of the covering-partition + slot
 /// model. Pure logic (no D3D12 objects) so it is unit-testable without a device; dx12_texture holds one
 /// under a mutex, the command list drives declare/finalize/discard and emits the returned barriers.
@@ -51,10 +89,9 @@ public:
     /// bound several times to one op declares several times; `flush` then merges them per box. Thread-safe
     /// via the owning dx12_texture's mutex.
     ///
-    /// If a box is declared twice for one op with two *different* target layouts, they must combine to a
-    /// layout that satisfies both — for D3D12 that is COMMON (`general`), with a sampling-perf penalty worth
-    /// a warning. That layout combining lands with the texture-views branch (where a binding group can bind
-    /// one texture as several views); until then the conflicting case is caught below.
+    /// If a box is already declared for this op with a *different* layout (the texture is bound as more than
+    /// one view), the two are combined via `combine_layouts`: they may fall back to COMMON (`general`) with a
+    /// one-time perf warning, and a genuine conflict (e.g. copy-dest + sampled) asserts.
     void declare(sg::command_list_slot slot,
                  sg::subresource_range range,
                  sg::pipeline_stage_flags stages,
@@ -62,14 +99,30 @@ public:
                  sg::texture_layout layout)
     {
         auto& s = slot_for(slot);
-        s.partition.for_each_box_in(range,
-                                    [&](sg::subresource_range const&, sg::resource_access_state& state)
-                                    {
-                                        CC_ASSERT(!state.has_pending_layout_change() || state.curr_layout == layout,
-                                                  "a texture subresource was bound with two different layouts in "
-                                                  "one operation (layout combining is not implemented yet)");
-                                        state.declare(stages, access, layout);
-                                    });
+        bool warned = false;
+        s.partition.for_each_box_in(
+            range,
+            [&](sg::subresource_range const&, sg::resource_access_state& state)
+            {
+                sg::texture_layout target = layout;
+                // Already declared for this op with a different layout? One layout must serve both accesses.
+                bool const touched = state.has_pending_declares() || state.has_pending_layout_change();
+                if (touched && state.curr_layout != layout)
+                {
+                    combined_layout const c = combine_layouts(state.curr_layout, layout);
+                    CC_ASSERT(c.result != layout_combine::conflict, "a texture subresource is bound with conflicting "
+                                                                    "layouts in one operation");
+                    if (c.result == layout_combine::degraded && !warned)
+                    {
+                        cc::eprintln("[sg] a texture is bound as both a sampled and a storage view in one "
+                                     "operation — using the COMMON layout, which is slower to sample. Prefer "
+                                     "a single view class.");
+                        warned = true;
+                    }
+                    target = c.layout;
+                }
+                state.declare(stages, access, target);
+            });
     }
 
     /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <shaped-graphics/backend/subresource.hh> // subresource_range (texture view sub-selection)
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/pixel_format.hh>
 
 #include <type_traits>
 
@@ -30,19 +32,39 @@ concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(siz
 enum class view_class
 {
     uniform,   ///< uniform block — constant buffer / UBO (read-only)
-    readonly,  ///< read-only storage — SRV / read SSBO
-    readwrite, ///< read-write storage — UAV / read-write SSBO
-    // Future (with textures / samplers): render_target, depth_stencil, sampler, acceleration_structure.
+    readonly,  ///< read-only storage — SRV / read SSBO / sampled texture
+    readwrite, ///< read-write storage — UAV / read-write SSBO / storage texture
+    // Future (with a graphics pipeline / samplers): render_target, depth_stencil, sampler, acceleration_structure.
 };
 
 /// How a view's bytes are laid out. `raw` is byte-addressed (element type `byte`); `structured` is an
-/// array strided by the element type; `uniform_block` is a single struct block.
+/// array strided by the element type; `uniform_block` is a single struct block; `texture` is a texel grid
+/// (dimension / array / cube / samples come from the bound raw_texture's description).
 enum class view_shape
 {
     uniform_block,
     structured,
     raw,
-    // Future (with textures / formats): texel, texture_1d, texture_2d, texture_2d_array, texture_3d, ...
+    texture,
+    // Future (with formats): texel (a typed buffer view).
+};
+
+/// The shader-facing dimensionality of a texture view — how the bound texels are declared in the shader
+/// (HLSL `Texture2D` / `Texture2DArray` / `TextureCube` / …; Vulkan `VkImageViewType`; D3D `SRV/UAV_DIMENSION`).
+/// Distinct from the texture's own `texture_dimension`: it is a *reinterpretation* the view chooses, so a
+/// single slice of a 2D array is `tex_2d`, a cube face is `tex_2d`, one cube of a cube array is `cube`.
+/// Storage (UAV) views only use the non-cube, non-multisampled members (a cube UAV is a 2D array).
+enum class texture_view_dimension : u8
+{
+    tex_1d,
+    tex_1d_array,
+    tex_2d,
+    tex_2d_array,
+    tex_2d_ms,       ///< multisampled 2D (sampled-only; `Load`-based)
+    tex_2d_ms_array, ///< multisampled 2D array (also how a multisampled cube is sampled — no `TextureCubeMS`)
+    tex_3d,
+    cube,
+    cube_array,
 };
 
 /// The erased form every typed view converts into — the value a backend reads (via `(access, shape)`)
@@ -51,11 +73,21 @@ struct raw_view
 {
     view_class access;
     view_shape shape;
+
+    // Buffer views (shape uniform_block / structured / raw). `buffer` is null for a texture view.
     raw_buffer_handle buffer;  ///< the viewed buffer
     isize offset_in_bytes = 0; ///< start of the view within the buffer
     isize size_in_bytes = 0;   ///< [uniform_block, raw] visible byte size
     isize element_count = 0;   ///< [structured] number of elements
     isize stride_in_bytes = 0; ///< [structured] element stride (= sizeof(T))
+
+    // Texture views (shape texture). `texture` is null for a buffer view.
+    raw_texture_handle texture;                                             ///< the viewed texture
+    texture_view_dimension view_dimension = texture_view_dimension::tex_2d; ///< shader-facing SRV/UAV dimension
+    pixel_format format = pixel_format::undefined; ///< the format the descriptor reads/writes as
+    subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
+    cc::start_end depth_slice_range
+        = {.start = 0, .end = 0}; ///< [3D storage view] depth (W/Z) slice window; empty otherwise
 };
 
 /// A uniform block of `T` — a constant buffer / UBO binding (read-only). {buffer, offset, sizeof(T)}.
@@ -133,6 +165,62 @@ struct readwrite_view
             .element_count = is_raw ? 0 : element_count,
             .stride_in_bytes = is_raw ? 0 : isize(sizeof(T)),
         };
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
+/// A read-only (sampled / SRV) texture view over a subresource range. Unlike buffer views it is not
+/// templated on an element type — the texel format is a runtime `pixel_format`, and dimension / array /
+/// cube / samples come from the bound texture. Built via `texture<Traits>::as_readonly_view()`.
+struct texture_readonly_view
+{
+    static constexpr view_class access = view_class::readonly;
+
+    raw_texture_handle texture;
+    texture_view_dimension dimension = texture_view_dimension::tex_2d;
+    pixel_format format = pixel_format::undefined;
+    subresource_range range;
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_view{.access = access,
+                        .shape = view_shape::texture,
+                        .texture = texture,
+                        .view_dimension = dimension,
+                        .format = format,
+                        .range = range};
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
+/// A read-write (storage / UAV) texture view over a subresource range (a single mip level). Built via
+/// `texture<Traits>::as_readwrite_view()` and friends.
+struct texture_readwrite_view
+{
+    static constexpr view_class access = view_class::readwrite;
+
+    raw_texture_handle texture;
+    texture_view_dimension dimension = texture_view_dimension::tex_2d;
+    pixel_format format = pixel_format::undefined;
+    subresource_range range;
+
+    /// For a 3D storage view (`dimension == tex_3d`): the half-open `[start, end)` window of depth slices
+    /// (a 3D texture's W / Z axis — D3D12's `FirstWSlice`/`WSize`) the view exposes, in slices of the
+    /// selected mip. These are *not* subresources (a whole 3D mip is one), so they live here, not in
+    /// `range`. Empty `{0, 0}` for every non-3D view, which ignore it.
+    cc::start_end depth_slice_range = {.start = 0, .end = 0};
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_view{.access = access,
+                        .shape = view_shape::texture,
+                        .texture = texture,
+                        .view_dimension = dimension,
+                        .format = format,
+                        .range = range,
+                        .depth_slice_range = depth_slice_range};
     }
 
     operator raw_view() const { return to_raw(); }

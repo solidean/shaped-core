@@ -18,11 +18,13 @@ The resource splits in two:
   minimal (getters + the finalizer/expiry lifetime hooks it shares with `raw_buffer`). All shapes flow
   through the one type; creation returns a `raw_texture_handle`.
 - [`texture<Traits>`](../../src/shaped-graphics/texture.hh) is a thin, *typed* value wrapper that
-  privately holds a `raw_texture_handle`. `Traits` is a single structural NTTP (`texture_traits`:
-  dimension + array + cube + multisampled). The shape-specific getters are gated with a trailing
-  `requires`, mirroring typed-geometry's dimension-gating — so `depth()` exists only on a 3D texture,
-  `array_layers()` only on an array, and misuse is a **compile error**, not a runtime check. The
-  typedefs (`texture_2d`, `texture_cube_array`, …) are the ergonomic names.
+  privately holds a `raw_texture_handle`. `Traits` is a single `texture_traits<Dim, Array, Cube,
+  Multisampled>` *type* — it carries the shape as static members, a static `matches(desc)` that runs the
+  runtime shape check against a `texture_description`, and the per-view parameter bags the factories take
+  (`read_only_params`, `read_write_2d_params`, …; see [views](views.md)). The shape-specific getters are
+  gated with a trailing `requires`, mirroring typed-geometry's dimension-gating — so `depth()` exists only
+  on a 3D texture, `array_layers()` only on an array, and misuse is a **compile error**, not a runtime
+  check. The typedefs (`texture_2d`, `texture_cube_array`, …) are the ergonomic names.
 
 Why both: the raw type keeps the backend interface and the create path monomorphic (one virtual, one
 resource class), while the wrapper gives call sites type safety without the backend ever knowing about
