@@ -60,12 +60,16 @@ public:
 
     // bind path
 public:
-    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings. Throws
-    /// sg::pipeline_creation_exception on failure.
-    [[nodiscard]] binding_layout_handle create_binding_layout(cc::span<binding const> bindings);
+    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings. Sampler
+    /// bindings named in `static_samplers` are baked into the layout; the rest are dynamic (supplied per
+    /// binding_group). Throws sg::pipeline_creation_exception on failure.
+    [[nodiscard]] binding_layout_handle create_binding_layout(cc::span<binding const> bindings,
+                                                              cc::span<named_sampler const> static_samplers = {});
 
     /// Fallible core of create_binding_layout — returns an error instead of throwing.
-    [[nodiscard]] cc::result<binding_layout_handle> try_create_binding_layout(cc::span<binding const> bindings);
+    [[nodiscard]] cc::result<binding_layout_handle> try_create_binding_layout(cc::span<binding const> bindings,
+                                                                              cc::span<named_sampler const> static_samplers
+                                                                              = {});
 
     /// Builds a compute_pipeline from a description (compute shader + layout). Throws
     /// sg::pipeline_creation_exception on failure.
@@ -78,11 +82,13 @@ public:
     /// Throws sg::binding_group_exception on a wiring error (unknown/missing binding, kind mismatch) or
     /// descriptor-heap exhaustion.
     [[nodiscard]] binding_group_handle create_binding_group(binding_layout_handle layout,
-                                                            cc::span<named_view const> views);
+                                                            cc::span<named_view const> views,
+                                                            cc::span<named_sampler const> samplers = {});
 
     /// Fallible core of create_binding_group — returns an error instead of throwing.
     [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
-                                                                            cc::span<named_view const> views);
+                                                                            cc::span<named_view const> views,
+                                                                            cc::span<named_sampler const> samplers = {});
 
     // Pinned to its owning context: neither copyable nor movable.
     context_persistent_scope(context_persistent_scope const&) = delete;

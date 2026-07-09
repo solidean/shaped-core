@@ -37,6 +37,8 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     _download_inline.on_epoch_advance(last);
     // Same again for the transient descriptor ring: snapshot `last`'s window, freed once `last` retires.
     _descriptor_heap.on_epoch_advance(last);
+    _sampler_heap.on_epoch_advance(last); // and the transient sampler ring
+
 
     // Auto-expire `last`'s transient buffers: their placed storage in ctx.transient's heap is reused by
     // the new epoch, so mark them expired now, which releases each resource into the deferred-deletion
@@ -128,6 +130,7 @@ void dx12_context::process_completed_epochs()
     _upload_inline.on_epochs_completed(sg::epoch(completed));
     // Reclaim transient descriptor ring slots the same way — the epoch fence proves the slots are idle.
     _descriptor_heap.on_epochs_completed(sg::epoch(completed));
+    _sampler_heap.on_epochs_completed(sg::epoch(completed));
 
     // Under the lock: drain finished epochs, then partition every expiring resource (from those epochs and
     // from the copy-deferred hold-back) by whether the copy queue has also passed its `copy_wait`. Ready

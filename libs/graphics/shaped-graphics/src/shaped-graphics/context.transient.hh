@@ -52,11 +52,13 @@ public:
     /// against the layout), whose descriptors are recycled when this epoch retires. Throws
     /// sg::binding_group_exception on a wiring error or descriptor-heap exhaustion.
     [[nodiscard]] binding_group_handle create_binding_group(binding_layout_handle layout,
-                                                            cc::span<named_view const> views);
+                                                            cc::span<named_view const> views,
+                                                            cc::span<named_sampler const> samplers = {});
 
     /// Fallible core of create_binding_group — returns an error instead of throwing.
     [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
-                                                                            cc::span<named_view const> views);
+                                                                            cc::span<named_view const> views,
+                                                                            cc::span<named_sampler const> samplers = {});
 
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources
     /// (buffers today, textures in future). May be called any time, repeatedly: it records a *pending*

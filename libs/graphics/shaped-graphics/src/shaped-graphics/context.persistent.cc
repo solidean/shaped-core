@@ -68,9 +68,10 @@ cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(
 
 // bind path
 
-binding_layout_handle context_persistent_scope::create_binding_layout(cc::span<binding const> bindings)
+binding_layout_handle context_persistent_scope::create_binding_layout(cc::span<binding const> bindings,
+                                                                      cc::span<named_sampler const> static_samplers)
 {
-    auto r = try_create_binding_layout(bindings);
+    auto r = try_create_binding_layout(bindings, static_samplers);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -78,9 +79,11 @@ binding_layout_handle context_persistent_scope::create_binding_layout(cc::span<b
     throw pipeline_creation_exception("", r.error());
 }
 
-cc::result<binding_layout_handle> context_persistent_scope::try_create_binding_layout(cc::span<binding const> bindings)
+cc::result<binding_layout_handle> context_persistent_scope::try_create_binding_layout(
+    cc::span<binding const> bindings,
+    cc::span<named_sampler const> static_samplers)
 {
-    return _ctx.try_create_binding_layout(bindings, lifetime_scope::persistent);
+    return _ctx.try_create_binding_layout(bindings, static_samplers, lifetime_scope::persistent);
 }
 
 compute_pipeline_handle context_persistent_scope::create_compute_pipeline(compute_pipeline_description const& desc)
@@ -100,9 +103,10 @@ cc::result<compute_pipeline_handle> context_persistent_scope::try_create_compute
 }
 
 binding_group_handle context_persistent_scope::create_binding_group(binding_layout_handle layout,
-                                                                    cc::span<named_view const> views)
+                                                                    cc::span<named_view const> views,
+                                                                    cc::span<named_sampler const> samplers)
 {
-    auto r = try_create_binding_group(cc::move(layout), views);
+    auto r = try_create_binding_group(cc::move(layout), views, samplers);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -111,8 +115,9 @@ binding_group_handle context_persistent_scope::create_binding_group(binding_layo
 }
 
 cc::result<binding_group_handle> context_persistent_scope::try_create_binding_group(binding_layout_handle layout,
-                                                                                    cc::span<named_view const> views)
+                                                                                    cc::span<named_view const> views,
+                                                                                    cc::span<named_sampler const> samplers)
 {
-    return _ctx.try_create_binding_group(cc::move(layout), views, lifetime_scope::persistent);
+    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 } // namespace sg

@@ -61,6 +61,13 @@ enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
 struct raw_view;
 
+// Texture samplers (see sampler.hh) — value types, no handle.
+enum class sampler_filter;
+enum class sampler_address_mode;
+enum class sampler_border_color;
+enum class compare_op;
+struct sampler_description;
+
 // Compiled shaders + reflected bindings (see compiled_shader.hh / binding.hh) — value types.
 enum class binding_type;
 enum class shader_stage;
@@ -76,7 +83,8 @@ class binding_layout;
 class compute_pipeline;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
-struct named_view; // {name, raw_view} — input to create_binding_group
+struct named_view;    // {name, raw_view} — input to create_binding_group
+struct named_sampler; // {name, sampler_description} — static sampler (layout) / dynamic sampler (group)
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See

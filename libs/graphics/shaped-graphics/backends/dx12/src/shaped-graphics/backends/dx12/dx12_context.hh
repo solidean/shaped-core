@@ -55,6 +55,10 @@ struct dx12_config
     /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the
     /// rest is the persistent bump region.
     float descriptor_transient_fraction = 0.25f;
+
+    /// Total descriptors in the shader-visible SAMPLER heap dynamic samplers are written into. D3D12 caps
+    /// a shader-visible sampler heap at 2048; split into transient/persistent by descriptor_transient_fraction.
+    int sampler_heap_capacity = 512;
 };
 
 /// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
@@ -95,13 +99,16 @@ public:
 
     // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
     // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
-    [[nodiscard]] cc::result<dx12_binding_layout_handle> create_dx12_binding_layout(cc::span<sg::binding const> bindings,
-                                                                                    sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_binding_layout_handle> create_dx12_binding_layout(
+        cc::span<sg::binding const> bindings,
+        cc::span<sg::named_sampler const> static_samplers,
+        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(sg::compiled_shader const& shader,
                                                                                         dx12_binding_layout_handle layout,
                                                                                         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_layout_handle layout,
                                                                                   cc::span<sg::named_view const> views,
+                                                                                  cc::span<sg::named_sampler const> samplers,
                                                                                   sg::lifetime_scope scope);
 
     /// Stages a refcount-zero GPU resource for deferred deletion, attributed to the epoch it dies in
@@ -141,13 +148,16 @@ public:
 
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
     // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(cc::span<sg::binding const> bindings,
-                                                                                  sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(
+        cc::span<sg::binding const> bindings,
+        cc::span<sg::named_sampler const> static_samplers,
+        sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
         sg::compute_pipeline_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle layout,
                                                                                 cc::span<sg::named_view const> views,
+                                                                                cc::span<sg::named_sampler const> samplers,
                                                                                 sg::lifetime_scope scope) override;
 
     // Device-loss detection (see is_device_lost). Records the sticky loss reason and returns true if the
@@ -290,6 +300,10 @@ public:
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.
     dx12_descriptor_heap _descriptor_heap;
+
+    // Shader-visible SAMPLER heap dynamic samplers are written into (a separate heap — D3D12 binds one of
+    // each type). Same transient/persistent split as _descriptor_heap. Initialized in create_dx12_context.
+    dx12_descriptor_heap _sampler_heap;
 };
 } // namespace sg::backend::dx12
 

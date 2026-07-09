@@ -20,8 +20,8 @@ HLSL / GLSL / Slang / MSL / WGSL:
 
 - **`binding_type`** — the kind of resource a slot expects (`uniform_buffer`,
   `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`,
-  `readwrite_raw_buffer`; sampler / texture / acceleration-structure follow with those resource
-  families). The backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
+  `readwrite_raw_buffer`, `readonly_texture`, `readwrite_texture`, `sampler`; acceleration-structure
+  follows). The backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
 - **`(set, index)` + `count`** — the address, following SPIR-V (set/binding), WGSL (`@group`/`@binding`),
   and Metal argument buffers. A D3D12 backend derives its `(register-type, register, space)` at layout
   build (register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`, space = `set`).
@@ -31,11 +31,26 @@ HLSL / GLSL / Slang / MSL / WGSL:
 ## Bindings and views speak the same vocabulary
 
 A `binding` describes what the shader *expects*; a [`raw_view`](../../src/shaped-graphics/views.hh)
-describes what is *bound*. For buffer kinds they line up exactly: `access_of(binding_type)` and
+describes what is *bound*. For buffer and texture kinds they line up exactly: `access_of(binding_type)` and
 `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have, and
 `accepts(binding_type, raw_view)` is the check. That equivalence is what lets a binding validate a
-bound view without a backend — and it is why `binding_type`'s buffer kinds mirror the view
+bound view without a backend — and it is why `binding_type`'s view kinds mirror the view
 `(access, shape)` combinations one-to-one.
+
+## Samplers: not views
+
+A `sampler` binding (`is_sampler(binding_type)`) has no view — a sampler carries no memory and no
+`(access, shape)`, so `accepts` rejects any view for it. It is matched instead to a
+[`sampler_description`](../../src/shaped-graphics/sampler.hh) — an immutable filtering/addressing/LOD
+state — via a `named_sampler`. There are two ways in, and *which one* is a layout-time decision:
+
+- **static** — a `named_sampler` passed to `create_binding_layout` is baked into the layout's native
+  root signature (D3D12 `D3D12_STATIC_SAMPLER_DESC`); it is fixed for every group and consumes no heap
+  slot. A sampler binding named in the layout's `static_samplers` must not be supplied per group.
+- **dynamic** — a sampler binding *not* named static is a table entry; each `binding_group` supplies its
+  `named_sampler`, written into a separate sampler descriptor heap. D3D12 keeps samplers in their own
+  heap and their own root descriptor table (one of each type bound at a time), so a group with dynamic
+  samplers binds two tables at dispatch.
 
 ## Where this is headed
 
@@ -76,7 +91,8 @@ precompiled DXIL blob).
 
 Constant-buffer member layouts, root/push constants, a content hash for caching, and input/output
 (vertex / render-target) signatures are all future additions to `compiled_shader`; the binding vocabulary
-gains sampler / texture / acceleration-structure kinds alongside those view families.
+still gains an acceleration-structure kind. (The DXC shader compiler reflects buffer / texture / sampler
+bindings; texel/typed buffers and acceleration structures are the remaining unsupported kinds.)
 
 ## See also
 

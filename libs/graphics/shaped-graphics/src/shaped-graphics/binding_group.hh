@@ -2,6 +2,7 @@
 
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/sampler.hh>
 #include <shaped-graphics/views.hh>
 
 namespace sg
@@ -12,6 +13,15 @@ struct named_view
 {
     cc::string name;
     raw_view view;
+};
+
+/// A binding name paired with a sampler state. As a `create_binding_layout` argument it declares a
+/// *static* sampler (baked into the root signature); as a `create_binding_group` argument it supplies a
+/// *dynamic* sampler for a sampler binding of that name. Same value type either way.
+struct named_sampler
+{
+    cc::string name;
+    sampler_description sampler;
 };
 
 /// A binding_layout instance with concrete resources bound: each named view is matched to a layout
