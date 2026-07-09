@@ -81,14 +81,22 @@ struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
 
-// Bind path: schema (binding_layout) -> pipeline (compute_pipeline) -> instance (binding_group). See
-// binding_layout.hh / compute_pipeline.hh / binding_group.hh.
-class binding_layout;
+// Bind path: group schema (binding_group_layout) -> pipeline interface (pipeline_layout) -> pipeline
+// (compute_pipeline) -> instance (binding_group). See binding_group_layout.hh / pipeline_layout.hh /
+// compute_pipeline.hh / binding_group.hh.
+class binding_group_layout;
+class pipeline_layout;
+struct bound_sampler;               // {binding, sampler} — a register-bound static sampler on a pipeline_layout
+struct pipeline_layout_description; // {groups, static_samplers} — input to create_pipeline_layout
 class compute_pipeline;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
 struct named_view;    // {name, raw_view} — input to create_binding_group
-struct named_sampler; // {name, sampler} — static sampler (layout) / dynamic sampler (group)
+struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
+
+/// Hard cap on the number of group slots a pipeline_layout can hold (dx12 root-parameter / vulkan set
+/// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `set`.
+inline constexpr int max_binding_groups = 4;
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
@@ -116,7 +124,8 @@ using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable
 using raw_texture_handle = std::shared_ptr<raw_texture const>;         // shared-immutable: shape is fixed at creation
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
-using binding_layout_handle = std::shared_ptr<binding_layout const>;   // immutable schema
+using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema
+using pipeline_layout_handle = std::shared_ptr<pipeline_layout const>;           // immutable ordered group layouts
 using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
 
@@ -127,6 +136,4 @@ using binding_group_handle = std::shared_ptr<binding_group const>; // immutable 
 using async_compiled_shader = std::shared_ptr<cc::async<compiled_shader>>; // try_value() -> compiled_shader_handle
 using async_compute_pipeline
     = std::shared_ptr<cc::async<compute_pipeline_handle>>; // blocking_get -> compute_pipeline_handle
-using async_binding_layout
-    = std::shared_ptr<cc::async<binding_layout_handle>>; // defined for future/graphics use — layout acquire is SYNC today
 } // namespace sg

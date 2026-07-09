@@ -4,11 +4,12 @@
 > decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
 > [bindings](bindings.md).
 
-Building a `binding_layout` or a `compute_pipeline` is expensive and repetitive: the same shader is
-compiled again and again, structurally identical layouts and PSOs are rebuilt, and a driver-level PSO
-build takes multiple milliseconds. sg answers this with a **content-addressed, get-or-create cache** for
-the pipeline schemas, and the shader compiler with a matching cache for compiled shaders. The verb is
-**`acquire`** = "get it if it exists, otherwise create and store it".
+Building a `binding_group_layout`, a `pipeline_layout`, or a `compute_pipeline` is expensive and
+repetitive: the same shader is compiled again and again, structurally identical layouts and PSOs are
+rebuilt, and a driver-level PSO build takes multiple milliseconds. sg answers this with a
+**content-addressed, get-or-create cache** for the pipeline schemas, and the shader compiler with a
+matching cache for compiled shaders. The verb is **`acquire`** = "get it if it exists, otherwise create
+and store it".
 
 ## Three layers: raw, cached, and the async result
 
@@ -19,14 +20,14 @@ ssc::dxc::shader_cache  ── get-or-create over the DXC compiler (a separate l
 ```
 
 - [`ctx.uncached`](../../src/shaped-graphics/context.uncached.hh) is the **raw layer**: it builds a fresh
-  `binding_layout` / `compute_pipeline` every call. It sits apart from `ctx.persistent` / `ctx.transient`
-  on purpose — a layout or pipeline is a *schema / PSO*, not a lifetime-scoped GPU resource, so it does
-  not belong on a resource-lifetime scope. Uncached is a **deliberately poor default**: most code should
-  not rebuild these per frame.
+  `binding_group_layout` / `pipeline_layout` / `compute_pipeline` every call. It sits apart from
+  `ctx.persistent` / `ctx.transient` on purpose — a layout or pipeline is a *schema / PSO*, not a
+  lifetime-scoped GPU resource, so it does not belong on a resource-lifetime scope. Uncached is a
+  **deliberately poor default**: most code should not rebuild these per frame.
 - [`ctx.cached`](../../src/shaped-graphics/context.cached.hh) is the **front door**. Every context owns a
   [`pipeline_cache`](../../src/shaped-graphics/pipeline_cache.hh) (with default in-memory tiers installed),
-  reached here. `acquire_binding_layout` returns a shared handle; `acquire_compute_pipeline` returns an
-  **async** handle whose build runs off-thread.
+  reached here. `acquire_binding_group_layout` and `acquire_pipeline_layout` return shared handles;
+  `acquire_compute_pipeline` returns an **async** handle whose build runs off-thread.
 - The DXC [`shader_cache`](../../../shaped-shader-compiler-dxc/src/shaped-shader-compiler-dxc/shader_cache.hh)
   lives in the compiler library (not sg — sg has no compiler), and caches `compile()` the same way: same
   request → same async compiled shader, never recompiled.
@@ -44,12 +45,16 @@ a length-prefixing byte blob builder — then hashed (XXH3-128). Length prefixes
 the same data distinct, and sub-structs are hashed field by field (never a raw `memcpy` of a struct,
 whose padding bytes would be nondeterministic).
 
-- **binding layout** = the reflected `binding`s **plus the static samplers**. Static samplers are baked
-  into the root signature, so a different static sampler is a different layout — it must be part of the key.
+- **binding group layout** = the reflected `binding`s **plus the static samplers**. Static samplers are
+  baked into the root signature, so a different static sampler is a different group layout — it must be part
+  of the key.
+- **pipeline layout** = the **ordered group-layout handle identities**. Pointer identity is enough because
+  group layouts are shared/persistent — so acquire the group layouts *through the cache* first for full dedup.
 - **compute pipeline** = the shader's content (bytecode + entry point + compiler signature) combined with
-  the **layout handle identity**. Pointer identity is enough because layouts are shared/persistent — which
-  is exactly why you should acquire the layout *through the cache* first: two structurally identical
-  layouts then collapse to one handle, so the pipelines built on them also dedup.
+  the **pipeline-layout handle identity** (which transitively covers its group layouts). Pointer identity is
+  enough because layouts are shared/persistent — which is exactly why you should acquire the pipeline layout
+  *through the cache* first: two structurally identical layouts then collapse to one handle, so the pipelines
+  built on them also dedup.
 - **compiled shader** = source + entry point + stage + model + every compile option.
 
 ## Async: the build runs off the frame path
@@ -87,14 +92,16 @@ second tier. Reach the cache via `ctx.cached.cache()` to install extra tiers or 
 ## Flow
 
 ```
-shader source ─▶ shader_cache.compile ─▶ async_compiled_shader ─┐
-                                                                 ▼  (blocking_get / try_value)
-bindings + static samplers ─▶ ctx.cached.acquire_binding_layout ─▶ binding_layout_handle ─┐
-                                                                                           ▼
+shader source ─▶ shader_cache.compile ─▶ async_compiled_shader ─────────────────────────────────┐
+                                                                                                  ▼  (blocking_get / try_value)
+bindings + static samplers ─▶ ctx.cached.acquire_binding_group_layout ─▶ binding_group_layout_handle ─┐
+                                                                                                  ▼   │
+                              ctx.cached.acquire_pipeline_layout({groups}) ─▶ pipeline_layout_handle ─┤
+                                                                                                  ▼
                               ctx.cached.acquire_compute_pipeline({shader, layout}) ─▶ async_compute_pipeline
-                                                                                           │
-                                                                          (blocking_get)   ▼
-                                                                          compute_pipeline_handle ─▶ cmd.compute.bind_pipeline
+                                                                                                  │
+                                                                                 (blocking_get)   ▼
+                                                                                 compute_pipeline_handle ─▶ cmd.compute.bind_pipeline
 ```
 
 Every arrow that names a cache is a get-or-create: identical inputs reuse the stored entry — and an

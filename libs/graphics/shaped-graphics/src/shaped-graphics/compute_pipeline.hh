@@ -6,17 +6,17 @@
 namespace sg
 {
 /// Everything needed to build a compute_pipeline: the compiled compute `shader` and the
-/// `binding_layout` it is compiled against. A struct (rather than loose arguments) so it stays
+/// `pipeline_layout` it is compiled against. A struct (rather than loose arguments) so it stays
 /// consistent with the graphics-pipeline descriptions to come, and can grow a cached-pipeline field
 /// for PSO caching.
 struct compute_pipeline_description
 {
     compiled_shader const& shader;
-    binding_layout_handle layout;
+    pipeline_layout_handle layout;
     // TODO: cached_pipeline — a previously-built pipeline / cache blob to seed the backend PSO cache.
 };
 
-/// A ready-to-run compute pipeline: a compute shader compiled against a binding_layout. Bound to a
+/// A ready-to-run compute pipeline: a compute shader compiled against a pipeline_layout. Bound to a
 /// command list and dispatched. Held via compute_pipeline_handle.
 ///
 /// Abstract: a backend subclasses it and owns the native object (dx12 pipeline state + root signature,

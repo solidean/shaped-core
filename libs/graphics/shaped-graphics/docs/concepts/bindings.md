@@ -44,10 +44,13 @@ A `sampler` binding (`is_sampler(binding_type)`) has no view — a sampler carri
 [`sampler`](../../src/shaped-graphics/sampler.hh) — an immutable filtering/addressing/LOD
 state — via a `named_sampler`. There are two ways in, and *which one* is a layout-time decision:
 
-- **static** — a `named_sampler` passed to `create_binding_layout` is baked into the layout itself; it is
-  fixed for every group and costs no per-group descriptor. A sampler binding named in the layout's
-  `static_samplers` must not be supplied per group. (dx12: a `D3D12_STATIC_SAMPLER_DESC` in the root
-  signature.)
+- **static** — fixed for every group and costs no per-group descriptor. Two ways to declare one, and you
+  can use either or both: a **name-matched** `named_sampler` passed to `create_binding_group_layout`
+  (matched to a sampler binding by name, then excluded from the dynamic group), or a **register-bound**
+  `bound_sampler` attached to the `pipeline_layout` directly (its `binding` carries the register/space, so
+  it needs no matching group binding — e.g. a shared sampler a pipeline needs on top of its groups). A
+  sampler binding declared static this way must not be supplied per group. (dx12: both become
+  `D3D12_STATIC_SAMPLER_DESC`s that the pipeline layout bakes into the root signature.)
 - **dynamic** — a sampler binding *not* named static is supplied per group: each `binding_group` provides
   its `named_sampler`, so the sampler state can vary group to group. (dx12: samplers occupy their own
   descriptor heap and root descriptor table, so a group with dynamic samplers binds a second heap and
@@ -59,23 +62,27 @@ Bindings are the input to the rest of the descriptor system, which consumes them
 bound to them) to reach the GPU:
 
 ```
-compiled_shader.bindings ─▶ binding_layout ─▶ binding_group (name → raw_view, validated) ─▶ command_list.bind + dispatch
-   (reflection)              (the schema)       (the first raw_view consumer; backend → native descriptor)
+compiled_shader.bindings ─▶ binding_group_layout ─▶ binding_group (name → raw_view, validated) ─▶ command_list.bind + dispatch
+   (reflection)              (one group's schema)     (the first raw_view consumer; backend → native descriptor)
+                                     └─▶ pipeline_layout (ordered group layouts) ─▶ compute_pipeline
 ```
 
-`binding_layout` and `compute_pipeline` are schemas / PSOs, not lifetime-scoped resources — they are
-built through the raw [`ctx.uncached.create_*`](../../src/shaped-graphics/context.uncached.hh) scope, or
-(almost always preferred) deduplicated and built asynchronously through
+A `pipeline_layout` composes an ordered list of `binding_group_layout`s (index = bind slot), so an entire
+group can be rebound at one slot without disturbing the others. `binding_group_layout`, `pipeline_layout`,
+and `compute_pipeline` are schemas / PSOs, not lifetime-scoped resources — they are built through the raw
+[`ctx.uncached.create_*`](../../src/shaped-graphics/context.uncached.hh) scope, or (almost always preferred)
+deduplicated and built asynchronously through
 [`ctx.cached.acquire_*`](../../src/shaped-graphics/context.cached.hh). See [caches](caches.md).
 A `binding_group`, being a per-instance set of bound resources, is genuinely lifetime-scoped:
 `ctx.persistent.create_binding_group` for one that lives until released, `ctx.transient.create_binding_group`
 for per-frame scratch recycled when its epoch retires. The `command_list` recording that binds and
 dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) is lifetime-agnostic.
 
-The **dx12** backend implements the full chain — a `binding_layout` becomes a root signature, a
-`binding_group` allocates a range in the single shader-visible descriptor heap and translates each
-`raw_view` into a native CBV/SRV/UAV, and a dispatch binds the table and runs. That heap is **split by
-lifetime**, and the two halves use different allocators because their hazard models differ:
+The **dx12** backend implements the full chain — a `pipeline_layout` becomes the root signature (composed
+from its group layouts' descriptor tables + baked static samplers), a `binding_group` allocates a range in
+the single shader-visible descriptor heap and translates each `raw_view` into a native CBV/SRV/UAV, and a
+dispatch binds each slot's table and runs. That heap is **split by lifetime**, and the two halves use
+different allocators because their hazard models differ:
 
 - a leading **transient ring** reclaimed per epoch. Descriptors are **written by the CPU** when a group
   is created and read by the GPU during that epoch, so a slot can't be reused until the epoch that wrote
@@ -87,9 +94,9 @@ lifetime**, and the two halves use different allocators because their hazard mod
   the group is released, deferred (via an epoch finalizer, like buffer deletion) until its last-using
   epoch retires — so long-lived groups don't leak the heap.
 
-The **vulkan** backend stubs the chain (`CC_UNREACHABLE`) until its own compute milestone. Compilation is
-still external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test embeds a
-precompiled DXIL blob).
+The **vulkan** backend stubs the chain (each create returns a `cc::error`) until its own compute milestone.
+Compilation is still external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test
+embeds a precompiled DXIL blob).
 
 ## Deferred
 

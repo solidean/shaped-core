@@ -1,13 +1,14 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
 // The whole chain, end to end: HLSL through the DXC wrapper (which now reflects texture + sampler
-// bindings), a binding_layout built straight from that reflection, a real texture + a dynamic sampler
+// bindings), a binding_group_layout + pipeline_layout built straight from that reflection, a real texture + a dynamic sampler
 // bound to a compute dispatch on WARP, and the sampled result read back and verified.
 //
 // Two passes, because texture upload isn't implemented yet: pass 1 writes a known pattern into the texture
@@ -103,19 +104,27 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
     REQUIRE(buf_r.has_value());
 
     // Pipelines + layouts, built straight from the reflected bindings.
-    auto fill_layout = c.create_dx12_binding_layout(fill.bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(fill_layout.has_value());
-    auto fill_pipe = c.create_dx12_compute_pipeline(fill, fill_layout.value(), sg::lifetime_scope::persistent);
+    auto fill_group_layout = c.create_dx12_binding_group_layout(fill.bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(fill_group_layout.has_value());
+    auto fill_pipeline_layout = c.create_dx12_pipeline_layout(
+        sg::pipeline_layout_description{.groups = {fill_group_layout.value()}}, sg::lifetime_scope::persistent);
+    REQUIRE(fill_pipeline_layout.has_value());
+    auto fill_pipe = c.create_dx12_compute_pipeline(fill, fill_pipeline_layout.value(), sg::lifetime_scope::persistent);
     REQUIRE(fill_pipe.has_value());
 
-    auto sample_layout = c.create_dx12_binding_layout(sample.bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(sample_layout.has_value());
-    auto sample_pipe = c.create_dx12_compute_pipeline(sample, sample_layout.value(), sg::lifetime_scope::persistent);
+    auto sample_group_layout = c.create_dx12_binding_group_layout(sample.bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(sample_group_layout.has_value());
+    auto sample_pipeline_layout = c.create_dx12_pipeline_layout(
+        sg::pipeline_layout_description{.groups = {sample_group_layout.value()}}, sg::lifetime_scope::persistent);
+    REQUIRE(sample_pipeline_layout.has_value());
+    auto sample_pipe
+        = c.create_dx12_compute_pipeline(sample, sample_pipeline_layout.value(), sg::lifetime_scope::persistent);
     REQUIRE(sample_pipe.has_value());
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.
     sg::named_view const fill_views[] = {{.name = "Dst", .view = tex.as_readwrite_view()}};
-    auto fill_group = c.create_dx12_binding_group(fill_layout.value(), fill_views, {}, sg::lifetime_scope::persistent);
+    auto fill_group
+        = c.create_dx12_binding_group(fill_group_layout.value(), fill_views, {}, sg::lifetime_scope::persistent);
     REQUIRE(fill_group.has_value());
 
     sg::named_view const sample_views[] = {
@@ -128,7 +137,7 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
                                                               .mip_filter = sg::sampler_filter::nearest,
                                                               .address_u = sg::sampler_address_mode::clamp_edge,
                                                               .address_v = sg::sampler_address_mode::clamp_edge}}};
-    auto sample_group = c.create_dx12_binding_group(sample_layout.value(), sample_views, sample_samplers,
+    auto sample_group = c.create_dx12_binding_group(sample_group_layout.value(), sample_views, sample_samplers,
                                                     sg::lifetime_scope::persistent);
     REQUIRE(sample_group.has_value());
 

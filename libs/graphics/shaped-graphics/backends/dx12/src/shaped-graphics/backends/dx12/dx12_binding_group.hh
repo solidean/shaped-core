@@ -40,7 +40,7 @@ class dx12_binding_group final : public sg::binding_group
 {
 public:
     [[nodiscard]] static cc::result<dx12_binding_group_handle> create(dx12_context& ctx,
-                                                                      dx12_binding_layout_handle layout,
+                                                                      dx12_binding_group_layout_handle layout,
                                                                       cc::span<sg::named_view const> views,
                                                                       cc::span<sg::named_sampler const> samplers,
                                                                       sg::lifetime_scope scope);
@@ -52,7 +52,7 @@ public:
     ~dx12_binding_group() override;
 
     dx12_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
-    dx12_binding_layout_handle layout;
+    dx12_binding_group_layout_handle layout;
     D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
     dx12_descriptor_alloc table; // the group's CBV/SRV/UAV range (its start feeds table_start; count for freeing)
     D3D12_GPU_DESCRIPTOR_HANDLE sampler_table_start{};

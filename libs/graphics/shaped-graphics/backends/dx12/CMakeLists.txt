@@ -19,7 +19,8 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_download_inline.cc
     src/shaped-graphics/backends/dx12/dx12_upload_async.cc
     src/shaped-graphics/backends/dx12/dx12_download_async.cc
-    src/shaped-graphics/backends/dx12/dx12_binding_layout.cc
+    src/shaped-graphics/backends/dx12/dx12_binding_group_layout.cc
+    src/shaped-graphics/backends/dx12/dx12_pipeline_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
     src/shaped-graphics/backends/dx12/dx12_descriptor_heap.cc
@@ -54,7 +55,8 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_descriptor_heap.hh
     src/shaped-graphics/backends/dx12/dx12_view_desc.hh
     src/shaped-graphics/backends/dx12/dx12_sampler.hh
-    src/shaped-graphics/backends/dx12/dx12_binding_layout.hh
+    src/shaped-graphics/backends/dx12/dx12_binding_group_layout.hh
+    src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.hh
     src/shaped-graphics/backends/dx12/dx12_binding_group.hh
 )

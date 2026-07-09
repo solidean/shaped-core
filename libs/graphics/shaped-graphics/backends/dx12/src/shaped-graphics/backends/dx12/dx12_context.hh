@@ -99,14 +99,17 @@ public:
 
     // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
     // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
-    [[nodiscard]] cc::result<dx12_binding_layout_handle> create_dx12_binding_layout(
+    [[nodiscard]] cc::result<dx12_binding_group_layout_handle> create_dx12_binding_group_layout(
         cc::span<sg::binding const> bindings,
         cc::span<sg::named_sampler const> static_samplers,
         sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_pipeline_layout_handle> create_dx12_pipeline_layout(
+        sg::pipeline_layout_description const& desc,
+        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(sg::compiled_shader const& shader,
-                                                                                        dx12_binding_layout_handle layout,
+                                                                                        dx12_pipeline_layout_handle layout,
                                                                                         sg::lifetime_scope scope);
-    [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_layout_handle layout,
+    [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_group_layout_handle layout,
                                                                                   cc::span<sg::named_view const> views,
                                                                                   cc::span<sg::named_sampler const> samplers,
                                                                                   sg::lifetime_scope scope);
@@ -148,14 +151,17 @@ public:
 
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
     // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
-    [[nodiscard]] cc::result<sg::binding_layout_handle> try_create_binding_layout(
+    [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<sg::binding const> bindings,
         cc::span<sg::named_sampler const> static_samplers,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::pipeline_layout_handle> try_create_pipeline_layout(
+        sg::pipeline_layout_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
         sg::compute_pipeline_description const& desc,
         sg::lifetime_scope scope) override;
-    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_layout_handle layout,
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
                                                                                 cc::span<sg::named_view const> views,
                                                                                 cc::span<sg::named_sampler const> samplers,
                                                                                 sg::lifetime_scope scope) override;

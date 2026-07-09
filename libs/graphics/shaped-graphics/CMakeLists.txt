@@ -14,7 +14,8 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
     src/shaped-graphics/backend/command_list_slot.cc
-    src/shaped-graphics/binding_layout.cc
+    src/shaped-graphics/binding_group_layout.cc
+    src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
@@ -64,7 +65,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/backend/subresource.hh
     src/shaped-graphics/views.hh
     src/shaped-graphics/binding.hh
-    src/shaped-graphics/binding_layout.hh
+    src/shaped-graphics/binding_group_layout.hh
+    src/shaped-graphics/pipeline_layout.hh
     src/shaped-graphics/compiled_shader.hh
     src/shaped-graphics/compute_pipeline.hh
     src/shaped-graphics/binding_group.hh

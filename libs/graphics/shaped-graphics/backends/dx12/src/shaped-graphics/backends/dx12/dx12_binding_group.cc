@@ -1,6 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
@@ -33,12 +33,12 @@ dx12_binding_group::~dx12_binding_group()
 }
 
 cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& ctx,
-                                                                 dx12_binding_layout_handle layout,
+                                                                 dx12_binding_group_layout_handle layout,
                                                                  cc::span<sg::named_view const> views,
                                                                  cc::span<sg::named_sampler const> samplers,
                                                                  sg::lifetime_scope scope)
 {
-    CC_ASSERT(layout != nullptr, "binding_group requires a binding_layout");
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
 
     auto group = std::make_shared<dx12_binding_group>();
     group->_ctx = &ctx;

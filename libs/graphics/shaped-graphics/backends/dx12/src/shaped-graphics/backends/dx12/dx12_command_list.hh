@@ -70,10 +70,14 @@ public:
     cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 
     // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop, and so
-    // each gets the reverse async-upload stamp at submit) and the group currently bound to compute set 0
-    // (whose views are declared at dispatch).
+    // each gets the reverse async-upload stamp at submit).
     cc::vector<dx12_buffer_handle> _touched_buffers;
-    dx12_binding_group const* _bound_group = nullptr;
+
+    // Compute bind state: the bound pipeline layout supplies each slot's root-parameter indices, and one
+    // bound group per slot (indexed by `set`, sized to the layout's group count) whose views are declared
+    // at dispatch. Both reset on compute_bind_pipeline.
+    dx12_pipeline_layout const* _bound_pipeline_layout = nullptr;
+    cc::vector<dx12_binding_group const*> _bound_groups;
 
     // Textures this list has touched, so their per-list subresource slots are finalized at submit/drop. A
     // texture finalize can return revert barriers (transitions back to its entry layout on a non-final
