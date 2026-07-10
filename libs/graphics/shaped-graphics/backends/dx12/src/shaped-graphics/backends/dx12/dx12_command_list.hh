@@ -140,6 +140,16 @@ protected:
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
 
+    // Ray-tracing dispatch (reached through cmd.raytracing). Bodies in dx12_command_list.cc, next to the
+    // compute equivalents (ray tracing binds through the compute root signature).
+    void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;
+    void raytracing_bind_group(int set, sg::binding_group const& group) override;
+    void raytracing_dispatch_rays(sg::raytracing_shader_table const& table,
+                                  sg::raygen_index raygen,
+                                  int width,
+                                  int height,
+                                  int depth) override;
+
 private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker
     // asks for (COPY_DEST→COPY_SOURCE and the like — precise, no bounce through COMMON), and record the

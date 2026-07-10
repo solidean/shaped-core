@@ -38,6 +38,18 @@ public:
     [[nodiscard]] tlas_handle build_tlas(cc::span<tlas_instance const> instances,
                                          accel_build_flags flags = accel_build_flags::fast_trace);
 
+    /// Binds a raytracing_pipeline for the following bind_group / dispatch_rays. Requires is_supported().
+    void bind_pipeline(raytracing_pipeline const& pipeline);
+
+    /// Binds `group` at slot `set` of the bound pipeline's layout (validated against it). Ray tracing binds
+    /// through the pipeline's global root signature, like compute.
+    void bind_group(int set, binding_group const& group);
+
+    /// Traces a `width` x `height` x `depth` grid of rays, launching the raygen shader at `raygen` in
+    /// `table`. Each dimension must be >= 1 and their product <= 2^30. Requires a bound pipeline; `table`
+    /// must have been built for it.
+    void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
+
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raytracing_scope(command_list_raytracing_scope const&) = delete;
     command_list_raytracing_scope(command_list_raytracing_scope&&) = delete;
