@@ -52,6 +52,7 @@ add_executable(shaped-shader-compiler-dxc-test
     tests/main.cc
     tests/preprocess-test.cc
     tests/compile-test.cc
+    tests/reflect-raytracing-test.cc
     tests/shader_cache-test.cc
 )
 

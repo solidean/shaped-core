@@ -127,7 +127,7 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
         FAILED(hr) || !object || object->GetBufferSize() == 0)
         return cc::error("shaped-shader-compiler-dxc: DXC produced no object bytecode");
 
-    auto reflected = impl::reflect(_state->utils.Get(), result, desc.stage);
+    auto reflected = impl::reflect(_state->utils.Get(), result, desc.stage, desc.entry_point);
     CC_RETURN_IF_ERROR(reflected);
 
     sg::compiled_shader shader;
