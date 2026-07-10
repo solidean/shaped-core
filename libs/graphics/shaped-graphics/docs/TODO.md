@@ -36,9 +36,12 @@ Running list of known follow-ups. Bigger design intent lives in
   time) and **compaction** (BLAS `allow_compaction` → query compacted size → copy into a smaller buffer);
   the **vulkan** implementation (`to_vk_buffer_usage` must map the `accel_structure_*` usages + add the
   buffer device address; then the real `VkAccelerationStructureKHR` build path — flip the
-  `nx::config::disabled`/`register_backend` toggle in `tests/backends/vulkan-entry.cc` once it lands); and
-  the **trace side** — a raytracing pipeline + shader binding table + the `acceleration_structure` binding
-  type/view to bind a `tlas` as an SRV (see [concepts/acceleration-structures.md](concepts/acceleration-structures.md)).
+  `nx::config::disabled`/`register_backend` toggle in `tests/backends/vulkan-entry.cc` once it lands). The
+  **trace side** is implemented for dx12 — the `acceleration_structure` binding (inline `RayQuery`) plus the
+  `raytracing_pipeline` / `raytracing_shader_table` / `cmd.raytracing.dispatch_rays` DXR path (see
+  [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md)); still open there are **local root
+  signatures**, a **dedicated shader-table buffer usage** (`types.hh` reserves `shader_binding_table`), a
+  **state-object cached blob**, and the **vulkan** trace implementation.
 - **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder. Surface a
   `cc::shared_ptr` in clean-core and switch handles to it (keeps sg off `std::`). See the
   [coding-guidelines](coding-guidelines.md) note.

@@ -133,14 +133,19 @@ gated on `D3D12_RAYTRACING_TIER`); it runs on WARP. **vulkan** stubs the build (
 `is_supported() == false` until its raytracing milestone. The supporting vocabulary and dx12 barrier
 translation were already in place.
 
+**The trace side is in.** A `tlas` binds as a shader resource via the `acceleration_structure` binding-type
+and view kind (inline `RayQuery` in a compute dispatch), and the full DXR pipeline path —
+`raytracing_pipeline` (a DXR state object), `raytracing_shader_table`, and `cmd.raytracing.dispatch_rays` —
+runs a raygen→miss→closest-hit trace on WARP. See
+[raytracing-pipeline.md](raytracing-pipeline.md).
+
 **Deferred** (see [TODO.md](../TODO.md)):
 
 - the **transient (single-epoch) variant** and the **refit/update + compaction** runtime path;
-- the **shader binding table** — a raytracing SBT gets its own abstraction, not a buffer usage;
-- **raytracing pipelines + their cache** (see [caches](caches.md));
-- the **`acceleration_structure` binding-type and view kind** for binding a `tlas` as an SRV to a pipeline
-  ([`binding.hh`](../../src/shaped-graphics/binding.hh), [`views.hh`](../../src/shaped-graphics/views.hh),
-  [bindings](bindings.md)).
+- a **dedicated shader-table buffer usage** — the table is backed by a plain readable buffer for now
+  (`types.hh` reserves `shader_binding_table` as future work);
+- **local root signatures** (records currently store only a 32-byte shader identifier — one global root
+  signature).
 
 ## See also
 
