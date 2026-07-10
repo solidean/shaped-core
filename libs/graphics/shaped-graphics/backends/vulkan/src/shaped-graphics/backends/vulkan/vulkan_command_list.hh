@@ -82,5 +82,27 @@ protected:
     {
         CC_UNREACHABLE("vulkan compute declare_array_texture_access is not implemented yet");
     }
+    void compute_set_inline_constants(cc::span<cc::byte const>, cc::optional<cc::isize>) override
+    {
+        CC_UNREACHABLE("vulkan compute set_inline_constants is not implemented yet");
+    }
+
+    // Ray tracing (reached through cmd.raytracing) — not implemented yet. is_supported() returns false, so a
+    // correct caller never reaches the build stubs; and the vulkan backend stays unregistered in the tier-1
+    // API tests until its raytracing milestone lands.
+    [[nodiscard]] bool raytracing_is_supported() const override { return false; }
+    [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const>,
+                                                                  sg::accel_build_flags) override
+    {
+        CC_UNREACHABLE("vulkan raytracing build_blas is not implemented yet");
+    }
+    [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const>, sg::accel_build_flags) override
+    {
+        CC_UNREACHABLE("vulkan raytracing build_blas is not implemented yet");
+    }
+    [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const>, sg::accel_build_flags) override
+    {
+        CC_UNREACHABLE("vulkan raytracing build_tlas is not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan

@@ -3,8 +3,9 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/sampler.hh>
 
@@ -84,8 +85,8 @@ TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WAR
     sg::named_sampler const statics[]
         = {{.name = "Static", .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}}};
 
-    auto layout = c.create_dx12_binding_layout(bindings, statics, sg::lifetime_scope::persistent);
-    REQUIRE(layout.has_value()); // root sig with an SRV table, a SAMPLER table, and one baked static sampler
+    auto layout = c.create_dx12_binding_group_layout(bindings, statics, sg::lifetime_scope::persistent);
+    REQUIRE(layout.has_value()); // group layout: an SRV range, a SAMPLER range, and one baked static sampler desc
     CHECK(layout.value()->sampler_slots.size() == 1); // only the dynamic sampler is a table entry
     CHECK(layout.value()->view_slots.size() == 1);
 
@@ -111,7 +112,7 @@ TEST("sg dx12 - static sampler naming no binding is rejected")
     };
     sg::named_sampler const statics[] = {{.name = "Nope", .sampler = {}}}; // matches no sampler binding
 
-    auto layout = c.create_dx12_binding_layout(bindings, statics, sg::lifetime_scope::persistent);
+    auto layout = c.create_dx12_binding_group_layout(bindings, statics, sg::lifetime_scope::persistent);
     CHECK(!layout.has_value());
 }
 
@@ -124,7 +125,7 @@ TEST("sg dx12 - a missing dynamic sampler is rejected at group creation")
     sg::binding const bindings[] = {
         {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
-    auto layout = c.create_dx12_binding_layout(bindings, {}, sg::lifetime_scope::persistent);
+    auto layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
 
     // No samplers provided → the dynamic "Dyn" binding is unfilled.
@@ -135,4 +136,30 @@ TEST("sg dx12 - a missing dynamic sampler is rejected at group creation")
     sg::named_sampler const wrong[] = {{.name = "Ghost", .sampler = {}}};
     auto group2 = c.create_dx12_binding_group(layout.value(), {}, wrong, sg::lifetime_scope::persistent);
     CHECK(!group2.has_value());
+}
+
+TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP")
+{
+    auto handle = dx12::acquire_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    // A group layout with just a texture SRV — no samplers of its own.
+    sg::binding const bindings[] = {
+        {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+    };
+    auto group_layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value());
+
+    // The pipeline layout carries an extra register-bound static sampler at s0 — not tied to any group
+    // binding — which bakes straight into the root signature.
+    sg::pipeline_layout_description pld;
+    pld.groups = {group_layout.value()};
+    pld.static_samplers.push_back(
+        {.binding = {.name = "Samp", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+         .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}});
+
+    auto pipeline_layout = c.create_dx12_pipeline_layout(pld, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline_layout.has_value()); // root sig: the group's SRV table + one baked static sampler
+    CHECK(pipeline_layout.value()->groups.size() == 1);
 }

@@ -33,10 +33,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                            help="Do not write any JUnit XML result files (per-binary XML is on by default)")
     p.add_argument("test_name", nargs="?",
                    help="Specific test name or binary to run (auto-discovers the binary)")
-    p.add_argument("runner_args", nargs=argparse.REMAINDER,
-                   help="Args after the test name are forwarded verbatim to the test binary, e.g. "
-                        "`-c <section>` to scope into a section/instance (repeat -c to descend a path). "
-                        "An optional leading `--` is dropped.")
+    # Args dev.py doesn't recognize are forwarded verbatim to the test binary (collected by the
+    # top-level parse_known_args into args.runner_args), e.g. `-c <section>` to scope into a
+    # section/instance (repeat -c to descend a path). An optional leading `--` is dropped. Unlike
+    # a REMAINDER positional this does NOT swallow dev.py's own options, so `--preset` et al. still
+    # bind here regardless of where they sit relative to the test name.
     return p
 
 
@@ -44,8 +45,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     primary = presets[0]
 
-    # Everything after the test name is passed straight to the test binary (e.g. `-c <section>` for nexus
-    # section/instance scoping). argparse.REMAINDER keeps a leading `--` if present; drop that one separator.
+    # Unrecognized args are passed straight to the test binary (e.g. `-c <section>` for nexus
+    # section/instance scoping). parse_known_args already drops the first `--`; strip a stray
+    # leading one defensively so an explicit `test <name> -- -c foo` never leaks the separator.
     runner_args = list(args.runner_args or [])
     if runner_args and runner_args[0] == "--":
         runner_args = runner_args[1:]

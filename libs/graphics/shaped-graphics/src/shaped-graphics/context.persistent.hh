@@ -59,18 +59,19 @@ public:
     [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes);
 
     // bind path
-    // NOTE: binding_layout and compute_pipeline creation are NOT here — they are schemas / PSOs, not
-    // lifetime-scoped GPU resources. They live on the raw `ctx.uncached` scope (prefer `ctx.cached`).
+    // NOTE: binding_group_layout / pipeline_layout / compute_pipeline creation are NOT here — they are
+    // schemas / PSOs, not lifetime-scoped GPU resources. They live on the raw `ctx.uncached` scope
+    // (prefer `ctx.cached`).
 public:
     /// Instantiates `layout` with the given name→view bindings, validating each against the layout.
     /// Throws sg::binding_group_exception on a wiring error (unknown/missing binding, kind mismatch) or
     /// descriptor-heap exhaustion.
-    [[nodiscard]] binding_group_handle create_binding_group(binding_layout_handle layout,
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle layout,
                                                             cc::span<named_view const> views,
                                                             cc::span<named_sampler const> samplers = {});
 
     /// Fallible core of create_binding_group — returns an error instead of throwing.
-    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                             cc::span<named_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 

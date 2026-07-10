@@ -25,12 +25,21 @@ class command_list_upload_scope;
 class command_list_download_scope;
 class command_list_copy_scope;
 class command_list_compute_scope;
+class command_list_raytracing_scope;
 class raw_buffer;
 class raw_texture;
-struct texture_description;        // value type (see raw_texture.hh) — input to create_raw_texture
-enum class pixel_format : u16;     // texel format (see pixel_format.hh)
-enum class texture_usage : u32;    // texture usage flags (see types.hh)
-enum class texture_dimension : u8; // 1D / 2D / 3D (see raw_texture.hh)
+class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
+class tlas;                         // top-level acceleration structure (see acceleration_structure.hh)
+struct blas_triangles;              // value type — one triangle geometry input to build_blas
+struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
+struct tlas_instance;               // value type — one instance input to build_tlas
+enum class accel_build_flags : u32; // build-time trade-offs (see acceleration_structure.hh)
+enum class accel_index_format : u8; // index element width for indexed triangles
+enum class instance_cull_mode : u8; // per-instance triangle cull selection
+struct texture_description;         // value type (see raw_texture.hh) — input to create_raw_texture
+enum class pixel_format : u16;      // texel format (see pixel_format.hh)
+enum class texture_usage : u32;     // texture usage flags (see types.hh)
+enum class texture_dimension : u8;  // 1D / 2D / 3D (see raw_texture.hh)
 class bytes_waiter;
 class bytes_future;
 template <class T>
@@ -81,14 +90,22 @@ struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
 
-// Bind path: schema (binding_layout) -> pipeline (compute_pipeline) -> instance (binding_group). See
-// binding_layout.hh / compute_pipeline.hh / binding_group.hh.
-class binding_layout;
+// Bind path: group schema (binding_group_layout) -> pipeline interface (pipeline_layout) -> pipeline
+// (compute_pipeline) -> instance (binding_group). See binding_group_layout.hh / pipeline_layout.hh /
+// compute_pipeline.hh / binding_group.hh.
+class binding_group_layout;
+class pipeline_layout;
+struct bound_sampler;               // {binding, sampler} — a register-bound static sampler on a pipeline_layout
+struct pipeline_layout_description; // {groups, static_samplers} — input to create_pipeline_layout
 class compute_pipeline;
 struct compute_pipeline_description; // {shader, layout} — input to create_compute_pipeline
 class binding_group;
 struct named_view;    // {name, raw_view} — input to create_binding_group
-struct named_sampler; // {name, sampler} — static sampler (layout) / dynamic sampler (group)
+struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
+
+/// Hard cap on the number of group slots a pipeline_layout can hold (dx12 root-parameter / vulkan set
+/// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `set`.
+inline constexpr int max_binding_groups = 4;
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
@@ -113,10 +130,13 @@ enum class submission_token : u64
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
-using raw_texture_handle = std::shared_ptr<raw_texture const>;         // shared-immutable: shape is fixed at creation
+using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutable: shape is fixed at creation
+using blas_handle = std::shared_ptr<blas const>;               // shared-immutable: an opaque, driver-built structure
+using tlas_handle = std::shared_ptr<tlas const>; // shared-immutable: indexes a set of instances of blas_handle
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
-using binding_layout_handle = std::shared_ptr<binding_layout const>;   // immutable schema
+using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema
+using pipeline_layout_handle = std::shared_ptr<pipeline_layout const>;           // immutable ordered group layouts
 using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
 
@@ -127,6 +147,4 @@ using binding_group_handle = std::shared_ptr<binding_group const>; // immutable 
 using async_compiled_shader = std::shared_ptr<cc::async<compiled_shader>>; // try_value() -> compiled_shader_handle
 using async_compute_pipeline
     = std::shared_ptr<cc::async<compute_pipeline_handle>>; // blocking_get -> compute_pipeline_handle
-using async_binding_layout
-    = std::shared_ptr<cc::async<binding_layout_handle>>; // defined for future/graphics use — layout acquire is SYNC today
 } // namespace sg

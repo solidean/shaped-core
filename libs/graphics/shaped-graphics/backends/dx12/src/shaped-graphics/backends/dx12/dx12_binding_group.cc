@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
@@ -33,12 +34,12 @@ dx12_binding_group::~dx12_binding_group()
 }
 
 cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& ctx,
-                                                                 dx12_binding_layout_handle layout,
+                                                                 dx12_binding_group_layout_handle layout,
                                                                  cc::span<sg::named_view const> views,
                                                                  cc::span<sg::named_sampler const> samplers,
                                                                  sg::lifetime_scope scope)
 {
-    CC_ASSERT(layout != nullptr, "binding_group requires a binding_layout");
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
 
     auto group = std::make_shared<dx12_binding_group>();
     group->_ctx = &ctx;
@@ -102,7 +103,16 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         view_filled[slot_index] = char(1);
 
         auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset);
-        if (nv.view.shape == sg::view_shape::texture)
+        if (nv.view.access == sg::view_class::acceleration_structure)
+        {
+            auto dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(nv.view.tlas);
+            CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
+            create_accel_view(ctx._device.Get(), *dx_tlas, dst);
+            // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
+            group->referenced.push_back(dx_tlas->_dx12_storage);
+            group->hazard_views.push_back({dx_tlas->_dx12_storage, nv.view.access});
+        }
+        else if (nv.view.shape == sg::view_shape::texture)
         {
             create_texture_view(ctx._device.Get(), nv.view, dst);
             auto dx = std::dynamic_pointer_cast<dx12_texture const>(nv.view.texture);

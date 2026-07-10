@@ -6,9 +6,10 @@
 #include <shaped-graphics/backend/access_inference.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -120,11 +121,19 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetComputeRootSignature(dp->layout->root_signature.Get());
     _list->SetPipelineState(dp->pipeline_state.Get());
+
+    // The pipeline layout supplies each slot's root-parameter indices for bind_group; reset the per-slot
+    // bound groups to one nullptr per group slot (a new pipeline may have a different slot count).
+    _bound_pipeline_layout = dp->layout.get();
+    _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
 }
 
 void dx12_command_list::compute_bind_group(int set, sg::binding_group const& group)
 {
-    CC_ASSERT(set == 0, "only descriptor set 0 is supported yet");
+    CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before binding groups");
+    CC_ASSERT(set >= 0 && set < int(_bound_groups.size()), "binding-group slot out of range for the bound pipeline "
+                                                           "layout");
+
     auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
     CC_ASSERT(dg != nullptr, "binding_group is not a dx12 binding_group");
 
@@ -133,31 +142,60 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
     CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
               "transient binding_group used past its epoch (its descriptors have been recycled)");
 
+    // The group's own schema must match what the pipeline layout declared at this slot (same root-signature
+    // table shape), otherwise the descriptor tables below would be bound against the wrong parameters.
+    auto const& gslot = _bound_pipeline_layout->groups[set];
+    CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
+
     // Remember the bound group so its views' accesses are declared at dispatch (the point work runs). The
-    // forward async-upload wait for each bound buffer is folded in there too, via track_buffer_access.
-    _bound_group = dg;
-    if (dg->layout->resource_root_param >= 0)
-        _list->SetComputeRootDescriptorTable(UINT(dg->layout->resource_root_param), dg->table_start);
-    if (dg->layout->sampler_root_param >= 0)
-        _list->SetComputeRootDescriptorTable(UINT(dg->layout->sampler_root_param), dg->sampler_table_start);
+    // forward async-upload wait for each bound buffer is folded in there too, via track_buffer_access. The
+    // root-parameter indices come from the pipeline layout's slot, not the group.
+    _bound_groups[set] = dg;
+    if (gslot.resource_root_param >= 0)
+        _list->SetComputeRootDescriptorTable(UINT(gslot.resource_root_param), dg->table_start);
+    if (gslot.sampler_root_param >= 0)
+        _list->SetComputeRootDescriptorTable(UINT(gslot.sampler_root_param), dg->sampler_table_start);
+}
+
+void dx12_command_list::compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+{
+    CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before setting inline constants");
+    CC_ASSERT(_bound_pipeline_layout->inline_constants_root_param >= 0, "the bound pipeline layout declares no "
+                                                                        "inline_constants block");
+    CC_ASSERT(data.size() % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
+
+    cc::isize const off = offset.value_or(0);
+    CC_ASSERT(off >= 0 && off % 4 == 0, "inline-constants offset must be non-negative and a multiple of 4");
+    if (offset.has_value())
+        CC_ASSERT(off + data.size() <= cc::isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
+                  "partial inline-constants update exceeds the declared block size");
+    else
+        CC_ASSERT(data.size() == cc::isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
+                  "full inline-constants replace must match the declared block size");
+
+    _list->SetComputeRoot32BitConstants(UINT(_bound_pipeline_layout->inline_constants_root_param),
+                                        UINT(data.size() / 4), data.data(), UINT(off / 4));
 }
 
 void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
 
-    // Declare each bound resource's shader access before the dispatch: the tracker emits any intra-list
+    // Declare each bound group's shader accesses before the dispatch: the tracker emits any intra-list
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
-    if (_bound_group != nullptr)
+    for (auto const* bound_group : _bound_groups)
     {
-        for (auto const& view : _bound_group->hazard_views)
+        if (bound_group == nullptr)
+            continue;
+
+        for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
                 track_buffer_access(view.buffer, sg::pipeline_stage_flags::compute, sg::shader_access_of(view.access));
 
         // Bound textures also transition to the layout their access class needs (a sampled texture to
         // shader_readonly, a storage texture to shader_readwrite) — the inferred layout is shader_layout_of.
-        for (auto const& tv : _bound_group->texture_hazard_views)
+        for (auto const& tv : bound_group->texture_hazard_views)
             track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flags::compute,
                                  sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }

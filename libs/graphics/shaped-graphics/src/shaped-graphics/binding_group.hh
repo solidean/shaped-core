@@ -15,18 +15,18 @@ struct named_view
     raw_view view;
 };
 
-/// A binding name paired with a sampler state. As a `create_binding_layout` argument it declares a
-/// *static* sampler (baked into the root signature); as a `create_binding_group` argument it supplies a
-/// *dynamic* sampler for a sampler binding of that name. Same value type either way.
+/// A binding name paired with a sampler state. As a `create_binding_group_layout` argument it declares a
+/// *static* sampler (baked into the pipeline layout's root signature); as a `create_binding_group` argument
+/// it supplies a *dynamic* sampler for a sampler binding of that name. Same value type either way.
 struct named_sampler
 {
     cc::string name;
     sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
 };
 
-/// A binding_layout instance with concrete resources bound: each named view is matched to a layout
-/// binding, validated, and turned into a backend descriptor. Bound to a pipeline as a unit. Immutable
-/// after creation (rebind by recreating). Held via binding_group_handle.
+/// A binding_group_layout instantiated with concrete resources bound: each named view is matched to a
+/// layout binding, validated, and turned into a backend descriptor. Bound at a pipeline-layout slot as a
+/// unit. Immutable after creation (rebind by recreating). Held via binding_group_handle.
 ///
 /// Abstract: a backend subclasses it and owns the native allocation (dx12 descriptor-heap range,
 /// vulkan VkDescriptorSet). See libs/graphics/shaped-graphics/docs/concepts/bindings.md.

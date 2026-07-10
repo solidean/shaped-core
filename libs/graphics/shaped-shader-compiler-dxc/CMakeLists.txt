@@ -60,7 +60,12 @@ target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-shader-comp
 # The dx12 backend is added before this lib (root CMakeLists order), so its target exists here and can be
 # linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch on WARP -> read back.
 if(TARGET shaped-graphics-dx12)
-    target_sources(shaped-shader-compiler-dxc-test PRIVATE tests/end-to-end-sampler-test.cc)
+    target_sources(shaped-shader-compiler-dxc-test PRIVATE
+        tests/end-to-end-sampler-test.cc
+        tests/end-to-end-multigroup-test.cc
+        tests/end-to-end-inline-constants-test.cc
+        tests/end-to-end-inline-raytracing-test.cc
+    )
     target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
 endif()
 

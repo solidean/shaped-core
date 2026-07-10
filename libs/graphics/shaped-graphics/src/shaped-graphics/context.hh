@@ -64,13 +64,14 @@ public:
     /// the shared readback ring the inline downloads stage through.
     context_download_scope download;
 
-    /// Raw, uncached factory for binding layouts and compute pipelines (schemas / PSOs, not lifetime-scoped
-    /// resources): `ctx.uncached.create_binding_layout(...)` / `create_compute_pipeline(...)`. Prefer
-    /// `ctx.cached` — most code wants the deduplicated + async version.
+    /// Raw, uncached factory for group/pipeline layouts and compute pipelines (schemas / PSOs, not
+    /// lifetime-scoped resources): `ctx.uncached.create_binding_group_layout(...)` /
+    /// `create_pipeline_layout(...)` / `create_compute_pipeline(...)`. Prefer `ctx.cached` — most code wants
+    /// the deduplicated + async version.
     context_uncached_scope uncached;
 
-    /// Built-in pipeline/layout cache facade: `ctx.cached.acquire_binding_layout(...)` and
-    /// `ctx.cached.acquire_compute_pipeline(...)`. Get-or-create over the context's pipeline_cache
+    /// Built-in pipeline/layout cache facade: `ctx.cached.acquire_binding_group_layout(...)`,
+    /// `acquire_pipeline_layout(...)`, and `acquire_compute_pipeline(...)`. Get-or-create over the context's pipeline_cache
     /// (default in-memory tiers installed); reach the cache via `ctx.cached.cache()` to add tiers.
     context_cached_scope cached;
 
@@ -249,25 +250,29 @@ protected:
     [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes) = 0;
 
     // The bind-path creates carry an explicit lifetime_scope. binding_group is a real per-scope descriptor
-    // allocation (ctx.persistent / ctx.transient append the scope); binding_layout / compute_pipeline are
-    // schemas / PSOs with no transient variant — ctx.uncached always passes persistent. (Buffers carry the
-    // scope inside allocation_info instead.)
+    // allocation (ctx.persistent / ctx.transient append the scope); binding_group_layout / pipeline_layout /
+    // compute_pipeline are schemas / PSOs with no transient variant — ctx.uncached always passes persistent.
+    // (Buffers carry the scope inside allocation_info instead.)
 
-    /// Builds a binding_layout (the bindable-set schema) from a shader's reflected bindings. Any sampler
-    /// binding named in `static_samplers` is baked into the layout; other sampler bindings are dynamic.
-    [[nodiscard]] virtual cc::result<binding_layout_handle> try_create_binding_layout(
+    /// Builds a binding_group_layout (one group's schema) from a shader's reflected bindings. Any sampler
+    /// binding named in `static_samplers` is baked into the group layout; other sampler bindings are dynamic.
+    [[nodiscard]] virtual cc::result<binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<binding const> bindings,
         cc::span<named_sampler const> static_samplers,
         lifetime_scope scope)
         = 0;
 
-    /// Builds a compute_pipeline from a description (compute shader + layout).
+    /// Builds a pipeline_layout (the binding interface) from an ordered list of group layouts.
+    [[nodiscard]] virtual cc::result<pipeline_layout_handle>
+    try_create_pipeline_layout(pipeline_layout_description const& desc, lifetime_scope scope) = 0;
+
+    /// Builds a compute_pipeline from a description (compute shader + pipeline layout).
     [[nodiscard]] virtual cc::result<compute_pipeline_handle>
     try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
 
-    /// Instantiates `layout` with the given name→view bindings (validated against the layout) and dynamic
-    /// `samplers` (one per non-static sampler binding).
-    [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_layout_handle layout,
+    /// Instantiates group `layout` with the given name→view bindings (validated against the layout) and
+    /// dynamic `samplers` (one per non-static sampler binding).
+    [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                                     cc::span<named_view const> views,
                                                                                     cc::span<named_sampler const> samplers,
                                                                                     lifetime_scope scope)

@@ -3,9 +3,10 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2), reused here with an extra storage-texture
 // binding the shader doesn't touch — enough to drive the texture UAV descriptor + the dispatch barrier.
@@ -42,7 +43,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
         REQUIRE(tex.has_value());
         sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
         auto layout
-            = c.create_dx12_binding_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
+            = c.create_dx12_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
         REQUIRE(layout.has_value());
 
         sg::texture_2d const typed(tex.value());
@@ -58,7 +59,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
         REQUIRE(tex.has_value());
         sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
         auto layout
-            = c.create_dx12_binding_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
+            = c.create_dx12_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
         REQUIRE(layout.has_value());
 
         sg::texture_2d const typed(tex.value());
@@ -101,9 +102,12 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
     auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::readwrite_texture), sg::allocation_info{});
     REQUIRE(tex.has_value());
 
-    auto layout = c.create_dx12_binding_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(layout.has_value());
-    auto pipeline = c.create_dx12_compute_pipeline(shader, layout.value(), sg::lifetime_scope::persistent);
+    auto group_layout = c.create_dx12_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value());
+    auto pipeline_layout = c.create_dx12_pipeline_layout(
+        sg::pipeline_layout_description{.groups = {group_layout.value()}}, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline_layout.has_value());
+    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), {}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
     sg::texture_2d const typed(tex.value());
@@ -111,7 +115,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
         {.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()},
         {.name = "Tex", .view = typed.as_readwrite_view()},
     };
-    auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(views, 2), {},
+    auto group = c.create_dx12_binding_group(group_layout.value(), cc::span<sg::named_view const>(views, 2), {},
                                              sg::lifetime_scope::persistent);
     REQUIRE(group.has_value());
 

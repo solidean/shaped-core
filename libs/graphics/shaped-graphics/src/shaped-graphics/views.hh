@@ -31,10 +31,11 @@ concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(siz
 /// How a shader reads a view. Mirrors buffer_usage's uniform/readonly/readwrite split.
 enum class view_class
 {
-    uniform,   ///< uniform block — constant buffer / UBO (read-only)
-    readonly,  ///< read-only storage — SRV / read SSBO / sampled texture
-    readwrite, ///< read-write storage — UAV / read-write SSBO / storage texture
-    // Future (with a graphics pipeline / samplers): render_target, depth_stencil, sampler, acceleration_structure.
+    uniform,                ///< uniform block — constant buffer / UBO (read-only)
+    readonly,               ///< read-only storage — SRV / read SSBO / sampled texture
+    readwrite,              ///< read-write storage — UAV / read-write SSBO / storage texture
+    acceleration_structure, ///< ray-tracing TLAS — a read-only SRV addressed by GPU VA (no bound resource)
+    // Future (with a graphics pipeline / samplers): render_target, depth_stencil, sampler.
 };
 
 /// How a view's bytes are laid out. `raw` is byte-addressed (element type `byte`); `structured` is an
@@ -46,6 +47,7 @@ enum class view_shape
     structured,
     raw,
     texture,
+    acceleration_structure, ///< a ray-tracing TLAS bound as an SRV — no byte layout, addressed by the AS's GPU VA
     // Future (with formats): texel (a typed buffer view).
 };
 
@@ -88,6 +90,11 @@ struct raw_view
     subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
     cc::start_end depth_slice_range
         = {.start = 0, .end = 0}; ///< [3D storage view] depth (W/Z) slice window; empty otherwise
+
+    // Acceleration-structure view (shape acceleration_structure). Null for buffer / texture views. Carries the
+    // abstract TLAS, not a buffer: each backend binds it its own way (dx12 reads its storage GPU VA; vulkan
+    // takes the native VkAccelerationStructureKHR handle; metal an MTLAccelerationStructure).
+    tlas_handle tlas; ///< the viewed top-level acceleration structure
 };
 
 /// A uniform block of `T` — a constant buffer / UBO binding (read-only). {buffer, offset, sizeof(T)}.
@@ -221,6 +228,28 @@ struct texture_readwrite_view
                         .format = format,
                         .range = range,
                         .depth_slice_range = depth_slice_range};
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
+/// A ray-tracing acceleration structure (TLAS) bound as a shader resource — HLSL
+/// `RaytracingAccelerationStructure`. Unlike buffer / texture views it has no element type, no layout, and no
+/// range; it carries the abstract `tlas` so each backend can bind it its own way (dx12 by the AS's GPU VA,
+/// vulkan by the native VkAccelerationStructureKHR handle). Obtain one from `tlas::as_view()`.
+struct acceleration_structure_view
+{
+    static constexpr view_class access = view_class::acceleration_structure;
+
+    tlas_handle tlas; ///< the top-level acceleration structure to bind
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_view{
+            .access = access,
+            .shape = view_shape::acceleration_structure,
+            .tlas = tlas,
+        };
     }
 
     operator raw_view() const { return to_raw(); }

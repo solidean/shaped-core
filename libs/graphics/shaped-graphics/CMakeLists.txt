@@ -13,8 +13,11 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
+    src/shaped-graphics/command_list.raytracing.cc
+    src/shaped-graphics/acceleration_structure.cc
     src/shaped-graphics/backend/command_list_slot.cc
-    src/shaped-graphics/binding_layout.cc
+    src/shaped-graphics/binding_group_layout.cc
+    src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
@@ -52,6 +55,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
+    src/shaped-graphics/command_list.raytracing.hh
+    src/shaped-graphics/acceleration_structure.hh
     src/shaped-graphics/raw_buffer.hh
     src/shaped-graphics/pixel_format.hh
     src/shaped-graphics/raw_texture.hh
@@ -66,7 +71,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/backend/subresource.hh
     src/shaped-graphics/views.hh
     src/shaped-graphics/binding.hh
-    src/shaped-graphics/binding_layout.hh
+    src/shaped-graphics/binding_group_layout.hh
+    src/shaped-graphics/pipeline_layout.hh
     src/shaped-graphics/compiled_shader.hh
     src/shaped-graphics/compute_pipeline.hh
     src/shaped-graphics/binding_group.hh
@@ -156,6 +162,7 @@ if(_sg_backends)
         tests/transient/transient-test.cc
         tests/barrier/barrier-test.cc
         tests/error-handling/error-handling-test.cc
+        tests/raytracing/raytracing-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)

@@ -35,9 +35,10 @@ src/shaped-graphics/
                                                 + erased raw_view; texture/texel views deferred (resource + format exist; binding is future)
   binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
   compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
-  binding_layout.hh/.cc           [in progress] abstract: the bindable-set schema (built from bindings); dx12 = root sig (vulkan stub)
-  compute_pipeline.hh/.cc         [in progress] abstract: compute shader + layout; dx12 = PSO (vulkan stub)
-  binding_group.hh/.cc            [in progress] abstract: layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
+  binding_group_layout.hh/.cc     [in progress] abstract: one group's schema (built from bindings); dx12 = descriptor-table schema (vulkan stub)
+  pipeline_layout.hh/.cc          [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
+  compute_pipeline.hh/.cc         [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
+  binding_group.hh/.cc            [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
   command_list.compute.hh/.cc     [in progress] cmd.compute scope: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
   memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
@@ -130,12 +131,17 @@ barriers             [in progress]  inferred access + state tracking + concurren
                                   entry-layout revert); no public texture op drives it yet, vulkan pending
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
                                   in compute); render_target/depth_stencil views + texel buffers deferred
-bindings             [in progress]  compiled_shader + binding vocab; binding_layout/group + compute_pipeline (dx12 real, vulkan stub)
+bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub)
 texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation + dx12 layout barriers + SRV/UAV
                                   views (bindable in compute) done; copies / render-target views remain
 pipeline             [in progress]  compute pipeline + bind path (dx12 real, vulkan stub); graphics pipelines + shader compiler planned
 sampler              [in progress]  sampler + static/dynamic samplers; dx12 real (root-sig static samplers
                                   + a separate sampler descriptor heap for dynamic ones); vulkan pending
+accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
+                                  triangles + procedural AABBs, build_tlas, is_supported), result sized from a
+                                  prebuild query with transient scratch, persistent handles across epochs;
+                                  dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update,
+                                  compaction, SBT, raytracing pipelines, the acceleration_structure binding
 swapchain / surface  [planned]  presentation
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
                                   deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)

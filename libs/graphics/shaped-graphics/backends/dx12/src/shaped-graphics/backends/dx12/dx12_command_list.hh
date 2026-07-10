@@ -70,10 +70,14 @@ public:
     cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 
     // Access tracking: buffers this list has touched (so their slots are finalized at submit/drop, and so
-    // each gets the reverse async-upload stamp at submit) and the group currently bound to compute set 0
-    // (whose views are declared at dispatch).
+    // each gets the reverse async-upload stamp at submit).
     cc::vector<dx12_buffer_handle> _touched_buffers;
-    dx12_binding_group const* _bound_group = nullptr;
+
+    // Compute bind state: the bound pipeline layout supplies each slot's root-parameter indices, and one
+    // bound group per slot (indexed by `set`, sized to the layout's group count) whose views are declared
+    // at dispatch. Both reset on compute_bind_pipeline.
+    dx12_pipeline_layout const* _bound_pipeline_layout = nullptr;
+    cc::vector<dx12_binding_group const*> _bound_groups;
 
     // Textures this list has touched, so their per-list subresource slots are finalized at submit/drop. A
     // texture finalize can return revert barriers (transitions back to its entry layout on a non-final
@@ -125,6 +129,16 @@ protected:
                                              cc::span<sg::array_buffer_access const> elements) override;
     void compute_declare_array_texture_access(cc::string_view binding_name,
                                               cc::span<sg::array_texture_access const> elements) override;
+    void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
+
+    // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
+    [[nodiscard]] bool raytracing_is_supported() const override;
+    [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
+                                                                  sg::accel_build_flags flags) override;
+    [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
+                                                              sg::accel_build_flags flags) override;
+    [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
+                                                        sg::accel_build_flags flags) override;
 
 private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker
@@ -133,6 +147,14 @@ private:
     // to COMMON at ExecuteCommandLists, so no trailing barrier is needed. Also folds the buffer's pending
     // async-upload value into _required_copy_wait (the forward cross-queue sync for ctx.upload).
     void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
+
+    // Shared BLAS build for both geometry families: prebuild-query the translated geometry descs, allocate the
+    // persistent result + transient scratch, barrier + record the build, and wrap it in a dx12_blas.
+    // `input_buffers` are the geometry's build-input buffers (tracked accel_read to order any prior upload).
+    [[nodiscard]] sg::blas_handle build_blas_common(cc::span<D3D12_RAYTRACING_GEOMETRY_DESC const> geometry_descs,
+                                                    cc::span<dx12_buffer_handle const> input_buffers,
+                                                    sg::accel_build_flags flags,
+                                                    int geometry_count);
 
     // Declare `stages`/`access`/`layout` over `range` on `texture` for this list's slot, emit the per-box
     // layout-transition barriers the tracker asks for, and record the texture so its slot is finalized at

@@ -9,6 +9,7 @@
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/context.hh>
+#include <shaped-graphics/pipeline_layout.hh> // pipeline_layout_description::groups
 #include <shaped-graphics/sampler.hh>
 
 namespace sg
@@ -34,10 +35,16 @@ void add_sampler(cc::byte_stream_builder& b, sampler const& s)
 }
 } // namespace
 
-void pipeline_cache::add_binding_layout_provider(
-    std::shared_ptr<cc::key_value_provider<cc::hash128, binding_layout_handle>> provider)
+void pipeline_cache::add_binding_group_layout_provider(
+    std::shared_ptr<cc::key_value_provider<cc::hash128, binding_group_layout_handle>> provider)
 {
-    _layout_cache.add_provider(cc::move(provider));
+    _binding_group_layout_cache.add_provider(cc::move(provider));
+}
+
+void pipeline_cache::add_pipeline_layout_provider(
+    std::shared_ptr<cc::key_value_provider<cc::hash128, pipeline_layout_handle>> provider)
+{
+    _pipeline_layout_cache.add_provider(cc::move(provider));
 }
 
 void pipeline_cache::add_compute_pipeline_provider(
@@ -48,18 +55,20 @@ void pipeline_cache::add_compute_pipeline_provider(
 
 void pipeline_cache::add_default_in_memory_providers(cc::isize max_entries)
 {
-    _layout_cache.add_default_in_memory_provider(max_entries);
+    _binding_group_layout_cache.add_default_in_memory_provider(max_entries);
+    _pipeline_layout_cache.add_default_in_memory_provider(max_entries);
     _compute_cache.add_default_in_memory_provider(max_entries);
 }
 
 void pipeline_cache::apply_bookkeeping()
 {
-    _layout_cache.apply_bookkeeping();
+    _binding_group_layout_cache.apply_bookkeeping();
+    _pipeline_layout_cache.apply_bookkeeping();
     _compute_cache.apply_bookkeeping();
 }
 
-cc::hash128 pipeline_cache::compute_binding_layout_key(cc::span<binding const> bindings,
-                                                       cc::span<named_sampler const> static_samplers) const
+cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding const> bindings,
+                                                             cc::span<named_sampler const> static_samplers) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_pod(cc::u64(bindings.size()));
@@ -81,6 +90,37 @@ cc::hash128 pipeline_cache::compute_binding_layout_key(cc::span<binding const> b
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
+cc::hash128 pipeline_cache::compute_pipeline_layout_key(pipeline_layout_description const& desc) const
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(cc::u64(desc.groups.size()));
+    for (auto const& g : desc.groups)
+        // group-layout identity — pointer is stable because cached group layouts are shared/persistent
+        b.add_pod(reinterpret_cast<cc::u64>(g.get()));
+    // pipeline-level static samplers change the root signature, so they are part of the identity
+    b.add_pod(cc::u64(desc.static_samplers.size()));
+    for (auto const& bs : desc.static_samplers)
+    {
+        b.add_pod(bs.binding.set);
+        b.add_pod(bs.binding.index);
+        b.add_pod(bs.binding.count);
+        b.add_pod(bs.binding.type);
+        add_sampler(b, bs.sampler);
+    }
+    // inline constants add a 32-bit-constants root parameter, so they are part of the identity too
+    b.add_pod(desc.inline_constants.has_value());
+    if (desc.inline_constants.has_value())
+    {
+        auto const& ic = desc.inline_constants.value();
+        b.add_pod(ic.set);
+        b.add_pod(ic.index);
+        b.add_pod(ic.count);
+        b.add_pod(ic.type);
+        b.add_optional(ic.block_size);
+    }
+    return cc::hash128::create(b.written_bytes(), 0);
+}
+
 cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_description const& desc) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
@@ -88,17 +128,25 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
     b.add(desc.shader.bytecode.span());
     b.add_string(desc.shader.entry_point);
     b.add_string(desc.shader.compiler.signature);
-    // layout identity — pointer is stable because cached layouts are shared/persistent
+    // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent, and it
+    // transitively covers its group layouts
     b.add_pod(reinterpret_cast<cc::u64>(desc.layout.get()));
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
-binding_layout_handle pipeline_cache::acquire_binding_layout(context& ctx,
-                                                             cc::span<binding const> bindings,
-                                                             cc::span<named_sampler const> static_samplers)
+binding_group_layout_handle pipeline_cache::acquire_binding_group_layout(context& ctx,
+                                                                         cc::span<binding const> bindings,
+                                                                         cc::span<named_sampler const> static_samplers)
 {
-    auto const key = this->compute_binding_layout_key(bindings, static_samplers);
-    return _layout_cache.acquire(key, [&] { return ctx.uncached.create_binding_layout(bindings, static_samplers); });
+    auto const key = this->compute_binding_group_layout_key(bindings, static_samplers);
+    return _binding_group_layout_cache.acquire(
+        key, [&] { return ctx.uncached.create_binding_group_layout(bindings, static_samplers); });
+}
+
+pipeline_layout_handle pipeline_cache::acquire_pipeline_layout(context& ctx, pipeline_layout_description const& desc)
+{
+    auto const key = this->compute_pipeline_layout_key(desc);
+    return _pipeline_layout_cache.acquire(key, [&] { return ctx.uncached.create_pipeline_layout(desc); });
 }
 
 async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc)

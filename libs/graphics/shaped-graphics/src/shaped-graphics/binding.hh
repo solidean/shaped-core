@@ -24,7 +24,7 @@ enum class binding_type
     readonly_texture,            ///< sampled texture — SRV (readonly, shape texture)
     readwrite_texture,           ///< storage texture — UAV (readwrite, shape texture)
     sampler,                     ///< texture sampler — not a view; bound as a static or dynamic sampler
-    // Future (with a graphics pipeline): acceleration_structure.
+    acceleration_structure,      ///< ray-tracing TLAS — SRV addressed by GPU VA (HLSL RaytracingAccelerationStructure)
 };
 
 /// Whether a binding is a sampler rather than a resource view. Sampler bindings carry no view (no access
@@ -51,6 +51,8 @@ enum class binding_type
         return view_class::readonly;
     case binding_type::readwrite_texture:
         return view_class::readwrite;
+    case binding_type::acceleration_structure:
+        return view_class::acceleration_structure;
     case binding_type::sampler:
         break; // a sampler is not a view — callers gate on is_sampler() first
     }
@@ -73,6 +75,8 @@ enum class binding_type
     case binding_type::readonly_texture:
     case binding_type::readwrite_texture:
         return view_shape::texture;
+    case binding_type::acceleration_structure:
+        return view_shape::acceleration_structure;
     case binding_type::sampler:
         break; // a sampler is not a view — callers gate on is_sampler() first
     }
