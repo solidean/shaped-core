@@ -19,6 +19,8 @@ add_library(shaped-graphics
     src/shaped-graphics/binding_group_layout.cc
     src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc
+    src/shaped-graphics/raytracing_pipeline.cc
+    src/shaped-graphics/raytracing_shader_table.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
     src/shaped-graphics/context.cc
@@ -75,6 +77,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/pipeline_layout.hh
     src/shaped-graphics/compiled_shader.hh
     src/shaped-graphics/compute_pipeline.hh
+    src/shaped-graphics/raytracing_pipeline.hh
+    src/shaped-graphics/raytracing_shader_table.hh
     src/shaped-graphics/binding_group.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/allocation_info.hh

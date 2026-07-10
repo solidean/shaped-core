@@ -270,6 +270,14 @@ protected:
     [[nodiscard]] virtual cc::result<compute_pipeline_handle>
     try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
 
+    /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).
+    [[nodiscard]] virtual cc::result<raytracing_pipeline_handle>
+    try_create_raytracing_pipeline(raytracing_pipeline_description const& desc, lifetime_scope scope) = 0;
+
+    /// Builds a raytracing_shader_table over a raytracing_pipeline (references its shader identifiers).
+    [[nodiscard]] virtual cc::result<raytracing_shader_table_handle>
+    try_create_raytracing_shader_table(raytracing_shader_table_description const& desc, lifetime_scope scope) = 0;
+
     /// Instantiates group `layout` with the given name→view bindings (validated against the layout) and
     /// dynamic `samplers` (one per non-static sampler binding).
     [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,

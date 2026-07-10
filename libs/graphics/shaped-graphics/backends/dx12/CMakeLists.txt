@@ -22,6 +22,8 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_group_layout.cc
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
+    src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.cc
+    src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
     src/shaped-graphics/backends/dx12/dx12_descriptor_heap.cc
     src/shaped-graphics/backends/dx12/dx12_view_desc.cc
@@ -61,6 +63,8 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_group_layout.hh
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.hh
+    src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh
+    src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh
     src/shaped-graphics/backends/dx12/dx12_binding_group.hh
     src/shaped-graphics/backends/dx12/dx12_acceleration_structure.hh
 )

@@ -122,6 +122,18 @@ public:
     {
         return cc::error("vulkan compute_pipeline creation is not implemented yet");
     }
+    [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
+        sg::raytracing_pipeline_description const&,
+        sg::lifetime_scope) override
+    {
+        return cc::error("vulkan raytracing_pipeline creation is not implemented yet");
+    }
+    [[nodiscard]] cc::result<sg::raytracing_shader_table_handle> try_create_raytracing_shader_table(
+        sg::raytracing_shader_table_description const&,
+        sg::lifetime_scope) override
+    {
+        return cc::error("vulkan raytracing_shader_table creation is not implemented yet");
+    }
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle,
                                                                                 cc::span<sg::named_view const>,
                                                                                 cc::span<sg::named_sampler const>,

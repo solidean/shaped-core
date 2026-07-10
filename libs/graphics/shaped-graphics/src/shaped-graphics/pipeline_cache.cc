@@ -10,6 +10,7 @@
 #include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/pipeline_layout.hh> // pipeline_layout_description::groups
+#include <shaped-graphics/raytracing_pipeline.hh>
 #include <shaped-graphics/sampler.hh>
 
 namespace sg
@@ -53,11 +54,18 @@ void pipeline_cache::add_compute_pipeline_provider(
     _compute_cache.add_provider(cc::move(provider));
 }
 
+void pipeline_cache::add_raytracing_pipeline_provider(
+    std::shared_ptr<cc::key_value_provider<cc::hash128, async_raytracing_pipeline>> provider)
+{
+    _raytracing_cache.add_provider(cc::move(provider));
+}
+
 void pipeline_cache::add_default_in_memory_providers(cc::isize max_entries)
 {
     _binding_group_layout_cache.add_default_in_memory_provider(max_entries);
     _pipeline_layout_cache.add_default_in_memory_provider(max_entries);
     _compute_cache.add_default_in_memory_provider(max_entries);
+    _raytracing_cache.add_default_in_memory_provider(max_entries);
 }
 
 void pipeline_cache::apply_bookkeeping()
@@ -65,6 +73,7 @@ void pipeline_cache::apply_bookkeeping()
     _binding_group_layout_cache.apply_bookkeeping();
     _pipeline_layout_cache.apply_bookkeeping();
     _compute_cache.apply_bookkeeping();
+    _raytracing_cache.apply_bookkeeping();
 }
 
 cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding const> bindings,
@@ -134,6 +143,48 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
+cc::hash128 pipeline_cache::compute_raytracing_pipeline_key(raytracing_pipeline_description const& desc) const
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent
+    b.add_pod(reinterpret_cast<cc::u64>(desc.layout.get()));
+
+    auto add_shader = [&b](compiled_shader const& s)
+    {
+        b.add(s.bytecode.span());
+        b.add_string(s.entry_point);
+        b.add_string(s.compiler.signature);
+    };
+    auto add_optional_shader = [&](cc::optional<compiled_shader> const& s)
+    {
+        b.add_pod(s.has_value());
+        if (s.has_value())
+            add_shader(s.value());
+    };
+
+    b.add_pod(cc::u64(desc.raygen_shaders.size()));
+    for (auto const& s : desc.raygen_shaders)
+        add_shader(s);
+    b.add_pod(cc::u64(desc.miss_shaders.size()));
+    for (auto const& s : desc.miss_shaders)
+        add_shader(s);
+    b.add_pod(cc::u64(desc.callable_shaders.size()));
+    for (auto const& s : desc.callable_shaders)
+        add_shader(s);
+    b.add_pod(cc::u64(desc.hit_shaders.size()));
+    for (auto const& h : desc.hit_shaders)
+    {
+        add_optional_shader(h.closest_hit);
+        add_optional_shader(h.any_hit);
+        add_optional_shader(h.intersection);
+    }
+
+    b.add_pod(desc.max_recursion_depth);
+    b.add_pod(desc.max_payload_size);
+    b.add_pod(desc.max_attribute_size);
+    return cc::hash128::create(b.written_bytes(), 0);
+}
+
 binding_group_layout_handle pipeline_cache::acquire_binding_group_layout(context& ctx,
                                                                          cc::span<binding const> bindings,
                                                                          cc::span<named_sampler const> static_samplers)
@@ -168,5 +219,26 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
                                               return actx.success(cc::move(res.value()));
                                           });
                                   });
+}
+
+async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& ctx,
+                                                                      raytracing_pipeline_description const& desc)
+{
+    auto const key = this->compute_raytracing_pipeline_key(desc);
+    return _raytracing_cache.acquire(key,
+                                     [&]() -> async_raytracing_pipeline
+                                     {
+                                         // The build frame runs later (possibly on a worker), so deep-copy the whole description (it owns
+                                         // its shader vectors + layout handle) rather than referencing the caller's.
+                                         return cc::make_async_scheduled<raytracing_pipeline_handle>(
+                                             [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](
+                                                 cc::async_context& actx) -> cc::async_result<raytracing_pipeline_handle>
+                                             {
+                                                 auto res = ctx_ptr->uncached.try_create_raytracing_pipeline(d);
+                                                 if (res.has_error())
+                                                     return actx.error(cc::move(res.error()));
+                                                 return actx.success(cc::move(res.value()));
+                                             });
+                                     });
 }
 } // namespace sg

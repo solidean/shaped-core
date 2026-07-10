@@ -116,6 +116,13 @@ public:
         dx12_pipeline_layout_handle layout,
         cc::span<cc::byte const> cached_pipeline,
         sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_raytracing_pipeline_handle> create_dx12_raytracing_pipeline(
+        sg::raytracing_pipeline_description const& desc,
+        dx12_pipeline_layout_handle layout,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_raytracing_shader_table_handle> create_dx12_raytracing_shader_table(
+        sg::raytracing_shader_table_description const& desc,
+        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_group_layout_handle layout,
                                                                                   cc::span<sg::named_view const> views,
                                                                                   cc::span<sg::named_sampler const> samplers,
@@ -167,6 +174,12 @@ public:
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
         sg::compute_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
+        sg::raytracing_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::raytracing_shader_table_handle> try_create_raytracing_shader_table(
+        sg::raytracing_shader_table_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
                                                                                 cc::span<sg::named_view const> views,
