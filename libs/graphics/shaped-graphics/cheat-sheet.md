@@ -303,7 +303,8 @@ sg::named_sampler           // { cc::string name; sampler sampler }  — name-ma
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `set`)
 sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle, max_binding_groups> groups; cc::vector<bound_sampler> static_samplers }  — groups ordered; index = bind slot
-sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout }
+sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
+compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)

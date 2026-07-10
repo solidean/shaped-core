@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/pinned_data.hh>
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -13,7 +14,11 @@ struct compute_pipeline_description
 {
     compiled_shader const& shader;
     pipeline_layout_handle layout;
-    // TODO: cached_pipeline — a previously-built pipeline / cache blob to seed the backend PSO cache.
+
+    /// Optional serialized PSO blob for accelerated creation (skips most shader-compile / driver work).
+    /// Platform-specific and best-effort: backends may ignore it. Empty by default; obtain one from a
+    /// previously-built pipeline (cached_pipeline_data below) and persist it across runs.
+    cc::pinned_data<cc::byte const> cached_pipeline = {};
 };
 
 /// A ready-to-run compute pipeline: a compute shader compiled against a pipeline_layout. Bound to a
@@ -28,6 +33,10 @@ public:
 
     /// The shader's workgroup size (`[numthreads]` / `local_size`) — drives `cmd.compute.dispatch_threads`.
     [[nodiscard]] compute_dimensions workgroup_size() const { return _workgroup_size; }
+
+    /// The backend's serialized PSO blob, for persisting and feeding back via
+    /// compute_pipeline_description::cached_pipeline. Empty if the backend doesn't support it.
+    [[nodiscard]] virtual cc::pinned_data<cc::byte const> cached_pipeline_data() const = 0;
 
 protected:
     explicit compute_pipeline(compute_dimensions workgroup_size) : _workgroup_size(workgroup_size) {}
