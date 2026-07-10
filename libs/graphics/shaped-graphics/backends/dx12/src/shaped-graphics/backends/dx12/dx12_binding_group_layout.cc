@@ -15,6 +15,7 @@ namespace
     case sg::view_class::uniform:
         return D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
     case sg::view_class::readonly:
+    case sg::view_class::acceleration_structure: // an AS is bound as an SRV (RAYTRACING_ACCELERATION_STRUCTURE)
         return D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     case sg::view_class::readwrite:
         return D3D12_DESCRIPTOR_RANGE_TYPE_UAV;

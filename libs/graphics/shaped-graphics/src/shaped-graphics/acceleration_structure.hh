@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/views.hh> // acceleration_structure_view (tlas::as_view)
 
 #include <atomic>
 #include <memory>
@@ -208,6 +209,14 @@ public:
     [[nodiscard]] accel_build_flags build_flags() const { return _build_flags; }
     [[nodiscard]] int instance_count() const { return _instance_count; }
     [[nodiscard]] bool allows_update() const { return has_flag(_build_flags, accel_build_flags::allow_update); }
+
+    /// A shader-bindable view of this TLAS (HLSL `RaytracingAccelerationStructure`). Pass it into a
+    /// binding_group like any other view; the view carries this tlas (each backend binds it its own way), and a
+    /// dispatch that binds it declares `accel_read` on the tlas storage.
+    [[nodiscard]] acceleration_structure_view as_view() const
+    {
+        return acceleration_structure_view{.tlas = shared_from_this()};
+    }
 
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
     [[nodiscard]] bool is_expired() const { return _expired.load(std::memory_order_acquire); }

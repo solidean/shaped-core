@@ -33,6 +33,8 @@ namespace
         if (bd.Dimension == D3D_SRV_DIMENSION_BUFFER)
             return {}; // RWBuffer<T> — a typed/texel buffer, not a storage texture
         return sg::binding_type::readwrite_texture;
+    case D3D_SIT_RTACCELERATIONSTRUCTURE:
+        return sg::binding_type::acceleration_structure; // RaytracingAccelerationStructure (SRV, VA-addressed)
     default:
         return {};
     }
@@ -66,8 +68,8 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
         cc::optional<sg::binding_type> const type = map_binding_type(bd);
         if (!type.has_value())
             return cc::error(cc::format("shaped-shader-compiler-dxc: resource '{}' is a binding kind shaped-graphics "
-                                        "does not model yet (texel / typed buffers, append/consume/counter buffers, "
-                                        "and acceleration structures are not supported)",
+                                        "does not model yet (texel / typed buffers and append/consume/counter buffers "
+                                        "are not supported)",
                                         bd.Name));
 
         // Faithful (register, space, kind) -> (index, set, type). No remapping; see reflection.hh.
