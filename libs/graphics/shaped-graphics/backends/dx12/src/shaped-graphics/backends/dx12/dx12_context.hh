@@ -106,9 +106,11 @@ public:
     [[nodiscard]] cc::result<dx12_pipeline_layout_handle> create_dx12_pipeline_layout(
         sg::pipeline_layout_description const& desc,
         sg::lifetime_scope scope);
-    [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(sg::compiled_shader const& shader,
-                                                                                        dx12_pipeline_layout_handle layout,
-                                                                                        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(
+        sg::compiled_shader const& shader,
+        dx12_pipeline_layout_handle layout,
+        cc::span<cc::byte const> cached_pipeline,
+        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_group_layout_handle layout,
                                                                                   cc::span<sg::named_view const> views,
                                                                                   cc::span<sg::named_sampler const> samplers,

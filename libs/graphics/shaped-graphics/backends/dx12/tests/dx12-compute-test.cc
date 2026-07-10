@@ -62,7 +62,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     auto pipeline_layout = c.create_dx12_pipeline_layout(
         sg::pipeline_layout_description{.groups = {group_layout.value()}}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value());
-    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), sg::lifetime_scope::persistent);
+    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), {}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
     // Bind the output buffer's read-write structured view to "Output".
@@ -117,7 +117,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
     auto pipeline_layout = c.create_dx12_pipeline_layout(
         sg::pipeline_layout_description{.groups = {group_layout.value()}}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value());
-    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), sg::lifetime_scope::persistent);
+    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), {}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
     for (int e = 0; e < 40; ++e)

@@ -107,7 +107,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
     auto pipeline_layout = c.create_dx12_pipeline_layout(
         sg::pipeline_layout_description{.groups = {group_layout.value()}}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value());
-    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), sg::lifetime_scope::persistent);
+    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), {}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
     sg::texture_2d const typed(tex.value());
