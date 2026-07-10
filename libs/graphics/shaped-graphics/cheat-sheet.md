@@ -248,8 +248,9 @@ sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — 
 sg::texture_readonly_view    // sampled texture (SRV) — view_class::readonly,  shape texture
 sg::texture_readwrite_view   // storage texture (UAV) — view_class::readwrite, shape texture
 // each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view().
-sg::view_class               // uniform | readonly | readwrite   (access; mirrors buffer_usage / texture_usage)
-sg::view_shape               // uniform_block | structured | raw | texture   (layout)
+sg::acceleration_structure_view // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
+sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
+sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
 v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, offset/size/... | format+range }
 // backends switch on (access, shape) to build the native descriptor (SRV/UAV/CBV/texture SRV/UAV)
@@ -277,7 +278,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 ```cpp
 #include <shaped-graphics/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
-                            //   | read{only,write}_texture | sampler   (backend-agnostic; replaces D3D_SHADER_INPUT_TYPE; +accel later)
+                            //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
 sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
                             //   (set,index) = SPIR-V set/binding / WGSL @group/@binding; count 0 = unbounded
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
@@ -348,6 +349,7 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> b
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 // blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); geometry_count()/instance_count(); build_flags();
 //   allows_update(); is_expired()/expire()/add_finalizer(). dx12 real (WARP); vulkan is_supported()==false + stubs.
+tlas.as_view()  // -> acceleration_structure_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RT / RayQuery)
 ```
 
 ## cached layouts + pipelines — the built-in cache  (ctx.cached / pipeline_cache)

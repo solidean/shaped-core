@@ -64,6 +64,7 @@ if(TARGET shaped-graphics-dx12)
         tests/end-to-end-sampler-test.cc
         tests/end-to-end-multigroup-test.cc
         tests/end-to-end-inline-constants-test.cc
+        tests/end-to-end-inline-raytracing-test.cc
     )
     target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
 endif()

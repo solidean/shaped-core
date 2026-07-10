@@ -21,6 +21,8 @@ namespace sg
         return access_flags::shader_read;
     case view_class::readwrite:
         return access_flags::shader_write;
+    case view_class::acceleration_structure:
+        return access_flags::accel_read;
     }
     return access_flags::shader_read; // unreachable for the closed set above
 }
@@ -34,6 +36,7 @@ namespace sg
     {
     case view_class::uniform:
     case view_class::readonly:
+    case view_class::acceleration_structure: // never a texture — buffers/AS never call this
         return texture_layout::shader_readonly;
     case view_class::readwrite:
         return texture_layout::shader_readwrite;

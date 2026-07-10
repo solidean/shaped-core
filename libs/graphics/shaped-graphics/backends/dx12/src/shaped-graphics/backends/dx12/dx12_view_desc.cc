@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
@@ -264,7 +265,22 @@ void create_buffer_view(ID3D12Device* device, sg::raw_view const& view, D3D12_CP
         device->CreateUnorderedAccessView(resource, nullptr, &desc, dst); // no counter resource
         return;
     }
+    case sg::view_class::acceleration_structure:
+        CC_UNREACHABLE("acceleration-structure views are created via create_accel_view, not create_buffer_view");
     }
     CC_UNREACHABLE("unhandled view access class");
+}
+
+void create_accel_view(ID3D12Device* device, dx12_tlas const& tlas, D3D12_CPU_DESCRIPTOR_HANDLE dst)
+{
+    // A ray-tracing AS SRV is special: it is addressed purely by the AS's GPU virtual address, so the resource
+    // argument to CreateShaderResourceView is null and the location lives in the desc.
+    CC_ASSERT(tlas._dx12_storage != nullptr, "acceleration structure has no storage buffer");
+    D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
+    desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+    desc.Format = DXGI_FORMAT_UNKNOWN;
+    desc.RaytracingAccelerationStructure.Location = tlas._dx12_storage->gpu_virtual_address();
+    device->CreateShaderResourceView(nullptr, &desc, dst);
 }
 } // namespace sg::backend::dx12
