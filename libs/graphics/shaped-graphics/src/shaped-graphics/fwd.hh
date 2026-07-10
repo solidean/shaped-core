@@ -25,12 +25,21 @@ class command_list_upload_scope;
 class command_list_download_scope;
 class command_list_copy_scope;
 class command_list_compute_scope;
+class command_list_raytracing_scope;
 class raw_buffer;
 class raw_texture;
-struct texture_description;        // value type (see raw_texture.hh) — input to create_raw_texture
-enum class pixel_format : u16;     // texel format (see pixel_format.hh)
-enum class texture_usage : u32;    // texture usage flags (see types.hh)
-enum class texture_dimension : u8; // 1D / 2D / 3D (see raw_texture.hh)
+class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
+class tlas;                         // top-level acceleration structure (see acceleration_structure.hh)
+struct blas_triangles;              // value type — one triangle geometry input to build_blas
+struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
+struct tlas_instance;               // value type — one instance input to build_tlas
+enum class accel_build_flags : u32; // build-time trade-offs (see acceleration_structure.hh)
+enum class accel_index_format : u8; // index element width for indexed triangles
+enum class instance_cull_mode : u8; // per-instance triangle cull selection
+struct texture_description;         // value type (see raw_texture.hh) — input to create_raw_texture
+enum class pixel_format : u16;      // texel format (see pixel_format.hh)
+enum class texture_usage : u32;     // texture usage flags (see types.hh)
+enum class texture_dimension : u8;  // 1D / 2D / 3D (see raw_texture.hh)
 class bytes_waiter;
 class bytes_future;
 template <class T>
@@ -121,7 +130,9 @@ enum class submission_token : u64
 /// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
 using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
-using raw_texture_handle = std::shared_ptr<raw_texture const>;         // shared-immutable: shape is fixed at creation
+using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutable: shape is fixed at creation
+using blas_handle = std::shared_ptr<blas const>;               // shared-immutable: an opaque, driver-built structure
+using tlas_handle = std::shared_ptr<tlas const>; // shared-immutable: indexes a set of instances of blas_handle
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

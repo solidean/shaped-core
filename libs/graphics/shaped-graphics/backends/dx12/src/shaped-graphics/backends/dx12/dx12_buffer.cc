@@ -20,9 +20,12 @@ D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usa
     desc.SampleDesc.Count = 1;
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // required for buffers
     // Only a UAV (read-write storage) needs a creation flag; SRV / CBV / VBV / IBV / copy / indirect
-    // are all allowed by default on a D3D12 buffer.
-    desc.Flags = sg::has_flag(usage, sg::buffer_usage::readwrite_buffer) ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-                                                                         : D3D12_RESOURCE_FLAG_NONE;
+    // are all allowed by default on a D3D12 buffer. Acceleration-structure *storage* is a UAV-flavored
+    // buffer too (D3D12 requires ALLOW_UNORDERED_ACCESS for it) — plus it must be *created* in the
+    // RAYTRACING_ACCELERATION_STRUCTURE state (see accel_structure_initial_state / dx12_context create).
+    bool const needs_uav = sg::has_flag(usage, sg::buffer_usage::readwrite_buffer)
+                        || sg::has_flag(usage, sg::buffer_usage::accel_structure_storage);
+    desc.Flags = needs_uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
     return desc;
 }
 
@@ -160,6 +163,12 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
         // so no explicit barriers are recorded for transfers.
         // TODO: a real per-resource barrier + state-tracking system will replace this (and enable, e.g.,
         // uploading then downloading the same buffer within one command list).
+        // Exception: acceleration-structure storage MUST be created in the RAYTRACING_ACCELERATION_STRUCTURE
+        // state and stays there for its whole life (D3D12 forbids transitioning an AS resource); the build's
+        // accel_write/accel_read barriers are same-state UAV-style ordering, not layout transitions.
+        D3D12_RESOURCE_STATES const initial_state = sg::has_flag(usage, sg::buffer_usage::accel_structure_storage)
+                                                      ? D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE
+                                                      : D3D12_RESOURCE_STATE_COMMON;
         if (alloc.is_placed())
         {
             // Placed: sub-allocate into the caller's heap at the offset its allocator picked.
@@ -169,7 +178,7 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
             CC_ASSERT(alloc.offset >= 0, "placement offset must be non-negative");
             CC_ASSERT(alloc.offset + size_in_bytes <= dx_heap->size_in_bytes(), "placement exceeds the heap");
             if (HRESULT hr = _device->CreatePlacedResource(dx_heap->_heap.Get(), UINT64(alloc.offset), &desc,
-                                                           D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource));
+                                                           initial_state, nullptr, IID_PPV_ARGS(&resource));
                 FAILED(hr))
                 return dx12_error(hr, "ID3D12Device::CreatePlacedResource failed");
             heap_handle = alloc.heap;
@@ -179,8 +188,8 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_i
             // Dedicated: a committed resource owns its own allocation.
             D3D12_HEAP_PROPERTIES heap = {};
             heap.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-resident: sg exposes no host-visible buffers.
-            if (HRESULT hr = _device->CreateCommittedResource(
-                    &heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource));
+            if (HRESULT hr = _device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, initial_state,
+                                                              nullptr, IID_PPV_ARGS(&resource));
                 FAILED(hr))
                 return dx12_error(hr, "ID3D12Device::CreateCommittedResource failed");
         }

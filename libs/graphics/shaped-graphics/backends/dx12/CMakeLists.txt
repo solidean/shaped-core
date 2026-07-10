@@ -27,6 +27,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_view_desc.cc
     src/shaped-graphics/backends/dx12/dx12_sampler.cc
     src/shaped-graphics/backends/dx12/dx12_bind.cc
+    src/shaped-graphics/backends/dx12/dx12_raytracing.cc
 )
 
 target_sources(shaped-graphics-dx12
@@ -59,6 +60,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.hh
     src/shaped-graphics/backends/dx12/dx12_binding_group.hh
+    src/shaped-graphics/backends/dx12/dx12_acceleration_structure.hh
 )
 
 target_compile_features(shaped-graphics-dx12 PUBLIC cxx_std_23)
@@ -102,6 +104,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-texture-barrier-test.cc
     tests/dx12-texture-view-test.cc
     tests/dx12-sampler-test.cc
+    tests/dx12-raytracing-test.cc
 )
 
 target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)

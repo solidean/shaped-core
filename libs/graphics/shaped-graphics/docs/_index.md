@@ -51,6 +51,9 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   vocabulary (`binding_type`, `(set, index)`) and how a binding validates a bound `raw_view`.
 - [caches](concepts/caches.md) — the content-addressed get-or-create caches for binding layouts,
   compute pipelines (async), and compiled shaders: `ctx.uncached` (raw) vs `ctx.cached`, keys, and tiers.
+- [acceleration structures](concepts/acceleration-structures.md) — ray-tracing `blas`/`tlas`: opaque
+  driver-built structures whose creation is a recorded `cmd.raytracing` build, the DXR∩Vulkan input
+  vocabulary, and the persistent-vs-transient handle lifetime.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
   epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue

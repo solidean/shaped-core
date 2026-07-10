@@ -137,6 +137,11 @@ texture              [in progress]  raw_texture + texture<Traits> + pixel_format
 pipeline             [in progress]  compute pipeline + bind path (dx12 real, vulkan stub); graphics pipelines + shader compiler planned
 sampler              [in progress]  sampler + static/dynamic samplers; dx12 real (root-sig static samplers
                                   + a separate sampler descriptor heap for dynamic ones); vulkan pending
+accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
+                                  triangles + procedural AABBs, build_tlas, is_supported), result sized from a
+                                  prebuild query with transient scratch, persistent handles across epochs;
+                                  dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update,
+                                  compaction, SBT, raytracing pipelines, the acceleration_structure binding
 swapchain / surface  [planned]  presentation
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
                                   deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)

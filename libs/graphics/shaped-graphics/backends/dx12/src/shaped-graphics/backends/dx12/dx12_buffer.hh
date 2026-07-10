@@ -41,6 +41,13 @@ public:
     // epoch retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
     ~dx12_buffer() override;
 
+    /// The buffer's GPU virtual address (0 for an empty / size-0 buffer, whose _resource is null). Used by
+    /// the raytracing build path, which references vertices / scratch / result by address.
+    [[nodiscard]] D3D12_GPU_VIRTUAL_ADDRESS gpu_virtual_address() const
+    {
+        return _resource ? _resource->GetGPUVirtualAddress() : D3D12_GPU_VIRTUAL_ADDRESS(0);
+    }
+
     dx12_context& _ctx;                       // creating context — outlives this buffer
     sg::epoch _creation_epoch;                // epoch this buffer was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook

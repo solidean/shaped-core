@@ -80,6 +80,11 @@ public:
 
     ~dx12_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
 
+    /// Whether this device supports ray tracing (DXR tier >= 1.0). Cached from CheckFeatureSupport at
+    /// creation; a build_blas / build_tlas on an unsupported device asserts. Surfaced through
+    /// cmd.raytracing.is_supported().
+    [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
+
     // backend-typed API — prefer these when you already hold a dx12_context
 
     [[nodiscard]] cc::result<std::unique_ptr<dx12_command_list>> create_dx12_command_list();
@@ -249,6 +254,9 @@ public:
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
+
+    // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5). NOT_SUPPORTED until set.
+    D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
 
     // Epoch machinery. The epoch fence is signaled with the epoch value at the end of each epoch;
     // the submission fence is a per-command-list timeline on the same queue.

@@ -36,6 +36,12 @@ using dx12_texture_handle = std::shared_ptr<dx12_texture const>;
 class dx12_memory_heap;
 using dx12_memory_heap_handle = std::shared_ptr<dx12_memory_heap const>;
 
+// Ray-tracing acceleration structures (see dx12_acceleration_structure.hh).
+class dx12_blas;
+using dx12_blas_handle = std::shared_ptr<dx12_blas const>;
+class dx12_tlas;
+using dx12_tlas_handle = std::shared_ptr<dx12_tlas const>;
+
 // Bind path (see dx12_binding_group_layout.hh / dx12_pipeline_layout.hh / dx12_compute_pipeline.hh /
 // dx12_binding_group.hh).
 struct dx12_descriptor_heap;
