@@ -217,7 +217,17 @@ def main() -> None:
     for module in COMMANDS:
         module.add_parser(sub)
 
-    args = parser.parse_args()
+    # parse_known_args (not parse_args) so `test` can forward unrecognized trailing tokens
+    # verbatim to the test binary (e.g. `-c <section>` for nexus section scoping) while dev.py's
+    # own options — crucially --preset — are still parsed no matter where they sit relative to the
+    # test-name positional. A REMAINDER positional used to swallow everything after the name,
+    # silently eating a trailing `--preset` and running the default preset instead (a real hazard:
+    # a `--preset release-clang` verify could actually run relwithdebinfo). For every other command
+    # unknown args stay a hard error, mirroring argparse's strict default so typos fail loudly.
+    args, forwarded = parser.parse_known_args()
+    if forwarded and args.command != "test":
+        parser.error("unrecognized arguments: %s" % " ".join(forwarded))
+    args.runner_args = forwarded
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
 
     # Capture logs on the way out regardless of how the command exits (including
