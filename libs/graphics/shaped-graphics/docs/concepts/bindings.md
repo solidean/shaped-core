@@ -13,9 +13,9 @@ loader, or hand-authored in a test.)
 
 ## The binding vocabulary is backend-agnostic
 
-The legacy GFX system's binding vocabulary was HLSL/D3D12 verbatim — its bind-type enum *was*
-`D3D_SHADER_INPUT_TYPE`, its address model was HLSL's `(space, register, count)`. Since sg's baseline
-shading language is undecided, the binding vocabulary is drawn from concepts common to
+A backend-specific binding vocabulary would be HLSL/D3D12 verbatim — a bind-type enum that *is*
+`D3D_SHADER_INPUT_TYPE`, an address model that is HLSL's `(space, register, count)`. Since sg's baseline
+shading language is undecided, the binding vocabulary is instead drawn from concepts common to
 HLSL / GLSL / Slang / MSL / WGSL:
 
 - **`binding_type`** — the kind of resource a slot expects (`uniform_buffer`,

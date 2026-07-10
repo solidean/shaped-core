@@ -221,6 +221,14 @@ public:
         _upload_async.upload_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
     }
 
+    void async_upload_bytes_to_texture(sg::raw_texture_handle texture,
+                                       cc::pinned_data<cc::byte const> data,
+                                       sg::subresource_index const& subresource,
+                                       sg::texture_region const& region) override
+    {
+        _upload_async.upload_texture(cc::move(texture), cc::move(data), subresource, region);
+    }
+
     // Reached through ctx.download — async GPU→CPU buffer readback on the copy queue. Forwards to the async
     // download system; a later direct-queue list writing the buffer auto-waits on the read.
     [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
@@ -228,6 +236,13 @@ public:
                                                                     cc::isize size_in_bytes) override
     {
         return _download_async.download_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
+    }
+
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_texture(sg::raw_texture_handle texture,
+                                                                     sg::subresource_index const& subresource,
+                                                                     sg::texture_region const& region) override
+    {
+        return _download_async.download_texture(cc::move(texture), subresource, region);
     }
 
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending

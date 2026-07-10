@@ -8,7 +8,7 @@
 /// declared accesses with `declare`, then calls `flush` before each GPU op to get the barrier to emit
 /// (if any) and roll the state forward. Buffers keep one of these; textures keep one per covering box.
 ///
-/// Three timelines keep barriers minimal (ported from the legacy GFX tracker):
+/// Three timelines keep barriers minimal:
 ///   curr_*           — what the *next* op will do (accumulated by declare, consumed by flush)
 ///   inflight_*       — everything issued since the last write / command-list start
 ///   barriered_read_* — the reads already synced against the last write (so read-after-read is free)

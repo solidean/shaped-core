@@ -46,6 +46,15 @@ public:
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed texture; null when dedicated
 
+    // Cross-queue sync stamps mirroring dx12_buffer's — they order the async copy queue (ctx.upload /
+    // ctx.download) against the direct queue. Only grow, never reset, mutable+atomic. An async texture copy
+    // requires the texture in the COMMON layout on the copy queue (see
+    // libs/graphics/shaped-graphics/docs/concepts/upload.async.md): a
+    // freshly created texture qualifies; one already in a shader/attachment layout must not be async-copied.
+    mutable std::atomic<cc::u64> _pending_async_upload_value = 0;   // forward: a later reader waits at submit
+    mutable std::atomic<cc::u64> _last_used_submission_token = 0;   // reverse: an async copy defers behind it
+    mutable std::atomic<cc::u64> _pending_async_download_value = 0; // forward: a later writer waits at submit
+
     // Per-command-list subresource access tracking. Mutable: a texture's shape is fixed but its tracked GPU
     // state changes as lists record against it; guarded because concurrent lists may record the same texture.
     // Thin forwarders return the barriers the command list must emit (dx12 owns barrier tracking + emission).

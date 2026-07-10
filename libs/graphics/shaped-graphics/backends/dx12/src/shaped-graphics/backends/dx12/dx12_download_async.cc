@@ -24,6 +24,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_download.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 
 namespace sg::backend::dx12
 {
@@ -33,6 +35,13 @@ namespace
 // Fewer than three reintroduces a sync bubble; more only adds staging memory.
 constexpr int num_staging_windows = 3;
 
+// Window sizes round up to the texture placement alignment (512) so each window base is 512-aligned — a
+// texture readback's placed footprint must start there. Buffer readbacks are unaffected by the rounding.
+[[nodiscard]] cc::isize round_window(cc::isize bytes)
+{
+    return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
+}
+
 // One chunk's CPU memcpy out of the readback staging buffer, deferred until its window's GPU read has run.
 // `source_keepalive` holds the read source alive until then (the read is recorded but not yet executed
 // when the job is dropped from the inbox).
@@ -41,7 +50,7 @@ struct download_mem_job
     cc::unique_function<void()> deferred_cpu_copy;
     std::weak_ptr<void const> pin;                      // future's pin; expired == caller cancelled the copy
     std::shared_ptr<dx12_async_download_waiter> waiter; // set only on a job's last chunk; marks the future ready
-    std::shared_ptr<dx12_buffer const> source_keepalive;
+    std::shared_ptr<void const> source_keepalive;       // holds the source (buffer or texture) alive across the read
 };
 
 // A submitted-but-not-yet-drained window. Its GPU read completes when the window fence reaches
@@ -93,33 +102,58 @@ protected:
     }
 
 private:
-    // Packs one readback into staging windows, submitting each as it fills. A read larger than a window
-    // spans several; a job finishing mid-window carries its completion value + last-chunk waiter into it.
+    // A cancelled read (its future's pin expired): skip the read (no CopyTextureRegion, no forward wait — no
+    // read means no read-after-write hazard) but STILL fold the completion value so the download fence reaches
+    // it (a later writer stamped with it must not hang). An empty window still submits + signals, keeping the
+    // fence monotonic and gap-free.
+    void fold_cancelled_completion(dx12_async_download_job& job)
+    {
+        if (job.completion_value != dx12_download_fence_value::none)
+        {
+            ensure_open_window();
+            cc::u64 const v = cc::u64(job.completion_value);
+            if (v > _open_highest_finished)
+                _open_highest_finished = v;
+        }
+    }
+
+    // Resolves one readback's source (buffer or texture) and stages it. The source is held strong for the
+    // job's whole lifetime, so its storage survives the copy-queue read without a deferred-deletion gate.
     void stage_job(dx12_async_download_job& job)
     {
-        // Cancelled? A dropped future expires its pin. Skip the read (no CopyBufferRegion, no forward wait —
-        // no read means no read-after-write hazard) but STILL fold the completion value so the download
-        // fence reaches it: a later writer stamped with this value must not hang. Mirrors upload's dropped-
-        // target rule. An empty window still submits + signals, keeping the fence monotonic and gap-free.
         if (job.pin.expired())
         {
-            if (job.completion_value != dx12_download_fence_value::none)
-            {
-                ensure_open_window();
-                cc::u64 const v = cc::u64(job.completion_value);
-                if (v > _open_highest_finished)
-                    _open_highest_finished = v;
-            }
+            fold_cancelled_completion(job);
             return;
         }
+        if (job.is_texture)
+        {
+            CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row exceeds "
+                                                                                      "one staging window");
+            dx12_texture_download download(job.texture_source->_resource.Get(), job.footprint, job.dst);
+            stage_resource(download, job, job.texture_source);
+        }
+        else
+        {
+            dx12_buffer_download download(job.buffer_source->_resource.Get(), job.src_offset, job.dst);
+            stage_resource(download, job, job.buffer_source);
+        }
+    }
 
+    // Packs one resource readback (buffer or texture) into staging windows, submitting each as it fills, and
+    // defers each chunk's CPU memcpy to drain. A read larger than a window spans several; a texture job
+    // self-aligns each window and returns 0 when a window tail can't fit its next aligned row, which rolls to
+    // a fresh window (buffers never return 0). `keepalive` holds the source alive across the deferred copies.
+    void stage_resource(dx12_resource_download& download,
+                        dx12_async_download_job& job,
+                        std::shared_ptr<void const> const& keepalive)
+    {
         // A window issues its cross-queue waits once, hoisted ahead of its reads (submit_window), so it must
         // never both promise a completion V and carry a wait that could depend on V — that self-referential
         // pair is the copy-actor deadlock. Two such waits per read: the forward direct-queue token, and the
-        // upload completion value (the async upload this read waits on may reverse-wait on a direct writer
-        // that itself waits on this window's V). If the open window already finished a read and either wait
-        // for this job is still pending, close the window now: this job's waits then land in a fresh window
-        // that can only point at prior, already-submitted work.
+        // upload completion value (the async upload this read waits on may reverse-wait on a direct writer that
+        // itself waits on this window's V). If the open window already finished a read and either wait is still
+        // pending, close it now: this job's waits then land in a fresh window pointing only at prior work.
         bool const forward_pending = cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
         bool const upload_pending
             = job.upload_wait_value != dx12_copy_fence_value::none
@@ -127,20 +161,22 @@ private:
         if (_window_open && _open_highest_finished > 0 && (forward_pending || upload_pending))
             submit_window();
 
-        dx12_buffer_download download(job.source->_resource.Get(), job.src_offset, job.dst);
         while (!download.is_finished())
         {
             ensure_open_window();
             cc::isize const avail = _sys._window_bytes - _window_used;
-            CC_ASSERT(avail > 0, "open staging window has no room"); // ensure_open_window guarantees room
             cc::isize const base = cc::isize(_current_window % cc::u64(num_staging_windows)) * _sys._window_bytes;
             dx12_download_allocation const alloc{_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
             dx12_pending_copy chunk = download.execute_next_job(*_list.Get(), alloc);
-            CC_ASSERT(chunk.bytes > 0, "async download made no progress");
+            if (chunk.bytes == 0) // window tail too small for the next aligned texture row → roll to a fresh window
+            {
+                submit_window();
+                continue;
+            }
             _window_used += chunk.bytes;
 
-            // This chunk reads the buffer, so its window must first wait for the last direct-queue list that
+            // This chunk reads the source, so its window must first wait for the last direct-queue list that
             // used it (forward sync) and for any pending async upload to it. Max over the window; both fences
             // are monotonic.
             if (cc::u64(job.wait_token) > _open_max_wait_token)
@@ -148,7 +184,7 @@ private:
             if (cc::u64(job.upload_wait_value) > _open_max_upload_wait)
                 _open_max_upload_wait = cc::u64(job.upload_wait_value);
 
-            // The window holding a read's last byte is the one whose completion satisfies a later writer's
+            // The window holding the read's last byte is the one whose completion satisfies a later writer's
             // reverse wait. Values are monotonic in enqueue order, so max keeps the window's value correct.
             bool const last = download.is_finished();
             if (last && job.completion_value != dx12_download_fence_value::none)
@@ -158,11 +194,10 @@ private:
                     _open_highest_finished = v;
             }
 
-            // Defer the CPU memcpy until this window's GPU read completes (at drain). The source is kept
-            // alive until then via the handle copy. Only the last chunk marks the future ready — windows
-            // drain in order, so by then every earlier chunk has already been copied.
+            // Defer the CPU memcpy until this window's GPU read completes (at drain). Only the last chunk marks
+            // the future ready — windows drain in order, so by then every earlier chunk has already been copied.
             _open_mem_jobs.push_back(
-                download_mem_job{cc::move(chunk.deferred_cpu_copy), job.pin, last ? job.waiter : nullptr, job.source});
+                download_mem_job{cc::move(chunk.deferred_cpu_copy), job.pin, last ? job.waiter : nullptr, keepalive});
 
             if (_window_used == _sys._window_bytes) // full → submit now and roll to the next window
                 submit_window();
@@ -300,7 +335,7 @@ private:
     // rebuilds staging at the new size. The per-slot allocators and the reused command list survive.
     void maybe_resize_staging()
     {
-        cc::isize const desired = _sys._desired_window_bytes.load(std::memory_order_acquire);
+        cc::isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
         if (desired == _sys._window_bytes)
             return;
         CC_ASSERT(desired > 0, "async download staging window must be positive");
@@ -360,6 +395,7 @@ private:
 cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async download staging window must be positive");
+    window_bytes = round_window(window_bytes); // keep every window's base 512-aligned for texture readbacks
 
     D3D12_COMMAND_QUEUE_DESC copy_queue_desc = {};
     copy_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
@@ -435,7 +471,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     dx12_async_download_job job;
     // Held strong for the job's whole lifetime, so the source storage survives the copy-queue read. dst
     // already dynamic_cast-verified above.
-    job.source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.buffer_source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     job.src_offset = offset;
     job.size = size;
     job.dst = dst_span;
@@ -446,6 +482,52 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     // committed bytes and never races an earlier-submitted writer.
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_copy_fence_value(upload_wait); // 0 == none: no pending async upload
+    _actor->enqueue_message(cc::move(job));
+
+    return sg::bytes_future(cc::move(dst), cc::move(waiter));
+}
+
+sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_handle texture,
+                                                              sg::subresource_index const& subresource,
+                                                              sg::texture_region const& region)
+{
+    CC_ASSERT(texture != nullptr, "async download source texture is null");
+    auto const* const src = dynamic_cast<dx12_texture const*>(texture.get());
+    CC_ASSERT(src != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!src->is_expired(), "async download source is a transient texture used past its epoch (expired)");
+    CC_ASSERT(src->_resource, "async download source texture has no storage");
+    CC_ASSERT(sg::has_flag(src->usage(), sg::texture_usage::copy_src), "async download source texture must have "
+                                                                       "texture_usage::copy_src");
+    CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
+
+    // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
+    dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
+
+    cc::u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
+
+    auto dst = cc::pinned_data<cc::byte>::create_uninitialized(fp.tight_size());
+    cc::span<cc::byte> const dst_span = dst.span();
+    auto waiter = std::make_shared<dx12_async_download_waiter>();
+
+    cc::u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    cc::u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
+    while (prev < value
+           && !src->_pending_async_download_value.compare_exchange_weak(prev, value, std::memory_order_release,
+                                                                        std::memory_order_relaxed))
+    {
+        // CAS retries; `prev` refreshed each time.
+    }
+
+    dx12_async_download_job job;
+    job.texture_source = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.footprint = fp;
+    job.is_texture = true;
+    job.dst = dst_span;
+    job.pin = std::weak_ptr<void const>(dst.pin());
+    job.waiter = waiter;
+    job.completion_value = dx12_download_fence_value(value);
+    job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
+    job.upload_wait_value = dx12_copy_fence_value(upload_wait);
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(waiter));

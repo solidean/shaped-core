@@ -29,6 +29,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context.uncached.cc
     src/shaped-graphics/context.cached.cc
     src/shaped-graphics/memory_heap.cc
+    src/shaped-graphics/impl/texture_copy_region.cc
 )
 
 # Public headers live co-located in src/. FILE_SET models the public API explicitly.
@@ -62,6 +63,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/texture.hh
     src/shaped-graphics/texture_traits.hh
     src/shaped-graphics/sampler.hh
+    src/shaped-graphics/texture_region.hh
     src/shaped-graphics/backend/command_list_slot.hh
     src/shaped-graphics/backend/resource_access.hh
     src/shaped-graphics/backend/resource_access_state.hh

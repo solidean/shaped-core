@@ -6,9 +6,11 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/texture_region.hh>
 
 #include <atomic>
 #include <memory>
@@ -28,15 +30,20 @@ public:
     }
 };
 
-/// One async download handed to the copy actor. `source` is held **strong** for the job's whole lifetime,
-/// so its storage stays alive across the copy-queue read (no deferred-deletion gate needed). `dst` lands
-/// the bytes; it is kept alive by `pin` (the future's pin, held weak here) — if the caller dropped the
-/// future before the actor reached this job, `pin` has expired and the copy is skipped, but its
-/// `completion_value` is still signaled so a later writer waiting on it never hangs. `wait_token` defers
-/// the read behind the last direct-queue list that used the buffer (so it reads committed bytes).
+/// One async download handed to the copy actor. `buffer_source` / `texture_source` is held **strong** for
+/// the job's whole lifetime, so its storage stays alive across the copy-queue read (no deferred-deletion
+/// gate needed). `dst` lands the bytes; it is kept alive by `pin` (the future's pin, held weak here) — if
+/// the caller dropped the future before the actor reached this job, `pin` has expired and the copy is
+/// skipped, but its `completion_value` is still signaled so a later writer waiting on it never hangs.
+/// `wait_token` defers the read behind the last direct-queue list that used the buffer (so it reads committed bytes).
 struct dx12_async_download_job
 {
-    std::shared_ptr<dx12_buffer const> source; // read source; held strong across the read
+    // Exactly one source is set: a buffer (via `buffer_source` + `src_offset`/`size`) or a texture (via
+    // `texture_source` + `footprint`). Both are held strong across the read so the storage survives it.
+    std::shared_ptr<dx12_buffer const> buffer_source;   // read source buffer, or empty for a texture read
+    std::shared_ptr<dx12_texture const> texture_source; // read source texture, or empty for a buffer read
+    dx12_texture_footprint footprint;                   // the texture region's copy footprint (texture reads)
+    bool is_texture = false;                            // discriminant: texture read vs buffer read
     cc::isize src_offset = 0;
     cc::isize size = 0;
     cc::span<cc::byte> dst;                             // destination bytes (valid while `pin` is)
@@ -82,6 +89,13 @@ public:
     /// the job to the actor. A zero-size read returns an already-ready, empty future. Preconditions: buffer
     /// non-null, a dx12 buffer, not expired, copy_src usage, in bounds.
     [[nodiscard]] sg::bytes_future download_buffer(sg::raw_buffer_handle buffer, cc::isize offset, cc::isize size);
+
+    /// Records an async readback of one region of `texture` and returns the pending future of tightly-packed
+    /// bytes. The texture must be in the COMMON layout on the copy queue; a large region packs across
+    /// staging windows row/slice-wise. Preconditions: non-null, a dx12 texture, not expired, copy_src usage.
+    [[nodiscard]] sg::bytes_future download_texture(sg::raw_texture_handle texture,
+                                                    sg::subresource_index const& subresource,
+                                                    sg::texture_region const& region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the

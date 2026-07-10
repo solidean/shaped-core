@@ -143,8 +143,8 @@ Preserve these; the rest is tuning:
 
 Not invariants — v1 shortcuts:
 
-- **Buffers only** (textures deferred), **persistent buffers only**, and **single-writer**: an async
-  download of a buffer concurrently written by an in-flight list is the caller's hazard to avoid.
+- **Persistent buffers only** and **single-writer**: an async download of a buffer concurrently written
+  by an in-flight list is the caller's hazard to avoid.
 - **In-order reads (head-of-line blocking).** Reads run strictly in submission order on the download's own
   transfer queue, so a forward wait on a slow command list stalls all later async reads behind it — a
   deferred optimization, as with upload.
@@ -177,6 +177,9 @@ Not invariants — v1 shortcuts:
   acyclicity guard extends to it: the actor closes the open window before staging a read whose pending-upload
   value is still unsatisfied once the window has finished a read. This replaces an earlier CPU block (which,
   on the old shared queue, could deadlock — see the fuzz op in `tests/transfer/transfer-fuzz-test.cc`).
+- **Async texture readbacks assume the texture is already in the COMMON layout** — the copy queue runs no
+  layout barriers, the same as the async upload. A freshly-created texture qualifies; one left in a
+  shader/attachment layout by a direct-queue list must be transitioned back or read inline instead.
 - The per-resource stamps live on `dx12_buffer`: `_pending_async_download_value` (reverse, a
   `dx12_download_fence_value` distinct from the epoch / submission / async-upload fences) and the shared
   `_last_used_submission_token` (forward). `track_buffer_access` in

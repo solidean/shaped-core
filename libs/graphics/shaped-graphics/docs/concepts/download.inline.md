@@ -140,11 +140,12 @@ so the counter reaches zero.
 
 ## What's implemented today vs deferred
 
-**Today:** inline **buffer** download over the READBACK ring, the actor, epoch-granular reclaim,
-drop-to-cancel for both the future and the list.
+**Today:** inline **buffer** and **texture** download over the READBACK ring, the actor, epoch-granular
+reclaim, drop-to-cancel for both the future and the list. A texture region larger than the ring — or one
+straddling the seam — splits into several contiguous chunks, each un-padded into the tightly-packed
+destination.
 
-**Deferred:** inline **texture** readback (row-unpadding in the deferred copy, chunked across several
-jobs); a fallback path when a single epoch's downloads exceed the ring; and the finer split GPU/CPU
+**Deferred:** a fallback path when a single epoch's downloads exceed the ring; and the finer split GPU/CPU
 watermarks noted in [epochs.md](epochs.md) if profiling shows the single-counter coarsening costs
 pipelining. (A read that straddles the ring seam is already split into two contiguous copies rather than
 wasting the tail — as is [inline upload](upload.inline.md).)

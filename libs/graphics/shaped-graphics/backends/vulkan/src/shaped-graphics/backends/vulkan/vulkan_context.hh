@@ -146,11 +146,24 @@ public:
     {
         CC_UNREACHABLE("vulkan async upload is not implemented yet");
     }
+    void async_upload_bytes_to_texture(sg::raw_texture_handle,
+                                       cc::pinned_data<cc::byte const>,
+                                       sg::subresource_index const&,
+                                       sg::texture_region const&) override
+    {
+        CC_UNREACHABLE("vulkan async texture upload is not implemented yet");
+    }
 
     // Async download (ctx.download) — not implemented yet.
     [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
     {
         CC_UNREACHABLE("vulkan async download is not implemented yet");
+    }
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_texture(sg::raw_texture_handle,
+                                                                     sg::subresource_index const&,
+                                                                     sg::texture_region const&) override
+    {
+        CC_UNREACHABLE("vulkan async texture download is not implemented yet");
     }
 
     // Deferred deletion: a refcount-zero GPU resource, staged for the current epoch and freed once

@@ -42,19 +42,40 @@ struct subresource_extent
     [[nodiscard]] int total() const { return mip_count * array_count * aspect_count; }
 };
 
+/// Addresses a single subresource: one (mip level, array layer, aspect) point in the grid — the point
+/// analog of `subresource_range`. Defaults to the first subresource (mip 0, layer 0, color).
+/// `array_layer` counts slices — a cube's faces are layers 0..5, a cube array's are `6*cube + face`.
+struct subresource_index
+{
+    int mip_level = 0;
+    int array_layer = 0;
+    texture_aspect aspect = texture_aspect::color;
+};
+
 /// A half-open box in the subresource grid: a `[start, end)` range on each of the mip, array-slice, and
-/// aspect-plane axes. Used to name the range an access covers.
+/// aspect-plane axes. Used to name the range an access covers. A single `subresource_index` converts to
+/// the one-wide box at its point, so ops that touch one subresource can pass it directly.
 struct subresource_range
 {
     cc::start_end mip_range = {.start = 0, .end = 1};
     cc::start_end array_range = {.start = 0, .end = 1};
     cc::start_end aspect_range = {.start = 0, .end = 1};
 
+    subresource_range() = default;
+    subresource_range(cc::start_end mips, cc::start_end arrays, cc::start_end aspects)
+      : mip_range(mips), array_range(arrays), aspect_range(aspects)
+    {
+    }
+    subresource_range(subresource_index const& sub) // NOLINT(*-explicit-*): a single subresource *is* a one-wide range
+      : mip_range{.start = sub.mip_level, .end = sub.mip_level + 1},
+        array_range{.start = sub.array_layer, .end = sub.array_layer + 1},
+        aspect_range{.start = int(sub.aspect), .end = int(sub.aspect) + 1}
+    {
+    }
+
     [[nodiscard]] static subresource_range whole(subresource_extent e)
     {
-        return {.mip_range = {.start = 0, .end = e.mip_count},
-                .array_range = {.start = 0, .end = e.array_count},
-                .aspect_range = {.start = 0, .end = e.aspect_count}};
+        return {{.start = 0, .end = e.mip_count}, {.start = 0, .end = e.array_count}, {.start = 0, .end = e.aspect_count}};
     }
     [[nodiscard]] bool is_empty() const
     {

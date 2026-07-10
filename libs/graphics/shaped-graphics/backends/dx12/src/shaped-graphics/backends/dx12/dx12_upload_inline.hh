@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -25,6 +26,16 @@ public:
     /// Stages `data` into `dst` at `dst_offset`, recording the copy into `cmd`. Synchronous: the
     /// source bytes are consumed before returning. Empty `data` is a no-op.
     void upload_buffer(dx12_command_list& cmd, dx12_buffer const& dst, cc::span<cc::byte const> data, cc::isize dst_offset);
+
+    /// Stages one texture region's tightly-packed `data` into `dst` per `fp`, recording CopyTextureRegion(s)
+    /// into `cmd`. The region is packed into 512-aligned ring windows row/slice-wise, so a region larger than
+    /// the free ring space — or one straddling the ring seam — is split across several copies (only a single
+    /// padded row wider than the whole ring is unsupported). The caller emits the copy_dst layout barrier
+    /// first (it holds the sg texture). Synchronous: `data` is consumed before returning.
+    void upload_texture(dx12_command_list& cmd,
+                        ID3D12Resource* dst,
+                        dx12_texture_footprint const& fp,
+                        cc::span<cc::byte const> data);
 
     /// Snapshots the ring cursor as the end-of-epoch boundary for `closed` (called at advance).
     void on_epoch_advance(sg::epoch closed);
@@ -62,20 +73,11 @@ public:
     void debug_set_cursor(cc::u64 pos);
 
 private:
-    /// A contiguous, non-wrapping slice of the ring: physical `offset` and the `granted` bytes there.
-    /// `granted` is capped at the seam (`_capacity - offset`), so a request straddling the wrap is
-    /// handed back in pieces the caller loops over — no wasted tail.
-    struct reservation
-    {
-        cc::isize offset = 0;
-        cc::isize granted = 0;
-    };
-
-    /// Reserves up to `size` bytes at the current cursor, never crossing the physical seam (so the
-    /// result may be smaller than `size` — the caller reserves again for the remainder). Blocks
-    /// (retiring in-flight epochs) when the space is still held by earlier epochs. Asserts if a single
-    /// upload exceeds the ring capacity.
-    reservation reserve(cc::isize size);
+    /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
+    /// returns its start cursor; the caller walks it, handing a resumable job to-seam windows (offset
+    /// `cursor % capacity`, size to the seam). `total` must fit the capacity. Blocks (retiring in-flight
+    /// epochs) when the space is still held by earlier epochs.
+    cc::u64 reserve_span(cc::isize total);
 
     dx12_context& _ctx;
 

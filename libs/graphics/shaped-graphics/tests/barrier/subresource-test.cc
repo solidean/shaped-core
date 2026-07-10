@@ -46,7 +46,7 @@ TEST("sg subresource - touching a sub-range splits while preserving the cover")
 
     // Declare a write on mip 1..2, array slice 0 only.
     int touched = 0;
-    p.for_each_in(sg::subresource_range{.mip_range = {1, 2}, .array_range = {0, 1}, .aspect_range = {0, 1}},
+    p.for_each_in(sg::subresource_range{{1, 2}, {0, 1}, {0, 1}},
                   [&](sg::resource_access_state& s)
                   {
                       s.declare(sg::pipeline_stage_flags::compute, sg::access_flags::shader_write);
@@ -70,8 +70,7 @@ TEST("sg subresource - whole-domain touch visits every box")
     CHECK(is_exact_cover(p));
 
     // After fragmenting, a whole-domain touch visits all boxes.
-    p.for_each_in(sg::subresource_range{.mip_range = {1, 2}, .array_range = {0, 1}, .aspect_range = {0, 1}},
-                  [](sg::resource_access_state&) {});
+    p.for_each_in(sg::subresource_range{{1, 2}, {0, 1}, {0, 1}}, [](sg::resource_access_state&) {});
     touched = 0;
     p.for_each_in(sg::subresource_range::whole(e), [&](sg::resource_access_state&) { ++touched; });
     CHECK(touched == p.box_count());
@@ -84,8 +83,7 @@ TEST("sg subresource - try_merge collapses a uniform partition")
     sg::subresource_partition p(e);
 
     // Fragment by touching a sub-range, but apply the SAME declare+flush to every cell so all states match.
-    p.for_each_in(sg::subresource_range{.mip_range = {1, 2}, .array_range = {0, 1}, .aspect_range = {0, 1}},
-                  [](sg::resource_access_state&) {});
+    p.for_each_in(sg::subresource_range{{1, 2}, {0, 1}, {0, 1}}, [](sg::resource_access_state&) {});
     CHECK(p.box_count() > 1);
 
     // Apply an identical (no-op) transform everywhere: states are all default-equal.
@@ -101,8 +99,7 @@ TEST("sg subresource - try_merge keeps distinct states apart")
     sg::subresource_partition p(e);
 
     // Give mip 0 a different state than mip 1.
-    p.for_each_in(sg::subresource_range{.mip_range = {0, 1}, .array_range = {0, 1}, .aspect_range = {0, 1}},
-                  [](sg::resource_access_state& s)
+    p.for_each_in(sg::subresource_range{{0, 1}, {0, 1}, {0, 1}}, [](sg::resource_access_state& s)
                   { s.declare(sg::pipeline_stage_flags::compute, sg::access_flags::shader_write); });
 
     p.try_merge();
@@ -117,7 +114,7 @@ TEST("sg subresource - for_each_box_in passes each covered box's range")
 
     // Touch mip 1..3; the callback must see box ranges contained in [1,3), covering it exactly.
     int covered_mips = 0;
-    p.for_each_box_in(sg::subresource_range{.mip_range = {1, 3}, .array_range = {0, 1}, .aspect_range = {0, 1}},
+    p.for_each_box_in(sg::subresource_range{{1, 3}, {0, 1}, {0, 1}},
                       [&](sg::subresource_range const& box_range, sg::resource_access_state&)
                       {
                           CHECK(box_range.mip_range.start >= 1);
