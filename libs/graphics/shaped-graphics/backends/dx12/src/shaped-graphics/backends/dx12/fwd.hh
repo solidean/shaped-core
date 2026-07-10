@@ -54,6 +54,12 @@ using dx12_pipeline_layout_handle = std::shared_ptr<dx12_pipeline_layout const>;
 using dx12_compute_pipeline_handle = std::shared_ptr<dx12_compute_pipeline const>;
 using dx12_binding_group_handle = std::shared_ptr<dx12_binding_group const>;
 
+// Ray-tracing pipeline + shader table (see dx12_raytracing_pipeline.hh / dx12_raytracing_shader_table.hh).
+class dx12_raytracing_pipeline;
+using dx12_raytracing_pipeline_handle = std::shared_ptr<dx12_raytracing_pipeline const>;
+class dx12_raytracing_shader_table;
+using dx12_raytracing_shader_table_handle = std::shared_ptr<dx12_raytracing_shader_table const>;
+
 // Inline buffer transfer (see dx12_upload_inline.hh / dx12_download_inline.hh and the resource helpers).
 class dx12_upload_inline_system;
 class dx12_download_inline_system;

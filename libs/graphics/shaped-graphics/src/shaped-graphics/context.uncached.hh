@@ -48,6 +48,24 @@ public:
     /// Fallible core of create_compute_pipeline — returns an error instead of throwing.
     [[nodiscard]] cc::result<compute_pipeline_handle> try_create_compute_pipeline(compute_pipeline_description const& desc);
 
+    /// Builds a raytracing_pipeline (a DXR state object) from a description. Blocking backend state-object
+    /// creation — prefer ctx.cached.acquire_raytracing_pipeline for an async, deduplicated build. Throws
+    /// sg::pipeline_creation_exception on failure.
+    [[nodiscard]] raytracing_pipeline_handle create_raytracing_pipeline(raytracing_pipeline_description const& desc);
+
+    /// Fallible core of create_raytracing_pipeline — returns an error instead of throwing.
+    [[nodiscard]] cc::result<raytracing_pipeline_handle> try_create_raytracing_pipeline(
+        raytracing_pipeline_description const& desc);
+
+    /// Builds a raytracing_shader_table over a pipeline (referencing its shader identifiers). Persistent and
+    /// uncached — it is tied to one pipeline. Throws sg::pipeline_creation_exception on failure.
+    [[nodiscard]] raytracing_shader_table_handle create_raytracing_shader_table(
+        raytracing_shader_table_description const& desc);
+
+    /// Fallible core of create_raytracing_shader_table — returns an error instead of throwing.
+    [[nodiscard]] cc::result<raytracing_shader_table_handle> try_create_raytracing_shader_table(
+        raytracing_shader_table_description const& desc);
+
     // Pinned to its owning context: neither copyable nor movable.
     context_uncached_scope(context_uncached_scope const&) = delete;
     context_uncached_scope(context_uncached_scope&&) = delete;

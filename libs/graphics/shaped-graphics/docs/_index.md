@@ -54,6 +54,9 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
 - [acceleration structures](concepts/acceleration-structures.md) — ray-tracing `blas`/`tlas`: opaque
   driver-built structures whose creation is a recorded `cmd.raytracing` build, the DXR∩Vulkan input
   vocabulary, and the persistent-vs-transient handle lifetime.
+- [raytracing pipeline](concepts/raytracing-pipeline.md) — the full DXR path: a `raytracing_pipeline`
+  (state object) + `raytracing_shader_table` + `cmd.raytracing.dispatch_rays`, the two-phase handle/index
+  model, and why records hold only a shader identifier.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
   epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue

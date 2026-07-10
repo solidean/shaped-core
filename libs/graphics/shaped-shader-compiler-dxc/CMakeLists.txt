@@ -52,6 +52,7 @@ add_executable(shaped-shader-compiler-dxc-test
     tests/main.cc
     tests/preprocess-test.cc
     tests/compile-test.cc
+    tests/reflect-raytracing-test.cc
     tests/shader_cache-test.cc
 )
 
@@ -65,6 +66,7 @@ if(TARGET shaped-graphics-dx12)
         tests/end-to-end-multigroup-test.cc
         tests/end-to-end-inline-constants-test.cc
         tests/end-to-end-inline-raytracing-test.cc
+        tests/end-to-end-raytracing-test.cc
     )
     target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
 endif()

@@ -13,14 +13,45 @@
 
 namespace sg
 {
-/// Pipeline stage a shader runs at. Compute is the focus today; graphics stages fill in as pipelines land.
+/// Pipeline stage a shader runs at. Compute and the ray-tracing stages are wired; the graphics stages
+/// fill in as pipelines land.
 enum class shader_stage
 {
     vertex,
     fragment,
     compute,
-    // Future: geometry, tessellation_control, tessellation_evaluation, mesh, task, raygen, ...
+    // Ray-tracing stages — each compiles to a single-entry `lib_6_x` blob (no dedicated shader-library type).
+    raygen,
+    closest_hit,
+    any_hit,
+    miss,
+    intersection,
+    callable,
+    // Future: geometry, tessellation_control, tessellation_evaluation, mesh, task, ...
 };
+
+/// True for the six ray-tracing stages (raygen / closest_hit / any_hit / miss / intersection / callable).
+[[nodiscard]] constexpr bool is_raytracing_stage(shader_stage s)
+{
+    switch (s)
+    {
+    case shader_stage::raygen:
+    case shader_stage::closest_hit:
+    case shader_stage::any_hit:
+    case shader_stage::miss:
+    case shader_stage::intersection:
+    case shader_stage::callable:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// True for the compute stage.
+[[nodiscard]] constexpr bool is_compute_stage(shader_stage s)
+{
+    return s == shader_stage::compute;
+}
 
 /// Bytecode format of the blob — which backend can consume it. A backend-agnostic shader must record it,
 /// so a pipeline knows whether the blob is for it.

@@ -110,6 +110,18 @@ protected:
                                                             accel_build_flags flags)
         = 0;
 
+    // Ray-tracing dispatch (reached through cmd.raytracing). bind_pipeline sets the DXR state object + global
+    // root signature; bind_group binds through that root signature (like compute); dispatch_rays traces a
+    // width x height x depth grid, launching the raygen at `raygen` in `table`.
+    virtual void raytracing_bind_pipeline(raytracing_pipeline const& pipeline) = 0;
+    virtual void raytracing_bind_group(int set, binding_group const& group) = 0;
+    virtual void raytracing_dispatch_rays(raytracing_shader_table const& table,
+                                          raygen_index raygen,
+                                          int width,
+                                          int height,
+                                          int depth)
+        = 0;
+
     epoch _epoch = epoch::invalid;
 };
 } // namespace sg

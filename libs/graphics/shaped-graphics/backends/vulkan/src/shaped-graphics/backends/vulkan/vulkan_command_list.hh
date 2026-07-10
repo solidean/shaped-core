@@ -104,5 +104,17 @@ protected:
     {
         CC_UNREACHABLE("vulkan raytracing build_tlas is not implemented yet");
     }
+    void raytracing_bind_pipeline(sg::raytracing_pipeline const&) override
+    {
+        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
+    }
+    void raytracing_bind_group(int, sg::binding_group const&) override
+    {
+        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
+    }
+    void raytracing_dispatch_rays(sg::raytracing_shader_table const&, sg::raygen_index, int, int, int) override
+    {
+        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
+    }
 };
 } // namespace sg::backend::vulkan
