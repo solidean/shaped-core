@@ -27,6 +27,18 @@ Running list of known follow-ups. Bigger design intent lives in
   `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables
   automatic transitions for callers that know their resources are already in the right layout; and folding
   the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
+- **Acceleration structures — deferred layers:** the single-shot build path is in (`sg::blas`/`sg::tlas`,
+  the `cmd.raytracing` scope with `build_blas` for triangles + procedural AABBs, `build_tlas`, and
+  `is_supported()`; dx12 real on WARP, vulkan stubbed). The abstract types already carry the stats a refit
+  needs (build + update scratch sizes, flags, the storage handle). Still open: the **transient (single-epoch)
+  AS variant** (per-frame rebuilds) — a property of the build call's result, not a new scope; **refit /
+  update** (reuses topology, needs `allow_update` at build and `PERFORM_UPDATE` + the source AS at build
+  time) and **compaction** (BLAS `allow_compaction` → query compacted size → copy into a smaller buffer);
+  the **vulkan** implementation (`to_vk_buffer_usage` must map the `accel_structure_*` usages + add the
+  buffer device address; then the real `VkAccelerationStructureKHR` build path — flip the
+  `nx::config::disabled`/`register_backend` toggle in `tests/backends/vulkan-entry.cc` once it lands); and
+  the **trace side** — a raytracing pipeline + shader binding table + the `acceleration_structure` binding
+  type/view to bind a `tlas` as an SRV (see [concepts/acceleration-structures.md](concepts/acceleration-structures.md)).
 - **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder. Surface a
   `cc::shared_ptr` in clean-core and switch handles to it (keeps sg off `std::`). See the
   [coding-guidelines](coding-guidelines.md) note.

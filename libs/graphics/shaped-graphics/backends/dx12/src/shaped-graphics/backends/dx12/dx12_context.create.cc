@@ -130,10 +130,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&submission_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (submission) failed");
 
+    // Query DXR support once; the raytracing build path gates on it (cmd.raytracing.is_supported()). A
+    // failed query leaves the tier at NOT_SUPPORTED, which is the correct "no ray tracing" answer.
+    D3D12_RAYTRACING_TIER raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+    if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+        raytracing_tier = options5.RaytracingTier;
+
     auto ctx = std::make_shared<dx12_context>();
     ctx->_factory = cc::move(factory);
     ctx->_device = cc::move(device);
     ctx->_queue = cc::move(queue);
+    ctx->_raytracing_tier = raytracing_tier;
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 
