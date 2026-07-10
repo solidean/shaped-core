@@ -210,8 +210,8 @@ public:
 
     void async_upload_bytes_to_texture(sg::raw_texture_handle texture,
                                        cc::pinned_data<cc::byte const> data,
-                                       sg::subresource_index subresource,
-                                       sg::texture_region region) override
+                                       sg::subresource_index const& subresource,
+                                       sg::texture_region const& region) override
     {
         _upload_async.upload_texture(cc::move(texture), cc::move(data), subresource, region);
     }
@@ -226,8 +226,8 @@ public:
     }
 
     [[nodiscard]] sg::bytes_future async_download_bytes_from_texture(sg::raw_texture_handle texture,
-                                                                     sg::subresource_index subresource,
-                                                                     sg::texture_region region) override
+                                                                     sg::subresource_index const& subresource,
+                                                                     sg::texture_region const& region) override
     {
         return _download_async.download_texture(cc::move(texture), subresource, region);
     }

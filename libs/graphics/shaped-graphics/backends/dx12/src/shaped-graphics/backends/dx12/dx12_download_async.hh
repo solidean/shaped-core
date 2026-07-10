@@ -30,18 +30,18 @@ public:
     }
 };
 
-/// One async download handed to the copy actor. `source` is held **strong** for the job's whole lifetime,
-/// so its storage stays alive across the copy-queue read (no deferred-deletion gate needed). `dst` lands
-/// the bytes; it is kept alive by `pin` (the future's pin, held weak here) — if the caller dropped the
-/// future before the actor reached this job, `pin` has expired and the copy is skipped, but its
-/// `completion_value` is still signaled so a later writer waiting on it never hangs. `wait_token` defers
-/// the read behind the last direct-queue list that used the buffer (so it reads committed bytes).
+/// One async download handed to the copy actor. `buffer_source` / `texture_source` is held **strong** for
+/// the job's whole lifetime, so its storage stays alive across the copy-queue read (no deferred-deletion
+/// gate needed). `dst` lands the bytes; it is kept alive by `pin` (the future's pin, held weak here) — if
+/// the caller dropped the future before the actor reached this job, `pin` has expired and the copy is
+/// skipped, but its `completion_value` is still signaled so a later writer waiting on it never hangs.
+/// `wait_token` defers the read behind the last direct-queue list that used the buffer (so it reads committed bytes).
 struct dx12_async_download_job
 {
-    // Exactly one source is set: a buffer (via `source` + `src_offset`/`size`) or a texture (via
-    // `source_texture` + `footprint`). Both are held strong across the read so the storage survives it.
-    std::shared_ptr<dx12_buffer const> source;          // read source buffer, or empty for a texture read
-    std::shared_ptr<dx12_texture const> source_texture; // read source texture, or empty for a buffer read
+    // Exactly one source is set: a buffer (via `buffer_source` + `src_offset`/`size`) or a texture (via
+    // `texture_source` + `footprint`). Both are held strong across the read so the storage survives it.
+    std::shared_ptr<dx12_buffer const> buffer_source;   // read source buffer, or empty for a texture read
+    std::shared_ptr<dx12_texture const> texture_source; // read source texture, or empty for a buffer read
     dx12_texture_footprint footprint;                   // the texture region's copy footprint (texture reads)
     bool is_texture = false;                            // discriminant: texture read vs buffer read
     cc::isize src_offset = 0;
@@ -94,8 +94,8 @@ public:
     /// bytes. The texture must be in the COMMON layout on the copy queue; a large region packs across
     /// staging windows row/slice-wise. Preconditions: non-null, a dx12 texture, not expired, copy_src usage.
     [[nodiscard]] sg::bytes_future download_texture(sg::raw_texture_handle texture,
-                                                    sg::subresource_index subresource,
-                                                    sg::texture_region region);
+                                                    sg::subresource_index const& subresource,
+                                                    sg::texture_region const& region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the

@@ -49,8 +49,8 @@ public:
     /// Streams one region of `texture` back to the host (the async mirror of
     /// cmd.download.bytes_from_texture), returning a bytes_future of tightly-packed bytes. Needs copy_src usage.
     [[nodiscard]] bytes_future bytes_from_texture(raw_texture_handle texture,
-                                                  subresource_index subresource = {},
-                                                  texture_region region = {});
+                                                  subresource_index const& subresource = {},
+                                                  cc::optional<texture_region> region = {});
 
     /// Sets the size of one async-download staging window in bytes (> 0); the staging buffer is triple-
     /// buffered, so this many bytes times three. Bigger windows amortize submits, smaller ones cut latency

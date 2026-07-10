@@ -115,7 +115,7 @@ private:
         }
         else
         {
-            auto const strong = job.target.lock();
+            auto const strong = job.buffer_target.lock();
             if (!strong || !strong->_resource)
             {
                 fold_dropped_completion(job);
@@ -385,7 +385,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
     // Weak ref, not strong: a caller may drop its last handle before the actor stages this. Resolving at
     // stage time lets us skip the copy (and its staging cost) for a released buffer — see stage_job. The
     // buffer's storage stays alive independently until the copy fence reaches `value` (the lifetime gate).
-    job.target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer)); // dst already dynamic_cast-verified
+    job.buffer_target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer)); // dst already dynamic_cast-verified
     job.dst_offset = offset;
     job.src = cc::move(data);
     job.copy_fence_value = dx12_copy_fence_value(value);
@@ -397,8 +397,8 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
 
 void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
                                               cc::pinned_data<cc::byte const> data,
-                                              sg::subresource_index subresource,
-                                              sg::texture_region region)
+                                              sg::subresource_index const& subresource,
+                                              sg::texture_region const& region)
 {
     CC_ASSERT(texture != nullptr, "async upload target texture is null");
     auto const* const dst = dynamic_cast<dx12_texture const*>(texture.get());
@@ -409,10 +409,9 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
                                                                        "texture_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
+    // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(data.size() == fp.tight_size(), "async upload pixel data size does not match the copy region");
-    if (data.empty())
-        return;
 
     // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command
     // list that reads the texture already sees a value to wait on.

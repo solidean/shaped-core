@@ -100,16 +100,16 @@ protected:
 
     void upload_bytes_to_texture(sg::raw_texture_handle texture,
                                  cc::span<cc::byte const> pixels,
-                                 sg::subresource_index subresource,
-                                 sg::texture_region region) override;
+                                 sg::subresource_index const& subresource,
+                                 sg::texture_region const& region) override;
 
     [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                               cc::isize offset_in_bytes,
                                                               cc::isize size_in_bytes) override;
 
     [[nodiscard]] sg::bytes_future download_bytes_from_texture(sg::raw_texture_handle texture,
-                                                               sg::subresource_index subresource,
-                                                               sg::texture_region region) override;
+                                                               sg::subresource_index const& subresource,
+                                                               sg::texture_region const& region) override;
 
     void copy_buffer_region(sg::raw_buffer_handle src,
                             sg::raw_buffer_handle dst,

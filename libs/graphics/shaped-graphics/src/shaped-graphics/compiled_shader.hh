@@ -22,8 +22,8 @@ enum class shader_stage
     // Future: geometry, tessellation_control, tessellation_evaluation, mesh, task, raygen, ...
 };
 
-/// Bytecode format of the blob — which backend can consume it. (Legacy GFX did not record this on the
-/// shader; a backend-agnostic shader must, so a pipeline knows whether the blob is for it.)
+/// Bytecode format of the blob — which backend can consume it. A backend-agnostic shader must record it,
+/// so a pipeline knows whether the blob is for it.
 enum class shader_format
 {
     dxil,      ///< DirectX Intermediate Language — dx12

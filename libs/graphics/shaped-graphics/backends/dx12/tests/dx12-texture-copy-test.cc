@@ -25,12 +25,16 @@ sg::texture_description copy_desc(sg::pixel_format fmt, int w, int h)
 }
 } // namespace
 
-TEST("sg dx12 - texture footprint math (padding, subresource index, region resolution)")
+TEST("sg dx12 - texture footprint math (padding, subresource index, block sizing)")
 {
+    // compute_texture_footprint takes an already-resolved concrete region (the sg layer expands "whole
+    // subresource" and skips empty regions), so these pass explicit boxes.
+
     // 8×8 RGBA8, mip 0: tight row 32 bytes -> padded to 256; whole subresource.
     {
         sg::texture_description const d = copy_desc(sg::pixel_format::rgba8_unorm, 8, 8);
-        auto const fp = dx12::compute_texture_footprint(d, {}, {});
+        auto const fp = dx12::compute_texture_footprint(
+            d, {}, sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(8, 8, 1)});
         CHECK(fp.subresource == 0u);
         CHECK(fp.width == 8);
         CHECK(fp.height == 8);
@@ -46,8 +50,8 @@ TEST("sg dx12 - texture footprint math (padding, subresource index, region resol
     // A 4×3 region of the same texture — the row is still padded, but only 3 rows are staged.
     {
         sg::texture_description const d = copy_desc(sg::pixel_format::rgba8_unorm, 8, 8);
-        auto const fp
-            = dx12::compute_texture_footprint(d, {}, {.offset = tg::vec3i(2, 1, 0), .size = tg::vec3i(4, 3, 0)});
+        auto const fp = dx12::compute_texture_footprint(
+            d, {}, sg::texture_region{.offset = tg::pos3i(2, 1, 0), .size = tg::vec3i(4, 3, 1)});
         CHECK(fp.x == 2);
         CHECK(fp.y == 1);
         CHECK(fp.width == 4);
@@ -63,7 +67,9 @@ TEST("sg dx12 - texture footprint math (padding, subresource index, region resol
         sg::texture_description d = copy_desc(sg::pixel_format::r32_float, 8, 8);
         d.mip_levels = 4;
         d.array_layers = 3;
-        auto const fp = dx12::compute_texture_footprint(d, {.mip_level = 1, .array_layer = 2}, {});
+        auto const fp = dx12::compute_texture_footprint(
+            d, {.mip_level = 1, .array_layer = 2},
+            sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(4, 4, 1)});
         CHECK(fp.subresource == 1u + 2u * 4u); // mip + layer*mipLevels
         CHECK(fp.width == 4);
         CHECK(fp.height == 4);
@@ -73,7 +79,8 @@ TEST("sg dx12 - texture footprint math (padding, subresource index, region resol
     // Block-compressed: rows and widths are counted in 4×4 blocks. BC1 = 8 bytes/block.
     {
         sg::texture_description const d = copy_desc(sg::pixel_format::bc1_rgba_unorm, 16, 16);
-        auto const fp = dx12::compute_texture_footprint(d, {}, {});
+        auto const fp = dx12::compute_texture_footprint(
+            d, {}, sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(16, 16, 1)});
         CHECK(fp.rows == 4);          // 16 / 4 block-rows
         CHECK(fp.row_bytes == 4 * 8); // 4 blocks wide * 8 bytes
         CHECK(fp.padded_pitch == 256);
@@ -133,7 +140,7 @@ TEST("sg dx12 - texture upload into a sub-region leaves the rest untouched")
     REQUIRE(cmd.has_value());
     cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(zeros, N)));
     cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(patch, RW * RH)), {},
-                                         {.offset = tg::vec3i(2, 1, 0), .size = tg::vec3i(RW, RH, 0)});
+                                         sg::texture_region{.offset = tg::pos3i(2, 1, 0), .size = tg::vec3i(RW, RH, 1)});
     auto future = cmd.value()->download.bytes_from_texture(tex.value());
     c.submit_dx12_command_list(cc::move(cmd.value()));
 
@@ -383,6 +390,47 @@ TEST("sg dx12 - async texture copy splits across staging windows")
         if (got[i] != src[i])
             ok = false;
     CHECK(ok);
+}
+
+TEST("sg dx12 - an empty texture region is a no-op")
+{
+    auto handle = dx12::acquire_warp_context();
+    REQUIRE(handle != nullptr);
+    auto& c = static_cast<dx12::dx12_context&>(*handle);
+
+    constexpr int W = 4, H = 4, N = W * H;
+    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
+    REQUIRE(tex.has_value());
+
+    float src[N];
+    for (int i = 0; i < N; ++i)
+        src[i] = float(i) + 0.5f;
+
+    auto cmd = c.create_dx12_command_list();
+    REQUIRE(cmd.has_value());
+    // Seed the whole subresource (no region), then an empty-region upload (zero size) — a no-op that needs
+    // no pixels and must not disturb the data.
+    cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(src, N)));
+    cmd.value()->upload.bytes_to_texture(tex.value(), {}, {},
+                                         sg::texture_region{.offset = tg::pos3i(1, 1, 0), .size = tg::vec3i(0, 0, 0)});
+    // An empty-region readback returns a ready, empty future; a no-region readback returns the whole subresource.
+    auto empty_fut = cmd.value()->download.bytes_from_texture(
+        tex.value(), {}, sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(0, 2, 1)});
+    auto full_fut = cmd.value()->download.bytes_from_texture(tex.value());
+    c.submit_dx12_command_list(cc::move(cmd.value()));
+
+    auto const empty_bytes = c.wait_for(empty_fut);
+    REQUIRE(empty_bytes.has_value());
+    CHECK(empty_bytes.value().size() == 0);
+
+    auto const full = c.wait_for(full_fut);
+    REQUIRE(full.has_value());
+    auto const* got = reinterpret_cast<float const*>(full.value().data());
+    bool ok = true;
+    for (int i = 0; i < N; ++i)
+        if (got[i] != src[i])
+            ok = false;
+    CHECK(ok); // the empty-region upload left the seeded data intact
 }
 
 TEST("sg dx12 - block-compressed texture round-trips whole blocks")

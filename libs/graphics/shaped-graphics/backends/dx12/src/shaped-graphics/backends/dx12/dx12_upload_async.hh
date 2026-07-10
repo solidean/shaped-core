@@ -15,17 +15,17 @@
 namespace sg::backend::dx12
 {
 /// One async upload handed to the copy actor. `src`'s pin holds the source bytes alive until they have
-/// been staged (the job is then destroyed on the actor thread, off the submission path). `target` is a
-/// weak ref resolved at stage time: if every handle to the destination was dropped before the actor ran,
-/// the copy is skipped — but its `copy_fence_value` is still signaled so the lifetime gate + any forward
-/// readers stamped with it never hang. `copy_fence_value` is reserved synchronously at enqueue; the
-/// completion fence reaches it once the copy has run (or the job was dropped).
+/// been staged (the job is then destroyed on the actor thread, off the submission path). `buffer_target` /
+/// `texture_target` is a weak ref resolved at stage time: if every handle to the destination was dropped
+/// before the actor ran, the copy is skipped — but its `copy_fence_value` is still signaled so the lifetime
+/// gate + any forward readers stamped with it never hang. `copy_fence_value` is reserved synchronously at
+/// enqueue; the completion fence reaches it once the copy has run (or the job was dropped).
 struct dx12_async_upload_job
 {
-    // Exactly one destination is set: a buffer (via `target` + `dst_offset`) or a texture (via
+    // Exactly one destination is set: a buffer (via `buffer_target` + `dst_offset`) or a texture (via
     // `texture_target` + `footprint`). Both are weak refs, locked at stage time — a dropped destination
     // skips the copy but still signals its completion value (see stage_job).
-    std::weak_ptr<dx12_buffer const> target;          // destination buffer, or empty for a texture copy
+    std::weak_ptr<dx12_buffer const> buffer_target;   // destination buffer, or empty for a texture copy
     std::weak_ptr<dx12_texture const> texture_target; // destination texture, or empty for a buffer copy
     dx12_texture_footprint footprint;                 // the texture region's copy footprint (texture copies)
     bool is_texture = false;                          // discriminant: texture copy vs buffer copy
@@ -74,8 +74,8 @@ public:
     /// windows row/slice-wise. Preconditions: non-null, a dx12 texture, not expired, copy_dst usage, data == region size.
     void upload_texture(sg::raw_texture_handle texture,
                         cc::pinned_data<cc::byte const> data,
-                        sg::subresource_index subresource,
-                        sg::texture_region region);
+                        sg::subresource_index const& subresource,
+                        sg::texture_region const& region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the

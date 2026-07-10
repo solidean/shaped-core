@@ -58,11 +58,11 @@ struct dx12_texture_copy_chunk
                                                               int row,
                                                               cc::isize max_staging_rows);
 
-/// Resolves + validates a (subresource, region) against `desc` and computes its copy footprint. A default
-/// region (zero extents) means the whole subresource. Asserts on: an out-of-range subresource/region, a
-/// non-color aspect (depth/stencil transfer is not supported yet), or a region that is not block-aligned
-/// for a block-compressed format.
+/// Computes the copy footprint of a concrete (subresource, region) against `desc`. The region is the box
+/// already resolved + bounds-checked by the sg layer, so it is in-bounds
+/// and non-empty here. Asserts on a non-color aspect (depth/stencil transfer is not supported yet) or a
+/// region that is not block-aligned for a block-compressed format.
 [[nodiscard]] dx12_texture_footprint compute_texture_footprint(sg::texture_description const& desc,
-                                                               sg::subresource_index subresource,
-                                                               sg::texture_region region);
+                                                               sg::subresource_index const& subresource,
+                                                               sg::texture_region const& region);
 } // namespace sg::backend::dx12

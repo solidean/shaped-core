@@ -34,14 +34,15 @@ public:
         return data_future<T>(bytes_from_buffer(cc::move(buffer), offset_in_elements * stride, count * stride));
     }
 
-    /// Reads one `subresource` of `texture` (its `region`, default the whole subresource) back to the host
-    /// as tightly-packed bytes. The texture must have been created with texture_usage::copy_src. Returns a
+    /// Reads one `subresource` of `texture` back to the host as tightly-packed bytes. `region` selects a box
+    /// within the subresource; passing none reads the **whole subresource**, and an empty region returns a
+    /// ready, empty future. The texture must have been created with texture_usage::copy_src. Returns a
     /// bytes_future ready once the submitted list has finished on the GPU and the rows have been un-padded
-    /// into host memory. The result layout matches bytes_to_texture (rows = region-height-in-blocks, row
-    /// bytes = region-width-in-blocks × block-bytes). Precondition: `region` in bounds + block-aligned.
+    /// into host memory. The result layout matches bytes_to_texture (rows = height-in-blocks, row bytes =
+    /// width-in-blocks × block-bytes). Precondition: a given `region` is in bounds + block-aligned.
     [[nodiscard]] bytes_future bytes_from_texture(raw_texture_handle texture,
-                                                  subresource_index subresource = {},
-                                                  texture_region region = {});
+                                                  subresource_index const& subresource = {},
+                                                  cc::optional<texture_region> region = {});
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_download_scope(command_list_download_scope const&) = delete;

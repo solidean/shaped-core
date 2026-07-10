@@ -96,54 +96,11 @@ void dx12_download_inline_system::ring_state::reclaim(dx12_download_inline_syste
     }
 }
 
-dx12_download_inline_system::reservation dx12_download_inline_system::reserve(cc::isize size)
-{
-    CC_ASSERT(size > 0, "reserve size must be positive");
-    CC_ASSERT(size <= _capacity, "a single inline download exceeds the readback ring capacity");
-
-    for (;;)
-    {
-        cc::optional<reservation> r = _ring.lock(
-            [&](ring_state& s) -> cc::optional<reservation>
-            {
-                s.reclaim(*this); // pick up epochs the actor has drained since we last looked
-
-                cc::u64 const start = s.next_pos;
-                cc::isize const offset = cc::isize(start % cc::u64(_capacity));
-                // Never cross the seam: grant only up to the ring end. A request that would wrap is
-                // split here — the caller loops and reserves the remainder from offset 0. No tail waste.
-                cc::isize const granted = cc::min(size, _capacity - offset);
-                cc::u64 const end = start + cc::u64(granted);
-                if (end - _freed_pos.load(std::memory_order_acquire) > cc::u64(_capacity))
-                {
-                    // The window overlaps space still held by earlier epochs. Only closed epochs
-                    // (checkpoints) can release it; if there are none, this one open epoch's downloads
-                    // exceed the ring — a hard budget error rather than a deadlock (a documented v1
-                    // limitation, like the upload ring).
-                    CC_ASSERT(!s.checkpoints.empty(), "inline downloads in one epoch exceed the readback ring "
-                                                      "capacity");
-                    return {};
-                }
-                s.next_pos = end;
-                return reservation{offset, granted, s.current_epoch_copies};
-            });
-
-        if (r.has_value())
-            return cc::move(r.value());
-
-        // Wait for the actor to drain an earlier epoch and advance the free watermark. Safe to block
-        // the recording thread: the occupied space belongs to already-submitted lists the actor is
-        // draining. A single epoch whose own downloads exceed the ring asserts above instead.
-        cc::u64 const seen = _freed_pos.load(std::memory_order_acquire);
-        _freed_pos.wait(seen, std::memory_order_acquire);
-    }
-}
-
 void dx12_download_inline_system::account_pending_copy(std::shared_ptr<std::atomic<cc::isize>> const& epoch_copies)
 {
-    // One more outstanding copy, counted only for a reservation that actually produces a copy job (a
-    // seam-skip window makes no progress and is not counted). Bumped here rather than in reserve() so the
-    // counts pair 1:1 with pushed jobs — each is released in on_copy_done / discard_unsubmitted.
+    // One more outstanding copy, counted only for a window that actually produces a copy job (a seam-skip
+    // window makes no progress and is not counted). Bumped here rather than in reserve_span so the counts
+    // pair 1:1 with pushed jobs — each is released in on_copy_done / discard_unsubmitted.
     epoch_copies->fetch_add(1, std::memory_order_relaxed); // this epoch's tally (gates ring reclaim)
     _outstanding.fetch_add(1, std::memory_order_relaxed);  // and the global drain gate
 }
@@ -151,7 +108,7 @@ void dx12_download_inline_system::account_pending_copy(std::shared_ptr<std::atom
 dx12_download_inline_system::span_reservation dx12_download_inline_system::reserve_span(cc::isize total)
 {
     CC_ASSERT(total > 0, "reserve size must be positive");
-    CC_ASSERT(total <= _capacity, "a single inline readback (with staging slack) exceeds the readback ring capacity");
+    CC_ASSERT(total <= _capacity, "a single inline readback exceeds the readback ring capacity");
 
     for (;;)
     {
@@ -199,8 +156,8 @@ sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list
     // The job self-aligns each byte window and returns bytes-consumed-including-alignment; the ring stays a
     // plain byte allocator. Reserve the whole region once, plus slack for the self-alignment (512) and the one
     // partial row a seam wrap pushes past the boundary (padded), then walk it with to-seam windows (mirroring
-    // the inline upload / the legacy gfx backend). Each chunk is its own deferred un-pad copy; a window too
-    // small for an aligned row yields an empty copy we skip; only the last real chunk carries the waiter.
+    // the inline upload). Each chunk is its own deferred un-pad copy; a window too small for an aligned row
+    // yields an empty copy we skip; only the last real chunk carries the waiter.
     cc::isize const total = download.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
     CC_ASSERT(total <= _capacity, "an inline texture readback (with staging slack) exceeds the readback ring capacity");
 
@@ -250,23 +207,27 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     dx12_buffer_download download(src, offset, dst_span);
     download.prepare(cmd);
 
-    // One pass per contiguous ring slice: a read that fits without wrapping is a single chunk; one that
-    // straddles the seam is split across successive reservations. Each chunk gets its own deferred
-    // memcpy and its own epoch-copy count; only the last chunk carries the waiter, so the future
-    // becomes ready once every chunk has drained (the actor copies in enqueue order).
+    // Reserve the whole read once (the span may wrap the seam), then walk it with to-seam windows — the same
+    // reserve_span the texture path uses. Each chunk gets its own deferred memcpy and its own epoch-copy
+    // count; only the last chunk carries the waiter, so the future becomes ready once every chunk has drained
+    // (the actor copies in enqueue order).
+    span_reservation const span = reserve_span(size);
+    cc::u64 cursor = span.start;
     while (!download.is_finished())
     {
-        cc::isize const remaining = download.total_bytes() - download.consumed();
-        reservation res = reserve(remaining);
-        dx12_download_allocation const alloc{_buffer.Get(), _mapped, res.offset, res.granted};
+        cc::isize const off = cc::isize(cursor % cc::u64(_capacity));
+        cc::isize const budget = _capacity - off; // contiguous bytes to the seam
+        dx12_download_allocation const alloc{_buffer.Get(), _mapped, off, budget};
         dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
-        account_pending_copy(res.epoch_copies);
+        CC_ASSERT(pending.bytes > 0, "inline readback made no progress");
+        cursor += cc::u64(pending.bytes);
+        account_pending_copy(span.epoch_copies);
 
         dx12_download_copy_job job;
         job.deferred_cpu_copy = cc::move(pending.deferred_cpu_copy);
         job.pin = std::weak_ptr<void const>(dst.pin());
         job.waiter = download.is_finished() ? waiter : nullptr;
-        job.epoch_copies = cc::move(res.epoch_copies);
+        job.epoch_copies = span.epoch_copies;
         cmd._pending_downloads.push_back(cc::move(job));
     }
 

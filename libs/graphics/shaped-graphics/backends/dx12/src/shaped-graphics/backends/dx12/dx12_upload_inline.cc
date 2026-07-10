@@ -28,43 +28,10 @@ cc::result<cc::unit> dx12_upload_inline_system::initialize(cc::isize capacity)
     return cc::unit{};
 }
 
-dx12_upload_inline_system::reservation dx12_upload_inline_system::reserve(cc::isize size)
-{
-    CC_ASSERT(size > 0, "reserve size must be positive");
-    CC_ASSERT(size <= _capacity, "a single inline upload exceeds the upload ring capacity");
-
-    for (;;)
-    {
-        cc::optional<reservation> r = _ring.lock(
-            [&](ring_state& s) -> cc::optional<reservation>
-            {
-                cc::u64 const start = s.next_pos;
-                cc::isize const offset = cc::isize(start % cc::u64(_capacity));
-                // Never cross the seam: grant only up to the ring end. A request that would wrap is
-                // split here — the caller loops and reserves the remainder from offset 0. No tail waste.
-                cc::isize const granted = cc::min(size, _capacity - offset);
-                cc::u64 const end = start + cc::u64(granted);
-                if (end - s.freed_pos > cc::u64(_capacity)) // space still held by in-flight epochs
-                    return {};
-                s.next_pos = end;
-                return reservation{offset, granted};
-            });
-
-        if (r.has_value())
-            return r.value();
-
-        // Not enough free space: retire the oldest in-flight epoch to advance the watermark. If nothing
-        // is in flight, this single epoch's uploads exceed the ring — a hard budget error.
-        bool const any_in_flight = _ctx._epoch_state.lock([](dx12_epoch_state& s) { return !s.in_flight.empty(); });
-        CC_ASSERT(any_in_flight, "inline uploads in one epoch exceed the upload ring capacity");
-        _ctx.wait_for_next_inflight_epoch(); // retires → on_epochs_completed advances freed_pos
-    }
-}
-
 cc::u64 dx12_upload_inline_system::reserve_span(cc::isize total)
 {
     CC_ASSERT(total > 0, "reserve size must be positive");
-    CC_ASSERT(total <= _capacity, "a single inline upload (with staging slack) exceeds the upload ring capacity");
+    CC_ASSERT(total <= _capacity, "a single inline upload exceeds the upload ring capacity");
 
     for (;;)
     {
@@ -106,7 +73,7 @@ void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
     // partial row a seam wrap pushes past the boundary (padded) — so the job always gets a contiguous window
     // big enough to make progress (a per-chunk reserve could hand it a sub-row tail and stall). Then hand it
     // to-seam windows, walking the reserved span; a window too small for an aligned row returns 0 (skip to the
-    // seam). See UploadResourceDataInline in the legacy gfx backend.
+    // seam).
     cc::isize const total = upload.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
     CC_ASSERT(total <= _capacity, "an inline texture upload (with staging slack) exceeds the upload ring capacity");
 
@@ -134,16 +101,18 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
     dx12_buffer_upload upload(dst, dst_offset, data);
     upload.prepare(cmd);
 
-    // One pass per contiguous ring slice: a buffer that fits without wrapping is a single job; one that
-    // straddles the seam is split across successive reservations (textures split similarly, but row-wise —
-    // see upload_texture).
+    // Reserve the whole upload once (the span may wrap the seam), then walk it with to-seam windows — the
+    // same reserve_span the texture path uses. A buffer consumes each window exactly (it splits at any byte),
+    // so it fits in one window unless it straddles the seam.
+    cc::u64 cursor = reserve_span(data.size());
     while (!upload.is_finished())
     {
-        cc::isize const remaining = upload.total_bytes() - upload.consumed();
-        reservation const res = reserve(remaining);
-        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, res.offset, res.granted};
+        cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
+        cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
+        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, offset, budget};
         cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
         CC_ASSERT(consumed > 0, "inline upload made no progress");
+        cursor += cc::u64(consumed);
     }
 }
 

@@ -151,17 +151,6 @@ public:
     void debug_set_cursor(cc::u64 pos);
 
 private:
-    /// A contiguous, non-wrapping ring slice: physical `offset`, the `granted` bytes there (capped at
-    /// the seam, so a wrapping request is handed back in pieces the caller loops over), and a handle to
-    /// the open epoch's copy counter (not yet incremented — see account_pending_copy). Blocks on the
-    /// reclaim watermark when space is held by earlier, still-in-flight epochs.
-    struct reservation
-    {
-        cc::isize offset = 0;
-        cc::isize granted = 0;
-        std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
-    };
-
     /// A one-shot span reservation (see reserve_span): the start cursor of `total` contiguous logical bytes
     /// (may wrap the seam) plus the open epoch's copy counter its chunks are accounted against.
     struct span_reservation
@@ -170,16 +159,12 @@ private:
         std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
     };
 
-    /// Reserves up to `size` bytes at the current cursor, never crossing the physical seam (the result
-    /// may be smaller than `size`). Does not itself count a copy — call account_pending_copy once the
-    /// reservation actually yields a pushed copy job (a self-aligning texture readback may reserve a seam
-    /// tail that makes no progress, which must not be counted).
-    reservation reserve(cc::isize size);
-
     /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
     /// returns its start cursor + the open epoch's counter; the caller walks it, handing a resumable readback
-    /// to-seam windows. Used by the texture path, which needs one window big enough to self-align + make
-    /// progress. `total` must fit the capacity. Blocks like reserve().
+    /// to-seam windows (offset `cursor % capacity`, size to the seam). Does not itself count a copy — call
+    /// account_pending_copy per window that yields a pushed copy job (a self-aligning texture readback can
+    /// hit a seam tail that makes no progress, which must not be counted). `total` must fit the capacity;
+    /// blocks on the reclaim watermark when space is held by earlier, still-in-flight epochs.
     span_reservation reserve_span(cc::isize total);
 
     /// Counts one copy against the open epoch's tally (`epoch_copies`) and the global drain gate. Call

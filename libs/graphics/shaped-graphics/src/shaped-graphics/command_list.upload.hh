@@ -33,16 +33,17 @@ public:
         bytes_to_buffer(cc::move(buffer), cc::as_bytes(data), offset_in_elements * cc::isize(sizeof(element_t)));
     }
 
-    /// Uploads tightly-packed `pixels` into one `subresource` of `texture`, filling `region` (default: the
-    /// whole subresource). The texture must have been created with texture_usage::copy_dst. The source
-    /// bytes are copied immediately (safe to mutate/free once this returns) and the write is visible to
-    /// later commands in the same list. Preconditions: the subresource exists; `region` is in bounds and
-    /// block-aligned for a block-compressed format; `pixels.size()` equals the region's tightly-packed
-    /// byte size (rows = region-height-in-blocks, row bytes = region-width-in-blocks × block-bytes).
+    /// Uploads tightly-packed `pixels` into one `subresource` of `texture`. `region` selects a box within
+    /// the subresource; passing none fills the **whole subresource**, and an empty region is a no-op. The
+    /// texture must have been created with texture_usage::copy_dst. The source bytes are copied immediately
+    /// (safe to mutate/free once this returns) and the write is visible to later commands in the same list.
+    /// Preconditions: the subresource exists; a given `region` is in bounds and block-aligned for a
+    /// block-compressed format; `pixels.size()` equals the copied box's tightly-packed byte size (rows =
+    /// height-in-blocks, row bytes = width-in-blocks × block-bytes).
     void bytes_to_texture(raw_texture_handle texture,
                           cc::span<cc::byte const> pixels,
-                          subresource_index subresource = {},
-                          texture_region region = {});
+                          subresource_index const& subresource = {},
+                          cc::optional<texture_region> region = {});
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_upload_scope(command_list_upload_scope const&) = delete;

@@ -183,8 +183,8 @@ protected:
     /// ctx.upload). See libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
     virtual void async_upload_bytes_to_texture(raw_texture_handle texture,
                                                cc::pinned_data<cc::byte const> data,
-                                               subresource_index subresource,
-                                               texture_region region)
+                                               subresource_index const& subresource,
+                                               texture_region const& region)
         = 0;
 
     /// Streams `size_in_bytes` from `buffer` at `offset_in_bytes` back to the host on a dedicated copy queue
@@ -201,8 +201,8 @@ protected:
     /// returning a bytes_future of tightly-packed bytes. See
     /// libs/graphics/shaped-graphics/docs/concepts/download.async.md.
     [[nodiscard]] virtual bytes_future async_download_bytes_from_texture(raw_texture_handle texture,
-                                                                         subresource_index subresource,
-                                                                         texture_region region)
+                                                                         subresource_index const& subresource,
+                                                                         texture_region const& region)
         = 0;
 
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending

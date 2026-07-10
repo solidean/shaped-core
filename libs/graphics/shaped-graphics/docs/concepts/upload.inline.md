@@ -27,9 +27,8 @@ overwritten until the GPU is done reading it. That "is the GPU done?" question i
 [epochs](epochs.md) answer cheaply, so the upload ring reclaims space at **epoch granularity**:
 
 - The ring is a single **logical cursor** over an unbounded byte count, mapped onto the physical buffer
-  via modulo. A copy that would straddle the wrap is **split at the seam** — the reservation is capped
-  at the ring end and the recorder loops for the remainder — so every recorded copy is contiguous with
-  no wasted tail.
+  via modulo. A copy reserves its whole span at once, then walks it in windows capped at the ring end, so
+  one that would straddle the wrap is **split at the seam** — each recorded copy is contiguous, no wasted tail.
 - At **epoch advance**, the cursor is snapshotted as the closing epoch's boundary.
 - At **epoch retire**, a free watermark advances past every epoch the GPU has finished. Those bytes are
   now reclaimable.

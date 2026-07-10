@@ -47,8 +47,8 @@ public:
     /// command list that reads the texture waits on the copy automatically. Needs texture_usage::copy_dst.
     void bytes_to_texture(raw_texture_handle texture,
                           cc::pinned_data<cc::byte const> data,
-                          subresource_index subresource = {},
-                          texture_region region = {});
+                          subresource_index const& subresource = {},
+                          cc::optional<texture_region> region = {});
 
     /// Sets the size of one async-upload staging window in bytes (> 0); the staging buffer is triple-
     /// buffered, so this many bytes times three. Bigger windows amortize submits, smaller ones cut latency

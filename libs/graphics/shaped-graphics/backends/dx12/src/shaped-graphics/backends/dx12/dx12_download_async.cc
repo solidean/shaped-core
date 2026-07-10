@@ -130,13 +130,13 @@ private:
         {
             CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row exceeds "
                                                                                       "one staging window");
-            dx12_texture_download download(job.source_texture->_resource.Get(), job.footprint, job.dst);
-            stage_resource(download, job, job.source_texture);
+            dx12_texture_download download(job.texture_source->_resource.Get(), job.footprint, job.dst);
+            stage_resource(download, job, job.texture_source);
         }
         else
         {
-            dx12_buffer_download download(job.source->_resource.Get(), job.src_offset, job.dst);
-            stage_resource(download, job, job.source);
+            dx12_buffer_download download(job.buffer_source->_resource.Get(), job.src_offset, job.dst);
+            stage_resource(download, job, job.buffer_source);
         }
     }
 
@@ -471,7 +471,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     dx12_async_download_job job;
     // Held strong for the job's whole lifetime, so the source storage survives the copy-queue read. dst
     // already dynamic_cast-verified above.
-    job.source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
+    job.buffer_source = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     job.src_offset = offset;
     job.size = size;
     job.dst = dst_span;
@@ -488,8 +488,8 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
 }
 
 sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_handle texture,
-                                                              sg::subresource_index subresource,
-                                                              sg::texture_region region)
+                                                              sg::subresource_index const& subresource,
+                                                              sg::texture_region const& region)
 {
     CC_ASSERT(texture != nullptr, "async download source texture is null");
     auto const* const src = dynamic_cast<dx12_texture const*>(texture.get());
@@ -500,9 +500,8 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
                                                                        "texture_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
+    // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
-    if (fp.tight_size() == 0)
-        return sg::bytes_future(cc::pinned_data<cc::byte const>(), std::make_shared<sg::ready_bytes_waiter>());
 
     cc::u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
 
@@ -520,7 +519,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     }
 
     dx12_async_download_job job;
-    job.source_texture = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
+    job.texture_source = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
     job.footprint = fp;
     job.is_texture = true;
     job.dst = dst_span;

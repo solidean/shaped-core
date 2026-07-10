@@ -66,7 +66,7 @@ struct subresource_range
       : mip_range(mips), array_range(arrays), aspect_range(aspects)
     {
     }
-    subresource_range(subresource_index sub) // NOLINT(*-explicit-*): a single subresource *is* a one-wide range
+    subresource_range(subresource_index const& sub) // NOLINT(*-explicit-*): a single subresource *is* a one-wide range
       : mip_range{.start = sub.mip_level, .end = sub.mip_level + 1},
         array_range{.start = sub.array_layer, .end = sub.array_layer + 1},
         aspect_range{.start = int(sub.aspect), .end = int(sub.aspect) + 1}

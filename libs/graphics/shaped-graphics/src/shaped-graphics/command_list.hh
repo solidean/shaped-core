@@ -54,8 +54,8 @@ protected:
 
     virtual void upload_bytes_to_texture(raw_texture_handle texture,
                                          cc::span<cc::byte const> pixels,
-                                         subresource_index subresource,
-                                         texture_region region)
+                                         subresource_index const& subresource,
+                                         texture_region const& region)
         = 0;
 
     [[nodiscard]] virtual bytes_future download_bytes_from_buffer(raw_buffer_handle buffer,
@@ -64,8 +64,8 @@ protected:
         = 0;
 
     [[nodiscard]] virtual bytes_future download_bytes_from_texture(raw_texture_handle texture,
-                                                                   subresource_index subresource,
-                                                                   texture_region region)
+                                                                   subresource_index const& subresource,
+                                                                   texture_region const& region)
         = 0;
 
     virtual void copy_buffer_region(raw_buffer_handle src,

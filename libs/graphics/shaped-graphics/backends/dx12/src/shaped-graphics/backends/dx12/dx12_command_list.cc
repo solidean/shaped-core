@@ -234,8 +234,8 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_ha
 
 void dx12_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
                                                 cc::span<cc::byte const> pixels,
-                                                sg::subresource_index subresource,
-                                                sg::texture_region region)
+                                                sg::subresource_index const& subresource,
+                                                sg::texture_region const& region)
 {
     CC_ASSERT(texture != nullptr, "upload target texture is null");
     auto const dst = std::dynamic_pointer_cast<dx12_texture const>(texture);
@@ -244,10 +244,9 @@ void dx12_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
     CC_ASSERT(sg::has_flag(dst->usage(), sg::texture_usage::copy_dst), "upload target texture must have "
                                                                        "texture_usage::copy_dst");
 
+    // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(pixels.size() == fp.tight_size(), "pixel data size does not match the copy region");
-    if (pixels.empty())
-        return;
 
     // Transition the target subresource to copy_dst (from whatever it was last used as), then record the copy.
     track_texture_access(dst, subresource, sg::pipeline_stage_flags::copy, sg::access_flags::copy_write,
@@ -257,8 +256,8 @@ void dx12_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
 }
 
 sg::bytes_future dx12_command_list::download_bytes_from_texture(sg::raw_texture_handle texture,
-                                                                sg::subresource_index subresource,
-                                                                sg::texture_region region)
+                                                                sg::subresource_index const& subresource,
+                                                                sg::texture_region const& region)
 {
     CC_ASSERT(texture != nullptr, "download source texture is null");
     auto const src = std::dynamic_pointer_cast<dx12_texture const>(texture);
@@ -267,6 +266,7 @@ sg::bytes_future dx12_command_list::download_bytes_from_texture(sg::raw_texture_
     CC_ASSERT(sg::has_flag(src->usage(), sg::texture_usage::copy_src), "download source texture must have "
                                                                        "texture_usage::copy_src");
 
+    // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
     // Transition the source subresource to copy_src, then record the readback copy.

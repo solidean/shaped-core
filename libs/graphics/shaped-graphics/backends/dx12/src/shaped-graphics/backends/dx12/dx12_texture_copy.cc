@@ -23,30 +23,22 @@ namespace
 } // namespace
 
 dx12_texture_footprint compute_texture_footprint(sg::texture_description const& desc,
-                                                 sg::subresource_index sub,
-                                                 sg::texture_region region)
+                                                 sg::subresource_index const& sub,
+                                                 sg::texture_region const& region)
 {
-    CC_ASSERT(sub.aspect == sg::texture_aspect::color, "only the color aspect is supported for texture copies yet");
-    CC_ASSERT(sub.mip_level >= 0 && sub.mip_level < desc.mip_levels, "mip level out of range");
-
-    // The array axis size D3D12 addresses subresources against (a cube is 6 slices per cube).
-    int const slices = desc.array_layers.value_or(1) * (desc.is_cube ? 6 : 1);
-    CC_ASSERT(sub.array_layer >= 0 && sub.array_layer < slices, "array layer out of range");
-
+    // The subresource (mip / array layer / color aspect) is already validated by the sg API layer.
     int const sub_w = mip_extent(desc.width, sub.mip_level);
     int const sub_h = desc.dimension == sg::texture_dimension::d1 ? 1 : mip_extent(desc.height, sub.mip_level);
-    int const sub_d = desc.dimension == sg::texture_dimension::d3 ? mip_extent(desc.depth, sub.mip_level) : 1;
 
-    // tg::vec is subscript-accessed ([0]/[1]/[2] = x/y/z); pull the axes out for the region math below.
-    int const ox = region.offset[0], oy = region.offset[1], oz = region.offset[2];
-
-    // A default (zero-size) region resolves to the whole subresource from the offset.
-    int const w = region.size[0] > 0 ? region.size[0] : sub_w - ox;
-    int const h = region.size[1] > 0 ? region.size[1] : sub_h - oy;
-    int const d = region.size[2] > 0 ? region.size[2] : sub_d - oz;
-    CC_ASSERT(ox >= 0 && oy >= 0 && oz >= 0, "region offset must be non-negative");
-    CC_ASSERT(w > 0 && h > 0 && d > 0, "region must be non-empty");
-    CC_ASSERT(ox + w <= sub_w && oy + h <= sub_h && oz + d <= sub_d, "region out of bounds");
+    // The region is already resolved + bounds-checked by the sg API layer, so it is a concrete, in-bounds,
+    // non-empty box here. tg::pos / tg::vec are subscript-accessed ([0..2]=x/y/z).
+    int const ox = region.offset[0];
+    int const oy = region.offset[1];
+    int const oz = region.offset[2];
+    int const w = region.size[0];
+    int const h = region.size[1];
+    int const d = region.size[2];
+    CC_ASSERT(w > 0 && h > 0 && d > 0, "texture copy region must be non-empty");
 
     int const block = sg::format_block_extent(desc.format); // 1 (uncompressed) or 4 (block-compressed)
     cc::isize const block_bytes = sg::format_block_size(desc.format);

@@ -73,25 +73,10 @@ public:
     void debug_set_cursor(cc::u64 pos);
 
 private:
-    /// A contiguous, non-wrapping slice of the ring: physical `offset` and the `granted` bytes there.
-    /// `granted` is capped at the seam (`_capacity - offset`), so a request straddling the wrap is
-    /// handed back in pieces the caller loops over — no wasted tail.
-    struct reservation
-    {
-        cc::isize offset = 0;
-        cc::isize granted = 0;
-    };
-
-    /// Reserves up to `size` bytes at the current cursor, never crossing the physical seam (so the
-    /// result may be smaller than `size` — the caller reserves again for the remainder). Blocks
-    /// (retiring in-flight epochs) when the space is still held by earlier epochs. Asserts if a single
-    /// upload exceeds the ring capacity.
-    reservation reserve(cc::isize size);
-
     /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
-    /// returns its start cursor; the caller walks it, handing a resumable job to-seam windows. Used by the
-    /// texture path, which needs one window big enough to self-align + make progress. `total` must fit the
-    /// capacity. Blocks like reserve().
+    /// returns its start cursor; the caller walks it, handing a resumable job to-seam windows (offset
+    /// `cursor % capacity`, size to the seam). `total` must fit the capacity. Blocks (retiring in-flight
+    /// epochs) when the space is still held by earlier epochs.
     cc::u64 reserve_span(cc::isize total);
 
     dx12_context& _ctx;
