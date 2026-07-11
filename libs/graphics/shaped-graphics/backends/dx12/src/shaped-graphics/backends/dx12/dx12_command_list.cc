@@ -472,6 +472,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next) -> sg::submission_token
         {
+            // Resolve + read back this list's GPU queries first: it records commands (ResolveQueryData +
+            // the readback copy) that must land before Close, and touches a transient resolve buffer whose
+            // slot the finalize loop below then commits. Its readbacks ride _pending_downloads and are
+            // stamped by enqueue_submitted at the end of this lambda.
+            cmd->finalize_queries_before_close();
+
             // Finalize access tracking before closing. Each resource decides per-itself: the last command
             // list using it commits its final state as the new canonical (the one case that may leave a
             // texture in a new layout); every earlier list rolls back to canonical. For buffers this is a
@@ -580,6 +586,13 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
 
     // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
     _download_inline.discard_unsubmitted(cmd._pending_downloads);
+
+    // Return any leased query heaps to the pool unresolved. Handles handed out for this list keep an
+    // invalid shared future, so they stay valid-but-never-ready (like a cancelled download).
+    for (auto& lease : cmd._leased_query_heaps)
+        _query_system.release_heap(cc::move(lease));
+    cmd._leased_query_heaps.clear();
+    cmd._active_timestamp_lease = -1;
 
     // The recorded work never runs, so its declared accesses leave no canonical state: clear each touched
     // resource's slot — which only decrements that resource's active-slot count (canonical layout

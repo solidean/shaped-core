@@ -6,9 +6,11 @@
 #include <shaped-graphics/command_list.compute.hh>
 #include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
+#include <shaped-graphics/command_list.query.hh>
 #include <shaped-graphics/command_list.raytracing.hh>
 #include <shaped-graphics/command_list.upload.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/gpu_timestamp.hh>
 
 namespace sg
 {
@@ -44,6 +46,9 @@ public:
     /// Ray-tracing facade: `cmd.raytracing.build_blas(...)` / `.build_tlas(...)` / `.is_supported()`.
     command_list_raytracing_scope raytracing;
 
+    /// GPU-query facade: `cmd.query.record_gpu_timestamp()` / `.is_supported()`.
+    command_list_query_scope query;
+
 protected:
     explicit command_list(epoch created_in);
 
@@ -54,6 +59,7 @@ protected:
     friend class command_list_copy_scope;
     friend class command_list_compute_scope;
     friend class command_list_raytracing_scope;
+    friend class command_list_query_scope;
 
     virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
         = 0;
@@ -121,6 +127,12 @@ protected:
                                           int height,
                                           int depth)
         = 0;
+
+    // GPU queries (reached through cmd.query). record_gpu_timestamp records a point-in-time timestamp and
+    // returns a handle whose tick is resolved + read back when the list is submitted. A backend without
+    // timestamp support answers false and returns an invalid query (record is always callable).
+    [[nodiscard]] virtual bool query_timestamps_supported() const = 0;
+    [[nodiscard]] virtual gpu_timestamp query_record_gpu_timestamp() = 0;
 
     epoch _epoch = epoch::invalid;
 };

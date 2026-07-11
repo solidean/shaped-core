@@ -155,6 +155,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(ctx->_upload_async.initialize(config.async_upload_window_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_async.initialize(config.async_download_window_bytes));
 
+    // The GPU-query heap pool; caches the direct queue's timestamp frequency (→ tick→seconds factor).
+    CC_RETURN_IF_ERROR(ctx->_query_system.initialize());
+
     // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a
     // per-epoch-reclaimed transient ring (leading fraction) and a persistent bump region (the rest).
     CC_RETURN_IF_ERROR(ctx->_descriptor_heap.initialize(*ctx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,

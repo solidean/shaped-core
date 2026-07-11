@@ -65,6 +65,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.
 - [async download](concepts/download.async.md) — bulk GPU→CPU readback on a dedicated copy queue
   (`ctx.download`), off the frame path, with automatic per-resource sync in both directions.
+- [GPU queries](concepts/queries.md) — `cmd.query.record_gpu_timestamp`: pooled query heaps leased per
+  list, one batched readback per heap at submit, and the poll-after-submit `gpu_timestamp` result.
 
 ## Conventions
 

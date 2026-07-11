@@ -40,6 +40,7 @@ src/shaped-graphics/
   compute_pipeline.hh/.cc         [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
   binding_group.hh/.cc            [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
   command_list.compute.hh/.cc     [in progress] cmd.compute scope: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
+  command_list.query.hh/.cc       [in progress] cmd.query scope: record_gpu_timestamp / is_supported -> gpu_timestamp (dx12 real; vulkan stub)
   allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
   memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
 backends/                                       # each subclasses the abstract sg types directly
@@ -142,6 +143,9 @@ accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd
                                   prebuild query with transient scratch, persistent handles across epochs;
                                   dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update,
                                   compaction, SBT, raytracing pipelines, the acceleration_structure binding
+gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
+                                  per list, one batched inline readback per heap at submit; dx12 real (WARP),
+                                  vulkan stub. Deferred: occlusion + pipeline-statistics queries
 swapchain / surface  [planned]  presentation
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
                                   deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)

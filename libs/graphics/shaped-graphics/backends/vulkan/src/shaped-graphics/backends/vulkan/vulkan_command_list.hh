@@ -116,5 +116,10 @@ protected:
     {
         CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
     }
+
+    // GPU queries (reached through cmd.query) — not implemented yet. Timestamps report unsupported, so
+    // record_gpu_timestamp always returns an invalid query (record is always callable).
+    [[nodiscard]] bool query_timestamps_supported() const override { return false; }
+    [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override { return {}; }
 };
 } // namespace sg::backend::vulkan

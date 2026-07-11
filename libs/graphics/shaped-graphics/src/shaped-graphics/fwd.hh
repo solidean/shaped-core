@@ -26,6 +26,7 @@ class command_list_download_scope;
 class command_list_copy_scope;
 class command_list_compute_scope;
 class command_list_raytracing_scope;
+class command_list_query_scope;
 class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
@@ -44,6 +45,7 @@ class bytes_waiter;
 class bytes_future;
 template <class T>
 class data_future;
+class gpu_timestamp; // value type (see gpu_timestamp.hh) — result of cmd.query.record_gpu_timestamp
 class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)
