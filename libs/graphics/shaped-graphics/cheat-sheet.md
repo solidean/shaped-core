@@ -169,6 +169,25 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // guarantee delivery either; use ctx.wait_for(future)). Uploading + downloading + copying the SAME buffer works in ONE list —
 // the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // vulkan transfer is a TODO stub.
+
+// GPU queries (cmd.query scope). See docs/concepts/queries.md.
+cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan stub: no)
+cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
+// resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
+```
+
+## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
+
+```cpp
+#include <shaped-graphics/gpu_timestamp.hh>
+sg::gpu_timestamp t = cmd.query.record_gpu_timestamp(); // copyable value type; read AFTER submitting the list
+t.is_valid()                    // bool — backed by a real query (false = default-constructed / unsupported backend)
+t.is_ready()                    // bool — NON-BLOCKING poll; true once the tick landed (false before submit / forever if dropped)
+t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (polls); only DIFFERENCES are meaningful
+t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
+ctx.wait_for_ticks(t)           // -> cc::optional<cc::u64>  — BLOCK until delivered, returns the tick
+ctx.wait_for_seconds(t)         // -> cc::optional<double>   — same, returns seconds
+// normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```
 
 ## raw_buffer — GPU-resident, immutable shape  (abstract)
