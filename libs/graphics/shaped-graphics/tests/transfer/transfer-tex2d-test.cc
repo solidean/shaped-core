@@ -9,36 +9,60 @@
 #include <shaped-graphics/types.hh>
 
 
-// KNOWN-BUG reproduction — dx12 cross-queue 2D-texture layout desync between the inline (cmd.upload/download,
-// DIRECT queue) and async (ctx.upload/download, COPY queue) transfer paths. Uncovered by
-// transfer-tex2d-fuzz-test.cc (whose async ops are #if 0'd off for the same reason).
+// HANDOVER — KNOWN dx12 BUG: async texture transfer skips the cross-queue layout hand-off
+// =======================================================================================
+// The async (ctx.upload/download) texture path runs its copy on a D3D12 COPY queue and does the cross-queue
+// *sync* (a fence signal→wait vs the last direct-queue user) but never performs the cross-queue *layout*
+// transition. Interleaving it with the inline (cmd.upload/download, DIRECT queue) path therefore hands the
+// COPY queue a texture in the wrong layout. Uncovered by transfer-tex2d-fuzz-test.cc, whose two async ops are
+// #if 0'd off for the same reason. This is a real defect, not debug-layer noise — the bytes still round-trip
+// (so no CHECK fails), but the D3D12 debug layer reports every occurrence.
 //
-// DISABLED via #if 0: the sequence below is data-correct (no CHECK fails), so nothing but the D3D12 debug
-// layer notices — it just floods stderr with barrier-layout errors. An INVOCABLE_TEST is always run by the
-// backend driver (nx::invoke_tests ignores nx::config::disabled), so #if 0 is the only way to keep it out of
-// the green suite. It has been confirmed to reproduce (4 barrier-layout errors from this one sequence); flip
-// the guard to #if 1 and run it against dx12 to see them:
+// Why textures and not buffers (this is the subtle part)
+// ------------------------------------------------------
+// Under *enhanced* barriers a buffer has no state — only access + sync — so a cross-queue fence is a
+// sufficient happens-before and no transition is needed. A **texture still has a layout**, and a D3D12 COPY
+// queue supports only the COMMON layout for it (COPY_SOURCE / COPY_DEST are direct/compute-queue layouts).
+// So a texture, unlike a buffer, cannot cross the queue boundary without first being transitioned to COMMON —
+// the fence alone is necessary but not sufficient. We are fully on enhanced barriers for textures
+// (d3d12_layout_from → D3D12_BARRIER_LAYOUT_*, emitted via ID3D12GraphicsCommandList7::Barrier in
+// dx12_barrier.cc), so this layout requirement is live.
+//
+// The exact sequence (reproduced below)
+// -------------------------------------
+// 1. INLINE upload: transitions the texture to COPY_DEST on the DIRECT queue; at submit the last list using
+//    it promotes that as the resting ("canonical") layout, so it is left physically in COPY_DEST
+//    (dx12_command_list.cc upload_bytes_to_texture / download_bytes_from_texture + dx12_texture_access.hh
+//    finalize).
+// 2. ASYNC download: the COPY queue reads the texture while it is still COPY_DEST — illegal on a COPY queue,
+//    which requires COMMON. (Debug layer: "must be in expected layout (COMMON) ... using
+//    D3D12_COMMAND_LIST_TYPE_COPY".) The async path (dx12_upload_async.cc / dx12_download_async.cc) never
+//    transitions it, because it does not participate in the layout tracker at all.
+// 3. INLINE download: the COPY queue implicitly decayed the texture to COMMON, but the tracker's canonical
+//    still reads copy_*, so this op emits a barrier whose layoutBefore no longer matches the resource.
+//    (Debug layer: "does not match expected layout (COMMON) ... using D3D12_COMMAND_LIST_TYPE_DIRECT".)
+//
+// The fix (follow-up in this PR)
+// ------------------------------
+// Make the async texture path a first-class participant in the layout tracker: before its COPY-queue job,
+// transition the texture COPY_* → COMMON on the DIRECT queue (the existing cross-queue fence is the
+// happens-before), let the COPY queue read/write it in COMMON, and record COMMON as the new canonical so the
+// next inline op has the correct layoutBefore. Cost is paid only when a texture is actually used cross-queue,
+// NOT by blanket-resting every copy-touched texture in COMMON. Once it lands, this test should assert-clean
+// and be re-enabled (drop the #if 0) together with the fuzz async ops.
+//
+// Related but out of scope: the buffer async path trips an analogous cross-queue error, but for a different
+// reason — buffers are NOT yet on enhanced barriers; they still rely on legacy implicit state promotion/decay
+// (dx12_resource_upload.hh: "no barrier is needed. TODO: a real ... barrier system lands later"), so the
+// errors there are phrased in legacy D3D12_RESOURCE_STATE_* terms. The buffer fix is that enhanced-barrier
+// migration (declare access, rely on the fence), after which buffers carry no state to coordinate.
+//
+// Disabled via #if 0 (not nx::config::disabled): an INVOCABLE_TEST is always run by the backend driver
+// (nx::invoke_tests ignores the disabled config), so #if 0 is the only way to keep it out of the green suite.
+// Confirmed to reproduce (4 barrier-layout errors from this one sequence). To see them, flip to #if 1 and:
 //   uv run dev.py test "sg - tex2d inline+async cross-queue layout (KNOWN BUG)"
 //   grep -E "must be in expected layout|does not match expected layout" \
 //     build/*/run-logs/run-log-shaped-graphics-test.stderr.txt
-//
-// What goes wrong
-// ---------------
-// The inline path transitions a texture to COPY_DEST / COPY_SOURCE on the DIRECT queue, and at submit the
-// last command list using it promotes that copy layout as the resting ("canonical") layout — the texture is
-// left physically in COPY_DEST / COPY_SOURCE (dx12_command_list.cc upload_bytes_to_texture /
-// download_bytes_from_texture + dx12_texture_access.hh finalize). The async path runs CopyTextureRegion on a
-// D3D12 COPY queue and does *only* fence cross-queue sync — it never touches the layout tracker
-// (dx12_upload_async.cc / dx12_download_async.cc). But a COPY queue requires its resources in the COMMON
-// layout, so:
-//   1. an inline copy followed by an async copy hits the texture while it is still COPY_DEST / COPY_SOURCE —
-//      illegal on the COPY queue; and
-//   2. the COPY queue implicitly decays the texture to COMMON, but the tracker's canonical still reads
-//      copy_*, so the *next* inline op emits a barrier whose layoutBefore no longer matches the resource.
-//
-// The fix is a barrier-system decision (rest copy-usage textures in COMMON at the inline<->async boundary);
-// it lands in the same PR as a follow-up, after which this test should assert-clean and be re-enabled (drop
-// the #if 0) alongside the fuzz async ops.
 
 #if 0
 namespace
