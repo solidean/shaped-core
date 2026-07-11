@@ -161,7 +161,9 @@ if(_sg_backends)
         tests/texture/texture-create-test.cc
         tests/command_list/command_list-test.cc
         tests/transfer/transfer-test.cc
-        tests/transfer/transfer-fuzz-test.cc
+        tests/transfer/transfer-tex2d-test.cc
+        tests/transfer/transfer-buffer-fuzz-test.cc
+        tests/transfer/transfer-tex2d-fuzz-test.cc
         tests/transfer/upload-async-test.cc
         tests/transfer/download-async-test.cc
         tests/copy/copy-test.cc
