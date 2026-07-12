@@ -118,10 +118,6 @@ transferred at thread exit; there is deliberately **no mid-life slab migration**
   in its bin holding the still-live nodes; frees keep landing in `remote` and are only reclaimed once the
   slab is adopted. Bounded (one bin per class), not a leak in the grow-unbounded sense, but worth knowing.
 
-- **Over-aligned large nodes are unsupported.** `system_allocate_node_bytes_large` asserts
-  `alignment == 8` ([node_allocation.cc:43](../../src/clean-core/memory/node_allocation.cc#L43)); larger
-  alignments are a `TODO`.
-
 - **Alloc-heavy workloads re-walk the ring on each exhaustion**
   ([node_allocation.cc](../../src/clean-core/memory/node_allocation.cc)) — no bookkeeping caches the
   last-known-full point, so exhaustion is O(ring) each time. A `TODO`.
@@ -140,7 +136,6 @@ refill** (previous slabs are retained in the ring), and the full **slab lifecycl
 thread-exit abandonment, cross-thread adoption, and trim (see above). Still open:
 
 - **Cheaper ring re-walk** — cache the last-known-full point instead of an O(ring) scan per exhaustion.
-- **Over-aligned (> 8 B) large nodes** — `system_allocate_node_bytes_large` still asserts `alignment == 8`.
 - **Co-located refcounts** — the header notes a possible future `shared_ptr`-like variant storing the
   count next to the node.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.

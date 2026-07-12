@@ -202,36 +202,44 @@ cc::node_allocator& system_get_allocator(void* userdata)
     return tls_allocator;
 }
 
+// 24-byte large-node header, sitting immediately BEFORE the returned payload: [size][alignment][resource*].
+// The resource pointer is at payload-8 so node_allocation_free_large can recover it (see its contract).
+constexpr cc::isize node_large_header_size = 24;
+
 /// Allocates a large node (> small_max) from the system memory resource.
-/// Stores a 24-byte header: (size, alignment, resource pointer).
-/// Alignment is bumped to at least 8 bytes to ensure proper alignment for the header.
+/// Layout: allocate a block aligned to `alignment`, place the payload at the first aligned offset that
+/// leaves room for the 24-byte header, and write the header in the 24 bytes right before the payload. So
+/// the payload honors any power-of-two alignment (not just 8) while keeping resource* at payload-8.
 cc::byte* system_allocate_node_bytes_large(cc::node_class_index idx, cc::isize size_bytes, cc::isize alignment, void* userdata)
 {
     CC_UNUSED(idx); // not needed for system allocator
     CC_UNUSED(userdata);
 
-    // bump alignment to at least 8 bytes to ensure proper storage of the header
+    // bump alignment to at least 8 bytes (the header fields are 8-byte writes); must be a power of two
     alignment = cc::max(alignment, cc::isize(8));
-    CC_ASSERT(alignment == 8, "TODO: for larger alignments we need to allocate a bit better");
 
-    // header layout: [size (8B)][alignment (8B)][resource* (8B)][actual allocation]
-    constexpr cc::isize header_size = 24;
-    cc::isize const total_size = header_size + size_bytes;
+    // payload offset: the first `alignment`-aligned point with >= header_size bytes ahead of it for the
+    // header. Since the block itself is `alignment`-aligned, this offset is a multiple of alignment, so the
+    // payload is aligned too. For alignment 8 this is 24 (the old layout); for 16 it is 32; etc.
+    cc::isize const payload_offset = cc::align_up(node_large_header_size, alignment);
+    cc::isize const total_size = payload_offset + size_bytes;
 
-    // allocate from system memory resource
+    // allocate from system memory resource, aligned so the payload lands on an `alignment` boundary
     cc::byte* alloc_ptr = nullptr;
     cc::isize const actual_size = cc::default_memory_resource->allocate_bytes(
         &alloc_ptr, total_size, total_size, alignment, cc::default_memory_resource->userdata);
     CC_ASSERT(actual_size >= total_size, "system allocator must allocate at least the requested size");
     CC_ASSERT(alloc_ptr != nullptr, "system allocator must return non-null for non-zero size");
 
-    // write header: size, alignment, resource pointer
-    *reinterpret_cast<cc::isize*>(alloc_ptr + 0) = size_bytes;                                    // NOLINT
-    *reinterpret_cast<cc::isize*>(alloc_ptr + 8) = alignment;                                     // NOLINT
-    *reinterpret_cast<cc::node_memory_resource**>(alloc_ptr + 16) = &system_node_memory_resource; // NOLINT
+    cc::byte* const payload = alloc_ptr + payload_offset;
+    CC_ASSERT(cc::is_aligned(payload, alignment), "large-node payload must honor the requested alignment");
 
-    // return pointer past the header
-    return alloc_ptr + header_size;
+    // write the header in the 24 bytes right before the payload: [size][alignment][resource*]
+    *reinterpret_cast<cc::isize*>(payload - 24) = size_bytes;                                  // NOLINT
+    *reinterpret_cast<cc::isize*>(payload - 16) = alignment;                                   // NOLINT
+    *reinterpret_cast<cc::node_memory_resource**>(payload - 8) = &system_node_memory_resource; // NOLINT
+
+    return payload;
 }
 
 /// Deallocates a large node (> small_max) by reading the header and calling into system memory resource.
@@ -240,19 +248,17 @@ void system_deallocate_node_bytes_large(cc::byte* ptr, cc::node_class_index idx,
     CC_UNUSED(idx); // not needed for system allocator
     CC_UNUSED(userdata);
 
-    // header is 24 bytes before the user pointer
-    constexpr cc::isize header_size = 24;
-    cc::byte* const alloc_ptr = ptr - header_size;
-
-    // read header: size, alignment, resource pointer
-    cc::isize const size_bytes = *reinterpret_cast<cc::isize*>(alloc_ptr + 0);           // NOLINT
-    cc::isize const alignment = *reinterpret_cast<cc::isize*>(alloc_ptr + 8);            // NOLINT
-    auto const resource = *reinterpret_cast<cc::node_memory_resource**>(alloc_ptr + 16); // NOLINT
+    // read the header from the 24 bytes before the payload: [size][alignment][resource*]
+    cc::isize const size_bytes = *reinterpret_cast<cc::isize*>(ptr - 24);         // NOLINT
+    cc::isize const alignment = *reinterpret_cast<cc::isize*>(ptr - 16);          // NOLINT
+    auto const resource = *reinterpret_cast<cc::node_memory_resource**>(ptr - 8); // NOLINT
 
     CC_ASSERT(resource == &system_node_memory_resource, "resource mismatch in large node deallocation");
 
-    // deallocate from system memory resource
-    cc::isize const total_size = header_size + size_bytes;
+    // recover the original allocation: the payload sits `payload_offset` into it (same formula as alloc)
+    cc::isize const payload_offset = cc::align_up(node_large_header_size, alignment);
+    cc::byte* const alloc_ptr = ptr - payload_offset;
+    cc::isize const total_size = payload_offset + size_bytes;
     cc::default_memory_resource->deallocate_bytes(alloc_ptr, total_size, alignment,
                                                   cc::default_memory_resource->userdata);
 }

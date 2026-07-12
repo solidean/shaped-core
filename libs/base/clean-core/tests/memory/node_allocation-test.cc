@@ -252,6 +252,32 @@ struct alignas(2) T999B_Align2
 };
 static_assert(sizeof(T999B_Align2) == 1000);
 static_assert(alignof(T999B_Align2) == 2);
+
+// Over-aligned large nodes (> 256 B payload, alignment > 8): these take the large path AND require the
+// returned pointer to honor an alignment greater than the header's 8 bytes.
+struct alignas(32) T512B_Align32
+{
+    u8 data[512] = {};
+    explicit T512B_Align32(u8 v = 0)
+    {
+        for (auto& d : data)
+            d = v;
+    }
+};
+static_assert(sizeof(T512B_Align32) == 512);
+static_assert(alignof(T512B_Align32) == 32);
+
+struct alignas(64) T300B_Align64
+{
+    u8 data[300] = {};
+    explicit T300B_Align64(u8 v = 0)
+    {
+        for (auto& d : data)
+            d = v;
+    }
+};
+static_assert(alignof(T300B_Align64) == 64);
+static_assert(sizeof(T300B_Align64) > 256); // large path
 } // namespace
 
 TEST("node_allocation - basic single allocation")
@@ -1705,6 +1731,34 @@ TEST("node_allocation - move-assignment from subobject safety")
             CHECK(outer.ptr->id == iter * 10 + 1);
         }
     }
+}
+
+TEST("node_allocation - over-aligned large nodes honor alignment")
+{
+    auto& alloc = cc::default_node_allocator();
+
+    // > 256 B with alignment > 8 takes the large path; the returned payload must honor the alignment.
+    // Regression: the old header layout returned payload = alloc_ptr + 24, which is not 32-aligned.
+    cc::vector<cc::node_allocation<T512B_Align32>> live;
+    for (int i = 0; i < 40; ++i)
+    {
+        auto n = cc::node_allocation<T512B_Align32>::create_from(alloc, u8(i));
+        CHECK(cc::is_aligned(n.ptr, 32));
+        CHECK(n.ptr->data[0] == u8(i));
+        CHECK(n.ptr->data[511] == u8(i));
+        live.push_back(cc::move(n));
+    }
+    // all still valid and aligned while co-resident, then freed (dtor round-trips the aligned header)
+    for (cc::isize i = 0; i < live.size(); ++i)
+    {
+        CHECK(cc::is_aligned(live[i].ptr, 32));
+        CHECK(live[i].ptr->data[7] == u8(i));
+    }
+
+    // a stronger alignment allocated alongside
+    auto b = cc::node_allocation<T300B_Align64>::create_from(alloc, u8(0xAB));
+    CHECK(cc::is_aligned(b.ptr, 64));
+    CHECK(b.ptr->data[299] == u8(0xAB));
 }
 
 // Slab-lifecycle tests for the frontend split. These use a *private* node_allocator bound to the real
