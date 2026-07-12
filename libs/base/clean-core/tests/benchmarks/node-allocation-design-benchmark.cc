@@ -1,10 +1,16 @@
 // Node-allocation DESIGN benchmark: the fast-path variants, side by side.
 //
 // Each variant is a self-contained mini-slab-allocator implemented inline below, with only the hot path
-// real; refill/drain-underflow is a non-load-bearing stub (the workload stays within one slab, so it never
-// fires in the timed loop). The point is to compare the *instruction mix* of each lock-removal strategy on
-// whatever machine you run it on — the whole reason to ship all the code (see
+// real; refill/drain-underflow routes through bench_design::cold_refill (an opaque call in another TU that
+// never fires in the timed loop). The point is to compare the *instruction mix* of each lock-removal
+// strategy on whatever machine you run it on — the whole reason to ship all the code (see
 // libs/base/clean-core/docs/systems/node-allocation.md).
+//
+// The cold refill is out-of-TU on purpose: it makes the optimizer reload the slab base on every allocation
+// (it cannot prove the base survives the call), exactly as the real cc::node_allocator must (its cold path
+// allocate_node_bytes_non_fast is likewise opaque). Without it the variants hoist a single fixed slab base
+// into a register and report a number the real allocator can't reach; with it, the shipped `node` line below
+// tracks the step2_tls_diff variant it implements. Never remove it for a "cleaner" inline stub.
 //
 // Variants:
 //   atomic          current design: one bitmap + next, `lock and` to allocate, `lock or` to free (2 locks)
@@ -20,6 +26,7 @@
 //   step2_teb_diff  step2_teb with the remote bitmap in a 2nd cache line
 //   mimalloc        cc::default_memory_resource, same batch pattern
 //   system          cc::system_memory_resource (platform malloc), same batch pattern
+//   node            the REAL shipped cc::node_allocator (not a mock) -- the line to trust for actual perf
 //
 // Workload: allocate a fixed batch of N, free all N in a fixed permuted order, repeat; 3 runs. Metric is
 // millions of alloc+free pairs/s AND GB/s (= pairs/s * size). Machine-readable rows are printed as
@@ -27,9 +34,11 @@
 // for scripts/plot-node-allocation-design.py to parse into SVGs.
 
 #include "bench_util.hh"
+#include "node-allocation-design-refill.hh"
 
 #include <clean-core/math/bit.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/memory/node_allocation.hh>
 #include <nexus/test.hh>
 
 #include <atomic>
@@ -123,16 +132,17 @@ struct VarAtomic
 
     CC_FORCE_INLINE cc::byte* alloc()
     {
-        auto fm = std::atomic_ref<u64>(*reinterpret_cast<u64*>(base));
-        u64 v = fm.load(std::memory_order_relaxed);
-        if (v == 0) [[unlikely]] // stub refill (never hit: batch fits the slab)
+        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        u64 v = std::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).load(std::memory_order_relaxed);
+        if (v == 0) [[unlikely]] // opaque refill (never hit: batch fits the slab) -- defeats base-hoisting
         {
-            fm.store(~u64(0), std::memory_order_relaxed);
-            v = ~u64(0);
+            b = bench_design::cold_refill(b);
+            base = b;
+            v = *reinterpret_cast<u64*>(b);
         }
         int const slot = cc::count_trailing_zeroes(v);
-        fm.fetch_and(~(u64(1) << slot), std::memory_order_relaxed); // lock and
-        return base + DATA_OFF + (isize(slot) << LOG);
+        std::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_and(~(u64(1) << slot), std::memory_order_relaxed); // lock and
+        return b + DATA_OFF + (isize(slot) << LOG);
     }
     CC_FORCE_INLINE void free(cc::byte* p)
     {
@@ -160,12 +170,17 @@ struct VarSingle
 
     CC_FORCE_INLINE cc::byte* alloc()
     {
-        u64& fm = *reinterpret_cast<u64*>(base);
-        if (fm == 0) [[unlikely]]
-            fm = ~u64(0);
-        int const slot = cc::count_trailing_zeroes(fm);
-        fm &= ~(u64(1) << slot); // plain and
-        return base + DATA_OFF + (isize(slot) << LOG);
+        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        u64 v = *reinterpret_cast<u64*>(b);
+        if (v == 0) [[unlikely]] // opaque refill -- defeats base-hoisting so base is reloaded per alloc
+        {
+            b = bench_design::cold_refill(b);
+            base = b;
+            v = *reinterpret_cast<u64*>(b);
+        }
+        int const slot = cc::count_trailing_zeroes(v);
+        *reinterpret_cast<u64*>(b) = v & ~(u64(1) << slot); // plain and
+        return b + DATA_OFF + (isize(slot) << LOG);
     }
     CC_FORCE_INLINE void free(cc::byte* p)
     {
@@ -200,17 +215,21 @@ struct VarStep1
 
     CC_FORCE_INLINE cc::byte* alloc()
     {
-        u64& lf = local(base);
-        u64 v = lf; // plain load
-        if (v == 0) // local empty: drain remote (one atomic), else stub refill
+        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        u64 v = local(b);   // plain load
+        if (v == 0)         // local empty: drain remote (one atomic), else opaque refill (reloads base per alloc)
         {
-            v = std::atomic_ref<u64>(remote(base)).exchange(0, std::memory_order_relaxed);
+            v = std::atomic_ref<u64>(remote(b)).exchange(0, std::memory_order_relaxed);
             if (v == 0) [[unlikely]]
-                v = ~u64(0);
+            {
+                b = bench_design::cold_refill(b);
+                base = b;
+                v = local(b);
+            }
         }
         int const slot = cc::count_trailing_zeroes(v);
-        lf = v & ~(u64(1) << slot); // plain and
-        return base + DATA_OFF + (isize(slot) << LOG);
+        local(b) = v & ~(u64(1) << slot); // plain and
+        return b + DATA_OFF + (isize(slot) << LOG);
     }
     CC_FORCE_INLINE void free(cc::byte* p)
     {
@@ -249,17 +268,21 @@ struct VarStep2
 
     CC_FORCE_INLINE cc::byte* alloc()
     {
-        u64& lf = local(base);
-        u64 v = lf;
-        if (v == 0) // local empty: drain remote, else stub refill
+        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        u64 v = local(b);
+        if (v == 0) // local empty: drain remote, else opaque refill (reloads base per alloc)
         {
-            v = std::atomic_ref<u64>(remote(base)).exchange(0, std::memory_order_relaxed);
+            v = std::atomic_ref<u64>(remote(b)).exchange(0, std::memory_order_relaxed);
             if (v == 0) [[unlikely]]
-                v = ~u64(0);
+            {
+                b = bench_design::cold_refill(b);
+                base = b;
+                v = local(b);
+            }
         }
         int const slot = cc::count_trailing_zeroes(v);
-        lf = v & ~(u64(1) << slot);
-        return base + DATA_OFF + (isize(slot) << LOG);
+        local(b) = v & ~(u64(1) << slot);
+        return b + DATA_OFF + (isize(slot) << LOG);
     }
     CC_FORCE_INLINE void free(cc::byte* p)
     {
@@ -287,6 +310,22 @@ struct VarResource
         return p;
     }
     CC_FORCE_INLINE void free(cc::byte* p) { res->deallocate_bytes(p, Size, 8, res->userdata); }
+};
+
+// node: the REAL shipped cc::node_allocator, not an inline mock. Same batch pattern, so it should track the
+// design variant it implements (step2_tls_diff) up to the cost of its extra not-taken branches (large-node
+// check, cold-path fallback). This is the line to trust for "what does the actual allocator do here".
+// Size is a power-of-two class size, so the class index is exactly log2(Size); size/align args are ignored
+// for small classes (only idx matters), so the hot path is identical to allocate_node_bytes' fast path.
+template <isize Size>
+struct VarNode
+{
+    static constexpr cc::node_class_index IDX = cc::node_class_index(log2i(Size));
+    cc::node_allocator* na = nullptr;
+    void hydrate() { na = &cc::default_node_allocator(); }
+    void teardown() {}
+    CC_FORCE_INLINE cc::byte* alloc() { return na->allocate_node_bytes(IDX, Size, 8); }
+    CC_FORCE_INLINE void free(cc::byte* p) { cc::node_allocation_free(p, IDX); }
 };
 
 // --- harness --------------------------------------------------------------------------------------------
@@ -342,6 +381,26 @@ void measure(char const* name, isize size, Var& v)
     v.teardown();
 }
 
+// Non-inlined, uniquely-named single-batch hot-loop probe, instantiated for the design mock and the real
+// allocator below. Identical loop structure differing only in the Var type, so `dev.py assembly show` lands
+// on each hot path and they can be diffed instruction-for-instruction — the check that the shipped
+// allocator actually compiles to the step2_tls_diff design it was chosen from (not just claims to).
+// Kept alive by references from the TEST (TU-local + noinline would otherwise be dead-code-eliminated).
+template <class Var>
+CC_DONT_INLINE u64 design_hotloop_probe(Var& v, cc::byte** nodes, int const* free_perm)
+{
+    for (isize i = 0; i < batch_n; ++i)
+        nodes[i] = v.alloc();
+    u64 acc = 0;
+    for (isize i = 0; i < batch_n; ++i)
+    {
+        cc::byte* const p = nodes[free_perm[i]];
+        acc ^= reinterpret_cast<u64>(p);
+        v.free(p);
+    }
+    return acc;
+}
+
 template <isize Size>
 void sweep()
 {
@@ -387,6 +446,10 @@ void sweep()
         VarResource<Size> v{&cc::system_memory_resource};
         measure("system", Size, v);
     }
+    {
+        VarNode<Size> v;
+        measure("node", Size, v);
+    }
 }
 } // namespace
 
@@ -408,6 +471,23 @@ TEST("bench-node-design (fast-path variants)", nx::config::manual)
     sweep<64>();
     sweep<128>();
     sweep<256>();
+
+    // Keep the two hot-loop probes alive as searchable disassembly symbols (not timed): the design mock
+    // step2_tls_diff vs the real cc::node_allocator, both at 16 B. Compare via
+    //   dev.py assembly show 'design_hotloop_probe<...VarStep2<16,true,false>...>'
+    //   dev.py assembly show 'design_hotloop_probe<...VarNode<16>...>'
+    {
+        cc::byte* probe_nodes[batch_n] = {};
+        VarStep2<16, true, false> vm;
+        vm.hydrate();
+        bench::sink ^= design_hotloop_probe(vm, probe_nodes, free_order);
+        vm.teardown();
+
+        VarNode<16> vn;
+        vn.hydrate();
+        bench::sink ^= design_hotloop_probe(vn, probe_nodes, free_order);
+        vn.teardown();
+    }
 
     std::fflush(stdout);
 }

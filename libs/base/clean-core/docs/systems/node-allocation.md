@@ -145,63 +145,100 @@ thread-exit abandonment, cross-thread adoption, and trim (see above). Still open
   count next to the node.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.
 
+**Confidence gaps — `TODO`s before the cross-thread guarantee is *proven*, not just *argued*:**
+
+- **The concurrency correctness is reason-only.** The multi-thread tests use a *single, non-contending*
+  helper thread; nothing genuinely contends the relaxed atomics (`remote` `fetch_or`, drain `exchange`,
+  adoption `owner` store) or the orphan-bin handoff. There is **no ThreadSanitizer** in this repo (the
+  sanitizer presets are ASan+UBSan only). The real gate is a **contended, multi-generation stress test**
+  (threads that alloc, hand nodes to siblings, free siblings' nodes under contention, then exit — asserting
+  bounded memory and all-nodes-freeable across generations) run under a **TSan preset** (Linux/macOS/CI).
+  Until then, treat "correct under real concurrency" as believed, not demonstrated.
+- **`any_node_allocation` / `poly_node_allocation` are untested.** Public surface with no coverage.
+- **Single-threaded trim is compile-checked, not run.** The `CC_HAS_THREADS==0` frontend builds
+  (`emscripten-release`) but the trim path there has not been executed under test.
+
 ## Throughput — where it actually stands
 
 **Speed matters, but it is not the reason this allocator exists** — the 8-byte handle and the stateless
 wait-free free are (see Model). On throughput it is already competitive-to-ahead for the small classes it
 targets, which is the *opposite* of what an earlier draft of this section claimed.
 
-> The table below was measured on the **prior two-lock fast path** (before the local/remote split landed on
-> this branch). It is retained as the mimalloc baseline and the pre-split reference. The split removes both
-> `lock`-prefixed RMWs on the owner path (confirmed via `dev.py assembly show`), so current small-class
-> numbers are **higher** than shown — the design benchmark projects ~2.3x the old node throughput at 16 B.
-> Re-running the comparison on the shipped split is a follow-up; see
-> [`bench-node-design (fast-path variants)`](../../tests/benchmarks/node-allocation-design-benchmark.cc).
-
 From the [handle & node comparison benchmark](../../tests/benchmarks/allocation-benchmark.cc)
-(`bench-alloc (handle & node comparison)`, manual; 32 live nodes to stay within one slab), cross-checked
-against the batch/interleaved
-[`bench-alloc (steady-state small batch)`](../../tests/benchmarks/allocation-benchmark.cc). Metric is
-**millions of alloc+free cycles per second — higher is better** (one cycle = one free + one allocate).
-Release build (`release-clang`), **Ryzen 9 7950X3D**; 3-run medians, run-to-run spread < 3%:
+(`bench-alloc (handle & node comparison)`, manual). Metric is **millions of alloc+free cycles per second —
+higher is better** (one cycle = one free + one allocate). Release build (`release-clang`),
+**Ryzen 9 7950X3D**, representative run:
 
 | size (B) | node (M cyc/s) | mimalloc raw (M cyc/s) | node / mi |
 |------:|------:|------:|------:|
-| 8 | 303 | 138 | 2.2x |
-| 16 | 326 | 219 | 1.5x |
-| 32 | 317 | 211 | 1.5x |
-| 64 | 313 | 212 | 1.5x |
-| 128 | 302 | 210 | 1.4x |
-| 256 | 297 | 187 | 1.6x |
-| 512 | 111 | 177 | 0.6x |
-| 1024 | 66 | 125 | 0.5x |
-| 4096 | 63 | 59 | 1.1x |
+| 8 | 340 | 134 | 2.5x |
+| 16 | 333 | 205 | 1.6x |
+| 32 | 334 | 202 | 1.7x |
+| 64 | 333 | 202 | 1.6x |
+| 128 | 333 | 195 | 1.7x |
+| 256 | 419 | 190 | 2.2x |
+| 512 | 100 | 166 | 0.6x |
+| 1024 | 64 | 126 | 0.5x |
+| 4096 | 61 | 59 | 1.0x |
 
 Reading it:
 
-- **Small classes (≤ 256 B) — the point of the allocator — run ~300–325 M cyc/s, ~1.4–2.2x mimalloc even
-  on the pre-split path.** That old path paid two `lock`-prefixed RMWs per cycle (`lock and` on allocate,
-  `lock or` on free); the shipped split makes the owner's allocate/free plain non-atomic ops (`dev.py
-  assembly show node_alloc_free_hotloop_probe`, see the
-  [disassembly guide](../../../../../docs/guides/disassembly.md)), so the margin is now wider. Throughput is
-  also **pattern-insensitive** — batch (alloc all, then free all) and interleaved (free-one / alloc-one)
-  land within noise for node; mimalloc varies more with the pattern.
+- **Small classes (≤ 256 B) — the point of the allocator — run ~330–420 M cyc/s, ~1.6–2.5x mimalloc.**
+  The owner's allocate and free are plain non-atomic bitmap ops; a `lock` appears only when *another* thread
+  frees (see the codegen below).
 - **The large path (> 256 B) is *slower* than mimalloc**, not "tracking" it: it is mimalloc plus a 24 B
   header and a second layer of function-pointer indirection, so 512 B / 1024 B fall to ~0.5–0.6x. Expected
   — there is no bespoke node fast path above the small classes — but it means node is the wrong tool for
   anything that is not a small single object.
 
-**Hardware sensitivity — measure, don't assume.** The margin's size varies by microarchitecture. An earlier
-draft reported node at *half* mimalloc (~65 vs ~165 M cyc/s) on a Ryzen 9 5900X (Zen 3) laptop, where the
-relative order *inverts*. So "node beats mimalloc" is true here and is not a law — it is the claim that must
-be re-checked per architecture, which is why all fast-path variants ship as a benchmark
-([`bench-node-design`](../../tests/benchmarks/node-allocation-design-benchmark.cc)) to compare on any
-machine. The variant that wins there is the one this frontend ships (`step2_tls_diff`), and it is
-uarch-dependent — re-run the design benchmark on new hardware.
+### Hot-path codegen
 
-Reproduce:
+From `dev.py assembly show node_alloc_free_hotloop_probe --preset release-clang` (threaded frontend, 16 B;
+see the [disassembly guide](../../../../../docs/guides/disassembly.md)). The whole owner path is non-atomic;
+the only `lock` is on the remote branch a same-thread workload never takes:
+
+```text
+; --- allocate (owner) ---
+mov   r8,  [rcx + slab_base_off]   ; the class's current slab, cached in the allocator
+mov   r9,  [r8]                    ; local free bitmap
+tzcnt rax, r9                      ; lowest free slot
+btr   r9,  rax                     ; clear it
+mov   [r8], r9                     ; write the bitmap back           <- no lock
+;     (ptr = slab + slot*size)
+
+; --- free ---
+mov   r11d, [base + 8]             ; the slab's owner_id
+cmp   r11d, [owner_token]          ; == this thread's token?  (raw TLS read, no lazy-init branch)
+jne   .remote
+or    [base], bit                  ; owner: OR the slot back          <- no lock
+.remote:
+lock  or [base + remote_off], bit  ; other thread: the ONLY atomic in the hot path
+```
+
+### The design benchmark carries the real allocator
+
+[`bench-node-design`](../../tests/benchmarks/node-allocation-design-benchmark.cc) sweeps ten idealized
+fast-path variants (one inline mini-allocator per lock-removal strategy) **plus a `node` line that drives
+the real `cc::node_allocator`**. On this machine the shipped `node` line **meets or beats** the idealized
+`step2_tls_diff` variant it implements, at every size — the shipped code pays no penalty over the design it
+was chosen from. Two things keep that comparison honest:
+
+- the idealized variants route their (never-taken) cold refill through an **opaque out-of-TU call**, forcing
+  a slab-base reload every allocation — exactly what the real allocator does (its cold path lives in another
+  TU). Without it the mocks hoist a single fixed slab into a register and report a number the real allocator
+  can't reach.
+- adding the real line is what surfaced a since-fixed inefficiency: the owner-token read on free used to
+  carry a lazy-init branch (visible in the codegen above as *absent*); the free path now reads the token raw.
+
+**Hardware sensitivity — measure, don't assume.** The margin's size varies by microarchitecture. An earlier
+draft reported node at *half* mimalloc on a Ryzen 9 5900X (Zen 3) laptop, where the relative order
+*inverts*. So "node beats mimalloc" is true here and is not a law — which is why all fast-path variants ship
+as a benchmark to re-check on any machine. The winning variant is uarch-dependent; the one this frontend
+ships is `step2_tls_diff`.
+
+Reproduce (and regenerate the design-benchmark SVGs):
 
 ```bash
 uv run dev.py --mirror-output test "bench-alloc (handle & node comparison)" --target clean-core-test --preset release-clang --timeout 0
-uv run dev.py --mirror-output test "bench-alloc (steady-state small batch)" --target clean-core-test --preset release-clang --timeout 0
+uv run libs/base/clean-core/scripts/plot-node-allocation-design.py --out .   # runs bench-node-design, writes two SVGs
 ```

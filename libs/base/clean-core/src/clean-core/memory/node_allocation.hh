@@ -177,16 +177,27 @@ namespace detail
 /// Test/debug hook: total slabs currently held in the system resource's per-class orphan bins (slabs
 /// abandoned by exited threads, awaiting adoption). Locks each bin; not for hot use.
 [[nodiscard]] isize node_orphan_slab_count();
+
+/// Per-thread owner token storage (one instance per thread across TUs). 0 == unassigned.
+/// node_owner_token() assigns it lazily on first alloc/hydrate; the hot free path reads it raw.
+inline thread_local u32 owner_token = 0;
 } // namespace detail
 
 /// Process-unique, never-recycled token for the calling thread (threaded frontend only).
-/// Lazily assigned once per thread; used to stamp slabs at hydrate and to pick the owner free path.
+/// Lazily assigned once per thread; used to stamp slabs at hydrate/adoption and on the allocating path.
 [[nodiscard]] CC_FORCE_INLINE u32 node_owner_token()
 {
-    thread_local u32 t = 0; // 0 == unassigned; inline-fn thread_local is one slot per thread across TUs
-    if (t == 0) [[unlikely]]
-        t = cc::detail::node_next_owner_id();
-    return t;
+    if (detail::owner_token == 0) [[unlikely]]
+        detail::owner_token = cc::detail::node_next_owner_id();
+    return detail::owner_token;
+}
+
+/// The calling thread's owner token WITHOUT lazy assignment (0 if never assigned). For the hot free path:
+/// a thread with token 0 has never hydrated a slab, so it owns none, so 0 != any slab's nonzero owner and
+/// the free correctly routes to remote. Skipping the assignment drops a branch (the t==0 check) from every free.
+[[nodiscard]] CC_FORCE_INLINE u32 node_owner_token_or_zero()
+{
+    return detail::owner_token;
 }
 #endif
 
@@ -233,8 +244,10 @@ CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
     auto const slot_bit = u64(1) << cc::node_slot_index_for_ptr(ptr, base, idx);
 
 #if CC_HAS_THREADS
-    // owner path: non-atomic free into local; predicted-taken because most frees are on the owning thread
-    if (*cc::node_slab_owner_for_base(base) == cc::node_owner_token()) [[likely]]
+    // owner path: non-atomic free into local; predicted-taken because most frees are on the owning thread.
+    // raw token read (no lazy-init): a thread that never allocated has token 0, owns nothing, so it routes
+    // to remote -- correct, and it keeps the t==0 branch out of the hot free.
+    if (*cc::node_slab_owner_for_base(base) == cc::node_owner_token_or_zero()) [[likely]]
     {
         auto const freemap = cc::node_slab_freemap_for_base(base);
         CC_ASSERT((*freemap & slot_bit) == 0, "node is already freed. double-delete or corruption?");

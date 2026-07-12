@@ -188,6 +188,7 @@ add_executable(clean-core-test
     tests/benchmarks/hash-benchmark.cc
     tests/benchmarks/allocation-benchmark.cc
     tests/benchmarks/node-allocation-design-benchmark.cc
+    tests/benchmarks/node-allocation-design-refill.cc
 
     # tests grouped by topic, mirroring src/clean-core/
     tests/common/assert-test.cc

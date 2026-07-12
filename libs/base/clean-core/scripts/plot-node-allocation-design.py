@@ -34,8 +34,10 @@ TEST_NAME = "bench-node-design (fast-path variants)"
 
 # Draw order + style per variant. Okabe-Ito colorblind-safe palette; solid = metadata in one cache line,
 # dashed = remote bitmap on a 2nd line; references (single/mimalloc/system) get their own dashes.
+# "node" is the REAL shipped cc::node_allocator — drawn thick black on top so it reads as the ground truth.
 # key: (label, color, linestyle, marker, linewidth, zorder)
 STYLE: dict[str, tuple] = {
+    "node":           ("node — real cc::node_allocator", "#000000", "-",           "*", 3.2, 9),
     "single":         ("single — no atomics (floor)",   "#000000", (0, (1, 1)),   ".", 1.6, 2),
     "step2_tls_same": ("step2 tls · same line",         "#009E73", "-",           "o", 2.2, 6),
     "step2_tls_diff": ("step2 tls · diff line",         "#009E73", (0, (5, 2)),   "s", 1.8, 5),
