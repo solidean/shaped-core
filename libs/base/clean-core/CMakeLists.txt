@@ -212,6 +212,8 @@ add_executable(clean-core-test
     tests/container/strided_span-test.cc
     tests/container/pinned_data-test.cc
     tests/container/vector-test.cc
+    tests/container/map-test.cc
+    tests/container/set-test.cc
     tests/container/byte_stream_builder-test.cc
     tests/container/key_value_cache-test.cc
 

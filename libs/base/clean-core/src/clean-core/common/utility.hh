@@ -128,6 +128,18 @@ template <class T, class U = T>
     return old_val;
 }
 
+/// Default transparent key equality for the node-chaining associative containers (cc::map / cc::set): a == b.
+/// Heterogeneous when the key type defines operator== against the probe type (as string does against
+/// string_view).
+struct default_equal
+{
+    template <class A, class B>
+    [[nodiscard]] constexpr bool operator()(A const& a, B const& b) const
+    {
+        return a == b;
+    }
+};
+
 // =========================================================================================================
 // Comparison and clamping
 // =========================================================================================================

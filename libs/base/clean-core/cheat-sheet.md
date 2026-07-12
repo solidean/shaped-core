@@ -84,6 +84,40 @@ sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 ```
 
+## Associative
+
+```cpp
+#include <clean-core/container/map.hh>            // cc::map<K,V> — separate-chaining hash map
+cc::map<cc::string, int> m;                       // K/V may be immovable; refs stay valid across other inserts/grows
+m[key] = v;                                        // mutable op[]: get-or-default-insert (needs V(), K(key)); NO const op[]
+m.get(key);                                        // -> V& / V const&, ASSERTS present (heterogeneous, no insert)
+m.get_ptr(key);                                    // -> V* / V const*, nullptr if absent
+m.contains(key);                                   // -> bool (heterogeneous)
+m.get_to(key, out);                                // -> bool; copies value into out& only on hit (const)
+m.get_or(key, fallback);                           // -> V by value (value or fallback copy) (const)
+m.get_or_default(key);                             // -> V by value (value or V{}) (const)
+m.erase(key);  m.clear();  m.reserve(n);           // erase -> bool removed;  clear keeps buckets;  reserve grows buckets
+m.size();  m.empty();  m.bucket_count();
+for (auto [k, v] : m) { v += 1; }                  // proxy {K const& key; V& value}; order arbitrary; mutate v via ref
+
+auto e = m.entry(key);                             // one lookup, reused for insert (Rust-style); copies the probe key
+if (!e.exists()) e.emplace(vargs...);              // vacant path: K from probe key, V from vargs, no re-hash/re-lookup
+e.value();  e.key();                               // valid once occupied;  e.get_or_emplace(vargs...) -> V&
+e.emplace_with_key(kargs, vargs...);               // rare: build K from explicit args instead of the probe key
+// entry is invalidated by ANY structural mutation of the map (incl. another entry's emplace) — don't mutate in between.
+// heterogeneous lookup needs the probe type to hash-equal & compare-equal to K (e.g. string_view vs string).
+// keys must hash well-mixed: buckets mask low bits. default_hash finalizes; a custom Hash MUST avalanche.
+// move: O(1) (nodes stay put).  copy: deep, only if K and V are copyable (else move-only).
+// customize: cc::map<K,V,Hash,KeyEqual> — Hash{}(k)->u64 (transparent), KeyEqual{}(a,b)->bool (transparent).
+
+#include <clean-core/container/set.hh>            // cc::set<T> — hash set (a cc::map<T, unit> underneath, value is free)
+cc::set<cc::string> s;                             // same properties as map: immovable T ok, stable refs, heterogeneous
+bool added = s.insert(x);                          // -> true if newly added; builds T from x (heterogeneous = emplace)
+s.contains(x);  s.erase(x);                        // -> bool (heterogeneous);  erase -> true if removed
+s.size();  s.empty();  s.clear();  s.reserve(n);  s.bucket_count();
+for (T const& x : s) { ... }                       // elements are immutable; order arbitrary
+```
+
 ## Caching & byte serialization
 
 ```cpp
