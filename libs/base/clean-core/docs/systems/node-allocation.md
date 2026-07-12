@@ -9,9 +9,10 @@ so nothing but a pointer is stored) and **wait-free cross-thread deallocation** 
 no reference to the allocator needed).
 
 It is the **less mature** of clean-core's two memory systems: several parts described in the header
-are half-wired or leak by design, and — as the [throughput](#throughput--the-goal-and-where-it-stands-today)
-section shows — the fast path does not yet beat the general allocator it aims to replace. Those gaps
-are called out explicitly below. Read this before relying on it under sustained churn.
+are half-wired or leak by design. That immaturity is in the **lifecycle** (refill leaks, no trim), not the
+fast path — which on current hardware already outruns the general allocator it aims to replace (see
+[throughput](#throughput--where-it-actually-stands)). Those gaps are called out explicitly below. Read this
+before relying on it under sustained churn.
 
 ## Model
 
@@ -95,6 +96,11 @@ header* — not the slab machinery at all.
 
 - **Non-leaking refill** — retain non-empty previous slabs in the ring instead of orphaning them; this is
   the fix for the headline leak and would make the existing ring-walk actually useful.
+- **Hot-path atomic removal** — split each slab's free bitmap into a local (owner-only, non-atomic) and a
+  remote (atomic) half, so local allocate/free avoid the two `lock`-prefixed RMWs the fast path pays today;
+  atomics stay only on genuine cross-thread frees. Step 1 (non-atomic allocate, atomic free retained)
+  removes one lock with no API change; a further step removes the second at the cost of an owner check on
+  free. See the throughput section.
 - **Slab trim** — return fully-free slabs to the backing resource so high-watermark memory can be reclaimed.
 - **Over-aligned (> 8 B) large nodes.**
 - **Co-located refcounts** — the header notes a possible future `shared_ptr`-like variant storing the
@@ -102,44 +108,59 @@ header* — not the slab machinery at all.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use
   ([node_allocation.hh:488](../../src/clean-core/memory/node_allocation.hh#L488)).
 
-## Throughput — the goal, and where it stands today
+## Throughput — where it actually stands
 
-**Speed is the whole point of this allocator** — an ultra-cheap thread-local fast path is its reason
-to exist. It is not there yet: today the small-class slab path is *slower* than mimalloc, and closing
-that gap is the main work remaining. The numbers below are the current baseline, not the target.
+**Speed matters, but it is not the reason this allocator exists** — the 8-byte handle and the stateless
+wait-free free are (see Model). On throughput it is already competitive-to-ahead for the small classes it
+targets, which is the *opposite* of what an earlier draft of this section claimed.
 
 From the [handle & node comparison benchmark](../../tests/benchmarks/allocation-benchmark.cc)
 (`bench-alloc (handle & node comparison)`, manual; 32 live nodes to stay within one slab and avoid the
-leaky refill). Metric is **millions of alloc+free cycles per second — higher is better** (one cycle =
-one free + one allocate). Release build, Ryzen 9 5900X; single-run, small rows noisy (~10%):
+leaky refill), cross-checked against the batch/interleaved
+[`bench-alloc (steady-state small batch)`](../../tests/benchmarks/allocation-benchmark.cc). Metric is
+**millions of alloc+free cycles per second — higher is better** (one cycle = one free + one allocate).
+Release build (`release-clang`), **Ryzen 9 7950X3D**; 3-run medians, run-to-run spread < 3%:
 
-| size (B) | node (M cyc/s) | mimalloc raw (M cyc/s) |
-|------:|------:|------:|
-| 8 | 64.0 | 60.4 |
-| 16 | 59.0 | 171.3 |
-| 32 | 65.1 | 172.5 |
-| 64 | 70.3 | 166.3 |
-| 128 | 68.8 | 165.9 |
-| 256 | 70.6 | 141.5 |
-| 512 | 96.8 | 146.3 |
-| 1024 | 50.1 | 68.8 |
-| 4096 | 41.0 | 36.0 |
+| size (B) | node (M cyc/s) | mimalloc raw (M cyc/s) | node / mi |
+|------:|------:|------:|------:|
+| 8 | 303 | 138 | 2.2x |
+| 16 | 326 | 219 | 1.5x |
+| 32 | 317 | 211 | 1.5x |
+| 64 | 313 | 212 | 1.5x |
+| 128 | 302 | 210 | 1.4x |
+| 256 | 297 | 187 | 1.6x |
+| 512 | 111 | 177 | 0.6x |
+| 1024 | 66 | 125 | 0.5x |
+| 4096 | 63 | 59 | 1.1x |
 
-Reading the baseline:
+Reading it:
 
-- **The small-class slab path runs ~55–70 M cyc/s — roughly half of mimalloc** at the same sizes. The
-  three atomics per cycle (an atomic bitmap load + `fetch_and` to allocate, an `atomic_or` to free)
-  currently cost more than mimalloc's lock-free thread-local free list. That per-cycle atomic traffic is
-  the obvious first target for the fast path.
-- **The large path (> 256 B) is just mimalloc + a 24 B header**, so the 512 B row (~97 M cyc/s) tracks
-  mimalloc rather than the slab path — above the small classes there is no bespoke node fast path to win
-  or lose on.
-- **Where it already pays off** — even at today's speed — is footprint and concurrency: an 8-byte handle
-  (no stored size or resource), stateless wait-free cross-thread free, and no per-object allocator
-  metadata. The aim is to keep those while making the fast path decisively beat the general allocator.
+- **Small classes (≤ 256 B) — the point of the allocator — run ~300–325 M cyc/s, ~1.4–2.2x mimalloc.** The
+  fast path is exactly two `lock`-prefixed RMWs per cycle: `lock and` to claim a slot on allocate, `lock or`
+  to release it on free (confirmed with `dev.py assembly show`, see the
+  [disassembly guide](../../../../../docs/guides/disassembly.md)). On this Zen 4 part those locked ops are
+  cheap enough that the design's lower per-op overhead (nothing stored but a pointer, class recovered from
+  it) wins outright. Throughput is also **pattern-insensitive** — batch (alloc all, then free all) and
+  interleaved (free-one / alloc-one) land within noise for node; mimalloc varies more with the pattern.
+- **The large path (> 256 B) is *slower* than mimalloc**, not "tracking" it: it is mimalloc plus a 24 B
+  header and a second layer of function-pointer indirection, so 512 B / 1024 B fall to ~0.5–0.6x. Expected
+  — there is no bespoke node fast path above the small classes — but it means node is the wrong tool for
+  anything that is not a small single object.
+
+**Hardware sensitivity — measure, don't assume.** The whole margin rests on the cost of those two locked
+RMWs, which varies by microarchitecture. An earlier draft reported node at *half* mimalloc (~65 vs ~165 M
+cyc/s); those numbers were from a Ryzen 9 5900X (Zen 3) laptop, where the relative order *inverts*. So
+"node beats mimalloc" is true here and is not a law — it is exactly the claim that must be re-checked per
+architecture, which is why the fast-path variants are being built to ship and compare everywhere.
+
+**The optimization that would widen the margin** is the local/remote bitmap split (see TODO): make local
+allocate/free non-atomic and pay atomics only on genuine cross-thread frees. This supersedes the older
+"the atomics are the target" framing — the atomics are the target, but the fix is a data-structure split,
+not a micro-tweak, and the allocator is already ahead while it waits.
 
 Reproduce:
 
 ```bash
-uv run dev.py test "bench-alloc (handle & node comparison)" --target clean-core-test --preset release-clang --timeout 0
+uv run dev.py --mirror-output test "bench-alloc (handle & node comparison)" --target clean-core-test --preset release-clang --timeout 0
+uv run dev.py --mirror-output test "bench-alloc (steady-state small batch)" --target clean-core-test --preset release-clang --timeout 0
 ```
