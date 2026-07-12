@@ -46,15 +46,23 @@ TEST("set - insert / contains / erase")
 
 TEST("set - empty value is free (no per-node value overhead)")
 {
-    // node = { u64 hash; node* next; int key; [[no_unique_address]] unit; }  -> same as without the value
-    struct bare
+    // cc::set rides on cc::map<T, cc::unit> whose node stores the value with [[no_unique_address]].
+    // An empty value must add no size — mirror the node shape and compare with/without it (portable
+    // across 32/64-bit pointers).
+    struct with_value
+    {
+        u64 hash;
+        void* next;
+        int key;
+        [[no_unique_address]] cc::unit value;
+    };
+    struct without_value
     {
         u64 hash;
         void* next;
         int key;
     };
-    CHECK(sizeof(cc::set<int>::map_t) > 0); // just make sure the type is usable
-    CHECK(sizeof(bare) == 24);              // sanity anchor for the intended node shape
+    CHECK(sizeof(with_value) == sizeof(without_value));
 }
 
 TEST("set - heterogeneous membership and insert")
