@@ -43,6 +43,16 @@ clean-core/
 Add further deep-dive docs here as kebab-case `.md` files and link them from this
 list.
 
+## Systems
+
+Deep dives on the internal machinery, including holes and gotchas not obvious from the headers:
+
+- [systems/allocation](systems/allocation.md) — `cc::allocation<T>`, the owning storage handle
+  under `array`/`vector`/`devector`, and the `memory_resource` interface. The extract/adopt escape
+  hatch across container types works today; `retype` and the ergonomic API around it do not yet.
+- [systems/node-allocation](systems/node-allocation.md) — the slab allocator for small nodes:
+  size classes, wait-free cross-thread free, and the by-design slab leak in the current refill path.
+
 ## Conventions
 
 - Namespace `cc`; **no dependencies** (bottom of the library stack).
