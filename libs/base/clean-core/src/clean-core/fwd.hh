@@ -143,9 +143,14 @@ struct small_vector;
 // template <class T, isize N>
 // struct fixed_devector;
 
-template <class K, class V>
+// Default transparent hasher/equality for the node-chaining associative containers:
+// default_hash (common/hash.hh) finalizes via cc::make_hash_finalized; default_equal (common/utility.hh)
+// compares with operator==.
+struct default_hash;
+struct default_equal;
+template <class K, class V, class Hash = default_hash, class KeyEqual = default_equal>
 struct map;
-template <class T>
+template <class T, class Hash = default_hash, class KeyEqual = default_equal>
 struct set;
 
 template <class K, class V>
