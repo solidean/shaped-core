@@ -13,6 +13,8 @@ The entry point for repo-wide documentation. (Library-local docs live next to th
   namespace, and the dependency order.
 - [graphics.md](graphics.md) — overview of the graphics library family (shaped-graphics `sg`,
   shaped-rendering `sr`, shaped-viewer `sv`) and how they layer.
+- [philosophy.md](philosophy.md) — the guiding stars behind the taste: who the library is for, how we
+  pick tradeoffs, and why being opinionated is a feature.
 - [coding-guidelines.md](coding-guidelines.md) — coding standards and design principles for the
   shaped-core libraries. `.clang-format` / `.clang-tidy` / `.clangd` are authoritative for
   formatting.
