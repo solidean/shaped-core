@@ -34,6 +34,16 @@ the variants as a benchmark** so it can be re-checked on new hardware rather tha
 from one machine. An earlier draft's "conclusion" that inverted between two CPUs is the cautionary
 tale.
 
+Two failure modes worth naming:
+
+- **A *cause* is a claim too.** "X is slow because of Y" needs the same evidence as the number itself —
+  read the codegen or profile before you attribute it. Inferring the mechanism from the numbers alone
+  is how a plausible-but-wrong explanation ships right next to a correct measurement.
+- **Idealized microbenchmarks flatter.** A hand-written mock of a hot path lets the compiler hoist,
+  constant-fold, and DCE what the real code can't (a slab base kept in a register, a branch the real
+  access must pay). Put the *real* symbol in the benchmark beside the mocks and diff the disassembly;
+  when they disagree, the mock is usually the optimistic one.
+
 ## Data structures over micro-tweaks
 
 The big wins come from changing the shape of the data (a local/remote bitmap split, a better layout),

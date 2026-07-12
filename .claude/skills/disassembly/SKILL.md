@@ -1,7 +1,7 @@
 ---
 name: disassembly
 description: Inspect the optimizer's actual codegen for shaped-core with `dev.py assembly` — search built symbols and disassemble a function (a local godbolt over the object files). Use when you need to confirm what machine code a function compiled to.
-when_to_use: "disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt"
+when_to_use: "disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt", "why is X slower/faster", "attribute a perf delta to a cause", "is this microbenchmark representative", "does the real code match the benchmark mock"
 allowed-tools: Bash mcp__repo_tools__repo_search Read
 ---
 
@@ -11,6 +11,13 @@ allowed-tools: Bash mcp__repo_tools__repo_search Read
 search symbols and disassemble a function — a local godbolt. Full reference:
 [docs/guides/disassembly.md](../../../docs/guides/disassembly.md). Activate the
 `building-and-testing` skill first if the preset isn't built yet.
+
+**Before you attribute a perf delta to a cause, come here.** "It's slower because of
+the TLS access / an extra load / a branch" is a *claim* — verify it in the codegen,
+don't infer it from the numbers. And when a microbenchmark's mock disagrees with the
+real code, pin the **real** symbol into the benchmark (a `CC_DONT_INLINE` probe) and
+diff its disassembly against the mock's; the mock is usually the optimistic one
+(it hoists / folds / DCEs what the real code can't).
 
 ```bash
 uv run dev.py assembly search <pattern> [--preset P] [--target T] [--regex] [--all] [--limit N]
