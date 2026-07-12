@@ -8,11 +8,14 @@ general resource can't cheaply offer: an 8-byte owning handle (the class is deri
 so nothing but a pointer is stored) and **stateless cross-thread deallocation** (no reference to the
 allocator needed — the freeing thread finds everything from the pointer).
 
-It is the **less mature** of clean-core's two memory systems, but the fast path and the headline
-lifecycle leak are now resolved. The fast path is **two compile-time frontends** selected by
-`CC_HAS_THREADS` (see [Model](#model)); the refill path retains previous slabs in a ring instead of
-orphaning them. The remaining gaps are in the **later lifecycle** (no slab trim; a thread's slabs leak
-when it exits) — called out explicitly below. Read this before relying on it under sustained churn.
+It is the **less mature** of clean-core's two memory systems, but the fast path and the full slab
+lifecycle are now resolved. The fast path is **two compile-time frontends** selected by `CC_HAS_THREADS`
+(see [Model](#model)); the refill path retains previous slabs in a ring instead of orphaning them, a
+thread's slabs are handed off and adopted across thread exit rather than leaked, and surplus fully-free
+slabs are trimmed back to the backing resource (see [Slab lifecycle](#slab-lifecycle-across-threads)).
+The design target is a **fixed set of long-lived threads**: that workload pays nothing for any of the
+lifecycle machinery. A thread-churning server stays correct and bounded but is second class — it pays a
+rare per-class lock on thread exit and on slab adoption.
 
 ## Model
 
@@ -64,17 +67,56 @@ The large path (> 256 B) allocates from `default_memory_resource` (mimalloc) wit
 `[size][alignment][resource*]`; free reads the header back. So a large node is *just mimalloc plus a
 header* — not the slab machinery at all.
 
+## Slab lifecycle across threads
+
+A slab moves through four states; the hot path only ever sees **owned**, so none of this touches the
+fast-path codegen.
+
+```text
+unhydrated ──refill──▶ owned(T) ──thread exit, has live nodes──▶ orphaned ──refill on any thread──▶ owned(M)
+                          │                                          │
+              thread exit, fully free /                     (never adopted, but fully
+                    trim, fully free                          free) waits for a taker
+                          │
+                          ▼
+                   freed to backing
+```
+
+- **owned(T).** The hydrating thread `T` owns the slab (its process-unique, never-recycled `owner_id`
+  is stamped in). `T` allocates and frees plain-local; every other thread routes its frees to `remote`.
+- **Abandonment (thread exit).** When a thread's `thread_local` allocator is destroyed, it reclaims its
+  ring **through a resource hook** (`node_memory_resource::reclaim_slabs`) — the system resource
+  implements it; a resource without the hook keeps the old leak-on-exit. Per class, under a per-class
+  lock: each slab's `remote` is drained into `local`; **fully-free** slabs (no live nodes) go back to
+  the backing resource; the rest are pushed onto a per-class **orphan bin**. Because `owner_id` is never
+  recycled and the owner only stops owning by *dying*, every subsequent free into an orphaned slab is
+  guaranteed to take the `remote` path — no plain-local writer can race the future adopter.
+- **Adoption (refill).** Before mallocing a fresh slab, refill pops one orphan of the class if present,
+  re-stamps `owner_id` to the adopting thread, drains its accumulated `remote` frees, and splices it into
+  the ring. `owner_id` is only ever *stamped* atomically (an `atomic_ref` store on the cold refill path);
+  the hot free-path read stays a plain `u32` load.
+- **Trim.** On the cold allocation path only (never on free), a per-class counter gates a rare O(ring)
+  sweep that returns surplus fully-free slabs to the backing resource, keeping one fully-free spare so a
+  steady working set never re-mallocs. A stable set of live nodes never produces a fully-free slab, so a
+  long-lived thread never actually trims.
+
+The per-class orphan bins are `constinit` spinlocks (not `std::mutex`) so they are never torn down —
+the main thread's allocator can reclaim safely even during static destruction. Ownership is only ever
+transferred at thread exit; there is deliberately **no mid-life slab migration** between live threads
+(that would force an atomic `owner_id` and cost the hot path).
+
 ## Gotchas
 
-- **Cross-thread free + thread exit is unsupported (guarded, not solved).** The owner check relies on a
-  process-unique `owner_id` that is **never recycled** — so a live id is never reused and a free is never
-  miscategorized. But ids are *not* reclaimed when a thread exits (that thread's slabs simply leak), and
-  the id space is a `u32` (an assert fires past ~4 B threads-ever). The full fix — an abandoned-slab
-  handoff protocol on thread exit, à la mimalloc/snmalloc — is a `TODO`. Until then, treat "a thread
-  allocates, hands nodes to others, then exits" as leaking (correct, just not reclaimed).
+- **`owner_id` is a `u32` and is never recycled.** Abandonment reclaims *slabs*, not *ids*, so the
+  counter stays monotonic (this is what keeps a live id from ever being reused and a free from being
+  miscategorized). The id space is a `u32`; an assert fires past ~4 B threads-*ever*-created. A fixed
+  thread pool never wraps; a server that spawns billions of threads over its lifetime would — accepted,
+  and loud when hit (see [philosophy.md](../../../../../docs/philosophy.md), "fail loud").
 
-- **Slabs are never returned.** There is no trim path back to the backing resource, so the default node
-  resource is a grow-only arena up to its high-watermark. A `TODO`.
+- **Cross-thread frees into an orphaned-but-never-adopted slab accumulate in `remote`.** If a thread
+  hands out nodes and exits and *no* later thread ever allocates that class again, the orphaned slab sits
+  in its bin holding the still-live nodes; frees keep landing in `remote` and are only reclaimed once the
+  slab is adopted. Bounded (one bin per class), not a leak in the grow-unbounded sense, but worth knowing.
 
 - **Over-aligned large nodes are unsupported.** `system_allocate_node_bytes_large` asserts
   `alignment == 8` ([node_allocation.cc:43](../../src/clean-core/memory/node_allocation.cc#L43)); larger
@@ -93,15 +135,12 @@ header* — not the slab machinery at all.
   without threads in one binary.
 
 Done on this branch: the **local/remote bitmap split** (the two `lock`-prefixed RMWs on the fast path are
-gone — the owner is fully non-atomic; only genuine cross-thread frees pay an atomic) and **non-leaking
-refill** (previous slabs are retained in the ring, so the ring-walk reuses them and remote frees are never
-orphaned). Still open:
+gone — the owner is fully non-atomic; only genuine cross-thread frees pay an atomic), **non-leaking
+refill** (previous slabs are retained in the ring), and the full **slab lifecycle across threads** —
+thread-exit abandonment, cross-thread adoption, and trim (see above). Still open:
 
-- **Abandoned-slab protocol** — hand a thread's slabs to a global orphan list on exit and allow owner-id
-  reclamation, so cross-thread-free + thread-exit stops leaking. Prerequisite for recycling `owner_id`.
-- **Slab trim** — return fully-free slabs to the backing resource so high-watermark memory can be reclaimed.
 - **Cheaper ring re-walk** — cache the last-known-full point instead of an O(ring) scan per exhaustion.
-- **Over-aligned (> 8 B) large nodes.**
+- **Over-aligned (> 8 B) large nodes** — `system_allocate_node_bytes_large` still asserts `alignment == 8`.
 - **Co-located refcounts** — the header notes a possible future `shared_ptr`-like variant storing the
   count next to the node.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.

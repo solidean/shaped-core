@@ -1735,6 +1735,22 @@ int usable_slots()
 {
     return cc::popcount(cc::node_seed_local_freemaps[cc::isize(cc::node_class_index_for<T>())]);
 }
+
+// number of slabs currently in an allocator's ring for a class (walks the public slab_base ring)
+int ring_len(cc::node_allocator& alloc, cc::node_class_index idx)
+{
+    cc::byte* const head = alloc.slabs().slab_base[cc::isize(idx)];
+    if (head == nullptr)
+        return 0;
+    int n = 0;
+    cc::byte* cur = head;
+    do
+    {
+        ++n;
+        cur = cc::node_slab_next_for_base(cur);
+    } while (cur != head);
+    return n;
+}
 } // namespace
 
 TEST("node_allocation - private allocator functional churn (both frontends)")
@@ -1812,6 +1828,38 @@ TEST("node_allocation - multi-slab ring reuse")
     }
 }
 
+TEST("node_allocation - slab trim returns surplus fully-free slabs to backing")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+    auto const idx = cc::node_class_index_for<T8B>();
+    int const usable = usable_slots<T8B>();
+
+    // inflate to a high watermark (~6 slabs), then free everything so all those slabs become fully free.
+    {
+        cc::vector<cc::node_allocation<T8B>> peak;
+        for (int i = 0; i < usable * 6; ++i)
+            peak.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+    }
+    int const peak_ring = ring_len(alloc, idx);
+    REQUIRE(peak_ring >= 6);
+
+    // churn with small bursts that each spill just past one slab. this drives the cold path enough for the
+    // gated trim sweep to run and hand the surplus fully-free slabs back to the backing resource.
+    for (int round = 0; round < 1000; ++round)
+    {
+        cc::vector<cc::node_allocation<T8B>> burst;
+        for (int i = 0; i < usable + 5; ++i)
+            burst.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(round * 100000 + i)));
+        for (auto const& n : burst)
+            CHECK(n.is_valid());
+    }
+
+    // the ring shrank back toward the live working set (a burst needs ~2 slabs) instead of staying at the peak
+    int const trimmed_ring = ring_len(alloc, idx);
+    CHECK(trimmed_ring < peak_ring);
+    CHECK(trimmed_ring <= 3);
+}
+
 #if CC_HAS_THREADS
 TEST("node_allocation - remote drain reclaims cross-thread frees")
 {
@@ -1868,5 +1916,72 @@ TEST("node_allocation - cross-thread free then reuse (basic)")
     auto b2 = cc::node_allocation<T16B>::create_from(alloc, u64(55));
     CHECK(a2.ptr->value == 44);
     CHECK(b2.ptr->a == 55);
+}
+
+TEST("node_allocation - thread-exit reclaims fully-free slabs to backing")
+{
+    auto const before = cc::detail::node_orphan_slab_count();
+
+    // a thread allocates a multi-slab batch, frees it ALL on itself, then exits. every slab is fully free
+    // at the allocator's teardown -> returned to the backing resource, and NOTHING is orphaned.
+    std::thread(
+        []
+        {
+            cc::node_allocator worker(cc::default_node_memory_resource);
+            cc::vector<cc::node_allocation<T8B>> nodes;
+            for (int i = 0; i < usable_slots<T8B>() * 3; ++i)
+                nodes.push_back(cc::node_allocation<T8B>::create_from(worker, u64(i)));
+            nodes.clear(); // free everything on the owner thread before `worker` is destroyed
+        })
+        .join();
+
+    CHECK(cc::detail::node_orphan_slab_count() == before); // orphan bins untouched -> slabs went to backing
+}
+
+TEST("node_allocation - abandoned slab is adopted by a later thread")
+{
+    auto const before = cc::detail::node_orphan_slab_count();
+    int const usable = usable_slots<T8B>();
+
+    // producer thread fills exactly one slab, hands every (live) node to a shared vector, then exits.
+    // its slab still holds live nodes -> not fully free -> orphaned to the global bin on teardown.
+    cc::vector<cc::node_allocation<T8B>> shared;
+    cc::byte* producer_base = nullptr;
+    std::thread(
+        [&]
+        {
+            cc::node_allocator producer(cc::default_node_memory_resource);
+            for (int i = 0; i < usable; ++i)
+                shared.push_back(cc::node_allocation<T8B>::create_from(producer, u64(i)));
+            producer_base = base_of(shared[0]);
+        })
+        .join();
+
+    // the handed-off nodes are still valid after the producer thread is gone, and all in the one slab
+    for (int i = 0; i < usable; ++i)
+    {
+        CHECK(base_of(shared[i]) == producer_base);
+        CHECK(shared[i].ptr->value == u64(i));
+    }
+    CHECK(cc::detail::node_orphan_slab_count() == before + 1); // exactly one slab orphaned
+
+    // free the whole batch on the consumer (main) thread -> routes to the orphaned slab's remote bitmap
+    // (the owner token is the dead producer's, never this thread's)
+    for (auto& n : shared)
+        n = {};
+
+    // a fresh consumer allocator refills: it must ADOPT the orphan (draining its remote frees) and reuse
+    // the producer's slab rather than mallocing a new one.
+    cc::node_allocator consumer(cc::default_node_memory_resource);
+    cc::vector<cc::node_allocation<T8B>> consumer_nodes;
+    for (int i = 0; i < usable; ++i)
+    {
+        consumer_nodes.push_back(cc::node_allocation<T8B>::create_from(consumer, u64(7000 + i)));
+        CHECK(base_of(consumer_nodes.back()) == producer_base); // adopted slab, no new slab
+    }
+    for (int i = 0; i < usable; ++i)
+        CHECK(consumer_nodes[i].ptr->value == u64(7000 + i));
+
+    CHECK(cc::detail::node_orphan_slab_count() == before); // the orphan was adopted -> bin drained
 }
 #endif

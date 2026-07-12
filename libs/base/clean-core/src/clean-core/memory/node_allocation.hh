@@ -173,6 +173,10 @@ namespace detail
 {
 /// Allocates the next process-unique nonzero owner id. Out-of-line so the token fast path stays a TLS load.
 [[nodiscard]] CC_COLD_FUNC u32 node_next_owner_id();
+
+/// Test/debug hook: total slabs currently held in the system resource's per-class orphan bins (slabs
+/// abandoned by exited threads, awaiting adoption). Locks each bin; not for hot use.
+[[nodiscard]] isize node_orphan_slab_count();
 } // namespace detail
 
 /// Process-unique, never-recycled token for the calling thread (threaded frontend only).
@@ -271,11 +275,24 @@ public:
         // the slabs here are not guaranteed to have free slots
         // because we want to keep the happy path fast (and there could be frees until the next alloc)
         cc::byte* slab_base[isize(node_class_index::small_count)] = {};
+
+        // per-class cold-path counter: gates the rare O(ring) trim sweep (see node_trim_ring). Allocator-side
+        // bookkeeping only -- the hot path never reads it, so it does not touch slab metadata or codegen.
+        cc::u16 trim_gate[isize(node_class_index::small_count)] = {};
     };
 
     // ctors
     node_allocator() = default;
     explicit node_allocator(node_memory_resource* resource) : _resource(resource) {}
+
+    // at teardown, hand retained slabs back to the resource (via its reclaim_slabs hook) so a thread's
+    // slabs are adopted by later threads instead of leaking. no-op if the resource has no hook.
+    // move/copy are deleted: an allocator owns its slab ring and is only ever used by reference or in place.
+    ~node_allocator();
+    node_allocator(node_allocator const&) = delete;
+    node_allocator& operator=(node_allocator const&) = delete;
+    node_allocator(node_allocator&&) = delete;
+    node_allocator& operator=(node_allocator&&) = delete;
 
     // accessors
     [[nodiscard]] slab_info& slabs() { return _slabs; }
@@ -388,6 +405,12 @@ struct cc::node_memory_resource
     // deallocates a large node (> small_max) to the resource
     // called by node_allocation_free_large
     cc::function_ptr<void(cc::byte*, node_class_index, void*)> deallocate_node_bytes_large = nullptr;
+
+    // optional: hand this allocator's retained slabs back to the resource at allocator teardown.
+    // called from ~node_allocator (threaded frontend only). null => slabs leak on destruction, which is
+    // fine for stateless/private resources; the system resource implements per-class orphan reclamation so
+    // a thread's slabs are reused by later threads instead of leaking. must null out each slab_base it takes.
+    cc::function_ptr<void(node_allocator::slab_info&, void*)> reclaim_slabs = nullptr;
 
     /// User-defined data for custom allocators. Can be nullptr for stateless allocators.
     void* userdata = nullptr;
