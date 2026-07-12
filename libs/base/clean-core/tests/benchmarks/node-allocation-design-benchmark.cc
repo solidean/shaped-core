@@ -100,8 +100,10 @@ CC_FORCE_INLINE u64 tls_token()
 }
 CC_FORCE_INLINE u64 teb_token()
 {
-#if defined(_WIN32)
+#if defined(CC_OS_WINDOWS) && defined(CC_ARCH_X64)
     return __readgsqword(0x30); // TEB self-pointer: one fixed-offset gs load, no TLS-index indirection
+#elif defined(CC_OS_WINDOWS) && defined(CC_ARCH_ARM64)
+    return __readx18qword(0x30); // TEB self-pointer: x18 holds the TEB on ARM64 Windows (same NtTib.Self offset)
 #else
     return reinterpret_cast<u64>(&g_tls_owner); // portable stand-in: a unique per-thread address
 #endif
