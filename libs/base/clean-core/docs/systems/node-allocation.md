@@ -5,14 +5,14 @@ The node allocator ([node_allocation.hh](../../src/clean-core/memory/node_alloca
 **small, single objects** — list/map/set nodes, `unique_ptr` payloads, `unique_function` storage.
 The goal is a **maximally cheap thread-local fast path** for these; it also gives two things the
 general resource can't cheaply offer: an 8-byte owning handle (the class is derived from the *type*,
-so nothing but a pointer is stored) and **wait-free cross-thread deallocation** (a single `atomic_or`,
-no reference to the allocator needed).
+so nothing but a pointer is stored) and **stateless cross-thread deallocation** (no reference to the
+allocator needed — the freeing thread finds everything from the pointer).
 
-It is the **less mature** of clean-core's two memory systems: several parts described in the header
-are half-wired or leak by design. That immaturity is in the **lifecycle** (refill leaks, no trim), not the
-fast path — which on current hardware already outruns the general allocator it aims to replace (see
-[throughput](#throughput--where-it-actually-stands)). Those gaps are called out explicitly below. Read this
-before relying on it under sustained churn.
+It is the **less mature** of clean-core's two memory systems, but the fast path and the headline
+lifecycle leak are now resolved. The fast path is **two compile-time frontends** selected by
+`CC_HAS_THREADS` (see [Model](#model)); the refill path retains previous slabs in a ring instead of
+orphaning them. The remaining gaps are in the **later lifecycle** (no slab trim; a thread's slabs leak
+when it exits) — called out explicitly below. Read this before relying on it under sustained churn.
 
 ## Model
 
@@ -23,24 +23,38 @@ header-backed **large path**.
 
 Each small class is served from **slabs**: a `64 * class_size` block, aligned to its own size, so the
 slab base is recovered from any interior pointer by `ptr & ~(slab_size - 1)` — a single AND, no
-metadata lookup. Each slab begins with a 16-byte prefix:
+metadata lookup. Data starts at slab offset 0; slots that overlap the slab's metadata are permanently
+blocked by a per-class **consteval seed mask** (`node_compute_seed_local_freemap`). The metadata layout
+is **frontend-dependent** (`CC_HAS_THREADS`):
 
-- offset 0: a `u64` **free bitmap**, one bit per slot (1 = free).
-- offset 8: a **next-slab pointer** (the slab ring, see gotchas).
+- **Threaded** (native, wasm+pthreads): `local` free bitmap `@0` (u64), `owner_id` `@8` (u32),
+  next-slab pointer `@16`; a second **`remote`** free bitmap on the 2nd cache line `@64` (for classes
+  whose slab spans two lines, i.e. ≥ 2 B) or `@24` for the single-line 1 B class.
+- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`. No
+  owner/remote — the second cache line is not touched.
 
-The prefix consumes whole slots, so usable capacity depends on class size:
+The metadata consumes whole slots, so usable capacity depends on class size and frontend:
 
-| class size | slots blocked by prefix | usable slots (of 64) |
+| class size | usable (threaded) | usable (single) |
 |---:|---:|---:|
-| 1 B | 16 | 48 |
-| 8 B | 2 | 62 |
-| ≥ 16 B | 1 | 63 |
+| 1 B | 36 | 48 |
+| 2 B | 50 | 62 |
+| 8 B | 60 | 62 |
+| ≥ 16 B | ~62 | 63 |
 
-**Allocation** (thread-owned, *not* thread-safe): find a free bit via `count_trailing_zeroes`, clear
-it with an atomic `fetch_and`, return `base + slot * class_size`. **Deallocation** (any thread,
-wait-free): recover the base, set the slot's bit with `atomic_or`. Because the class index comes from
-the pointer + `sizeof`/`alignof`, free needs no allocator or resource — this is what makes remote free
-cheap and stateless.
+The **fast path is two frontends behind an unchanged API**, selected at compile time:
+
+- **Threaded (`step2_tls_diff`).** The owning thread allocates and frees **non-atomically** into `local`
+  (find a free bit via `count_trailing_zeroes`, clear it; free sets it). A *genuinely remote* thread
+  frees with a single `atomic_or` into `remote` (a separate cache line, so it never invalidates the
+  owner's hot `local` line). When `local` empties, the owner drains `remote` into it via one atomic
+  `exchange` on the cold path. The owner is identified by a process-unique, never-recycled `owner_id`
+  stamped into the slab at hydrate and compared against a thread-local token on free.
+- **Single-threaded.** Plain non-atomic `and`/`or` on the one `local` bitmap — no owner, no remote, no
+  atomics at all.
+
+Because the class index comes from the pointer + `sizeof`/`alignof`, **free needs no allocator or
+resource** — this is what makes cross-thread free stateless.
 
 Handles: `node_allocation<T>` (typed, move-only), `any_node_allocation` (type-erased pointer + deleter
 + class index, for wrappers with no natural base class), and `poly_node_allocation<T, NodeTraits>` (the
@@ -52,61 +66,45 @@ header* — not the slab machinery at all.
 
 ## Gotchas
 
-- **Slab refill leaks by design — the headline issue.** When a class runs out of free slots,
-  `system_refill_slabs_and_allocate_node_bytes`
-  ([node_allocation.cc:124–130](../../src/clean-core/memory/node_allocation.cc#L124-L130)) allocates a
-  *fresh* slab, wires it as a **self-cycle**, and overwrites the class head — **dropping the previous
-  slab ring entirely**. The old slabs, and every slot ever freed in them, are never revisited and never
-  returned. Under a workload whose live set repeatedly exceeds one slab's capacity this is unbounded
-  growth. It is marked `TODO`/`FIXME` in the code. Workloads that stay within a slab (the intended
-  small-node case) never hit this.
-
-- **The multi-slab ring is aspirational.** The next-pointer and the ring-walk in
-  `allocate_node_bytes_non_fast`
-  ([node_allocation.cc:198–226](../../src/clean-core/memory/node_allocation.cc#L198-L226)) are fully
-  built to revisit multiple slabs of a class — but because refill only ever emits a self-cycle, the
-  walk currently never finds a second slab and always falls through to another (leaking) refill. The
-  machinery exists; nothing feeds it yet.
+- **Cross-thread free + thread exit is unsupported (guarded, not solved).** The owner check relies on a
+  process-unique `owner_id` that is **never recycled** — so a live id is never reused and a free is never
+  miscategorized. But ids are *not* reclaimed when a thread exits (that thread's slabs simply leak), and
+  the id space is a `u32` (an assert fires past ~4 B threads-ever). The full fix — an abandoned-slab
+  handoff protocol on thread exit, à la mimalloc/snmalloc — is a `TODO`. Until then, treat "a thread
+  allocates, hands nodes to others, then exits" as leaking (correct, just not reclaimed).
 
 - **Slabs are never returned.** There is no trim path back to the backing resource, so the default node
-  resource is effectively a grow-only arena, and a thread's TLS slabs leak when the thread exits.
-
-- **Remote frees into a dropped slab are lost.** A wait-free free always succeeds (sets the bit), but if
-  it lands in a slab that refill has already orphaned, that slot is never rediscovered for reuse.
+  resource is a grow-only arena up to its high-watermark. A `TODO`.
 
 - **Over-aligned large nodes are unsupported.** `system_allocate_node_bytes_large` asserts
   `alignment == 8` ([node_allocation.cc:43](../../src/clean-core/memory/node_allocation.cc#L43)); larger
   alignments are a `TODO`.
 
 - **Alloc-heavy workloads re-walk the ring on each exhaustion**
-  ([node_allocation.cc:194](../../src/clean-core/memory/node_allocation.cc#L194)) — no bookkeeping caches
-  the last-known-full point, so exhaustion is O(ring) each time. A `TODO`.
-
-- **Stale header comment.** `node_allocator::refill_slabs_and_allocate_node_bytes` is annotated
-  `TODO: implement me` ([node_allocation.hh:229](../../src/clean-core/memory/node_allocation.hh#L229)),
-  but it *is* implemented — it delegates to the resource
-  ([node_allocation.cc:175](../../src/clean-core/memory/node_allocation.cc#L175)). The comment is
-  misleading; the missing piece is the *non-leaking* refill strategy inside the resource, not this method.
+  ([node_allocation.cc](../../src/clean-core/memory/node_allocation.cc)) — no bookkeeping caches the
+  last-known-full point, so exhaustion is O(ring) each time. A `TODO`.
 
 - **Allocation is single-threaded per allocator.** A `node_allocator` is a thread-local cache and must
   not allocate from two threads; only *free* is concurrency-safe. A `node_memory_resource` that wants to
   serve many threads does so by handing out different allocators (e.g. via TLS), which the default does.
 
-## TODO / not yet implemented
+- **Slab metadata layout is a whole-build switch.** The frontend (and thus the slab layout) is chosen by
+  `CC_HAS_THREADS` at compile time, so slabs never cross frontends. Do not mix objects built with and
+  without threads in one binary.
 
-- **Non-leaking refill** — retain non-empty previous slabs in the ring instead of orphaning them; this is
-  the fix for the headline leak and would make the existing ring-walk actually useful.
-- **Hot-path atomic removal** — split each slab's free bitmap into a local (owner-only, non-atomic) and a
-  remote (atomic) half, so local allocate/free avoid the two `lock`-prefixed RMWs the fast path pays today;
-  atomics stay only on genuine cross-thread frees. Step 1 (non-atomic allocate, atomic free retained)
-  removes one lock with no API change; a further step removes the second at the cost of an owner check on
-  free. See the throughput section.
+Done on this branch: the **local/remote bitmap split** (the two `lock`-prefixed RMWs on the fast path are
+gone — the owner is fully non-atomic; only genuine cross-thread frees pay an atomic) and **non-leaking
+refill** (previous slabs are retained in the ring, so the ring-walk reuses them and remote frees are never
+orphaned). Still open:
+
+- **Abandoned-slab protocol** — hand a thread's slabs to a global orphan list on exit and allow owner-id
+  reclamation, so cross-thread-free + thread-exit stops leaking. Prerequisite for recycling `owner_id`.
 - **Slab trim** — return fully-free slabs to the backing resource so high-watermark memory can be reclaimed.
+- **Cheaper ring re-walk** — cache the last-known-full point instead of an O(ring) scan per exhaustion.
 - **Over-aligned (> 8 B) large nodes.**
 - **Co-located refcounts** — the header notes a possible future `shared_ptr`-like variant storing the
-  count next to the node ([node_allocation.hh:264](../../src/clean-core/memory/node_allocation.hh#L264)).
-- **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use
-  ([node_allocation.hh:488](../../src/clean-core/memory/node_allocation.hh#L488)).
+  count next to the node.
+- **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.
 
 ## Throughput — where it actually stands
 
@@ -114,9 +112,16 @@ header* — not the slab machinery at all.
 wait-free free are (see Model). On throughput it is already competitive-to-ahead for the small classes it
 targets, which is the *opposite* of what an earlier draft of this section claimed.
 
+> The table below was measured on the **prior two-lock fast path** (before the local/remote split landed on
+> this branch). It is retained as the mimalloc baseline and the pre-split reference. The split removes both
+> `lock`-prefixed RMWs on the owner path (confirmed via `dev.py assembly show`), so current small-class
+> numbers are **higher** than shown — the design benchmark projects ~2.3x the old node throughput at 16 B.
+> Re-running the comparison on the shipped split is a follow-up; see
+> [`bench-node-design (fast-path variants)`](../../tests/benchmarks/node-allocation-design-benchmark.cc).
+
 From the [handle & node comparison benchmark](../../tests/benchmarks/allocation-benchmark.cc)
-(`bench-alloc (handle & node comparison)`, manual; 32 live nodes to stay within one slab and avoid the
-leaky refill), cross-checked against the batch/interleaved
+(`bench-alloc (handle & node comparison)`, manual; 32 live nodes to stay within one slab), cross-checked
+against the batch/interleaved
 [`bench-alloc (steady-state small batch)`](../../tests/benchmarks/allocation-benchmark.cc). Metric is
 **millions of alloc+free cycles per second — higher is better** (one cycle = one free + one allocate).
 Release build (`release-clang`), **Ryzen 9 7950X3D**; 3-run medians, run-to-run spread < 3%:
@@ -135,28 +140,25 @@ Release build (`release-clang`), **Ryzen 9 7950X3D**; 3-run medians, run-to-run 
 
 Reading it:
 
-- **Small classes (≤ 256 B) — the point of the allocator — run ~300–325 M cyc/s, ~1.4–2.2x mimalloc.** The
-  fast path is exactly two `lock`-prefixed RMWs per cycle: `lock and` to claim a slot on allocate, `lock or`
-  to release it on free (confirmed with `dev.py assembly show`, see the
-  [disassembly guide](../../../../../docs/guides/disassembly.md)). On this Zen 4 part those locked ops are
-  cheap enough that the design's lower per-op overhead (nothing stored but a pointer, class recovered from
-  it) wins outright. Throughput is also **pattern-insensitive** — batch (alloc all, then free all) and
-  interleaved (free-one / alloc-one) land within noise for node; mimalloc varies more with the pattern.
+- **Small classes (≤ 256 B) — the point of the allocator — run ~300–325 M cyc/s, ~1.4–2.2x mimalloc even
+  on the pre-split path.** That old path paid two `lock`-prefixed RMWs per cycle (`lock and` on allocate,
+  `lock or` on free); the shipped split makes the owner's allocate/free plain non-atomic ops (`dev.py
+  assembly show node_alloc_free_hotloop_probe`, see the
+  [disassembly guide](../../../../../docs/guides/disassembly.md)), so the margin is now wider. Throughput is
+  also **pattern-insensitive** — batch (alloc all, then free all) and interleaved (free-one / alloc-one)
+  land within noise for node; mimalloc varies more with the pattern.
 - **The large path (> 256 B) is *slower* than mimalloc**, not "tracking" it: it is mimalloc plus a 24 B
   header and a second layer of function-pointer indirection, so 512 B / 1024 B fall to ~0.5–0.6x. Expected
   — there is no bespoke node fast path above the small classes — but it means node is the wrong tool for
   anything that is not a small single object.
 
-**Hardware sensitivity — measure, don't assume.** The whole margin rests on the cost of those two locked
-RMWs, which varies by microarchitecture. An earlier draft reported node at *half* mimalloc (~65 vs ~165 M
-cyc/s); those numbers were from a Ryzen 9 5900X (Zen 3) laptop, where the relative order *inverts*. So
-"node beats mimalloc" is true here and is not a law — it is exactly the claim that must be re-checked per
-architecture, which is why the fast-path variants are being built to ship and compare everywhere.
-
-**The optimization that would widen the margin** is the local/remote bitmap split (see TODO): make local
-allocate/free non-atomic and pay atomics only on genuine cross-thread frees. This supersedes the older
-"the atomics are the target" framing — the atomics are the target, but the fix is a data-structure split,
-not a micro-tweak, and the allocator is already ahead while it waits.
+**Hardware sensitivity — measure, don't assume.** The margin's size varies by microarchitecture. An earlier
+draft reported node at *half* mimalloc (~65 vs ~165 M cyc/s) on a Ryzen 9 5900X (Zen 3) laptop, where the
+relative order *inverts*. So "node beats mimalloc" is true here and is not a law — it is the claim that must
+be re-checked per architecture, which is why all fast-path variants ship as a benchmark
+([`bench-node-design`](../../tests/benchmarks/node-allocation-design-benchmark.cc)) to compare on any
+machine. The variant that wins there is the one this frontend ships (`step2_tls_diff`), and it is
+uarch-dependent — re-run the design benchmark on new hardware.
 
 Reproduce:
 

@@ -3,6 +3,7 @@
 #include <nexus/test.hh>
 
 #include <array>
+#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -1705,3 +1706,167 @@ TEST("node_allocation - move-assignment from subobject safety")
         }
     }
 }
+
+// Slab-lifecycle tests for the frontend split. These use a *private* node_allocator bound to the real
+// default resource (a fresh slab_info, isolated from the process-wide default_node_allocator() that other
+// tests share) so they observe the real, shipped refill/ring/drain code from a clean slate. Slab lifecycle
+// is asserted via distinct slab base addresses (node_slab_base_for_ptr): a new base == a new slab.
+namespace
+{
+// records `base` if not already present; returns true iff it was newly inserted
+bool track_base(cc::vector<cc::byte*>& seen, cc::byte* base)
+{
+    for (auto* b : seen)
+        if (b == base)
+            return false;
+    seen.push_back(base);
+    return true;
+}
+
+template <class T>
+cc::byte* base_of(cc::node_allocation<T> const& n)
+{
+    return cc::node_slab_base_for_ptr(reinterpret_cast<cc::byte*>(n.ptr), cc::node_class_index_for<T>());
+}
+
+// usable (non-metadata-blocked) slots per slab for T's class
+template <class T>
+int usable_slots()
+{
+    return cc::popcount(cc::node_seed_local_freemaps[cc::isize(cc::node_class_index_for<T>())]);
+}
+} // namespace
+
+TEST("node_allocation - private allocator functional churn (both frontends)")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+
+    // churn a live set that spans several slabs; every value must round-trip through alloc+free cycles
+    constexpr int live = 130;
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < live; ++i)
+        nodes.push_back({});
+
+    for (int iter = 0; iter < 5000; ++iter)
+    {
+        int const i = iter % live;
+        nodes[i] = cc::node_allocation<T8B>::create_from(alloc, u64(iter)); // frees the old slot i, then reallocs
+        CHECK(nodes[i].is_valid());
+        CHECK(nodes[i].ptr->value == u64(iter));
+    }
+
+    for (int i = 0; i < live; ++i)
+        CHECK(nodes[i].is_valid());
+}
+
+TEST("node_allocation - bounded slab growth under churn (leak fix)")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+    auto const idx = cc::node_class_index_for<T8B>();
+    int const usable = usable_slots<T8B>();
+
+    // keep a live set spanning ~4 slabs and churn hard while counting distinct slabs ever touched.
+    // the retaining ring keeps a handful of slabs and reuses them forever; the old leaky refill dropped
+    // previous slabs and allocated a fresh one roughly every `usable` iterations -> hundreds of slabs.
+    int const live = usable * 3 + 5;
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < live; ++i)
+        nodes.push_back({});
+    cc::vector<cc::byte*> seen;
+
+    for (int iter = 0; iter < 20000; ++iter)
+    {
+        int const i = iter % live;
+        nodes[i] = cc::node_allocation<T8B>::create_from(alloc, u64(iter));
+        track_base(seen, cc::node_slab_base_for_ptr(reinterpret_cast<cc::byte*>(nodes[i].ptr), idx));
+    }
+
+    CHECK(seen.size() <= 8);
+}
+
+TEST("node_allocation - multi-slab ring reuse")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+    int const usable = usable_slots<T8B>();
+
+    // fill exactly 3 slabs; the head (3rd slab) ends up full
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < usable * 3; ++i)
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+
+    cc::vector<cc::byte*> seen;
+    for (auto const& n : nodes)
+        track_base(seen, base_of(n));
+    REQUIRE(seen.size() == 3);
+
+    // free every slot of the first (non-head) slab back into it, on the owner thread
+    cc::byte* const slab1 = base_of(nodes[0]);
+    for (int i = 0; i < usable; ++i)
+        nodes[i] = {};
+
+    // the head is full, so the next `usable` allocations must walk the ring and reuse slab 1's freed slots
+    for (int i = 0; i < usable; ++i)
+    {
+        auto n = cc::node_allocation<T8B>::create_from(alloc, u64(1000 + i));
+        CHECK(base_of(n) == slab1); // reused slab 1, no new slab
+    }
+}
+
+#if CC_HAS_THREADS
+TEST("node_allocation - remote drain reclaims cross-thread frees")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+
+    constexpr int batch = 200;
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < batch; ++i)
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+
+    cc::vector<cc::byte*> seen;
+    for (auto const& n : nodes)
+        track_base(seen, base_of(n));
+
+    // free the whole batch on ANOTHER thread -> each free routes into its slab's remote bitmap
+    std::thread([&nodes] { nodes.clear(); }).join();
+
+    // owner reallocates the same batch: local is empty everywhere, so the cold path must drain the remote
+    // bitmaps to reclaim the slots -- otherwise it would allocate brand-new slabs (new bases).
+    for (int i = 0; i < batch; ++i)
+    {
+        auto n = cc::node_allocation<T8B>::create_from(alloc, u64(1000 + i));
+        CHECK(n.ptr->value == u64(1000 + i));
+        CHECK(track_base(seen, base_of(n)) == false); // base already seen -> no new slab, drain worked
+    }
+}
+
+TEST("node_allocation - cross-thread free then reuse (basic)")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+
+    auto a = cc::node_allocation<T8B>::create_from(alloc, u64(11));
+    auto b = cc::node_allocation<T16B>::create_from(alloc, u64(22));
+    auto c = cc::node_allocation<T64B>::create_from(alloc, u64(33));
+    CHECK(a.ptr->value == 11);
+    CHECK(b.ptr->a == 22);
+    CHECK(c.ptr->data[0] == 33);
+
+    // free all three on another thread (remote path: differing owner token)
+    std::thread(
+        [&]
+        {
+            a.reset();
+            b.reset();
+            c.reset();
+        })
+        .join();
+    CHECK(!a.is_valid());
+    CHECK(!b.is_valid());
+    CHECK(!c.is_valid());
+
+    // owner reallocates the same classes and they work
+    auto a2 = cc::node_allocation<T8B>::create_from(alloc, u64(44));
+    auto b2 = cc::node_allocation<T16B>::create_from(alloc, u64(55));
+    CHECK(a2.ptr->value == 44);
+    CHECK(b2.ptr->a == 55);
+}
+#endif

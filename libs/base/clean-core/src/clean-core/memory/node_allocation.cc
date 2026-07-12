@@ -86,8 +86,8 @@ void system_deallocate_node_bytes_large(cc::byte* ptr, cc::node_class_index idx,
 }
 
 /// Refills slabs for a given size class by allocating a new slab from the system memory resource.
-/// Sets up the freemap with appropriate slots forced to zero (for the header metadata).
-/// Wires the new slab into the cyclic slab list (making it the new head).
+/// Initializes the metadata (local freemap from the consteval seed mask; threaded: remote=0, owner stamped),
+/// splices the new slab into the ring as the new head (retaining previous slabs), and allocates one slot.
 cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info& slabs,
                                                       cc::node_class_index idx,
                                                       void* userdata)
@@ -104,39 +104,29 @@ cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_i
     CC_ASSERT(new_slab != nullptr, "system allocator must return non-null for slab allocation");
     CC_ASSERT(cc::is_aligned(new_slab, slab_alignment), "slab must be aligned to its own size");
 
-    // compute how many slots are blocked by the 16-byte header (freemap + next pointer)
-    // header is 16 bytes: [freemap (8B)][next slab pointer (8B)]
-    constexpr cc::isize header_bytes = 16;
-    cc::isize const class_size = cc::isize(1) << cc::isize(idx);                  // 2^idx
-    cc::isize const blocked_slots = (header_bytes + class_size - 1) / class_size; // round up division
+    // initialize metadata: local freemap seeds the free slots (blocking the ones the metadata overlaps)
+    cc::u64 const initial_freemap = cc::node_seed_local_freemaps[cc::isize(idx)];
+    *cc::node_slab_freemap_for_base(new_slab) = initial_freemap;
+#if CC_HAS_THREADS
+    *cc::node_slab_remote_for_base(new_slab, idx) = 0;                // no remote frees yet
+    *cc::node_slab_owner_for_base(new_slab) = cc::node_owner_token(); // stamp the hydrating thread
+#endif
 
-    // initialize freemap: all bits set to 1 (free), except for blocked slots
-    cc::u64 initial_freemap = ~cc::u64(0);                          // all 1s
-    cc::u64 const blocked_mask = (cc::u64(1) << blocked_slots) - 1; // mask for blocked slots
-    initial_freemap &= ~blocked_mask;                               // clear bits for blocked slots
+    // splice into the ring as the new head, retaining any previous slabs (they may hold free slots)
+    cc::byte*& head = slabs.slab_base[cc::isize(idx)];
+    if (head == nullptr) // first slab for this class: a self-cycle
+        *cc::node_slab_next_ptr_for_base(new_slab) = new_slab;
+    else // insert after the old head so the whole ring stays reachable
+    {
+        *cc::node_slab_next_ptr_for_base(new_slab) = cc::node_slab_next_for_base(head);
+        *cc::node_slab_next_ptr_for_base(head) = new_slab;
+    }
+    head = new_slab;
 
-    // write freemap
-    *reinterpret_cast<cc::u64*>(new_slab) = initial_freemap; // NOLINT
-
-    // get reference to the slab base for this class
-    cc::byte*& slab_base_ref = slabs.slab_base[cc::isize(idx)];
-
-    // DEBUG: for now we simply pass out new self-cycles
-    // TODO: keep non-empty previous slabs in here as well
-    // FIXME: this is currently basically a memory leak here, but it's fine for correctness for now
-    *reinterpret_cast<cc::byte**>(new_slab + 8) = new_slab; // NOLINT
-
-    // update slab base reference to point to the new slab (making it the new head)
-    slab_base_ref = new_slab;
-
-    // allocate the first free slot from the new slab
-    auto const a_freemap = std::atomic_ref<cc::u64>(*cc::node_slab_freemap_for_base(new_slab));
-    auto const freemap = a_freemap.load();
-    CC_ASSERT(freemap != 0, "newly allocated slab must have at least one free slot");
-
-    auto const slot_idx = cc::count_trailing_zeroes(freemap);
-    auto const slot_bit = cc::u64(1) << slot_idx;
-    a_freemap.fetch_and(~slot_bit);
+    // allocate the first free slot from the new slab (owner-only, non-atomic — we just created it)
+    CC_ASSERT(initial_freemap != 0, "newly allocated slab must have at least one free slot");
+    auto const slot_idx = cc::count_trailing_zeroes(initial_freemap);
+    *cc::node_slab_freemap_for_base(new_slab) = initial_freemap & ~(cc::u64(1) << slot_idx);
 
     return cc::node_slot_ptr_for(new_slab, idx, slot_idx);
 }
@@ -152,6 +142,19 @@ constinit cc::node_memory_resource system_node_memory_resource = {
 } // namespace
 
 constinit cc::node_memory_resource* const cc::default_node_memory_resource = &system_node_memory_resource;
+
+#if CC_HAS_THREADS
+cc::u32 cc::detail::node_next_owner_id()
+{
+    // process-unique, never recycled: an id is never reused, so a free is never miscategorized.
+    // ids are not reclaimed on thread exit (that leaks the thread's slabs -- a known, deferred follow-up).
+    static std::atomic<cc::u32> s_next_owner_id{1}; // 0 is reserved for "unassigned"
+    cc::u32 const id = s_next_owner_id.fetch_add(1, std::memory_order_relaxed);
+    CC_ASSERT(id != 0, "node owner-id space exhausted (>4B threads ever); cross-thread-free after "
+                       "thread-exit is unsupported");
+    return id;
+}
+#endif
 
 void cc::node_allocation_free_large(cc::byte* ptr, node_class_index idx)
 {
@@ -182,51 +185,40 @@ cc::byte* cc::node_allocator::refill_slabs_and_allocate_node_bytes(node_class_in
 
 cc::byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
 {
-    if (_slabs.slab_base[isize(idx)] == nullptr) [[unlikely]]
+    auto const start_base = _slabs.slab_base[isize(idx)];
+    if (start_base == nullptr) [[unlikely]]
         return this->refill_slabs_and_allocate_node_bytes(idx);
 
-    auto const start_base = _slabs.slab_base[isize(idx)];
-    CC_ASSERT(start_base != nullptr, "node class should be initialized");
-
-    // slab is initialized but full
-    // we now iterate the slab ring to find a new free slab
-    // this is still reasonably hot (it's the full node capacity for this thread without refill)
-    // TODO: this is currently non-ideal for alloc-only workflows
-    //       because we go through the list for each exhaustion
-    //       with some minimal bookkeeping, we can keep this cheaper
-    //       maybe slabs need to know the owning allocators after all
-    auto base = cc::node_slab_next_for_base(start_base);
-    while (base != start_base)
+    // The head's local just emptied (that's why the fast path fell through), but any slab in the ring --
+    // including the head -- may have cross-thread frees waiting in its remote bitmap. Walk the whole ring
+    // from the head; on each slab with an empty local, drain remote into local (atomic exchange) and retry.
+    // TODO: still O(ring) per exhaustion for alloc-heavy workflows -- some bookkeeping could keep this cheaper.
+    auto base = start_base;
+    do
     {
         CC_ASSERT(base != nullptr, "the slab ring must be a cycling single-linked-list. indicates a "
                                    "node_memory_resource bug.");
 
-        auto const a_freemap = std::atomic_ref<u64>(*cc::node_slab_freemap_for_base(base));
-        auto const freemap = a_freemap.load();
+        auto const local = cc::node_slab_freemap_for_base(base);
+        u64 freemap = *local;
+#if CC_HAS_THREADS
+        if (freemap == 0) // reclaim cross-thread frees into local
+            freemap
+                = std::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, std::memory_order_relaxed);
+#endif
 
         if (freemap != 0) [[likely]]
         {
-            // record next free slab
-            _slabs.slab_base[isize(idx)] = base;
-
-            // allocate & return
+            _slabs.slab_base[isize(idx)] = base; // keep allocating from this slab
             auto const slot_idx = cc::count_trailing_zeroes(freemap);
-            auto const slot_bit = u64(1) << slot_idx;
-            // updating the freemap must happen atomically
-            // we're the only thread allocating from it
-            // BUT there can be many threads that concurrently free
-            auto const old_freemap = a_freemap.fetch_and(~slot_bit);
-            CC_ASSERT((old_freemap & slot_bit) != 0, "double-allocation detected. this indicates multiple threads "
-                                                     "allocating from the same slab");
+            *local = freemap & ~(u64(1) << slot_idx); // owner-only, non-atomic
             return cc::node_slot_ptr_for(base, idx, slot_idx);
         }
 
-        // advance
         base = cc::node_slab_next_for_base(base);
-    }
+    } while (base != start_base);
 
-    // all slabs in the ring are full
-    // => we request more from the allocator
+    // whole ring exhausted (local + remote) => request a new slab
     return this->refill_slabs_and_allocate_node_bytes(idx);
 }
 

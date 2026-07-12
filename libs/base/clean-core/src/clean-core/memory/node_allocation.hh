@@ -68,6 +68,59 @@ template <class T>
     return node_slab_size_bytes_for_class(idx) - 1;
 }
 
+/// Slab metadata byte layout (kept in one place so refill, the fast path, and the seed mask agree):
+///   CC_HAS_THREADS==1: local_freemap @0 (u64), owner_id @8 (u32), next @16 (byte*); remote_freemap on
+///                      the 2nd cache line @64 (u64) when the slab spans two lines (class idx >= 1), else
+///                      @24 (the 1 B class has a single-line 64 B slab, so its remote shares line 0).
+///   CC_HAS_THREADS==0: local_freemap @0 (u64), next @8 (byte*). No owner/remote.
+/// Data still starts at slab offset 0; slots overlapping metadata are permanently blocked by the seed mask.
+
+/// Offset of the next-slab-ring pointer, which moves to make room for owner_id in the threaded layout.
+inline constexpr isize node_slab_next_offset = CC_HAS_THREADS ? 16 : 8;
+
+/// Compute the initial local free bitmap for a freshly refilled slab of the given class.
+/// Bit i is 1 (free) unless slot i overlaps slab metadata, in which case it is permanently 0.
+/// consteval so each class's mask is a compile-time constant; the runtime-idx refill reads the table below.
+[[nodiscard]] consteval u64 node_compute_seed_local_freemap(int idx)
+{
+    isize const size = isize(1) << idx;
+    isize const slab = size * 64;
+    u64 mask = ~u64(0); // all slots free
+
+    // clear every slot touched by the metadata byte range [lo, hi)
+    auto block = [&](isize lo, isize hi)
+    {
+        isize const first = lo / size;
+        isize const last = (hi - 1) / size;
+        for (isize s = first; s <= last; ++s)
+            mask &= ~(u64(1) << s);
+    };
+
+#if CC_HAS_THREADS
+    block(0, 8);   // local_freemap
+    block(8, 12);  // owner_id (u32)
+    block(16, 24); // next
+    if (slab >= 128)
+        block(64, 72); // remote_freemap on the 2nd cache line
+    else
+        block(24, 32); // 1 B class: remote shares line 0
+#else
+    block(0, 8);  // local_freemap
+    block(8, 16); // next
+#endif
+    return mask;
+}
+
+/// Per-class initial local free bitmaps, one per small size class. Indexed by class index in refill.
+inline constexpr u64 node_seed_local_freemaps[isize(node_class_index::small_count)] = {
+    node_compute_seed_local_freemap(0), node_compute_seed_local_freemap(1), node_compute_seed_local_freemap(2),
+    node_compute_seed_local_freemap(3), node_compute_seed_local_freemap(4), node_compute_seed_local_freemap(5),
+    node_compute_seed_local_freemap(6), node_compute_seed_local_freemap(7), node_compute_seed_local_freemap(8),
+};
+static_assert(cc::popcount(node_seed_local_freemaps[0]) >= 1, "every class must have at least one usable slot");
+static_assert(cc::popcount(node_seed_local_freemaps[isize(node_class_index::small_max)]) >= 1,
+              "every class must have at least one usable slot");
+
 /// Recover the slab base address from any pointer inside the slab.
 /// Exploits the fact that slabs are aligned to their own size.
 /// Computation is ptr & ~(slab_size - 1), a single bitwise AND.
@@ -86,12 +139,52 @@ template <class T>
     return reinterpret_cast<u64*>(base); // NOLINT
 }
 
-/// Retrieve the pointer to the next slab in the ring.
-/// The next slab pointer is stored adjacent to the freemap (at base + 8).
+/// Retrieve a pointer to the next-slab-ring slot for read or write.
+/// The offset depends on the frontend (see node_slab_next_offset); all next-pointer access goes through here.
+[[nodiscard]] CC_FORCE_INLINE cc::byte** node_slab_next_ptr_for_base(cc::byte* base)
+{
+    return reinterpret_cast<cc::byte**>(base + node_slab_next_offset); // NOLINT
+}
+
+/// Retrieve the next slab in the ring.
 [[nodiscard]] CC_FORCE_INLINE cc::byte* node_slab_next_for_base(cc::byte* base)
 {
-    return *reinterpret_cast<cc::byte**>(base + 8); // NOLINT
+    return *node_slab_next_ptr_for_base(base);
 }
+
+#if CC_HAS_THREADS
+/// Retrieve the owner-id slot of a slab (threaded frontend only).
+/// Holds the token of the thread that hydrated the slab; a free from any other thread routes to remote.
+[[nodiscard]] CC_FORCE_INLINE u32* node_slab_owner_for_base(cc::byte* base)
+{
+    return reinterpret_cast<u32*>(base + 8); // NOLINT
+}
+
+/// Retrieve the remote free bitmap of a slab (threaded frontend only).
+/// Lives on the 2nd cache line (@64) for classes whose slab spans two lines; the single-line 1 B class
+/// keeps it on line 0 (@24). Remote frees atomic_or here; the owner drains it into local on underflow.
+[[nodiscard]] CC_FORCE_INLINE u64* node_slab_remote_for_base(cc::byte* base, node_class_index idx)
+{
+    auto const off = (node_slab_size_bytes_for_class(idx) >= 128) ? isize(64) : isize(24);
+    return reinterpret_cast<u64*>(base + off); // NOLINT
+}
+
+namespace detail
+{
+/// Allocates the next process-unique nonzero owner id. Out-of-line so the token fast path stays a TLS load.
+[[nodiscard]] CC_COLD_FUNC u32 node_next_owner_id();
+} // namespace detail
+
+/// Process-unique, never-recycled token for the calling thread (threaded frontend only).
+/// Lazily assigned once per thread; used to stamp slabs at hydrate and to pick the owner free path.
+[[nodiscard]] CC_FORCE_INLINE u32 node_owner_token()
+{
+    thread_local u32 t = 0; // 0 == unassigned; inline-fn thread_local is one slot per thread across TUs
+    if (t == 0) [[unlikely]]
+        t = cc::detail::node_next_owner_id();
+    return t;
+}
+#endif
 
 /// Compute the slot index within a slab for a given pointer.
 /// Index = (ptr - slab_base) / class_size where class_size = 2^class_index.
@@ -116,12 +209,12 @@ CC_COLD_FUNC void node_allocation_free_large(cc::byte* ptr, node_class_index idx
 
 /// Free a node by returning its slot to the slab's free bitmap.
 /// Requires only the pointer and class index; no allocator state or resource reference needed.
-/// Implemented as a single atomic_or into the slab's free bitmap; wait-free and callable from any thread.
-/// The owning thread may later discover this freed slot in its cold allocation path.
+/// The owning thread frees non-atomically into local; a genuinely remote thread atomic_ors into the slab's
+/// remote bitmap, which the owner drains on underflow. Single-threaded builds always take the plain path.
 ///
 /// DESIGN CHOICE: This is a free function, not bound to node_memory_resource.
 /// This ensures that freeing cannot directly depend on the resource by default.
-/// Deallocation is stateless and decoupled from allocation, enabling wait-free cross-thread deallocation
+/// Deallocation is stateless and decoupled from allocation, enabling cross-thread deallocation
 /// without requiring the freeing thread to have any reference to or knowledge of the allocating resource.
 CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
 {
@@ -133,11 +226,25 @@ CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
     }
 
     auto const base = cc::node_slab_base_for_ptr(ptr, idx);
-    auto const freemap = cc::node_slab_freemap_for_base(base);
     auto const slot_bit = u64(1) << cc::node_slot_index_for_ptr(ptr, base, idx);
 
+#if CC_HAS_THREADS
+    // owner path: non-atomic free into local; predicted-taken because most frees are on the owning thread
+    if (*cc::node_slab_owner_for_base(base) == cc::node_owner_token()) [[likely]]
+    {
+        auto const freemap = cc::node_slab_freemap_for_base(base);
+        CC_ASSERT((*freemap & slot_bit) == 0, "node is already freed. double-delete or corruption?");
+        *freemap |= slot_bit;
+    }
+    else // remote thread: the only path that pays an atomic (double-free assert omitted; the read would race)
+    {
+        std::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, std::memory_order_relaxed);
+    }
+#else
+    auto const freemap = cc::node_slab_freemap_for_base(base);
     CC_ASSERT((*freemap & slot_bit) == 0, "node is already freed. double-delete or corruption?");
-    cc::atomic_or(*freemap, slot_bit);
+    *freemap |= slot_bit;
+#endif
 }
 
 /// Default node memory resource used when none specified.
@@ -192,25 +299,21 @@ public:
         // happy path for valid slabs with free slots
         if (base != nullptr) [[likely]]
         {
-            auto const a_freemap = std::atomic_ref<u64>(*cc::node_slab_freemap_for_base(base));
-            auto const freemap = a_freemap.load();
+            // only the owning thread allocates from local, so this is a plain (non-atomic) read/clear.
+            // remote frees land in a separate bitmap and are drained into local by the cold path.
+            auto const local = cc::node_slab_freemap_for_base(base);
+            auto const freemap = *local;
 
-            // this is the hottest node allocation path, so we duplicate it
             if (freemap != 0) [[likely]]
             {
                 auto const slot_idx = cc::count_trailing_zeroes(freemap);
                 auto const slot_bit = u64(1) << slot_idx;
-                // updating the freemap must happen atomically
-                // we're the only thread allocating from it
-                // BUT there can be many threads that concurrently free
-                auto const old_freemap = a_freemap.fetch_and(~slot_bit);
-                CC_ASSERT((old_freemap & slot_bit) != 0, "double-allocation detected. this indicates multiple threads "
-                                                         "allocating from the same slab");
+                *local = freemap & ~slot_bit;
                 return cc::node_slot_ptr_for(base, idx, u64(slot_idx));
             }
         }
 
-        // all else goes through fallback paths
+        // all else goes through fallback paths (local empty: drain remote / walk ring / refill)
         return this->allocate_node_bytes_non_fast(idx);
     }
 
@@ -222,10 +325,8 @@ private:
     [[nodiscard]] CC_COLD_FUNC cc::byte* allocate_node_bytes_large(node_class_index idx, isize size_bytes, isize alignment);
 
     // called when the current slab ring is full
-    // should do bookkeeping and ensure the slab ring has free capacity
-    // and also allocate a node for the given size class (guaranteed to be a small class)
+    // ensures the slab ring has free capacity and allocates a node for the given (small) class
     // also works when the class is not initialized yet
-    // TODO: implement me
     [[nodiscard]] CC_COLD_FUNC cc::byte* refill_slabs_and_allocate_node_bytes(node_class_index idx);
 
 private:
@@ -241,20 +342,19 @@ private:
 /// Nodes are grouped by power-of-two size classes: class index i corresponds to size 2^i bytes.
 /// Size class index = bit_width(max(sizeof(T), alignof(T)) - 1), ensuring both size and alignment are satisfied.
 ///
-/// Each slab is a 64 * class_size block; slabs are aligned to their own size.
-/// The slab prefix contains metadata that blocks some initial slots:
-///   - First u64 (offset 0): Free bitmap tracking slot availability (one bit per slot)
-///   - Second u64 (offset 8): Pointer to the next slab in the slab ring (byte*)
+/// Each slab is a 64 * class_size block; slabs are aligned to their own size. Data starts at slab offset 0;
+/// slots overlapping the metadata are permanently blocked by a per-class consteval seed mask (see
+/// node_compute_seed_local_freemap). The metadata layout is frontend-dependent (CC_HAS_THREADS):
+///   - threaded: local_freemap @0, owner_id @8 (u32), next @16; remote_freemap @64 (2nd cache line) for
+///     classes whose slab spans two lines (idx >= 1), else @24. Usable slots: 1B → 36, 2B → 50, 16B+ → ~62.
+///   - single-threaded: local_freemap @0, next @8; usable slots: 1B → 48, 8B → 62, 16B+ → 63 (as before).
 ///
-/// The number of blocked slots depends on class size:
-///   - 1B nodes (e.g., char): 16 bytes prefix blocks 16 slots → 48 usable slots per slab
-///   - 8B nodes (e.g., i64, ptr): 16 bytes prefix blocks 2 slots → 62 usable slots per slab
-///   - 16B+ nodes: 16 bytes prefix blocks 1 slot → 63 usable slots per slab
-///
-/// Allocation is thread-owned and may update allocator state for bookkeeping and slab lifecycle management.
+/// The fast path is two compile-time frontends behind an unchanged API (selected by CC_HAS_THREADS):
+///   - threaded (step2_tls_diff): the owner allocs/frees non-atomically into local; a genuinely remote
+///     thread atomic_ors into remote; the owner drains remote into local on underflow (cold path).
+///   - single-threaded: plain non-atomic and/or on one bitmap, no owner/remote.
 /// Deallocation requires only the pointer and class index; no allocator state or resource reference needed.
-/// Free operations are wait-free: any thread may free any node via atomic bitmap update (atomic_or).
-/// The allocating thread discovers remotely freed slots during cold allocation paths (slab reuse, new slab allocation).
+/// The allocating thread discovers remotely freed slots during cold allocation paths (drain + slab reuse).
 ///
 /// Slab base recovery from any interior pointer: ptr & ~(slab_size - 1), exploiting alignment.
 ///
