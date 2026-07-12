@@ -18,6 +18,7 @@ Usage:
     uv run dev.py pgo run                    Profile-guided optimization (instrument/train/optimize/measure)
     uv run dev.py clean [--all]             Remove build artifacts
     uv run dev.py info build-flags TARGET   Show resolved compile/link flags (or compile-command FILE)
+    uv run dev.py assembly search PATTERN   Search symbols in built objects (or show SYMBOL to disassemble)
     uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
     uv run dev.py doctor                    Sanity-check the toolchain
     uv run dev.py list-presets              List available build presets
@@ -62,6 +63,7 @@ sys.path.insert(0, str(ROOT))
 from tools import dev  # noqa: E402
 from tools.dev import cmd, console  # noqa: E402
 from tools.dev.cmd import (  # noqa: E402
+    assembly,
     build,
     check,
     clean,
@@ -95,6 +97,7 @@ COMMANDS = [
     clean,
     diagnose,
     info,
+    assembly,
     doctor,
     list_presets,
     list_targets,
