@@ -27,6 +27,9 @@ class command_list_copy_scope;
 class command_list_compute_scope;
 class command_list_raytracing_scope;
 class command_list_query_scope;
+class command_list_raster_scope;
+class command_list_raster_manual_scope;
+class rendering_scope;
 class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)

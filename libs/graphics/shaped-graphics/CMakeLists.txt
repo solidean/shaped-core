@@ -13,6 +13,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
+    src/shaped-graphics/command_list.raster.cc
     src/shaped-graphics/command_list.raytracing.cc
     src/shaped-graphics/command_list.query.cc
     src/shaped-graphics/gpu_timestamp.cc
@@ -59,6 +60,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
+    src/shaped-graphics/command_list.raster.hh
     src/shaped-graphics/command_list.raytracing.hh
     src/shaped-graphics/acceleration_structure.hh
     src/shaped-graphics/raw_buffer.hh

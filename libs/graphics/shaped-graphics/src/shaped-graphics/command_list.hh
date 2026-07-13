@@ -7,6 +7,7 @@
 #include <shaped-graphics/command_list.copy.hh>
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.query.hh>
+#include <shaped-graphics/command_list.raster.hh>
 #include <shaped-graphics/command_list.raytracing.hh>
 #include <shaped-graphics/command_list.upload.hh>
 #include <shaped-graphics/fwd.hh>
@@ -43,6 +44,10 @@ public:
     /// Compute facade: `cmd.compute.bind_pipeline(...)` / `.bind_group(...)` / `.dispatch(...)`.
     command_list_compute_scope compute;
 
+    /// Raster facade: `cmd.raster.render_to(...)` opens a rendering scope over a set of targets;
+    /// `cmd.raster.manual.begin_rendering(...)` / `.end_rendering()` do it by hand.
+    command_list_raster_scope raster;
+
     /// Ray-tracing facade: `cmd.raytracing.build_blas(...)` / `.build_tlas(...)` / `.is_supported()`.
     command_list_raytracing_scope raytracing;
 
@@ -60,6 +65,9 @@ protected:
     friend class command_list_compute_scope;
     friend class command_list_raytracing_scope;
     friend class command_list_query_scope;
+    friend class command_list_raster_scope;
+    friend class command_list_raster_manual_scope;
+    friend class rendering_scope;
 
     virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
         = 0;
@@ -100,6 +108,13 @@ protected:
     virtual void compute_declare_array_texture_access(cc::string_view binding_name,
                                                       cc::span<array_texture_access const> elements)
         = 0;
+
+    // Raster rendering scope (reached through cmd.raster). begin_rendering transitions each target to
+    // its attachment layout, binds the color/depth targets to the output-merger, and applies each
+    // target's clear / discard; end_rendering closes the scope and releases its RTV/DSV descriptors.
+    // Calls must be balanced. Draw recording lands with the graphics pipeline.
+    virtual void raster_begin_rendering(rendering_info const& info) = 0;
+    virtual void raster_end_rendering() = 0;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Split by geometry family
     // (a BLAS is triangles or AABBs, never both) since span-element overloads can't dispatch through one

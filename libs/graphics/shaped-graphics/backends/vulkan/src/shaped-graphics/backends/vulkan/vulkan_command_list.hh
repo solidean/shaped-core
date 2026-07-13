@@ -87,6 +87,13 @@ protected:
         CC_UNREACHABLE("vulkan compute set_inline_constants is not implemented yet");
     }
 
+    // Raster rendering scope (reached through cmd.raster) — not implemented yet.
+    void raster_begin_rendering(sg::rendering_info const&) override
+    {
+        CC_UNREACHABLE("vulkan raster rendering is not implemented yet");
+    }
+    void raster_end_rendering() override { CC_UNREACHABLE("vulkan raster rendering is not implemented yet"); }
+
     // Ray tracing (reached through cmd.raytracing) — not implemented yet. is_supported() returns false, so a
     // correct caller never reaches the build stubs; and the vulkan backend stays unregistered in the tier-1
     // API tests until its raytracing milestone lands.

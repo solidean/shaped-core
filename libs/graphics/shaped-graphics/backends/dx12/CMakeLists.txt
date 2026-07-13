@@ -10,6 +10,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.queries.cc
+    src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc
     src/shaped-graphics/backends/dx12/dx12_barrier.cc
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
@@ -115,6 +116,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-texture-barrier-test.cc
     tests/dx12-texture-view-test.cc
     tests/dx12-rtv-dsv-test.cc
+    tests/dx12-clear-test.cc
     tests/dx12-sampler-test.cc
     tests/dx12-texture-copy-test.cc
     tests/dx12-raytracing-test.cc

@@ -15,6 +15,7 @@
 #include <shaped-graphics/command_list.download.hh>
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/command_list.query.hh>
+#include <shaped-graphics/command_list.raster.hh>
 #include <shaped-graphics/command_list.raytracing.hh>
 #include <shaped-graphics/command_list.upload.hh>
 #include <shaped-graphics/compiled_shader.hh>

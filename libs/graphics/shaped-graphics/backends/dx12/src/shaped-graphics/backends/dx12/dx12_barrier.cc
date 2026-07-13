@@ -75,6 +75,23 @@ D3D12_BUFFER_BARRIER make_buffer_barrier(ID3D12Resource* resource, sg::access_ba
     return bb;
 }
 
+namespace
+{
+// D3D12 requires each attachment sync bit to have a matching access bit. The coarse `attachment` stage
+// maps to both RENDER_TARGET and DEPTH_STENCIL sync (see d3d12_sync_from), but a given texture is either a
+// color or a depth target — never both — so drop the sync bit its access doesn't use. Without this, a
+// color barrier carries SYNC_DEPTH_STENCIL with ACCESS_RENDER_TARGET (and vice versa), which the runtime
+// rejects. A no-op for non-attachment syncs (compute/copy/etc.), which set neither bit.
+[[nodiscard]] D3D12_BARRIER_SYNC reconcile_attachment_sync(D3D12_BARRIER_SYNC sync, D3D12_BARRIER_ACCESS access)
+{
+    if ((access & D3D12_BARRIER_ACCESS_RENDER_TARGET) == 0)
+        sync &= ~D3D12_BARRIER_SYNC_RENDER_TARGET;
+    if ((access & (D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ | D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE)) == 0)
+        sync &= ~D3D12_BARRIER_SYNC_DEPTH_STENCIL;
+    return sync;
+}
+} // namespace
+
 D3D12_BARRIER_LAYOUT d3d12_layout_from(sg::texture_layout layout)
 {
     switch (layout)
@@ -119,6 +136,9 @@ D3D12_TEXTURE_BARRIER make_texture_barrier(ID3D12Resource* resource,
         = tb.SyncBefore == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.src_access);
     tb.AccessAfter
         = tb.SyncAfter == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.dst_access);
+    // Keep only the attachment sync bit (render-target vs depth-stencil) the access actually uses.
+    tb.SyncBefore = reconcile_attachment_sync(tb.SyncBefore, tb.AccessBefore);
+    tb.SyncAfter = reconcile_attachment_sync(tb.SyncAfter, tb.AccessAfter);
     tb.LayoutBefore = d3d12_layout_from(b.src_layout);
     tb.LayoutAfter = d3d12_layout_from(b.dst_layout);
     tb.pResource = resource;

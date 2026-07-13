@@ -174,6 +174,15 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan stub: no)
 cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
+
+// raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops.
+// No graphics pipeline yet -> clears/discards only; draw arrives later. vulkan is a stub. dx12 real on WARP.
+auto pass = cmd.raster.render_to({.color_targets={sg::clear(rtv, tg::vec4f(1,0,0,1))},   // -> sg::rendering_scope (RAII)
+                                  .depth_stencil_target=sg::clear(dsv, 1.0f)});           //   end_rendering() at scope exit
+// factories: sg::clear(view, color/depth[,stencil]) | sg::keep(view) | sg::discard(view) -> color_target / depth_stencil_target
+// rendering_info { small_vector<color_target,8> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor }
+//   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
+cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
 ```
 
 ## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
