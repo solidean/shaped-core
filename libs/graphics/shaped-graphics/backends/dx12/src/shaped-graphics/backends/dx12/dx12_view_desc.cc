@@ -1,5 +1,4 @@
 #include <clean-core/common/assert.hh>
-#include <shaped-graphics/attachment_views.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
@@ -179,7 +178,7 @@ namespace
     return desc;
 }
 
-// The D3D12 RTV desc for a color attachment: a single mip level, 2D-shaped (a cube renders as a 2D
+// The D3D12 RTV desc for a color (render-target) view: a single mip level, 2D-shaped (a cube renders as a 2D
 // array), MSAA allowed. A non-zero first slice on a non-array dimension promotes to the size-1 array form.
 [[nodiscard]] D3D12_RENDER_TARGET_VIEW_DESC texture_rtv_desc(sg::render_target_view const& v, DXGI_FORMAT format)
 {
@@ -233,7 +232,7 @@ namespace
     return desc;
 }
 
-// The D3D12 DSV desc for a depth/stencil attachment: like the RTV, but there is no PlaneSlice (a DSV
+// The D3D12 DSV desc for a depth-stencil view: like the RTV, but there is no PlaneSlice (a DSV
 // covers the depth (+stencil) planes implicitly) and it carries the read-only flags (none here).
 [[nodiscard]] D3D12_DEPTH_STENCIL_VIEW_DESC texture_dsv_desc(sg::depth_stencil_view const& v, DXGI_FORMAT format)
 {

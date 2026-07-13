@@ -263,7 +263,7 @@ tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2D
 tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
 //   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
 tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
-// attachments (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
+// render-target / depth-stencil views (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
 tex.as_render_target_view({.mip=1})            // -> render_target_view  (needs render_target usage + color format)
 tex.as_depth_stencil_view()                    // -> depth_stencil_view  (needs depth_stencil usage + depth format)
 tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face as a 2D target (also _depth_stencil_)
@@ -296,9 +296,9 @@ v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, o
 ```
 
 ```cpp
-#include <shaped-graphics/attachment_views.hh>   // color / depth-stencil targets — NOT shader-facing
-sg::render_target_view       // color attachment (RTV) — made via texture<Traits>.as_render_target_view()
-sg::depth_stencil_view       // depth/stencil attachment (DSV) — via .as_depth_stencil_view()
+// also in views.hh: render-target / depth-stencil target views — NOT shader-facing (do not erase to raw_view)
+sg::render_target_view       // color render target (RTV) — made via texture<Traits>.as_render_target_view()
+sg::depth_stencil_view       // depth-stencil target (DSV) — via .as_depth_stencil_view()
 // each holds { raw_texture_handle, texture_view_dimension, pixel_format, subresource_range } (single mip).
 v.texture() v.dimension() v.format() v.range()   // getters
 v.width() v.height()         // int — the viewed mip's pixel size (mip-adjusted, >= 1)

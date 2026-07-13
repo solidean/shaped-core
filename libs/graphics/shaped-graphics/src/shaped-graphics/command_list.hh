@@ -110,8 +110,8 @@ protected:
         = 0;
 
     // Raster rendering scope (reached through cmd.raster). begin_rendering transitions each target to
-    // its attachment layout, binds the color/depth targets to the output-merger, and applies each
-    // target's clear / discard; end_rendering closes the scope and releases its RTV/DSV descriptors.
+    // its render-target / depth-stencil layout, binds the color/depth targets to the output-merger, and
+    // applies each target's clear / discard; end_rendering closes the scope and releases its RTV/DSV descriptors.
     // Calls must be balanced. Draw recording lands with the graphics pipeline.
     virtual void raster_begin_rendering(rendering_info const& info) = 0;
     virtual void raster_end_rendering() = 0;

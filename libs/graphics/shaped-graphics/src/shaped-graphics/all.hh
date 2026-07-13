@@ -5,7 +5,6 @@
 
 #include <shaped-graphics/acceleration_structure.hh>
 #include <shaped-graphics/allocation_info.hh>
-#include <shaped-graphics/attachment_views.hh>
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/binding_group_layout.hh>

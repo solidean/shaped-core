@@ -200,8 +200,8 @@ private:
 
     // Declare `stages`/`access`/`layout` over `range` on `texture` for this list's slot, emit the per-box
     // layout-transition barriers the tracker asks for, and record the texture so its slot is finalized at
-    // submit/drop. Driven by download_bytes_from_texture and the raster rendering scope (attachment
-    // transitions); future texture copy / upload / dispatch ops will use it too.
+    // submit/drop. Driven by download_bytes_from_texture and the raster rendering scope (render-target /
+    // depth-stencil transitions); future texture copy / upload / dispatch ops will use it too.
     void track_texture_access(dx12_texture_handle const& texture,
                               sg::subresource_range range,
                               sg::pipeline_stage_flags stages,

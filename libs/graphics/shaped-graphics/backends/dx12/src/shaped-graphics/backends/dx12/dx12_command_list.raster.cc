@@ -1,5 +1,6 @@
 // dx12_command_list raster rendering scope: transition the color / depth-stencil targets to their
-// attachment layouts, bind them to the output-merger, and apply each target's clear / discard. There is
+// render-target / depth-stencil layouts, bind them to the output-merger, and apply each target's clear /
+// discard. There is
 // no graphics pipeline yet, so a scope only applies its begin-ops; draw recording lands with the pipeline.
 
 #include <clean-core/common/assert.hh>
@@ -22,7 +23,7 @@ namespace
 {
     // Only dx12 textures ever reach a dx12 command list, so static_cast is sound; the dynamic_cast is the
     // debug-only check (stripped in release, where CC_ASSERT leaves its condition unevaluated).
-    CC_ASSERT(std::dynamic_pointer_cast<dx12_texture const>(tex) != nullptr, "attachment texture is not a dx12 "
+    CC_ASSERT(std::dynamic_pointer_cast<dx12_texture const>(tex) != nullptr, "target texture is not a dx12 "
                                                                              "texture");
     return std::static_pointer_cast<dx12_texture const>(tex);
 }
@@ -34,11 +35,11 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     CC_ASSERT(!info.color_targets.empty() || info.depth_stencil_target.has_value(),
               "a rendering scope needs at least one color or depth-stencil target");
 
-    // 1) Transition each target to its attachment layout (color -> render_target, depth -> depth_readwrite)
+    // 1) Transition each target to its output layout (color -> render_target, depth -> depth_readwrite)
     //    and register it with this list. Flush the barriers up-front: enhanced barriers are illegal once the
     //    targets are bound / inside the pass, unlike a compute dispatch which flushes right before each op.
     for (auto const& ct : info.color_targets)
-        track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flags::attachment,
+        track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flags::render_output,
                              sg::access_flags::color_write, sg::texture_layout::render_target);
     if (info.depth_stencil_target.has_value())
     {
@@ -46,7 +47,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
         // pairing it with depth_read is rejected. A read-only depth target (once draws exist) would use the
         // depth_readonly layout + depth_read instead.
         auto const& dt = info.depth_stencil_target.value();
-        track_texture_access(as_dx12_texture(dt.view.texture()), dt.view.range(), sg::pipeline_stage_flags::attachment,
+        track_texture_access(as_dx12_texture(dt.view.texture()), dt.view.range(), sg::pipeline_stage_flags::render_output,
                              sg::access_flags::depth_write, sg::texture_layout::depth_readwrite);
     }
     flush_barriers();
@@ -70,7 +71,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
         _rendering_dsv_slot = dsv.value().slot;
     }
 
-    // 3) Apply each target's begin-op: clear to a value, discard (contents undefined), or keep (nothing).
+    // 3) Apply each target's begin-op: clear to a value, discard (contents undefined), or preserve (nothing).
     for (int i = 0; i < int(info.color_targets.size()); ++i)
     {
         auto const& ct = info.color_targets[i];

@@ -2,8 +2,8 @@
 
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/error/optional.hh>
-#include <shaped-graphics/attachment_views.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/views.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>

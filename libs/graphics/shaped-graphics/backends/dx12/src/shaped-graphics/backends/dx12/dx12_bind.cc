@@ -2,7 +2,6 @@
 // heavy bodies live in the respective dx12_*.cc; these are the context create_dx12_* entry points plus the
 // sg::context override forwarders (which unpack the description / downcast the abstract layout handles).
 
-#include <shaped-graphics/attachment_views.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>

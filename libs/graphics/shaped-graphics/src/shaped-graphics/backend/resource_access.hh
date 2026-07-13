@@ -40,7 +40,7 @@ enum class access_flags : u32
 };
 
 /// Pipeline stages that may perform an access. Bit flags. Coarse on purpose (tessellation/geometry fold
-/// into `vertex`, early/late depth into `attachment`), mirroring how DX12 `BARRIER_SYNC` and Vulkan
+/// into `vertex`, early/late depth into `render_output`), mirroring how DX12 `BARRIER_SYNC` and Vulkan
 /// `PIPELINE_STAGE_2` are typically consumed.
 enum class pipeline_stage_flags : u32
 {
@@ -50,7 +50,7 @@ enum class pipeline_stage_flags : u32
     fragment = 1u << 2,      // DX12 PIXEL_SHADING / Vk FRAGMENT_SHADER
     compute = 1u << 3,       // DX12 COMPUTE_SHADING / Vk COMPUTE_SHADER
     copy = 1u << 4,          // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
-    attachment = 1u << 5,    // render-target + depth output: DX12 RENDER_TARGET|DEPTH_STENCIL / Vk COLOR|DS_ATTACHMENT
+    render_output = 1u << 5, // render-target + depth output: DX12 RENDER_TARGET|DEPTH_STENCIL / Vk COLOR|DS_ATTACHMENT
     raytracing = 1u << 6,    // DX12 RAYTRACING / Vk RAY_TRACING_SHADER
     accel_build = 1u << 7,   // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
 };
