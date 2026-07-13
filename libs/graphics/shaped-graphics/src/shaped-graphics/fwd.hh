@@ -76,6 +76,11 @@ enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
 struct raw_view;
 
+// Attachment views (see attachment_views.hh) — a texture bound as a color / depth-stencil target.
+// Not shader-facing; they do not erase to raw_view.
+class render_target_view;
+class depth_stencil_view;
+
 // Texture samplers (see sampler.hh) — value types, no handle.
 enum class sampler_filter;
 enum class sampler_address_mode;

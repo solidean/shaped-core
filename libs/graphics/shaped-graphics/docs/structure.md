@@ -131,10 +131,11 @@ barriers             [in progress]  inferred access + state tracking + concurren
                                   barriers real for buffers + textures (subresource-range layout transitions,
                                   entry-layout revert); no public texture op drives it yet, vulkan pending
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
-                                  in compute); render_target/depth_stencil views + texel buffers deferred
+                                  in compute); render_target/depth_stencil views done (dx12 descriptors, no render-pass
+                                  consumer yet); texel buffers deferred
 bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub)
 texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation + dx12 layout barriers + SRV/UAV
-                                  views (bindable in compute) done; copies / render-target views remain
+                                  + RTV/DSV views done; copies + the render-pass consumer for RTV/DSV remain
 pipeline             [in progress]  compute pipeline + bind path (dx12 real, vulkan stub); graphics pipelines + shader compiler planned
 sampler              [in progress]  sampler + static/dynamic samplers; dx12 real (root-sig static samplers
                                   + a separate sampler descriptor heap for dynamic ones); vulkan pending

@@ -168,6 +168,14 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(ctx->_sampler_heap.initialize(
         *ctx, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, config.sampler_heap_capacity, config.descriptor_transient_fraction));
 
+    // Non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into.
+    auto rtv_heap = dx12_cpu_descriptor_heap::create(*ctx, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, config.rtv_heap_capacity);
+    CC_RETURN_IF_ERROR(rtv_heap);
+    ctx->_rtv_heap = cc::move(rtv_heap.value());
+    auto dsv_heap = dx12_cpu_descriptor_heap::create(*ctx, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, config.dsv_heap_capacity);
+    CC_RETURN_IF_ERROR(dsv_heap);
+    ctx->_dsv_heap = cc::move(dsv_heap.value());
+
     return context_handle(cc::move(ctx));
 }
 } // namespace sg

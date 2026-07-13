@@ -254,10 +254,14 @@ tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2D
 tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
 //   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
 tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
+// attachments (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
+tex.as_render_target_view({.mip=1})            // -> render_target_view  (needs render_target usage + color format)
+tex.as_depth_stencil_view()                    // -> depth_stencil_view  (needs depth_stencil usage + depth format)
+tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face as a 2D target (also _depth_stencil_)
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
 // bind a texture view in a compute dispatch → it auto-transitions to shader_read (SRV) / storage (UAV).
-// NOTE: SRV/UAV + samplers — render_target/depth_stencil views + texture upload/download/copy remain future work.
+// NOTE: SRV/UAV/RTV/DSV + samplers exist; texture upload/download/copy and the render-pass consumer remain future.
 ```
 
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
@@ -279,7 +283,18 @@ sg::view_shape               // uniform_block | structured | raw | texture | acc
 sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
 v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, offset/size/... | format+range }
 // backends switch on (access, shape) to build the native descriptor (SRV/UAV/CBV/texture SRV/UAV)
-// deferred: render_target/depth_stencil views and texel buffers (typed linear buffers). samplers: see sampler.hh
+// deferred: texel buffers (typed linear buffers). samplers: see sampler.hh
+```
+
+```cpp
+#include <shaped-graphics/attachment_views.hh>   // color / depth-stencil targets — NOT shader-facing
+sg::render_target_view       // color attachment (RTV) — made via texture<Traits>.as_render_target_view()
+sg::depth_stencil_view       // depth/stencil attachment (DSV) — via .as_depth_stencil_view()
+// each holds { raw_texture_handle, texture_view_dimension, pixel_format, subresource_range } (single mip).
+v.texture() v.dimension() v.format() v.range()   // getters
+v.width() v.height()         // int — the viewed mip's pixel size (mip-adjusted, >= 1)
+// Do NOT erase to raw_view (never shader-visible / in a binding group); a backend consumes them directly.
+sg::is_render_target_format(f) // bool — a renderable color format (not depth, not compressed, not undefined)
 ```
 
 ## samplers — how a shader reads a texture  (see docs/concepts/bindings.md)
