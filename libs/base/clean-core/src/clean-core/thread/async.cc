@@ -1,3 +1,4 @@
+#include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 
@@ -21,6 +22,22 @@ thread_local cc::async_scheduler* s_current_scheduler = nullptr;
 // Process-wide default scheduler for compute nodes that cannot run on the current thread. Read-mostly:
 // installed once at startup. Atomic so installation is visible to worker threads without extra synchronization.
 std::atomic<cc::async_scheduler*> s_default_scheduler{nullptr};
+
+// spilled dependency-list nodes come from the node slab allocator (wait-free free, cross-thread safe): a node
+// parked by one worker may be re-polled/torn down by another, which then frees these on a different thread.
+cc::impl::async_dep_list_node* dep_alloc_node(cc::u64 dep_word)
+{
+    constexpr auto idx = cc::node_class_index_for<cc::impl::async_dep_list_node>();
+    auto* raw = cc::default_node_allocator().allocate_node_bytes(idx, sizeof(cc::impl::async_dep_list_node),
+                                                                 alignof(cc::impl::async_dep_list_node));
+    return new (cc::placement_new, raw) cc::impl::async_dep_list_node{dep_word, nullptr};
+}
+
+void dep_free_node(cc::impl::async_dep_list_node* n)
+{
+    // async_dep_list_node is trivially destructible (u64 + raw ptr), so no explicit dtor call is needed
+    cc::node_allocation_free(reinterpret_cast<cc::byte*>(n), cc::node_class_index_for<cc::impl::async_dep_list_node>());
+}
 } // namespace
 
 // ============================================================================
@@ -180,12 +197,94 @@ void cc::async_node_base::reschedule_self()
 }
 
 // ============================================================================
+// async_dep_head — packed not-ready dependency set (see async_node.hh)
+// ============================================================================
+
+void cc::impl::async_dep_head::add(async_node_base* dep)
+{
+    auto const dv = reinterpret_cast<cc::u64>(dep); // 64-aligned: low 6 bits clear, so unsubscribed
+
+    if (_head == 0) // empty -> single (bit0 == 0 => not a list)
+    {
+        _head = dv;
+        return;
+    }
+
+    if ((_head & tag_is_list) == 0) // single -> start a list carrying the existing entry
+        set_list_head(dep_alloc_node(_head));
+
+    auto* n = dep_alloc_node(dv); // prepend the new dep
+    n->_next = list_head();
+    set_list_head(n);
+}
+
+void cc::impl::async_dep_head::remove_ready()
+{
+    if (_head == 0)
+        return;
+
+    if ((_head & tag_is_list) == 0)
+    {
+        auto* dep = reinterpret_cast<async_node_base*>(_head & async_dep_entry::dep_mask);
+        if (dep->is_ready())
+            _head = 0;
+        return;
+    }
+
+    async_dep_list_node* prev = nullptr;
+    for (auto* n = list_head(); n != nullptr;)
+    {
+        auto* const next = n->_next;
+        auto* dep = reinterpret_cast<async_node_base*>(n->_dep & async_dep_entry::dep_mask);
+        if (dep->is_ready())
+        {
+            if (prev != nullptr)
+                prev->_next = next;
+            else
+                set_list_head(next);
+            dep_free_node(n);
+        }
+        else
+            prev = n;
+        n = next;
+    }
+    normalize();
+}
+
+void cc::impl::async_dep_head::normalize()
+{
+    if ((_head & tag_is_list) == 0)
+        return; // empty or single already
+
+    auto* h = list_head();
+    if (h == nullptr)
+        _head = 0;                // list emptied
+    else if (h->_next == nullptr) // exactly one left -> collapse to single (carries its subscribed bit)
+    {
+        _head = h->_dep;
+        dep_free_node(h);
+    }
+}
+
+void cc::impl::async_dep_head::clear()
+{
+    if ((_head & tag_is_list) != 0)
+        for (auto* n = list_head(); n != nullptr;)
+        {
+            auto* const next = n->_next;
+            dep_free_node(n);
+            n = next;
+        }
+    _head = 0;
+}
+
+// ============================================================================
 // async_node_base — dependency bookkeeping
 // ============================================================================
 
 void cc::async_node_base::drop_ready_pending_deps()
 {
-    _pending_deps.remove_all_where([](async_node_base* d) { return d->is_ready(); });
+    _deps.remove_ready();
 }
 
 bool cc::async_node_base::try_subscribe(async_node_base* dependent)
@@ -199,22 +298,31 @@ bool cc::async_node_base::try_subscribe(async_node_base* dependent)
 
 bool cc::async_node_base::subscribe_to_pending_deps()
 {
-    _subscribed.clear();
-    for (auto* dep : _pending_deps)
-    {
-        if (dep->try_subscribe(this))
-            _subscribed.push_back(dep);
-        else
+    // subscribe to each not-ready dep, marking it via the entry's subscribed bit; the first dep found already
+    // ready aborts parking (return true) so the poller re-evaluates from scratch.
+    return _deps.for_each_until(
+        [this](impl::async_dep_entry e)
+        {
+            if (e.dep()->try_subscribe(this))
+            {
+                e.set_subscribed(true);
+                return false; // keep going
+            }
             return true; // a dep is already ready: abort parking, re-evaluate from scratch
-    }
-    return false;
+        });
 }
 
 void cc::async_node_base::unsubscribe_all()
 {
-    for (auto* dep : _subscribed)
-        dep->remove_continuation(this);
-    _subscribed.clear();
+    _deps.for_each(
+        [this](impl::async_dep_entry e)
+        {
+            if (e.subscribed())
+            {
+                e.dep()->remove_continuation(this);
+                e.set_subscribed(false);
+            }
+        });
 }
 
 void cc::async_node_base::add_continuation(async_node_base* dependent)
@@ -262,7 +370,7 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
 
 void cc::async_node_base::mark_ready_and_notify()
 {
-    _pending_deps.clear();
+    _deps.clear();
 
     cc::small_vector<std::weak_ptr<async_node_base>, 1> continuations;
     void (*on_complete)(void*) = nullptr;
@@ -290,7 +398,7 @@ void cc::async_node_base::mark_ready_and_notify()
 void cc::async_node_base::complete_from_compute()
 {
     unsubscribe_all(); // still valid: our frame (destroyed below) pins the deps we are unsubscribing from
-    _pending_deps.clear();
+    _deps.clear();
 
     destroy_frame(); // release the frame's captures
 
@@ -323,7 +431,7 @@ void cc::async_node_base::poll()
     {
         drop_ready_pending_deps();
 
-        if (!_pending_deps.empty())
+        if (!_deps.empty())
         {
             // Not-ready dependencies remain (require() already scheduled any cold ones). Install wakeup
             // continuations late, then decide whether to park.

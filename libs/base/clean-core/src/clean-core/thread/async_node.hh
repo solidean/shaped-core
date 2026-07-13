@@ -211,6 +211,130 @@ private:
     cc::vector<std::shared_ptr<async_node_base>> _queue;
 };
 
+struct async_node_base; // fwd: dep-head entries hold non-owning base pointers
+
+namespace impl
+{
+/// One entry of a node's not-ready dependency set: a raw (non-owning) async_node_base* plus a "subscribed"
+/// bit, packed into a single word. A dependency is 64-aligned (async_node_base is alignas(64)), so bits 0..5
+/// are free; bit 1 is the subscribed flag. This proxy edits the packed word in place.
+struct async_dep_entry
+{
+    cc::u64* _word;
+
+    static constexpr cc::u64 subscribed_bit = 0x2;
+    static constexpr cc::u64 dep_mask = ~cc::u64(0x3F); // clear the low 6 tag bits to recover the 64-aligned dep
+
+    [[nodiscard]] async_node_base* dep() const { return reinterpret_cast<async_node_base*>(*_word & dep_mask); }
+    [[nodiscard]] bool subscribed() const { return (*_word & subscribed_bit) != 0; }
+    void set_subscribed(bool v) const
+    {
+        if (v)
+            *_word |= subscribed_bit;
+        else
+            *_word &= ~subscribed_bit;
+    }
+};
+
+/// A spilled-dependency-list node, used only when a node tracks 2+ not-ready deps. node_allocation-backed and
+/// intrusively linked; _dep packs the dependency + subscribed bit exactly like a single-mode head.
+struct async_dep_list_node
+{
+    cc::u64 _dep; // 64-aligned async_node_base* in the high bits, subscribed in bit 1
+    async_dep_list_node* _next;
+};
+
+/// A node's set of not-ready dependencies, folded into a single 8 B tagged word (replaces two 64 B
+/// small_vectors). Only the single active poller ever touches it, so it needs no lock. Move-only; the
+/// destructor frees any spilled list nodes.
+///
+/// _head encoding:
+///   0            -> empty
+///   bit0 == 0    -> single dep inline: high bits = async_node_base*, bit1 = subscribed
+///   bit0 == 1    -> list mode: (_head & ~1) = async_dep_list_node* (first of the chain)
+struct async_dep_head
+{
+    async_dep_head() = default;
+    ~async_dep_head() { clear(); }
+
+    async_dep_head(async_dep_head&& o) noexcept : _head(o._head) { o._head = 0; }
+    async_dep_head& operator=(async_dep_head&& o) noexcept
+    {
+        if (this != &o)
+        {
+            clear();
+            _head = o._head;
+            o._head = 0;
+        }
+        return *this;
+    }
+    async_dep_head(async_dep_head const&) = delete;
+    async_dep_head& operator=(async_dep_head const&) = delete;
+
+    [[nodiscard]] bool empty() const { return _head == 0; }
+
+    [[nodiscard]] cc::isize count() const
+    {
+        if (_head == 0)
+            return 0;
+        if ((_head & tag_is_list) == 0)
+            return 1;
+        cc::isize n = 0;
+        for (auto* p = list_head(); p != nullptr; p = p->_next)
+            ++n;
+        return n;
+    }
+
+    /// Append a not-ready dependency (order irrelevant). The entry starts unsubscribed.
+    void add(async_node_base* dep);
+    /// Remove (and free) every entry whose dependency is already ready.
+    void remove_ready();
+    /// Free all list nodes and reset to empty.
+    void clear();
+
+    /// Visit every entry in place; f is called as f(async_dep_entry).
+    template <class F>
+    void for_each(F&& f)
+    {
+        if (_head == 0)
+            return;
+        if ((_head & tag_is_list) == 0)
+        {
+            f(async_dep_entry{&_head});
+            return;
+        }
+        for (auto* p = list_head(); p != nullptr; p = p->_next)
+            f(async_dep_entry{&p->_dep});
+    }
+
+    /// Visit entries until f returns true; returns true if some f short-circuited, else false.
+    template <class F>
+    bool for_each_until(F&& f)
+    {
+        if (_head == 0)
+            return false;
+        if ((_head & tag_is_list) == 0)
+            return f(async_dep_entry{&_head});
+        for (auto* p = list_head(); p != nullptr; p = p->_next)
+            if (f(async_dep_entry{&p->_dep}))
+                return true;
+        return false;
+    }
+
+private:
+    static constexpr cc::u64 tag_is_list = 0x1;
+
+    [[nodiscard]] async_dep_list_node* list_head() const
+    {
+        return reinterpret_cast<async_dep_list_node*>(_head & ~tag_is_list);
+    }
+    void set_list_head(async_dep_list_node* n) { _head = reinterpret_cast<cc::u64>(n) | tag_is_list; }
+    void normalize(); // collapse a 0/1-entry list back to empty/single mode
+
+    cc::u64 _head = 0;
+};
+} // namespace impl
+
 // ============================================================================
 // async_node_base — untemplated node state + poll loop
 // ============================================================================
@@ -227,10 +351,9 @@ enum class async_node_state : cc::u8
     ready,            // terminal: completed with a value or an error
 };
 
-/// Shared, T-agnostic node machinery. Holds the atomic state, the pending-dependency list (only not-ready
-/// deps, for scheduling), the continuation list (dependents to wake on completion), the owned children
-/// (structured lifetime under this frame), and the failure-channel value. The typed value and the compute
-/// frame live in the derived typed node (async.hh).
+/// Shared, T-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
+/// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), and the
+/// failure-channel value. The typed value and the compute frame live in the derived typed node (async.hh).
 ///
 /// Concurrency: safe to drive from multiple threads. A per-node spinlock serializes state transitions and
 /// continuation/subscription bookkeeping; the state word stays atomic for lock-free is_ready()/is_cold()
@@ -267,7 +390,7 @@ public:
     // debug/introspection (used by tests) — racy on a live node; call only when it is quiescent (single-threaded)
 public:
     /// Number of not-ready dependencies currently tracked. Only meaningful between polls.
-    [[nodiscard]] cc::isize pending_dependency_count() const { return _pending_deps.size(); }
+    [[nodiscard]] cc::isize pending_dependency_count() const { return _deps.count(); }
     /// Number of installed wakeup continuations (may count entries whose dependent has since expired).
     [[nodiscard]] cc::isize continuation_count() const { return _continuations.size(); }
     /// True while the continuation list still fits its inline buffer (no heap dependent-list allocation).
@@ -338,7 +461,7 @@ protected:
 
     /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
     /// if this node has to park).
-    void add_pending_dependency(async_node_base* dep) { _pending_deps.push_back(dep); }
+    void add_pending_dependency(async_node_base* dep) { _deps.add(dep); }
 
     /// Mark ready and wake dependents. Used by external/manual completion (no frame to tear down).
     void mark_ready_and_notify();
@@ -371,12 +494,10 @@ private:
 
     async_error _error; // valid iff _is_error
 
-    /// Not-ready dependencies, rebuilt each poll. Only for scheduling/wakeup — it does not own anything.
-    /// Poller-private (only the single active poller touches it), so it needs no lock.
-    cc::small_vector<async_node_base*, 4> _pending_deps;
-
-    /// Deps we installed a continuation on while parking; used to unsubscribe on wake/teardown. Poller-private.
-    cc::small_vector<async_node_base*, 4> _subscribed;
+    /// Not-ready dependencies, rebuilt each poll (folded pending + subscribed set). Only for scheduling/wakeup;
+    /// it does not own anything (the compute frame's captures keep deps alive). Poller-private (only the single
+    /// active poller touches it), so it needs no lock. See impl::async_dep_head for the packed 8 B layout.
+    impl::async_dep_head _deps;
 
     /// Dependents to reschedule when this node completes, held as weak_ptrs so a wake can never touch a
     /// dependent that is being destroyed concurrently. Inline capacity 1 keeps the common single-dependent
