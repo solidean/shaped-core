@@ -233,7 +233,6 @@ struct threaded_actor_impl;
 //
 
 struct async_error;
-struct async_affinity;
 struct async_node_base;
 struct async_scheduler;
 struct async_worker_scope;

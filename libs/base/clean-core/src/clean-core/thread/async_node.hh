@@ -23,38 +23,6 @@
 
 namespace cc
 {
-// ============================================================================
-// affinity + reschedule routing (which worker may run a node; where a woken node goes)
-// ============================================================================
-
-/// A typed task-class bitmask. A node may run on a worker thread iff their masks overlap (bitwise AND != 0).
-/// Bit 0 is general-purpose compute — the default for every compute ("pull") async and for a worker scope
-/// with no explicit mask. Higher bits are user-defined task classes. A push/manual async carries the empty
-/// mask (nothing to run). Work stealing is permitted only between overlapping masks.
-struct async_affinity
-{
-    cc::u32 bits = 1; // bit 0 = general-purpose compute
-
-    [[nodiscard]] static async_affinity general() { return {1u}; }
-    [[nodiscard]] static async_affinity none() { return {0u}; }
-
-    [[nodiscard]] bool overlaps(async_affinity o) const { return (bits & o.bits) != 0; }
-    [[nodiscard]] bool is_empty() const { return bits == 0; }
-
-    friend bool operator==(async_affinity, async_affinity) = default;
-};
-
-/// Routes a (re)scheduled node to the scheduler/pool serving its affinity. A raw function pointer (not a
-/// unique_function): compute nodes are long-lived and routing must stay allocation-free. Invoked from the
-/// completion/wakeup path, possibly on a foreign thread, so it must not depend on any thread-local worker
-/// scope. The referenced pool must outlive every node routed to it (caller's responsibility).
-using async_reschedule_fn = void (*)(std::shared_ptr<async_node_base>);
-
-/// The default route for general-compute (bit 0) nodes: the installed default scheduler if one exists, else
-/// the current thread's worker scope (inline driving), else an assert. Compute nodes take this route by
-/// default; set_affinity replaces it for a user-defined task class.
-void async_default_reschedule(std::shared_ptr<async_node_base> node);
-
 namespace impl
 {
 /// Tiny per-node spinlock. Critical sections are a few list ops / a single state store — never user code —
@@ -187,11 +155,11 @@ struct async_success_tag
 struct async_scheduler
 {
     /// Make a node runnable on the CURRENT worker (local / hot enqueue). Called only when a worker scope is
-    /// active on this thread and the node's affinity is compatible with it.
+    /// active on this thread.
     virtual void enqueue(std::shared_ptr<async_node_base> node) = 0;
 
-    /// Affinity-routed injection: make a node runnable regardless of the calling thread (foreign threads,
-    /// cross-affinity wakeups). The default routes to enqueue; a pool overrides this with its injection queue.
+    /// Injection: make a node runnable regardless of the calling thread (foreign threads, cross-thread
+    /// wakeups). The default routes to enqueue; a pool overrides this with its injection queue.
     virtual void submit(std::shared_ptr<async_node_base> node) { enqueue(cc::move(node)); }
 
     virtual ~async_scheduler() = default;
@@ -200,12 +168,9 @@ struct async_scheduler
     [[nodiscard]] static async_scheduler& current();
     [[nodiscard]] static async_scheduler* current_or_null();
 
-    /// Affinity served by the worker scope active on this thread (async_affinity::none() if no scope).
-    [[nodiscard]] static async_affinity current_affinity();
-
-    /// The process-wide default scheduler that general-compute (bit 0) nodes route to when they cannot run on
-    /// the current thread. Null unless one is installed (see install_default_async_pool). Read-mostly:
-    /// install once at startup, before the graphs that depend on it run.
+    /// The process-wide default scheduler that compute nodes route to when they cannot run on the current
+    /// thread. Null unless one is installed (see install_default_async_pool). Read-mostly: install once at
+    /// startup, before the graphs that depend on it run.
     static void set_default(async_scheduler* sched);
     [[nodiscard]] static async_scheduler* default_or_null();
 };
@@ -215,9 +180,8 @@ struct async_scheduler
 /// This is the low-level hook that decouples the async graph from any particular executor.
 struct async_worker_scope
 {
-    /// Binds `scheduler` (and the affinity it serves) to the calling thread. `served` defaults to
-    /// general-purpose compute (bit 0), matching the inline scheduler and any plain worker.
-    explicit async_worker_scope(async_scheduler& scheduler, async_affinity served = async_affinity::general());
+    /// Binds `scheduler` to the calling thread.
+    explicit async_worker_scope(async_scheduler& scheduler);
     ~async_worker_scope();
 
     async_worker_scope(async_worker_scope const&) = delete;
@@ -227,7 +191,6 @@ struct async_worker_scope
 
 private:
     async_scheduler* _previous = nullptr;
-    async_affinity _previous_affinity;
 };
 
 /// The default scheduler: a worker-local LIFO stack pumped on the calling thread. No global lock, no thread
@@ -310,27 +273,17 @@ public:
     /// True while the continuation list still fits its inline buffer (no heap dependent-list allocation).
     [[nodiscard]] bool continuations_are_inline() const { return _continuations.is_inline(); }
 
-    // affinity
-public:
-    [[nodiscard]] async_affinity affinity() const { return _affinity; }
-
-    /// Pin this node to a user-defined task class and give it the route to the pool serving that class. Must be
-    /// called before the node is scheduled (asserts otherwise); affinity is frozen once scheduling begins. The
-    /// reschedule fn must be non-null and its pool must outlive the node. Bit-0 (general) nodes need no call —
-    /// they default to general affinity and the default route.
-    void set_affinity(async_affinity a, async_reschedule_fn route);
-
     // scheduling / driving
 public:
-    /// Idempotent hint: make this node runnable. Routes to the current worker (if affinity-compatible) or, via
-    /// this node's reschedule fn, to the pool serving its affinity. Never implies ownership of execution. Safe
-    /// to call from a completed dependency waking many dependents, or twice. A running node records a re-poll
-    /// request instead of enqueuing. Requires the node to be shared-owned (created via make_shared).
+    /// Idempotent hint: make this node runnable. Routes to the current worker (hot) if a worker scope is active
+    /// here, else to the installed default pool. Never implies ownership of execution. Safe to call from a
+    /// completed dependency waking many dependents, or twice. A running node records a re-poll request instead
+    /// of enqueuing. Requires the node to be shared-owned (created via make_shared).
     void schedule();
 
-    /// Like schedule(), but routes onto `target` specifically (bypassing current-thread/affinity routing).
-    /// Used by drivers to place a root on a chosen pool. cold/blocked -> scheduled + target.submit(); a running
-    /// node records a re-poll; terminal/already-scheduled nodes are left as-is.
+    /// Like schedule(), but routes onto `target` specifically (bypassing current-thread routing). Used by
+    /// drivers to place a root on a chosen pool. cold/blocked -> scheduled + target.submit(); a running node
+    /// records a re-poll; terminal/already-scheduled nodes are left as-is.
     void schedule_on(async_scheduler& target);
 
     /// Drive this node forward. Never blocks. Acquires execution ownership (a no-op if another poller owns it
@@ -379,14 +332,9 @@ protected:
     void set_state(async_node_state s) { _state.store(s, std::memory_order_release); }
     [[nodiscard]] async_node_state state() const { return _state.load(std::memory_order_acquire); }
 
-    /// Turn this into a push/manual node: awaiting external completion, with the empty affinity mask and no
-    /// compute route (it is never run inline; only push_value / push_error complete it).
-    void mark_external_pending()
-    {
-        _affinity = async_affinity::none();
-        _reschedule = nullptr;
-        set_state(async_node_state::external_pending);
-    }
+    /// Turn this into a push/manual node: awaiting external completion. It is never run inline (schedule()
+    /// bails on external_pending); only push_value / push_error complete it.
+    void mark_external_pending() { set_state(async_node_state::external_pending); }
 
     /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
     /// if this node has to park).
@@ -417,9 +365,6 @@ private:
     std::atomic<async_node_state> _state{async_node_state::cold};
     bool _is_error = false;
     bool _wake_pending = false; // set (under _lock) when a running node is scheduled; makes it re-poll
-
-    async_affinity _affinity = async_affinity::general();        // bit 0 by default
-    async_reschedule_fn _reschedule = &async_default_reschedule; // route for the general-compute default
 
     void (*_on_complete)(void*) = nullptr; // one-shot completion hook (pool blocking driver)
     void* _on_complete_ctx = nullptr;

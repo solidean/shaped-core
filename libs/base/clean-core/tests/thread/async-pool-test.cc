@@ -33,14 +33,6 @@ cc::shared_async<cc::i64> build_sum_tree(int depth)
     return cc::make_async_lazy([](cc::i64 l, cc::i64 r) { return l + r; }, left, right);
 }
 
-// A user-defined affinity class ("render", bit 1) and its route to a dedicated pool. The route is a plain fn
-// pointer, so the target pool is reached through a file-static handle the test sets up before use.
-constexpr cc::async_affinity render_affinity{2}; // bit 1
-cc::async_thread_pool* g_test_render_pool = nullptr;
-void route_to_render_pool(std::shared_ptr<cc::async_node_base> node)
-{
-    g_test_render_pool->submit(cc::move(node));
-}
 } // namespace
 
 TEST("async - a dependency tree drives correctly on a thread pool")
@@ -103,59 +95,18 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
     CHECK(v == 42);
 }
 
-TEST("async - affinity routes a task to the pool serving its class, not the general pool")
+TEST("async - two pools coexist; each drives its own submitted root")
 {
-    cc::async_thread_pool general_pool(2, cc::async_affinity::general());
-    cc::async_thread_pool render_pool(1, render_affinity);
-    g_test_render_pool = &render_pool;
+    // Without a task-class system, routing to a specific pool is done by submitting the root to it
+    // (blocking_get / schedule_on), not by pinning an affinity. Two independent pools drive independently.
+    cc::async_thread_pool pool_a(2);
+    cc::async_thread_pool pool_b(1);
 
-    // identify the render pool's single worker thread
-    auto render_worker = std::make_shared<std::thread::id>();
-    {
-        auto probe = cc::make_async_lazy(
-            [render_worker]
-            {
-                *render_worker = std::this_thread::get_id();
-                return 0;
-            });
-        probe->set_affinity(render_affinity, &route_to_render_pool);
-        render_pool.blocking_get(probe);
-    }
+    auto ra = cc::make_async_lazy([] { return 7; });
+    auto rb = cc::make_async_lazy([] { return 9; });
 
-    // a render-affinity task runs on the render worker
-    auto rid = std::make_shared<std::thread::id>();
-    auto rtask = cc::make_async_lazy(
-        [rid]
-        {
-            *rid = std::this_thread::get_id();
-            return 7;
-        });
-    rtask->set_affinity(render_affinity, &route_to_render_pool);
-    CHECK(render_pool.blocking_get(rtask) == 7);
-    CHECK(*rid == *render_worker);
-
-    // a general task never runs on the render worker
-    auto gid = std::make_shared<std::thread::id>();
-    auto gtask = cc::make_async_lazy(
-        [gid]
-        {
-            *gid = std::this_thread::get_id();
-            return 9;
-        });
-    CHECK(general_pool.blocking_get(gtask) == 9);
-    CHECK(*gid != *render_worker);
-
-    g_test_render_pool = nullptr;
-}
-
-TEST("async - affinity is frozen once scheduled")
-{
-    cc::async_thread_pool pool(2);
-
-    auto a = cc::make_async_lazy([] { return 1; });
-    CHECK(pool.blocking_get(a) == 1); // now ready, no longer cold
-
-    CHECK_ASSERTS(a->set_affinity(render_affinity, &route_to_render_pool));
+    CHECK(pool_a.blocking_get(ra) == 7);
+    CHECK(pool_b.blocking_get(rb) == 9);
 }
 
 TEST("async - installing a second default pool asserts")

@@ -161,11 +161,11 @@ alive on its own.
 `cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../src/clean-core/thread/async_thread_pool.hh))
 is a **work-stealing** scheduler that runs graphs on real threads. Each worker has a private LIFO deque (freshly
 spawned children stay hot) and steals from siblings when idle; a shared injection queue takes work from foreign
-threads and cross-affinity wakeups.
+threads and cross-thread wakeups.
 
 ```cpp
 cc::async_thread_pool pool(cc::num_hardware_threads());
-cc::install_default_async_pool(pool);            // general-compute nodes now route here
+cc::install_default_async_pool(pool);            // compute nodes now route here when off-worker
 auto root = build_graph();
 int v = pool.blocking_get(root);                 // submit to the pool, block THIS (foreign) thread
 ```
@@ -179,31 +179,24 @@ continuation bookkeeping, at most one thread polls a node, a completing dependen
 records a re-poll instead of enqueuing a second copy, and continuations are held as `weak_ptr`s so a wake can
 never touch a dependent being torn down concurrently.
 
-### Affinity — pinning task classes to pools
+### Routing to a specific pool
 
-An `async_affinity` is a typed `u32` bitmask of task classes. A node runs on a worker iff their masks
-**overlap**; bit 0 is general-purpose compute and the default for every compute node and plain worker. Work
-stealing is allowed only between overlapping masks.
+There is no task-class / affinity system: every worker in every pool serves all compute work, and steals are
+always eligible. A node with no active worker scope and no explicit target routes to the installed **default**
+pool. To drive a graph on a *specific* pool, submit its root there — `pool.blocking_get(root)` (or the
+lower-level `root->schedule_on(pool)`) — rather than pinning the node. Build and coexist as many pools as you
+like; only one may be the process-wide default at a time.
 
-Build one pool per task class and coexist them. General nodes route to the installed default pool. For a
-user-defined class, create the async **lazy**, set its affinity + the route to its pool, then schedule
-(affinity is frozen once scheduled — changing it asserts). The route is a raw fn pointer (allocation-free;
-long-lived graphs), so the pool it names must outlive the nodes routed to it. Push/manual nodes carry the
-empty mask (nothing to run).
-
-```cpp
-cc::async_thread_pool render_pool(2, cc::async_affinity{0b10}); // serves bit 1
-auto t = cc::make_async_lazy([] { return render_tile(); });
-t->set_affinity(cc::async_affinity{0b10}, &route_to_render_pool); // route enqueues onto render_pool
-// ... schedule / require t: it now only ever runs on render_pool's workers.
-```
+(An earlier version pinned nodes to pools via a typed `async_affinity` bitmask + a per-node reschedule fn
+pointer. That was removed to shrink the node; if per-class routing returns it belongs on the scheduler, not as
+bytes on every node.)
 
 ### v1 tradeoffs (node size & locking)
 
 The concurrency-safe node is **deliberately a v1**: correctness and a stable API first, leanness second. A
-node now carries a per-node spinlock, a `_wake_pending` flag, an affinity mask, a reschedule fn pointer, a
-one-shot completion hook (two words), and `weak_ptr` continuations — and it is cacheline-aligned (64 B) to
-avoid false sharing. That makes `async<T>` noticeably heavier than the data it computes.
+node still carries a per-node spinlock, a `_wake_pending` flag, a one-shot completion hook (two words), and
+`weak_ptr` continuations — and it is cacheline-aligned (64 B) to avoid false sharing. That makes `async<T>`
+heavier than the data it computes (an ongoing size-reduction effort is shrinking it toward a single line).
 
 This is a known cost, not a settled design. The **semantics and the public API are the contract**; the node
 layout is not. Leaner designs with the same guarantees are expected to be possible (e.g. folding the flags
@@ -216,8 +209,8 @@ system matures without breaking callers.
 * **Structured/owned children** — a parent frame spawning children with borrow-by-reference lifetime. An
   earlier `spawn_child` / `await` subsystem was removed pending a real use case; fork/join today uses regular
   refcounted `shared_async` children captured and required by the parent frame.
-* A **lock-free** per-worker deque (Chase-Lev) and finer routing (worker affinity subsets within one pool);
-  today the deques are mutex-guarded and every worker in a pool serves the same mask.
+* A **lock-free** per-worker deque (Chase-Lev) and finer per-worker routing within one pool; today the deques
+  are mutex-guarded and every worker serves all work.
 * Typed and **shared errors** (today error propagation re-materializes the message; the failure channel will
   grow typed errors and shared error payloads), plus cancellation propagation through a graph.
 * `co_await` integration layered on top of the raw frame API, and plain (non-async) arguments in the variadic

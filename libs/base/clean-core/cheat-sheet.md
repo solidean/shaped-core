@@ -421,14 +421,12 @@ cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind sche
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // pump; interleave external push here
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
-cc::async_thread_pool pool(cc::num_hardware_threads());  // >=1 workers serving general (bit 0) by default
-cc::install_default_async_pool(pool);                    // general-compute nodes route here
+cc::async_thread_pool pool(cc::num_hardware_threads());  // >=1 workers; every worker serves all compute work
+cc::install_default_async_pool(pool);                    // compute nodes route here when off-worker
 int v = pool.blocking_get(root);                         // submit + block THIS (foreign) thread; not from a worker
-// affinity: typed u32 mask, overlap => eligible; bit 0 = general (default). One pool per class:
-cc::async_thread_pool rpool(2, cc::async_affinity{0b10});     // serves bit 1
-auto t = cc::make_async_lazy([]{ ... });                      // create LAZY, then:
-t->set_affinity(cc::async_affinity{0b10}, &route_to_rpool);   // freeze-on-schedule; route = raw fn ptr to its pool
-// Not here yet: co_await, plain (non-async) dep args, nested once deps, typed/shared errors, eager child reclaim.
+// route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
+cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
+// Not here yet: co_await, plain (non-async) dep args, structured/owned children, typed/shared errors.
 ```
 
 ## Strings — encoding conversion

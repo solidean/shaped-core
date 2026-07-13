@@ -19,29 +19,24 @@
 // cc::async_thread_pool — a work-stealing scheduler that actually runs cc::async graphs concurrently.
 //
 // Each worker thread has a private LIFO deque (freshly spawned children stay hot) and steals from siblings
-// when idle; a shared injection queue takes work from foreign threads and cross-affinity wakeups. The pool
+// when idle; a shared injection queue takes work from foreign threads and cross-thread wakeups. The pool
 // implements the async_scheduler seam: schedule()/completion routing places nodes here (see async_node.hh).
 //
 //   cc::async_thread_pool pool(cc::num_hardware_threads());
-//   cc::install_default_async_pool(pool);                 // general-compute nodes now route here
+//   cc::install_default_async_pool(pool);                 // compute nodes now route here
 //   auto a = cc::make_async_lazy([] { return heavy(); });
 //   int v = pool.blocking_get(a);                         // drive on the pool, block THIS (foreign) thread
 //
-// Affinity: a pool serves one affinity mask (default general / bit 0). Every worker serves that mask, so a
-// steal within a pool is always affinity-compatible. Nodes with a user-defined affinity (set via
-// node->set_affinity) route to their own pool through their reschedule fn; construct one pool per task class
-// and coexist them freely.
-//
-// Lifetime: the pool must outlive every node routed to it (nodes hold only a raw reschedule fn, by design).
-// The destructor stops the workers and joins them; it does not drain outstanding work, so finish (or abandon)
-// your graphs before tearing a pool down.
+// Lifetime: the pool must outlive every node routed to it (a woken node reaches its pool through the installed
+// default, by design). The destructor stops the workers and joins them; it does not drain outstanding work, so
+// finish (or abandon) your graphs before tearing a pool down.
 
 namespace cc
 {
 struct async_thread_pool final : async_scheduler
 {
-    /// Starts `worker_count` (>= 1) worker threads, each serving `served` (default general-purpose compute).
-    explicit async_thread_pool(int worker_count, async_affinity served = async_affinity::general());
+    /// Starts `worker_count` (>= 1) worker threads.
+    explicit async_thread_pool(int worker_count);
 
     /// Stops and joins all workers. Asserts the pool is not still the installed default (uninstall it first —
     /// see uninstall_default_async_pool / scoped_default_async_pool). Does not drain queued work — outstanding
@@ -59,13 +54,11 @@ public:
     /// route taken by a running frame scheduling a child / cold dependency).
     void enqueue(std::shared_ptr<async_node_base> node) override;
 
-    /// Affinity-routed injection from any thread (foreign submits, cross-affinity wakeups). Asserts the node's
-    /// affinity overlaps this pool's served mask.
+    /// Injection from any thread (foreign submits, cross-thread wakeups).
     void submit(std::shared_ptr<async_node_base> node) override;
 
     // queries
 public:
-    [[nodiscard]] async_affinity served() const { return _served; }
     [[nodiscard]] int worker_count() const { return int(_workers.size()); }
 
     // blocking driver (call from a foreign thread — never from inside a worker/frame)
@@ -85,7 +78,6 @@ private:
     {
         async_thread_pool* pool = nullptr;
         int id = 0;
-        async_affinity served;
         cc::mutex<cc::vector<std::shared_ptr<async_node_base>>> deque;
         std::thread thread;
     };
@@ -101,7 +93,6 @@ private:
 
     cc::vector<cc::unique_ptr<worker>> _workers; // unique_ptr: stable addresses for deque/thread + stealing
     cc::mutex<cc::vector<std::shared_ptr<async_node_base>>> _injection;
-    async_affinity _served;
 
     std::atomic<int> _pending{0};  // claimable tasks across all deques + injection (drives sleep/wake)
     std::atomic<int> _sleepers{0}; // workers currently blocked on _wait_cv

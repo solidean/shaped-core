@@ -14,12 +14,11 @@
 
 namespace
 {
-// The scheduler + served affinity bound to the calling thread (set by async_worker_scope). thread_local even
-// without threads: a single-threaded build just has one slot. nullptr scheduler => no worker scope active.
+// The scheduler bound to the calling thread (set by async_worker_scope). thread_local even without threads: a
+// single-threaded build just has one slot. nullptr => no worker scope active.
 thread_local cc::async_scheduler* s_current_scheduler = nullptr;
-thread_local cc::async_affinity s_current_affinity = cc::async_affinity::none();
 
-// Process-wide default scheduler for general-compute nodes that cannot run on the current thread. Read-mostly:
+// Process-wide default scheduler for compute nodes that cannot run on the current thread. Read-mostly:
 // installed once at startup. Atomic so installation is visible to worker threads without extra synchronization.
 std::atomic<cc::async_scheduler*> s_default_scheduler{nullptr};
 } // namespace
@@ -39,11 +38,6 @@ cc::async_scheduler* cc::async_scheduler::current_or_null()
     return s_current_scheduler;
 }
 
-cc::async_affinity cc::async_scheduler::current_affinity()
-{
-    return s_current_affinity;
-}
-
 void cc::async_scheduler::set_default(async_scheduler* sched)
 {
     s_default_scheduler.store(sched, std::memory_order_release);
@@ -54,29 +48,14 @@ cc::async_scheduler* cc::async_scheduler::default_or_null()
     return s_default_scheduler.load(std::memory_order_acquire);
 }
 
-void cc::async_default_reschedule(std::shared_ptr<async_node_base> node)
-{
-    // general-compute route: the installed default pool if any, else the current worker (inline driving).
-    if (auto* d = async_scheduler::default_or_null())
-        d->submit(cc::move(node));
-    else if (auto* c = async_scheduler::current_or_null())
-        c->enqueue(cc::move(node));
-    else
-        CC_ASSERT(false, "no scheduler to route a general-compute async: install a default async pool or drive "
-                         "it inside an async_worker_scope");
-}
-
-cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler, cc::async_affinity served)
-  : _previous(s_current_scheduler), _previous_affinity(s_current_affinity)
+cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(s_current_scheduler)
 {
     s_current_scheduler = &scheduler;
-    s_current_affinity = served;
 }
 
 cc::async_worker_scope::~async_worker_scope()
 {
     s_current_scheduler = _previous;
-    s_current_affinity = _previous_affinity;
 }
 
 bool cc::inline_scheduler::run_one()
@@ -95,19 +74,6 @@ void cc::inline_scheduler::run_until(cc::function_ref<bool()> done)
     while (!done() && run_one())
     {
     }
-}
-
-// ============================================================================
-// async_node_base — affinity
-// ============================================================================
-
-void cc::async_node_base::set_affinity(async_affinity a, async_reschedule_fn route)
-{
-    CC_ASSERT(_state.load(std::memory_order_relaxed) == async_node_state::cold, "affinity may only be set before the "
-                                                                                "async is scheduled");
-    CC_ASSERT(route != nullptr, "a user-defined affinity needs a reschedule route to its pool");
-    _affinity = a;
-    _reschedule = route;
 }
 
 // ============================================================================
@@ -166,19 +132,23 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
 void cc::async_node_base::route_after_schedule()
 {
     // State is `scheduled` and nobody else will enqueue it (schedule() is idempotent on `scheduled`), so we
-    // route exactly once. Local hot path when a compatible worker scope is active here; else the node's own
-    // affinity route (thread-independent), which is what makes cross-thread wakeups correct.
+    // route exactly once: the current worker (hot) if a scope is active here, else the installed default pool.
+    // The default-pool fallback is thread-independent, which is what makes cross-thread wakeups correct.
     auto self = shared_from_this();
-    if (auto* sched = async_scheduler::current_or_null();
-        sched != nullptr && _affinity.overlaps(async_scheduler::current_affinity()))
+    if (auto* sched = async_scheduler::current_or_null())
     {
         sched->enqueue(cc::move(self));
         return;
     }
 
-    CC_ASSERT(_reschedule != nullptr, "a schedulable async must have a reschedule route (compute nodes get a "
-                                      "default; a push/manual node must not be scheduled)");
-    _reschedule(cc::move(self));
+    if (auto* d = async_scheduler::default_or_null())
+    {
+        d->submit(cc::move(self));
+        return;
+    }
+
+    CC_ASSERT(false, "no scheduler to route a compute async: install a default async pool or drive it inside an "
+                     "async_worker_scope");
 }
 
 bool cc::async_node_base::try_begin_running()

@@ -18,10 +18,9 @@
 
 thread_local cc::async_thread_pool::worker* cc::async_thread_pool::s_current_worker = nullptr;
 
-cc::async_thread_pool::async_thread_pool(int worker_count, async_affinity served) : _served(served)
+cc::async_thread_pool::async_thread_pool(int worker_count)
 {
     CC_ASSERT(worker_count >= 1, "a thread pool needs at least one worker");
-    CC_ASSERT(!served.is_empty(), "a pool must serve at least one affinity class");
 
     _workers.reserve(worker_count);
     for (int i = 0; i < worker_count; ++i)
@@ -29,7 +28,6 @@ cc::async_thread_pool::async_thread_pool(int worker_count, async_affinity served
         auto w = cc::make_unique<worker>();
         w->pool = this;
         w->id = i;
-        w->served = served;
         _workers.push_back(cc::move(w));
     }
 
@@ -65,7 +63,6 @@ void cc::async_thread_pool::enqueue(std::shared_ptr<async_node_base> node)
 void cc::async_thread_pool::submit(std::shared_ptr<async_node_base> node)
 {
     CC_ASSERT(node != nullptr, "cannot submit a null node");
-    CC_ASSERT(node->affinity().overlaps(_served), "submitted a node whose affinity this pool does not serve");
 
     _injection.lock([&](cc::vector<std::shared_ptr<async_node_base>>& q) { q.push_back(cc::move(node)); });
     _pending.fetch_add(1, std::memory_order_seq_cst);
@@ -102,7 +99,7 @@ std::shared_ptr<cc::async_node_base> cc::async_thread_pool::try_get_work(worker&
             }))
         return n;
 
-    // 2. steal from a sibling's opposite (old) end, taking the first affinity-compatible task
+    // 2. steal from a sibling's opposite (old) end
     for (auto& other : _workers)
     {
         if (other.get() == &w)
@@ -111,16 +108,15 @@ std::shared_ptr<cc::async_node_base> cc::async_thread_pool::try_get_work(worker&
         auto stolen = other->deque.try_lock(
             [&](cc::vector<std::shared_ptr<async_node_base>>& q) -> std::shared_ptr<async_node_base>
             {
-                for (cc::isize i = 0; i < q.size(); ++i)
-                    if (q[i]->affinity().overlaps(w.served))
-                        return q.pop_at(i);
-                return nullptr;
+                if (q.empty())
+                    return nullptr;
+                return q.pop_at(0);
             });
         if (stolen.has_value() && stolen.value() != nullptr)
             return stolen.value();
     }
 
-    // 3. the shared injection queue (foreign submits / cross-affinity wakeups)
+    // 3. the shared injection queue (foreign submits / cross-thread wakeups)
     if (auto n = _injection.lock(
             [](cc::vector<std::shared_ptr<async_node_base>>& q) -> std::shared_ptr<async_node_base>
             {
@@ -137,7 +133,7 @@ void cc::async_thread_pool::worker_main(worker& w)
 {
     cc::set_current_thread_name("async-pool");
     s_current_worker = &w;
-    async_worker_scope scope(*this, w.served);
+    async_worker_scope scope(*this);
 
     while (!_stop.load(std::memory_order_acquire))
     {

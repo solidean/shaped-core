@@ -185,7 +185,7 @@ public:
 
     // manual / promise-style completion (for externally produced values)
 public:
-    /// Mark this node as awaiting external completion (no compute frame; empty affinity). See make_async_manual.
+    /// Mark this node as awaiting external completion (no compute frame; never run inline). See make_async_manual.
     void set_manual() { this->mark_external_pending(); }
 
     /// Complete externally with a value; wakes any parked dependents. Call at most once.
