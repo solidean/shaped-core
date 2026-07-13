@@ -4,7 +4,8 @@
 #include <shaped-graphics/backend/subresource.hh> // subresource_range
 #include <shaped-graphics/pixel_format.hh>
 #include <shaped-graphics/raw_texture.hh>
-#include <shaped-graphics/views.hh> // texture_view_dimension (shared, raw_view-neutral)
+#include <shaped-graphics/views.hh>     // texture_view_dimension (shared, raw_view-neutral)
+#include <typed-geometry/linalg/vec.hh> // tg::vec4f (clear color)
 
 /// Attachment views — a texture bound as a color (render target) or depth/stencil target of a graphics
 /// pipeline. Unlike the shader-binding views in views.hh, these are *not* shader-visible, never enter a
@@ -45,6 +46,15 @@ public:
         return h < 1 ? 1 : h;
     }
 
+    // Bind as a rendering-scope target, choosing what happens to its contents at pass start. `&&`
+    // overloads move the view into the target; the `const&` overloads copy. See command_list.raster.hh.
+    [[nodiscard]] color_target cleared(tg::vec4f color) const&;
+    [[nodiscard]] color_target cleared(tg::vec4f color) &&;
+    [[nodiscard]] color_target preserved() const&;
+    [[nodiscard]] color_target preserved() &&;
+    [[nodiscard]] color_target discarded() const&;
+    [[nodiscard]] color_target discarded() &&;
+
 private:
     raw_texture_handle _texture;
     texture_view_dimension _dimension = texture_view_dimension::tex_2d;
@@ -82,6 +92,15 @@ public:
         int const h = _texture->height() >> _range.mip_range.start;
         return h < 1 ? 1 : h;
     }
+
+    // Bind as a rendering-scope target, choosing what happens to its contents at pass start. `&&`
+    // overloads move the view into the target; the `const&` overloads copy. See command_list.raster.hh.
+    [[nodiscard]] depth_stencil_target cleared(float depth, cc::u8 stencil = 0) const&;
+    [[nodiscard]] depth_stencil_target cleared(float depth, cc::u8 stencil = 0) &&;
+    [[nodiscard]] depth_stencil_target preserved() const&;
+    [[nodiscard]] depth_stencil_target preserved() &&;
+    [[nodiscard]] depth_stencil_target discarded() const&;
+    [[nodiscard]] depth_stencil_target discarded() &&;
 
 private:
     raw_texture_handle _texture;

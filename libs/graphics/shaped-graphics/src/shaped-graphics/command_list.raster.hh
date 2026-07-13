@@ -9,48 +9,38 @@
 #include <typed-geometry/linalg/vec.hh>
 
 /// Raster (graphics-pipeline) recording: bind a set of color / depth-stencil targets as a rendering
-/// scope and, per target, clear / keep / discard its contents. Reached as `cmd.raster`. Draw support
+/// scope and, per target, clear / preserve / discard its contents. Reached as `cmd.raster`. Draw support
 /// arrives with the graphics pipeline; for now a scope only applies its begin-ops (clear/discard).
 
 namespace sg
 {
-/// What happens to a target's contents at the start of a rendering scope. Set through the
-/// sg::clear / sg::keep / sg::discard factories, not by hand.
-enum class target_op
+/// What happens to a target's contents at the start of a rendering scope. Set through the view's
+/// .cleared() / .preserved() / .discarded() members, not by hand.
+enum class target_op : cc::u8
 {
-    keep,    ///< preserve the existing contents
-    clear,   ///< clear to a value before rendering
-    discard, ///< contents become undefined (neither loaded nor cleared)
+    preserve, ///< keep the existing contents
+    clear,    ///< clear to a value before rendering
+    discard,  ///< contents become undefined (neither loaded nor cleared)
 };
 
 /// A color (render-target) target of a rendering scope: the view plus what to do with it at pass start.
-/// Build with sg::clear(view, color) / sg::keep(view) / sg::discard(view).
+/// Build with view.cleared(color) / view.preserved() / view.discarded().
 struct color_target
 {
     render_target_view view;
-    target_op op = target_op::keep;
+    target_op op = target_op::preserve;
     tg::vec4f clear_color; ///< used only when op == clear
 };
 
-/// A depth-stencil target of a rendering scope. Build with sg::clear(view, depth[, stencil]) /
-/// sg::keep(view) / sg::discard(view).
+/// A depth-stencil target of a rendering scope. Build with view.cleared(depth[, stencil]) /
+/// view.preserved() / view.discarded().
 struct depth_stencil_target
 {
     depth_stencil_view view;
-    target_op op = target_op::keep;
+    target_op op = target_op::preserve;
     float clear_depth = 1.0f; ///< used only when op == clear
     cc::u8 clear_stencil = 0; ///< used only when op == clear
 };
-
-// Target factories — the op is the function name, so no op enum appears at the call site.
-
-[[nodiscard]] color_target clear(render_target_view view, tg::vec4f color);
-[[nodiscard]] color_target keep(render_target_view view);
-[[nodiscard]] color_target discard(render_target_view view);
-
-[[nodiscard]] depth_stencil_target clear(depth_stencil_view view, float depth, cc::u8 stencil = 0);
-[[nodiscard]] depth_stencil_target keep(depth_stencil_view view);
-[[nodiscard]] depth_stencil_target discard(depth_stencil_view view);
 
 /// The region of the target(s) rendering maps to, plus the depth range. Offset/size are in pixels.
 /// Omitting the viewport from rendering_info uses the full target extent with depth [0, 1].
@@ -117,7 +107,7 @@ private:
 };
 
 /// Raster recording facade for a command list, reached as `cmd.raster`: open a rendering scope over a
-/// set of targets, clearing / keeping / discarding each. `manual` exposes the same begin/end by hand.
+/// set of targets, clearing / preserving / discarding each. `manual` exposes the same begin/end by hand.
 class command_list_raster_scope
 {
 public:

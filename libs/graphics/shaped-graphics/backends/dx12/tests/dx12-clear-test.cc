@@ -40,9 +40,9 @@ TEST("sg dx12 - clear render target fills every texel (render_to)")
 
     auto cmd = ctx->create_command_list();
     {
-        // {view, color} => clear; the RAII scope calls end_rendering when it goes out of scope.
+        // view.cleared(color) => clear; the RAII scope calls end_rendering when it goes out of scope.
         auto pass
-            = cmd->raster.render_to({.color_targets = {sg::clear(typed.as_render_target_view(), tg::vec4f(1, 0, 0, 1))}});
+            = cmd->raster.render_to({.color_targets = {typed.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1))}});
     }
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
@@ -73,7 +73,7 @@ TEST("sg dx12 - clear depth target fills every texel")
 
     auto cmd = ctx->create_command_list();
     {
-        auto pass = cmd->raster.render_to({.depth_stencil_target = sg::clear(typed.as_depth_stencil_view(), 0.5f)});
+        auto pass = cmd->raster.render_to({.depth_stencil_target = typed.as_depth_stencil_view().cleared(0.5f)});
     }
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
@@ -103,7 +103,7 @@ TEST("sg dx12 - clear render target via the explicit manual scope")
     sg::texture_2d const typed(tex);
 
     sg::rendering_info info;
-    info.color_targets.push_back(sg::clear(typed.as_render_target_view(), tg::vec4f(0, 1, 0, 1)));
+    info.color_targets.push_back(typed.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1)));
 
     auto cmd = ctx->create_command_list();
     cmd->raster.manual.begin_rendering(info);
@@ -135,7 +135,7 @@ TEST("sg dx12 - discard render target records and executes")
 
     auto cmd = ctx->create_command_list();
     {
-        auto pass = cmd->raster.render_to({.color_targets = {sg::discard(typed.as_render_target_view())}});
+        auto pass = cmd->raster.render_to({.color_targets = {typed.as_render_target_view().discarded()}});
     }
     // Contents are undefined after a discard, so only assert the path records + runs (WARP's debug layer is
     // the oracle: a bad command would fault before the readback resolves).
@@ -164,7 +164,7 @@ TEST("sg dx12 - clear with an explicit viewport and scissor")
     auto cmd = ctx->create_command_list();
     {
         auto pass = cmd->raster.render_to({
-            .color_targets = {sg::clear(typed.as_render_target_view(), tg::vec4f(0, 0, 1, 1))},
+            .color_targets = {typed.as_render_target_view().cleared(tg::vec4f(0, 0, 1, 1))},
             .viewport = sg::viewport{.offset = tg::pos2f(0, 0), .size = tg::vec2f(float(W), float(H))},
             .scissor = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(W, H)),
         });

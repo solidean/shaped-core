@@ -84,6 +84,12 @@ struct raw_view;
 class render_target_view;
 class depth_stencil_view;
 
+// Rendering-scope targets (see command_list.raster.hh) — a view plus its begin-op (clear / preserve /
+// discard). Built via the view's .cleared() / .preserved() / .discarded() members.
+enum class target_op : u8;
+struct color_target;
+struct depth_stencil_target;
+
 // Texture samplers (see sampler.hh) — value types, no handle.
 enum class sampler_filter;
 enum class sampler_address_mode;

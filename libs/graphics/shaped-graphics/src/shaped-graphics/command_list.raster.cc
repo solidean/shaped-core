@@ -4,34 +4,62 @@
 
 namespace sg
 {
-color_target clear(render_target_view view, tg::vec4f color)
+// Color-target builders — the op is the method name, so no op enum appears at the call site.
+
+color_target render_target_view::cleared(tg::vec4f color) const&
 {
-    return {.view = cc::move(view), .op = target_op::clear, .clear_color = color};
+    return {.view = *this, .op = target_op::clear, .clear_color = color};
+}
+color_target render_target_view::cleared(tg::vec4f color) &&
+{
+    return {.view = cc::move(*this), .op = target_op::clear, .clear_color = color};
 }
 
-color_target keep(render_target_view view)
+color_target render_target_view::preserved() const&
 {
-    return {.view = cc::move(view), .op = target_op::keep};
+    return {.view = *this, .op = target_op::preserve};
+}
+color_target render_target_view::preserved() &&
+{
+    return {.view = cc::move(*this), .op = target_op::preserve};
 }
 
-color_target discard(render_target_view view)
+color_target render_target_view::discarded() const&
 {
-    return {.view = cc::move(view), .op = target_op::discard};
+    return {.view = *this, .op = target_op::discard};
+}
+color_target render_target_view::discarded() &&
+{
+    return {.view = cc::move(*this), .op = target_op::discard};
 }
 
-depth_stencil_target clear(depth_stencil_view view, float depth, cc::u8 stencil)
+// Depth-stencil-target builders.
+
+depth_stencil_target depth_stencil_view::cleared(float depth, cc::u8 stencil) const&
 {
-    return {.view = cc::move(view), .op = target_op::clear, .clear_depth = depth, .clear_stencil = stencil};
+    return {.view = *this, .op = target_op::clear, .clear_depth = depth, .clear_stencil = stencil};
+}
+depth_stencil_target depth_stencil_view::cleared(float depth, cc::u8 stencil) &&
+{
+    return {.view = cc::move(*this), .op = target_op::clear, .clear_depth = depth, .clear_stencil = stencil};
 }
 
-depth_stencil_target keep(depth_stencil_view view)
+depth_stencil_target depth_stencil_view::preserved() const&
 {
-    return {.view = cc::move(view), .op = target_op::keep};
+    return {.view = *this, .op = target_op::preserve};
+}
+depth_stencil_target depth_stencil_view::preserved() &&
+{
+    return {.view = cc::move(*this), .op = target_op::preserve};
 }
 
-depth_stencil_target discard(depth_stencil_view view)
+depth_stencil_target depth_stencil_view::discarded() const&
 {
-    return {.view = cc::move(view), .op = target_op::discard};
+    return {.view = *this, .op = target_op::discard};
+}
+depth_stencil_target depth_stencil_view::discarded() &&
+{
+    return {.view = cc::move(*this), .op = target_op::discard};
 }
 
 rendering_scope::rendering_scope(command_list& cmd, rendering_info const& info) : _cmd(cmd)
