@@ -223,8 +223,6 @@ bool cc::async_node_base::try_subscribe(async_node_base* dependent)
     impl::async_spinlock_guard g(_lock);
     if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
         return false; // already ready under the lock: the dependent must not park on us
-    CC_ASSERT(!_single_consumer || _continuations.empty(), "once_async allows only a single dependent (it is "
-                                                           "single-consumer)");
     _continuations.push_back(dependent->weak_from_this());
     return true;
 }
@@ -252,8 +250,6 @@ void cc::async_node_base::unsubscribe_all()
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
-    CC_ASSERT(!_single_consumer || _continuations.empty(), "once_async allows only a single dependent (it is "
-                                                           "single-consumer)");
     _continuations.push_back(dependent->weak_from_this());
 }
 
@@ -282,11 +278,6 @@ cc::async_error cc::async_node_base::propagate_error() const
     // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the
     // message. The context chain is lost — a richer error-sharing scheme is a follow-up.
     return async_error::make_error(cc::any_error(_error.underlying().to_string()));
-}
-
-void cc::async_node_base::destroy_children()
-{
-    _children.clear();
 }
 
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
@@ -331,23 +322,15 @@ void cc::async_node_base::complete_from_compute()
     unsubscribe_all(); // still valid: our frame (destroyed below) pins the deps we are unsubscribing from
     _pending_deps.clear();
 
-    // structured completion: a frame must await every child it spawns, so no child frame outlives the parent
-    // frame it may borrow from. Under threads an un-awaited child could still be running here.
-    for (auto const& child : _children)
-        CC_ASSERT(child->is_ready(), "a compute frame completed with an unfinished spawned child (await every "
-                                     "spawn_child)");
-
-    // release captures: owned children first, then this frame (a child may borrow parent-frame state)
-    destroy_children();
-    destroy_frame();
+    destroy_frame(); // release the frame's captures
 
     mark_ready_and_notify();
 }
 
 cc::async_node_base::~async_node_base()
 {
-    // The typed node destructor already ran unsubscribe_all() + destroy_children() before dropping its frame.
-    // This is a defensive backstop for any node destroyed without a value (e.g. an undriven manual node).
+    // The typed node destructor already ran unsubscribe_all() before dropping its frame. This is a defensive
+    // backstop for any node destroyed without a value (e.g. an undriven manual node).
     unsubscribe_all();
 }
 

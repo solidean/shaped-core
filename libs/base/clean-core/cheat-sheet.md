@@ -392,13 +392,12 @@ b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe t
 cc::shared_async<T> = std::shared_ptr<cc::async<T>>;   // the normal handle (async<T> is non-copy/non-move)
 
 // creation — pick eager (scheduled) or lazy (cold) explicitly at the call site. f may take a leading
-// cc::async_context& or omit it; extra args are dependencies (shared_async or shared_ptr<once_async>),
-// awaited + unwrapped to plain values before f runs; errors short-circuit. T deduced or explicit.
+// cc::async_context& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
+// values before f runs; errors short-circuit. T deduced or explicit.
 auto a = cc::make_async_lazy([]{ return 40; });                          // cold; no context, no deps
 auto s = cc::make_async_scheduled<int>([](cc::async_context&){ ... });   // eager (scheduled now if a worker scope active)
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);   // depends on a,s; f gets plain ints
 auto d = a->map_lazy([](int x){ return x + 2; });   // single-dep transform (also map_scheduled; no plain `map`)
-auto o = cc::make_once_lazy([]{ return 7; });        // std::shared_ptr<once_async<int>>; consume as a dep exactly once
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
 
 // driving BLOCKS the calling thread (busy-waits vs a real scheduler) — top-level/tests only, never in a frame:
@@ -410,19 +409,16 @@ std::shared_ptr<cc::async_error const> pe = a->try_error();
 m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")));  // complete a manual node
 
 // raw compute frame (perf-critical state machine): async_result<T>(async_context&). Multi-branch frames MUST
-// annotate -> cc::async_result<T>.
-[step=0](cc::async_context& actx) mutable -> cc::async_result<int> {
-    if (step++ == 0) return actx.await([]{ return 10; });   // child frame may also omit async_context
-    return actx.success(5); };
+// annotate -> cc::async_result<T>. A frame may create + require new deps mid-compute (dynamic dependencies).
+[step=0, dep=cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_result<int> {
+    if (step++ == 0) { dep = cc::make_async_lazy([]{ return 10; }); actx.require(dep); return actx.wait_for_dependencies(); }
+    return actx.success(*dep->value_ptr()); };
 actx.require(dep);              // -> bool ready (no subscription); else records a pending dep, return wait
-actx.spawn_child(frame);       // -> once_async<CT>* owned child dep (child frame dies before parent frame)
-actx.await(frame);             // spawn_child + wait_for_dependencies()
 actx.success(v);  actx.error(async_error|any_error);  actx.wait_for_dependencies();  actx.yield();
 
 // driving decoupled from any executor (the seam); default is inline, on the calling thread:
 cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind scheduler to this thread
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // pump; interleave external push here
-cc::once_async<T>                 // single-consumer owned child (2nd subscription asserts); not a default type
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
 cc::async_thread_pool pool(cc::num_hardware_threads());  // >=1 workers serving general (bit 0) by default

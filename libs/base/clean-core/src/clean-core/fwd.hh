@@ -244,8 +244,6 @@ template <class T>
 struct async_result;
 template <class T>
 struct async;
-template <class T>
-struct once_async;
 
 
 //

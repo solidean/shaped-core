@@ -115,30 +115,22 @@ TEST("async - dependency frame may still take a leading async_context")
     CHECK(cc::async_blocking_get(b) == 20);
 }
 
-TEST("async - a once_async can be consumed as a dependency")
-{
-    auto once = cc::make_once_lazy([] { return 21; });
-
-    // the make_async_lazy that takes `once` as a dep becomes its single owner/consumer
-    auto c = cc::make_async_lazy([](int x) { return x * 2; }, once);
-    CHECK(cc::async_blocking_get(c) == 42);
-}
-
 // ============================================================================
 // dynamic dependencies
 // ============================================================================
 
 TEST("async - dynamic dependency added during compute, removed once ready")
 {
-    // step 0 spawns a child dependency and waits; step 1 reads its value. The child must be gone from the
-    // pending list by the time the parent completes.
+    // step 0 creates a dependency mid-compute, requires it, and waits; step 1 reads its value. The dependency
+    // must be gone from the pending list by the time the parent completes.
     auto p = cc::make_async_lazy<int>(
-        [step = 0, child = static_cast<cc::once_async<int>*>(nullptr)](async_context& actx) mutable -> async_result<int>
+        [step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> async_result<int>
         {
             switch (step++)
             {
             case 0:
-                child = actx.spawn_child([] { return 10; }); // child frame omits its async_context
+                child = cc::make_async_lazy([] { return 10; }); // a regular dependency, created on the fly
+                (void)actx.require(child);
                 return actx.wait_for_dependencies();
             default:
                 return actx.success(*child->value_ptr() + 5);
@@ -212,18 +204,18 @@ TEST("async - a frame is never invoked again after it produces a value")
 
 TEST("async - a two-phase frame runs exactly twice (register deps, then compute)")
 {
-    // First poll registers a child dependency and waits; the second (and last) poll computes. The frame must
-    // be entered exactly twice — never again after it returns success.
+    // First poll registers a dependency and waits; the second (and last) poll computes. The frame must be
+    // entered exactly twice — never again after it returns success.
     auto calls = std::make_shared<int>(0);
     auto p = cc::make_async_lazy<int>(
-        [calls, step = 0,
-         child = static_cast<cc::once_async<int>*>(nullptr)](async_context& actx) mutable -> async_result<int>
+        [calls, step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> async_result<int>
         {
             ++*calls;
             switch (step++)
             {
             case 0:
-                child = actx.spawn_child([] { return 1; });
+                child = cc::make_async_lazy([] { return 1; });
+                (void)actx.require(child);
                 return actx.wait_for_dependencies();
             default:
                 return actx.success(*child->value_ptr());
@@ -265,87 +257,6 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
     REQUIRE(p->is_ready());
     CHECK(*p->try_value() == 42);
     CHECK(ext->continuation_count() == 0); // detached on completion
-}
-
-// ============================================================================
-// once_async — single consumer
-// ============================================================================
-
-TEST("async - once_async allows only a single continuation")
-{
-    cc::once_async<int> dep;
-    cc::once_async<int> d1;
-    cc::once_async<int> d2;
-
-    dep.add_continuation(&d1);
-    CHECK(dep.continuation_count() == 1);
-    CHECK(dep.continuations_are_inline()); // single continuation fits inline — no dependent-list allocation
-
-    CHECK_ASSERTS(dep.add_continuation(&d2)); // second subscription is a hard error
-}
-
-// ============================================================================
-// owned-child lifetime
-// ============================================================================
-
-namespace
-{
-// records its id into a shared log on destruction; movable, and moved-from instances are silent
-struct destruction_tracker
-{
-    std::shared_ptr<cc::vector<int>> log;
-    int id = 0;
-
-    destruction_tracker() = default;
-    destruction_tracker(std::shared_ptr<cc::vector<int>> l, int i) : log(cc::move(l)), id(i) {}
-
-    destruction_tracker(destruction_tracker&& o) noexcept : log(cc::move(o.log)), id(o.id) { o.log = nullptr; }
-    destruction_tracker& operator=(destruction_tracker&& o) noexcept
-    {
-        log = cc::move(o.log);
-        id = o.id;
-        o.log = nullptr;
-        return *this;
-    }
-    destruction_tracker(destruction_tracker const&) = delete;
-    destruction_tracker& operator=(destruction_tracker const&) = delete;
-
-    ~destruction_tracker()
-    {
-        if (log)
-            log->push_back(id);
-    }
-};
-} // namespace
-
-TEST("async - owned child frame is destroyed before the parent frame")
-{
-    auto log = std::make_shared<cc::vector<int>>();
-
-    {
-        auto p = cc::make_async_lazy<int>(
-            [log, t = destruction_tracker(log, 1), parent_state = 100, step = 0,
-             child = static_cast<cc::once_async<int>*>(nullptr)](async_context& actx) mutable -> async_result<int>
-            {
-                switch (step++)
-                {
-                case 0:
-                    // the child borrows parent_state by reference — valid because the parent frame outlives it
-                    child = actx.spawn_child([log2 = log, t2 = destruction_tracker(log, 2), &parent_state]
-                                             { return parent_state + 1; });
-                    return actx.wait_for_dependencies();
-                default:
-                    return actx.success(*child->value_ptr());
-                }
-            });
-
-        CHECK(cc::async_blocking_get(p) == 101);
-    }
-
-    // child frame (id 2) torn down before parent frame (id 1)
-    REQUIRE(log->size() == 2);
-    CHECK((*log)[0] == 2);
-    CHECK((*log)[1] == 1);
 }
 
 // ============================================================================

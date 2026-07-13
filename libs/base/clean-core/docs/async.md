@@ -20,14 +20,11 @@ auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on 
 int v = cc::async_blocking_get(b);   // drives the graph on this thread -> 42
 ```
 
-Two handle flavors:
+The handle:
 
 * **`shared_async<T>` = `std::shared_ptr<async<T>>`** — the normal, composable handle. Many dependents may
   observe it. `async<T>` itself is non-copyable and immovable; you copy the `shared_ptr`, never the node.
   (clean-core has no shared pointer yet, so `std::shared_ptr` is used deliberately, as in `pinned_data`.)
-* **`once_async<T>`** — single-consumer, single-continuation. Used internally for owned fork/join children
-  (`async_context::await` / `spawn_child`). A second subscription is a hard assert. Not a default public type
-  — it is a footgun if used as one.
 
 ### The raw compute frame
 
@@ -36,13 +33,13 @@ dependencies dynamically as it runs:
 
 ```cpp
 auto a = cc::make_async_lazy<int>(
-    [step = 0, child = static_cast<cc::once_async<int>*>(nullptr)](cc::async_context& actx) mutable
-        -> cc::async_result<int>
+    [step = 0, child = cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_result<int>
     {
         switch (step++)
         {
         case 0:
-            child = actx.spawn_child([](cc::async_context&) -> cc::async_result<int> { return 10; });
+            child = cc::make_async_lazy([] { return 10; }); // a dependency created on the fly
+            actx.require(child);
             return actx.wait_for_dependencies();
         default:
             return actx.success(*child->value_ptr() + 5);
@@ -56,10 +53,8 @@ have different types, so `auto` deduction won't unify them).
 `async_context` gives a frame:
 
 * `require(dep) -> bool` — true if `dep` is already ready (read its value now); otherwise records it as a
-  pending dependency and returns false. **No subscription happens here.**
-* `spawn_child(f) -> once_async<CT>*` — create an owned child from a frame, register it as a dependency, and
-  return a handle to read on resume. `await(f)` is `spawn_child` + `wait_for_dependencies`. The child frame
-  may omit its `async_context&` too.
+  pending dependency and returns false. **No subscription happens here.** `dep` may be a `shared_async`
+  created earlier or one the frame builds on the fly (dynamic dependencies) — capture it so it stays alive.
 * result helpers: `success(v)`, `error(async_error | any_error)`, `wait_for_dependencies()`, `yield()`.
 
 A frame is **re-entrant**: one that waits is re-polled once its dependencies are ready. A typical two-phase
@@ -69,7 +64,7 @@ produces a value or error — the frame is destroyed the moment it completes.
 ### Composition without hand-writing a frame
 
 Most compositions don't need a raw frame. `make_async_lazy` / `make_async_scheduled` are **variadic in their
-dependencies**: extra arguments are `shared_async`s (or a `std::shared_ptr<once_async>`) that are awaited and
+dependencies**: extra arguments are `shared_async`s that are awaited and
 **unwrapped** to plain values before `f` runs, with errors short-circuiting (the first failed dependency
 propagates and `f` is skipped). `f` may take a leading `async_context&` or omit it entirely — the wrapper
 adapts either way, and a no-dependency `f` may drop the context too.
@@ -79,15 +74,11 @@ auto a = cc::make_async_scheduled<int>(/* ... */);
 auto b = cc::make_async_scheduled<int>(/* ... */);
 auto c = cc::make_async_lazy([](int x, int y) { return x + y; }, a, b);   // c waits for a,b; f gets plain ints
 auto d = cc::make_async_lazy([] { return 7; });                          // no deps, no context
-
-// a once_async is consumed (owned) by the single make_async_* / make_once_* call it is passed to:
-auto once = cc::make_once_lazy([] { return 21; });
-auto e = cc::make_async_lazy([](int x) { return x * 2; }, once);
 ```
 
 `dep->map_lazy(f)` / `dep->map_scheduled(f)` are the shorthand for the single-dependency case (mirroring the
-lazy/scheduled split — there is deliberately no plain `map`). Plain non-async arguments, and depending a
-`once_async` on another `once_async`, are not wired up yet.
+lazy/scheduled split — there is deliberately no plain `map`). Plain non-async arguments in the variadic
+dependency form are not wired up yet.
 
 ## Polling never blocks
 
@@ -101,20 +92,17 @@ State word (atomic, CAS transitions): `cold → scheduled → running → blocke
 completing and scheduling a node cannot be erased by that node parking itself.
 
 **Subscriptions are late.** Adding a dependency does not subscribe. A node installs wakeup continuations only
-at the moment it must park, and detaches them on completion. For `async<T>` the continuation list allows many
-dependents; for `once_async<T>` it is capped at one (and fits the node's inline buffer, so no allocation).
+at the moment it must park, and detaches them on completion. The continuation list allows many dependents (a
+single dependent fits the node's inline buffer, so no allocation).
 
 ## Lifetime rules
 
 * **Frame captures** retain whatever the computation needs later — including observed `shared_async`
-  dependencies. The pending-dependency list does **not** own anything; it only tracks not-ready deps for
-  scheduling.
-* **Owned children** (`spawn_child` / `await`) have structured lifetime under the parent frame: a child frame
-  is destroyed before the parent frame, so a child may safely borrow parent-frame state by reference. Each
-  node is heap-owned via `std::shared_ptr` — a child is held by its parent and thus transitively pinned by the
-  root `shared_async`, and `schedule()` enqueues a `shared_ptr`, so a queued node can never be destroyed out
-  from under the scheduler. This is what lets owned children be **freely scheduled** (and, later, stolen);
-  nested `once_async` children work as long as some shared_async ancestor exists (it always does).
+  dependencies (a dependency the frame builds on the fly must be captured so it stays alive). The
+  pending-dependency list does **not** own anything; it only tracks not-ready deps for scheduling.
+* Each node is heap-owned via `std::shared_ptr`, and `schedule()` enqueues a `shared_ptr`, so a queued node
+  can never be destroyed out from under the scheduler — which is what lets a required dependency be **freely
+  scheduled** (and, later, stolen) while its dependents hold it alive.
 
 ## Errors
 
@@ -225,11 +213,12 @@ system matures without breaking callers.
 
 ## Not yet here (follow-ups)
 
-* **Reclaim completed owned children eagerly** rather than at root teardown (long-lived graphs hold finished
-  `spawn_child` nodes until the root drops).
+* **Structured/owned children** — a parent frame spawning children with borrow-by-reference lifetime. An
+  earlier `spawn_child` / `await` subsystem was removed pending a real use case; fork/join today uses regular
+  refcounted `shared_async` children captured and required by the parent frame.
 * A **lock-free** per-worker deque (Chase-Lev) and finer routing (worker affinity subsets within one pool);
   today the deques are mutex-guarded and every worker in a pool serves the same mask.
 * Typed and **shared errors** (today error propagation re-materializes the message; the failure channel will
   grow typed errors and shared error payloads), plus cancellation propagation through a graph.
-* `co_await` integration layered on top of the raw frame API; plain (non-async) arguments in the variadic
-  dependency form; and depending a `once_async` on another `once_async` (nested once graphs).
+* `co_await` integration layered on top of the raw frame API, and plain (non-async) arguments in the variadic
+  dependency form.

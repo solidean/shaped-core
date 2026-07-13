@@ -57,19 +57,24 @@ TEST("async - many independent asyncs fan out across the pool")
 {
     cc::async_thread_pool pool(4);
 
-    // one root that sums 64 independent children via a two-phase frame (spawns them, then reads them)
+    // one root that sums 64 independent children via a two-phase frame (creates + requires them, then reads
+    // them) — the children fan out across the pool's workers
     int const n = 64;
     auto root = cc::make_async_lazy<cc::i64>(
-        [n, step = 0, kids = cc::vector<cc::once_async<cc::i64>*>()](async_context& actx) mutable -> async_result<cc::i64>
+        [n, step = 0, kids = cc::vector<cc::shared_async<cc::i64>>()](async_context& actx) mutable -> async_result<cc::i64>
         {
             if (step++ == 0)
             {
                 for (int i = 0; i < n; ++i)
-                    kids.push_back(actx.spawn_child([i] { return cc::i64(i); }));
+                {
+                    auto k = cc::make_async_lazy([i] { return cc::i64(i); });
+                    (void)actx.require(k);
+                    kids.push_back(cc::move(k));
+                }
                 return actx.wait_for_dependencies();
             }
             cc::i64 sum = 0;
-            for (auto* k : kids)
+            for (auto const& k : kids)
                 sum += *k->value_ptr();
             return actx.success(sum);
         });

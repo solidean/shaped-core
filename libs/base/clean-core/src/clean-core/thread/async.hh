@@ -24,13 +24,10 @@
 // Handles:
 //   shared_async<T> = std::shared_ptr<async<T>>  — the normal, composable, many-dependent handle. async<T>
 //     itself is non-copyable and immovable; you copy the shared_ptr, never the node.
-//   once_async<T>  — single-consumer, single-continuation; used internally for owned fork/join children
-//     (async_context::await / spawn_child). Not the default public type — a footgun if used as one.
 //
 // Design notes worth stating up front:
 //   * pending-dependency lists hold only NOT-ready deps, purely for scheduling/wakeup.
 //   * compute-frame captures are what retain observed shared_async dependencies (not the pending list).
-//   * owned child dependencies are destroyed before their parent frame.
 //   * subscriptions/continuations are late-installed wakeup hints, added only when a frame must park.
 
 namespace cc
@@ -87,13 +84,13 @@ private:
 };
 
 // ============================================================================
-// typed node: shared machinery for async<T> and once_async<T>
+// typed node: the value + compute-frame layer under async<T>
 // ============================================================================
 
 namespace impl
 {
 /// Holds the typed value and the type-erased compute frame; implements the two virtuals the base poll loop
-/// needs. async<T> and once_async<T> add only their handle-specific surface on top.
+/// needs. async<T> adds only its handle-specific surface on top.
 template <class T>
 struct async_typed_node : cc::async_node_base
 {
@@ -130,11 +127,10 @@ struct async_typed_node : cc::async_node_base
 
     void destroy_frame() override { _frame = {}; }
 
-    // teardown order matters: stop referencing deps, destroy owned children (deps we own), then our frame
+    // teardown order matters: stop referencing deps, then drop our frame (releasing its captures)
     ~async_typed_node() override
     {
         this->unsubscribe_all();
-        this->destroy_children();
         _frame = {};
     }
 
@@ -208,19 +204,6 @@ public:
 };
 
 // ============================================================================
-// once_async<T> — single-consumer owned child
-// ============================================================================
-
-/// Single-consumer async: exactly one dependent may await it (a second subscription asserts). Used
-/// internally for owned fork/join children created by async_context::await / spawn_child. The single
-/// continuation fits the node's inline continuation buffer, so no dependent-list allocation is needed.
-template <class T>
-struct once_async : impl::async_typed_node<T>
-{
-    once_async() { this->set_single_consumer(); }
-};
-
-// ============================================================================
 // async_context — handed to every compute step
 // ============================================================================
 
@@ -260,33 +243,6 @@ public:
             dep->schedule(); // a required-but-cold dependency must be made runnable, else nobody drives it
         return false;
     }
-
-    /// Require an owned once_async child (e.g. a spawn_child handle) as a dependency.
-    template <class T>
-    bool require(once_async<T>& dep) const
-    {
-        if (dep.is_ready())
-            return true;
-        current->add_pending_dependency(&dep);
-        if (dep.is_cold())
-            dep.schedule();
-        return false;
-    }
-
-    /// Spawn an owned once_async child from a compute frame, register it as a dependency, and schedule it.
-    /// Returns a raw handle the parent can read on resume (owned by the parent — do not delete). The child
-    /// frame may borrow parent state by reference: it is destroyed before the parent frame. The frame may
-    /// omit its async_context& parameter (see make_async_lazy). Defined out-of-line (needs the frame plumbing).
-    template <class F>
-    auto spawn_child(F&& f) const;
-
-    /// spawn_child + wait in one call: creates the owned child, then asks the frame to wait for it.
-    template <class F>
-    [[nodiscard]] async_waiting_tag await(F&& f) const
-    {
-        (void)spawn_child(cc::forward<F>(f));
-        return {};
-    }
 };
 
 // ============================================================================
@@ -302,19 +258,13 @@ struct async_deduce_result
 template <class T>
 inline constexpr bool async_is_deduce = std::is_same_v<T, async_deduce_result>;
 
-// A dependency argument is a shared_async<U> or a shared_ptr<once_async<U>>: awaited before f runs, then
-// unwrapped to the stored U. A once_async dep is taken into ownership here (this is its single consumer — a
-// second consumer asserts). Plain pass-through values are not supported yet — capture them in the closure.
+// A dependency argument is a shared_async<U>: awaited before f runs, then unwrapped to the stored U. Plain
+// pass-through values are not supported yet — capture them in the closure.
 
 template <class U>
 bool async_require_arg(async_context& ctx, shared_async<U> const& dep)
 {
     return ctx.require(dep);
-}
-template <class U>
-bool async_require_arg(async_context& ctx, std::shared_ptr<once_async<U>> const& dep)
-{
-    return ctx.require(*dep);
 }
 
 template <class U>
@@ -323,21 +273,10 @@ void async_collect_arg_error(cc::optional<async_error>& out, shared_async<U> con
     if (!out.has_value() && dep->has_error())
         out.emplace_value(dep->propagate_error());
 }
-template <class U>
-void async_collect_arg_error(cc::optional<async_error>& out, std::shared_ptr<once_async<U>> const& dep)
-{
-    if (!out.has_value() && dep->has_error())
-        out.emplace_value(dep->propagate_error());
-}
 
 // returns a reference into the dependency node's stored value (stable while the node is alive)
 template <class U>
 U const& async_unwrap_arg(shared_async<U> const& dep)
-{
-    return *dep->value_ptr();
-}
-template <class U>
-U const& async_unwrap_arg(std::shared_ptr<once_async<U>> const& dep)
 {
     return *dep->value_ptr();
 }
@@ -378,7 +317,7 @@ using async_deduced_frame_result_t = typename async_frame_value<std::remove_cvre
     async_declval<async_context&>(),
     async_unwrap_arg(async_declval<std::decay_t<Deps> const&>())...))>>::type;
 
-// The one compute-frame wrapper behind every make_async_* / spawn_child / map form. Requires all deps,
+// The one compute-frame wrapper behind every make_async_* / map form. Requires all deps,
 // short-circuits on the first error, then calls f — passing async_context& only if f wants it. A raw
 // state-machine frame is just the zero-dependency case where f takes async_context& and returns async_result.
 template <class R, class F, class... Deps>
@@ -400,40 +339,18 @@ auto async_make_frame(F&& f, Deps&&... deps)
     };
 }
 
-// shared factory for make_async_* / make_once_*: build NodeT<R> and install the wrapped frame
-template <template <class> class NodeT, class T, class F, class... Deps>
+// shared factory for make_async_*: build async<R> and install the wrapped frame
+template <class T, class F, class... Deps>
 auto async_make_node(F&& f, Deps&&... deps)
 {
     using result_t = std::conditional_t<async_is_deduce<T>, async_deduced_frame_result_t<F, Deps...>, T>;
     static_assert(!std::is_void_v<result_t>, "the frame must return a value (wrap void as cc::unit)");
 
-    auto node = std::make_shared<NodeT<result_t>>();
+    auto node = std::make_shared<async<result_t>>();
     node->set_frame(async_make_frame<result_t>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
     return node;
 }
 } // namespace impl
-
-template <class F>
-auto async_context::spawn_child(F&& f) const
-{
-    using child_value_t = impl::async_deduced_frame_result_t<F>;
-
-    auto child = std::make_shared<once_async<child_value_t>>();
-    child->set_frame(impl::async_make_frame<child_value_t>(cc::forward<F>(f)));
-    auto* raw = child.get();
-
-    // A child is an anonymous sub-task of the parent, so it runs on the parent's pool: inherit affinity+route
-    // before scheduling (children of a render-affinity task are render-affinity too).
-    raw->inherit_affinity_from(*current);
-
-    // The child is owned by the parent (and transitively pinned by the root shared_async), so it can be freely
-    // scheduled: the scheduler co-owns it while queued. Register it as a dependency and make it runnable; the
-    // parent parks on it and is woken when it completes.
-    current->add_pending_dependency(raw);
-    current->adopt_child(cc::move(child));
-    raw->schedule();
-    return raw;
-}
 
 // ============================================================================
 // creation
@@ -442,9 +359,8 @@ auto async_context::spawn_child(F&& f) const
 /// Create a cold (lazy) async — it runs only once scheduled (required by another async, or driven by
 /// async_blocking_get). The compute frame is `f`, optionally followed by dependency arguments:
 ///
-///   * each dependency is a shared_async<U> or a std::shared_ptr<once_async<U>>; it is awaited and unwrapped
-///     to the stored U before f runs. Errors short-circuit: if any dependency failed, f is skipped and the
-///     first error propagates. A once_async dependency is consumed here (its single owner).
+///   * each dependency is a shared_async<U>; it is awaited and unwrapped to the stored U before f runs.
+///     Errors short-circuit: if any dependency failed, f is skipped and the first error propagates.
 ///   * f is called with the unwrapped dependency values. It may take a leading async_context& (for a raw
 ///     state-machine that manages its own dependencies) or omit it entirely — both are wrapped as needed.
 ///   * T defaults to the deduced result of f (async_result<S> counts as S), or may be given explicitly.
@@ -455,7 +371,7 @@ auto async_context::spawn_child(F&& f) const
 template <class T = impl::async_deduce_result, class F, class... Deps>
 [[nodiscard]] auto make_async_lazy(F&& f, Deps&&... deps)
 {
-    return impl::async_make_node<async, T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
+    return impl::async_make_node<T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
 }
 
 /// Like make_async_lazy, but eager: schedules the node immediately if a worker scope is active on this thread
@@ -463,26 +379,7 @@ template <class T = impl::async_deduce_result, class F, class... Deps>
 template <class T = impl::async_deduce_result, class F, class... Deps>
 [[nodiscard]] auto make_async_scheduled(F&& f, Deps&&... deps)
 {
-    auto node = impl::async_make_node<async, T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
-    if (async_scheduler::current_or_null() != nullptr)
-        node->schedule();
-    return node;
-}
-
-/// Create a cold single-consumer once_async (same forms as make_async_lazy). Pass the returned
-/// std::shared_ptr<once_async<T>> as a dependency to exactly one make_async_* / make_once_* call, which
-/// becomes its owner. (Depending a once_async on another once_async is not wired up yet.)
-template <class T = impl::async_deduce_result, class F, class... Deps>
-[[nodiscard]] auto make_once_lazy(F&& f, Deps&&... deps)
-{
-    return impl::async_make_node<once_async, T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
-}
-
-/// Like make_once_lazy, but eager (schedules now if a worker scope is active).
-template <class T = impl::async_deduce_result, class F, class... Deps>
-[[nodiscard]] auto make_once_scheduled(F&& f, Deps&&... deps)
-{
-    auto node = impl::async_make_node<once_async, T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
+    auto node = impl::async_make_node<T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
     if (async_scheduler::current_or_null() != nullptr)
         node->schedule();
     return node;

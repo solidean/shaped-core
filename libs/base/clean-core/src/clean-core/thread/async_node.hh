@@ -9,11 +9,11 @@
 #include <clean-core/fwd.hh>
 
 #include <atomic>
-#include <memory> // std::unique_ptr — polymorphic child ownership (cc::unique_ptr has no upcast)
+#include <memory> // std::shared_ptr / std::weak_ptr / std::enable_shared_from_this (no cc equivalent yet)
 
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency /
 // continuation bookkeeping, the scheduler seam, and the failure-channel value type. The templated public
-// surface (async<T>, once_async<T>, async_result<T>, make_async_*, async_blocking_get) lives in async.hh.
+// surface (async<T>, async_result<T>, make_async_*, async_blocking_get) lives in async.hh.
 //
 // Nothing here ever blocks a thread: poll() drives a node's compute frame forward until it completes, fails
 // as a value, or parks on not-ready dependencies with wakeup continuations installed. The default driver
@@ -277,10 +277,10 @@ enum class async_node_state : cc::u8
 /// dependent that is being torn down concurrently.
 ///
 /// Every node is heap-owned through a std::shared_ptr (make_shared): shared_async<T> for public nodes, and a
-/// shared_ptr held by the parent for owned once_async children. schedule()/poll() call shared_from_this() and
-/// the scheduler co-owns queued nodes through that shared_ptr, so a node MUST be shared-owned before it is
-/// ever scheduled or polled — creating one on the stack and driving it is unsupported (shared_from_this()
-/// would be undefined). make_async_* / make_once_* / spawn_child all create nodes via make_shared.
+/// schedule()/poll() call shared_from_this() and the scheduler co-owns queued nodes through that shared_ptr,
+/// so a node MUST be shared-owned before it is ever scheduled or polled — creating one on the stack and
+/// driving it is unsupported (shared_from_this() would be undefined). make_async_* create nodes via
+/// make_shared.
 ///
 /// Cacheline-aligned (64 B): nodes are polled and woken concurrently from different threads, so keeping each
 /// on its own line avoids false sharing between unrelated nodes.
@@ -342,7 +342,7 @@ public:
     /// blocking driver). Returns true if the node was ALREADY ready (no callback installed — do not wait).
     bool install_completion_hook_or_ready(void (*fn)(void*), void* ctx);
 
-    // subscription (called by the poll loop; single-consumer nodes cap the continuation list at 1)
+    // subscription (called by the poll loop)
 public:
     void add_continuation(async_node_base* dependent);
     void remove_continuation(async_node_base* dependent);
@@ -378,7 +378,6 @@ protected:
 
     void set_state(async_node_state s) { _state.store(s, std::memory_order_release); }
     [[nodiscard]] async_node_state state() const { return _state.load(std::memory_order_acquire); }
-    void set_single_consumer() { _single_consumer = true; }
 
     /// Turn this into a push/manual node: awaiting external completion, with the empty affinity mask and no
     /// compute route (it is never run inline; only push_value / push_error complete it).
@@ -393,19 +392,10 @@ protected:
     /// if this node has to park).
     void add_pending_dependency(async_node_base* dep) { _pending_deps.push_back(dep); }
 
-    /// Add an owned child node (structured lifetime under this frame). Held by shared_ptr so the child is
-    /// pinned both by this parent and, transitively, by the root shared_async — and can be freely scheduled.
-    void adopt_child(std::shared_ptr<async_node_base> child) { _children.push_back(cc::move(child)); }
-
-    /// Mark ready and wake dependents. Used by external/manual completion (no frame/children to tear down).
+    /// Mark ready and wake dependents. Used by external/manual completion (no frame to tear down).
     void mark_ready_and_notify();
 
-    /// Destroy owned children (running their teardown, which destroys their frames first). The typed node's
-    /// destructor calls this before dropping its own frame, enforcing "child frame dies before parent frame".
-    void destroy_children();
-
-    /// Remove this node's continuations from every dependency it subscribed to. Must run before a node
-    /// destroys its owned children (a child is a dependency it may still be subscribed to).
+    /// Remove this node's continuations from every dependency it subscribed to.
     void unsubscribe_all();
 
     // internal
@@ -418,24 +408,15 @@ private:
     void complete_from_compute();
     void reschedule_self();
 
-    /// Copy affinity + route from a parent (used by spawn_child so a child runs on its parent's pool). Only
-    /// valid before the child is scheduled.
-    void inherit_affinity_from(async_node_base const& parent)
-    {
-        _affinity = parent._affinity;
-        _reschedule = parent._reschedule;
-    }
-
     // members
 private:
-    friend struct async_context; // reaches add_pending_dependency / adopt_child / inherit_affinity_from
+    friend struct async_context; // reaches add_pending_dependency on the generic require() path
 
     impl::async_spinlock _lock; // guards _state transitions, _wake_pending, _continuations (see class doc)
 
     std::atomic<async_node_state> _state{async_node_state::cold};
     bool _is_error = false;
-    bool _single_consumer = false; // once_async: at most one continuation
-    bool _wake_pending = false;    // set (under _lock) when a running node is scheduled; makes it re-poll
+    bool _wake_pending = false; // set (under _lock) when a running node is scheduled; makes it re-poll
 
     async_affinity _affinity = async_affinity::general();        // bit 0 by default
     async_reschedule_fn _reschedule = &async_default_reschedule; // route for the general-compute default
@@ -453,12 +434,8 @@ private:
     cc::small_vector<async_node_base*, 4> _subscribed;
 
     /// Dependents to reschedule when this node completes, held as weak_ptrs so a wake can never touch a
-    /// dependent that is being destroyed concurrently. Inline capacity 1 keeps the once_async single-consumer
-    /// case allocation-free; async<T> spills to the heap for many dependents. Guarded by _lock.
+    /// dependent that is being destroyed concurrently. Inline capacity 1 keeps the common single-dependent
+    /// case allocation-free; spills to the heap for many dependents. Guarded by _lock.
     cc::small_vector<std::weak_ptr<async_node_base>, 1> _continuations;
-
-    /// Owned child nodes (shared so a scheduled child stays pinned). Destroyed before the compute frame
-    /// (see destroy_children / typed node dtor).
-    cc::vector<std::shared_ptr<async_node_base>> _children;
 };
 } // namespace cc
