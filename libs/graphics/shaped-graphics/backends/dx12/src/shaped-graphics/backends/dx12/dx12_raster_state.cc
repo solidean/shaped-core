@@ -178,6 +178,8 @@ D3D12_PRIMITIVE_TOPOLOGY_TYPE to_d3d12_topology_type(sg::primitive_topology_type
         return D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
     case sg::primitive_topology_type::triangle:
         return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    case sg::primitive_topology_type::patch:
+        return D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
     }
     CC_UNREACHABLE("unhandled primitive_topology_type");
 }
@@ -196,7 +198,17 @@ D3D12_PRIMITIVE_TOPOLOGY to_d3d12_topology(sg::primitive_topology t)
         return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     case sg::primitive_topology::triangle_strip:
         return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+    case sg::primitive_topology::patch_list:
+        // The concrete IA topology also encodes the control-point count — go through to_d3d12_patch_topology.
+        CC_UNREACHABLE("patch_list needs a control-point count; use to_d3d12_patch_topology");
     }
     CC_UNREACHABLE("unhandled primitive_topology");
+}
+
+D3D12_PRIMITIVE_TOPOLOGY to_d3d12_patch_topology(int control_points)
+{
+    CC_ASSERT(control_points >= 1 && control_points <= 32, "patch control-point count must be 1..32");
+    // The 32 N_CONTROL_POINT_PATCHLIST values are contiguous from the 1-control-point one.
+    return D3D12_PRIMITIVE_TOPOLOGY(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + (control_points - 1));
 }
 } // namespace sg::backend::dx12

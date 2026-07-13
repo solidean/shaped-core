@@ -37,9 +37,12 @@ Running list of known follow-ups. Bigger design intent lives in
   [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open: **PSO caching**
   (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing + `async_raster_pipeline` —
   the compute/RT parity piece); **indirect draws** (`draw_indirect` / count buffers); **dynamic primitive
-  topology** and **dynamic depth bias** (both baked into the PSO for now); **tessellation / geometry /
-  mesh-task** stages; and the **vulkan** implementation (`VkPipeline` + dynamic-rendering formats + the
-  `vkCmdDraw*` seams — currently `CC_UNREACHABLE`).
+  topology** and **dynamic depth bias** (both baked into the PSO for now); **mesh / task** stages; and the
+  **vulkan** implementation (`VkPipeline` + dynamic-rendering formats + the `vkCmdDraw*` seams — currently
+  `CC_UNREACHABLE`). **Geometry** and **tessellation** (hull/domain) stages are now in for dx12:
+  `raster_pipeline_description::geometry_shader` / `tessellation_control_shader` /
+  `tessellation_evaluation_shader`, the `patch_list` topology + `patch_control_points`, and the DXC gs/hs/ds
+  profiles.
 - **Acceleration structures — deferred layers:** the single-shot build path is in (`sg::blas`/`sg::tlas`,
   the `cmd.raytracing` scope with `build_blas` for triangles + procedural AABBs, `build_tlas`, and
   `is_supported()`; dx12 real on WARP, vulkan stubbed). The abstract types already carry the stats a refit

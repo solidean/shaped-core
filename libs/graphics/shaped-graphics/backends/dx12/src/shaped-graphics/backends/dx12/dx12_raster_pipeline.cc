@@ -40,10 +40,45 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
         CC_ASSERT(desc.fragment_shader.value().format == sg::shader_format::dxil, "the dx12 backend requires DXIL "
                                                                                   "bytecode");
     }
+
+    // Tessellation: hull + domain come as a pair, drive a patch-list topology, and vice versa.
+    bool const has_tess = desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value();
+    if (has_tess)
+    {
+        CC_ASSERT(desc.tessellation_control_shader.has_value() && desc.tessellation_evaluation_shader.has_value(),
+                  "tessellation needs both a control (hull) and an evaluation (domain) shader");
+        CC_ASSERT(desc.tessellation_control_shader.value().stage == sg::shader_stage::tessellation_control,
+                  "tessellation_control_shader must be a tessellation_control stage");
+        CC_ASSERT(desc.tessellation_evaluation_shader.value().stage == sg::shader_stage::tessellation_evaluation,
+                  "tessellation_evaluation_shader must be a tessellation_evaluation stage");
+        CC_ASSERT(desc.tessellation_control_shader.value().format == sg::shader_format::dxil
+                      && desc.tessellation_evaluation_shader.value().format == sg::shader_format::dxil,
+                  "the dx12 backend requires DXIL bytecode");
+        CC_ASSERT(desc.topology == sg::primitive_topology::patch_list, "a tessellation pipeline requires patch_list "
+                                                                       "topology");
+    }
+    if (desc.topology == sg::primitive_topology::patch_list)
+    {
+        CC_ASSERT(has_tess, "patch_list topology requires tessellation (hull + domain) shaders");
+        CC_ASSERT(desc.patch_control_points >= 1 && desc.patch_control_points <= 32, "patch_control_points must be "
+                                                                                     "1..32 for a patch_list pipeline");
+    }
+    if (desc.geometry_shader.has_value())
+    {
+        CC_ASSERT(desc.geometry_shader.value().stage == sg::shader_stage::geometry, "geometry_shader must be a "
+                                                                                    "geometry stage");
+        CC_ASSERT(desc.geometry_shader.value().format == sg::shader_format::dxil, "the dx12 backend requires DXIL "
+                                                                                  "bytecode");
+    }
+
     CC_ASSERT(desc.color_targets.size() <= 8, "a raster pipeline supports at most 8 color targets");
     CC_ASSERT(desc.sample_count >= 1, "sample_count must be >= 1");
 
-    auto pipeline = std::make_shared<dx12_raster_pipeline>(to_d3d12_topology(desc.topology));
+    // The concrete IA topology set at bind time — patch lists also encode the control-point count.
+    D3D12_PRIMITIVE_TOPOLOGY const ia_topology = desc.topology == sg::primitive_topology::patch_list
+                                                   ? to_d3d12_patch_topology(desc.patch_control_points)
+                                                   : to_d3d12_topology(desc.topology);
+    auto pipeline = std::make_shared<dx12_raster_pipeline>(ia_topology);
 
     // Input layout — the semantic names must stay alive through CreateGraphicsPipelineState, so
     // materialize null-terminated copies into a reserved (non-reallocating) buffer and point at them.
@@ -76,6 +111,14 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.VS = {desc.vertex_shader.bytecode.data(), SIZE_T(desc.vertex_shader.bytecode.size())};
     if (desc.fragment_shader.has_value())
         pso.PS = {desc.fragment_shader.value().bytecode.data(), SIZE_T(desc.fragment_shader.value().bytecode.size())};
+    if (desc.tessellation_control_shader.has_value())
+        pso.HS = {desc.tessellation_control_shader.value().bytecode.data(),
+                  SIZE_T(desc.tessellation_control_shader.value().bytecode.size())};
+    if (desc.tessellation_evaluation_shader.has_value())
+        pso.DS = {desc.tessellation_evaluation_shader.value().bytecode.data(),
+                  SIZE_T(desc.tessellation_evaluation_shader.value().bytecode.size())};
+    if (desc.geometry_shader.has_value())
+        pso.GS = {desc.geometry_shader.value().bytecode.data(), SIZE_T(desc.geometry_shader.value().bytecode.size())};
 
     pso.InputLayout = {input_elements.empty() ? nullptr : input_elements.data(), UINT(input_elements.size())};
 

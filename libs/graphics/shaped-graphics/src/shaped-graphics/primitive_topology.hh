@@ -16,6 +16,11 @@ enum class primitive_topology
     line_strip,     // DX12 LINESTRIP     / Vk LINE_STRIP
     triangle_list,  // DX12 TRIANGLELIST  / Vk TRIANGLE_LIST
     triangle_strip, // DX12 TRIANGLESTRIP / Vk TRIANGLE_STRIP
+
+    /// A list of control-point patches — the input a tessellation (hull/domain) pipeline consumes. The
+    /// control-point count per patch is not part of the topology; it comes from
+    /// `raster_pipeline_description::patch_control_points`. DX12 N_CONTROL_POINT_PATCHLIST / Vk PATCH_LIST.
+    patch_list,
 };
 
 /// The coarse family a topology belongs to — the granularity a dx12 PSO records
@@ -25,6 +30,7 @@ enum class primitive_topology_type
     point,
     line,
     triangle,
+    patch, ///< tessellation control-point patches (any control-point count)
 };
 
 /// The coarse family `t` assembles into.
@@ -40,6 +46,8 @@ enum class primitive_topology_type
     case primitive_topology::triangle_list:
     case primitive_topology::triangle_strip:
         return primitive_topology_type::triangle;
+    case primitive_topology::patch_list:
+        return primitive_topology_type::patch;
     }
     return primitive_topology_type::triangle;
 }

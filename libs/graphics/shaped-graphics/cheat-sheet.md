@@ -346,7 +346,7 @@ sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
 
 #include <shaped-graphics/compiled_shader.hh>
-sg::shader_stage            // vertex | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
+sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
 sg::is_raytracing_stage(s)  // bool — one of the six RT stages;  sg::is_compute_stage(s) — the compute stage
 sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
@@ -386,13 +386,14 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
-                                  //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; rasterization_state; depth_stencil_state;
+                                  //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
+                                  //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
                                   //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={} }
 sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=all }  — one color target's PSO state
 sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; vector<vertex_attribute> attributes }; static create<Vs...>() derives one slot per type
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
-//   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
+//   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
 //   blend_factor / blend_op / color_write_mask (r|g|b|a|all bit flags)  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)

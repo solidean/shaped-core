@@ -16,6 +16,12 @@ namespace
         return "cs";
     case sg::shader_stage::vertex:
         return "vs";
+    case sg::shader_stage::tessellation_control:
+        return "hs"; // hull
+    case sg::shader_stage::tessellation_evaluation:
+        return "ds"; // domain
+    case sg::shader_stage::geometry:
+        return "gs";
     case sg::shader_stage::fragment:
         return "ps";
     // Ray-tracing stages all target a single-entry DXIL library.
