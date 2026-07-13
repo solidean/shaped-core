@@ -5,10 +5,15 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/container/small_vector.hh>
+#include <clean-core/container/fixed_vector.hh>
+#include <shaped-graphics/backend/access_inference.hh> // shader_access_of / shader_layout_of
+#include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
+#include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
+#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/command_list.raster.hh>
 #include <shaped-graphics/pixel_format.hh>
@@ -26,6 +31,12 @@ namespace
     CC_ASSERT(std::dynamic_pointer_cast<dx12_texture const>(tex) != nullptr, "target texture is not a dx12 "
                                                                              "texture");
     return std::static_pointer_cast<dx12_texture const>(tex);
+}
+
+[[nodiscard]] dx12_buffer_handle as_dx12_buffer(sg::raw_buffer_handle const& buf)
+{
+    CC_ASSERT(std::dynamic_pointer_cast<dx12_buffer const>(buf) != nullptr, "buffer is not a dx12 buffer");
+    return std::static_pointer_cast<dx12_buffer const>(buf);
 }
 } // namespace
 
@@ -55,7 +66,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
 
     // 2) Create the RTV/DSV descriptors and collect the CPU handles the clears / OM bind use. The slots
     //    outlive recording and are freed against this list's epoch in end_rendering.
-    cc::small_vector<D3D12_CPU_DESCRIPTOR_HANDLE, 8> rtv_handles;
+    cc::fixed_vector<D3D12_CPU_DESCRIPTOR_HANDLE, sg::max_color_targets> rtv_handles;
     for (auto const& ct : info.color_targets)
     {
         auto rtv = _ctx.create_dx12_render_target_view(ct.view);
@@ -163,5 +174,193 @@ void dx12_command_list::raster_end_rendering()
     _rendering_rtv_slots.clear();
     _rendering_dsv_slot = cpu_descriptor_slot::invalid;
     _in_render_pass = false;
+
+    // The graphics bind + IA state is scoped to the pass it was set up in.
+    _bound_raster_layout = nullptr;
+    _bound_raster_groups.clear();
+    _bound_vertex_buffers.clear();
+    _bound_index_buffer = nullptr;
+}
+
+// --- draw recording (reached through cmd.raster / cmd.raster.manual) -----------------------------------
+
+void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline)
+{
+    CC_ASSERT(_in_render_pass, "bind_pipeline requires an open rendering scope");
+    auto const* rp = dynamic_cast<dx12_raster_pipeline const*>(&pipeline);
+    CC_ASSERT(rp != nullptr, "raster_pipeline is not a dx12 raster_pipeline");
+
+    // The shader-visible heaps must be set before any root descriptor table is bound (as for compute).
+    ID3D12DescriptorHeap* heaps[] = {_ctx._descriptor_heap.heap.Get(), _ctx._sampler_heap.heap.Get()};
+    _list->SetDescriptorHeaps(2, heaps);
+    _list->SetGraphicsRootSignature(rp->layout->root_signature.Get());
+    _list->SetPipelineState(rp->pipeline_state.Get());
+    _list->IASetPrimitiveTopology(rp->topology);
+
+    _bound_raster_layout = rp->layout.get();
+    _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->groups.size(), nullptr);
+}
+
+void dx12_command_list::raster_bind_group(int set, sg::binding_group const& group)
+{
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before binding groups");
+    CC_ASSERT(set >= 0 && set < int(_bound_raster_groups.size()), "binding-group slot out of range for the bound "
+                                                                  "pipeline layout");
+
+    auto const* dg = dynamic_cast<dx12_binding_group const*>(&group);
+    CC_ASSERT(dg != nullptr, "binding_group is not a dx12 binding_group");
+    CC_ASSERT(!(dg->transient && dg->creation_epoch != _ctx.current_epoch()),
+              "transient binding_group used past its epoch (its descriptors have been recycled)");
+
+    auto const& gslot = _bound_raster_layout->groups[set];
+    CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
+
+    // Remembered so its views' accesses are declared at draw (like compute). Root-parameter indices come
+    // from the pipeline layout's slot; graphics uses the graphics root bind point.
+    _bound_raster_groups[set] = dg;
+    if (gslot.resource_root_param >= 0)
+        _list->SetGraphicsRootDescriptorTable(UINT(gslot.resource_root_param), dg->table_start);
+    if (gslot.sampler_root_param >= 0)
+        _list->SetGraphicsRootDescriptorTable(UINT(gslot.sampler_root_param), dg->sampler_table_start);
+}
+
+void dx12_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views)
+{
+    CC_ASSERT(first_slot >= 0, "vertex buffer slot must be non-negative");
+
+    cc::fixed_vector<D3D12_VERTEX_BUFFER_VIEW, sg::max_vertex_buffers> vbvs;
+    for (int i = 0; i < int(views.size()); ++i)
+    {
+        auto const& v = views[i];
+        CC_ASSERT(v.buffer != nullptr, "vertex_buffer_view has no buffer");
+        auto buf = as_dx12_buffer(v.buffer);
+        cc::isize const size = v.size_in_bytes < 0 ? (buf->size_in_bytes() - v.offset_in_bytes) : v.size_in_bytes;
+
+        D3D12_VERTEX_BUFFER_VIEW vbv = {};
+        vbv.BufferLocation = buf->gpu_virtual_address() + UINT64(v.offset_in_bytes);
+        vbv.SizeInBytes = UINT(size);
+        vbv.StrideInBytes = UINT(v.stride_in_bytes);
+        vbvs.push_back(vbv);
+
+        // Remember the buffer at its slot so its vertex_read is declared for barriers at draw time.
+        int const slot = first_slot + i;
+        while (int(_bound_vertex_buffers.size()) <= slot)
+            _bound_vertex_buffers.push_back(nullptr);
+        _bound_vertex_buffers[slot] = cc::move(buf);
+    }
+
+    _list->IASetVertexBuffers(UINT(first_slot), UINT(vbvs.size()), vbvs.empty() ? nullptr : vbvs.data());
+}
+
+void dx12_command_list::raster_bind_index_buffer(sg::index_buffer_view const& view)
+{
+    CC_ASSERT(view.buffer != nullptr, "index_buffer_view has no buffer");
+    auto buf = as_dx12_buffer(view.buffer);
+    cc::isize const size = view.size_in_bytes < 0 ? (buf->size_in_bytes() - view.offset_in_bytes) : view.size_in_bytes;
+
+    D3D12_INDEX_BUFFER_VIEW ibv = {};
+    ibv.BufferLocation = buf->gpu_virtual_address() + UINT64(view.offset_in_bytes);
+    ibv.SizeInBytes = UINT(size);
+    ibv.Format = view.format == sg::index_format::uint16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+    _list->IASetIndexBuffer(&ibv);
+
+    _bound_index_buffer = cc::move(buf);
+}
+
+void dx12_command_list::raster_set_viewport(sg::viewport const& vp)
+{
+    D3D12_VIEWPORT d = {vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
+    _list->RSSetViewports(1, &d);
+}
+
+void dx12_command_list::raster_set_scissor(tg::aabb2i const& rect)
+{
+    D3D12_RECT r = {LONG(rect.min[0]), LONG(rect.min[1]), LONG(rect.max[0]), LONG(rect.max[1])};
+    _list->RSSetScissorRects(1, &r);
+}
+
+void dx12_command_list::raster_set_stencil_reference(sg::u32 reference)
+{
+    _list->OMSetStencilRef(UINT(reference));
+}
+
+void dx12_command_list::raster_set_blend_constants(tg::vec4f constants)
+{
+    _list->OMSetBlendFactor(constants.data);
+}
+
+void dx12_command_list::raster_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+{
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before setting inline constants");
+    CC_ASSERT(_bound_raster_layout->inline_constants_root_param >= 0, "the bound pipeline layout declares no "
+                                                                      "inline_constants block");
+    CC_ASSERT(data.size() % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
+
+    cc::isize const off = offset.value_or(0);
+    CC_ASSERT(off >= 0 && off % 4 == 0, "inline-constants offset must be non-negative and a multiple of 4");
+    if (offset.has_value())
+        CC_ASSERT(off + data.size() <= cc::isize(_bound_raster_layout->inline_constants_num_32bit) * 4,
+                  "partial inline-constants update exceeds the declared block size");
+    else
+        CC_ASSERT(data.size() == cc::isize(_bound_raster_layout->inline_constants_num_32bit) * 4,
+                  "full inline-constants replace must match the declared block size");
+
+    _list->SetGraphicsRoot32BitConstants(UINT(_bound_raster_layout->inline_constants_root_param), UINT(data.size() / 4),
+                                         data.data(), UINT(off / 4));
+}
+
+void dx12_command_list::declare_raster_draw_barriers(bool indexed)
+{
+    // Bound groups' shader reads/writes (same policy as compute_dispatch), keyed to the graphics stages.
+    for (auto const* bound_group : _bound_raster_groups)
+    {
+        if (bound_group == nullptr)
+            continue;
+        for (auto const& view : bound_group->hazard_views)
+            if (view.buffer)
+                track_buffer_access(view.buffer, sg::pipeline_stage_flags::vertex | sg::pipeline_stage_flags::fragment,
+                                    sg::shader_access_of(view.access));
+        for (auto const& tv : bound_group->texture_hazard_views)
+            track_texture_access(tv.texture, tv.range,
+                                 sg::pipeline_stage_flags::vertex | sg::pipeline_stage_flags::fragment,
+                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+    }
+
+    // The IA vertex fetch reads the bound vertex buffers; an indexed draw also fetches the index buffer.
+    for (auto const& vb : _bound_vertex_buffers)
+        if (vb)
+            track_buffer_access(vb, sg::pipeline_stage_flags::vertex, sg::access_flags::vertex_read);
+    if (indexed && _bound_index_buffer)
+        track_buffer_access(_bound_index_buffer, sg::pipeline_stage_flags::vertex, sg::access_flags::index_read);
+}
+
+void dx12_command_list::raster_draw(sg::draw_config const& config)
+{
+    CC_ASSERT(_in_render_pass, "draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(config.vertex_range.offset >= 0 && config.vertex_range.size >= 0, "vertex range must be non-negative");
+    CC_ASSERT(config.instance_range.offset >= 0 && config.instance_range.size >= 0, "instance range must be "
+                                                                                    "non-negative");
+
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    _list->DrawInstanced(UINT(config.vertex_range.size), UINT(config.instance_range.size),
+                         UINT(config.vertex_range.offset), UINT(config.instance_range.offset));
+}
+
+void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& config)
+{
+    CC_ASSERT(_in_render_pass, "draw_indexed requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_bound_index_buffer != nullptr, "draw_indexed requires a bound index buffer");
+    CC_ASSERT(config.index_range.offset >= 0 && config.index_range.size >= 0, "index range must be non-negative");
+    CC_ASSERT(config.instance_range.offset >= 0 && config.instance_range.size >= 0, "instance range must be "
+                                                                                    "non-negative");
+
+    declare_raster_draw_barriers(true);
+    flush_barriers();
+    _list->DrawIndexedInstanced(UINT(config.index_range.size), UINT(config.instance_range.size),
+                                UINT(config.index_range.offset), config.vertex_offset,
+                                UINT(config.instance_range.offset));
 }
 } // namespace sg::backend::dx12

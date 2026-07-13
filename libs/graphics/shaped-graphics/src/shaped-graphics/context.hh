@@ -278,6 +278,10 @@ protected:
     [[nodiscard]] virtual cc::result<compute_pipeline_handle>
     try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
 
+    /// Builds a raster_pipeline from a description (vertex/fragment shaders + pipeline layout + state).
+    [[nodiscard]] virtual cc::result<raster_pipeline_handle>
+    try_create_raster_pipeline(raster_pipeline_description const& desc, lifetime_scope scope) = 0;
+
     /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).
     [[nodiscard]] virtual cc::result<raytracing_pipeline_handle>
     try_create_raytracing_pipeline(raytracing_pipeline_description const& desc, lifetime_scope scope) = 0;

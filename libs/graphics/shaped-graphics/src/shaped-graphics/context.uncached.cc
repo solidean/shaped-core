@@ -4,6 +4,7 @@
 #include <shaped-graphics/compute_pipeline.hh> // compute_pipeline_description::shader
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/raster_pipeline.hh>     // raster_pipeline_description
 #include <shaped-graphics/raytracing_pipeline.hh> // raytracing_pipeline_description
 
 namespace sg
@@ -58,6 +59,22 @@ cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_p
 {
     // Pipelines have no transient variant — always persistent.
     return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
+}
+
+raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pipeline_description const& desc)
+{
+    auto r = try_create_raster_pipeline(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw pipeline_creation_exception(desc.vertex_shader.entry_point, r.error());
+}
+
+cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
+{
+    // Pipelines have no transient variant — always persistent.
+    return _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)

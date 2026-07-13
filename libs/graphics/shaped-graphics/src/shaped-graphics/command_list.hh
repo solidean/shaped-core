@@ -111,10 +111,26 @@ protected:
 
     // Raster rendering scope (reached through cmd.raster). begin_rendering transitions each target to
     // its render-target / depth-stencil layout, binds the color/depth targets to the output-merger, and
-    // applies each target's clear / discard; end_rendering closes the scope and releases its RTV/DSV descriptors.
-    // Calls must be balanced. Draw recording lands with the graphics pipeline.
+    // applies each target's clear / discard; end_rendering closes the scope and releases its RTV/DSV
+    // descriptors. Calls must be balanced.
     virtual void raster_begin_rendering(rendering_info const& info) = 0;
     virtual void raster_end_rendering() = 0;
+
+    // Raster draw recording (reached through cmd.raster / cmd.raster.manual). bind_pipeline sets the
+    // graphics PSO + root signature and the IA topology; bind_group binds through that root signature;
+    // the set/bind ops configure IA + dynamic state; draw / draw_indexed record the draw. All are valid
+    // only inside an open rendering scope (backend asserts).
+    virtual void raster_bind_pipeline(raster_pipeline const& pipeline) = 0;
+    virtual void raster_bind_group(int set, binding_group const& group) = 0;
+    virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
+    virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
+    virtual void raster_set_viewport(viewport const& vp) = 0;
+    virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
+    virtual void raster_set_stencil_reference(u32 reference) = 0;
+    virtual void raster_set_blend_constants(tg::vec4f constants) = 0;
+    virtual void raster_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) = 0;
+    virtual void raster_draw(draw_config const& config) = 0;
+    virtual void raster_draw_indexed(draw_indexed_config const& config) = 0;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Split by geometry family
     // (a BLAS is triangles or AABBs, never both) since span-element overloads can't dispatch through one

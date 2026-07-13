@@ -5,7 +5,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/index_buffer_view.hh>
 #include <shaped-graphics/types.hh>
+#include <shaped-graphics/vertex_buffer_view.hh>
 #include <shaped-graphics/views.hh>
 
 #include <atomic>
@@ -107,6 +109,31 @@ public:
     [[nodiscard]] readwrite_view<cc::byte> as_raw_readwrite(cc::offset_size range) const
     {
         return as_readwrite_buffer<cc::byte>(range);
+    }
+
+    // Attachment-less draw-input views — a vertex or index buffer bound at draw time (not shader-visible,
+    // so they don't go through views.hh / binding groups). Bind via cmd.raster.bind_vertex_buffers /
+    // bind_index_buffer.
+
+    /// The whole buffer as a vertex buffer with per-vertex stride `sizeof(T)`. Requires vertex_buffer usage.
+    template <class T>
+    [[nodiscard]] vertex_buffer_view as_vertex_buffer() const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
+        return vertex_buffer_view{.buffer = shared_from_this(),
+                                  .offset_in_bytes = 0,
+                                  .size_in_bytes = _size_in_bytes,
+                                  .stride_in_bytes = isize(sizeof(T))};
+    }
+
+    /// The whole buffer as an index buffer of `format` elements. Requires index_buffer usage.
+    [[nodiscard]] index_buffer_view as_index_buffer(index_format format = index_format::uint16) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::index_buffer), "buffer lacks index_buffer usage");
+        return index_buffer_view{.buffer = shared_from_this(),
+                                 .format = format,
+                                 .offset_in_bytes = 0,
+                                 .size_in_bytes = _size_in_bytes};
     }
 
     /// Registers a callback to run once this buffer's GPU storage is released *and* no longer in

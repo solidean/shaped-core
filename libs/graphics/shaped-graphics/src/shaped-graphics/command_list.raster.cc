@@ -86,4 +86,115 @@ rendering_scope command_list_raster_scope::render_to(rendering_info const& info)
 {
     return rendering_scope(_cmd, info);
 }
+
+// Draw recording — identical thin forwarders on both raster facades (cmd.raster and cmd.raster.manual),
+// each delegating to the shared command_list backend seams.
+
+void command_list_raster_scope::bind_pipeline(raster_pipeline const& pipeline)
+{
+    _cmd.raster_bind_pipeline(pipeline);
+}
+void command_list_raster_scope::bind_group(int set, binding_group const& group)
+{
+    _cmd.raster_bind_group(set, group);
+}
+void command_list_raster_scope::bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot)
+{
+    _cmd.raster_bind_vertex_buffers(first_slot, views);
+}
+void command_list_raster_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
+{
+    _cmd.raster_bind_vertex_buffers(first_slot,
+                                    cc::span<vertex_buffer_view const>(views.begin(), cc::isize(views.size())));
+}
+void command_list_raster_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
+{
+    _cmd.raster_bind_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
+}
+void command_list_raster_scope::bind_index_buffer(index_buffer_view const& view)
+{
+    _cmd.raster_bind_index_buffer(view);
+}
+void command_list_raster_scope::set_viewport(viewport const& vp)
+{
+    _cmd.raster_set_viewport(vp);
+}
+void command_list_raster_scope::set_scissor(tg::aabb2i const& rect)
+{
+    _cmd.raster_set_scissor(rect);
+}
+void command_list_raster_scope::set_stencil_reference(u32 reference)
+{
+    _cmd.raster_set_stencil_reference(reference);
+}
+void command_list_raster_scope::set_blend_constants(tg::vec4f constants)
+{
+    _cmd.raster_set_blend_constants(constants);
+}
+void command_list_raster_scope::set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+{
+    _cmd.raster_set_inline_constants(data, offset);
+}
+void command_list_raster_scope::draw(draw_config const& config)
+{
+    _cmd.raster_draw(config);
+}
+void command_list_raster_scope::draw_indexed(draw_indexed_config const& config)
+{
+    _cmd.raster_draw_indexed(config);
+}
+
+void command_list_raster_manual_scope::bind_pipeline(raster_pipeline const& pipeline)
+{
+    _cmd.raster_bind_pipeline(pipeline);
+}
+void command_list_raster_manual_scope::bind_group(int set, binding_group const& group)
+{
+    _cmd.raster_bind_group(set, group);
+}
+void command_list_raster_manual_scope::bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot)
+{
+    _cmd.raster_bind_vertex_buffers(first_slot, views);
+}
+void command_list_raster_manual_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
+{
+    _cmd.raster_bind_vertex_buffers(first_slot,
+                                    cc::span<vertex_buffer_view const>(views.begin(), cc::isize(views.size())));
+}
+void command_list_raster_manual_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
+{
+    _cmd.raster_bind_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
+}
+void command_list_raster_manual_scope::bind_index_buffer(index_buffer_view const& view)
+{
+    _cmd.raster_bind_index_buffer(view);
+}
+void command_list_raster_manual_scope::set_viewport(viewport const& vp)
+{
+    _cmd.raster_set_viewport(vp);
+}
+void command_list_raster_manual_scope::set_scissor(tg::aabb2i const& rect)
+{
+    _cmd.raster_set_scissor(rect);
+}
+void command_list_raster_manual_scope::set_stencil_reference(u32 reference)
+{
+    _cmd.raster_set_stencil_reference(reference);
+}
+void command_list_raster_manual_scope::set_blend_constants(tg::vec4f constants)
+{
+    _cmd.raster_set_blend_constants(constants);
+}
+void command_list_raster_manual_scope::set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+{
+    _cmd.raster_set_inline_constants(data, offset);
+}
+void command_list_raster_manual_scope::draw(draw_config const& config)
+{
+    _cmd.raster_draw(config);
+}
+void command_list_raster_manual_scope::draw_indexed(draw_indexed_config const& config)
+{
+    _cmd.raster_draw_indexed(config);
+}
 } // namespace sg

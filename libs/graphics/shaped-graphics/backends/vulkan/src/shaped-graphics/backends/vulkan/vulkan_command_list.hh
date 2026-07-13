@@ -87,12 +87,44 @@ protected:
         CC_UNREACHABLE("vulkan compute set_inline_constants is not implemented yet");
     }
 
-    // Raster rendering scope (reached through cmd.raster) — not implemented yet.
+    // Raster rendering scope + draws (reached through cmd.raster / cmd.raster.manual) — not implemented yet.
     void raster_begin_rendering(sg::rendering_info const&) override
     {
         CC_UNREACHABLE("vulkan raster rendering is not implemented yet");
     }
     void raster_end_rendering() override { CC_UNREACHABLE("vulkan raster rendering is not implemented yet"); }
+    void raster_bind_pipeline(sg::raster_pipeline const&) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
+    void raster_bind_group(int, sg::binding_group const&) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
+    void raster_bind_vertex_buffers(int, cc::span<sg::vertex_buffer_view const>) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
+    void raster_bind_index_buffer(sg::index_buffer_view const&) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
+    void raster_set_viewport(sg::viewport const&) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
+    void raster_set_scissor(tg::aabb2i const&) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
+    void raster_set_stencil_reference(sg::u32) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
+    void raster_set_blend_constants(tg::vec4f) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
+    void raster_set_inline_constants(cc::span<cc::byte const>, cc::optional<cc::isize>) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
+    void raster_draw(sg::draw_config const&) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
+    void raster_draw_indexed(sg::draw_indexed_config const&) override
+    {
+        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
+    }
 
     // Ray tracing (reached through cmd.raytracing) — not implemented yet. is_supported() returns false, so a
     // correct caller never reaches the build stubs; and the vulkan backend stays unregistered in the tier-1
