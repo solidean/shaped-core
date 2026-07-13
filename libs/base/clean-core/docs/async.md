@@ -202,26 +202,26 @@ bytes on every node.)
 
 ### v1 tradeoffs (node size & locking)
 
-The concurrency-safe node is **deliberately a v1**: correctness and a stable API first, leanness second. A
-node still carries a per-node spinlock, a `_wake_pending` flag, a compute frame (a `unique_function`), and a
-vtable pointer — and it is cacheline-aligned (64 B) to avoid false sharing. An ongoing size-reduction effort
-is shrinking it toward a single line: `sizeof(async<int>)` is currently **128 B** (down from an original
-384 B).
+`sizeof(async<int>)` is **64 B — one cache line** (down from an original 384 B), and the node is
+cacheline-aligned to avoid false sharing between unrelated nodes. Three ideas get it there:
 
-The value, the failure-channel error, and the set of dependents to wake (continuations) are **mutually
-exclusive over a node's life** — continuations matter only before completion, the value/error only after — so
-they share one 32 B result slot, discriminated by the node state (see `async_result_slot`). The slot holds up
-to **three inline weak dependents** (the common fan-out pays no allocation) and spills the rest, plus any
-one-shot completion latch, into slab-backed cells. Completion steals the continuation head under the node
-lock, then moves the value/error into the freed slot and publishes `ready` last, so a late subscriber never
-observes `ready` before the result is in place.
+* The value, the failure-channel error, and the set of dependents to wake (continuations) are **mutually
+  exclusive over a node's life** — continuations matter only before completion, the value/error only after —
+  so the error and the continuation head share one 16 B result slot, discriminated by the node state (see
+  `async_result_slot`); the value lives separately in the typed node. The slot holds **one inline weak
+  dependent** (the common single-dependent case pays no allocation) and spills the rest, plus any one-shot
+  completion latch, into slab-backed cells. Completion steals the continuation head under the node lock, then
+  moves the error into the freed slot and publishes `ready` last, so a late subscriber never observes `ready`
+  before the result is in place.
+* The compute frame is a **one-pointer `unique_function`** (the closure and its type-erased ops share one
+  node; see `cc::poly_node_allocation`).
+* The cacheline alignment lives on the concrete typed node, not the untemplated base, so the base does not
+  round its own size up to 64 and push the value/frame onto a second line.
 
-This is a known cost, not a settled design. The **semantics and the public API are the contract**; the node
-layout is not. Further shrinking toward 64 B is expected (a `unique_function` that is one pointer, removing
-the vtable by type-erasing the poll step into the frame, and merging the value into the result slot); leaner
-locking is also possible (folding the flags into the state word, a hybrid spin-then-block lock — see the
-REVIEW note on `async_spinlock`). These can change under the hood as the system matures without breaking
-callers.
+This is still a v1 on locking: each node carries a per-node spinlock and a `_wake_pending` flag plus the
+vtable pointer. The **semantics and the public API are the contract**; the node layout is not. Leaner locking
+is possible (folding the flags into the state word, a hybrid spin-then-block lock — see the REVIEW note on
+`async_spinlock`), and can change under the hood as the system matures without breaking callers.
 
 ## Not yet here (follow-ups)
 

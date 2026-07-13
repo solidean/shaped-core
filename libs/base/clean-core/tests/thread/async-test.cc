@@ -12,9 +12,9 @@
 using cc::async_context;
 using cc::async_result;
 
-// Node size guard. E3 (value/error/continuation result-slot union) took async<int> from 192 B to 128 B.
-// E4/E5 (unique_function -> 8 B, drop the vptr, merge the value into the union) will tighten this to 64 B.
-static_assert(sizeof(cc::async<int>) <= 128, "async<int> node grew beyond the E3 target (128 B)");
+// Node size guard: an async<int> node fits in exactly one cache line. Got here via the result-slot union
+// (E3), an 8 B unique_function frame (E4), and a 16 B continuation head (one inline dependent).
+static_assert(sizeof(cc::async<int>) <= 64, "async<int> node grew beyond one cache line (64 B)");
 
 // ============================================================================
 // basics

@@ -400,11 +400,12 @@ struct async_cont_cell
 };
 
 /// A node's set of dependents to wake when it completes (its "continuations"), plus at most a few
-/// one-shot completion latches. Exactly 32 B, so it shares the node's result slot with async_error
-/// (the two are mutually exclusive: continuations matter only before ready, the error only after).
-/// Up to 3 weak dependents sit inline — the common fan-out pays no allocation; the 4th+ dependents and
-/// every latch spill into a slab-backed intrusive list. Guarded by the node _lock: unlike async_dep_head
-/// it has multiple writers (other nodes' pollers subscribing/unsubscribing, plus this node completing).
+/// one-shot completion latches. Exactly 16 B, so it shares the node's result slot with async_error
+/// (the two are mutually exclusive: continuations matter only before ready, the error only after — and an
+/// async_error is 16 B, which sets the slot size). One weak dependent sits inline — the common single-
+/// dependent case pays no allocation; the 2nd+ dependents and every latch spill into a slab-backed intrusive
+/// list. Guarded by the node _lock: unlike async_dep_head it has multiple writers (other nodes' pollers
+/// subscribing/unsubscribing, plus this node completing).
 struct async_cont_head
 {
     async_cont_head() = default;
@@ -428,11 +429,15 @@ struct async_cont_head
     /// head only — never while holding the node lock, since scheduling a dependent takes its lock.
     void notify_all();
 
-    async_node_weak _inline_deps[3];   // 24 B: up to 3 dependents; a null slot is unused (holes allowed)
-    async_cont_cell* _spill = nullptr; // 8 B: 4th+ dependents and all latches
+    // Inline dependent capacity. Sized so the whole head stays 16 B (matching async_error, which sets the
+    // result-slot size); raising it past what fits 16 B grows the node past one cache line.
+    static constexpr cc::isize inline_capacity = 1;
+
+    async_node_weak _inline_deps[inline_capacity]; // a null slot is unused
+    async_cont_cell* _spill = nullptr;             // 2nd+ dependents and all latches
 };
 
-/// The 32 B result slot: a node holds EITHER its continuation head (while not ready) OR its
+/// The 16 B result slot: a node holds EITHER its continuation head (while not ready) OR its
 /// failure-channel error (while ready && is_error). A ready value lives separately in the typed node.
 /// Manual lifetime — async_node_base switches/destroys the active member by state (like small_vector /
 /// string do for their SSO union); this wrapper only guarantees the slot is born as an empty head.
@@ -484,9 +489,11 @@ enum class async_node_state : cc::u8
 /// the scheduler co-owns queued nodes through that handle. A node MUST be created via make_async_* (which
 /// make_shared) — a stack node is unsupported (from_alive would corrupt a never-initialized count).
 ///
-/// Cacheline-aligned (64 B): nodes are polled and woken concurrently from different threads, so keeping each
-/// on its own line avoids false sharing between unrelated nodes.
-struct alignas(64) async_node_base
+/// The concrete node (async<T>) is cacheline-aligned (64 B): nodes are polled and woken concurrently from
+/// different threads, so keeping each on its own line avoids false sharing between unrelated nodes. The
+/// alignment lives on the derived typed node, not here — this base is the low half of that line, and forcing
+/// alignas(64) on it alone would round its own size up to 64 and push the typed value/frame onto a 2nd line.
+struct async_node_base
 {
     // queries
 public:
@@ -614,20 +621,22 @@ private:
     /// stashed by the derived ctor so free_storage frees the right slot even through a base-typed weak cell.
     std::atomic<cc::u32> _strong{0};
     std::atomic<cc::u32> _weak{0};
-    cc::node_class_index _class_index{};
 
-    impl::async_spinlock _lock; // guards _state transitions, _wake_pending, _continuations (see class doc)
-
+    // The four byte-sized fields are grouped ahead of _lock so they fill what would otherwise be padding in
+    // front of the 4-byte-aligned spinlock — keeping the base at 48 B (node one cache line). Do not reorder.
     std::atomic<async_node_state> _state{async_node_state::cold};
-    bool _is_error = false;     // set (under _lock) at completion; also selects the active _slot member
-    bool _wake_pending = false; // set (under _lock) when a running node is scheduled; makes it re-poll
+    bool _is_error = false;              // set (under _lock) at completion; also selects the active _slot member
+    bool _wake_pending = false;          // set (under _lock) when a running node is scheduled; makes it re-poll
+    cc::node_class_index _class_index{}; // this node's concrete async<T> size class (free_storage frees by it)
+
+    impl::async_spinlock _lock; // guards _state transitions, _wake_pending, and the continuation head (class doc)
 
     /// Not-ready dependencies, rebuilt each poll (folded pending + subscribed set). Only for scheduling/wakeup;
     /// it does not own anything (the compute frame's captures keep deps alive). Poller-private (only the single
     /// active poller touches it), so it needs no lock. See impl::async_dep_head for the packed 8 B layout.
     impl::async_dep_head _deps;
 
-    /// The 32 B value/error/continuation slot. Holds the continuation head (dependents to wake, weak, guarded
+    /// The 16 B value/error/continuation slot. Holds the continuation head (dependents to wake, weak, guarded
     /// by _lock) until completion; then either nothing (value completion — value lives in the typed node) or
     /// the failure-channel error (ready && _is_error). See impl::async_result_slot; the active member is
     /// switched/destroyed by state in the completion path and teardown_payload.

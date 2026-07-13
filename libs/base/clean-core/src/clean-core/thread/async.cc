@@ -336,7 +336,7 @@ cc::impl::async_cont_head::~async_cont_head()
 cc::impl::async_cont_head::async_cont_head(async_cont_head&& o) noexcept : _spill(o._spill)
 {
     o._spill = nullptr;
-    for (int i = 0; i < 3; ++i)
+    for (cc::isize i = 0; i < inline_capacity; ++i)
         _inline_deps[i] = cc::move(o._inline_deps[i]);
 }
 
@@ -352,7 +352,7 @@ cc::impl::async_cont_head& cc::impl::async_cont_head::operator=(async_cont_head&
         }
         _spill = o._spill;
         o._spill = nullptr;
-        for (int i = 0; i < 3; ++i)
+        for (cc::isize i = 0; i < inline_capacity; ++i)
             _inline_deps[i] = cc::move(o._inline_deps[i]); // weak_ptr move-assign resets ours, steals o's
     }
     return *this;

@@ -91,9 +91,11 @@ private:
 namespace impl
 {
 /// Holds the typed value and the type-erased compute frame; implements the two virtuals the base poll loop
-/// needs. async<T> adds only its handle-specific surface on top.
+/// needs. async<T> adds only its handle-specific surface on top. Cacheline-aligned here (not on the base) so
+/// the whole node — base + value + frame — occupies exactly one 64 B line for a value up to ~16 B (see the
+/// async_node_base doc); larger values grow it onto further lines naturally.
 template <class T>
-struct async_typed_node : cc::async_node_base
+struct alignas(64) async_typed_node : cc::async_node_base
 {
     /// Install the compute frame. F is called as `async_result<T>(async_context&)`.
     template <class F>
