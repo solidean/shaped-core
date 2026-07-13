@@ -397,14 +397,14 @@ cc::shared_async<T> = std::shared_ptr<cc::async<T>>;   // the normal handle (asy
 auto a = cc::make_async_lazy([]{ return 40; });                          // cold; no context, no deps
 auto s = cc::make_async_scheduled<int>([](cc::async_context&){ ... });   // eager (scheduled now if a worker scope active)
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);   // depends on a,s; f gets plain ints
-auto d = a->map_lazy([](int x){ return x + 2; });   // single-dep transform (also map_scheduled; no plain `map`)
+auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
 
 // driving BLOCKS the calling thread (busy-waits vs a real scheduler) — top-level/tests only, never in a frame:
 int v = cc::async_blocking_get(a);                               // -> T (asserts on error/cancel)
 cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a); // fallible drive
 a->is_ready();  a->has_value();  a->has_error();
-std::shared_ptr<int const> pv = a->try_value();   // zero-copy alias; null unless ready with a value
+int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value (also try_error())
 std::shared_ptr<cc::async_error const> pe = a->try_error();
 m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")));  // complete a manual node
 

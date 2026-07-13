@@ -145,43 +145,21 @@ protected:
 // ============================================================================
 
 /// The normal composable async handle. Always used through shared_async<T> = std::shared_ptr<async<T>>;
-/// the node is non-copyable and immovable. Create with cc::make_async_lazy / cc::make_async_scheduled,
-/// transform with map_lazy / map_scheduled, drive with cc::async_blocking_get. Shared ownership comes from
-/// async_node_base.
+/// the node is non-copyable and immovable. Create with cc::make_async_lazy / cc::make_async_scheduled (the
+/// variadic dependency form handles single- and multi-dependency transforms), drive with
+/// cc::async_blocking_get. Shared ownership comes from async_node_base.
 template <class T>
 struct async : impl::async_typed_node<T>
 {
     // zero-copy access
 public:
-    /// A shared_ptr aliasing the stored value (keeps the node alive); empty unless ready with a value.
-    [[nodiscard]] std::shared_ptr<T const> try_value() const
-    {
-        if (!this->has_value())
-            return {};
-        std::shared_ptr<async_node_base const> self = this->shared_from_this();
-        return std::shared_ptr<T const>(cc::move(self), this->value_ptr());
-    }
+    /// Pointer to the stored value, or null unless ready with a value. Non-owning — valid while the node is
+    /// alive (you keep it alive through the shared_async handle, not through this pointer).
+    [[nodiscard]] T const* try_value() const { return this->value_ptr(); }
 
-    /// A shared_ptr aliasing the stored error (keeps the node alive); empty unless ready with an error.
-    [[nodiscard]] std::shared_ptr<async_error const> try_error() const
-    {
-        if (!this->has_error())
-            return {};
-        std::shared_ptr<async_node_base const> self = this->shared_from_this();
-        return std::shared_ptr<async_error const>(cc::move(self), &this->base_error());
-    }
-
-    // dataflow
-public:
-    /// Transform this async's value — the simple single-dependency case (richer compositions use the variadic
-    /// make_async_lazy / make_async_scheduled dependency form). Lazy vs scheduled mirrors the make_async_*
-    /// distinction; there is deliberately no plain `map` (it would hide whether the result is eager or lazy).
-    /// The function may omit its async_context& parameter. Dataflow naming — deliberately not `then`.
-    /// Defined out-of-line below.
-    template <class F>
-    [[nodiscard]] auto map_lazy(F&& f);
-    template <class F>
-    [[nodiscard]] auto map_scheduled(F&& f);
+    /// Pointer to the failure-channel value, or null unless ready with an error. Non-owning — valid while the
+    /// node is alive.
+    [[nodiscard]] async_error const* try_error() const { return this->has_error() ? &this->base_error() : nullptr; }
 
     // manual / promise-style completion (for externally produced values)
 public:
@@ -431,24 +409,5 @@ template <class T>
     auto r = cc::try_async_blocking_get(root);
     CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
     return cc::move(r).value();
-}
-
-// member map: the simple single-dependency transform, routed through the variadic dependency form (f gets
-// the unwrapped value, and may take a leading async_context&). Anything richer goes through make_async_*.
-template <class T>
-template <class F>
-auto async<T>::map_lazy(F&& f)
-{
-    // shared_from_this() yields the async_node_base handle; recover the typed shared_async<T>.
-    auto self = std::static_pointer_cast<async<T>>(this->shared_from_this());
-    return cc::make_async_lazy(cc::forward<F>(f), cc::move(self));
-}
-
-template <class T>
-template <class F>
-auto async<T>::map_scheduled(F&& f)
-{
-    auto self = std::static_pointer_cast<async<T>>(this->shared_from_this());
-    return cc::make_async_scheduled(cc::forward<F>(f), cc::move(self));
 }
 } // namespace cc

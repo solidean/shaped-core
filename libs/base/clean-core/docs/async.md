@@ -76,9 +76,9 @@ auto c = cc::make_async_lazy([](int x, int y) { return x + y; }, a, b);   // c w
 auto d = cc::make_async_lazy([] { return 7; });                          // no deps, no context
 ```
 
-`dep->map_lazy(f)` / `dep->map_scheduled(f)` are the shorthand for the single-dependency case (mirroring the
-lazy/scheduled split — there is deliberately no plain `map`). Plain non-async arguments in the variadic
-dependency form are not wired up yet.
+The single-dependency transform is just the one-argument form: `make_async_lazy(f, dep)` /
+`make_async_scheduled(f, dep)` (lazy vs scheduled — there is deliberately no plain `map` that hides which).
+Plain non-async arguments in the variadic dependency form are not wired up yet.
 
 ## Polling never blocks
 

@@ -22,12 +22,10 @@ TEST("async - basic scheduled async and zero-copy try_value")
 
     CHECK(cc::async_blocking_get(a) == 42);
 
-    auto v = a->try_value();
+    // try_value() is a non-owning pointer into the node (null unless ready with a value); the handle keeps
+    // the node alive.
+    int const* v = a->try_value();
     REQUIRE(v != nullptr);
-    CHECK(*v == 42);
-
-    // the aliasing shared_ptr keeps the node alive after the original handle is dropped
-    a.reset();
     CHECK(*v == 42);
 }
 
@@ -46,21 +44,21 @@ TEST("async - success via context helper")
 }
 
 // ============================================================================
-// map — dataflow transform (never `then`)
+// single-dependency transform (the one-argument variadic form)
 // ============================================================================
 
-TEST("async - member map_lazy transforms a value")
+TEST("async - single-dependency transform via make_async_lazy")
 {
     auto a = cc::make_async_lazy([] { return 20; });
-    auto b = a->map_lazy([](int x) { return x + 22; });
+    auto b = cc::make_async_lazy([](int x) { return x + 22; }, a);
     CHECK(cc::async_blocking_get(b) == 42);
 }
 
-TEST("async - chained member map_lazy")
+TEST("async - chained single-dependency transforms")
 {
     auto a = cc::make_async_lazy([] { return 1; });
-    auto b = a->map_lazy([](int x) { return x + 1; });
-    auto c = b->map_lazy([](int x) { return x * 10; });
+    auto b = cc::make_async_lazy([](int x) { return x + 1; }, a);
+    auto c = cc::make_async_lazy([](int x) { return x * 10; }, b);
     CHECK(cc::async_blocking_get(c) == 20);
 }
 
@@ -263,18 +261,19 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
 // error propagation
 // ============================================================================
 
-TEST("async - error short-circuits member map, f never runs")
+TEST("async - error short-circuits a dependent transform, f never runs")
 {
     auto a = cc::make_async_lazy<int>([](async_context& actx) -> async_result<int>
                                       { return actx.error(cc::any_error("boom")); });
 
     bool ran = false;
-    auto b = a->map_lazy(
+    auto b = cc::make_async_lazy(
         [&](int x)
         {
             ran = true;
             return x + 1;
-        });
+        },
+        a);
 
     auto r = cc::try_async_blocking_get(b);
     CHECK(r.has_error());
