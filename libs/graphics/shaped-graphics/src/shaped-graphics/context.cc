@@ -3,6 +3,7 @@
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/gpu_timestamp.hh>
 #include <shaped-graphics/pipeline_cache.hh>
 
 #include <memory>
@@ -50,6 +51,25 @@ context::context(backend_kind backend, thread_model threading)
 pipeline_cache& context::pipeline_cache_ref()
 {
     return *_pipeline_cache;
+}
+
+cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
+{
+    if (timestamp._heap_future == nullptr)
+        return {};
+    auto const data = timestamp._heap_future->wait_get_data();
+    if (!data.has_value())
+        return {};
+    CC_ASSERT(timestamp._index < data.value().size(), "timestamp index out of range for its heap download");
+    return data.value()[timestamp._index];
+}
+
+cc::optional<double> context::wait_for_seconds(gpu_timestamp const& timestamp)
+{
+    auto const ticks = wait_for_ticks(timestamp);
+    if (!ticks.has_value())
+        return {};
+    return double(ticks.value()) * timestamp._tick_to_seconds;
 }
 
 context::~context()

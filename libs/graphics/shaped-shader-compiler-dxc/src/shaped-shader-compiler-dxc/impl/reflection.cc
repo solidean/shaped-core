@@ -39,31 +39,19 @@ namespace
         return {};
     }
 }
-} // namespace
 
-cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::shader_stage stage)
+/// The bound-resource loop, shared by the monolithic (ID3D12ShaderReflection) and library
+/// (ID3D12FunctionReflection) paths — both expose GetResourceBindingDesc / GetConstantBufferByName.
+template <class ReflectionT>
+[[nodiscard]] cc::result<cc::vector<sg::binding>> reflect_bindings(ReflectionT* reflection, UINT bound_resources)
 {
-    ComPtr<IDxcBlob> reflection_blob;
-    if (HRESULT hr = result->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(reflection_blob.GetAddressOf()), nullptr);
-        FAILED(hr) || !reflection_blob)
-        return dxc_error(hr, "GetOutput(DXC_OUT_REFLECTION)");
-
-    DxcBuffer const buffer = {reflection_blob->GetBufferPointer(), reflection_blob->GetBufferSize(), 0};
-    ComPtr<ID3D12ShaderReflection> reflection;
-    if (HRESULT hr = utils->CreateReflection(&buffer, IID_PPV_ARGS(reflection.GetAddressOf())); FAILED(hr))
-        return dxc_error(hr, "IDxcUtils::CreateReflection");
-
-    D3D12_SHADER_DESC shader_desc = {};
-    if (HRESULT hr = reflection->GetDesc(&shader_desc); FAILED(hr))
-        return dxc_error(hr, "ID3D12ShaderReflection::GetDesc");
-
-    reflected_shader out;
-    out.bindings.reserve(cc::isize(shader_desc.BoundResources));
-    for (UINT i = 0; i < shader_desc.BoundResources; ++i)
+    cc::vector<sg::binding> bindings;
+    bindings.reserve(cc::isize(bound_resources));
+    for (UINT i = 0; i < bound_resources; ++i)
     {
         D3D12_SHADER_INPUT_BIND_DESC bd = {};
         if (HRESULT hr = reflection->GetResourceBindingDesc(i, &bd); FAILED(hr))
-            return dxc_error(hr, "ID3D12ShaderReflection::GetResourceBindingDesc");
+            return dxc_error(hr, "GetResourceBindingDesc");
 
         cc::optional<sg::binding_type> const type = map_binding_type(bd);
         if (!type.has_value())
@@ -90,10 +78,77 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
             }
         }
 
-        out.bindings.push_back(cc::move(b));
+        bindings.push_back(cc::move(b));
+    }
+    return bindings;
+}
+
+/// Reflects a single-entry DXIL library: finds the function whose mangled name carries `entry_point`
+/// (DXC mangles `main` to e.g. `?main@@YAXXZ` — the unmangled name sits between `?` and `@@`, so the
+/// `?entry@@` token avoids matching a prefix like `main2`), then extracts its bindings.
+[[nodiscard]] cc::result<cc::vector<sg::binding>> reflect_library_bindings(ID3D12LibraryReflection* library,
+                                                                           cc::string_view entry_point)
+{
+    D3D12_LIBRARY_DESC library_desc = {};
+    if (HRESULT hr = library->GetDesc(&library_desc); FAILED(hr))
+        return dxc_error(hr, "ID3D12LibraryReflection::GetDesc");
+
+    cc::string const search_token = cc::format("?{}@@", entry_point);
+    for (UINT i = 0; i < library_desc.FunctionCount; ++i)
+    {
+        ID3D12FunctionReflection* function = library->GetFunctionByIndex(INT(i));
+        if (function == nullptr)
+            continue;
+
+        D3D12_FUNCTION_DESC function_desc = {};
+        if (HRESULT hr = function->GetDesc(&function_desc); FAILED(hr))
+            return dxc_error(hr, "ID3D12FunctionReflection::GetDesc");
+
+        if (cc::string_view(function_desc.Name).contains(search_token))
+            return reflect_bindings(function, function_desc.BoundResources);
     }
 
-    if (stage == sg::shader_stage::compute)
+    return cc::error(
+        cc::format("shaped-shader-compiler-dxc: entry point '{}' not found in the compiled DXIL library", entry_point));
+}
+} // namespace
+
+cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::shader_stage stage, cc::string_view entry_point)
+{
+    ComPtr<IDxcBlob> reflection_blob;
+    if (HRESULT hr = result->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(reflection_blob.GetAddressOf()), nullptr);
+        FAILED(hr) || !reflection_blob)
+        return dxc_error(hr, "GetOutput(DXC_OUT_REFLECTION)");
+
+    DxcBuffer const buffer = {reflection_blob->GetBufferPointer(), reflection_blob->GetBufferSize(), 0};
+    reflected_shader out;
+
+    if (sg::is_raytracing_stage(stage))
+    {
+        // Ray-tracing shaders reflect as a DXIL library; bindings hang off the entry-point function.
+        ComPtr<ID3D12LibraryReflection> library;
+        if (HRESULT hr = utils->CreateReflection(&buffer, IID_PPV_ARGS(library.GetAddressOf())); FAILED(hr))
+            return dxc_error(hr, "IDxcUtils::CreateReflection (library)");
+
+        auto bindings = reflect_library_bindings(library.Get(), entry_point);
+        CC_RETURN_IF_ERROR(bindings);
+        out.bindings = cc::move(bindings.value());
+        return out; // no workgroup size for ray-tracing stages
+    }
+
+    ComPtr<ID3D12ShaderReflection> reflection;
+    if (HRESULT hr = utils->CreateReflection(&buffer, IID_PPV_ARGS(reflection.GetAddressOf())); FAILED(hr))
+        return dxc_error(hr, "IDxcUtils::CreateReflection");
+
+    D3D12_SHADER_DESC shader_desc = {};
+    if (HRESULT hr = reflection->GetDesc(&shader_desc); FAILED(hr))
+        return dxc_error(hr, "ID3D12ShaderReflection::GetDesc");
+
+    auto bindings = reflect_bindings(reflection.Get(), shader_desc.BoundResources);
+    CC_RETURN_IF_ERROR(bindings);
+    out.bindings = cc::move(bindings.value());
+
+    if (is_compute_stage(stage))
     {
         UINT x = 0, y = 0, z = 0;
         reflection->GetThreadGroupSize(&x, &y, &z);

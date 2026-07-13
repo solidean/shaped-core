@@ -6,6 +6,7 @@
 #include <shaped-graphics/backend/subresource.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
+#include <shaped-graphics/backends/dx12/dx12_query.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/command_list.hh>
 
@@ -45,6 +46,11 @@ public:
     /// before every GPU op that consumes them, and by the context at submit for the finalize reverts.
     void flush_barriers();
 
+    /// Resolve every leased query heap into one transient buffer and start one inline readback per heap,
+    /// filling each heap's shared future in place. Records GPU work, so it must run before Close and is
+    /// driven from submit under the submission lock. No-op for a list that recorded no queries.
+    void finalize_queries_before_close();
+
     dx12_context& _ctx;             // creating context — outlives this list
     sg::command_list_slot _slot;    // released to the context's slot allocator on submit/drop
     bool _consumed = false;         // set by submit/drop; gates the destructor's auto-drop
@@ -55,6 +61,15 @@ public:
     // Deferred readback copies recorded into this list; stamped with the submission token and handed
     // to the download system at submit (empty for a list with no downloads).
     cc::vector<dx12_download_copy_job> _pending_downloads;
+
+    // Query heaps leased by this list while recording (empty for a list with no queries). Slots are
+    // bump-allocated from the active lease; finalize_queries_before_close resolves + reads them back at
+    // submit and returns them to the query system. A drop returns them unresolved.
+    cc::vector<cc::unique_ptr<dx12_query_heap_lease>> _leased_query_heaps;
+
+    // Index into _leased_query_heaps of the current timestamp heap (-1 = none / all full). A new heap is
+    // leased on demand when this is -1 or the active one is full. One slot per query type (timestamp only).
+    int _active_timestamp_lease = -1;
 
     // Resources whose access has been declared for the *next* GPU op but not yet flushed. track_*_access
     // appends a resource here on its first binding to the op only (declare reports that), so each appears at
@@ -139,6 +154,20 @@ protected:
                                                               sg::accel_build_flags flags) override;
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
+
+    // Ray-tracing dispatch (reached through cmd.raytracing). Bodies in dx12_command_list.cc, next to the
+    // compute equivalents (ray tracing binds through the compute root signature).
+    void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;
+    void raytracing_bind_group(int set, sg::binding_group const& group) override;
+    void raytracing_dispatch_rays(sg::raytracing_shader_table const& table,
+                                  sg::raygen_index raygen,
+                                  int width,
+                                  int height,
+                                  int depth) override;
+
+    // GPU queries (reached through cmd.query). Bodies in dx12_command_list.queries.cc.
+    [[nodiscard]] bool query_timestamps_supported() const override;
+    [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override;
 
 private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker

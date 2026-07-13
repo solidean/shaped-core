@@ -10,6 +10,8 @@
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
+#include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -205,6 +207,84 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     _list->Dispatch(UINT(x), UINT(y), UINT(z));
 }
 
+void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline)
+{
+    auto const* rp = dynamic_cast<dx12_raytracing_pipeline const*>(&pipeline);
+    CC_ASSERT(rp != nullptr, "raytracing_pipeline is not a dx12 raytracing_pipeline");
+
+    // Query the DXR command-list interface OUTSIDE the assert — SetPipelineState1 lives on it, and the
+    // As() out-param is a real side effect CC_ASSERT would compile out with asserts off.
+    ComPtr<ID3D12GraphicsCommandList4> list4;
+    [[maybe_unused]] HRESULT const list4_hr = _list.As(&list4);
+    CC_ASSERT(SUCCEEDED(list4_hr) && list4, "ID3D12GraphicsCommandList4 unavailable (SDK/driver too old for DXR)");
+
+    // Ray tracing binds through the compute root signature; set the shader-visible heaps first, then the
+    // global root signature, then the state object (SetPipelineState1, not SetPipelineState).
+    ID3D12DescriptorHeap* heaps[] = {_ctx._descriptor_heap.heap.Get(), _ctx._sampler_heap.heap.Get()};
+    _list->SetDescriptorHeaps(2, heaps);
+    _list->SetComputeRootSignature(rp->layout->root_signature.Get());
+    list4->SetPipelineState1(rp->state_object.Get());
+
+    _bound_pipeline_layout = rp->layout.get();
+    _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
+}
+
+void dx12_command_list::raytracing_bind_group(int set, sg::binding_group const& group)
+{
+    // Identical to compute: DXR binds through the compute root signature.
+    compute_bind_group(set, group);
+}
+
+void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table const& table,
+                                                 sg::raygen_index raygen,
+                                                 int width,
+                                                 int height,
+                                                 int depth)
+{
+    CC_ASSERT(width >= 1 && height >= 1 && depth >= 1, "dispatch_rays dimensions must be >= 1");
+    CC_ASSERT(cc::i64(width) * cc::i64(height) * cc::i64(depth) <= (cc::i64(1) << 30), "dispatch_rays exceeds the 2^30 "
+                                                                                       "total-thread limit");
+    CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a raytracing pipeline before dispatch_rays");
+
+    auto const* dt = dynamic_cast<dx12_raytracing_shader_table const*>(&table);
+    CC_ASSERT(dt != nullptr, "raytracing_shader_table is not a dx12 shader table");
+
+    ComPtr<ID3D12GraphicsCommandList4> list4;
+    [[maybe_unused]] HRESULT const list4_hr = _list.As(&list4);
+    CC_ASSERT(SUCCEEDED(list4_hr) && list4, "ID3D12GraphicsCommandList4 unavailable (SDK/driver too old for DXR)");
+
+    // Declare each bound group's accesses at the raytracing stage (a bound TLAS surfaces as accel_read), same
+    // rhythm as compute_dispatch.
+    for (auto const* bound_group : _bound_groups)
+    {
+        if (bound_group == nullptr)
+            continue;
+
+        for (auto const& view : bound_group->hazard_views)
+            if (view.buffer)
+                track_buffer_access(view.buffer, sg::pipeline_stage_flags::raytracing, sg::shader_access_of(view.access));
+
+        for (auto const& tv : bound_group->texture_hazard_views)
+            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flags::raytracing,
+                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+    }
+
+    // The shader table buffer is read by the fixed-function ray dispatch.
+    track_buffer_access(dt->buffer, sg::pipeline_stage_flags::raytracing, sg::access_flags::shader_read);
+
+    flush_barriers();
+
+    D3D12_DISPATCH_RAYS_DESC desc = {};
+    desc.RayGenerationShaderRecord = dt->raygen_record(raygen);
+    desc.MissShaderTable = dt->miss_table;
+    desc.HitGroupTable = dt->hit_table;
+    desc.CallableShaderTable = dt->callable_table;
+    desc.Width = UINT(width);
+    desc.Height = UINT(height);
+    desc.Depth = UINT(depth);
+    list4->DispatchRays(&desc);
+}
+
 void dx12_command_list::compute_declare_array_buffer_access(cc::string_view binding_name,
                                                             cc::span<sg::array_buffer_access const> elements)
 {
@@ -392,6 +472,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next) -> sg::submission_token
         {
+            // Resolve + read back this list's GPU queries first: it records commands (ResolveQueryData +
+            // the readback copy) that must land before Close, and touches a transient resolve buffer whose
+            // slot the finalize loop below then commits. Its readbacks ride _pending_downloads and are
+            // stamped by enqueue_submitted at the end of this lambda.
+            cmd->finalize_queries_before_close();
+
             // Finalize access tracking before closing. Each resource decides per-itself: the last command
             // list using it commits its final state as the new canonical (the one case that may leave a
             // texture in a new layout); every earlier list rolls back to canonical. For buffers this is a
@@ -500,6 +586,13 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
 
     // Never submitted, so its recorded downloads will never run — reclaim their reserved readback space.
     _download_inline.discard_unsubmitted(cmd._pending_downloads);
+
+    // Return any leased query heaps to the pool unresolved. Handles handed out for this list keep an
+    // invalid shared future, so they stay valid-but-never-ready (like a cancelled download).
+    for (auto& lease : cmd._leased_query_heaps)
+        _query_system.release_heap(cc::move(lease));
+    cmd._leased_query_heaps.clear();
+    cmd._active_timestamp_lease = -1;
 
     // The recorded work never runs, so its declared accesses leave no canonical state: clear each touched
     // resource's slot — which only decrements that resource's active-slot count (canonical layout

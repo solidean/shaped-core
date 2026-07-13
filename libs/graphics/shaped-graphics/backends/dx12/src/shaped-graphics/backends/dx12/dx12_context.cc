@@ -48,6 +48,7 @@ void dx12_context::shutdown()
     }
 
     _cmd_pool.shutdown();
+    _query_system.shutdown();
 
     _submission_fence.Reset();
     _epoch_fence.Reset();

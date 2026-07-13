@@ -169,6 +169,25 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // guarantee delivery either; use ctx.wait_for(future)). Uploading + downloading + copying the SAME buffer works in ONE list —
 // the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // vulkan transfer is a TODO stub.
+
+// GPU queries (cmd.query scope). See docs/concepts/queries.md.
+cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan stub: no)
+cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
+// resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
+```
+
+## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
+
+```cpp
+#include <shaped-graphics/gpu_timestamp.hh>
+sg::gpu_timestamp t = cmd.query.record_gpu_timestamp(); // copyable value type; read AFTER submitting the list
+t.is_valid()                    // bool — backed by a real query (false = default-constructed / unsupported backend)
+t.is_ready()                    // bool — NON-BLOCKING poll; true once the tick landed (false before submit / forever if dropped)
+t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (polls); only DIFFERENCES are meaningful
+t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
+ctx.wait_for_ticks(t)           // -> cc::optional<cc::u64>  — BLOCK until delivered, returns the tick
+ctx.wait_for_seconds(t)         // -> cc::optional<double>   — same, returns seconds
+// normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```
 
 ## raw_buffer — GPU-resident, immutable shape  (abstract)
@@ -307,7 +326,8 @@ sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
 
 #include <shaped-graphics/compiled_shader.hh>
-sg::shader_stage            // vertex | fragment | compute (+ more later)
+sg::shader_stage            // vertex | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
+sg::is_raytracing_stage(s)  // bool — one of the six RT stages;  sg::is_compute_stage(s) — the compute stage
 sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
                             //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler }  — value type
@@ -373,6 +393,34 @@ cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> t
 tlas.as_view()  // -> acceleration_structure_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RT / RayQuery)
 ```
 
+## raytracing pipeline + shader table + dispatch_rays  (dx12 real on WARP; see docs/concepts/raytracing-pipeline.md)
+
+```cpp
+#include <shaped-graphics/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing_shader_table.hh>
+// each RT shader is its own single-entry lib_6_x compiled_shader (stage raygen/miss/closest_hit/any_hit/intersection/callable)
+sg::hit_shader { optional<compiled_shader> closest_hit, any_hit, intersection; }  // intersection present ⇒ procedural hit group
+sg::raytracing_pipeline_description { pipeline_layout_handle layout;              // global root signature (one, no local root sigs)
+    vector<compiled_shader> raygen_shaders, miss_shaders, callable_shaders; vector<hit_shader> hit_shaders;
+    u32 max_recursion_depth=1; isize max_payload_size=0, max_attribute_size=8; pinned_data cached_pipeline; }
+//   phase 1 — register in the pipeline, returns a *_shader_handle:
+desc.add_raygen_shader(compiled_shader)  // -> raygen_shader_handle    (also add_miss_shader / add_callable_shader)
+desc.add_hit_shader(hit_shader)          // -> hit_shader_handle
+ctx.uncached.create_raytracing_pipeline(desc)      // -> raytracing_pipeline_handle (throws; sync escape hatch)
+ctx.cached.acquire_raytracing_pipeline(desc)       // -> async_raytracing_pipeline  (memoized, async build)
+
+sg::raytracing_shader_table_description { raytracing_pipeline_handle pipeline;
+    vector<raygen_shader_handle> raygen; vector<miss_shader_handle> miss; vector<hit_shader_handle> hit; vector<callable_shader_handle> callable; }
+//   phase 2 — place a handle in the table, returns a *_index (what HLSL TraceRay / dispatch_rays address):
+tbl.add_raygen_shader(raygen_shader_handle)  // -> raygen_index         (also add_miss_shader / add_hit_shader / add_callable_shader)
+ctx.uncached.create_raytracing_shader_table(tbl)   // -> raytracing_shader_table_handle (persistent, uncached, ties to one pipeline)
+
+// recording (on a command_list, via cmd.raytracing). Binds through the compute root signature.
+cmd.raytracing.bind_pipeline(raytracing_pipeline const&)          // void — sets the DXR state object + global root signature
+cmd.raytracing.bind_group(int set, binding_group const&)         // void — like compute; bind a tlas here (surfaces accel_read)
+cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — traces w*h*d rays (product <= 2^30)
+```
+
 ## cached layouts + pipelines — the built-in cache  (ctx.cached / pipeline_cache)
 
 ```cpp
@@ -383,6 +431,7 @@ ctx.cached.acquire_binding_group_layout(span<binding const>, static_samplers={})
 ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_layout_handle  SYNC; keyed on the ordered group-layout identities => one shared handle
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
 // keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: ordered group-layout
 //   identities; compute pipeline: shader bytecode+entry+signature + pipeline-layout handle identity).

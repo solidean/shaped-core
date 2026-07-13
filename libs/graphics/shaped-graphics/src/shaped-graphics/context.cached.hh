@@ -31,6 +31,11 @@ public:
     /// layout through this scope too for full dedup (see pipeline_cache).
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(compute_pipeline_description const& desc);
 
+    /// The async raytracing_pipeline for `desc`, built on a miss. Drive with cc::async_blocking_get, or
+    /// poll .is_ready() / .try_value(); a build failure surfaces as an async error. Acquire the pipeline
+    /// layout through this scope too for full dedup (see pipeline_cache).
+    [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(raytracing_pipeline_description const& desc);
+
     /// The underlying cache — install providers (add_*_provider) or run apply_bookkeeping through it.
     [[nodiscard]] pipeline_cache& cache();
 

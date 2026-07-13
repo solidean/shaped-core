@@ -41,6 +41,10 @@ public:
     /// Adds a tier to the compute-pipeline cache.
     void add_compute_pipeline_provider(std::shared_ptr<cc::key_value_provider<cc::hash128, async_compute_pipeline>> provider);
 
+    /// Adds a tier to the raytracing-pipeline cache.
+    void add_raytracing_pipeline_provider(
+        std::shared_ptr<cc::key_value_provider<cc::hash128, async_raytracing_pipeline>> provider);
+
     /// Convenience: give every cache a default in-memory tier (up to max_entries each).
     void add_default_in_memory_providers(cc::isize max_entries = 4096);
 
@@ -65,6 +69,12 @@ public:
     /// cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc);
 
+    /// The async raytracing_pipeline for `desc`, built via ctx.uncached on a miss. The key combines every
+    /// shader's content with the pipeline_layout handle's identity and the pipeline limits. Drive with
+    /// cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(context& ctx,
+                                                                        raytracing_pipeline_description const& desc);
+
     // maintenance
 public:
     /// Runs bookkeeping (e.g. in-memory eviction) on all caches.
@@ -75,10 +85,12 @@ private:
                                                                cc::span<named_sampler const> static_samplers) const;
     [[nodiscard]] cc::hash128 compute_pipeline_layout_key(pipeline_layout_description const& desc) const;
     [[nodiscard]] cc::hash128 compute_compute_pipeline_key(compute_pipeline_description const& desc) const;
+    [[nodiscard]] cc::hash128 compute_raytracing_pipeline_key(raytracing_pipeline_description const& desc) const;
 
     cc::key_value_cache<cc::hash128, binding_group_layout_handle> _binding_group_layout_cache;
     cc::key_value_cache<cc::hash128, pipeline_layout_handle> _pipeline_layout_cache;
     cc::key_value_cache<cc::hash128, async_compute_pipeline> _compute_cache;
-    // TODO: _graphics_cache / _raytracing_cache once those pipeline types exist in sg.
+    cc::key_value_cache<cc::hash128, async_raytracing_pipeline> _raytracing_cache;
+    // TODO: _graphics_cache once that pipeline type exists in sg.
 };
 } // namespace sg

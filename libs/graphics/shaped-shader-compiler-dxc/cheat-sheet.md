@@ -25,7 +25,8 @@ ssc::dxc::compile_options       // { target; optimization; bool debug_info; bool
 #include <shaped-shader-compiler-dxc/shader_description.hh>
 ssc::dxc::shader_description     // { cc::string source; cc::string entry_point="main";
                            //   sg::shader_stage stage=compute; ssc::dxc::shader_model model=sm_6_8 }
-                           //   stage+model form the DXC profile ("cs_6_8")
+                           //   stage+model form the DXC profile ("cs_6_8"); the six RT stages -> "lib_6_x" (need model>=sm_6_3),
+                           //   reflected via ID3D12LibraryReflection (entry_point selects the library function). -E is still emitted.
 
 #include <shaped-shader-compiler-dxc/preprocessed_source.hh>
 ssc::dxc::preprocessed_source   // { cc::string source; cc::string warnings }  — flattened HLSL + diagnostics

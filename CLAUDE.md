@@ -74,6 +74,10 @@ nexus    typed-geometry  ←────────────────┘
 * **`.clang-format` is authoritative.** Source must not change under it (requires
   clang-format >= 21); it wins over prose docs. `.clang-tidy` is still being
   calibrated — treat its warnings as advisory, not gospel.
+* **Building or testing requires the `building-and-testing` skill.** Activate it
+  before the first `dev.py` build/test in a session — do not drive `dev.py` from
+  memory (piping into `tail`/`head` masks failures; `--mirror-output` shows live
+  stdout).
 * **Test binaries are named `*-test`.** Never run one directly — go through
   `uv run dev.py test` (auto-configures, builds, discovers, records). See the
   `building-and-testing` skill.
@@ -104,6 +108,13 @@ caller — treat growing it as a first-class option.
 ---
 
 ## Build & test (essentials)
+
+**Before you build or test in a session, activate the `building-and-testing`
+skill** — it carries the non-obvious rules that keep the loop correct (never pipe
+`dev.py` into `tail`/`head`/`grep` — it masks the real exit code; use the global
+`--mirror-output` to see a binary's live stdout, e.g. a benchmark's printed table;
+`--preset` goes *after* the subcommand; diagnose with `build_diag` / `test_diag`).
+Don't reconstruct these from memory — load the skill.
 
 [dev.py](dev.py) is the only way to build and test. Run from the repo root,
 **without piping output** (it's terse by design):

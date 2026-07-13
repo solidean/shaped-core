@@ -14,6 +14,7 @@
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_query.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
@@ -80,7 +81,8 @@ public:
         _upload_inline(*this),
         _download_inline(*this),
         _upload_async(*this),
-        _download_async(*this)
+        _download_async(*this),
+        _query_system(*this)
     {
     }
 
@@ -121,6 +123,13 @@ public:
         sg::compiled_shader const& shader,
         dx12_pipeline_layout_handle layout,
         cc::span<cc::byte const> cached_pipeline,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_raytracing_pipeline_handle> create_dx12_raytracing_pipeline(
+        sg::raytracing_pipeline_description const& desc,
+        dx12_pipeline_layout_handle layout,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_raytracing_shader_table_handle> create_dx12_raytracing_shader_table(
+        sg::raytracing_shader_table_description const& desc,
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_binding_group_handle> create_dx12_binding_group(dx12_binding_group_layout_handle layout,
                                                                                   cc::span<sg::named_view const> views,
@@ -182,6 +191,12 @@ public:
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
         sg::compute_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
+        sg::raytracing_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::raytracing_shader_table_handle> try_create_raytracing_shader_table(
+        sg::raytracing_shader_table_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
                                                                                 cc::span<sg::named_view const> views,
@@ -316,9 +331,9 @@ public:
     // Extra systems — owned by value, constructed with *this. The command-allocator pool recycles
     // command allocators (epoch-gated) and command lists per queue.
     //
-    // TODO: more backend systems will grow here as the API expands — a group-fence pool, async
-    // upload/download (copy-queue) systems, a query system, a descriptor system, and RTV/DSV
-    // allocators. (Inline upload/download already exist below.)
+    // TODO: more backend systems will grow here as the API expands — a group-fence pool, a descriptor
+    // system, and RTV/DSV allocators. (Inline upload/download, async upload/download, and the query
+    // system already exist below.)
     dx12_command_allocator_pool _cmd_pool;
 
     // Inline host↔device buffer transfer over UPLOAD / READBACK ring buffers on the direct queue.
@@ -333,6 +348,10 @@ public:
     // Async GPU→CPU buffer readback on the copy queue (reached via ctx.download). Owns its readback staging
     // ring + copy actor; initialized in create_dx12_context after the copy queue + download fence exist.
     dx12_download_async_system _download_async;
+
+    // GPU-query heap pool (reached via cmd.query). Leases timestamp query heaps to recording lists and
+    // caches the direct queue's timestamp frequency. Initialized in create_dx12_context after the queue exists.
+    dx12_query_system _query_system;
 
     // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
     // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a

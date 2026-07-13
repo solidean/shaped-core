@@ -187,6 +187,8 @@ add_executable(clean-core-test
     tests/benchmarks/string-hash-bench.cc
     tests/benchmarks/hash-benchmark.cc
     tests/benchmarks/allocation-benchmark.cc
+    tests/benchmarks/node-allocation-design-benchmark.cc
+    tests/benchmarks/node-allocation-design-refill.cc
 
     # tests grouped by topic, mirroring src/clean-core/
     tests/common/assert-test.cc
@@ -203,6 +205,10 @@ add_executable(clean-core-test
 
     tests/memory/allocation-test.cc
     tests/memory/node_allocation-test.cc
+    tests/memory/node_allocation-patterns-test.cc
+    tests/memory/node_allocation-sizes-test.cc
+    tests/memory/node_allocation-slabs-test.cc
+    tests/memory/node_allocation-handles-test.cc
     tests/memory/unique_ptr-test.cc
 
     tests/container/array-test.cc
@@ -212,6 +218,8 @@ add_executable(clean-core-test
     tests/container/strided_span-test.cc
     tests/container/pinned_data-test.cc
     tests/container/vector-test.cc
+    tests/container/map-test.cc
+    tests/container/set-test.cc
     tests/container/byte_stream_builder-test.cc
     tests/container/key_value_cache-test.cc
 

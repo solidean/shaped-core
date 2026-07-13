@@ -140,6 +140,14 @@ public:
         return future.wait_get_data();
     }
 
+    /// Blocks until `timestamp`'s tick is delivered, then returns the raw GPU tick. Waitable once the
+    /// recording list is submitted; nullopt if the timestamp is invalid, unsubmitted, or cancelled. Only
+    /// differences are meaningful. Normal per-frame usage polls gpu_timestamp::is_ready() instead.
+    [[nodiscard]] cc::optional<u64> wait_for_ticks(gpu_timestamp const& timestamp);
+
+    /// Like wait_for_ticks, but returns the tick converted to seconds (1 / timestamp frequency).
+    [[nodiscard]] cc::optional<double> wait_for_seconds(gpu_timestamp const& timestamp);
+
     /// Whether the command list that produced this token has finished executing.
     [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;
 
@@ -269,6 +277,14 @@ protected:
     /// Builds a compute_pipeline from a description (compute shader + pipeline layout).
     [[nodiscard]] virtual cc::result<compute_pipeline_handle>
     try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
+
+    /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).
+    [[nodiscard]] virtual cc::result<raytracing_pipeline_handle>
+    try_create_raytracing_pipeline(raytracing_pipeline_description const& desc, lifetime_scope scope) = 0;
+
+    /// Builds a raytracing_shader_table over a raytracing_pipeline (references its shader identifiers).
+    [[nodiscard]] virtual cc::result<raytracing_shader_table_handle>
+    try_create_raytracing_shader_table(raytracing_shader_table_description const& desc, lifetime_scope scope) = 0;
 
     /// Instantiates group `layout` with the given name→view bindings (validated against the layout) and
     /// dynamic `samplers` (one per non-static sampler binding).

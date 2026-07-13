@@ -110,9 +110,9 @@ node rather than starting a duplicate build.
 
 ## Deferred
 
-Graphics and raytracing pipeline caching (sg has no such pipeline types yet), a content hash on
-`compiled_shader` (so the pipeline key need not re-hash the bytecode), disk-backed provider tiers, and
-richer eviction than clear-on-overflow.
+Graphics pipeline caching (sg has no such pipeline type yet — the raytracing pipeline is cached, keyed on
+all its shaders + layout + limits), a content hash on `compiled_shader` (so the pipeline key need not
+re-hash the bytecode), disk-backed provider tiers, and richer eviction than clear-on-overflow.
 
 ## See also
 

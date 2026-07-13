@@ -26,6 +26,7 @@ class command_list_download_scope;
 class command_list_copy_scope;
 class command_list_compute_scope;
 class command_list_raytracing_scope;
+class command_list_query_scope;
 class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
@@ -44,6 +45,7 @@ class bytes_waiter;
 class bytes_future;
 template <class T>
 class data_future;
+class gpu_timestamp; // value type (see gpu_timestamp.hh) — result of cmd.query.record_gpu_timestamp
 class memory_heap;
 struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory_heap.hh)
@@ -108,6 +110,25 @@ class binding_group;
 struct named_view;    // {name, raw_view} — input to create_binding_group
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
 
+// Ray-tracing pipeline + shader table (see raytracing_pipeline.hh / raytracing_shader_table.hh). A
+// DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.
+class raytracing_pipeline;
+struct raytracing_pipeline_description; // {layout, raygen/miss/hit/callable shaders, limits} — input to create
+struct hit_shader;                      // {closest_hit, any_hit, intersection} — one hit group's shaders
+class raytracing_shader_table;
+struct raytracing_shader_table_description; // {pipeline, raygen/miss/hit/callable handles} — input to create
+
+// Two-phase model: a *_shader_handle registers a shader in a raytracing_pipeline; a *_index is a slot in a
+// raytracing_shader_table (what HLSL TraceRay addresses at dispatch). Strongly-typed integer newtypes.
+enum class raygen_shader_handle : u32;
+enum class miss_shader_handle : u32;
+enum class hit_shader_handle : u32;
+enum class callable_shader_handle : u32;
+enum class raygen_index : u32;
+enum class miss_index : u32;
+enum class hit_index : u32;
+enum class callable_index : u32;
+
 /// Hard cap on the number of group slots a pipeline_layout can hold (dx12 root-parameter / vulkan set
 /// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `set`.
 inline constexpr int max_binding_groups = 4;
@@ -143,6 +164,8 @@ using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immuta
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema
 using pipeline_layout_handle = std::shared_ptr<pipeline_layout const>;           // immutable ordered group layouts
 using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
+using raytracing_pipeline_handle = std::shared_ptr<raytracing_pipeline const>; // immutable DXR state object + shader ids
+using raytracing_shader_table_handle = std::shared_ptr<raytracing_shader_table const>; // immutable table over a pipeline
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
@@ -152,4 +175,6 @@ using binding_group_handle = std::shared_ptr<binding_group const>; // immutable 
 using async_compiled_shader = std::shared_ptr<cc::async<compiled_shader>>; // try_value() -> compiled_shader_handle
 using async_compute_pipeline
     = std::shared_ptr<cc::async<compute_pipeline_handle>>; // blocking_get -> compute_pipeline_handle
+using async_raytracing_pipeline
+    = std::shared_ptr<cc::async<raytracing_pipeline_handle>>; // blocking_get -> raytracing_pipeline_handle
 } // namespace sg

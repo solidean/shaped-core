@@ -104,5 +104,22 @@ protected:
     {
         CC_UNREACHABLE("vulkan raytracing build_tlas is not implemented yet");
     }
+    void raytracing_bind_pipeline(sg::raytracing_pipeline const&) override
+    {
+        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
+    }
+    void raytracing_bind_group(int, sg::binding_group const&) override
+    {
+        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
+    }
+    void raytracing_dispatch_rays(sg::raytracing_shader_table const&, sg::raygen_index, int, int, int) override
+    {
+        CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
+    }
+
+    // GPU queries (reached through cmd.query) — not implemented yet. Timestamps report unsupported, so
+    // record_gpu_timestamp always returns an invalid query (record is always callable).
+    [[nodiscard]] bool query_timestamps_supported() const override { return false; }
+    [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override { return {}; }
 };
 } // namespace sg::backend::vulkan

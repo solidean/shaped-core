@@ -22,4 +22,23 @@ tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance con
 {
     return _cmd.raytracing_build_tlas(instances, flags);
 }
+
+void command_list_raytracing_scope::bind_pipeline(raytracing_pipeline const& pipeline)
+{
+    _cmd.raytracing_bind_pipeline(pipeline);
+}
+
+void command_list_raytracing_scope::bind_group(int set, binding_group const& group)
+{
+    _cmd.raytracing_bind_group(set, group);
+}
+
+void command_list_raytracing_scope::dispatch_rays(raytracing_shader_table const& table,
+                                                  raygen_index raygen,
+                                                  int width,
+                                                  int height,
+                                                  int depth)
+{
+    _cmd.raytracing_dispatch_rays(table, raygen, width, height, depth);
+}
 } // namespace sg

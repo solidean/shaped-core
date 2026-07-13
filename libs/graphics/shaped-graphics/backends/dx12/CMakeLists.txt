@@ -9,6 +9,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_context.create.cc
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
+    src/shaped-graphics/backends/dx12/dx12_command_list.queries.cc
     src/shaped-graphics/backends/dx12/dx12_barrier.cc
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
@@ -22,6 +23,8 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_group_layout.cc
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
+    src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.cc
+    src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
     src/shaped-graphics/backends/dx12/dx12_descriptor_heap.cc
     src/shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.cc
@@ -30,6 +33,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_texture_copy.cc
     src/shaped-graphics/backends/dx12/dx12_bind.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing.cc
+    src/shaped-graphics/backends/dx12/dx12_query.cc
 )
 
 target_sources(shaped-graphics-dx12
@@ -63,8 +67,11 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_group_layout.hh
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.hh
+    src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh
+    src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh
     src/shaped-graphics/backends/dx12/dx12_binding_group.hh
     src/shaped-graphics/backends/dx12/dx12_acceleration_structure.hh
+    src/shaped-graphics/backends/dx12/dx12_query.hh
 )
 
 target_compile_features(shaped-graphics-dx12 PUBLIC cxx_std_23)
@@ -111,6 +118,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-sampler-test.cc
     tests/dx12-texture-copy-test.cc
     tests/dx12-raytracing-test.cc
+    tests/dx12-query-test.cc
 )
 
 target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)

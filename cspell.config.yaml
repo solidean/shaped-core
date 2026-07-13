@@ -3,7 +3,9 @@ ignorePaths: []
 dictionaryDefinitions: []
 dictionaries: []
 words:
+  - aabbs
   - Allman
+  - blas
   - CPPRTTI
   - CPPUNWIND
   - crossrefs
@@ -30,12 +32,15 @@ words:
   - precommit
   - pycache
   - qtcreator
+  - raygen
+  - raytracing
   - relwithdebinfo
   - rtti
   - smod
   - Solidean
   - SOLIDEAN
   - stdlib
+  - tlas
   - toolsets
   - tweakable
   - uncompiled

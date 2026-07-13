@@ -8,9 +8,13 @@
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
+#include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/pipeline_layout.hh>
+#include <shaped-graphics/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing_shader_table.hh>
 
 namespace sg::backend::dx12
 {
@@ -50,6 +54,23 @@ cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipel
 {
     require_persistent(scope);
     return dx12_compute_pipeline::create(_device.Get(), cc::move(layout), shader, cached_pipeline);
+}
+
+cc::result<dx12_raytracing_pipeline_handle> dx12_context::create_dx12_raytracing_pipeline(
+    sg::raytracing_pipeline_description const& desc,
+    dx12_pipeline_layout_handle layout,
+    sg::lifetime_scope scope)
+{
+    require_persistent(scope);
+    return dx12_raytracing_pipeline::create(_device.Get(), cc::move(layout), desc);
+}
+
+cc::result<dx12_raytracing_shader_table_handle> dx12_context::create_dx12_raytracing_shader_table(
+    sg::raytracing_shader_table_description const& desc,
+    sg::lifetime_scope scope)
+{
+    require_persistent(scope);
+    return dx12_raytracing_shader_table::create(*this, desc);
 }
 
 cc::result<dx12_binding_group_handle> dx12_context::create_dx12_binding_group(dx12_binding_group_layout_handle layout,
@@ -107,6 +128,26 @@ cc::result<sg::compute_pipeline_handle> dx12_context::try_create_compute_pipelin
     return note_device_loss_on_error(cc::result<sg::compute_pipeline_handle>(create_dx12_compute_pipeline(
                                          desc.shader, cc::move(dx), desc.cached_pipeline.span(), scope)),
                                      "create_compute_pipeline");
+}
+
+cc::result<sg::raytracing_pipeline_handle> dx12_context::try_create_raytracing_pipeline(
+    sg::raytracing_pipeline_description const& desc,
+    sg::lifetime_scope scope)
+{
+    auto dx = std::dynamic_pointer_cast<dx12_pipeline_layout const>(desc.layout);
+    CC_ASSERT(dx != nullptr, "pipeline_layout is not a dx12 pipeline_layout");
+    return note_device_loss_on_error(
+        cc::result<sg::raytracing_pipeline_handle>(create_dx12_raytracing_pipeline(desc, cc::move(dx), scope)),
+        "create_raytracing_pipeline");
+}
+
+cc::result<sg::raytracing_shader_table_handle> dx12_context::try_create_raytracing_shader_table(
+    sg::raytracing_shader_table_description const& desc,
+    sg::lifetime_scope scope)
+{
+    return note_device_loss_on_error(
+        cc::result<sg::raytracing_shader_table_handle>(create_dx12_raytracing_shader_table(desc, scope)),
+        "create_raytracing_shader_table");
 }
 
 cc::result<sg::binding_group_handle> dx12_context::try_create_binding_group(sg::binding_group_layout_handle layout,

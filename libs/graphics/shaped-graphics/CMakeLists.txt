@@ -14,11 +14,15 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
     src/shaped-graphics/command_list.raytracing.cc
+    src/shaped-graphics/command_list.query.cc
+    src/shaped-graphics/gpu_timestamp.cc
     src/shaped-graphics/acceleration_structure.cc
     src/shaped-graphics/backend/command_list_slot.cc
     src/shaped-graphics/binding_group_layout.cc
     src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc
+    src/shaped-graphics/raytracing_pipeline.cc
+    src/shaped-graphics/raytracing_shader_table.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
     src/shaped-graphics/context.cc
@@ -76,6 +80,8 @@ target_sources(shaped-graphics
     src/shaped-graphics/pipeline_layout.hh
     src/shaped-graphics/compiled_shader.hh
     src/shaped-graphics/compute_pipeline.hh
+    src/shaped-graphics/raytracing_pipeline.hh
+    src/shaped-graphics/raytracing_shader_table.hh
     src/shaped-graphics/binding_group.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/allocation_info.hh
@@ -164,6 +170,7 @@ if(_sg_backends)
         tests/barrier/barrier-test.cc
         tests/error-handling/error-handling-test.cc
         tests/raytracing/raytracing-test.cc
+        tests/query/query-test.cc
     )
     if(WIN32)
         target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
