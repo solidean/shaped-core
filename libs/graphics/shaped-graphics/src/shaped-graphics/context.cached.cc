@@ -1,5 +1,6 @@
 #include "context.cached.hh"
 
+#include <clean-core/thread/async.hh> // the async pipeline handles are cc::shared_async (copied here on return)
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/pipeline_cache.hh>
 

@@ -88,6 +88,11 @@ cc::async_worker_scope::~async_worker_scope()
     s_current_scheduler = _previous;
 }
 
+void cc::inline_scheduler::enqueue(async_node_ptr node)
+{
+    _queue.push_back(cc::move(node));
+}
+
 bool cc::inline_scheduler::run_one()
 {
     if (_queue.empty())
@@ -156,7 +161,7 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
     }
 
     if (do_submit)
-        target.submit(shared_from_this());
+        target.submit(async_node_ptr::from_alive(this)); // strong > 0: our caller holds a handle
 }
 
 void cc::async_node_base::route_after_schedule()
@@ -164,7 +169,7 @@ void cc::async_node_base::route_after_schedule()
     // State is `scheduled` and nobody else will enqueue it (schedule() is idempotent on `scheduled`), so we
     // route exactly once: the current worker (hot) if a scope is active here, else the installed default pool.
     // The default-pool fallback is thread-independent, which is what makes cross-thread wakeups correct.
-    auto self = shared_from_this();
+    auto self = async_node_ptr::from_alive(this); // strong > 0 throughout scheduling (our caller holds a handle)
     if (auto* sched = async_scheduler::current_or_null())
     {
         sched->enqueue(cc::move(self));
@@ -305,7 +310,7 @@ bool cc::async_node_base::try_subscribe(async_node_base* dependent)
     impl::async_spinlock_guard g(_lock);
     if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
         return false; // already ready under the lock: the dependent must not park on us
-    _continuations.push_back(dependent->weak_from_this());
+    _continuations.push_back(async_node_weak::from_alive(dependent)); // dependent is alive (it is polling us)
     return true;
 }
 
@@ -341,7 +346,7 @@ void cc::async_node_base::unsubscribe_all()
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
-    _continuations.push_back(dependent->weak_from_this());
+    _continuations.push_back(async_node_weak::from_alive(dependent));
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
@@ -349,10 +354,10 @@ void cc::async_node_base::remove_continuation(async_node_base* dependent)
     impl::async_spinlock_guard g(_lock);
     // drop the target, and opportunistically prune any dependents that have since expired
     _continuations.remove_all_where(
-        [&](std::weak_ptr<async_node_base> const& w)
+        [&](async_node_weak const& w)
         {
             auto sp = w.lock();
-            return !sp || sp.get() == dependent;
+            return !sp.is_valid() || sp.get() == dependent;
         });
 }
 
@@ -385,7 +390,7 @@ void cc::async_node_base::mark_ready_and_notify()
 {
     _deps.clear();
 
-    cc::small_vector<std::weak_ptr<async_node_base>, 1> continuations;
+    cc::small_vector<async_node_weak, 1> continuations;
     void (*on_complete)(void*) = nullptr;
     void* on_complete_ctx = nullptr;
     {
@@ -418,11 +423,15 @@ void cc::async_node_base::complete_from_compute()
     mark_ready_and_notify();
 }
 
-cc::async_node_base::~async_node_base()
+void cc::async_node_base::teardown_payload()
 {
-    // The typed node destructor already ran unsubscribe_all() before dropping its frame. This is a defensive
-    // backstop for any node destroyed without a value (e.g. an undriven manual node).
-    unsubscribe_all();
+    // Base part of the strong-0 teardown: the typed override already ran unsubscribe_all() + released the frame
+    // (which pinned the deps) and the value. Reset the remaining non-trivial members to EMPTY (releasing the
+    // continuation buffer + dec_weak'ing any leftover dependents, freeing spilled dep-list nodes, and dropping
+    // the error) — but leave the counts alive for outstanding weak refs. Nothing races us: strong is already 0.
+    _continuations = {};
+    _deps.clear();
+    _error = async_error{};
 }
 
 // ============================================================================

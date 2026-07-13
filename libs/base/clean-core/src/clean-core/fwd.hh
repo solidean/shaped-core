@@ -238,6 +238,10 @@ struct threaded_actor_impl;
 
 struct async_error;
 struct async_node_base;
+namespace impl
+{
+struct async_node_traits;
+}
 struct async_scheduler;
 struct async_worker_scope;
 struct inline_scheduler;
@@ -247,6 +251,10 @@ template <class T>
 struct async_result;
 template <class T>
 struct async;
+
+/// The normal async handle: an 8 B intrusive cc::shared_ptr over one slab node (see thread/async.hh).
+template <class T>
+using shared_async = shared_ptr<async<T>, impl::async_node_traits>;
 
 
 //

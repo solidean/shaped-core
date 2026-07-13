@@ -7,9 +7,9 @@
 #include <clean-core/error/result.hh> // cc::any_error
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/memory/shared_ptr.hh> // cc::shared_ptr / cc::weak_ptr (intrusive node handles)
 
 #include <atomic>
-#include <memory> // std::shared_ptr / std::weak_ptr / std::enable_shared_from_this (no cc equivalent yet)
 
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency /
 // continuation bookkeeping, the scheduler seam, and the failure-channel value type. The templated public
@@ -142,6 +142,42 @@ struct async_success_tag
 };
 
 // ============================================================================
+// intrusive node handle: cc::shared_ptr keyed on async_node_base
+// ============================================================================
+
+namespace impl
+{
+/// Refcount traits for the async node: strong + weak counts live inline in async_node_base (offset 0), so a
+/// node needs no separate control block and the handle is one pointer. Keyed on the BASE, so every async<T>
+/// shares it via upcast and continuations can hold weak_ptr<async_node_base> cells that actually point at
+/// larger async<T> nodes. free_storage frees by the concrete size class stashed at construction; destroy_object
+/// tears down only the payload (frame/value/error/continuations) and leaves the counts alive — a weak ref may
+/// still read them after the object is gone. Method bodies are defined inline once async_node_base is complete.
+struct async_node_traits
+{
+    static constexpr bool supports_weak = true;
+
+    // intrusive: the node IS the async node, control included; free by the concrete class stashed in the node
+    static constexpr cc::isize node_size(cc::isize payload_size, cc::isize) { return payload_size; }
+    static constexpr cc::isize node_align(cc::isize payload_align) { return payload_align; }
+
+    static void init_control(async_node_base* p);
+    static void inc_strong(async_node_base* p);
+    static bool dec_strong(async_node_base* p);
+    static void inc_weak(async_node_base* p);
+    static bool dec_weak(async_node_base* p);
+    static bool try_lock_strong(async_node_base* p);
+    static void destroy_object(async_node_base* p);
+    static void free_storage(async_node_base* p);
+};
+} // namespace impl
+
+/// The owning / weak node handles. shared_async<T> (async.hh) is a cc::shared_ptr<async<T>, async_node_traits>
+/// that upcasts to this base handle when handed to the scheduler; continuations are async_node_weak cells.
+using async_node_ptr = cc::shared_ptr<async_node_base, impl::async_node_traits>;
+using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
+
+// ============================================================================
 // scheduler seam
 // ============================================================================
 
@@ -150,17 +186,17 @@ struct async_success_tag
 /// reach it via async_scheduler::current(). The default is inline_scheduler (runs on the calling thread); a
 /// future work-stealing pool implements the same interface.
 ///
-/// A queued node is passed as a shared_ptr so the scheduler co-owns it while it waits: a node cannot be
-/// destroyed while runnable, which is what makes owned children freely schedulable (and steal-safe later).
+/// A queued node is passed as a shared handle so the scheduler co-owns it while it waits: a node cannot be
+/// destroyed while runnable, which is what makes required dependencies freely schedulable (and steal-safe).
 struct async_scheduler
 {
     /// Make a node runnable on the CURRENT worker (local / hot enqueue). Called only when a worker scope is
     /// active on this thread.
-    virtual void enqueue(std::shared_ptr<async_node_base> node) = 0;
+    virtual void enqueue(async_node_ptr node) = 0;
 
     /// Injection: make a node runnable regardless of the calling thread (foreign threads, cross-thread
     /// wakeups). The default routes to enqueue; a pool overrides this with its injection queue.
-    virtual void submit(std::shared_ptr<async_node_base> node) { enqueue(cc::move(node)); }
+    virtual void submit(async_node_ptr node) { enqueue(cc::move(node)); }
 
     virtual ~async_scheduler() = default;
 
@@ -197,7 +233,7 @@ private:
 /// ever blocks. LIFO keeps freshly spawned children hot in cache, matching explicit-stack recursion.
 struct inline_scheduler final : async_scheduler
 {
-    void enqueue(std::shared_ptr<async_node_base> node) override { _queue.push_back(cc::move(node)); }
+    void enqueue(async_node_ptr node) override; // out-of-line: needs the node handle's traits complete
 
     /// Poll one queued node (LIFO). Returns false if the queue was empty.
     bool run_one();
@@ -208,10 +244,8 @@ struct inline_scheduler final : async_scheduler
     [[nodiscard]] bool empty() const { return _queue.empty(); }
 
 private:
-    cc::vector<std::shared_ptr<async_node_base>> _queue;
+    cc::vector<async_node_ptr> _queue;
 };
-
-struct async_node_base; // fwd: dep-head entries hold non-owning base pointers
 
 namespace impl
 {
@@ -371,15 +405,15 @@ enum class async_node_state : cc::u8
 /// the user compute frame. Continuations are held as weak_ptrs so a completing dependency can never wake a
 /// dependent that is being torn down concurrently.
 ///
-/// Every node is heap-owned through a std::shared_ptr (make_shared): shared_async<T> for public nodes, and a
-/// schedule()/poll() call shared_from_this() and the scheduler co-owns queued nodes through that shared_ptr,
-/// so a node MUST be shared-owned before it is ever scheduled or polled — creating one on the stack and
-/// driving it is unsupported (shared_from_this() would be undefined). make_async_* create nodes via
-/// make_shared.
+/// Every node carries its own intrusive strong/weak refcount (async_node_traits) and is created through
+/// cc::make_shared into one slab node: shared_async<T> for public nodes. schedule()/poll() recover a handle
+/// from `this` in O(1) via async_node_ptr::from_alive (strong > 0 is guaranteed while polling/scheduling), and
+/// the scheduler co-owns queued nodes through that handle. A node MUST be created via make_async_* (which
+/// make_shared) — a stack node is unsupported (from_alive would corrupt a never-initialized count).
 ///
 /// Cacheline-aligned (64 B): nodes are polled and woken concurrently from different threads, so keeping each
 /// on its own line avoids false sharing between unrelated nodes.
-struct alignas(64) async_node_base : std::enable_shared_from_this<async_node_base>
+struct alignas(64) async_node_base
 {
     // queries
 public:
@@ -441,7 +475,9 @@ public:
     async_node_base& operator=(async_node_base const&) = delete;
     async_node_base& operator=(async_node_base&&) = delete;
 
-    virtual ~async_node_base();
+    /// Never invoked at runtime: nodes are torn down by teardown_payload (at strong 0) + free_storage (at weak
+    /// 0), not by delete. Present only for the vtable. Defaulted so it is a no-op if it ever ran.
+    virtual ~async_node_base() = default;
 
     // supplied by the typed node
 protected:
@@ -449,9 +485,15 @@ protected:
     /// have been stored. Not called for external/manual nodes (they have no frame).
     virtual async_step_status poll_compute_step(async_context& ctx) = 0;
 
-    /// Destroy the compute frame (release its captures). Called on completion and teardown, always after the
-    /// owned children are destroyed, so a child frame is torn down before the parent frame it borrows from.
+    /// Destroy the compute frame (release its captures). Called on completion.
     virtual void destroy_frame() = 0;
+
+    /// Release ALL payload resources (frame, value, error, continuations, deps) but LEAVE the intrusive counts
+    /// alive — a weak ref may still read them after the object is gone. Called once by async_node_traits at
+    /// strong 0 (destroy_object); free_storage reclaims the raw node afterward. The typed node overrides to add
+    /// the value + frame, then chains to this base part. Resets members to empty rather than destroying them,
+    /// so the (never-called) destructor stays a safe no-op.
+    virtual void teardown_payload();
 
     // shared helpers for the typed node
 protected:
@@ -463,6 +505,10 @@ protected:
 
     void set_state(async_node_state s) { _state.store(s, std::memory_order_release); }
     [[nodiscard]] async_node_state state() const { return _state.load(std::memory_order_acquire); }
+
+    /// Stash the concrete node's size class (node_class_index_for<async<T>>()), so free_storage frees the right
+    /// slot even when only a base-typed weak cell remains. Called once from the derived ctor.
+    void set_class_index(cc::node_class_index idx) { _class_index = idx; }
 
     /// Turn this into a push/manual node: awaiting external completion. It is never run inline (schedule()
     /// bails on external_pending); only push_value / push_error complete it.
@@ -490,7 +536,15 @@ private:
 
     // members
 private:
-    friend struct async_context; // reaches add_pending_dependency on the generic require() path
+    friend struct async_context;           // reaches add_pending_dependency on the generic require() path
+    friend struct impl::async_node_traits; // reaches the intrusive counts / class index / teardown_payload
+
+    /// Intrusive refcount (async_node_traits): strong owners + weak (continuation cells + the strong owners'
+    /// collective one). Born 1/1 by init_control. _class_index is this node's concrete async<T> size class,
+    /// stashed by the derived ctor so free_storage frees the right slot even through a base-typed weak cell.
+    std::atomic<cc::u32> _strong{0};
+    std::atomic<cc::u32> _weak{0};
+    cc::node_class_index _class_index{};
 
     impl::async_spinlock _lock; // guards _state transitions, _wake_pending, _continuations (see class doc)
 
@@ -508,9 +562,51 @@ private:
     /// active poller touches it), so it needs no lock. See impl::async_dep_head for the packed 8 B layout.
     impl::async_dep_head _deps;
 
-    /// Dependents to reschedule when this node completes, held as weak_ptrs so a wake can never touch a
+    /// Dependents to reschedule when this node completes, held as weak handles so a wake can never touch a
     /// dependent that is being destroyed concurrently. Inline capacity 1 keeps the common single-dependent
     /// case allocation-free; spills to the heap for many dependents. Guarded by _lock.
-    cc::small_vector<std::weak_ptr<async_node_base>, 1> _continuations;
+    cc::small_vector<async_node_weak, 1> _continuations;
 };
+
+// ============================================================================
+// async_node_traits — intrusive refcount ops (defined now that async_node_base is complete)
+// ============================================================================
+
+inline void impl::async_node_traits::init_control(async_node_base* p)
+{
+    p->_strong.store(1, std::memory_order_relaxed);
+    p->_weak.store(1, std::memory_order_relaxed);
+}
+inline void impl::async_node_traits::inc_strong(async_node_base* p)
+{
+    p->_strong.fetch_add(1, std::memory_order_relaxed);
+}
+inline bool impl::async_node_traits::dec_strong(async_node_base* p)
+{
+    return p->_strong.fetch_sub(1, std::memory_order_acq_rel) == 1;
+}
+inline void impl::async_node_traits::inc_weak(async_node_base* p)
+{
+    p->_weak.fetch_add(1, std::memory_order_relaxed);
+}
+inline bool impl::async_node_traits::dec_weak(async_node_base* p)
+{
+    return p->_weak.fetch_sub(1, std::memory_order_acq_rel) == 1;
+}
+inline bool impl::async_node_traits::try_lock_strong(async_node_base* p)
+{
+    cc::u32 cur = p->_strong.load(std::memory_order_relaxed);
+    while (cur != 0)
+        if (p->_strong.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel, std::memory_order_relaxed))
+            return true;
+    return false; // lost the race to the last strong drop -> the node is (being) torn down
+}
+inline void impl::async_node_traits::destroy_object(async_node_base* p)
+{
+    p->teardown_payload();
+}
+inline void impl::async_node_traits::free_storage(async_node_base* p)
+{
+    cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), p->_class_index);
+}
 } // namespace cc

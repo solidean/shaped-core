@@ -53,25 +53,25 @@ cc::async_thread_pool::~async_thread_pool()
             w->thread.join();
 }
 
-void cc::async_thread_pool::enqueue(std::shared_ptr<async_node_base> node)
+void cc::async_thread_pool::enqueue(async_node_ptr node)
 {
     worker* w = s_current_worker;
     CC_ASSERT(w != nullptr && w->pool == this, "enqueue() must be called from a worker of this pool");
     push_local(*w, cc::move(node));
 }
 
-void cc::async_thread_pool::submit(std::shared_ptr<async_node_base> node)
+void cc::async_thread_pool::submit(async_node_ptr node)
 {
     CC_ASSERT(node != nullptr, "cannot submit a null node");
 
-    _injection.lock([&](cc::vector<std::shared_ptr<async_node_base>>& q) { q.push_back(cc::move(node)); });
+    _injection.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(cc::move(node)); });
     _pending.fetch_add(1, std::memory_order_seq_cst);
     wake_one();
 }
 
-void cc::async_thread_pool::push_local(worker& w, std::shared_ptr<async_node_base> node)
+void cc::async_thread_pool::push_local(worker& w, async_node_ptr node)
 {
-    w.deque.lock([&](cc::vector<std::shared_ptr<async_node_base>>& q) { q.push_back(cc::move(node)); });
+    w.deque.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(cc::move(node)); });
     _pending.fetch_add(1, std::memory_order_seq_cst);
     wake_one();
 }
@@ -87,11 +87,11 @@ void cc::async_thread_pool::wake_one()
     _wait_cv.notify_one();
 }
 
-std::shared_ptr<cc::async_node_base> cc::async_thread_pool::try_get_work(worker& w)
+cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w)
 {
     // 1. our own deque, LIFO (hot: freshly spawned children)
     if (auto n = w.deque.lock(
-            [](cc::vector<std::shared_ptr<async_node_base>>& q) -> std::shared_ptr<async_node_base>
+            [](cc::vector<async_node_ptr>& q) -> async_node_ptr
             {
                 if (q.empty())
                     return nullptr;
@@ -106,7 +106,7 @@ std::shared_ptr<cc::async_node_base> cc::async_thread_pool::try_get_work(worker&
             continue;
 
         auto stolen = other->deque.try_lock(
-            [&](cc::vector<std::shared_ptr<async_node_base>>& q) -> std::shared_ptr<async_node_base>
+            [&](cc::vector<async_node_ptr>& q) -> async_node_ptr
             {
                 if (q.empty())
                     return nullptr;
@@ -118,7 +118,7 @@ std::shared_ptr<cc::async_node_base> cc::async_thread_pool::try_get_work(worker&
 
     // 3. the shared injection queue (foreign submits / cross-thread wakeups)
     if (auto n = _injection.lock(
-            [](cc::vector<std::shared_ptr<async_node_base>>& q) -> std::shared_ptr<async_node_base>
+            [](cc::vector<async_node_ptr>& q) -> async_node_ptr
             {
                 if (q.empty())
                     return nullptr;

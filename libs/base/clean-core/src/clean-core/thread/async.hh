@@ -5,9 +5,9 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/async_node.hh>
 
-#include <memory>      // std::shared_ptr, std::enable_shared_from_this
 #include <type_traits> // std::decay_t
 
 // cc::async<T> — a low-overhead value/dataflow async for compute-heavy dependency graphs.
@@ -22,8 +22,9 @@
 //   int v = cc::async_blocking_get(b);   // drives the graph on this thread -> 42
 //
 // Handles:
-//   shared_async<T> = std::shared_ptr<async<T>>  — the normal, composable, many-dependent handle. async<T>
-//     itself is non-copyable and immovable; you copy the shared_ptr, never the node.
+//   shared_async<T> = cc::shared_ptr<async<T>, ...>  — the normal, composable, many-dependent handle (an 8 B
+//     intrusive-refcount handle over one slab node). async<T> itself is non-copyable and immovable; you copy
+//     the handle, never the node.
 //
 // Design notes worth stating up front:
 //   * pending-dependency lists hold only NOT-ready deps, purely for scheduling/wakeup.
@@ -32,8 +33,8 @@
 
 namespace cc
 {
-template <class T>
-using shared_async = std::shared_ptr<async<T>>;
+// shared_async<T> = cc::shared_ptr<async<T>, impl::async_node_traits> — defined in clean-core/fwd.hh so light
+// forward headers (e.g. shaped-graphics fwd.hh) can name the handle without pulling in the whole async surface.
 
 // ============================================================================
 // async_result<T> — what a compute frame returns from one step
@@ -127,11 +128,16 @@ struct async_typed_node : cc::async_node_base
 
     void destroy_frame() override { _frame = {}; }
 
-    // teardown order matters: stop referencing deps, then drop our frame (releasing its captures)
-    ~async_typed_node() override
+    /// Strong-0 teardown (async_node_traits::destroy_object): release the payload but leave the intrusive
+    /// counts alive for outstanding weak refs. Order matters — unsubscribe while the frame still pins the deps,
+    /// then drop the frame + value, then the base part. Resets to empty rather than destroying, so the
+    /// never-called ~async_typed_node stays a safe no-op.
+    void teardown_payload() override
     {
         this->unsubscribe_all();
         _frame = {};
+        _value = cc::nullopt;
+        async_node_base::teardown_payload();
     }
 
 protected:
@@ -144,13 +150,16 @@ protected:
 // async<T> — the normal shared handle
 // ============================================================================
 
-/// The normal composable async handle. Always used through shared_async<T> = std::shared_ptr<async<T>>;
-/// the node is non-copyable and immovable. Create with cc::make_async_lazy / cc::make_async_scheduled (the
-/// variadic dependency form handles single- and multi-dependency transforms), drive with
-/// cc::async_blocking_get. Shared ownership comes from async_node_base.
+/// The normal composable async handle. Always used through shared_async<T> (an intrusive cc::shared_ptr); the
+/// node is non-copyable and immovable. Create with cc::make_async_lazy / cc::make_async_scheduled (the variadic
+/// dependency form handles single- and multi-dependency transforms), drive with cc::async_blocking_get.
 template <class T>
 struct async : impl::async_typed_node<T>
 {
+    /// Stash this concrete type's size class for the intrusive free path (see set_class_index). Nodes are only
+    /// ever created via make_async_* / cc::make_shared<async<T>>, which allocate exactly node_class_index_for<async<T>>().
+    async() { this->set_class_index(cc::node_class_index_for<async>()); }
+
     // zero-copy access
 public:
     /// Pointer to the stored value, or null unless ready with a value. Non-owning — valid while the node is
@@ -324,7 +333,7 @@ auto async_make_node(F&& f, Deps&&... deps)
     using result_t = std::conditional_t<async_is_deduce<T>, async_deduced_frame_result_t<F, Deps...>, T>;
     static_assert(!std::is_void_v<result_t>, "the frame must return a value (wrap void as cc::unit)");
 
-    auto node = std::make_shared<async<result_t>>();
+    auto node = cc::make_shared<async<result_t>, async_node_traits>();
     node->set_frame(async_make_frame<result_t>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
     return node;
 }
@@ -368,7 +377,7 @@ template <class T = impl::async_deduce_result, class F, class... Deps>
 template <class T>
 [[nodiscard]] shared_async<T> make_async_manual()
 {
-    auto node = std::make_shared<async<T>>();
+    auto node = cc::make_shared<async<T>, impl::async_node_traits>();
     node->set_manual();
     return node;
 }

@@ -52,10 +52,10 @@ struct async_thread_pool final : async_scheduler
 public:
     /// Local/hot enqueue onto the current worker's deque. Must be called from a worker of THIS pool (it is the
     /// route taken by a running frame scheduling a child / cold dependency).
-    void enqueue(std::shared_ptr<async_node_base> node) override;
+    void enqueue(async_node_ptr node) override;
 
     /// Injection from any thread (foreign submits, cross-thread wakeups).
-    void submit(std::shared_ptr<async_node_base> node) override;
+    void submit(async_node_ptr node) override;
 
     // queries
 public:
@@ -78,13 +78,13 @@ private:
     {
         async_thread_pool* pool = nullptr;
         int id = 0;
-        cc::mutex<cc::vector<std::shared_ptr<async_node_base>>> deque;
+        cc::mutex<cc::vector<async_node_ptr>> deque;
         std::thread thread;
     };
 
     void worker_main(worker& w);
-    [[nodiscard]] std::shared_ptr<async_node_base> try_get_work(worker& w);
-    void push_local(worker& w, std::shared_ptr<async_node_base> node);
+    [[nodiscard]] async_node_ptr try_get_work(worker& w);
+    void push_local(worker& w, async_node_ptr node);
     void wake_one();
     void block_until_ready(async_node_base& root);
 
@@ -92,7 +92,7 @@ private:
     static thread_local worker* s_current_worker;
 
     cc::vector<cc::unique_ptr<worker>> _workers; // unique_ptr: stable addresses for deque/thread + stealing
-    cc::mutex<cc::vector<std::shared_ptr<async_node_base>>> _injection;
+    cc::mutex<cc::vector<async_node_ptr>> _injection;
 
     std::atomic<int> _pending{0};  // claimable tasks across all deques + injection (drives sleep/wake)
     std::atomic<int> _sleepers{0}; // workers currently blocked on _wait_cv
