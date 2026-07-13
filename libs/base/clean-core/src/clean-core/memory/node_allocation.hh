@@ -536,9 +536,15 @@ public:
     T* ptr = nullptr;
 };
 
-// almost like a theoretical cc::node_allocation<void>
-// this stores size class + void* ptr + a deleter fun ptr
-// super useful for type erased wrappers like unique_function (with no natural base class)
+/// A node_allocation with its element type erased: a single move-only handle that owns any node-allocated
+/// object, whatever its type or size class. It keeps node_allocation<T>'s allocation fast path and stateless
+/// wait-free free, and is built by moving a node_allocation<T> in. The tradeoff is handle size — three
+/// pointers (payload, deleter, class index) instead of one — so prefer node_allocation<T> when the type is
+/// statically known. Meant for type-erased wrappers with no natural base class, e.g. unique_function storage.
+///
+/// How it works: erasing a node_allocation<T> captures its pointer, its class index, and a deleter (null for
+/// trivially destructible T). Destruction runs the deleter (if any) and returns the slot using the stored
+/// class index, so no type information or allocator state is needed at the free site.
 struct cc::any_node_allocation
 {
     // properties
@@ -618,16 +624,38 @@ public:
     /// If non-null, calls the dtor of ptr (null for trivially destructible)
     cc::function_ptr<void(void*)> deleter = nullptr;
 
-    // size class index of this node allocation
+    /// Node class index of the erased payload; used to return the slot to the right slab on free.
     cc::node_class_index class_index = {};
 
     // future: we have 7 padding bytes here (3 on wasm?)
 };
 
-// node_allocation but with a way to get class index dynamically (not coupled to T)
-// enables casting and polymorphism
-// completely user-customizable
-// NodeTraits::destroy_and_get_class_index(T&) -> node_class_index
+/// A node_allocation for polymorphic types: the handle's static type may be a base while the live object is
+/// any derived type in any size class. It keeps node_allocation<T>'s single-pointer handle, fast allocation
+/// path, and stateless wait-free free; the price is that the size class can no longer be deduced from T, so
+/// the user supplies a NodeTraits that destroys the object and reports the class it was allocated in. Use it
+/// for intrusive polymorphic nodes (virtual or hand-rolled dispatch) without paying for a fat handle.
+///
+/// How it works: the handle stores only a T* (as node_allocation<T> does). At destruction it passes *ptr to
+/// NodeTraits::destroy_and_get_class_index(T&), which must read the class index (typically via a virtual),
+/// destroy the object, and return that index — read it before destroying, since the vtable is gone afterwards.
+/// The slot is then returned to that class's slab. Move-only; copying is unsupported.
+///
+/// Example:
+///     struct my_traits
+///     {
+///         static cc::node_class_index destroy_and_get_class_index(my_base& b)
+///         {
+///             auto const idx = b.node_class(); // virtual: the derived object's class index
+///             b.~my_base();                    // virtual dtor: destroys the actual derived object
+///             return idx;
+///         }
+///     };
+///
+///     auto* mem = alloc.allocate_node_bytes(
+///         cc::node_class_index_for<my_derived>(), sizeof(my_derived), alignof(my_derived));
+///     cc::poly_node_allocation<my_base, my_traits> h;
+///     h.ptr = new (cc::placement_new, mem) my_derived();
 template <class T, class NodeTraits>
 struct cc::poly_node_allocation
 {

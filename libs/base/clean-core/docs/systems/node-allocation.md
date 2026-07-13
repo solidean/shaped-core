@@ -149,7 +149,6 @@ thread-exit abandonment, cross-thread adoption, and trim (see above). Still open
   (threads that alloc, hand nodes to siblings, free siblings' nodes under contention, then exit — asserting
   bounded memory and all-nodes-freeable across generations) run under a **TSan preset** (Linux/macOS/CI).
   Until then, treat "correct under real concurrency" as believed, not demonstrated.
-- **`any_node_allocation` / `poly_node_allocation` are untested.** Public surface with no coverage.
 - **Single-threaded trim is compile-checked, not run.** The `CC_HAS_THREADS==0` frontend builds
   (`emscripten-release`) but the trim path there has not been executed under test.
 

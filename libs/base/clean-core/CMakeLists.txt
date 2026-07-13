@@ -205,6 +205,10 @@ add_executable(clean-core-test
 
     tests/memory/allocation-test.cc
     tests/memory/node_allocation-test.cc
+    tests/memory/node_allocation-patterns-test.cc
+    tests/memory/node_allocation-sizes-test.cc
+    tests/memory/node_allocation-slabs-test.cc
+    tests/memory/node_allocation-handles-test.cc
     tests/memory/unique_ptr-test.cc
 
     tests/container/array-test.cc
