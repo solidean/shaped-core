@@ -2,7 +2,6 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/container/small_vector.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh> // cc::any_error
 #include <clean-core/function/function_ref.hh>
@@ -376,6 +375,80 @@ private:
 
     cc::u64 _head = 0;
 };
+
+// ============================================================================
+// continuation head — dependents to wake on completion (lives in the result slot)
+// ============================================================================
+
+/// A spilled continuation entry: either a weak dependent (to schedule) or a one-shot completion latch
+/// (to call). node_allocation-backed and intrusively linked, exactly like async_dep_list_node. The
+/// union member is left inactive by the default ctor; the allocator constructs the active member.
+struct async_cont_cell
+{
+    async_cont_cell* _next = nullptr;
+    void (*_fn)(void*) = nullptr; // null => weak-dependent cell (_weak active); else a latch (_ctx active)
+    union
+    {
+        async_node_weak _weak;
+        void* _ctx;
+    };
+
+    async_cont_cell() {}  // union left inactive: the allocator initializes _weak or _fn/_ctx
+    ~async_cont_cell() {} // the owner destroys _weak (weak cells only) before freeing the slot
+    async_cont_cell(async_cont_cell const&) = delete;
+    async_cont_cell& operator=(async_cont_cell const&) = delete;
+};
+
+/// A node's set of dependents to wake when it completes (its "continuations"), plus at most a few
+/// one-shot completion latches. Exactly 32 B, so it shares the node's result slot with async_error
+/// (the two are mutually exclusive: continuations matter only before ready, the error only after).
+/// Up to 3 weak dependents sit inline — the common fan-out pays no allocation; the 4th+ dependents and
+/// every latch spill into a slab-backed intrusive list. Guarded by the node _lock: unlike async_dep_head
+/// it has multiple writers (other nodes' pollers subscribing/unsubscribing, plus this node completing).
+struct async_cont_head
+{
+    async_cont_head() = default;
+    ~async_cont_head();
+
+    async_cont_head(async_cont_head&& o) noexcept;
+    async_cont_head& operator=(async_cont_head&& o) noexcept;
+    async_cont_head(async_cont_head const&) = delete;
+    async_cont_head& operator=(async_cont_head const&) = delete;
+
+    /// Subscribe a dependent (held weakly). Fills a free inline slot if any, else prepends a spill cell.
+    void add(async_node_base* dependent);
+    /// Install a one-shot completion latch (always spills; latches are rare — the pool blocking driver only).
+    void add_latch(void (*fn)(void*), void* ctx);
+    /// Remove `dependent`, and prune any entries whose dependent has since expired.
+    void remove(async_node_base* dependent);
+    /// Number of live weak dependents (latches excluded).
+    [[nodiscard]] cc::isize count() const;
+
+    /// Fire every entry: schedule each still-live dependent, call each latch. Call on a stolen (local)
+    /// head only — never while holding the node lock, since scheduling a dependent takes its lock.
+    void notify_all();
+
+    async_node_weak _inline_deps[3];   // 24 B: up to 3 dependents; a null slot is unused (holes allowed)
+    async_cont_cell* _spill = nullptr; // 8 B: 4th+ dependents and all latches
+};
+
+/// The 32 B result slot: a node holds EITHER its continuation head (while not ready) OR its
+/// failure-channel error (while ready && is_error). A ready value lives separately in the typed node.
+/// Manual lifetime — async_node_base switches/destroys the active member by state (like small_vector /
+/// string do for their SSO union); this wrapper only guarantees the slot is born as an empty head.
+struct async_result_slot
+{
+    union
+    {
+        async_cont_head conts;
+        async_error error;
+    };
+
+    async_result_slot() : conts() {}
+    ~async_result_slot() {} // no-op: async_node_base drives destruction in teardown_payload
+    async_result_slot(async_result_slot const&) = delete;
+    async_result_slot& operator=(async_result_slot const&) = delete;
+};
 } // namespace impl
 
 // ============================================================================
@@ -423,7 +496,7 @@ public:
     [[nodiscard]] bool is_cold() const { return _state.load(std::memory_order_acquire) == async_node_state::cold; }
 
     /// The failure-channel value; valid only when has_error().
-    [[nodiscard]] async_error const& base_error() const { return _error; }
+    [[nodiscard]] async_error const& base_error() const { return _slot.error; }
 
     /// A fresh, independent copy of this node's error for propagation to a dependent. cc::any_error is
     /// move-only and a shared node's error must not be moved out, so the message is re-materialized (the
@@ -435,9 +508,8 @@ public:
     /// Number of not-ready dependencies currently tracked. Only meaningful between polls.
     [[nodiscard]] cc::isize pending_dependency_count() const { return _deps.count(); }
     /// Number of installed wakeup continuations (may count entries whose dependent has since expired).
-    [[nodiscard]] cc::isize continuation_count() const { return _continuations.size(); }
-    /// True while the continuation list still fits its inline buffer (no heap dependent-list allocation).
-    [[nodiscard]] bool continuations_are_inline() const { return _continuations.is_inline(); }
+    /// Zero once ready — the continuation head is stolen at completion (the slot then holds value/error).
+    [[nodiscard]] cc::isize continuation_count() const { return is_ready() ? 0 : _slot.conts.count(); }
 
     // scheduling / driving
 public:
@@ -481,9 +553,11 @@ public:
 
     // supplied by the typed node
 protected:
-    /// Run one step of the compute frame. produced_value/produced_error mean the typed value / base error
-    /// have been stored. Not called for external/manual nodes (they have no frame).
-    virtual async_step_status poll_compute_step(async_context& ctx) = 0;
+    /// Run one step of the compute frame. produced_value means the typed value has been stored (in the
+    /// derived node). produced_error means the failure is moved into out_error — NOT into the node, whose
+    /// result slot still holds the live continuation head; the completion path installs it after stealing
+    /// the head. Not called for external/manual nodes (they have no frame).
+    virtual async_step_status poll_compute_step(async_context& ctx, async_error& out_error) = 0;
 
     /// Destroy the compute frame (release its captures). Called on completion.
     virtual void destroy_frame() = 0;
@@ -497,12 +571,6 @@ protected:
 
     // shared helpers for the typed node
 protected:
-    void set_error(async_error e)
-    {
-        _is_error = true;
-        _error = cc::move(e);
-    }
-
     void set_state(async_node_state s) { _state.store(s, std::memory_order_release); }
     [[nodiscard]] async_node_state state() const { return _state.load(std::memory_order_acquire); }
 
@@ -518,8 +586,10 @@ protected:
     /// if this node has to park).
     void add_pending_dependency(async_node_base* dep) { _deps.add(dep); }
 
-    /// Mark ready and wake dependents. Used by external/manual completion (no frame to tear down).
-    void mark_ready_and_notify();
+    /// Mark ready and wake dependents. Used by external/manual completion (no frame to tear down) and by
+    /// the compute completion path. Pass the failure to install (moved into the result slot after the
+    /// continuation head is stolen), or nullptr for a value completion (the value is already stored).
+    void mark_ready_and_notify(async_error* err);
 
     /// Remove this node's continuations from every dependency it subscribed to.
     void unsubscribe_all();
@@ -531,7 +601,7 @@ private:
     bool subscribe_to_pending_deps();               // returns true if a dep was found already ready (abort parking)
     bool try_subscribe(async_node_base* dependent); // on the dep: subscribe unless already ready
     void route_after_schedule();                    // enqueue exactly once after a cold/blocked -> scheduled transition
-    void complete_from_compute();
+    void complete_from_compute(bool produced_error, async_error& err);
     void reschedule_self();
 
     // members
@@ -549,23 +619,19 @@ private:
     impl::async_spinlock _lock; // guards _state transitions, _wake_pending, _continuations (see class doc)
 
     std::atomic<async_node_state> _state{async_node_state::cold};
-    bool _is_error = false;
+    bool _is_error = false;     // set (under _lock) at completion; also selects the active _slot member
     bool _wake_pending = false; // set (under _lock) when a running node is scheduled; makes it re-poll
-
-    void (*_on_complete)(void*) = nullptr; // one-shot completion hook (pool blocking driver)
-    void* _on_complete_ctx = nullptr;
-
-    async_error _error; // valid iff _is_error
 
     /// Not-ready dependencies, rebuilt each poll (folded pending + subscribed set). Only for scheduling/wakeup;
     /// it does not own anything (the compute frame's captures keep deps alive). Poller-private (only the single
     /// active poller touches it), so it needs no lock. See impl::async_dep_head for the packed 8 B layout.
     impl::async_dep_head _deps;
 
-    /// Dependents to reschedule when this node completes, held as weak handles so a wake can never touch a
-    /// dependent that is being destroyed concurrently. Inline capacity 1 keeps the common single-dependent
-    /// case allocation-free; spills to the heap for many dependents. Guarded by _lock.
-    cc::small_vector<async_node_weak, 1> _continuations;
+    /// The 32 B value/error/continuation slot. Holds the continuation head (dependents to wake, weak, guarded
+    /// by _lock) until completion; then either nothing (value completion — value lives in the typed node) or
+    /// the failure-channel error (ready && _is_error). See impl::async_result_slot; the active member is
+    /// switched/destroyed by state in the completion path and teardown_payload.
+    impl::async_result_slot _slot;
 };
 
 // ============================================================================

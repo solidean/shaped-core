@@ -12,6 +12,10 @@
 using cc::async_context;
 using cc::async_result;
 
+// Node size guard. E3 (value/error/continuation result-slot union) took async<int> from 192 B to 128 B.
+// E4/E5 (unique_function -> 8 B, drop the vptr, merge the value into the union) will tighten this to 64 B.
+static_assert(sizeof(cc::async<int>) <= 128, "async<int> node grew beyond the E3 target (128 B)");
+
 // ============================================================================
 // basics
 // ============================================================================
@@ -255,6 +259,66 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
     REQUIRE(p->is_ready());
     CHECK(*p->try_value() == 42);
     CHECK(ext->continuation_count() == 0); // detached on completion
+}
+
+TEST("async - many dependents park on one node (inline + spill), all woken on completion")
+{
+    cc::inline_scheduler sched;
+    cc::async_worker_scope scope(sched);
+
+    auto ext = cc::make_async_manual<int>();
+
+    // 5 dependents: fills the 3 inline continuation slots + spills 2 into the slab list
+    constexpr int n = 5;
+    cc::vector<cc::shared_async<int>> deps;
+    for (int i = 0; i < n; ++i)
+        deps.push_back(cc::make_async_lazy<int>(
+            [ext, i](async_context& actx) -> async_result<int>
+            {
+                if (!actx.require(ext))
+                    return actx.wait_for_dependencies();
+                return actx.success(*ext->value_ptr() + i);
+            }));
+
+    for (auto const& d : deps)
+        d->schedule();
+    sched.run_until([&] { return false; }); // drain: every dependent parks + subscribes on ext
+
+    CHECK(ext->continuation_count() == n); // 3 inline + 2 spill
+
+    ext->push_value(100); // wakes all n dependents in one completion
+    sched.run_until([&] { return false; });
+
+    for (int i = 0; i < n; ++i)
+    {
+        REQUIRE(deps[i]->is_ready());
+        CHECK(*deps[i]->try_value() == 100 + i);
+    }
+    CHECK(ext->continuation_count() == 0); // continuation head stolen at completion
+}
+
+TEST("async - a dependent that expires is pruned from a subscribed-to node")
+{
+    cc::inline_scheduler sched;
+    cc::async_worker_scope scope(sched);
+
+    auto ext = cc::make_async_manual<int>();
+    {
+        auto p = cc::make_async_lazy<int>(
+            [ext](async_context& actx) -> async_result<int>
+            {
+                if (!actx.require(ext))
+                    return actx.wait_for_dependencies();
+                return actx.success(*ext->value_ptr());
+            });
+        p->schedule();
+        sched.run_until([&] { return false; }); // p parks + subscribes on ext
+        CHECK(ext->continuation_count() == 1);
+    } // p's last handle drops here: its node is torn down while still subscribed on ext (weak continuation)
+
+    // completing ext must not touch the torn-down dependent (weak lock fails) — no crash, count sees it gone
+    ext->push_value(7);
+    CHECK(ext->continuation_count() == 0);
 }
 
 // ============================================================================

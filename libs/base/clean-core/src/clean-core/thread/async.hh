@@ -106,7 +106,7 @@ struct async_typed_node : cc::async_node_base
     [[nodiscard]] T const* value_ptr() const { return this->has_value() ? &_value.value() : nullptr; }
     [[nodiscard]] T* value_ptr() { return this->has_value() ? &_value.value() : nullptr; }
 
-    async_step_status poll_compute_step(cc::async_context& ctx) override
+    async_step_status poll_compute_step(cc::async_context& ctx, async_error& out_error) override
     {
         CC_ASSERT(_frame.is_valid(), "polled a node without a compute frame");
         auto r = _frame(ctx);
@@ -116,7 +116,9 @@ struct async_typed_node : cc::async_node_base
             _value.emplace_value(cc::move(r).take_value());
             return async_step_status::produced_value;
         case async_status::error:
-            this->set_error(cc::move(r).take_error());
+            // hand the error back to the poll loop; it goes into the node's result slot only at completion,
+            // after the continuation head (which shares that storage) has been stolen
+            out_error = cc::move(r).take_error();
             return async_step_status::produced_error;
         case async_status::waiting:
             return async_step_status::waiting;
@@ -179,15 +181,11 @@ public:
     void push_value(T v)
     {
         this->_value.emplace_value(cc::move(v));
-        this->mark_ready_and_notify();
+        this->mark_ready_and_notify(nullptr);
     }
 
     /// Complete externally with an error; wakes any parked dependents. Call at most once.
-    void push_error(async_error e)
-    {
-        this->set_error(cc::move(e));
-        this->mark_ready_and_notify();
-    }
+    void push_error(async_error e) { this->mark_ready_and_notify(&e); }
 };
 
 // ============================================================================

@@ -39,6 +39,27 @@ void dep_free_node(cc::impl::async_dep_list_node* n)
     cc::node_allocation_free(reinterpret_cast<cc::byte*>(n), cc::node_class_index_for<cc::impl::async_dep_list_node>());
 }
 
+// spilled continuation cells share the same wait-free node slab (a node parked by one worker may be
+// re-polled / torn down by another, freeing these on a different thread).
+cc::impl::async_cont_cell* cont_alloc_cell()
+{
+    constexpr auto idx = cc::node_class_index_for<cc::impl::async_cont_cell>();
+    auto* raw = cc::default_node_allocator().allocate_node_bytes(idx, sizeof(cc::impl::async_cont_cell),
+                                                                 alignof(cc::impl::async_cont_cell));
+    return new (cc::placement_new, raw) cc::impl::async_cont_cell();
+}
+
+void cont_free_cell(cc::impl::async_cont_cell* c)
+{
+    if (c->_fn == nullptr) // weak-dependent cell: end the weak's lifetime (dec_weak, maybe free that node)
+    {
+        using weak_t = cc::async_node_weak;
+        c->_weak.~weak_t();
+    }
+    c->~async_cont_cell();
+    cc::node_allocation_free(reinterpret_cast<cc::byte*>(c), cc::node_class_index_for<cc::impl::async_cont_cell>());
+}
+
 // Per-worker recursion depth of the eager depth-first dep drive (poll() calling a dependency's poll()). Caps
 // the native stack at graph-depth; past the cap we fall back to subscribe+park, which uses no extra stack.
 thread_local int s_inline_depth = 0;
@@ -297,6 +318,139 @@ void cc::impl::async_dep_head::clear()
 }
 
 // ============================================================================
+// async_cont_head — continuation set (up to 3 inline weak dependents + a spill list; see async_node.hh)
+// ============================================================================
+
+cc::impl::async_cont_head::~async_cont_head()
+{
+    for (auto* c = _spill; c != nullptr;)
+    {
+        auto* const next = c->_next;
+        cont_free_cell(c);
+        c = next;
+    }
+    _spill = nullptr;
+    // the inline weak_ptrs auto-destroy (dec_weak) as this object is destroyed
+}
+
+cc::impl::async_cont_head::async_cont_head(async_cont_head&& o) noexcept : _spill(o._spill)
+{
+    o._spill = nullptr;
+    for (int i = 0; i < 3; ++i)
+        _inline_deps[i] = cc::move(o._inline_deps[i]);
+}
+
+cc::impl::async_cont_head& cc::impl::async_cont_head::operator=(async_cont_head&& o) noexcept
+{
+    if (this != &o)
+    {
+        for (auto* c = _spill; c != nullptr;) // release our current spill
+        {
+            auto* const next = c->_next;
+            cont_free_cell(c);
+            c = next;
+        }
+        _spill = o._spill;
+        o._spill = nullptr;
+        for (int i = 0; i < 3; ++i)
+            _inline_deps[i] = cc::move(o._inline_deps[i]); // weak_ptr move-assign resets ours, steals o's
+    }
+    return *this;
+}
+
+void cc::impl::async_cont_head::add(async_node_base* dependent)
+{
+    for (auto& w : _inline_deps)
+        if (w.get() == nullptr) // free inline slot: no allocation for the common small fan-out
+        {
+            w = async_node_weak::from_alive(dependent); // dependent is alive (it is polling us)
+            return;
+        }
+
+    auto* c = cont_alloc_cell(); // 4th+ dependent: prepend a weak spill cell
+    c->_fn = nullptr;
+    new (cc::placement_new, &c->_weak) async_node_weak(async_node_weak::from_alive(dependent));
+    c->_next = _spill;
+    _spill = c;
+}
+
+void cc::impl::async_cont_head::add_latch(void (*fn)(void*), void* ctx)
+{
+    auto* c = cont_alloc_cell(); // latches always spill (rare; the pool blocking driver only)
+    c->_fn = fn;
+    c->_ctx = ctx;
+    c->_next = _spill;
+    _spill = c;
+}
+
+void cc::impl::async_cont_head::remove(async_node_base* dependent)
+{
+    // drop the target, and opportunistically prune any dependents that have since expired
+    for (auto& w : _inline_deps)
+    {
+        if (w.get() == nullptr)
+            continue;
+        auto sp = w.lock();
+        if (!sp.is_valid() || sp.get() == dependent)
+            w = {};
+    }
+
+    async_cont_cell* prev = nullptr;
+    for (auto* c = _spill; c != nullptr;)
+    {
+        auto* const next = c->_next;
+        bool drop = false;
+        if (c->_fn == nullptr)
+        {
+            auto sp = c->_weak.lock();
+            drop = !sp.is_valid() || sp.get() == dependent;
+        }
+        if (drop)
+        {
+            if (prev != nullptr)
+                prev->_next = next;
+            else
+                _spill = next;
+            cont_free_cell(c);
+        }
+        else
+            prev = c;
+        c = next;
+    }
+}
+
+cc::isize cc::impl::async_cont_head::count() const
+{
+    cc::isize n = 0;
+    for (auto const& w : _inline_deps)
+        if (w.get() != nullptr)
+            ++n;
+    for (auto* c = _spill; c != nullptr; c = c->_next)
+        if (c->_fn == nullptr)
+            ++n;
+    return n;
+}
+
+void cc::impl::async_cont_head::notify_all()
+{
+    for (auto& w : _inline_deps)
+        if (w.get() != nullptr)
+            if (auto c = w.lock()) // skips any dependent that is being torn down
+                c->schedule();
+
+    for (auto* c = _spill; c != nullptr; c = c->_next)
+    {
+        if (c->_fn == nullptr)
+        {
+            if (auto s = c->_weak.lock())
+                s->schedule();
+        }
+        else
+            c->_fn(c->_ctx); // fire the completion latch
+    }
+}
+
+// ============================================================================
 // async_node_base — dependency bookkeeping
 // ============================================================================
 
@@ -309,8 +463,8 @@ bool cc::async_node_base::try_subscribe(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
     if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
-        return false; // already ready under the lock: the dependent must not park on us
-    _continuations.push_back(async_node_weak::from_alive(dependent)); // dependent is alive (it is polling us)
+        return false;           // already ready under the lock: the dependent must not park on us
+    _slot.conts.add(dependent); // dependent is alive (it is polling us)
     return true;
 }
 
@@ -346,19 +500,13 @@ void cc::async_node_base::unsubscribe_all()
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
-    _continuations.push_back(async_node_weak::from_alive(dependent));
+    _slot.conts.add(dependent);
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
-    // drop the target, and opportunistically prune any dependents that have since expired
-    _continuations.remove_all_where(
-        [&](async_node_weak const& w)
-        {
-            auto sp = w.lock();
-            return !sp.is_valid() || sp.get() == dependent;
-        });
+    _slot.conts.remove(dependent); // drops the target and prunes any dependents that have since expired
 }
 
 // ============================================================================
@@ -368,12 +516,12 @@ void cc::async_node_base::remove_continuation(async_node_base* dependent)
 cc::async_error cc::async_node_base::propagate_error() const
 {
     CC_ASSERT(has_error(), "no error to propagate");
-    if (_error.is_cancelled())
+    if (_slot.error.is_cancelled())
         return async_error::make_cancelled();
 
     // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the
     // message. The context chain is lost — a richer error-sharing scheme is a follow-up.
-    return async_error::make_error(cc::any_error(_error.underlying().to_string()));
+    return async_error::make_error(cc::any_error(_slot.error.underlying().to_string()));
 }
 
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
@@ -381,57 +529,57 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
     impl::async_spinlock_guard g(_lock);
     if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
         return true; // already done: caller must not wait
-    _on_complete = fn;
-    _on_complete_ctx = ctx;
+    _slot.conts.add_latch(fn, ctx);
     return false;
 }
 
-void cc::async_node_base::mark_ready_and_notify()
+void cc::async_node_base::mark_ready_and_notify(async_error* err)
 {
     _deps.clear();
 
-    cc::small_vector<async_node_weak, 1> continuations;
-    void (*on_complete)(void*) = nullptr;
-    void* on_complete_ctx = nullptr;
+    impl::async_cont_head continuations; // stolen out of the result slot below
     {
         impl::async_spinlock_guard g(_lock);
-        _state.store(async_node_state::ready, std::memory_order_release); // ready store under the lock (I1)
 
-        // detach then wake: a woken dependent may re-poll and re-subscribe elsewhere
-        continuations = cc::move(_continuations);
-        _continuations.clear();
-        on_complete = _on_complete;
-        on_complete_ctx = _on_complete_ctx;
+        // Steal the continuation head, freeing the result slot; then, for an error completion, switch the
+        // slot's active union member to the error (a value completion leaves the value in the typed node and
+        // the freed head empty). Publish `ready` LAST, so a subscriber that wins the lock after us sees the
+        // value/error already in place (I1); one that wins before us lands in `continuations` and gets woken.
+        continuations = cc::move(_slot.conts);
+        if (err != nullptr)
+        {
+            _slot.conts.~async_cont_head();                                    // end the (now empty) head's lifetime
+            new (cc::placement_new, &_slot.error) async_error(cc::move(*err)); // begin the error's lifetime
+            _is_error = true;
+        }
+        _state.store(async_node_state::ready, std::memory_order_release);
     }
 
-    // outside the lock: waking a dependent takes its lock, so we must not hold ours (no two node locks at once)
-    for (auto const& w : continuations)
-        if (auto c = w.lock()) // skips any dependent that is being torn down
-            c->schedule();
-
-    if (on_complete != nullptr)
-        on_complete(on_complete_ctx);
+    // outside the lock: waking a dependent / firing a latch takes other locks, so we must not hold ours
+    continuations.notify_all();
 }
 
-void cc::async_node_base::complete_from_compute()
+void cc::async_node_base::complete_from_compute(bool produced_error, async_error& err)
 {
     unsubscribe_all(); // still valid: our frame (destroyed below) pins the deps we are unsubscribing from
     _deps.clear();
 
     destroy_frame(); // release the frame's captures
 
-    mark_ready_and_notify();
+    mark_ready_and_notify(produced_error ? &err : nullptr);
 }
 
 void cc::async_node_base::teardown_payload()
 {
     // Base part of the strong-0 teardown: the typed override already ran unsubscribe_all() + released the frame
-    // (which pinned the deps) and the value. Reset the remaining non-trivial members to EMPTY (releasing the
-    // continuation buffer + dec_weak'ing any leftover dependents, freeing spilled dep-list nodes, and dropping
-    // the error) — but leave the counts alive for outstanding weak refs. Nothing races us: strong is already 0.
-    _continuations = {};
+    // (which pinned the deps) and the value. Free the remaining owned state — spilled dep-list nodes, and the
+    // active result-slot member (the continuation head while not ready, else the error once ready-with-error) —
+    // but leave the intrusive counts alive for outstanding weak refs. Nothing races us: strong is already 0.
     _deps.clear();
-    _error = async_error{};
+    if (is_ready() && _is_error)
+        _slot.error.~async_error();
+    else
+        _slot.conts.~async_cont_head();
 }
 
 // ============================================================================
@@ -503,11 +651,16 @@ void cc::async_node_base::poll()
             continue;
         }
 
-        switch (poll_compute_step(ctx))
+        // A produced error is handed back here (not stored in the node), so the completion path can install it
+        // into the result slot only after stealing the still-live continuation head that shares that storage.
+        async_error step_error;
+        switch (poll_compute_step(ctx, step_error))
         {
         case async_step_status::produced_value:
+            complete_from_compute(/*produced_error*/ false, step_error);
+            return;
         case async_step_status::produced_error:
-            complete_from_compute();
+            complete_from_compute(/*produced_error*/ true, step_error);
             return;
         case async_step_status::waiting:
             continue; // frame added deps / asked to wait — normalize and poll them now

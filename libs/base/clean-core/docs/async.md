@@ -203,15 +203,25 @@ bytes on every node.)
 ### v1 tradeoffs (node size & locking)
 
 The concurrency-safe node is **deliberately a v1**: correctness and a stable API first, leanness second. A
-node still carries a per-node spinlock, a `_wake_pending` flag, a one-shot completion hook (two words), and
-`weak_ptr` continuations — and it is cacheline-aligned (64 B) to avoid false sharing. That makes `async<T>`
-heavier than the data it computes (an ongoing size-reduction effort is shrinking it toward a single line).
+node still carries a per-node spinlock, a `_wake_pending` flag, a compute frame (a `unique_function`), and a
+vtable pointer — and it is cacheline-aligned (64 B) to avoid false sharing. An ongoing size-reduction effort
+is shrinking it toward a single line: `sizeof(async<int>)` is currently **128 B** (down from an original
+384 B).
+
+The value, the failure-channel error, and the set of dependents to wake (continuations) are **mutually
+exclusive over a node's life** — continuations matter only before completion, the value/error only after — so
+they share one 32 B result slot, discriminated by the node state (see `async_result_slot`). The slot holds up
+to **three inline weak dependents** (the common fan-out pays no allocation) and spills the rest, plus any
+one-shot completion latch, into slab-backed cells. Completion steals the continuation head under the node
+lock, then moves the value/error into the freed slot and publishes `ready` last, so a late subscriber never
+observes `ready` before the result is in place.
 
 This is a known cost, not a settled design. The **semantics and the public API are the contract**; the node
-layout is not. Leaner designs with the same guarantees are expected to be possible (e.g. folding the flags
-into the state word, a hybrid spin-then-block lock — see the REVIEW note on `async_spinlock` — externalizing
-the completion hook, or shrinking the continuation representation). These can change under the hood as the
-system matures without breaking callers.
+layout is not. Further shrinking toward 64 B is expected (a `unique_function` that is one pointer, removing
+the vtable by type-erasing the poll step into the frame, and merging the value into the result slot); leaner
+locking is also possible (folding the flags into the state word, a hybrid spin-then-block lock — see the
+REVIEW note on `async_spinlock`). These can change under the hood as the system matures without breaking
+callers.
 
 ## Not yet here (follow-ups)
 
