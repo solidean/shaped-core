@@ -136,7 +136,7 @@ public:
                                                                                   cc::span<sg::named_sampler const> samplers,
                                                                                   sg::lifetime_scope scope);
 
-    // Attachment descriptors — RTV/DSV are CPU-only (bound via the output-merger, not a descriptor table),
+    // Render-target / depth-stencil descriptors — RTV/DSV are CPU-only (bound via the output-merger, not a descriptor table),
     // so they get their own non-shader-visible heaps rather than going through a binding group. Each create
     // allocates a heap slot and writes the descriptor; free the returned slot when the view is done with.
     // Bodies in dx12_bind.cc. Returns an error when the RTV/DSV heap is exhausted.

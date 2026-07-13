@@ -174,6 +174,15 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan stub: no)
 cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
+
+// raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops.
+// No graphics pipeline yet -> clears/discards only; draw arrives later. vulkan is a stub. dx12 real on WARP.
+auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1))},       // -> sg::rendering_scope (RAII)
+                                  .depth_stencil_target=dsv.cleared(1.0f)});              //   end_rendering() at scope exit
+// view builders: view.cleared(color/depth[,stencil]) | view.preserved() | view.discarded() -> color_target / depth_stencil_target
+// rendering_info { small_vector<color_target,8> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor }
+//   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
+cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
 ```
 
 ## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
@@ -254,7 +263,7 @@ tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2D
 tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
 //   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
 tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
-// attachments (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
+// render-target / depth-stencil views (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
 tex.as_render_target_view({.mip=1})            // -> render_target_view  (needs render_target usage + color format)
 tex.as_depth_stencil_view()                    // -> depth_stencil_view  (needs depth_stencil usage + depth format)
 tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face as a 2D target (also _depth_stencil_)
@@ -287,9 +296,9 @@ v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, o
 ```
 
 ```cpp
-#include <shaped-graphics/attachment_views.hh>   // color / depth-stencil targets — NOT shader-facing
-sg::render_target_view       // color attachment (RTV) — made via texture<Traits>.as_render_target_view()
-sg::depth_stencil_view       // depth/stencil attachment (DSV) — via .as_depth_stencil_view()
+// also in views.hh: render-target / depth-stencil target views — NOT shader-facing (do not erase to raw_view)
+sg::render_target_view       // color render target (RTV) — made via texture<Traits>.as_render_target_view()
+sg::depth_stencil_view       // depth-stencil target (DSV) — via .as_depth_stencil_view()
 // each holds { raw_texture_handle, texture_view_dimension, pixel_format, subresource_range } (single mip).
 v.texture() v.dimension() v.format() v.range()   // getters
 v.width() v.height()         // int — the viewed mip's pixel size (mip-adjusted, >= 1)

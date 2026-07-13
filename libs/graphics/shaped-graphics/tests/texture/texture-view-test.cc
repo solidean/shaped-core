@@ -71,8 +71,8 @@ sg::texture_description desc_3d(sg::texture_usage usage, int depth, int mips = 1
     return d;
 }
 
-// A 2D texture with a chosen format (for attachment format-validity tests: a depth DSV target, or a
-// deliberately wrong format).
+// A 2D texture with a chosen format (for render-target / depth-stencil format-validity tests: a depth DSV
+// target, or a deliberately wrong format).
 sg::texture_description desc_2d_fmt(sg::texture_usage usage, sg::pixel_format format, int mips = 1)
 {
     auto d = desc_2d(usage, mips);
@@ -129,7 +129,7 @@ static_assert(!has_ro_2d_array<sg::texture_2d_array> && !has_ro_2d_array<sg::tex
 static_assert(has_rw_2d<sg::texture_2d_array> && has_rw_2d<sg::texture_cube>);
 static_assert(!has_rw_2d<sg::texture_2d_array_ms>); // MSAA forbids UAV
 
-// Attachment (RTV/DSV) views exist on every 2D-shaped texture (MSAA and cubes included), but not on 1D/3D.
+// Render-target / depth-stencil (RTV/DSV) views exist on every 2D-shaped texture (MSAA and cubes included), but not on 1D/3D.
 static_assert(has_rtv<sg::texture_2d> && has_rtv<sg::texture_2d_array> && has_rtv<sg::texture_2d_ms>);
 static_assert(has_rtv<sg::texture_cube> && has_rtv<sg::texture_cube_array> && has_rtv<sg::texture_2d_array_ms>);
 static_assert(!has_rtv<sg::texture_1d> && !has_rtv<sg::texture_1d_array> && !has_rtv<sg::texture_3d>);
@@ -325,10 +325,10 @@ TEST("sg - texture binding types accept the matching texture view")
     CHECK(!sg::accepts(sg::binding_type::readonly_structured_buffer, tex.as_readonly_view().to_raw())); // wrong shape
 }
 
-// -- Attachment views (render_target / depth_stencil). These do not erase to raw_view; their getters ARE
-//    the surface, so the tests read them directly.
+// -- Render-target / depth-stencil views (render_target / depth_stencil). These do not erase to raw_view;
+//    their getters ARE the surface, so the tests read them directly.
 
-TEST("sg - as_render_target_view builds a single-mip color-attachment view; getters report size / format")
+TEST("sg - as_render_target_view builds a single-mip color render-target view; getters report size / format")
 {
     sg::texture_2d tex(std::make_shared<test_texture>(desc_2d(sg::texture_usage::render_target, /*mips*/ 3)));
 
@@ -337,7 +337,7 @@ TEST("sg - as_render_target_view builds a single-mip color-attachment view; gett
     CHECK(rtv.format() == sg::pixel_format::rgba8_unorm);
     CHECK(rtv.texture() == tex.raw());
     CHECK(rtv.range().mip_range.start == 1);
-    CHECK(rtv.range().mip_range.end == 2); // an attachment targets a single mip
+    CHECK(rtv.range().mip_range.end == 2); // a render-target view targets a single mip
     CHECK(rtv.width() == 32);              // 64 >> mip 1
     CHECK(rtv.height() == 32);
 }
@@ -385,7 +385,7 @@ TEST("sg - as_depth_stencil_view requires a depth format and covers its aspects"
     CHECK(ds.as_depth_stencil_view().range().aspect_range.end == 2);
 }
 
-TEST("sg - attachment views assert on missing usage")
+TEST("sg - render-target / depth-stencil views assert on missing usage")
 {
     sg::texture_2d no_rt(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture)));
     CHECK_ASSERTS(no_rt.as_render_target_view()); // lacks render_target usage
@@ -395,7 +395,7 @@ TEST("sg - attachment views assert on missing usage")
     CHECK_ASSERTS(no_ds.as_depth_stencil_view()); // lacks depth_stencil usage
 }
 
-TEST("sg - attachment views assert on an incompatible format")
+TEST("sg - render-target / depth-stencil views assert on an incompatible format")
 {
     // A render target must be a renderable color format, not a depth format.
     sg::texture_2d rt_depth(
@@ -407,7 +407,7 @@ TEST("sg - attachment views assert on an incompatible format")
     CHECK_ASSERTS(ds_color.as_depth_stencil_view());
 }
 
-TEST("sg - attachment views assert on out-of-range selection")
+TEST("sg - render-target / depth-stencil views assert on out-of-range selection")
 {
     sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4, 2)));
     CHECK_ASSERTS(arr.as_render_target_2d_view({.slice = 4}));                      // slice past the last

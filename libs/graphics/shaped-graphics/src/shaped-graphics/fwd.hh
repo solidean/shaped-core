@@ -27,6 +27,9 @@ class command_list_copy_scope;
 class command_list_compute_scope;
 class command_list_raytracing_scope;
 class command_list_query_scope;
+class command_list_raster_scope;
+class command_list_raster_manual_scope;
+class rendering_scope;
 class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
@@ -76,10 +79,16 @@ enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
 struct raw_view;
 
-// Attachment views (see attachment_views.hh) — a texture bound as a color / depth-stencil target.
+// Render-target / depth-stencil views (see views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.
 class render_target_view;
 class depth_stencil_view;
+
+// Rendering-scope targets (see command_list.raster.hh) — a view plus its begin-op (clear / preserve /
+// discard). Built via the view's .cleared() / .preserved() / .discarded() members.
+enum class target_op : u8;
+struct color_target;
+struct depth_stencil_target;
 
 // Texture samplers (see sampler.hh) — value types, no handle.
 enum class sampler_filter;

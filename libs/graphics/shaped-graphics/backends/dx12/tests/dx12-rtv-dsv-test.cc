@@ -4,7 +4,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-// End-to-end attachment views on WARP: a texture's as_render_target_view() / as_depth_stencil_view()
+// End-to-end render-target / depth-stencil views on WARP: a texture's as_render_target_view() / as_depth_stencil_view()
 // becomes a real D3D12 RTV / DSV descriptor in the context's non-shader-visible heaps. The WARP debug
 // layer is the oracle — it rejects a malformed desc, so a returned descriptor_ref means it was accepted.
 

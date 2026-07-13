@@ -16,8 +16,10 @@ D3D12_BARRIER_SYNC d3d12_sync_from(sg::pipeline_stage_flags stages)
         out |= D3D12_BARRIER_SYNC_COMPUTE_SHADING;
     if (sg::has_all(stages, sg::pipeline_stage_flags::copy))
         out |= D3D12_BARRIER_SYNC_COPY;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::attachment))
-        out |= D3D12_BARRIER_SYNC_RENDER_TARGET | D3D12_BARRIER_SYNC_DEPTH_STENCIL;
+    if (sg::has_all(stages, sg::pipeline_stage_flags::render_target))
+        out |= D3D12_BARRIER_SYNC_RENDER_TARGET;
+    if (sg::has_all(stages, sg::pipeline_stage_flags::depth_stencil_target))
+        out |= D3D12_BARRIER_SYNC_DEPTH_STENCIL;
     if (sg::has_all(stages, sg::pipeline_stage_flags::raytracing))
         out |= D3D12_BARRIER_SYNC_RAYTRACING;
     if (sg::has_all(stages, sg::pipeline_stage_flags::accel_build))

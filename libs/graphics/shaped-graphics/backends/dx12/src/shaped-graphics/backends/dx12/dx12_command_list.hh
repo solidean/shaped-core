@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/container/small_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backend/subresource.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -99,6 +101,13 @@ public:
     // submit) that are emitted before Close — unlike buffers, which are teeth-free.
     cc::vector<dx12_texture_handle> _touched_textures;
 
+    // Raster rendering-scope state. begin_rendering sets _in_render_pass and records the RTV/DSV descriptor
+    // slots it created for the pass; end_rendering schedules their epoch-deferred free (they must outlive the
+    // list's GPU execution) and clears these. At most one scope is open at a time (begin/end are balanced).
+    bool _in_render_pass = false;
+    cc::small_vector<cpu_descriptor_slot, 8> _rendering_rtv_slots;
+    cpu_descriptor_slot _rendering_dsv_slot = cpu_descriptor_slot::invalid;
+
     // Highest async-upload completion value any buffer this list touches is waiting on. At submit the
     // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
     // means no touched buffer had a pending async upload. Maintained by track_buffer_access; the reverse
@@ -146,6 +155,10 @@ protected:
                                               cc::span<sg::array_texture_access const> elements) override;
     void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
 
+    // Raster rendering scope (reached through cmd.raster). Bodies in dx12_command_list.raster.cc.
+    void raster_begin_rendering(sg::rendering_info const& info) override;
+    void raster_end_rendering() override;
+
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
@@ -187,8 +200,8 @@ private:
 
     // Declare `stages`/`access`/`layout` over `range` on `texture` for this list's slot, emit the per-box
     // layout-transition barriers the tracker asks for, and record the texture so its slot is finalized at
-    // submit/drop. No public op calls this yet — it is the wired, tested bridge a future texture copy /
-    // upload / dispatch op will use.
+    // submit/drop. Driven by download_bytes_from_texture and the raster rendering scope (render-target /
+    // depth-stencil transitions); future texture copy / upload / dispatch ops will use it too.
     void track_texture_access(dx12_texture_handle const& texture,
                               sg::subresource_range range,
                               sg::pipeline_stage_flags stages,

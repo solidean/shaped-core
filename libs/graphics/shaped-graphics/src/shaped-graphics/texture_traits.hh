@@ -201,11 +201,11 @@ consteval auto pick_read_write_1d_params()
         return no_params{};
 }
 
-// Attachment (render-target / depth-stencil) params. Same axes as a storage view — a single mip plus a
-// slice selection — but multisampling is allowed (MSAA render targets / depth are valid). 2D-only.
+// Render-target / depth-stencil view params. Same axes as a storage view — a single mip plus a slice
+// selection — but multisampling is allowed (MSAA render targets / depth are valid). 2D-only.
 
 template <texture_dimension Dim, bool Array, bool Cube, bool MS>
-consteval auto pick_attachment_params()
+consteval auto pick_target_view_params()
 {
     if constexpr (Dim != texture_dimension::d2)
         return no_params{};
@@ -216,7 +216,7 @@ consteval auto pick_attachment_params()
 }
 
 template <texture_dimension Dim, bool Array, bool Cube, bool MS>
-consteval auto pick_attachment_2d_params()
+consteval auto pick_target_view_2d_params()
 {
     if constexpr (Dim != texture_dimension::d2)
         return no_params{};
@@ -261,10 +261,10 @@ struct texture_traits
     using read_write_2d_params = decltype(detail::pick_read_write_2d_params<Dim, Array, Cube, Multisampled>());
     using read_write_1d_params = decltype(detail::pick_read_write_1d_params<Dim, Array, Cube, Multisampled>());
 
-    // Attachment views share the storage-view axes (single mip + slice selection); RTV and DSV use the
-    // same bags. `render_target_params` / `render_target_2d_params` name them for the factories.
-    using render_target_params = decltype(detail::pick_attachment_params<Dim, Array, Cube, Multisampled>());
-    using render_target_2d_params = decltype(detail::pick_attachment_2d_params<Dim, Array, Cube, Multisampled>());
+    // Render-target / depth-stencil views share the storage-view axes (single mip + slice selection); RTV
+    // and DSV use the same bags. `render_target_params` / `render_target_2d_params` name them for the factories.
+    using render_target_params = decltype(detail::pick_target_view_params<Dim, Array, Cube, Multisampled>());
+    using render_target_2d_params = decltype(detail::pick_target_view_2d_params<Dim, Array, Cube, Multisampled>());
     using depth_stencil_params = render_target_params;
     using depth_stencil_2d_params = render_target_2d_params;
 };

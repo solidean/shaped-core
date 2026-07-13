@@ -19,7 +19,7 @@ enum class cpu_descriptor_slot : int
 };
 
 /// A created RTV/DSV descriptor: the CPU handle to bind (OMSetRenderTargets / Clear*) plus the heap slot
-/// to return via the owning context's free_* when the attachment view is no longer needed.
+/// to return via the owning context's free_* when the RTV/DSV is no longer needed.
 struct dx12_descriptor_ref
 {
     D3D12_CPU_DESCRIPTOR_HANDLE handle{};

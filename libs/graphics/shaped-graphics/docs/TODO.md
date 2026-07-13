@@ -48,7 +48,7 @@ Running list of known follow-ups. Bigger design intent lives in
 - **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
   `cc::flags` once that clean-core type is implemented.
 - **Views — deferred layers:** buffer views (`uniform`/`readonly`/`readwrite`, `byte` = raw) + the
-  erased `raw_view` are in, as are texture SRV/UAV views and `render_target`/`depth_stencil` attachment
+  erased `raw_view` are in, as are texture SRV/UAV views and `render_target` / `depth_stencil` target
   views (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array); see [concepts/views.md](concepts/views.md).
   Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);

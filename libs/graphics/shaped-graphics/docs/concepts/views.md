@@ -132,15 +132,14 @@ UAV).
 When a texture is bound to a compute dispatch, the barrier system transitions it to the layout its access
 implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of`.
 
-### Attachment views (render target / depth-stencil)
+### Render-target / depth-stencil views
 
 Binding a texture as a graphics-pipeline **color** or **depth/stencil** target is a *different kind* of
 view: it is never shader-visible, never enters a binding group / descriptor table, and is bound through the
 output-merger (`OMSetRenderTargets` / dynamic-rendering attachments). So it does **not** erase to `raw_view`
-and lives in its own header, [attachment_views.hh](../../src/shaped-graphics/attachment_views.hh) —
-`render_target_view` / `depth_stencil_view`, plain value types (holding the `raw_texture_handle`, so they
-keep the texture alive) with getters `texture()` / `dimension()` / `format()` / `range()` / `width()` /
-`height()`. A backend consumes the typed view directly.
+— `render_target_view` / `depth_stencil_view` (in [views.hh](../../src/shaped-graphics/views.hh)), plain
+value types (holding the `raw_texture_handle`, so they keep the texture alive) with getters `texture()` /
+`dimension()` / `format()` / `range()` / `width()` / `height()`. A backend consumes the typed view directly.
 
 The factories mirror the storage-view shape — a single mip level + an array-slice range, 2D-shaped only
 (`as_render_target_view` / `as_depth_stencil_view` on any 2D texture incl. cubes and MSAA;
@@ -153,7 +152,7 @@ lands the descriptors into non-shader-visible RTV/DSV heaps (`dx12_context::crea
 / `create_dx12_depth_stencil_view`).
 
 Deferred: **aspect (depth/stencil) selection + format reinterpretation** on sampled views (depth-as-SRV
-needs a typeless resource), the **render-pass consumer** for the attachment views above, and **texel
+needs a typeless resource), the **render-pass consumer** for the render-target / depth-stencil views above, and **texel
 buffers** (`Buffer<T>` / `samplerBuffer` — a format-decoded linear buffer). **Samplers** are supported (see
 [bindings](bindings.md) and `sampler.hh`) — they are not views, so they live outside this concept: a
 `sampler` bound static (baked into a layout's root signature) or dynamic (per binding_group, in a separate
@@ -161,7 +160,6 @@ sampler descriptor heap).
 
 ## See also
 
-- [views.hh](../../src/shaped-graphics/views.hh) — the view types, `view_class` / `view_shape`, and `raw_view`.
-- [attachment_views.hh](../../src/shaped-graphics/attachment_views.hh) — `render_target_view` / `depth_stencil_view` (not shader-facing).
+- [views.hh](../../src/shaped-graphics/views.hh) — the view types (shader-facing views plus `render_target_view` / `depth_stencil_view`), `view_class` / `view_shape`, and `raw_view`.
 - [buffer.hh](../../src/shaped-graphics/raw_buffer.hh) — the `buffer.as_*()` view factories.
 - [memory](memory.md) — the resource-backing model views sit on top of.
