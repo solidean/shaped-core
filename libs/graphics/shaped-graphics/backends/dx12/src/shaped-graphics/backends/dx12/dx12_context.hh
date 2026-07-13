@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
@@ -59,6 +60,11 @@ struct dx12_config
     /// Total descriptors in the shader-visible SAMPLER heap dynamic samplers are written into. D3D12 caps
     /// a shader-visible sampler heap at 2048; split into transient/persistent by descriptor_transient_fraction.
     int sampler_heap_capacity = 512;
+
+    /// Descriptors in the (non-shader-visible) RTV / DSV heaps render-target / depth-stencil views are
+    /// created into.
+    int rtv_heap_capacity = 256;
+    int dsv_heap_capacity = 256;
 };
 
 /// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
@@ -120,6 +126,15 @@ public:
                                                                                   cc::span<sg::named_view const> views,
                                                                                   cc::span<sg::named_sampler const> samplers,
                                                                                   sg::lifetime_scope scope);
+
+    // Attachment descriptors — RTV/DSV are CPU-only (bound via the output-merger, not a descriptor table),
+    // so they get their own non-shader-visible heaps rather than going through a binding group. Each create
+    // allocates a heap slot and writes the descriptor; free the returned slot when the view is done with.
+    // Bodies in dx12_bind.cc. Returns an error when the RTV/DSV heap is exhausted.
+    [[nodiscard]] cc::result<dx12_descriptor_ref> create_dx12_render_target_view(sg::render_target_view const& view);
+    [[nodiscard]] cc::result<dx12_descriptor_ref> create_dx12_depth_stencil_view(sg::depth_stencil_view const& view);
+    void free_dx12_render_target_view(cpu_descriptor_slot slot) { _rtv_heap->free(slot); }
+    void free_dx12_depth_stencil_view(cpu_descriptor_slot slot) { _dsv_heap->free(slot); }
 
     /// Stages a refcount-zero GPU resource for deferred deletion, attributed to the epoch it dies in
     /// (freed once that epoch retires). Called from ~dx12_buffer; safe to call from any thread.
@@ -335,6 +350,11 @@ public:
     // Shader-visible SAMPLER heap dynamic samplers are written into (a separate heap — D3D12 binds one of
     // each type). Same transient/persistent split as _descriptor_heap. Initialized in create_dx12_context.
     dx12_descriptor_heap _sampler_heap;
+
+    // Non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into (CPU-only,
+    // bound via the output-merger). Built by dx12_cpu_descriptor_heap::create in create_dx12_context.
+    std::unique_ptr<dx12_cpu_descriptor_heap> _rtv_heap;
+    std::unique_ptr<dx12_cpu_descriptor_heap> _dsv_heap;
 };
 } // namespace sg::backend::dx12
 

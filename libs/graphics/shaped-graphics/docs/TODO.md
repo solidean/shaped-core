@@ -45,9 +45,12 @@ Running list of known follow-ups. Bigger design intent lives in
 - **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
   `cc::flags` once that clean-core type is implemented.
 - **Views — deferred layers:** buffer views (`uniform`/`readonly`/`readwrite`, `byte` = raw) + the
-  erased `raw_view` are in; see [concepts/views.md](concepts/views.md). Still deferred:
-  - **texture + texel views** — their own view family, blocked on `sg::texture` + a pixel-`format`
-    enum (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array, + `render_target`/`depth_stencil`);
+  erased `raw_view` are in, as are texture SRV/UAV views and `render_target`/`depth_stencil` attachment
+  views (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array); see [concepts/views.md](concepts/views.md).
+  Still deferred:
+  - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
+  - the **render-pass / OMSetRenderTargets consumer** for the RTV/DSV views (the descriptors + heaps
+    exist in the dx12 backend, but nothing binds them as output-merger targets yet);
   - the **binding path** (pipelines, descriptor groups/layouts, `command_list` binding) that consumes
     `raw_view`, plus **reflection-driven validation** of a view's `T`/access against the shader;
   - the **backend `raw_view` translation** (`switch` on `(access, shape)` → native descriptor) — no

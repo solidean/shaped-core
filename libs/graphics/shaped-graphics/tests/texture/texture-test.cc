@@ -29,6 +29,14 @@ TEST("sg - pixel_format classification")
     CHECK(sg::is_compressed_format(pf::bc7_rgba_unorm_srgb));
     CHECK(!sg::is_compressed_format(pf::rgba8_unorm));
     CHECK(!sg::is_compressed_format(pf::depth32_float));
+
+    // Render-target validity: color, uncompressed, not `undefined`.
+    CHECK(sg::is_render_target_format(pf::rgba8_unorm));
+    CHECK(sg::is_render_target_format(pf::rgba16_float));
+    CHECK(sg::is_render_target_format(pf::r32_uint));
+    CHECK(!sg::is_render_target_format(pf::undefined));
+    CHECK(!sg::is_render_target_format(pf::depth32_float));  // depth is not a color target
+    CHECK(!sg::is_render_target_format(pf::bc1_rgba_unorm)); // compressed is not renderable
 }
 
 TEST("sg - pixel_format block size")

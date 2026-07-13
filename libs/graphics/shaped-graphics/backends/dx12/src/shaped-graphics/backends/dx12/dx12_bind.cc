@@ -2,11 +2,13 @@
 // heavy bodies live in the respective dx12_*.cc; these are the context create_dx12_* entry points plus the
 // sg::context override forwarders (which unpack the description / downcast the abstract layout handles).
 
+#include <shaped-graphics/attachment_views.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/pipeline_layout.hh>
 
@@ -56,6 +58,26 @@ cc::result<dx12_binding_group_handle> dx12_context::create_dx12_binding_group(dx
                                                                               sg::lifetime_scope scope)
 {
     return dx12_binding_group::create(*this, cc::move(layout), views, samplers, scope);
+}
+
+cc::result<dx12_descriptor_ref> dx12_context::create_dx12_render_target_view(sg::render_target_view const& view)
+{
+    cpu_descriptor_slot const slot = _rtv_heap->allocate();
+    if (slot == cpu_descriptor_slot::invalid)
+        return cc::error("render_target_view: RTV descriptor heap exhausted");
+    D3D12_CPU_DESCRIPTOR_HANDLE const dst = _rtv_heap->cpu_at(slot);
+    create_render_target_view(_device.Get(), view, dst);
+    return dx12_descriptor_ref{.handle = dst, .slot = slot};
+}
+
+cc::result<dx12_descriptor_ref> dx12_context::create_dx12_depth_stencil_view(sg::depth_stencil_view const& view)
+{
+    cpu_descriptor_slot const slot = _dsv_heap->allocate();
+    if (slot == cpu_descriptor_slot::invalid)
+        return cc::error("depth_stencil_view: DSV descriptor heap exhausted");
+    D3D12_CPU_DESCRIPTOR_HANDLE const dst = _dsv_heap->cpu_at(slot);
+    create_depth_stencil_view(_device.Get(), view, dst);
+    return dx12_descriptor_ref{.handle = dst, .slot = slot};
 }
 
 // --- sg::context override forwarders --------------------------------------------------------------

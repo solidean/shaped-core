@@ -71,6 +71,15 @@ sg::texture_description desc_3d(sg::texture_usage usage, int depth, int mips = 1
     return d;
 }
 
+// A 2D texture with a chosen format (for attachment format-validity tests: a depth DSV target, or a
+// deliberately wrong format).
+sg::texture_description desc_2d_fmt(sg::texture_usage usage, sg::pixel_format format, int mips = 1)
+{
+    auto d = desc_2d(usage, mips);
+    d.format = format;
+    return d;
+}
+
 // Which view factories a shape exposes, and which axes its params bag names — a compile-time contract.
 template <class T>
 concept has_rw_view = requires(T t) { t.as_readwrite_view(); };
@@ -90,6 +99,14 @@ template <class T>
 concept ro_has_cubes = requires(typename T::read_only_params p) { p.cubes; };
 template <class T>
 concept rw_has_depth_slices = requires(typename T::read_write_params p) { p.depth_slices; };
+template <class T>
+concept has_rtv = requires(T t) { t.as_render_target_view(); };
+template <class T>
+concept has_dsv = requires(T t) { t.as_depth_stencil_view(); };
+template <class T>
+concept has_rtv_2d = requires(T t) { t.as_render_target_2d_view(); };
+template <class T>
+concept has_dsv_2d = requires(T t) { t.as_depth_stencil_2d_view(); };
 } // namespace
 
 static_assert(has_rw_view<sg::texture_2d>);
@@ -111,6 +128,16 @@ static_assert(has_ro_2d_array<sg::texture_cube> && has_ro_2d_array<sg::texture_c
 static_assert(!has_ro_2d_array<sg::texture_2d_array> && !has_ro_2d_array<sg::texture_cube_ms>);
 static_assert(has_rw_2d<sg::texture_2d_array> && has_rw_2d<sg::texture_cube>);
 static_assert(!has_rw_2d<sg::texture_2d_array_ms>); // MSAA forbids UAV
+
+// Attachment (RTV/DSV) views exist on every 2D-shaped texture (MSAA and cubes included), but not on 1D/3D.
+static_assert(has_rtv<sg::texture_2d> && has_rtv<sg::texture_2d_array> && has_rtv<sg::texture_2d_ms>);
+static_assert(has_rtv<sg::texture_cube> && has_rtv<sg::texture_cube_array> && has_rtv<sg::texture_2d_array_ms>);
+static_assert(!has_rtv<sg::texture_1d> && !has_rtv<sg::texture_1d_array> && !has_rtv<sg::texture_3d>);
+static_assert(has_dsv<sg::texture_2d> && has_dsv<sg::texture_2d_array> && has_dsv<sg::texture_2d_ms>);
+static_assert(has_dsv<sg::texture_cube> && !has_dsv<sg::texture_1d> && !has_dsv<sg::texture_3d>);
+// The single-slice reinterpret exists only on 2D array / cube shapes (bind one layer/face as a 2D target).
+static_assert(has_rtv_2d<sg::texture_2d_array> && has_rtv_2d<sg::texture_cube> && has_dsv_2d<sg::texture_2d_array>);
+static_assert(!has_rtv_2d<sg::texture_2d> && !has_rtv_2d<sg::texture_3d> && !has_dsv_2d<sg::texture_2d>);
 
 TEST("sg - texture as_readonly_view builds a sampled (SRV) view over the whole texture")
 {
@@ -296,4 +323,94 @@ TEST("sg - texture binding types accept the matching texture view")
     CHECK(sg::accepts(sg::binding_type::readwrite_texture, tex.as_readwrite_view().to_raw()));
     CHECK(!sg::accepts(sg::binding_type::readonly_texture, tex.as_readwrite_view().to_raw()));          // wrong access
     CHECK(!sg::accepts(sg::binding_type::readonly_structured_buffer, tex.as_readonly_view().to_raw())); // wrong shape
+}
+
+// -- Attachment views (render_target / depth_stencil). These do not erase to raw_view; their getters ARE
+//    the surface, so the tests read them directly.
+
+TEST("sg - as_render_target_view builds a single-mip color-attachment view; getters report size / format")
+{
+    sg::texture_2d tex(std::make_shared<test_texture>(desc_2d(sg::texture_usage::render_target, /*mips*/ 3)));
+
+    auto const rtv = tex.as_render_target_view({.mip = 1});
+    CHECK(rtv.dimension() == sg::texture_view_dimension::tex_2d);
+    CHECK(rtv.format() == sg::pixel_format::rgba8_unorm);
+    CHECK(rtv.texture() == tex.raw());
+    CHECK(rtv.range().mip_range.start == 1);
+    CHECK(rtv.range().mip_range.end == 2); // an attachment targets a single mip
+    CHECK(rtv.width() == 32);              // 64 >> mip 1
+    CHECK(rtv.height() == 32);
+}
+
+TEST("sg - as_render_target_view over an array selects the whole slice range; a slice reinterprets as 2D")
+{
+    sg::texture_2d_array tex(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4)));
+
+    auto const whole = tex.as_render_target_view();
+    CHECK(whole.dimension() == sg::texture_view_dimension::tex_2d_array);
+    CHECK(whole.range().array_range.start == 0);
+    CHECK(whole.range().array_range.end == 4);
+
+    auto const slice = tex.as_render_target_2d_view({.slice = 2});
+    CHECK(slice.dimension() == sg::texture_view_dimension::tex_2d);
+    CHECK(slice.range().array_range.start == 2);
+    CHECK(slice.range().array_range.end == 3);
+    CHECK(slice.width() == 64); // mip 0
+}
+
+TEST("sg - a multisampled render target binds as Texture2DMS")
+{
+    sg::texture_2d_ms tex(
+        std::make_shared<test_texture>(desc_2d(sg::texture_usage::render_target, /*mips*/ 1, /*samples*/ 4)));
+
+    auto const rtv = tex.as_render_target_view();
+    CHECK(rtv.dimension() == sg::texture_view_dimension::tex_2d_ms);
+    CHECK(rtv.range().mip_range.end == 1);
+}
+
+TEST("sg - as_depth_stencil_view requires a depth format and covers its aspects")
+{
+    sg::texture_2d tex(
+        std::make_shared<test_texture>(desc_2d_fmt(sg::texture_usage::depth_stencil, sg::pixel_format::depth32_float)));
+
+    auto const dsv = tex.as_depth_stencil_view();
+    CHECK(dsv.dimension() == sg::texture_view_dimension::tex_2d);
+    CHECK(dsv.format() == sg::pixel_format::depth32_float);
+    CHECK(dsv.range().aspect_range.start == 0);
+    CHECK(dsv.range().aspect_range.end == 1); // depth-only: one aspect plane
+
+    // A combined depth+stencil format exposes two aspect planes.
+    sg::texture_2d ds(std::make_shared<test_texture>(
+        desc_2d_fmt(sg::texture_usage::depth_stencil, sg::pixel_format::depth32_float_stencil8)));
+    CHECK(ds.as_depth_stencil_view().range().aspect_range.end == 2);
+}
+
+TEST("sg - attachment views assert on missing usage")
+{
+    sg::texture_2d no_rt(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture)));
+    CHECK_ASSERTS(no_rt.as_render_target_view()); // lacks render_target usage
+
+    sg::texture_2d no_ds(std::make_shared<test_texture>(
+        desc_2d_fmt(sg::texture_usage::readonly_texture, sg::pixel_format::depth32_float)));
+    CHECK_ASSERTS(no_ds.as_depth_stencil_view()); // lacks depth_stencil usage
+}
+
+TEST("sg - attachment views assert on an incompatible format")
+{
+    // A render target must be a renderable color format, not a depth format.
+    sg::texture_2d rt_depth(
+        std::make_shared<test_texture>(desc_2d_fmt(sg::texture_usage::render_target, sg::pixel_format::depth32_float)));
+    CHECK_ASSERTS(rt_depth.as_render_target_view());
+
+    // A depth-stencil target must be a depth format, not a color format.
+    sg::texture_2d ds_color(std::make_shared<test_texture>(desc_2d(sg::texture_usage::depth_stencil)));
+    CHECK_ASSERTS(ds_color.as_depth_stencil_view());
+}
+
+TEST("sg - attachment views assert on out-of-range selection")
+{
+    sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4, 2)));
+    CHECK_ASSERTS(arr.as_render_target_2d_view({.slice = 4}));                      // slice past the last
+    CHECK_ASSERTS(arr.as_render_target_view({.slices = {.start = 0, .count = 5}})); // range past the last
+    CHECK_ASSERTS(arr.as_render_target_view({.mip = 2}));                           // mip past the last
 }
