@@ -16,8 +16,10 @@ D3D12_BARRIER_SYNC d3d12_sync_from(sg::pipeline_stage_flags stages)
         out |= D3D12_BARRIER_SYNC_COMPUTE_SHADING;
     if (sg::has_all(stages, sg::pipeline_stage_flags::copy))
         out |= D3D12_BARRIER_SYNC_COPY;
-    if (sg::has_all(stages, sg::pipeline_stage_flags::render_output))
-        out |= D3D12_BARRIER_SYNC_RENDER_TARGET | D3D12_BARRIER_SYNC_DEPTH_STENCIL;
+    if (sg::has_all(stages, sg::pipeline_stage_flags::render_target))
+        out |= D3D12_BARRIER_SYNC_RENDER_TARGET;
+    if (sg::has_all(stages, sg::pipeline_stage_flags::depth_stencil_target))
+        out |= D3D12_BARRIER_SYNC_DEPTH_STENCIL;
     if (sg::has_all(stages, sg::pipeline_stage_flags::raytracing))
         out |= D3D12_BARRIER_SYNC_RAYTRACING;
     if (sg::has_all(stages, sg::pipeline_stage_flags::accel_build))
@@ -75,23 +77,6 @@ D3D12_BUFFER_BARRIER make_buffer_barrier(ID3D12Resource* resource, sg::access_ba
     return bb;
 }
 
-namespace
-{
-// D3D12 requires each render-output sync bit to have a matching access bit. The coarse `render_output`
-// stage maps to both RENDER_TARGET and DEPTH_STENCIL sync (see d3d12_sync_from), but a given texture is
-// either a color or a depth target — never both — so drop the sync bit its access doesn't use. Without
-// this, a color barrier carries SYNC_DEPTH_STENCIL with ACCESS_RENDER_TARGET (and vice versa), which the
-// runtime rejects. A no-op for non-render-output syncs (compute/copy/etc.), which set neither bit.
-[[nodiscard]] D3D12_BARRIER_SYNC reconcile_render_output_sync(D3D12_BARRIER_SYNC sync, D3D12_BARRIER_ACCESS access)
-{
-    if ((access & D3D12_BARRIER_ACCESS_RENDER_TARGET) == 0)
-        sync &= ~D3D12_BARRIER_SYNC_RENDER_TARGET;
-    if ((access & (D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ | D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE)) == 0)
-        sync &= ~D3D12_BARRIER_SYNC_DEPTH_STENCIL;
-    return sync;
-}
-} // namespace
-
 D3D12_BARRIER_LAYOUT d3d12_layout_from(sg::texture_layout layout)
 {
     switch (layout)
@@ -136,9 +121,6 @@ D3D12_TEXTURE_BARRIER make_texture_barrier(ID3D12Resource* resource,
         = tb.SyncBefore == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.src_access);
     tb.AccessAfter
         = tb.SyncAfter == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.dst_access);
-    // Keep only the render-output sync bit (render-target vs depth-stencil) the access actually uses.
-    tb.SyncBefore = reconcile_render_output_sync(tb.SyncBefore, tb.AccessBefore);
-    tb.SyncAfter = reconcile_render_output_sync(tb.SyncAfter, tb.AccessAfter);
     tb.LayoutBefore = d3d12_layout_from(b.src_layout);
     tb.LayoutAfter = d3d12_layout_from(b.dst_layout);
     tb.pResource = resource;

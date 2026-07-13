@@ -40,19 +40,20 @@ enum class access_flags : u32
 };
 
 /// Pipeline stages that may perform an access. Bit flags. Coarse on purpose (tessellation/geometry fold
-/// into `vertex`, early/late depth into `render_output`), mirroring how DX12 `BARRIER_SYNC` and Vulkan
-/// `PIPELINE_STAGE_2` are typically consumed.
+/// into `vertex`, early/late depth into `depth_stencil_target`), mirroring how DX12 `BARRIER_SYNC` and
+/// Vulkan `PIPELINE_STAGE_2` are typically consumed.
 enum class pipeline_stage_flags : u32
 {
     none = 0,
-    draw_indirect = 1u << 0, // DX12 EXECUTE_INDIRECT / Vk DRAW_INDIRECT
-    vertex = 1u << 1,        // vertex-processing stages: DX12 VERTEX_SHADING / Vk VERTEX_SHADER (+ pre-raster)
-    fragment = 1u << 2,      // DX12 PIXEL_SHADING / Vk FRAGMENT_SHADER
-    compute = 1u << 3,       // DX12 COMPUTE_SHADING / Vk COMPUTE_SHADER
-    copy = 1u << 4,          // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
-    render_output = 1u << 5, // render-target + depth output: DX12 RENDER_TARGET|DEPTH_STENCIL / Vk COLOR|DS_ATTACHMENT
-    raytracing = 1u << 6,    // DX12 RAYTRACING / Vk RAY_TRACING_SHADER
-    accel_build = 1u << 7,   // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
+    draw_indirect = 1u << 0,        // DX12 EXECUTE_INDIRECT / Vk DRAW_INDIRECT
+    vertex = 1u << 1,               // vertex-processing stages: DX12 VERTEX_SHADING / Vk VERTEX_SHADER (+ pre-raster)
+    fragment = 1u << 2,             // DX12 PIXEL_SHADING / Vk FRAGMENT_SHADER
+    compute = 1u << 3,              // DX12 COMPUTE_SHADING / Vk COMPUTE_SHADER
+    copy = 1u << 4,                 // copy/resolve: DX12 COPY / Vk (ALL_)TRANSFER
+    render_target = 1u << 5,        // color output:         DX12 RENDER_TARGET / Vk COLOR_ATTACHMENT_OUTPUT
+    depth_stencil_target = 1u << 6, // depth/stencil output: DX12 DEPTH_STENCIL / Vk EARLY|LATE_FRAGMENT_TESTS
+    raytracing = 1u << 7,           // DX12 RAYTRACING / Vk RAY_TRACING_SHADER
+    accel_build = 1u << 8,          // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
 };
 
 /// Memory layout a texture subresource is in. Buffers are always `general`. Maps to DX12

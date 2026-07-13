@@ -39,7 +39,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     //    and register it with this list. Flush the barriers up-front: enhanced barriers are illegal once the
     //    targets are bound / inside the pass, unlike a compute dispatch which flushes right before each op.
     for (auto const& ct : info.color_targets)
-        track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flags::render_output,
+        track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flags::render_target,
                              sg::access_flags::color_write, sg::texture_layout::render_target);
     if (info.depth_stencil_target.has_value())
     {
@@ -47,8 +47,9 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
         // pairing it with depth_read is rejected. A read-only depth target (once draws exist) would use the
         // depth_readonly layout + depth_read instead.
         auto const& dt = info.depth_stencil_target.value();
-        track_texture_access(as_dx12_texture(dt.view.texture()), dt.view.range(), sg::pipeline_stage_flags::render_output,
-                             sg::access_flags::depth_write, sg::texture_layout::depth_readwrite);
+        track_texture_access(as_dx12_texture(dt.view.texture()), dt.view.range(),
+                             sg::pipeline_stage_flags::depth_stencil_target, sg::access_flags::depth_write,
+                             sg::texture_layout::depth_readwrite);
     }
     flush_barriers();
 
