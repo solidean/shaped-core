@@ -285,6 +285,15 @@ struct async_dep_head
         return n;
     }
 
+    /// The first tracked dependency (any entry), or nullptr if empty. Used to pick one to drive inline.
+    [[nodiscard]] async_node_base* first() const
+    {
+        if (_head == 0)
+            return nullptr;
+        cc::u64 const word = (_head & tag_is_list) == 0 ? _head : list_head()->_dep;
+        return reinterpret_cast<async_node_base*>(word & async_dep_entry::dep_mask);
+    }
+
     /// Append a not-ready dependency (order irrelevant). The entry starts unsubscribed.
     void add(async_node_base* dep);
     /// Remove (and free) every entry whose dependency is already ready.

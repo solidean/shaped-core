@@ -83,16 +83,25 @@ dependency form are not wired up yet.
 ## Polling never blocks
 
 `poll()` drives a node forward until it completes, fails as a value, or **parks** on not-ready dependencies.
-Its loop: drop ready deps, park on any that remain (requiring a cold dependency schedules it, so the
-scheduler drives it), otherwise run a compute step, and on completion publish the result and wake dependents.
-It never blocks a thread.
+Its loop: drop ready deps; if any remain, **drive one inline, depth-first** — `require()` already made every
+dependency runnable, so the poller descends into a not-ready dependency's own `poll()` on the current stack
+(bounded by a per-worker depth cap) and re-evaluates. Only when a dependency cannot be completed inline — a
+manual/push node, one already running on another worker, or the depth cap — does it fall back to installing
+wakeup continuations and parking. Otherwise it runs a compute step, and on completion publishes the result and
+wakes dependents. It never blocks a thread.
+
+**Execution order among a node's dependencies is unspecified.** The eager drive visits them in an unspecified
+order and a work-stealing pool may complete them in any order; only the resulting *values* are guaranteed. The
+native stack is bounded by the depth cap, not by graph depth (past the cap the loop parks instead of recursing).
 
 State word (atomic, CAS transitions): `cold → scheduled → running → blocked → ready`, plus
 `external_pending` for manual/promise nodes. Transitions are written to be **lost-wakeup-free**: a dependency
 completing and scheduling a node cannot be erased by that node parking itself.
 
-**Subscriptions are late.** Adding a dependency does not subscribe. A node installs wakeup continuations only
-at the moment it must park, and detaches them on completion. The continuation list allows many dependents (a
+**Subscriptions are the exception, not the rule.** Adding a dependency does not subscribe, and the eager
+depth-first drive completes most dependencies inline without ever parking. A node installs wakeup continuations
+only when it actually has to park — on a manual/push dependency, one running on another worker, or when the
+inline depth cap is hit — and detaches them on completion. The continuation list allows many dependents (a
 single dependent fits the node's inline buffer, so no allocation).
 
 ## Lifetime rules

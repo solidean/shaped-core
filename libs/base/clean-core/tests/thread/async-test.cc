@@ -349,3 +349,17 @@ TEST("async - large dependency tree drives correctly without computing undemande
     CHECK(!*orphan_ran);
     CHECK(!orphan->is_ready());
 }
+
+TEST("async - deep cold chain completes across the inline depth cap")
+{
+    // A lazy chain far longer than the eager-drive recursion cap: the first ~cap levels are driven inline
+    // depth-first on one stack, then the poll loop falls back to subscribe+park (driven via the scheduler
+    // queue) for the rest. The result must be identical either way — this pins that the cap fallback is
+    // correct and that the native stack stays bounded regardless of graph depth.
+    int const n = 400; // > the internal inline depth cap
+    auto node = cc::make_async_lazy<cc::i64>([] { return cc::i64(0); });
+    for (int i = 1; i < n; ++i)
+        node = cc::make_async_lazy([](cc::i64 x) { return x + 1; }, cc::move(node));
+
+    CHECK(cc::async_blocking_get(node) == cc::i64(n - 1));
+}

@@ -38,6 +38,19 @@ void dep_free_node(cc::impl::async_dep_list_node* n)
     // async_dep_list_node is trivially destructible (u64 + raw ptr), so no explicit dtor call is needed
     cc::node_allocation_free(reinterpret_cast<cc::byte*>(n), cc::node_class_index_for<cc::impl::async_dep_list_node>());
 }
+
+// Per-worker recursion depth of the eager depth-first dep drive (poll() calling a dependency's poll()). Caps
+// the native stack at graph-depth; past the cap we fall back to subscribe+park, which uses no extra stack.
+thread_local int s_inline_depth = 0;
+constexpr int async_max_inline_depth = 128;
+
+struct inline_depth_guard
+{
+    inline_depth_guard() { ++s_inline_depth; }
+    ~inline_depth_guard() { --s_inline_depth; }
+    inline_depth_guard(inline_depth_guard const&) = delete;
+    inline_depth_guard& operator=(inline_depth_guard const&) = delete;
+};
 } // namespace
 
 // ============================================================================
@@ -433,8 +446,30 @@ void cc::async_node_base::poll()
 
         if (!_deps.empty())
         {
-            // Not-ready dependencies remain (require() already scheduled any cold ones). Install wakeup
-            // continuations late, then decide whether to park.
+            // Eager depth-first drive: require() already made every dependency runnable, so rather than parking
+            // we try to satisfy one right here — drive it inline on this stack (better locality, no scheduler
+            // round-trip, no wakeup). A work-stealing pool can still steal the other, already-scheduled deps in
+            // parallel; whichever finishes first, we re-evaluate and drop it. We only fall back to the old
+            // subscribe+park path when the picked dep cannot be completed inline (a manual/push node, one
+            // already running on another worker, or one whose own deps aren't ready) or the recursion depth cap
+            // is hit. Subscription therefore becomes the exception, not the rule.
+            //
+            // TODO: in a pure-inline run every dep also sits in the scheduler queue (require() enqueued it) and
+            // is popped later as a ready no-op. Harmless, but the enqueue could be gated on "are there
+            // steal-capable peers" (a scheduler property) to avoid the churn.
+            if (s_inline_depth < async_max_inline_depth)
+            {
+                async_node_base* const pick = _deps.first(); // non-null: _deps is not empty
+                {
+                    inline_depth_guard const ds;
+                    pick->poll();
+                }
+                if (pick->is_ready())
+                    continue; // progress: drop the finished dep and re-evaluate (drives siblings left-to-right)
+                // pick could not be completed inline -> fall through to subscribe + park on the not-ready set
+            }
+
+            // Install wakeup continuations late, then decide whether to park.
             bool const found_ready = subscribe_to_pending_deps();
 
             bool parked = false;
