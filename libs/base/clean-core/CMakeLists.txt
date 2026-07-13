@@ -210,6 +210,7 @@ add_executable(clean-core-test
     tests/memory/node_allocation-slabs-test.cc
     tests/memory/node_allocation-handles-test.cc
     tests/memory/unique_ptr-test.cc
+    tests/memory/shared_ptr-test.cc
 
     tests/container/array-test.cc
     tests/container/fixed-array-test.cc

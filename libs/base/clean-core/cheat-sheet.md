@@ -289,6 +289,13 @@ auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args
 #include <clean-core/memory/unique_ptr.hh>        // cc::unique_ptr<T> — move-only single-object owner (wraps node_allocation)
 auto p = cc::make_unique<T>(args...);              // *p; p->member; p.get(); p.is_valid(); if (p) ...
 p = nullptr;                                       // destroys + clears (no reset()); ==/!= vs ptr/nullptr; hidden-friend hash
+
+#include <clean-core/memory/shared_ptr.hh>         // cc::shared_ptr<T, Traits=default_shared_traits<T>> — 8 B, intrusive
+auto s = cc::make_shared<T>(args...);              // only way to construct (strong=1); *s; s->m; s.get(); default: [T|control]
+cc::weak_ptr<T> w = s;  w.lock();                   // weak (if Traits::supports_weak); lock() -> shared_ptr or empty
+// custom Traits (all static, on T*) for intrusive counts: node_size/node_align + init_control/inc_/dec_strong->bool/
+// destroy_object/free_storage (+weak: inc_/dec_weak/try_lock_strong). Base-keyed Traits serves derived T via upcast;
+// from_alive(T*) mints a handle from a pointer known alive. (cc::async will key one Traits on async_node_base.)
 ```
 
 ## Utility & bit

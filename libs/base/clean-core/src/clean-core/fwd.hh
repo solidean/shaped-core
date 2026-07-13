@@ -80,6 +80,10 @@ template <class T, class NodeTraits>
 struct poly_node_allocation;
 template <class T>
 struct unique_ptr;
+template <class T, class Traits>
+struct shared_ptr;
+template <class T, class Traits>
+struct weak_ptr;
 
 
 //
