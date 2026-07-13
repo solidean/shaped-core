@@ -214,6 +214,7 @@ add_executable(clean-core-test
     tests/container/array-test.cc
     tests/container/fixed-array-test.cc
     tests/container/small_vector-test.cc
+    tests/container/fixed_vector-test.cc
     tests/container/span-test.cc
     tests/container/strided_span-test.cc
     tests/container/pinned_data-test.cc
