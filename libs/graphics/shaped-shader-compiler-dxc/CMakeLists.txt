@@ -69,6 +69,7 @@ if(TARGET shaped-graphics-dx12)
         tests/end-to-end-raytracing-test.cc
         tests/end-to-end-raster-test.cc
         tests/end-to-end-raster-stages-test.cc
+        tests/end-to-end-cube-window-test.cc
     )
     target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
 endif()
