@@ -252,9 +252,12 @@ original 384 B), and the node is cacheline-aligned to avoid false sharing betwee
 * **16 B header.** Two `atomic<u32>` intrusive refcounts (strong + weak — the handle is one pointer, no
   separate control block) plus one `atomic<u64>` control word. That word is a **tagged pointer**: a 32-aligned
   `async_type_ops const*` in the high bits, and the lifecycle state + wake-pending flag + spinlock bit in the
-  low 5 bits. There is **no C++ vtable** — the ops descriptor (a static-constexpr per-`async<T>` struct) is the
-  hand-rolled replacement, carrying the typed value/error destructors and the node's size class; the frame is
-  invoked directly. `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
+  low 5 bits. There is **no C++ vtable** — a static-constexpr `async_type_ops` descriptor is the hand-rolled
+  replacement, carrying the typed value/error destructors and the node's size class; the frame is invoked
+  directly. The descriptor is keyed on `(size class, value-teardown, error-teardown)`, not on `(T, E)`, so it
+  **collapses**: a trivially-destructible type uses a null teardown, and every async whose value/error land in
+  the same size class with the same teardowns shares one descriptor instance — e.g. `async<int, async_error>` and
+  `async<float, async_error>` get the same pointer. `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
 * **Payload slot (offset 16), one hand-managed union.** The compute frame, the not-ready dependency set, and
   the continuation head (dependents to wake) are **mutually exclusive with** the resolved value ⊍ error — the
   scratch matters only before completion, the value/error only after — so they share the slot, discriminated by

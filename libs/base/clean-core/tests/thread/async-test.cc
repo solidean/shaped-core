@@ -12,10 +12,10 @@
 
 using cc::async_context;
 
-// Node size guards. The node is a 24 B header (refcount + tagged state/ops word + the compute frame) followed
-// by the payload slot: max(scratch, sizeof(value)), aligned so the whole node is a 64 B line for a value up to
-// ~40 B. The value shares the payload with the unresolved scratch (deps + continuations) and grows the node
-// naturally for a larger T (no inline cap — the value is built straight into the payload at resolution).
+// Node size guards. The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the
+// payload slot: max(scratch, sizeof(T), sizeof(E)), aligned so the whole node is a 64 B line for a value up to
+// ~48 B. The value/error shares the payload with the unresolved scratch (frame + deps + continuations) and
+// grows the node naturally for a larger T/E (no inline cap — it is built straight into the payload at resolution).
 static_assert(sizeof(cc::async<int>) == 64, "async<int> should be exactly one cache line");
 static_assert(sizeof(cc::async<cc::vector<int>>) == 64, "async<vector> should stay one cache line");
 static_assert(sizeof(cc::async<cc::string>) == 64, "async<string> should stay one cache line");
@@ -34,6 +34,15 @@ static_assert(sizeof(cc::async<big_value>) > 64, "a large value must grow the no
 // a custom E defaults to async_error; the default async<int> (== async<int, async_error>) stays one cache line
 static_assert(sizeof(cc::async<int, cc::async_error>) == 64, "async<int, async_error> should be exactly one cache line");
 static_assert(sizeof(cc::async<int, big_error>) > 64, "a large error type must grow the node onto further lines");
+
+// async_type_ops collapse: trivially-destructible payloads of the same node size class share ONE descriptor.
+// int and float are both trivial and land in the same 64 B class -> identical ops pointer.
+static_assert(&cc::impl::async_type_ops_for<int, cc::async_error> == &cc::impl::async_type_ops_for<float, cc::async_error>,
+              "trivially-destructible values of the same size class must share one async_type_ops");
+// a non-trivially-destructible value keeps its own value-teardown, so it does NOT collapse with int
+static_assert(&cc::impl::async_type_ops_for<int, cc::async_error>
+                  != &cc::impl::async_type_ops_for<cc::string, cc::async_error>,
+              "a non-trivially-destructible value type must keep its own teardown");
 
 // ============================================================================
 // basics

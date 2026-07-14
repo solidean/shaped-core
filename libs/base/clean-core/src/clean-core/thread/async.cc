@@ -543,9 +543,15 @@ void cc::async_node_base::teardown_payload()
     // intrusive counts and _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
     auto const s = load_state(std::memory_order_relaxed);
     if (s == async_node_state::ready_value)
-        ops()->teardown_value(this); // destroy the resolved value at payload offset 0
+    {
+        if (auto const f = ops()->teardown_value) // null for a trivially-destructible value type
+            f(this);                              // destroy the resolved value at payload offset 0
+    }
     else if (s == async_node_state::ready_error)
-        ops()->teardown_error(this); // destroy the resolved error at payload offset 0
+    {
+        if (auto const f = ops()->teardown_error) // null for a trivially-destructible error type
+            f(this);                              // destroy the resolved error at payload offset 0
+    }
     else
     {
         unsubscribe_all();

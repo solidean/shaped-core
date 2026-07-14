@@ -68,12 +68,8 @@ struct alignas(64) async_typed_node : cc::async_node_base
     static_assert(alignof(E) <= 16, "async<T, E>: E is over-aligned (> 16) — box it");
     // NOTE: no blanket nothrow-move requirement on T — an emplace-only immovable T is supported. The nothrow-move
     // constraint is applied per-path, only where a value is actually moved (finish_value / push_value /
-    // make_async_from_value / into_result).
-
-    /// Destroy the resolved value in the payload (called through the ops table at teardown when ready_value).
-    void clear_value() { reinterpret_cast<T*>(this->value_storage())->~T(); }
-    /// Destroy the resolved error in the payload (called through the ops table at teardown when ready_error).
-    void clear_error() { reinterpret_cast<E*>(this->value_storage())->~E(); }
+    // make_async_from_value / into_result). Payload teardown is not a member here — it lives in the single-type
+    // helper impl::async_typed_teardown so the ops descriptor collapses across types (see async_type_ops_for).
 
     /// Pointer to the produced value; null unless ready with a value. Stable while the node is alive.
     [[nodiscard]] T const* value_ptr() const
@@ -96,22 +92,42 @@ private:
     alignas(16) cc::byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
 
-/// Type-erased ops for async<T, E> (the hand-rolled vtable, see cc::async_type_ops): destroy the resolved value
-/// or error + the concrete size class, reached from the untemplated base. async<T, E> adds no data members over
-/// async_typed_node<T, E>, so their size classes match (class index taken from async_typed_node<T, E>, complete
-/// here; async<T, E> is not yet). The async<T, E> ctor static_asserts the sizes stay equal.
-template <class T, class E>
-struct async_typed_node_ops
+/// Type-erased teardown of the resolved payload: destroy a single U (the value or the error) at payload offset 0.
+/// Keyed on ONE type, not the (T, E) pair — the value and error share offset 0, and this needs neither the other
+/// arm's type nor the node size — so it is shared by every async whose value, or whose error, is U. (Friend of
+/// async_node_base, declared in async_node.hh, to reach the protected payload.)
+template <class U>
+void async_typed_teardown(cc::async_node_base* n)
 {
-    static void teardown_value(cc::async_node_base* n) { static_cast<async_typed_node<T, E>*>(n)->clear_value(); }
-    static void teardown_error(cc::async_node_base* n) { static_cast<async_typed_node<T, E>*>(n)->clear_error(); }
-};
+    reinterpret_cast<U*>(n->value_storage())->~U();
+}
+
+using async_teardown_fn = void (*)(cc::async_node_base*);
+
+/// Teardown pointer for a payload of type U: null for a trivially-destructible U (no function is emitted, and the
+/// null slot is what lets descriptors collapse), else the single-type teardown. `if constexpr` so a trivial U
+/// never instantiates async_typed_teardown<U>.
+template <class U>
+consteval async_teardown_fn async_teardown_ptr()
+{
+    if constexpr (std::is_trivially_destructible_v<U>)
+        return nullptr;
+    else
+        return &async_typed_teardown<U>;
+}
+
+/// The ops descriptor (hand-rolled vtable, see cc::async_type_ops) keyed on what actually distinguishes it: the
+/// node size class + the value/error teardowns. Two async types with the same size class and the same (possibly
+/// null) teardowns therefore share ONE static instance — e.g. async<int, async_error> and async<float,
+/// async_error> get the SAME async_type_ops pointer (both: null value teardown, async_error error teardown,
+/// same 64 B class). class_index comes from async_typed_node<T, E>, which is complete here (async<T, E> is not).
+template <cc::node_class_index Cls, async_teardown_fn TV, async_teardown_fn TE>
+inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, Cls};
+
+/// The descriptor for a concrete async<T, E> — a reference into the shared, collapsed instance above.
 template <class T, class E>
-inline constexpr cc::async_type_ops async_type_ops_for = {
-    &async_typed_node_ops<T, E>::teardown_value,
-    &async_typed_node_ops<T, E>::teardown_error,
-    cc::node_class_index_for<async_typed_node<T, E>>(),
-};
+inline constexpr cc::async_type_ops const& async_type_ops_for
+    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(), async_teardown_ptr<T>(), async_teardown_ptr<E>()>;
 
 // error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
 // The default copies (a custom E is assumed copyable where this is used); the async_error overload

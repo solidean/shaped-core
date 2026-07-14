@@ -434,6 +434,15 @@ struct alignas(32) async_type_ops
 };
 static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned so its low 5 bits are free for tags");
 
+namespace impl
+{
+/// Type-erased teardown of a resolved payload of type U (value or error), defined in async.hh. Declared here so
+/// async_node_base can befriend it — it reaches the protected payload. Keyed on U alone so the ops descriptor
+/// collapses across types (see impl::async_type_ops_for).
+template <class U>
+void async_typed_teardown(async_node_base* n);
+} // namespace impl
+
 /// Shared, T/E-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
 /// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), and the
 /// type-erased compute frame (its signature carries no T/E). The typed value AND the typed error live in the
@@ -740,8 +749,10 @@ private:
 private:
     friend struct async_context_base; // reaches add_pending_dependency on the generic require() path
     template <class, class>
-    friend struct async_context;           // typed context reaches finish_value* / finish_error*
-    friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
+    friend struct async_context; // typed context reaches finish_value* / finish_error*
+    template <class U>
+    friend void impl::async_typed_teardown(async_node_base*); // reaches value_storage for the typed dtor
+    friend struct impl::async_node_traits;                    // reaches the intrusive counts / ops / teardown_payload
 
     /// Intrusive refcount (async_node_traits): strong owners + weak (continuation cells + the strong owners'
     /// collective one). Born 1/1 by init_control. Kept as two independent atomics (offset 0) so inc/dec stay
