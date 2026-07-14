@@ -113,29 +113,40 @@ cc::result<cc::unit> dx12_swapchain::build_backbuffers()
         td.height = _size[1];
         td.usage = sg::texture_usage::render_target;
 
-        // Wrap the DXGI back buffer as a dx12_texture (borrowed resource). The wrapper's deferred-deletion
-        // dtor just drops our reference once its epoch retires — exactly what ResizeBuffers/teardown needs.
-        // The render pass creates the RTV on demand from the render_target_view acquire hands out, so the
-        // swapchain keeps no RTV of its own.
-        auto tex = std::make_shared<dx12_texture>(_ctx, _ctx.current_epoch(), td, cc::move(resource));
+        // Wrap the DXGI back buffer as a *borrowed* dx12_texture: DXGI owns the resource, so ~dx12_texture
+        // drops our reference synchronously (the swapchain waits for the GPU before releasing). The render
+        // pass creates the RTV on demand from the render_target_view acquire hands out, so the swapchain
+        // keeps no RTV of its own.
+        auto tex = std::make_shared<dx12_texture>(_ctx, _ctx.current_epoch(), td, cc::move(resource),
+                                                  /*heap*/ nullptr, /*borrowed*/ true);
         _backbuffers.push_back(backbuffer{.texture = dx12_texture_handle(cc::move(tex)), .frame_fence_value = 0});
     }
     return cc::unit{};
 }
 
+void dx12_swapchain::wait_for_gpu()
+{
+    // Best-effort (never throws — it also runs from the destructor): a lost device never signals, and a
+    // failed SetEventOnCompletion means the device is broken and we're tearing down anyway.
+    if (_ctx.is_device_lost())
+        return;
+    if (_present_fence->GetCompletedValue() < _fence_value)
+        if (SUCCEEDED(_present_fence->SetEventOnCompletion(_fence_value, _fence_event)))
+            WaitForSingleObject(_fence_event, INFINITE);
+}
+
 void dx12_swapchain::release_backbuffers()
 {
-    _backbuffers.clear(); // ~dx12_texture stages each DXGI resource for deferred deletion
+    _backbuffers.clear(); // borrowed → ~dx12_texture drops the DXGI reference synchronously (see wait_for_gpu)
 }
 
 cc::result<cc::unit> dx12_swapchain::resize(tg::vec2i size)
 {
-    // ResizeBuffers requires zero outstanding back-buffer references. Drop our wrappers first (staging their
-    // deferred deletion in the open epoch), then drain the GPU so that epoch retires and the DXGI resource
-    // references are actually released, before resizing.
+    // ResizeBuffers requires zero outstanding back-buffer references. Since acquire calls this at most once
+    // per epoch, waiting for the GPU to finish every submitted present (the present fence) is enough to make
+    // the back buffers safe to release — no epoch advance needed. Borrowed wrappers then release synchronously.
+    wait_for_gpu();
     release_backbuffers();
-    _ctx.advance_epoch_and_wait_for_idle();
-    _ctx.process_completed_epochs();
 
     UINT const flags = _tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
     if (HRESULT hr = _swapchain->ResizeBuffers(UINT(_desc.buffer_count), UINT(size[0]), UINT(size[1]),
@@ -151,13 +162,18 @@ sg::render_target_view dx12_swapchain::acquire_backbuffer()
 {
     CC_ASSERT(!_acquired, "acquire_backbuffer() called twice without an intervening present()");
 
-    // Auto-resize to the window's current client area.
-    if (tg::vec2i const client = client_size_of(_hwnd); client != _size)
-        if (auto r = resize(client); r.has_error())
-            fail(DXGI_ERROR_DEVICE_REMOVED, "swapchain resize failed");
+    // Auto-resize to the window — but only the first acquire of each epoch checks. That bounds resize (which
+    // drains the GPU) to once per epoch, so it never advances an epoch under the caller.
+    if (sg::epoch const epoch = _ctx.current_epoch(); epoch != _last_resize_epoch)
+    {
+        _last_resize_epoch = epoch;
+        if (tg::vec2i const client = client_size_of(_hwnd); client != _size)
+            if (auto r = resize(client); r.has_error())
+                fail(DXGI_ERROR_DEVICE_REMOVED, "swapchain resize failed");
+    }
 
-    UINT const idx = _swapchain->GetCurrentBackBufferIndex();
-    backbuffer const& bb = _backbuffers[idx];
+    _acquired_index = _swapchain->GetCurrentBackBufferIndex();
+    backbuffer const& bb = _backbuffers[_acquired_index];
 
     // Don't hand back a buffer whose previous frame is still in flight.
     if (_present_fence->GetCompletedValue() < bb.frame_fence_value)
@@ -171,23 +187,22 @@ sg::render_target_view dx12_swapchain::acquire_backbuffer()
     return sg::render_target_view(bb.texture, sg::texture_view_dimension::tex_2d, _desc.format, sg::subresource_range{});
 }
 
+void dx12_swapchain::record_present_transition(sg::command_list& cmd)
+{
+    CC_ASSERT(_acquired, "record_present_transition without a matching acquire_backbuffer()");
+    auto* const dx = dynamic_cast<dx12_command_list*>(&cmd);
+    CC_ASSERT(dx != nullptr, "command list is not a dx12 command list");
+
+    // Transition the acquired back buffer to the PRESENT layout on the caller's still-open list. Going
+    // through the barrier tracker computes it from whatever layout the frame left the buffer in (a no-op if
+    // already present) and leaves its canonical layout as `present` for next frame.
+    dx->transition_texture_to(_backbuffers[_acquired_index].texture, sg::texture_layout::present);
+}
+
 void dx12_swapchain::present()
 {
-    CC_ASSERT(_acquired, "present() called without a matching acquire_backbuffer()");
+    CC_ASSERT(_acquired, "present() without a matching acquire_backbuffer()");
     _acquired = false;
-
-    UINT const idx = _swapchain->GetCurrentBackBufferIndex();
-
-    // Transition the acquired back buffer to the PRESENT layout on a short command list. Going through the
-    // barrier tracker means the transition is computed from whatever layout the frame's render pass left it
-    // in (typically render_target), and leaves the back buffer's canonical layout as `present` for next frame.
-    {
-        auto cmd = _ctx.create_dx12_command_list();
-        if (cmd.has_error())
-            fail(DXGI_ERROR_DEVICE_REMOVED, "swapchain present: command list creation failed");
-        cmd.value()->transition_texture_to(_backbuffers[idx].texture, sg::texture_layout::present);
-        _ctx.submit_dx12_command_list(cc::move(cmd.value()));
-    }
 
     UINT const sync_interval = _desc.present_mode == sg::present_mode::vsync ? 1u : 0u;
     UINT const flags = _tearing ? DXGI_PRESENT_ALLOW_TEARING : 0u; // valid only with sync interval 0
@@ -198,7 +213,7 @@ void dx12_swapchain::present()
     ++_fence_value;
     if (HRESULT hr = _ctx._queue->Signal(_present_fence.Get(), _fence_value); FAILED(hr))
         fail(hr, "ID3D12CommandQueue::Signal (swapchain present fence) failed");
-    _backbuffers[idx].frame_fence_value = _fence_value;
+    _backbuffers[_acquired_index].frame_fence_value = _fence_value;
 }
 
 void dx12_swapchain::fail(HRESULT hr, char const* what)
@@ -211,8 +226,8 @@ void dx12_swapchain::fail(HRESULT hr, char const* what)
 
 dx12_swapchain::~dx12_swapchain()
 {
-    // Drop the back-buffer wrappers; their deferred-deletion dtor gates the real DXGI-resource release on
-    // the owning epoch retiring (GPU done), so no explicit drain is needed here.
+    // Wait for the GPU to finish with the back buffers, then release them synchronously (borrowed storage).
+    wait_for_gpu();
     release_backbuffers();
     if (_fence_event != nullptr)
         CloseHandle(_fence_event);

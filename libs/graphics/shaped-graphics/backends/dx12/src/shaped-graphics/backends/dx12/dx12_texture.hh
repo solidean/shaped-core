@@ -27,12 +27,14 @@ public:
                  sg::epoch created_in,
                  sg::texture_description const& desc,
                  ComPtr<ID3D12Resource> resource,
-                 sg::memory_heap_handle heap = nullptr)
+                 sg::memory_heap_handle heap = nullptr,
+                 bool borrowed = false)
       : sg::raw_texture(desc),
         _ctx(ctx),
         _creation_epoch(created_in),
         _resource(cc::move(resource)),
         _heap(cc::move(heap)),
+        _borrowed(borrowed),
         _access(subresource_extent_of(desc))
     {
     }
@@ -45,6 +47,11 @@ public:
     sg::epoch _creation_epoch;                // epoch this texture was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed texture; null when dedicated
+
+    // Borrowed (externally-owned) storage — a swapchain back buffer owned by DXGI, not us. Released
+    // synchronously (the swapchain waits for the GPU before dropping it) rather than through the epoch's
+    // deferred deletion, so ResizeBuffers/teardown see zero outstanding references immediately.
+    bool _borrowed = false;
 
     // Cross-queue sync stamps mirroring dx12_buffer's — they order the async copy queue (ctx.upload /
     // ctx.download) against the direct queue. Only grow, never reset, mutable+atomic. An async texture copy

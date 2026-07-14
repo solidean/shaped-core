@@ -97,6 +97,12 @@ public:
     /// A command list must be submitted (or dropped) in the same epoch it was opened in.
     virtual submission_token submit_command_list(std::unique_ptr<command_list> cmd) = 0;
 
+    /// Submits `cmd` and presents `sc`'s acquired back buffer — the way to present. Records the back
+    /// buffer's final transition to the present layout onto `cmd` (folding it into work already recorded,
+    /// rather than a separate list), submits `cmd`, then hands the buffer to the display. `cmd` must contain
+    /// this frame's rendering into the back buffer acquired from `sc`. Returns the submission's completion token.
+    submission_token submit_command_list_and_present(swapchain& sc, std::unique_ptr<command_list> cmd);
+
     /// Discards a command list unsubmitted and consumes it — same as letting it go out of scope.
     /// Must happen in the epoch the list was opened in.
     virtual void drop_command_list(std::unique_ptr<command_list> cmd) = 0;

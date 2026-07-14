@@ -9,9 +9,10 @@
 namespace sg::backend::dx12
 {
 /// DirectX 12 implementation of sg::swapchain over an IDXGISwapChain3 (flip-discard model). Each back
-/// buffer is wrapped in a dx12_texture so it flows through the normal render-pass / barrier path (which
-/// creates the RTV on demand); a dedicated present fence gates back-buffer reuse. Auto-resizes to its
-/// HWND's client area on acquire. Created by dx12_context::create_dx12_swapchain.
+/// buffer is wrapped in a dx12_texture (borrowed storage) so it flows through the normal render-pass /
+/// barrier path — the RTV is created on demand by the render pass. A dedicated present fence gates
+/// back-buffer reuse. Auto-resizes to its HWND's client area, checked at most once per epoch so acquire
+/// never advances an epoch under the caller. Created by dx12_context::create_dx12_swapchain.
 class dx12_swapchain final : public sg::swapchain
 {
 public:
@@ -34,20 +35,20 @@ public:
     {
     }
 
-    // Drops the back-buffer wrappers (deferred deletion gates their real release on GPU completion) and
+    // Waits for the GPU to finish with the back buffers, then releases them (borrowed → synchronous) and
     // closes the fence event. Body in dx12_swapchain.cc.
     ~dx12_swapchain() override;
 
-    // sg::swapchain overrides
     [[nodiscard]] sg::render_target_view acquire_backbuffer() override;
-    void present() override;
-    [[nodiscard]] tg::vec2i get_size() const override { return _size; }
-    [[nodiscard]] int get_width() const override { return _size[0]; }
-    [[nodiscard]] int get_height() const override { return _size[1]; }
 
     // Populates _backbuffers (one dx12_texture wrapper per buffer) from the current IDXGISwapChain3 at the
     // current _size. Called at creation and after every ResizeBuffers. Returns an error if GetBuffer fails.
     [[nodiscard]] cc::result<cc::unit> build_backbuffers();
+
+protected:
+    // sg::swapchain present handshake (driven by context::submit_command_list_and_present).
+    void record_present_transition(sg::command_list& cmd) override;
+    void present() override;
 
 private:
     // One back buffer: the dx12_texture wrapping the DXGI resource (its RTV is created on demand by the
@@ -58,13 +59,17 @@ private:
         cc::u64 frame_fence_value = 0;
     };
 
-    // Drops the back-buffer wrappers (their ~dx12_texture schedules the DXGI resource for deferred
-    // deletion). Does not drain the GPU — callers that must (resize) do so around it.
+    // Blocks until the GPU has finished every present submitted so far (present fence reaches _fence_value),
+    // so the back buffers are safe to release synchronously. No-op if the device is lost.
+    void wait_for_gpu();
+
+    // Releases the back-buffer wrappers. Borrowed storage, so ~dx12_texture drops the DXGI reference
+    // synchronously — callers must wait_for_gpu() first.
     void release_backbuffers();
 
-    // Drains the GPU, releases the back buffers, calls ResizeBuffers to `size`, and rebuilds. The idle
-    // drain + deferred-deletion sweep before ResizeBuffers is what leaves zero outstanding back-buffer
-    // references (D3D12 requires it).
+    // Waits for the GPU, releases the back buffers, calls ResizeBuffers to `size`, and rebuilds. Does NOT
+    // advance an epoch (acquire calls this at most once per epoch, so the present-fence wait alone leaves
+    // zero outstanding back-buffer references, which ResizeBuffers requires).
     [[nodiscard]] cc::result<cc::unit> resize(tg::vec2i size);
 
     // Marks the context device-lost if `hr` indicates removal, then throws: device_lost_exception when the
@@ -84,7 +89,9 @@ private:
     cc::u64 _fence_value = 0;
     HANDLE _fence_event = nullptr;
 
-    tg::vec2i _size;        // current back-buffer resolution (tracks auto-resize)
+    tg::vec2i _size;                                   // current back-buffer resolution (tracks auto-resize)
+    sg::epoch _last_resize_epoch = sg::epoch::invalid; // epoch of the last auto-resize check (once per epoch)
+    UINT _acquired_index = 0;                          // back-buffer index handed out by the current acquire
     bool _acquired = false; // true between acquire_backbuffer and present (enforces the 1:1 pairing)
 };
 } // namespace sg::backend::dx12

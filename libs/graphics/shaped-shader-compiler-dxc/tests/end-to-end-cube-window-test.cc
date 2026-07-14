@@ -231,7 +231,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
     desc.depth_stencil.depth_test = true;
     desc.depth_stencil.depth_write = true;
     desc.depth_stencil_format = sg::pixel_format::depth32_float;
-    desc.color_targets.push_back({.format = sc->get_format()});
+    desc.color_targets.push_back({.format = sc->format()});
     auto pipeline = ctx.uncached.create_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
@@ -279,8 +279,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         if (t > max_seconds)
             break;
 
-        auto rt = sc->acquire_backbuffer(); // auto-resizes to the window first
-        tg::vec2i const size = sc->get_size();
+        auto rt = sc->acquire_backbuffer();                        // auto-resizes to the window first
+        tg::vec2i const size = tg::vec2i(rt.width(), rt.height()); // the acquired view is the size of record
         ensure_depth(size);
         sg::texture_2d const depth_typed(depth_tex);
 
@@ -310,10 +310,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
             cmd->raster.bind_vertex_buffers({vbuf->as_vertex_buffer<vertex>()});
             cmd->raster.draw({.vertex_range = {.offset = 0, .size = cc::isize(cube.size())}});
         }
-        ctx.submit_command_list(cc::move(cmd));
-
-        sc->present();
-        ctx.advance_epoch(sc->get_buffer_count()); // throttle CPU ahead of the GPU + retire finished frames
+        ctx.submit_command_list_and_present(*sc, cc::move(cmd));
+        ctx.advance_epoch(sc->buffer_count()); // throttle CPU ahead of the GPU + retire finished frames
     }
 
     ctx.advance_epoch_and_wait_for_idle(); // drain before the swapchain / window tear down

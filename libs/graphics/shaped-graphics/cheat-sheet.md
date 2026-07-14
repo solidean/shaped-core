@@ -95,6 +95,7 @@ ctx.download.set_async_window_size(bytes)          // void — resize the async 
 ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); default 16 MiB
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in); throws sg::device_lost_exception on device loss
+ctx.submit_command_list_and_present(sc, std::move(cmd)) // -> submission_token — THE present path: folds the swapchain back-buffer's present-layout transition into cmd, submits, then presents (see swapchain)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; explicit discard (same epoch). NB a list left to leave
                                                    //   scope un-consumed auto-drops itself but PRINTS A WARNING — submit or drop it explicitly
 ctx.shutdown()                                     // void — release backend state; virtual; idempotent; auto-run by backend dtor
@@ -331,14 +332,13 @@ sg::swapchain_description       // { void* native_window_handle=nullptr (HWND on
 sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
 auto sc = ctx.create_swapchain({.native_window_handle = hwnd});   // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
 // per frame:
-auto rt = sc->acquire_backbuffer();   // -> render_target_view for the current back buffer (auto-resizes to the window first)
+auto rt = sc->acquire_backbuffer();   // -> render_target_view for the current back buffer (auto-resizes to the window, once/epoch)
+int w = rt.width(); int h = rt.height();  // THIS frame's size — the swapchain has no size getter (a later acquire may resize)
 //   ... render into rt this frame (rt.cleared(color) / cmd.raster.render_to({.color_targets = {...}})) ...
-sc->present();                        // hand the acquired buffer to the display — EXACTLY once per successful acquire
-sc->get_size()                        // tg::vec2i {width, height} — current resolution (tracks auto-resize)
-sc->get_width() / sc->get_height()    // int
-sc->get_format() sc->get_buffer_count() sc->get_present_mode() sc->is_hdr_enabled() sc->get_native_window_handle()
-sc->get_description()                 // swapchain_description const&
-// acquire/present throw sg::device_lost_exception on device loss. A bad handle / count / non-renderable format asserts.
+ctx.submit_command_list_and_present(*sc, std::move(cmd));  // the present path: folds the present-layout transition into cmd,
+                                                           //   submits, then presents — exactly one per successful acquire
+sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->native_window_handle() sc->description()
+// acquire / submit_command_list_and_present throw sg::device_lost_exception on device loss. Bad handle / count / format asserts.
 ```
 
 ## samplers — how a shader reads a texture  (see docs/concepts/bindings.md)

@@ -96,25 +96,20 @@ TEST("sg dx12 - swapchain create, describe, and present on a hidden window")
     REQUIRE(sc != nullptr);
 
     // Description getters reflect what was requested.
-    CHECK(sc->get_buffer_count() == 2);
-    CHECK(sc->get_format() == sg::pixel_format::bgra8_unorm);
-    CHECK(sc->get_present_mode() == sg::present_mode::vsync);
+    CHECK(sc->buffer_count() == 2);
+    CHECK(sc->format() == sg::pixel_format::bgra8_unorm);
+    CHECK(sc->present_mode() == sg::present_mode::vsync);
     CHECK(!sc->is_hdr_enabled());
-    CHECK(sc->get_native_window_handle() == win.hwnd);
+    CHECK(sc->native_window_handle() == win.hwnd);
 
-    // Size tracks the window's client area.
-    CHECK(sc->get_width() == win.client_w);
-    CHECK(sc->get_height() == win.client_h);
-    CHECK(sc->get_size() == tg::vec2i(win.client_w, win.client_h));
-
-    // A few frames: acquire -> clear the back buffer through the raster path -> present. buffer_count 2
-    // means the third frame exercises the present-fence reuse wait. WARP's debug behaviour is the oracle —
-    // a bad barrier / present would fault before we get here.
+    // A few frames: acquire -> clear the back buffer -> present. The acquired view carries this frame's
+    // size (the swapchain has no size getter). buffer_count 2 means the third frame exercises the
+    // present-fence reuse wait. WARP's debug behaviour is the oracle — a bad barrier / present would fault.
     for (int frame = 0; frame < 3; ++frame)
     {
         auto rt = sc->acquire_backbuffer();
-        CHECK(rt.width() == sc->get_width());
-        CHECK(rt.height() == sc->get_height());
+        CHECK(rt.width() == win.client_w);
+        CHECK(rt.height() == win.client_h);
         CHECK(rt.format() == sg::pixel_format::bgra8_unorm);
 
         auto cmd = ctx->create_command_list();
@@ -122,8 +117,7 @@ TEST("sg dx12 - swapchain create, describe, and present on a hidden window")
             auto pass
                 = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.0f, float(frame) * 0.25f, 1, 1))}});
         }
-        ctx->submit_command_list(cc::move(cmd));
-        sc->present();
+        ctx->submit_command_list_and_present(*sc, cc::move(cmd));
     }
 
     ctx->advance_epoch_and_wait_for_idle();
@@ -143,36 +137,24 @@ TEST("sg dx12 - swapchain auto-resizes to its window")
         SKIP("WARP could not create a swapchain for the window (likely a headless / session-0 host)");
     sg::swapchain_handle const sc = sc_result.value();
 
-    CHECK(sc->get_width() == win.client_w);
-    CHECK(sc->get_height() == win.client_h);
-
-    // Grow the window; the next acquire must resize the chain to match.
-    tg::vec2i const grown = win.resize_client(320, 240);
+    // Auto-resize is checked on the first acquire of each epoch, so drive it like a real frame loop:
+    // acquire -> render -> present -> advance_epoch, resizing the window between epochs.
+    auto frame = [&](tg::vec2i expected, tg::vec4f color)
     {
         auto rt = sc->acquire_backbuffer();
-        CHECK(sc->get_size() == grown);
-        CHECK(rt.width() == grown[0]);
-        CHECK(rt.height() == grown[1]);
+        CHECK(rt.width() == expected[0]);
+        CHECK(rt.height() == expected[1]);
         auto cmd = ctx->create_command_list();
         {
-            auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(1, 0, 0, 1))}});
+            auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(color)}});
         }
-        ctx->submit_command_list(cc::move(cmd));
-        sc->present();
-    }
+        ctx->submit_command_list_and_present(*sc, cc::move(cmd));
+        ctx->advance_epoch(sc->buffer_count());
+    };
 
-    // Shrink it again; the chain follows.
-    tg::vec2i const shrunk = win.resize_client(128, 96);
-    {
-        auto rt = sc->acquire_backbuffer();
-        CHECK(sc->get_size() == shrunk);
-        auto cmd = ctx->create_command_list();
-        {
-            auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0, 1, 0, 1))}});
-        }
-        ctx->submit_command_list(cc::move(cmd));
-        sc->present();
-    }
+    frame(tg::vec2i(win.client_w, win.client_h), tg::vec4f(0, 0, 1, 1)); // initial size
+    frame(win.resize_client(320, 240), tg::vec4f(1, 0, 0, 1));           // grow — the chain follows
+    frame(win.resize_client(128, 96), tg::vec4f(0, 1, 0, 1));            // shrink — and again
 
     ctx->advance_epoch_and_wait_for_idle();
 }

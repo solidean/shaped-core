@@ -147,10 +147,11 @@ accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; dx12 real (WARP),
                                   vulkan stub. Deferred: occlusion + pipeline-statistics queries
-swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acquire_backbuffer/present/get_size,
-                                  auto-resize, vsync/immediate, HDR flag); dx12 real (IDXGISwapChain3 flip model,
-                                  back buffers as dx12_texture on the render-pass path); vulkan stub. Deferred:
-                                  deeper HDR, multi-window, exclusive fullscreen
+swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acquire_backbuffer -> render_target_view;
+                                  present via ctx.submit_command_list_and_present; once-per-epoch auto-resize;
+                                  vsync/immediate; HDR flag); dx12 real (IDXGISwapChain3 flip model, back buffers as
+                                  borrowed dx12_texture on the render-pass path); vulkan stub. Deferred: deeper HDR,
+                                  multi-window, exclusive fullscreen
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
                                   deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)
 ```
