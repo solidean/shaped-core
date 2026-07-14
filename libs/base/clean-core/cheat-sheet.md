@@ -416,13 +416,14 @@ int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready wi
 std::shared_ptr<cc::async_error const> pe = a->try_error();
 m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")));  // complete a manual node
 
-// raw compute frame (perf-critical state machine): async_result<T>(async_context&). Multi-branch frames MUST
-// annotate -> cc::async_result<T>. A frame may create + require new deps mid-compute (dynamic dependencies).
-[step=0, dep=cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_result<int> {
+// raw compute frame (perf-critical state machine): async_step_status(async_context&) — resolves via ctx,
+// returns a status. Annotate -> cc::async_step_status and give T explicitly (make_async_lazy<int>). A frame
+// may create + require new deps mid-compute (dynamic dependencies).
+[step=0, dep=cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_step_status {
     if (step++ == 0) { dep = cc::make_async_lazy([]{ return 10; }); actx.require(dep); return actx.wait_for_dependencies(); }
-    return actx.success(*dep->value_ptr()); };
+    return actx.resolve_to_value(*dep->value_ptr()); };   // or actx.success(...)
 actx.require(dep);              // -> bool ready (no subscription); else records a pending dep, return wait
-actx.success(v);  actx.error(async_error|any_error);  actx.wait_for_dependencies();  actx.yield();
+actx.resolve_to_value(v)/success(v);  actx.resolve_to_error(async_error|any_error)/error(...);  actx.wait_for_dependencies();  actx.yield();
 
 // driving decoupled from any executor (the seam); default is inline, on the calling thread:
 cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind scheduler to this thread

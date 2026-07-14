@@ -248,8 +248,6 @@ struct inline_scheduler;
 struct async_thread_pool;
 struct async_context;
 template <class T>
-struct async_result;
-template <class T>
 struct async;
 
 /// The normal async handle: an 8 B intrusive cc::shared_ptr over one slab node (see thread/async.hh).

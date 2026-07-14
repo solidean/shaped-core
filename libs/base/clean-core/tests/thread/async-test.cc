@@ -10,7 +10,6 @@
 // philosophy. The concurrent work-stealing scheduler and its tests live in async-pool-test.cc (threads only).
 
 using cc::async_context;
-using cc::async_result;
 
 // Node size guard: an async<int> node fits in exactly one cache line. Got here via the result-slot union
 // (E3), an 8 B unique_function frame (E4), and a 16 B continuation head (one inline dependent).
@@ -42,8 +41,8 @@ TEST("async - try_value is empty before completion")
 
 TEST("async - success via context helper")
 {
-    // f keeps its async_context to exercise success(); T is deduced from the success tag
-    auto a = cc::make_async_lazy([](async_context& actx) { return actx.success(cc::string("hi")); });
+    // f keeps its async_context to exercise success(); a raw ctx-resolving frame gives its result type explicitly
+    auto a = cc::make_async_lazy<cc::string>([](async_context& actx) { return actx.success(cc::string("hi")); });
     CHECK(cc::async_blocking_get(a) == "hi");
 }
 
@@ -80,7 +79,7 @@ TEST("async - variadic dependency form unwraps async args")
 TEST("async - variadic dependency form short-circuits on a dependency error")
 {
     auto a = cc::make_async_lazy([] { return 3; });
-    auto bad = cc::make_async_lazy<int>([](async_context& actx) -> async_result<int>
+    auto bad = cc::make_async_lazy<int>([](async_context& actx) -> cc::async_step_status
                                         { return actx.error(cc::any_error("boom")); });
 
     bool ran = false;
@@ -112,8 +111,8 @@ TEST("async - dependency frame may still take a leading async_context")
 {
     auto a = cc::make_async_lazy([] { return 10; });
 
-    // f receives the context plus the unwrapped dependency value
-    auto b = cc::make_async_lazy([](async_context& actx, int x) { return actx.success(x * 2); }, a);
+    // f receives the context plus the unwrapped dependency value; a ctx-resolving frame gives its result type
+    auto b = cc::make_async_lazy<int>([](async_context& actx, int x) { return actx.success(x * 2); }, a);
     CHECK(cc::async_blocking_get(b) == 20);
 }
 
@@ -126,7 +125,7 @@ TEST("async - dynamic dependency added during compute, removed once ready")
     // step 0 creates a dependency mid-compute, requires it, and waits; step 1 reads its value. The dependency
     // must be gone from the pending list by the time the parent completes.
     auto p = cc::make_async_lazy<int>(
-        [step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> async_result<int>
+        [step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> cc::async_step_status
         {
             switch (step++)
             {
@@ -149,7 +148,7 @@ TEST("async - already-ready dependency completes without parking")
     dep->push_value(7); // ready before anyone requires it
 
     auto p = cc::make_async_lazy<int>(
-        [dep](async_context& actx) -> async_result<int>
+        [dep](async_context& actx) -> cc::async_step_status
         {
             bool const ready = actx.require(dep);
             CHECK(ready); // require on a ready dep returns true immediately
@@ -167,7 +166,7 @@ TEST("async - required cold dependency is scheduled and driven to completion")
     // scheduler drives it to completion, waking the parent — all within one async_blocking_get.
     auto dep = cc::make_async_lazy([] { return 100; });
     auto p = cc::make_async_lazy<int>(
-        [dep](async_context& actx) -> async_result<int>
+        [dep](async_context& actx) -> cc::async_step_status
         {
             if (!actx.require(dep))
                 return actx.wait_for_dependencies();
@@ -210,7 +209,7 @@ TEST("async - a two-phase frame runs exactly twice (register deps, then compute)
     // entered exactly twice — never again after it returns success.
     auto calls = std::make_shared<int>(0);
     auto p = cc::make_async_lazy<int>(
-        [calls, step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> async_result<int>
+        [calls, step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> cc::async_step_status
         {
             ++*calls;
             switch (step++)
@@ -239,7 +238,7 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy<int>(
-        [ext](async_context& actx) -> async_result<int>
+        [ext](async_context& actx) -> cc::async_step_status
         {
             if (!actx.require(ext))
                 return actx.wait_for_dependencies();
@@ -273,7 +272,7 @@ TEST("async - many dependents park on one node (inline + spill), all woken on co
     cc::vector<cc::shared_async<int>> deps;
     for (int i = 0; i < n; ++i)
         deps.push_back(cc::make_async_lazy<int>(
-            [ext, i](async_context& actx) -> async_result<int>
+            [ext, i](async_context& actx) -> cc::async_step_status
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
@@ -305,7 +304,7 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
     auto ext = cc::make_async_manual<int>();
     {
         auto p = cc::make_async_lazy<int>(
-            [ext](async_context& actx) -> async_result<int>
+            [ext](async_context& actx) -> cc::async_step_status
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
@@ -327,7 +326,7 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
 
 TEST("async - error short-circuits a dependent transform, f never runs")
 {
-    auto a = cc::make_async_lazy<int>([](async_context& actx) -> async_result<int>
+    auto a = cc::make_async_lazy<int>([](async_context& actx) -> cc::async_step_status
                                       { return actx.error(cc::any_error("boom")); });
 
     bool ran = false;
@@ -354,7 +353,7 @@ TEST("async - try_async_blocking_get surfaces a value")
 
 TEST("async - cancellation propagates as a value")
 {
-    auto a = cc::make_async_lazy<int>([](async_context& actx) -> async_result<int>
+    auto a = cc::make_async_lazy<int>([](async_context& actx) -> cc::async_step_status
                                       { return actx.error(cc::async_error::make_cancelled()); });
 
     auto r = cc::try_async_blocking_get(a);

@@ -653,8 +653,10 @@ void cc::async_node_base::poll()
 
         // A produced error is handed back here (not stored in the node), so the completion path can install it
         // into the result slot only after stealing the still-live continuation head that shares that storage.
+        // The frame writes it through ctx.out_error (resolve_to_error); point that at this step's local.
         async_error step_error;
-        switch (poll_compute_step(ctx, step_error))
+        ctx.out_error = &step_error;
+        switch (poll_compute_step(ctx))
         {
         case async_step_status::produced_value:
             complete_from_compute(/*produced_error*/ false, step_error);

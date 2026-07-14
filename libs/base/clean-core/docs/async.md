@@ -28,12 +28,12 @@ The handle:
 
 ### The raw compute frame
 
-A frame is a callable `async_result<T>(async_context&)`. It may be a hand-written state machine that adds
-dependencies dynamically as it runs:
+A frame is a callable `async_step_status(async_context&)`: it resolves its outcome **through** the context and
+returns a status. It may be a hand-written state machine that adds dependencies dynamically as it runs:
 
 ```cpp
 auto a = cc::make_async_lazy<int>(
-    [step = 0, child = cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_result<int>
+    [step = 0, child = cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_step_status
     {
         switch (step++)
         {
@@ -42,20 +42,23 @@ auto a = cc::make_async_lazy<int>(
             actx.require(child);
             return actx.wait_for_dependencies();
         default:
-            return actx.success(*child->value_ptr() + 5);
+            return actx.resolve_to_value(*child->value_ptr() + 5); // or actx.success(...)
         }
     });
 ```
 
-A frame that has more than one kind of `return` must annotate `-> cc::async_result<T>` (the tag helpers all
-have different types, so `auto` deduction won't unify them).
+A raw frame's return carries no value type (it returns a status), so its node must give `T` explicitly —
+`make_async_lazy<int>(...)`. A plain value-returning frame (`[](int x){ return x + 1; }`) deduces `T`.
 
 `async_context` gives a frame:
 
 * `require(dep) -> bool` — true if `dep` is already ready (read its value now); otherwise records it as a
   pending dependency and returns false. **No subscription happens here.** `dep` may be a `shared_async`
   created earlier or one the frame builds on the fly (dynamic dependencies) — capture it so it stays alive.
-* result helpers: `success(v)`, `error(async_error | any_error)`, `wait_for_dependencies()`, `yield()`.
+* resolve the result — each returns the matching status, so `return actx.xxx(...)`: `resolve_to_value(v)` /
+  `resolve_to_error(async_error | any_error)` (aliased `success(v)` / `error(...)`), plus
+  `wait_for_dependencies()` and `yield()`. `resolve_to_value` stores the value into the node as the frame
+  runs; `resolve_to_error` hands the failure to the completion path.
 
 A frame is **re-entrant**: one that waits is re-polled once its dependencies are ready. A typical two-phase
 frame (register deps → `wait`, then compute) therefore runs twice. It is never entered again after it

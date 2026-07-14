@@ -12,7 +12,7 @@
 
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency /
 // continuation bookkeeping, the scheduler seam, and the failure-channel value type. The templated public
-// surface (async<T>, async_result<T>, make_async_*, async_blocking_get) lives in async.hh.
+// surface (async<T>, async_context, make_async_*, async_blocking_get) lives in async.hh.
 //
 // Nothing here ever blocks a thread: poll() drives a node's compute frame forward until it completes, fails
 // as a value, or parks on not-ready dependencies with wakeup continuations installed. The default driver
@@ -112,32 +112,6 @@ enum class async_step_status : cc::u8
     produced_error, // frame finished on the failure channel; error stored in the base node
     waiting,        // frame added dependencies / asked to wait — normalize and poll them now
     yield,          // frame yielded cooperatively — reschedule and come back later
-};
-
-/// Status discriminator inside async_result<T> (kept here so async_context can hand out T-agnostic tags).
-enum class async_status : cc::u8
-{
-    value,
-    error,
-    waiting,
-    yield,
-};
-
-// tiny tag types returned by async_context helpers; each converts to any async_result<T> (see async.hh)
-struct async_waiting_tag
-{
-};
-struct async_yield_tag
-{
-};
-struct async_error_result_tag
-{
-    async_error error;
-};
-template <class V>
-struct async_success_tag
-{
-    V value;
 };
 
 // ============================================================================
@@ -560,11 +534,12 @@ public:
 
     // supplied by the typed node
 protected:
-    /// Run one step of the compute frame. produced_value means the typed value has been stored (in the
-    /// derived node). produced_error means the failure is moved into out_error — NOT into the node, whose
-    /// result slot still holds the live continuation head; the completion path installs it after stealing
-    /// the head. Not called for external/manual nodes (they have no frame).
-    virtual async_step_status poll_compute_step(async_context& ctx, async_error& out_error) = 0;
+    /// Run one step of the compute frame; the frame resolves its outcome through async_context. produced_value
+    /// means the typed value was stored (via ctx.resolve_to_value, in the derived node). produced_error means
+    /// the failure was written to ctx.out_error (the poll loop's stack local) — NOT into the node, whose result
+    /// slot still holds the live continuation head; the completion path installs it after stealing the head.
+    /// Not called for external/manual nodes (they have no frame).
+    virtual async_step_status poll_compute_step(async_context& ctx) = 0;
 
     /// Destroy the compute frame (release its captures). Called on completion.
     virtual void destroy_frame() = 0;

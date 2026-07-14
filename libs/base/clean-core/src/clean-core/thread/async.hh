@@ -37,7 +37,7 @@ namespace cc
 // forward headers (e.g. shaped-graphics fwd.hh) can name the handle without pulling in the whole async surface.
 
 // ============================================================================
-// async_result<T> — what a compute frame returns from one step
+// compute-frame result plumbing
 // ============================================================================
 
 namespace impl
@@ -46,43 +46,6 @@ namespace impl
 template <class U>
 U async_declval() noexcept;
 } // namespace impl
-
-/// The outcome of one compute step: a value, a failure, a request to wait for dependencies, or a yield.
-/// Implicitly constructible from a plain T (the common "return the value" success path) and from the tiny
-/// tag types async_context hands out, so a frame can simply `return value;` or `return actx.wait_...();`.
-/// Move-only (carries a move-only async_error). Use T = cc::unit to model an async<void>.
-template <class T>
-struct async_result
-{
-    // success from a plain value — intentionally implicit so `return value;` works inside a frame
-    async_result(T v) : _status(async_status::value) { _value.emplace_value(cc::move(v)); }
-
-    // from async_context helpers (all intentionally implicit)
-    template <class V>
-    async_result(async_success_tag<V> s) : _status(async_status::value)
-    {
-        _value.emplace_value(cc::move(s.value));
-    }
-    async_result(async_waiting_tag) : _status(async_status::waiting) {}
-    async_result(async_yield_tag) : _status(async_status::yield) {}
-    async_result(async_error_result_tag e) : _status(async_status::error), _error(cc::move(e.error)) {}
-
-    [[nodiscard]] async_status status() const { return _status; }
-
-    // consumed by the node once a step finishes; valid for the matching status only
-    [[nodiscard]] T take_value() && { return cc::move(_value.value()); }
-    [[nodiscard]] async_error take_error() && { return cc::move(_error); }
-
-    async_result(async_result&&) noexcept = default;
-    async_result& operator=(async_result&&) noexcept = default;
-    async_result(async_result const&) = delete;
-    async_result& operator=(async_result const&) = delete;
-
-private:
-    async_status _status;
-    cc::optional<T> _value;
-    async_error _error;
-};
 
 // ============================================================================
 // typed node: the value + compute-frame layer under async<T>
@@ -97,37 +60,26 @@ namespace impl
 template <class T>
 struct alignas(64) async_typed_node : cc::async_node_base
 {
-    /// Install the compute frame. F is called as `async_result<T>(async_context&)`.
+    /// Install the compute frame. The frame resolves its outcome through async_context and returns a status —
+    /// `async_step_status(async_context&)`.
     template <class F>
     void set_frame(F&& f)
     {
-        _frame = cc::unique_function<cc::async_result<T>(cc::async_context&)>(cc::forward<F>(f));
+        _frame = cc::unique_function<async_step_status(cc::async_context&)>(cc::forward<F>(f));
     }
+
+    /// Store the produced value (called by async_context::resolve_to_value while the frame runs). A frame
+    /// resolves at most once.
+    void store_value(T v) { _value.emplace_value(cc::move(v)); }
 
     /// Pointer to the produced value; null unless ready with a value. Stable while the node is alive.
     [[nodiscard]] T const* value_ptr() const { return this->has_value() ? &_value.value() : nullptr; }
     [[nodiscard]] T* value_ptr() { return this->has_value() ? &_value.value() : nullptr; }
 
-    async_step_status poll_compute_step(cc::async_context& ctx, async_error& out_error) override
+    async_step_status poll_compute_step(cc::async_context& ctx) override
     {
         CC_ASSERT(_frame.is_valid(), "polled a node without a compute frame");
-        auto r = _frame(ctx);
-        switch (r.status())
-        {
-        case async_status::value:
-            _value.emplace_value(cc::move(r).take_value());
-            return async_step_status::produced_value;
-        case async_status::error:
-            // hand the error back to the poll loop; it goes into the node's result slot only at completion,
-            // after the continuation head (which shares that storage) has been stolen
-            out_error = cc::move(r).take_error();
-            return async_step_status::produced_error;
-        case async_status::waiting:
-            return async_step_status::waiting;
-        case async_status::yield:
-            return async_step_status::yield;
-        }
-        CC_UNREACHABLE("invalid async_status");
+        return _frame(ctx); // the frame resolves via ctx (value into _value, error into ctx.out_error)
     }
 
     void destroy_frame() override { _frame = {}; }
@@ -146,7 +98,7 @@ struct alignas(64) async_typed_node : cc::async_node_base
 
 protected:
     cc::optional<T> _value;
-    cc::unique_function<cc::async_result<T>(cc::async_context&)> _frame;
+    cc::unique_function<async_step_status(cc::async_context&)> _frame;
 };
 } // namespace impl
 
@@ -200,19 +152,43 @@ struct async_context
 {
     async_node_base* current = nullptr;
     async_scheduler* scheduler = nullptr;
+    async_error* out_error = nullptr; // the poll loop's per-step error slot; resolve_to_error writes here
 
-    // result helpers (each returns a tag that converts to async_result<T>)
+    // resolving the result — each returns the matching async_step_status, so a frame can `return ctx.xxx(...)`
 public:
-    [[nodiscard]] async_waiting_tag wait_for_dependencies() const { return {}; }
-    [[nodiscard]] async_yield_tag yield() const { return {}; }
-    [[nodiscard]] async_error_result_tag error(async_error e) const { return {cc::move(e)}; }
-    [[nodiscard]] async_error_result_tag error(cc::any_error e) const { return {async_error::make_error(cc::move(e))}; }
-
+    /// Resolve this frame with a value: stores it into the node now (while the frame runs) and reports
+    /// produced_value. Call at most once; the frame must not resolve again afterwards. V must match the node's
+    /// result type.
     template <class V>
-    [[nodiscard]] async_success_tag<std::decay_t<V>> success(V&& v) const
+    [[nodiscard]] async_step_status resolve_to_value(V&& v) const
     {
-        return {cc::forward<V>(v)};
+        static_cast<impl::async_typed_node<std::decay_t<V>>*>(current)->store_value(cc::forward<V>(v));
+        return async_step_status::produced_value;
     }
+
+    /// Resolve this frame on the failure channel. The error is handed back to the poll loop (via out_error),
+    /// which installs it into the node's result slot at completion — it is not stored on the node now, whose
+    /// slot still holds the live continuation head. Reports produced_error.
+    [[nodiscard]] async_step_status resolve_to_error(async_error e) const
+    {
+        *out_error = cc::move(e);
+        return async_step_status::produced_error;
+    }
+
+    // convenience aliases for readable frames: success/error resolve; wait/yield report a status
+public:
+    template <class V>
+    [[nodiscard]] async_step_status success(V&& v) const
+    {
+        return resolve_to_value(cc::forward<V>(v));
+    }
+    [[nodiscard]] async_step_status error(async_error e) const { return resolve_to_error(cc::move(e)); }
+    [[nodiscard]] async_step_status error(cc::any_error e) const
+    {
+        return resolve_to_error(async_error::make_error(cc::move(e)));
+    }
+    [[nodiscard]] async_step_status wait_for_dependencies() const { return async_step_status::waiting; }
+    [[nodiscard]] async_step_status yield() const { return async_step_status::yield; }
 
     // dependencies
 public:
@@ -278,51 +254,47 @@ decltype(auto) async_invoke_frame_fn(F& f, async_context& ctx, Args&&... args)
         return f(cc::forward<Args>(args)...);
 }
 
-// value type a frame produces: async_result<S> / success(S) -> S; any other return value R -> R.
-// (async_error_result_tag and the wait/yield tags carry no value type, so a frame that only ever returns one
-// of those must give T explicitly or annotate its return type — as it would need to anyway.)
-template <class R>
-struct async_frame_value
+// invoke the user function and resolve the node with its result. A raw frame that itself returns a status
+// (it resolves via ctx and manages its own dependencies) is passed through unchanged; any other return value
+// is a plain value that we resolve into the node here.
+template <class F, class... Args>
+async_step_status async_invoke_and_resolve(async_context& ctx, F& f, Args&&... args)
 {
-    using type = R;
-};
-template <class S>
-struct async_frame_value<async_result<S>>
-{
-    using type = S;
-};
-template <class S>
-struct async_frame_value<async_success_tag<S>>
-{
-    using type = S;
-};
+    using r_t = std::remove_cvref_t<decltype(async_invoke_frame_fn(f, ctx, cc::forward<Args>(args)...))>;
+    if constexpr (std::is_same_v<r_t, async_step_status>)
+        return async_invoke_frame_fn(f, ctx, cc::forward<Args>(args)...);
+    else
+        return ctx.resolve_to_value(async_invoke_frame_fn(f, ctx, cc::forward<Args>(args)...));
+}
 
-// deduced result type of a frame f applied to the unwrapped dependency arguments (with or without ctx)
+// deduced value type of a frame f applied to the unwrapped dependency arguments (with or without ctx). A raw
+// frame that returns async_step_status carries no value type — those must give the result type explicitly.
 template <class F, class... Deps>
-using async_deduced_frame_result_t = typename async_frame_value<std::remove_cvref_t<decltype(async_invoke_frame_fn(
-    async_declval<std::decay_t<F>&>(),
-    async_declval<async_context&>(),
-    async_unwrap_arg(async_declval<std::decay_t<Deps> const&>())...))>>::type;
+using async_deduced_frame_result_t
+    = std::remove_cvref_t<decltype(async_invoke_frame_fn(async_declval<std::decay_t<F>&>(),
+                                                         async_declval<async_context&>(),
+                                                         async_unwrap_arg(async_declval<std::decay_t<Deps> const&>())...))>;
 
-// The one compute-frame wrapper behind every make_async_* / map form. Requires all deps,
-// short-circuits on the first error, then calls f — passing async_context& only if f wants it. A raw
-// state-machine frame is just the zero-dependency case where f takes async_context& and returns async_result.
-template <class R, class F, class... Deps>
+// The one compute-frame wrapper behind every make_async_* form. Requires all deps, short-circuits on the first
+// error, then invokes f — passing async_context& only if f wants it, and resolving f's returned value (or
+// passing through the status of a raw ctx-resolving frame). Returns the step status. A raw state-machine frame
+// is just the zero-dependency case where f takes async_context& and resolves + returns a status itself.
+template <class F, class... Deps>
 auto async_make_frame(F&& f, Deps&&... deps)
 {
-    return [fn = cc::forward<F>(f), ... ds = cc::forward<Deps>(deps)](async_context& ctx) mutable -> async_result<R>
+    return [fn = cc::forward<F>(f), ... ds = cc::forward<Deps>(deps)](async_context& ctx) mutable -> async_step_status
     {
         bool all_ready = true;
         ((all_ready = async_require_arg(ctx, ds) && all_ready), ...); // require EVERY dep (registers pending)
         if (!all_ready)
-            return ctx.wait_for_dependencies();
+            return async_step_status::waiting;
 
         cc::optional<async_error> err;
         (async_collect_arg_error(err, ds), ...); // the first errored dependency short-circuits f
         if (err.has_value())
-            return ctx.error(cc::move(err.value()));
+            return ctx.resolve_to_error(cc::move(err.value()));
 
-        return async_invoke_frame_fn(fn, ctx, async_unwrap_arg(ds)...);
+        return async_invoke_and_resolve(ctx, fn, async_unwrap_arg(ds)...);
     };
 }
 
@@ -332,9 +304,12 @@ auto async_make_node(F&& f, Deps&&... deps)
 {
     using result_t = std::conditional_t<async_is_deduce<T>, async_deduced_frame_result_t<F, Deps...>, T>;
     static_assert(!std::is_void_v<result_t>, "the frame must return a value (wrap void as cc::unit)");
+    static_assert(!std::is_same_v<result_t, async_step_status>,
+                  "a raw async_context frame resolves via ctx and returns a status, not a value — give the "
+                  "result type explicitly, e.g. make_async_lazy<int>(...)");
 
     auto node = cc::make_shared<async<result_t>, async_node_traits>();
-    node->set_frame(async_make_frame<result_t>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
+    node->set_frame(async_make_frame(cc::forward<F>(f), cc::forward<Deps>(deps)...));
     return node;
 }
 } // namespace impl
@@ -350,7 +325,8 @@ auto async_make_node(F&& f, Deps&&... deps)
 ///     Errors short-circuit: if any dependency failed, f is skipped and the first error propagates.
 ///   * f is called with the unwrapped dependency values. It may take a leading async_context& (for a raw
 ///     state-machine that manages its own dependencies) or omit it entirely — both are wrapped as needed.
-///   * T defaults to the deduced result of f (async_result<S> counts as S), or may be given explicitly.
+///   * T defaults to the deduced return type of f; a raw frame that resolves via async_context (and returns a
+///     status) carries no value type, so it must give T explicitly.
 ///
 ///   auto a = cc::make_async_scheduled<int>([](cc::async_context&) { return 40; });  // raw frame
 ///   auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);                    // depends on a; f gets int

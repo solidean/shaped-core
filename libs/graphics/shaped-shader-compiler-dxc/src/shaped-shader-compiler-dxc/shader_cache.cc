@@ -72,7 +72,7 @@ sg::async_compiled_shader shader_cache::compile(shader_description const& desc, 
                           {
                               // Copy desc + options into the deferred frame — the frame outlives this call.
                               return cc::make_async_scheduled<sg::compiled_shader>(
-                                  [desc, options](cc::async_context& actx) -> cc::async_result<sg::compiled_shader>
+                                  [desc, options](cc::async_context& actx) -> cc::async_step_status
                                   {
                                       compiler* comp = thread_local_compiler();
                                       if (comp == nullptr)

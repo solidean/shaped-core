@@ -15,7 +15,6 @@
 #include <thread>
 
 using cc::async_context;
-using cc::async_result;
 
 namespace
 {
@@ -53,7 +52,7 @@ TEST("async - many independent asyncs fan out across the pool")
     // them) — the children fan out across the pool's workers
     int const n = 64;
     auto root = cc::make_async_lazy<cc::i64>(
-        [n, step = 0, kids = cc::vector<cc::shared_async<cc::i64>>()](async_context& actx) mutable -> async_result<cc::i64>
+        [n, step = 0, kids = cc::vector<cc::shared_async<cc::i64>>()](async_context& actx) mutable -> cc::async_step_status
         {
             if (step++ == 0)
             {
