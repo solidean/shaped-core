@@ -34,18 +34,46 @@ struct MoveOnly
     MoveOnly(MoveOnly const&) = delete;
     MoveOnly& operator=(MoveOnly const&) = delete;
 };
+
+// Over-aligned element types: exercise the k_align > 8 path (struct alignment bumped to alignof(T)).
+// Over16 mirrors a 16 B / 16-aligned float4; Over32 a 32 B / 32-aligned float8.
+struct alignas(16) Over16
+{
+    int value = 0;
+    Over16() = default;
+    explicit Over16(int v) : value(v) {}
+};
+struct alignas(32) Over32
+{
+    int value = 0;
+    Over32() = default;
+    explicit Over32(int v) : value(v) {}
+};
 } // namespace
 
-// The SSO fold (mode flag + resource in one tagged word) keeps the common case at 48 B — one line under
-// the old 64 B. N is a *minimum* inline capacity: the head layout auto-grows the buffer to fill the
-// footprint; a large inline buffer falls back to the tail layout and grows the struct (still >= N).
+// The SSO fold (mode flag + resource in one tagged word) keeps the common case at 48 B — one line under the
+// old 64 B. N is a *minimum* inline capacity: a single raw buffer holds the elements at the front, a u32 size,
+// then the tagged resource word (trailing 8 B); the buffer auto-grows to fill the footprint. A larger inline
+// buffer grows the struct but wastes no leading bytes (still >= N).
 static_assert(sizeof(cc::small_vector<int, 4>) == 48, "small_vector<int,4> should be 48 B");
 static_assert(sizeof(cc::small_vector<cc::u16, 3>) == 48, "small_vector<u16,3> should be 48 B");
-static_assert(cc::small_vector<int, 4>::inline_capacity() == 9, "head layout auto-grows <int,4> to 9");
+static_assert(cc::small_vector<int, 4>::inline_capacity() == 9, "auto-grows <int,4> to 9 inline");
 static_assert(cc::small_vector<int, 4>::inline_capacity() >= 4, "inline_capacity is at least N");
 static_assert(cc::small_vector<cc::u16, 3>::inline_capacity() >= 3, "inline_capacity is at least N");
-static_assert(sizeof(cc::small_vector<int, 64>) > 48, "a large inline buffer grows past 48 B (tail layout)");
-static_assert(cc::small_vector<int, 64>::inline_capacity() >= 64, "tail layout keeps at least N");
+// A large inline buffer grows the struct, but the unified layout wastes no leading bytes: it stays strictly
+// below the old tail layout's footprint (48 B header + N elements).
+static_assert(sizeof(cc::small_vector<int, 64>) > 48, "a large inline buffer grows past 48 B");
+static_assert(sizeof(cc::small_vector<int, 64>) < 48 + 64 * sizeof(int), "no wasted leading region (tail waste gone)");
+static_assert(cc::small_vector<int, 64>::inline_capacity() >= 64, "keeps at least N inline");
+// Over-aligned T is handled with no special dependency on alignof(T) <= 8: the struct picks up alignof(T)
+// (elements sit at offset 0, so they get T's alignment) and grows only as needed. A 16 B/16-aligned element
+// still lands the common case at 48 B; a 32 B/32-aligned element rounds the footprint up to 64 B.
+static_assert(alignof(cc::small_vector<Over16, 2>) == 16, "over-aligned T bumps the struct alignment");
+static_assert(sizeof(cc::small_vector<Over16, 2>) == 48, "16 B/16-aligned element still fits the 48 B footprint");
+static_assert(cc::small_vector<Over16, 2>::inline_capacity() >= 2, "keeps at least N inline");
+static_assert(alignof(cc::small_vector<Over32, 1>) == 32, "32-aligned T bumps struct alignment to 32");
+static_assert(sizeof(cc::small_vector<Over32, 1>) == 64, "32 B/32-aligned element rounds the footprint to 64 B");
+static_assert(cc::small_vector<Over32, 1>::inline_capacity() >= 1, "keeps at least N inline");
 
 TEST("small_vector - empty is inline")
 {
@@ -449,4 +477,26 @@ TEST("small_vector - shrink_to_fit returns to inline when it fits")
     CHECK(v.size() == 3);
     CHECK(v[0] == 0);
     CHECK(v[2] == 2);
+}
+
+TEST("small_vector - over-aligned element type spills and re-inlines")
+{
+    cc::small_vector<Over16, 2> v;
+    CHECK(v.is_inline());
+    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0); // elements carry T's alignment
+
+    for (int i = 0; i < 20; ++i)
+        v.push_back(Over16(i));
+    CHECK(!v.is_inline()); // spilled to heap
+    CHECK(v.size() == 20);
+    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0);
+    for (int i = 0; i < 20; ++i)
+        CHECK(v[i].value == i);
+
+    v.resize_down_to(2);
+    v.shrink_to_fit();
+    CHECK(v.is_inline()); // back inline
+    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0);
+    CHECK(v[0].value == 0);
+    CHECK(v[1].value == 1);
 }

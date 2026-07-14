@@ -79,7 +79,7 @@ cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, da
 auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), structured bindings
 
 #include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, N-min inline (SVO)
-cc::small_vector<int, 4> sv;                       // 48 B (alignof(T)<=8); N is a MINIMUM inline capacity
+cc::small_vector<int, 4> sv;                       // 48 B here; N is a MINIMUM inline cap; over-aligned T OK
 sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 sv.inline_capacity();                              // actual inline cap >= N (auto-grows to fill footprint; 9 here)
