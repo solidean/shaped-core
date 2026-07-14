@@ -23,6 +23,17 @@ std::unique_ptr<command_list> context::create_command_list()
     CC_UNREACHABLE("create_command_list failed on a healthy device — internal error");
 }
 
+swapchain_handle context::create_swapchain(swapchain_description const& desc)
+{
+    auto r = try_create_swapchain(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+
+    if (_device_lost)
+        throw device_lost_exception(_device_loss_reason);
+    throw swapchain_creation_exception(r.error());
+}
+
 void context::mark_device_lost(cc::string reason)
 {
     // Sticky: the first observed reason wins; later observations don't overwrite it.

@@ -41,6 +41,7 @@
 #include <shaped-graphics/raw_texture.hh>
 #include <shaped-graphics/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing_shader_table.hh>
+#include <shaped-graphics/swapchain.hh>
 #include <shaped-graphics/texture.hh>
 #include <shaped-graphics/types.hh>
 #include <shaped-graphics/vertex_input.hh>

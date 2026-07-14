@@ -15,6 +15,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
     src/shaped-graphics/backends/dx12/dx12_texture.cc
+    src/shaped-graphics/backends/dx12/dx12_swapchain.cc
     src/shaped-graphics/backends/dx12/dx12_format.cc
     src/shaped-graphics/backends/dx12/dx12_memory_heap.cc
     src/shaped-graphics/backends/dx12/dx12_upload_inline.cc
@@ -54,6 +55,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh
     src/shaped-graphics/backends/dx12/dx12_buffer.hh
     src/shaped-graphics/backends/dx12/dx12_texture.hh
+    src/shaped-graphics/backends/dx12/dx12_swapchain.hh
     src/shaped-graphics/backends/dx12/dx12_format.hh
     src/shaped-graphics/backends/dx12/dx12_memory_heap.hh
     src/shaped-graphics/backends/dx12/dx12_resource_upload.hh
@@ -121,6 +123,7 @@ add_executable(shaped-graphics-dx12-test
     tests/dx12-texture-view-test.cc
     tests/dx12-rtv-dsv-test.cc
     tests/dx12-clear-test.cc
+    tests/dx12-swapchain-test.cc
     tests/dx12-sampler-test.cc
     tests/dx12-texture-copy-test.cc
     tests/dx12-raytracing-test.cc

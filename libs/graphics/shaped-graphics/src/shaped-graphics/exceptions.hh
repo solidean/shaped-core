@@ -85,6 +85,18 @@ private:
     cc::string _entry_point;
 };
 
+/// Creating a swapchain failed — a bad window handle, an unsupported surface format, or a DXGI/driver
+/// error creating the flip chain. Recoverable in principle (fix the window / format and retry). Carries
+/// the underlying backend error.
+class swapchain_creation_exception final : public exception
+{
+public:
+    explicit swapchain_creation_exception(cc::any_error const& error)
+      : exception(cc::format("swapchain creation failed: {}", error.to_string()))
+    {
+    }
+};
+
 /// Instantiating a binding_group against its layout failed: a bound view names no binding, a view's
 /// access/shape doesn't match its binding, or a declared binding was left unprovided. A caller-side
 /// mistake in wiring views to a layout (as opposed to running out of GPU memory). Carries the message

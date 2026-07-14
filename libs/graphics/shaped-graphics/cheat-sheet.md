@@ -28,6 +28,7 @@ comment giving the return type / intuition.
 sg::context_handle        // std::shared_ptr<sg::context>        — shared, long-lived driver
 sg::raw_buffer_handle     // std::shared_ptr<sg::raw_buffer const>   — shared-immutable resource
 sg::raw_texture_handle    // std::shared_ptr<sg::raw_texture const>  — shared-immutable resource
+sg::swapchain_handle      // std::shared_ptr<sg::swapchain>          — MUTABLE per-frame present driver (acquire/present)
 // command_list has NO handle: it's a move-only temporary — std::unique_ptr<sg::command_list>,
 // passed around by reference (command_list&). record once, submit once, not reused.
 sg::async_compiled_shader   // std::shared_ptr<cc::async<compiled_shader>>   — async compile result (try_value() -> compiled_shader_handle)
@@ -61,6 +62,7 @@ sg::buffer_usage          // bit flags named by operation: none/copy_src/copy_ds
                           //   (granularity set by Vulkan; DX12 typeless, Metal untyped — they consume a subset)
 a | b                     // combine usages
 sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
+sg::present_mode          // vsync | immediate  (swapchain frame pacing — see the swapchain section)
 ```
 
 ## context — mutable driver / factory
@@ -71,6 +73,8 @@ ctx.backend()                                      // sg::backend_kind (coarse t
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
+ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
+ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain_handle>  (fallible twin)
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
 ctx.persistent.try_create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (fallible core; every create_* has a try_ twin)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
@@ -115,6 +119,7 @@ sg::device_lost_exception        // device lost (sticky); .reason(). from submit
 sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_bytes()
 sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute|raster|raytracing pipeline build failure; .entry_point()
 sg::binding_group_exception      // binding_group wiring error (unknown/missing binding, kind mismatch) or descriptor exhaustion
+sg::swapchain_creation_exception // create_swapchain failure (bad window / format / DXGI error)
 // only the throwing create_* and submit/advance raise these; the try_create_* surface never throws
 ```
 
@@ -315,6 +320,25 @@ v.texture() v.dimension() v.format() v.range()   // getters
 v.width() v.height()         // int — the viewed mip's pixel size (mip-adjusted, >= 1)
 // Do NOT erase to raw_view (never shader-visible / in a binding group); a backend consumes them directly.
 sg::is_render_target_format(f) // bool — a renderable color format (not depth, not compressed, not undefined)
+```
+
+## swapchain — window presentation  (dx12 real; via ctx.create_swapchain)
+
+```cpp
+#include <shaped-graphics/swapchain.hh>
+sg::swapchain_description       // { void* native_window_handle=nullptr (HWND on Windows); int buffer_count=2 (>=2);
+                                //   pixel_format format=bgra8_unorm; present_mode present_mode=vsync; bool enable_hdr=false }
+sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
+auto sc = ctx.create_swapchain({.native_window_handle = hwnd});   // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
+// per frame:
+auto rt = sc->acquire_backbuffer();   // -> render_target_view for the current back buffer (auto-resizes to the window first)
+//   ... render into rt this frame (rt.cleared(color) / cmd.raster.render_to({.color_targets = {...}})) ...
+sc->present();                        // hand the acquired buffer to the display — EXACTLY once per successful acquire
+sc->get_size()                        // tg::vec2i {width, height} — current resolution (tracks auto-resize)
+sc->get_width() / sc->get_height()    // int
+sc->get_format() sc->get_buffer_count() sc->get_present_mode() sc->is_hdr_enabled() sc->get_native_window_handle()
+sc->get_description()                 // swapchain_description const&
+// acquire/present throw sg::device_lost_exception on device loss. A bad handle / count / non-renderable format asserts.
 ```
 
 ## samplers — how a shader reads a texture  (see docs/concepts/bindings.md)

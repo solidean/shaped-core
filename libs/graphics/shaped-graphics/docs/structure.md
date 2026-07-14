@@ -147,7 +147,10 @@ accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; dx12 real (WARP),
                                   vulkan stub. Deferred: occlusion + pipeline-statistics queries
-swapchain / surface  [planned]  presentation
+swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acquire_backbuffer/present/get_size,
+                                  auto-resize, vsync/immediate, HDR flag); dx12 real (IDXGISwapChain3 flip model,
+                                  back buffers as dx12_texture on the render-pass path); vulkan stub. Deferred:
+                                  deeper HDR, multi-window, exclusive fullscreen
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
                                   deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)
 ```
@@ -166,7 +169,7 @@ underpins safe resource reclamation and command-allocator recycling. See
 3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
 4. textures + views                                        [in progress]  texture resource + creation done (dx12 real, vulkan minimal); texture/texel views + binding path remain
 5. pipelines + shaders                                     [in progress]  compute bind path dx12-real (vulkan + graphics + shader compiler pending)
-6. presentation (swapchain/surface) + submission/sync      [planned]
+6. presentation (swapchain/surface) + submission/sync      [in progress]  dx12 swapchain real (WARP-tested); vulkan pending
 7. tier 2 backends (metal, webgpu)                         [planned]
 8. legacy backends (opengl, webgl)                         [planned]
 ```

@@ -14,6 +14,7 @@
 #include <shaped-graphics/context.uncached.hh>
 #include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/swapchain.hh>
 #include <shaped-graphics/texture_region.hh>
 #include <shaped-graphics/types.hh>
 
@@ -80,6 +81,17 @@ public:
     /// sg::device_lost_exception if the device has been lost; any other internal creation failure is a
     /// bug and aborts.
     [[nodiscard]] std::unique_ptr<command_list> create_command_list();
+
+    /// Creates a swapchain that presents into the window named by `desc` (see swapchain_description).
+    /// Throwing façade over try_create_swapchain: returns the swapchain, or throws
+    /// sg::device_lost_exception (device lost) / sg::swapchain_creation_exception (bad handle / format /
+    /// DXGI error). Only backends that support windowed presentation implement it.
+    [[nodiscard]] swapchain_handle create_swapchain(swapchain_description const& desc = {});
+
+    /// The fallible core behind create_swapchain: returns a swapchain or a cc::error, never throws. A
+    /// backend that cannot present (no windowing) returns an error. Device loss is marked but still
+    /// surfaces here as an error (the throwing façade classifies it).
+    [[nodiscard]] virtual cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc = {}) = 0;
 
     /// Submits a command list for execution and consumes it, returning a token for its completion.
     /// A command list must be submitted (or dropped) in the same epoch it was opened in.
