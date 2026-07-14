@@ -52,6 +52,7 @@ target_sources(clean-core
     src/clean-core/common/hash.hh
     src/clean-core/common/hash128.hh
     src/clean-core/common/assert.hh
+    src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
     src/clean-core/common/asserts.hh

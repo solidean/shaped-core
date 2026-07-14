@@ -3,6 +3,12 @@
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
 
+// Packing: the size field uses the smallest unsigned type that fits N and fills the tail padding next to
+// the aligned storage — u8 for fixed_vector<u8,10>, u16 for fixed_vector<u8,300>, u64 for fixed_vector<u64,2>.
+static_assert(sizeof(cc::fixed_vector<cc::u8, 10>) == 11, "u8/10 -> 1-byte size field, no padding");
+static_assert(sizeof(cc::fixed_vector<cc::u8, 300>) == 302, "u8/300 -> u16 size field");
+static_assert(sizeof(cc::fixed_vector<cc::u64, 2>) == 24, "u64/2 -> u64 size field fills the 8-byte padding");
+
 namespace
 {
 // Tracks ctor/dtor balance so we can assert elements are constructed / destroyed exactly once.
@@ -47,6 +53,20 @@ TEST("fixed_vector - empty")
     CHECK((cc::fixed_vector<int, 4>::capacity() == 4));
     CHECK(v.capacity_back() == 4);
     CHECK(v.begin() == v.end());
+}
+
+TEST("fixed_vector - N == 0 is a valid permanently-empty vector")
+{
+    cc::fixed_vector<int, 0> v;
+    CHECK(v.size() == 0);
+    CHECK(v.empty());
+    CHECK(v.full()); // 0 == capacity
+    CHECK(v.capacity() == 0);
+    CHECK(v.capacity_back() == 0);
+    CHECK(v.begin() == v.end());
+
+    auto copy = v; // copy / move of an empty N==0 vector is well-formed
+    CHECK(copy.empty());
 }
 
 TEST("fixed_vector - fill to capacity")

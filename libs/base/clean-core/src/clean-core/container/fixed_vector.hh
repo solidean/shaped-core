@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/hash.hh> // cc::make_hash_range
+#include <clean-core/common/impl/small_size_type.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
@@ -18,14 +19,20 @@
 /// handful but an occasional overflow must still work", use `cc::small_vector` instead.
 ///
 /// The public surface mirrors `cc::vector` where it is meaningful for a fixed capacity (create_*
-/// factories, push/emplace [_stable], pop/remove, remove_at[_unordered] / _range / _where, resize_* /
+/// factories, push/emplace, pop/remove, remove_at[_unordered] / _range / _where, resize_* /
 /// clear_resize_* family, fill), so it is a drop-in where the capacity fits. Members that only exist to
 /// manage a growable allocation — `reserve*`, `shrink_to_fit`, `create_with_capacity` /
 /// `create_from_allocation` / `extract_allocation` — are meaningless here (capacity is always `N`) and are
 /// intentionally absent.
 ///
 /// Value semantics (deep copy); a moved-from fixed_vector is left empty. Elements are constructed /
-/// destroyed in place, so `T` need not be default-constructible.
+/// destroyed in place, so `T` need not be default-constructible. `N == 0` is a valid (permanently empty)
+/// vector.
+///
+/// **Not subobject-safe:** copy/move assignment destroys the current elements before reading the source,
+/// so assigning from an element of the *same* vector (e.g. `v = v[0].other`) is undefined behavior — the
+/// self-assignment guard only catches whole-object aliasing. Same constraint as `cc::optional`; fine for
+/// a non-allocating container.
 ///
 /// Usage:
 ///   cc::fixed_vector<int, 4> v; // holds at most 4 ints, never allocates
@@ -36,7 +43,7 @@ template <class T, cc::isize N>
 struct cc::fixed_vector
 {
     static_assert(std::is_object_v<T> && !std::is_const_v<T>, "fixed_vector needs non-const object elements");
-    static_assert(N >= 1, "fixed_vector capacity N must be >= 1");
+    static_assert(N >= 0, "fixed_vector capacity N must be non-negative");
 
     // factories (mirroring cc::vector)
 public:
@@ -90,13 +97,13 @@ public:
 
     fixed_vector(fixed_vector const& rhs)
     {
-        for (isize i = 0; i < rhs._size; ++i)
+        for (isize i = 0; i < rhs.size(); ++i)
             push_back(rhs[i]);
     }
 
     fixed_vector(fixed_vector&& rhs) noexcept
     {
-        for (isize i = 0; i < rhs._size; ++i)
+        for (isize i = 0; i < rhs.size(); ++i)
             emplace_back(cc::move(rhs[i]));
         rhs.clear();
     }
@@ -106,7 +113,7 @@ public:
         if (this != &rhs)
         {
             clear();
-            for (isize i = 0; i < rhs._size; ++i)
+            for (isize i = 0; i < rhs.size(); ++i)
                 push_back(rhs[i]);
         }
         return *this;
@@ -117,7 +124,7 @@ public:
         if (this != &rhs)
         {
             clear();
-            for (isize i = 0; i < rhs._size; ++i)
+            for (isize i = 0; i < rhs.size(); ++i)
                 emplace_back(cc::move(rhs[i]));
             rhs.clear();
         }
@@ -130,12 +137,12 @@ public:
 public:
     [[nodiscard]] T& operator[](isize i)
     {
-        CC_ASSERT(i >= 0 && i < _size, "fixed_vector index out of bounds");
+        CC_ASSERT(i >= 0 && i < size(), "fixed_vector index out of bounds");
         return data()[i];
     }
     [[nodiscard]] T const& operator[](isize i) const
     {
-        CC_ASSERT(i >= 0 && i < _size, "fixed_vector index out of bounds");
+        CC_ASSERT(i >= 0 && i < size(), "fixed_vector index out of bounds");
         return data()[i];
     }
 
@@ -152,12 +159,12 @@ public:
     [[nodiscard]] T& back()
     {
         CC_ASSERT(!empty(), "back() on empty fixed_vector");
-        return data()[_size - 1];
+        return data()[size() - 1];
     }
     [[nodiscard]] T const& back() const
     {
         CC_ASSERT(!empty(), "back() on empty fixed_vector");
-        return data()[_size - 1];
+        return data()[size() - 1];
     }
 
     [[nodiscard]] T* data() { return reinterpret_cast<T*>(_storage); }
@@ -166,20 +173,21 @@ public:
     // iterators
 public:
     [[nodiscard]] T* begin() { return data(); }
-    [[nodiscard]] T* end() { return data() + _size; }
+    [[nodiscard]] T* end() { return data() + size(); }
     [[nodiscard]] T const* begin() const { return data(); }
-    [[nodiscard]] T const* end() const { return data() + _size; }
+    [[nodiscard]] T const* end() const { return data() + size(); }
 
     // queries
 public:
-    [[nodiscard]] isize size() const { return _size; }
+    /// Element count as isize — the storage keeps it in a smaller unsigned type, converted here.
+    [[nodiscard]] isize size() const { return isize(_size); }
     [[nodiscard]] bool empty() const { return _size == 0; }
-    [[nodiscard]] bool full() const { return _size == N; }
-    [[nodiscard]] isize size_bytes() const { return _size * isize(sizeof(T)); }
+    [[nodiscard]] bool full() const { return size() == N; }
+    [[nodiscard]] isize size_bytes() const { return size() * isize(sizeof(T)); }
 
     /// The compile-time capacity — the hard cap on element count.
     [[nodiscard]] static constexpr isize capacity() { return N; }
-    [[nodiscard]] isize capacity_back() const { return N - _size; }
+    [[nodiscard]] isize capacity_back() const { return N - size(); }
     [[nodiscard]] bool has_capacity_back_for(isize count) const { return capacity_back() >= count; }
 
     // appending — no `_stable` variants: a fixed_vector never reallocates, so every append is already
@@ -191,8 +199,8 @@ public:
     template <class... Args>
     T& emplace_back(Args&&... args)
     {
-        CC_ASSERT(_size < N, "fixed_vector capacity exceeded");
-        T* const slot = data() + _size;
+        CC_ASSERT(size() < N, "fixed_vector capacity exceeded");
+        T* const slot = data() + size();
         new (cc::placement_new, slot) T(cc::forward<Args>(args)...);
         ++_size;
         return *slot;
@@ -213,8 +221,9 @@ public:
     void remove_back()
     {
         CC_ASSERT(!empty(), "remove_back() on empty fixed_vector");
-        --_size;
-        data()[_size].~T();
+        isize const last = size() - 1;
+        data()[last].~T();
+        _size = size_type(last);
     }
 
     /// Removes and returns the element at `idx`, preserving order. Precondition: 0 <= idx < size().
@@ -227,9 +236,9 @@ public:
     /// Removes the element at `idx`, preserving order (O(n) compaction). Precondition: 0 <= idx < size().
     void remove_at(isize idx)
     {
-        CC_ASSERT(idx >= 0 && idx < _size, "remove_at index out of bounds");
+        CC_ASSERT(idx >= 0 && idx < size(), "remove_at index out of bounds");
         T* const d = data();
-        for (isize i = idx; i + 1 < _size; ++i)
+        for (isize i = idx; i + 1 < size(); ++i)
             d[i] = cc::move(d[i + 1]);
         remove_back();
     }
@@ -243,9 +252,9 @@ public:
     /// Removes the element at `idx` by swapping in the last element (O(1), does not preserve order).
     void remove_at_unordered(isize idx)
     {
-        CC_ASSERT(idx >= 0 && idx < _size, "remove_at_unordered index out of bounds");
-        if (idx != _size - 1)
-            data()[idx] = cc::move(data()[_size - 1]);
+        CC_ASSERT(idx >= 0 && idx < size(), "remove_at_unordered index out of bounds");
+        if (idx != size() - 1)
+            data()[idx] = cc::move(data()[size() - 1]);
         remove_back();
     }
 
@@ -254,9 +263,9 @@ public:
     /// Removes `count` elements starting at `start`, preserving order. Precondition: start + count <= size().
     void remove_at_range(isize start, isize count)
     {
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= _size, "remove_at_range out of bounds");
+        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range out of bounds");
         T* const d = data();
-        isize const new_size = _size - count;
+        isize const new_size = size() - count;
         for (isize i = start; i < new_size; ++i)
             d[i] = cc::move(d[i + count]);
         _shrink_to(new_size);
@@ -264,24 +273,24 @@ public:
     /// Removes `count` elements starting at `start` by moving trailing elements into the gap (unordered).
     void remove_at_range_unordered(isize start, isize count)
     {
-        CC_ASSERT(start >= 0 && count >= 0 && start + count <= _size, "remove_at_range_unordered out of bounds");
+        CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range_unordered out of bounds");
         T* const d = data();
-        isize const avail = _size - (start + count);   // untouched elements after the removed range
+        isize const avail = size() - (start + count);  // untouched elements after the removed range
         isize const k = avail < count ? avail : count; // how many tail elements move into the gap
         for (isize i = 0; i < k; ++i)
-            d[start + i] = cc::move(d[_size - k + i]);
-        _shrink_to(_size - count);
+            d[start + i] = cc::move(d[size() - k + i]);
+        _shrink_to(size() - count);
     }
     /// Removes the range [start, end), preserving order. Precondition: start <= end <= size().
     void remove_from_to(isize start, isize end)
     {
-        CC_ASSERT(start >= 0 && start <= end && end <= _size, "remove_from_to out of bounds");
+        CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to out of bounds");
         remove_at_range(start, end - start);
     }
     /// Removes the range [start, end) by moving trailing elements into the gap (unordered).
     void remove_from_to_unordered(isize start, isize end)
     {
-        CC_ASSERT(start >= 0 && start <= end && end <= _size, "remove_from_to_unordered out of bounds");
+        CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to_unordered out of bounds");
         remove_at_range_unordered(start, end - start);
     }
 
@@ -293,14 +302,14 @@ public:
     {
         T* const d = data();
         isize w = 0;
-        for (isize r = 0; r < _size; ++r)
+        for (isize r = 0; r < size(); ++r)
             if (!pred(d[r]))
             {
                 if (w != r)
                     d[w] = cc::move(d[r]);
                 ++w;
             }
-        isize const removed = _size - w;
+        isize const removed = size() - w;
         _shrink_to(w);
         return removed;
     }
@@ -308,7 +317,7 @@ public:
     template <class Pred>
     bool remove_first_where(Pred&& pred)
     {
-        for (isize i = 0; i < _size; ++i)
+        for (isize i = 0; i < size(); ++i)
             if (pred(data()[i]))
             {
                 remove_at(i);
@@ -320,7 +329,7 @@ public:
     template <class Pred>
     bool remove_last_where(Pred&& pred)
     {
-        for (isize i = _size - 1; i >= 0; --i)
+        for (isize i = size() - 1; i >= 0; --i)
             if (pred(data()[i]))
             {
                 remove_at(i);
@@ -357,7 +366,7 @@ public:
     /// Shrinks to `new_size` by destroying trailing elements. Precondition: 0 <= new_size <= size().
     void resize_down_to(isize new_size)
     {
-        CC_ASSERT(new_size >= 0 && new_size <= _size, "resize_down_to must not grow");
+        CC_ASSERT(new_size >= 0 && new_size <= size(), "resize_down_to must not grow");
         _shrink_to(new_size);
     }
     /// Resizes to `new_size`; new elements are `T(args...)`. Precondition: 0 <= new_size <= N.
@@ -365,40 +374,40 @@ public:
     void resize_to_constructed(isize new_size, Args const&... args)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_constructed exceeds fixed_vector capacity");
-        if (new_size < _size)
+        if (new_size < size())
             _shrink_to(new_size);
         else
-            while (_size < new_size)
+            while (size() < new_size)
                 emplace_back(args...);
     }
     /// Resizes to `new_size`, default-constructing any new elements. Precondition: 0 <= new_size <= N.
     void resize_to_defaulted(isize new_size)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_defaulted exceeds fixed_vector capacity");
-        if (new_size < _size)
+        if (new_size < size())
             _shrink_to(new_size);
         else
-            while (_size < new_size)
+            while (size() < new_size)
                 emplace_back();
     }
     /// Resizes to `new_size`, filling any new elements with `value`. Precondition: 0 <= new_size <= N.
     void resize_to_filled(isize new_size, T const& value)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_filled exceeds fixed_vector capacity");
-        if (new_size < _size)
+        if (new_size < size())
             _shrink_to(new_size);
         else
-            while (_size < new_size)
+            while (size() < new_size)
                 push_back(value);
     }
     /// Resizes to `new_size`, leaving any new elements uninitialized (trivial types only); keeps existing.
     void resize_to_uninitialized(isize new_size)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_uninitialized exceeds fixed_vector capacity");
-        if (new_size < _size)
+        if (new_size < size())
             _shrink_to(new_size);
         else
-            _size = new_size; // new elements uninitialized — valid for trivially-constructible T only
+            _size = size_type(new_size); // new elements uninitialized — valid for trivially-constructible T only
     }
 
     template <class... Args>
@@ -429,7 +438,7 @@ public:
     void clear()
     {
         T* const d = data();
-        for (isize i = 0; i < _size; ++i)
+        for (isize i = 0; i < size(); ++i)
             d[i].~T();
         _size = 0;
     }
@@ -438,7 +447,7 @@ public:
     void fill(T const& value)
     {
         T* const d = data();
-        for (isize i = 0; i < _size; ++i)
+        for (isize i = 0; i < size(); ++i)
             d[i] = value;
     }
 
@@ -449,17 +458,23 @@ public:
 
     // implementation
 private:
-    /// Destroys elements [new_size, _size) and sets the size. Precondition: 0 <= new_size <= _size.
+    /// Destroys elements [new_size, size()) and sets the size. Precondition: 0 <= new_size <= size().
     void _shrink_to(isize new_size)
     {
         T* const d = data();
-        for (isize i = new_size; i < _size; ++i)
+        for (isize i = new_size; i < size(); ++i)
             d[i].~T();
-        _size = new_size;
+        _size = size_type(new_size);
     }
 
+    // Count field of the smallest unsigned type that holds N and fills the tail padding next to `alignas(T)`
+    // storage (u8 for fixed_vector<u8,10>, u16 for fixed_vector<u8,300>, u64 for fixed_vector<u64,2>, ...).
+    // Purely a storage detail — every read goes through size(), which converts to the signed isize API.
+    using size_type = cc::impl::small_size_t<u64(N), alignof(T)>;
+
     // Uninitialized aligned storage for N elements; only [0, _size) are alive. reinterpret_cast in data()
-    // is well-defined for the objects placement-new'd into it.
-    alignas(T) unsigned char _storage[sizeof(T) * N];
-    isize _size = 0;
+    // is well-defined for the objects placement-new'd into it. Sized to at least 1 byte so N == 0 does not
+    // form a (UB) zero-length array.
+    alignas(T) unsigned char _storage[N == 0 ? 1 : sizeof(T) * N];
+    size_type _size = 0;
 };
