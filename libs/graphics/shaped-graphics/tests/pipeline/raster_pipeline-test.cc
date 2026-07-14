@@ -92,12 +92,17 @@ TEST("sg - raster fixed-function state defaults")
     CHECK(ds.stencil_test == false);
     CHECK(ds.depth_compare == sg::compare_op::less);
 
-    // A default-constructed description writes triangles with no depth / no color targets.
+    // A default-constructed description writes triangles with no depth / no color targets, and no optional
+    // geometry / tessellation stages.
     sg::raster_pipeline_description const desc;
     CHECK(desc.topology == sg::primitive_topology::triangle_list);
     CHECK(desc.color_targets.empty());
     CHECK(desc.depth_stencil_format == sg::pixel_format::undefined);
     CHECK(desc.sample_count == 1);
+    CHECK(!desc.geometry_shader.has_value());
+    CHECK(!desc.tessellation_control_shader.has_value());
+    CHECK(!desc.tessellation_evaluation_shader.has_value());
+    CHECK(desc.patch_control_points == 0);
 }
 
 TEST("sg - raster topology family mapping")
@@ -105,4 +110,5 @@ TEST("sg - raster topology family mapping")
     CHECK(sg::topology_type(sg::primitive_topology::point_list) == sg::primitive_topology_type::point);
     CHECK(sg::topology_type(sg::primitive_topology::line_strip) == sg::primitive_topology_type::line);
     CHECK(sg::topology_type(sg::primitive_topology::triangle_strip) == sg::primitive_topology_type::triangle);
+    CHECK(sg::topology_type(sg::primitive_topology::patch_list) == sg::primitive_topology_type::patch);
 }

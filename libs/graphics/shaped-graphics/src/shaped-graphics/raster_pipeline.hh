@@ -39,8 +39,21 @@ struct raster_pipeline_description
     compiled_shader vertex_shader;                 ///< the vertex stage (required)
     cc::optional<compiled_shader> fragment_shader; ///< the fragment stage; omit for a depth-only pipeline
 
+    /// Optional tessellation stages. Both must be set together (a tessellator needs a hull *and* a domain
+    /// stage) or both omitted; when set, `topology` must be `patch_list` and `patch_control_points` > 0.
+    cc::optional<compiled_shader> tessellation_control_shader;    ///< hull stage
+    cc::optional<compiled_shader> tessellation_evaluation_shader; ///< domain stage
+
+    /// Optional geometry stage — a per-primitive shader that may amplify/emit primitives. Omit for none.
+    cc::optional<compiled_shader> geometry_shader;
+
     vertex_input_layout vertex_input;
     primitive_topology topology = primitive_topology::triangle_list;
+
+    /// Control points per patch — used only when `topology == patch_list` (tessellation). Must be 1..32.
+    /// Ignored otherwise.
+    int patch_control_points = 0;
+
     rasterization_state rasterization = {};
     depth_stencil_state depth_stencil = {};
 

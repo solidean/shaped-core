@@ -25,6 +25,23 @@ concrete need justifies it" spirit as [`pixel_format`](../../src/shaped-graphics
 The description **owns** its shaders (`compiled_shader` by value + `optional`), like
 `raytracing_pipeline_description`, so building on a worker thread stays safe once caching lands.
 
+## Optional geometry / tessellation stages
+
+Beyond the required vertex + optional fragment stage, the description carries three more optional
+`compiled_shader`s: `geometry_shader`, and the tessellation pair
+`tessellation_control_shader` / `tessellation_evaluation_shader` (dx12 hull / domain). Naming is
+backend-neutral (Vulkan/GL vocabulary); dx12 maps control→hull (`hs`), evaluation→domain (`ds`),
+geometry→`gs` — both in the DXC profile prefix and the PSO's `HS` / `DS` / `GS` bytecode slots.
+
+Tessellation constrains the topology: the two stages are **both-or-neither**, they require
+`topology == primitive_topology::patch_list`, and `patch_control_points` (1..32) sets how many control
+points each patch carries. `patch_list` adds a `primitive_topology_type::patch` family (PSO
+`PRIMITIVE_TOPOLOGY_TYPE_PATCH`); the concrete IA topology also encodes the control-point count
+(`D3D_PRIMITIVE_TOPOLOGY_N_CONTROL_POINT_PATCHLIST`), computed at build and set at `bind_pipeline`. The
+backend asserts these invariants. For barrier tracking, geometry/tessellation reads fold into the
+`vertex` pipeline stage (as `pipeline_stage_flags` already documents), so no new draw-time hazard wiring
+is needed.
+
 ### Vertex input: explicit or type-driven
 
 `vertex_input_layout` can be filled by hand (one `vertex_input_slot` per bound vertex buffer + a flat list
@@ -68,5 +85,5 @@ vertex-input layout; inert for compute / ray tracing). **vulkan** is a `CC_UNREA
 
 PSO **caching** (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing +
 `async_raster_pipeline` — the compute/RT parity piece), **indirect draws**, **dynamic** primitive topology
-and depth bias (baked into the PSO for now), **tessellation / geometry / mesh-task** stages, and the
-**vulkan** implementation. See [TODO](../TODO.md).
+and depth bias (baked into the PSO for now), **mesh / task** stages, and the **vulkan** implementation.
+Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).

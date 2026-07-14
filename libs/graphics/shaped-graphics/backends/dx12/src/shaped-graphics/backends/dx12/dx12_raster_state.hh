@@ -23,4 +23,6 @@ namespace sg::backend::dx12
 [[nodiscard]] D3D12_COMPARISON_FUNC to_d3d12_comparison(sg::compare_op op);
 [[nodiscard]] D3D12_PRIMITIVE_TOPOLOGY_TYPE to_d3d12_topology_type(sg::primitive_topology_type t);
 [[nodiscard]] D3D12_PRIMITIVE_TOPOLOGY to_d3d12_topology(sg::primitive_topology t);
+/// IA topology for a `control_points`-per-patch patch list (tessellation). control_points must be 1..32.
+[[nodiscard]] D3D12_PRIMITIVE_TOPOLOGY to_d3d12_patch_topology(int control_points);
 } // namespace sg::backend::dx12
