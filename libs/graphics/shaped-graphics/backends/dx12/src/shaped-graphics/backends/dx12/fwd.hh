@@ -35,6 +35,8 @@ class dx12_texture;
 using dx12_texture_handle = std::shared_ptr<dx12_texture const>;
 class dx12_memory_heap;
 using dx12_memory_heap_handle = std::shared_ptr<dx12_memory_heap const>;
+class dx12_swapchain;
+using dx12_swapchain_handle = std::shared_ptr<dx12_swapchain>; // mutable: a per-frame present driver
 
 // Ray-tracing acceleration structures (see dx12_acceleration_structure.hh).
 class dx12_blas;

@@ -104,6 +104,11 @@ public:
         return cc::error("vulkan memory_heap creation is not implemented yet");
     }
 
+    [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const&) override
+    {
+        return cc::error("vulkan swapchain creation is not implemented yet");
+    }
+
     // Bind path (binding_group_layout / pipeline_layout / compute_pipeline / binding_group) — not implemented yet.
     [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<sg::binding const>,

@@ -27,6 +27,7 @@ add_library(shaped-graphics
     src/shaped-graphics/raytracing_shader_table.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
+    src/shaped-graphics/swapchain.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/context.transient.cc
@@ -93,6 +94,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/raytracing_pipeline.hh
     src/shaped-graphics/raytracing_shader_table.hh
     src/shaped-graphics/binding_group.hh
+    src/shaped-graphics/swapchain.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/allocation_info.hh
     src/shaped-graphics/memory_heap.hh

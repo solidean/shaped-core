@@ -123,4 +123,19 @@ Running list of known follow-ups. Bigger design intent lives in
 - **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
+- **Swapchain / presentation — deferred layers:** the windowed-presentation path is in
+  (`ctx.create_swapchain` -> `sg::swapchain` with `acquire_backbuffer` / `present` / `get_size` +
+  description getters; auto-resize on acquire; `present_mode` vsync/immediate; an `enable_hdr` flag). dx12
+  is real (an `IDXGISwapChain3` flip-discard chain; back buffers wrapped as `dx12_texture` so they ride the
+  normal render-pass + barrier path; a dedicated present fence gates buffer reuse; `present()` transitions
+  the buffer to `texture_layout::present` via `dx12_command_list::transition_texture_to`). The native
+  window handle is an opaque `void*` (HWND on Windows) in the agnostic description. Still open: the
+  **vulkan** implementation (`VkSurfaceKHR` + `VkSwapchainKHR` + acquire/present semaphores — currently a
+  not-implemented `cc::error` stub); a **proper `native_window_handle` type** to replace the opaque `void*`
+  in `swapchain_description` (a small platform-tagged struct — HWND / xcb+window / wl_surface / NSWindow —
+  once a second windowing backend actually needs one, so it isn't speculative); **deeper HDR** (metadata /
+  tone-mapping beyond the colorspace set); **exclusive fullscreen** and **multi-window**; letting a windowed
+  renderer thread the swapchain's back-buffer count into `advance_epoch`; and a headless/offscreen present
+  target so the present path can be pixel-verified on CI (today the WARP swapchain test needs a real hidden
+  window and SKIPs without one).
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

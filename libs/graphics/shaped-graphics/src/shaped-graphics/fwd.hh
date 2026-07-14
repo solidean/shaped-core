@@ -91,6 +91,11 @@ struct raw_view;
 class render_target_view;
 class depth_stencil_view;
 
+// Window presentation (see swapchain.hh) — a chain of back buffers presented to an OS window.
+struct swapchain_description; // value type — input to create_swapchain
+class swapchain;
+enum class present_mode : u8; // frame pacing (vsync / immediate)
+
 // Rendering-scope targets (see command_list.raster.hh) — a view plus its begin-op (clear / preserve /
 // discard). Built via the view's .cleared() / .preserved() / .discarded() members.
 enum class target_op : u8;
@@ -233,6 +238,7 @@ using raster_pipeline_handle = std::shared_ptr<raster_pipeline const>; // immuta
 using raytracing_pipeline_handle = std::shared_ptr<raytracing_pipeline const>; // immutable DXR state object + shader ids
 using raytracing_shader_table_handle = std::shared_ptr<raytracing_shader_table const>; // immutable table over a pipeline
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
+using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is a per-frame driver (acquire/present)
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
 // pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). cc::async<T> cannot hold a const T

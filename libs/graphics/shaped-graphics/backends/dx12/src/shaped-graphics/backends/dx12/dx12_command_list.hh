@@ -48,6 +48,12 @@ public:
     /// before every GPU op that consumes them, and by the context at submit for the finalize reverts.
     void flush_barriers();
 
+    /// Transition the whole of `texture` to `layout` and record the barrier immediately (declare + flush).
+    /// The new layout becomes the texture's canonical state when this list submits. Used by the swapchain
+    /// to hand a back buffer to Present (sg::texture_layout::present); the transition is computed from the
+    /// texture's tracked layout, so it composes with whatever the frame's render pass left it in.
+    void transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout);
+
     /// Resolve every leased query heap into one transient buffer and start one inline readback per heap,
     /// filling each heap's shared future in place. Records GPU work, so it must run before Close and is
     /// driven from submit under the submission lock. No-op for a list that recorded no queries.

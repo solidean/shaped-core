@@ -23,6 +23,26 @@ std::unique_ptr<command_list> context::create_command_list()
     CC_UNREACHABLE("create_command_list failed on a healthy device — internal error");
 }
 
+swapchain_handle context::create_swapchain(swapchain_description const& desc)
+{
+    auto r = try_create_swapchain(desc);
+    if (r.has_value())
+        return cc::move(r.value());
+
+    if (_device_lost)
+        throw device_lost_exception(_device_loss_reason);
+    throw swapchain_creation_exception(r.error());
+}
+
+submission_token context::submit_command_list_and_present(swapchain& sc, std::unique_ptr<command_list> cmd)
+{
+    // Fold the back-buffer's present-layout transition into the caller's command list, submit, then present.
+    sc.record_present_transition(*cmd);
+    auto const token = submit_command_list(cc::move(cmd));
+    sc.present();
+    return token;
+}
+
 void context::mark_device_lost(cc::string reason)
 {
     // Sticky: the first observed reason wins; later observations don't overwrite it.

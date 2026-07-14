@@ -62,6 +62,18 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
 
 void dx12_texture::release_storage() const
 {
+    // Borrowed (swapchain) storage: DXGI owns the resource and the swapchain already waited for the GPU, so
+    // drop our reference right now (deferred deletion would keep the back-buffer reference alive past the
+    // ResizeBuffers/teardown that needs it gone).
+    if (_borrowed)
+    {
+        _resource.Reset();
+        for (auto& finalizer : _finalizers)
+            finalizer();
+        _finalizers.clear();
+        return;
+    }
+
     // Stage the GPU handle + finalizers for deletion once the current epoch retires. Already-released
     // textures own nothing here and no-op.
     if (_resource || !_finalizers.empty())

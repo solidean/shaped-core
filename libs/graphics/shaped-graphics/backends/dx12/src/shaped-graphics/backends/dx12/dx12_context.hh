@@ -15,6 +15,7 @@
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
+#include <shaped-graphics/backends/dx12/dx12_swapchain.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
@@ -102,6 +103,7 @@ public:
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
+    [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
@@ -184,6 +186,12 @@ public:
                                          "create_memory_heap");
     }
 
+    [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override
+    {
+        return note_device_loss_on_error(cc::result<sg::swapchain_handle>(create_dx12_swapchain(desc)), "create_"
+                                                                                                        "swapchain");
+    }
+
     // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
     // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
     [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
@@ -209,6 +217,9 @@ public:
                                                                                 cc::span<sg::named_view const> views,
                                                                                 cc::span<sg::named_sampler const> samplers,
                                                                                 sg::lifetime_scope scope) override;
+
+    // The swapchain uses note_device_removed_if_lost (below) to mark the context lost on a failed Present.
+    friend class dx12_swapchain;
 
     // Device-loss detection (see is_device_lost). Records the sticky loss reason and returns true if the
     // device is removed — either `hr` is a removed/reset code, or the device reports a non-S_OK removed
