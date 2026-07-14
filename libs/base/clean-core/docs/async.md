@@ -203,28 +203,34 @@ like; only one may be the process-wide default at a time.
 pointer. That was removed to shrink the node; if per-class routing returns it belongs on the scheduler, not as
 bytes on every node.)
 
-### v1 tradeoffs (node size & locking)
+### Node layout (size & locking)
 
-`sizeof(async<int>)` is **64 B — one cache line** (down from an original 384 B), and the node is
-cacheline-aligned to avoid false sharing between unrelated nodes. Three ideas get it there:
+A node is a **16 B header** followed by a payload slot; `async<int>` is **64 B — one cache line** (down from an
+original 384 B), and the node is cacheline-aligned to avoid false sharing between unrelated nodes.
 
-* The value, the failure-channel error, and the set of dependents to wake (continuations) are **mutually
-  exclusive over a node's life** — continuations matter only before completion, the value/error only after —
-  so the error and the continuation head share one 16 B result slot, discriminated by the node state (see
-  `async_result_slot`); the value lives separately in the typed node. The slot holds **one inline weak
-  dependent** (the common single-dependent case pays no allocation) and spills the rest, plus any one-shot
-  completion latch, into slab-backed cells. Completion steals the continuation head under the node lock, then
-  moves the error into the freed slot and publishes `ready` last, so a late subscriber never observes `ready`
-  before the result is in place.
-* The compute frame is a **one-pointer `unique_function`** (the closure and its type-erased ops share one
-  node; see `cc::poly_node_allocation`).
-* The cacheline alignment lives on the concrete typed node, not the untemplated base, so the base does not
-  round its own size up to 64 and push the value/frame onto a second line.
+* **16 B header.** Two `atomic<u32>` intrusive refcounts (strong + weak — the handle is one pointer, no
+  separate control block) plus one `atomic<u64>` control word. That word is a **tagged pointer**: a 32-aligned
+  `async_type_ops const*` in the high bits, and the lifecycle state + wake-pending flag + spinlock bit in the
+  low 5 bits. There is **no C++ vtable** — the ops descriptor (a static-constexpr per-`async<T>` struct) is the
+  hand-rolled replacement, carrying the typed-value destructor and the node's size class; the frame is invoked
+  directly. `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
+* **Payload slot (offset 16), one hand-managed union.** The compute frame, the not-ready dependency set, and
+  the continuation head (dependents to wake) are **mutually exclusive with** the resolved value ⊍ error — the
+  scratch matters only before completion, the value/error only after — so they share the slot, discriminated by
+  the node state. The value is built **straight into the slot** at resolution: the poll loop moves the frame
+  onto its own stack for the compute step (so the value can overwrite its slot; the frame is moved back if it
+  parks), and completion steals the continuation head under the node lock, tears down the scratch, constructs
+  the value/error, and publishes `ready` last — so a late subscriber never observes `ready` before the result
+  is in place. The value **grows the node naturally** for a large `T` (no inline cap): `async<int>` /
+  `async<vector<T>>` / `async<string>` are one line; a bigger `T` spills onto further lines.
+* The continuation head keeps **one inline weak dependent** (the common single-dependent case pays no
+  allocation) and spills the rest, plus any one-shot completion latch, into slab-backed cells.
+* The compute frame is a **one-pointer `unique_function`** (closure + type-erased ops in one node; see
+  `cc::poly_node_allocation`). Cacheline alignment lives on the concrete typed node so unrelated nodes never
+  share a line.
 
-This is still a v1 on locking: each node carries a per-node spinlock and a `_wake_pending` flag plus the
-vtable pointer. The **semantics and the public API are the contract**; the node layout is not. Leaner locking
-is possible (folding the flags into the state word, a hybrid spin-then-block lock — see the REVIEW note on
-`async_spinlock`), and can change under the hood as the system matures without breaking callers.
+The **semantics and the public API are the contract**; the node layout is not, and can change under the hood as
+the system matures without breaking callers.
 
 ## Not yet here (follow-ups)
 

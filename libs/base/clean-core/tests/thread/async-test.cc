@@ -1,5 +1,6 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
 
@@ -11,9 +12,21 @@
 
 using cc::async_context;
 
-// Node size guard: an async<int> node fits in exactly one cache line. Got here via the result-slot union
-// (E3), an 8 B unique_function frame (E4), and a 16 B continuation head (one inline dependent).
-static_assert(sizeof(cc::async<int>) <= 64, "async<int> node grew beyond one cache line (64 B)");
+// Node size guards. The node is a 24 B header (refcount + tagged state/ops word + the compute frame) followed
+// by the payload slot: max(scratch, sizeof(value)), aligned so the whole node is a 64 B line for a value up to
+// ~40 B. The value shares the payload with the unresolved scratch (deps + continuations) and grows the node
+// naturally for a larger T (no inline cap — the value is built straight into the payload at resolution).
+static_assert(sizeof(cc::async<int>) == 64, "async<int> should be exactly one cache line");
+static_assert(sizeof(cc::async<cc::vector<int>>) == 64, "async<vector> should stay one cache line");
+static_assert(sizeof(cc::async<cc::string>) == 64, "async<string> should stay one cache line");
+namespace
+{
+struct big_value // 96 B: intentionally larger than one line's payload — the node must grow, not fail to compile
+{
+    cc::i64 data[12] = {};
+};
+} // namespace
+static_assert(sizeof(cc::async<big_value>) > 64, "a large value must grow the node onto further cache lines");
 
 // ============================================================================
 // basics
@@ -359,6 +372,42 @@ TEST("async - cancellation propagates as a value")
     auto r = cc::try_async_blocking_get(a);
     REQUIRE(r.has_error());
     CHECK(r.error().is_cancelled());
+}
+
+// ============================================================================
+// large values (node grows past one cache line; value built in place)
+// ============================================================================
+
+TEST("async - a large value grows the node but round-trips through value + dependency paths")
+{
+    // big_value (96 B) exceeds one line's payload, so the node spans multiple lines. The value is built
+    // straight into the payload at resolution (over the moved-out frame's slot) — verify it survives the value
+    // read, a manual push, and being unwrapped as a dependency.
+    auto a = cc::make_async_lazy(
+        []
+        {
+            big_value v;
+            v.data[0] = 7;
+            v.data[11] = 42;
+            return v;
+        });
+    auto va = cc::async_blocking_get(a);
+    CHECK(va.data[0] == 7);
+    CHECK(va.data[11] == 42);
+    REQUIRE(a->try_value() != nullptr);
+    CHECK(a->try_value()->data[11] == 42); // zero-copy read of the in-payload value
+
+    // unwrapped as a dependency (by value)
+    auto b = cc::make_async_lazy([](big_value x) { return x.data[0] + x.data[11]; }, a);
+    CHECK(cc::async_blocking_get(b) == 49);
+
+    // manual/push path with a large value
+    auto m = cc::make_async_manual<big_value>();
+    big_value pushed;
+    pushed.data[5] = 99;
+    m->push_value(pushed);
+    REQUIRE(m->try_value() != nullptr);
+    CHECK(m->try_value()->data[5] == 99);
 }
 
 // ============================================================================

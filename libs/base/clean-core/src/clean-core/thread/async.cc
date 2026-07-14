@@ -455,15 +455,15 @@ void cc::impl::async_cont_head::notify_all()
 
 void cc::async_node_base::drop_ready_pending_deps()
 {
-    _deps.remove_ready();
+    deps().remove_ready();
 }
 
 bool cc::async_node_base::try_subscribe(async_node_base* dependent)
 {
     lock_scope g(this);
     if (is_ready_state(load_state(std::memory_order_relaxed)))
-        return false;           // already ready under the lock: the dependent must not park on us
-    _slot.conts.add(dependent); // dependent is alive (it is polling us)
+        return false;       // already ready under the lock: the dependent must not park on us
+    conts().add(dependent); // dependent is alive (it is polling us)
     return true;
 }
 
@@ -471,7 +471,7 @@ bool cc::async_node_base::subscribe_to_pending_deps()
 {
     // subscribe to each not-ready dep, marking it via the entry's subscribed bit; the first dep found already
     // ready aborts parking (return true) so the poller re-evaluates from scratch.
-    return _deps.for_each_until(
+    return deps().for_each_until(
         [this](impl::async_dep_entry e)
         {
             if (e.dep()->try_subscribe(this))
@@ -485,7 +485,7 @@ bool cc::async_node_base::subscribe_to_pending_deps()
 
 void cc::async_node_base::unsubscribe_all()
 {
-    _deps.for_each(
+    deps().for_each(
         [this](impl::async_dep_entry e)
         {
             if (e.subscribed())
@@ -501,15 +501,15 @@ void cc::async_node_base::add_continuation(async_node_base* dependent)
     lock_scope g(this);
     CC_ASSERT(!is_ready_state(load_state(std::memory_order_relaxed)), "add_continuation on a ready node: the "
                                                                       "continuation head has been stolen");
-    _slot.conts.add(dependent);
+    conts().add(dependent);
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
 {
     lock_scope g(this);
     if (is_ready_state(load_state(std::memory_order_relaxed)))
-        return;                    // completed: the continuation head was stolen and its storage may now hold the error
-    _slot.conts.remove(dependent); // drops the target and prunes any dependents that have since expired
+        return;                // completed: the continuation head was stolen and its storage may now hold the error
+    conts().remove(dependent); // drops the target and prunes any dependents that have since expired
 }
 
 // ============================================================================
@@ -519,12 +519,12 @@ void cc::async_node_base::remove_continuation(async_node_base* dependent)
 cc::async_error cc::async_node_base::propagate_error() const
 {
     CC_ASSERT(has_error(), "no error to propagate");
-    if (_slot.error.is_cancelled())
+    if (error_ref().is_cancelled())
         return async_error::make_cancelled();
 
     // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the
     // message. The context chain is lost — a richer error-sharing scheme is a follow-up.
-    return async_error::make_error(cc::any_error(_slot.error.underlying().to_string()));
+    return async_error::make_error(cc::any_error(error_ref().underlying().to_string()));
 }
 
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
@@ -532,65 +532,44 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
     lock_scope g(this);
     if (is_ready_state(load_state(std::memory_order_relaxed)))
         return true; // already done: caller must not wait
-    _slot.conts.add_latch(fn, ctx);
+    conts().add_latch(fn, ctx);
     return false;
 }
 
-void cc::async_node_base::mark_ready_and_notify(async_error* err)
+void cc::async_node_base::complete_with_error(async_error err)
 {
-    _deps.clear();
+    // Mirror finish_value, but the error is untyped so the base builds it directly. On the compute path the
+    // frame is already moved onto the poll stack (the payload frame slot is a moved-from shell); on push_error
+    // the frame slot is empty. Either way the unresolved arm is destroyed and the error built in its place.
+    unsubscribe_all(); // the frame still pins the deps we are unsubscribing from
 
-    impl::async_cont_head continuations; // stolen out of the result slot below
+    impl::async_cont_head continuations;
     {
         lock_scope g(this);
-
-        // Steal the continuation head, freeing the result slot; then, for an error completion, switch the
-        // slot's active union member to the error (a value completion leaves the value in the typed node and
-        // the freed head empty). Publish the terminal state LAST, so a subscriber that wins the lock after us
-        // sees the value/error already in place (I1); one that wins before us lands in `continuations` and is
-        // woken. The state itself records value-vs-error (ready_value / ready_error).
-        continuations = cc::move(_slot.conts);
-        if (err != nullptr)
-        {
-            _slot.conts.~async_cont_head();                                    // end the (now empty) head's lifetime
-            new (cc::placement_new, &_slot.error) async_error(cc::move(*err)); // begin the error's lifetime
-            store_state(async_node_state::ready_error);
-        }
-        else
-        {
-            store_state(async_node_state::ready_value);
-        }
+        continuations = cc::move(conts());
+        unresolved().~async_unresolved(); // frame shell + deps + the moved-from head shell
+        new (cc::placement_new, value_storage()) async_error(cc::move(err)); // error at payload offset 0
+        store_state(async_node_state::ready_error);
     }
-
-    // outside the lock: waking a dependent / firing a latch takes other locks, so we must not hold ours
-    continuations.notify_all();
-}
-
-void cc::async_node_base::complete_from_compute(bool produced_error, async_error& err)
-{
-    unsubscribe_all(); // still valid: our frame (destroyed below) pins the deps we are unsubscribing from
-    _deps.clear();
-
-    _frame = {}; // release the frame's captures
-
-    mark_ready_and_notify(produced_error ? &err : nullptr);
+    continuations.notify_all(); // outside the lock: waking a dependent / firing a latch takes other locks
 }
 
 void cc::async_node_base::teardown_payload()
 {
-    // Strong-0 teardown: release the payload but leave the intrusive counts (and _ops) alive for outstanding
-    // weak refs (nothing races us — strong is already 0). Order matters: unsubscribe while the frame still pins
-    // the deps, then release the frame, then destroy the typed value through the ops table. Finally free the
-    // base state — spilled dep-list nodes and the active result-slot member (the continuation head while not
-    // ready, else the error once ready-with-error).
-    unsubscribe_all();
-    _frame = {};
-    ops()->teardown_value(this);
-    _deps.clear();
-    if (has_error())
-        _slot.error.~async_error();
+    // Strong-0 teardown (nothing races us — strong is already 0). If ready, the unresolved arm is already gone
+    // and the payload holds the resolved value/error — destroy that; else the arm is live, so unsubscribe (the
+    // frame still pins the deps) then destroy the whole arm (frame + deps + conts). The intrusive counts and
+    // _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
+    auto const s = load_state(std::memory_order_relaxed);
+    if (s == async_node_state::ready_value)
+        ops()->teardown_value(this); // destroy the resolved value at payload offset 0
+    else if (s == async_node_state::ready_error)
+        error_ref().~async_error(); // destroy the resolved error at payload offset 0
     else
-        _slot.conts.~async_cont_head();
+    {
+        unsubscribe_all();
+        unresolved().~async_unresolved(); // destroy frame (releases captures) + deps + conts
+    }
 }
 
 // ============================================================================
@@ -612,7 +591,7 @@ void cc::async_node_base::poll()
     {
         drop_ready_pending_deps();
 
-        if (!_deps.empty())
+        if (!deps().empty())
         {
             // Eager depth-first drive: require() already made every dependency runnable, so rather than parking
             // we try to satisfy one right here — drive it inline on this stack (better locality, no scheduler
@@ -627,7 +606,7 @@ void cc::async_node_base::poll()
             // steal-capable peers" (a scheduler property) to avoid the churn.
             if (s_inline_depth < async_max_inline_depth)
             {
-                async_node_base* const pick = _deps.first(); // non-null: _deps is not empty
+                async_node_base* const pick = deps().first(); // non-null: deps() is not empty
                 {
                     inline_depth_guard const ds;
                     pick->poll();
@@ -662,23 +641,26 @@ void cc::async_node_base::poll()
             continue;
         }
 
-        // A produced error is handed back here (not stored in the node), so the completion path can install it
-        // into the result slot only after stealing the still-live continuation head that shares that storage.
-        // The frame writes it through ctx.out_error (resolve_to_error); point that at this step's local.
+        // Move the frame onto our stack for the compute step: the value/error is built over the frame's slot in
+        // the payload, so the live closure must not sit there while it runs. If it resolves, it builds the value
+        // straight into the (now moved-from) slot and `f` drops here; if it parks (waiting/yield), we move it
+        // back into the arm for the next poll. An error is handed back via ctx.out_error (a stack local).
         async_error step_error;
         ctx.out_error = &step_error;
-        CC_ASSERT(_frame.is_valid(), "polled a node without a compute frame");
-        switch (_frame(ctx))
+        CC_ASSERT(frame().is_valid(), "polled a node without a compute frame");
+        frame_type f = cc::move(frame());
+        switch (f(ctx))
         {
         case async_step_status::produced_value:
-            complete_from_compute(/*produced_error*/ false, step_error);
-            return;
+            return; // resolve_to_value already published ready_value + woke dependents; f (spent) drops here
         case async_step_status::produced_error:
-            complete_from_compute(/*produced_error*/ true, step_error);
-            return;
+            complete_with_error(cc::move(step_error));
+            return; // f (spent) drops here
         case async_step_status::waiting:
-            continue; // frame added deps / asked to wait — normalize and poll them now
+            frame() = cc::move(f); // the frame parks — move it back into the payload for the next poll
+            continue;              // frame added deps / asked to wait — normalize and poll them now
         case async_step_status::yield:
+            frame() = cc::move(f); // move the frame back, then reschedule
             reschedule_self();
             return;
         }

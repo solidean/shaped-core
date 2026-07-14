@@ -53,32 +53,39 @@ U async_declval() noexcept;
 
 namespace impl
 {
-/// Holds the typed value under async<T>. The compute frame and the state machine / poll loop live in
-/// async_node_base (the frame signature is T-agnostic); this layer adds only the typed value plus the
-/// resolve/read accessors. Cacheline-aligned here (not on the base) so the whole node occupies exactly one
-/// 64 B line for a value up to ~16 B (see the async_node_base doc); larger values grow it onto further lines.
+/// Declares the node's payload storage (the offset-16 slot the base manages, see async_node_base::payload()):
+/// raw bytes holding EITHER the unresolved scratch (frame + deps + conts, ~32 B) OR the resolved value ⊍ error.
+/// Sized to the larger of the scratch and sizeof(T), so the value grows the node naturally for a large T (the
+/// node stays one cache line for sizeof(T) up to ~48 B; a larger T spills onto more lines). Cacheline-aligned so
+/// unrelated nodes never share a line; the value is 16-aligned. This layer adds only the typed read/teardown of
+/// the value — the base owns everything else (including the compute frame, in the payload's unresolved arm).
 template <class T>
 struct alignas(64) async_typed_node : cc::async_node_base
 {
-    /// Store the produced value (called by async_context::resolve_to_value while the frame runs). A frame
-    /// resolves at most once.
-    void store_value(T v) { _value.emplace_value(cc::move(v)); }
+    static_assert(alignof(T) <= 16, "async<T>: T is over-aligned (> 16) — box it");
+    static_assert(std::is_nothrow_move_constructible_v<T>,
+                  "async<T>: T must be nothrow-move-constructible (it is moved under the node lock at completion)");
 
-    /// Destroy the stored value (called through the ops table at teardown). Safe when already empty.
-    void clear_value() { _value = cc::nullopt; }
+    /// Destroy the resolved value in the payload (called through the ops table at teardown when ready_value).
+    void clear_value() { reinterpret_cast<T*>(this->value_storage())->~T(); }
 
     /// Pointer to the produced value; null unless ready with a value. Stable while the node is alive.
-    [[nodiscard]] T const* value_ptr() const { return this->has_value() ? &_value.value() : nullptr; }
-    [[nodiscard]] T* value_ptr() { return this->has_value() ? &_value.value() : nullptr; }
+    [[nodiscard]] T const* value_ptr() const
+    {
+        return this->has_value() ? reinterpret_cast<T const*>(this->payload()) : nullptr;
+    }
+    [[nodiscard]] T* value_ptr() { return this->has_value() ? reinterpret_cast<T*>(this->payload()) : nullptr; }
 
-protected:
-    cc::optional<T> _value;
+private:
+    static constexpr cc::isize payload_bytes
+        = sizeof(T) > sizeof(impl::async_unresolved) ? cc::isize(sizeof(T)) : cc::isize(sizeof(impl::async_unresolved));
+    alignas(16) cc::byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
 
-/// Type-erased ops for async<T> (the hand-rolled vtable, see cc::async_type_ops): the typed-value destructor
-/// plus the concrete size class, reached from the untemplated base. async<T> adds no data members over
-/// async_typed_node<T>, so their size classes match — the class index is taken from async_typed_node<T>, which
-/// is complete here (async<T> is not yet). The async<T> ctor static_asserts the sizes stay equal.
+/// Type-erased ops for async<T> (the hand-rolled vtable, see cc::async_type_ops): destroy the resolved value +
+/// the concrete size class, reached from the untemplated base. async<T> adds no data members over
+/// async_typed_node<T>, so their size classes match (class index taken from async_typed_node<T>, complete here;
+/// async<T> is not yet). The async<T> ctor static_asserts the sizes stay equal.
 template <class T>
 struct async_typed_node_ops
 {
@@ -109,6 +116,7 @@ struct async : impl::async_typed_node<T>
         static_assert(sizeof(async) == sizeof(impl::async_typed_node<T>),
                       "async<T> must add no data members over async_typed_node<T> (ops class_index relies on it)");
         this->set_ops(&impl::async_type_ops_for<T>);
+        this->init_payload(); // birth the unresolved arm (empty frame/deps/conts) into the offset-16 slot
     }
 
     // zero-copy access
@@ -127,14 +135,10 @@ public:
     void set_manual() { this->mark_external_pending(); }
 
     /// Complete externally with a value; wakes any parked dependents. Call at most once.
-    void push_value(T v)
-    {
-        this->_value.emplace_value(cc::move(v));
-        this->mark_ready_and_notify(nullptr);
-    }
+    void push_value(T v) { this->finish_value(cc::move(v)); } // builds the value into the payload, wakes dependents
 
     /// Complete externally with an error; wakes any parked dependents. Call at most once.
-    void push_error(async_error e) { this->mark_ready_and_notify(&e); }
+    void push_error(async_error e) { this->complete_with_error(cc::move(e)); }
 };
 
 // ============================================================================
@@ -151,19 +155,20 @@ struct async_context
 
     // resolving the result — each returns the matching async_step_status, so a frame can `return ctx.xxx(...)`
 public:
-    /// Resolve this frame with a value: stores it into the node now (while the frame runs) and reports
-    /// produced_value. Call at most once; the frame must not resolve again afterwards. V must match the node's
-    /// result type.
+    /// Resolve this frame with a value. Builds the value straight into the node's payload and completes the node
+    /// in place (the frame is a separate member the value never overlaps, so this is safe while the frame runs).
+    /// Reports produced_value; call at most once. V must match the node's result type. AFTER resolving, the frame
+    /// is spent — it must not touch the node again.
     template <class V>
     [[nodiscard]] async_step_status resolve_to_value(V&& v) const
     {
-        static_cast<impl::async_typed_node<std::decay_t<V>>*>(current)->store_value(cc::forward<V>(v));
+        current->finish_value(cc::forward<V>(v));
         return async_step_status::produced_value;
     }
 
     /// Resolve this frame on the failure channel. The error is handed back to the poll loop (via out_error),
-    /// which installs it into the node's result slot at completion — it is not stored on the node now, whose
-    /// slot still holds the live continuation head. Reports produced_error.
+    /// which installs it into the node's payload at completion — it is not stored on the node now, whose
+    /// payload still holds the live continuation head. Reports produced_error.
     [[nodiscard]] async_step_status resolve_to_error(async_error e) const
     {
         *out_error = cc::move(e);
