@@ -500,12 +500,16 @@ void cc::async_node_base::unsubscribe_all()
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
+    CC_ASSERT(_state.load(std::memory_order_relaxed) != async_node_state::ready,
+              "add_continuation on a ready node: the continuation head has been stolen");
     _slot.conts.add(dependent);
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
 {
     impl::async_spinlock_guard g(_lock);
+    if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
+        return;                    // completed: the continuation head was stolen and its storage may now hold the error
     _slot.conts.remove(dependent); // drops the target and prunes any dependents that have since expired
 }
 
@@ -564,17 +568,21 @@ void cc::async_node_base::complete_from_compute(bool produced_error, async_error
     unsubscribe_all(); // still valid: our frame (destroyed below) pins the deps we are unsubscribing from
     _deps.clear();
 
-    destroy_frame(); // release the frame's captures
+    _frame = {}; // release the frame's captures
 
     mark_ready_and_notify(produced_error ? &err : nullptr);
 }
 
 void cc::async_node_base::teardown_payload()
 {
-    // Base part of the strong-0 teardown: the typed override already ran unsubscribe_all() + released the frame
-    // (which pinned the deps) and the value. Free the remaining owned state — spilled dep-list nodes, and the
-    // active result-slot member (the continuation head while not ready, else the error once ready-with-error) —
-    // but leave the intrusive counts alive for outstanding weak refs. Nothing races us: strong is already 0.
+    // Strong-0 teardown: release the payload but leave the intrusive counts (and _ops) alive for outstanding
+    // weak refs (nothing races us — strong is already 0). Order matters: unsubscribe while the frame still pins
+    // the deps, then release the frame, then destroy the typed value through the ops table. Finally free the
+    // base state — spilled dep-list nodes and the active result-slot member (the continuation head while not
+    // ready, else the error once ready-with-error).
+    unsubscribe_all();
+    _frame = {};
+    _ops->teardown_value(this);
     _deps.clear();
     if (is_ready() && _is_error)
         _slot.error.~async_error();
@@ -656,7 +664,8 @@ void cc::async_node_base::poll()
         // The frame writes it through ctx.out_error (resolve_to_error); point that at this step's local.
         async_error step_error;
         ctx.out_error = &step_error;
-        switch (poll_compute_step(ctx))
+        CC_ASSERT(_frame.is_valid(), "polled a node without a compute frame");
+        switch (_frame(ctx))
         {
         case async_step_status::produced_value:
             complete_from_compute(/*produced_error*/ false, step_error);

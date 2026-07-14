@@ -53,52 +53,41 @@ U async_declval() noexcept;
 
 namespace impl
 {
-/// Holds the typed value and the type-erased compute frame; implements the two virtuals the base poll loop
-/// needs. async<T> adds only its handle-specific surface on top. Cacheline-aligned here (not on the base) so
-/// the whole node — base + value + frame — occupies exactly one 64 B line for a value up to ~16 B (see the
-/// async_node_base doc); larger values grow it onto further lines naturally.
+/// Holds the typed value under async<T>. The compute frame and the state machine / poll loop live in
+/// async_node_base (the frame signature is T-agnostic); this layer adds only the typed value plus the
+/// resolve/read accessors. Cacheline-aligned here (not on the base) so the whole node occupies exactly one
+/// 64 B line for a value up to ~16 B (see the async_node_base doc); larger values grow it onto further lines.
 template <class T>
 struct alignas(64) async_typed_node : cc::async_node_base
 {
-    /// Install the compute frame. The frame resolves its outcome through async_context and returns a status —
-    /// `async_step_status(async_context&)`.
-    template <class F>
-    void set_frame(F&& f)
-    {
-        _frame = cc::unique_function<async_step_status(cc::async_context&)>(cc::forward<F>(f));
-    }
-
     /// Store the produced value (called by async_context::resolve_to_value while the frame runs). A frame
     /// resolves at most once.
     void store_value(T v) { _value.emplace_value(cc::move(v)); }
+
+    /// Destroy the stored value (called through the ops table at teardown). Safe when already empty.
+    void clear_value() { _value = cc::nullopt; }
 
     /// Pointer to the produced value; null unless ready with a value. Stable while the node is alive.
     [[nodiscard]] T const* value_ptr() const { return this->has_value() ? &_value.value() : nullptr; }
     [[nodiscard]] T* value_ptr() { return this->has_value() ? &_value.value() : nullptr; }
 
-    async_step_status poll_compute_step(cc::async_context& ctx) override
-    {
-        CC_ASSERT(_frame.is_valid(), "polled a node without a compute frame");
-        return _frame(ctx); // the frame resolves via ctx (value into _value, error into ctx.out_error)
-    }
-
-    void destroy_frame() override { _frame = {}; }
-
-    /// Strong-0 teardown (async_node_traits::destroy_object): release the payload but leave the intrusive
-    /// counts alive for outstanding weak refs. Order matters — unsubscribe while the frame still pins the deps,
-    /// then drop the frame + value, then the base part. Resets to empty rather than destroying, so the
-    /// never-called ~async_typed_node stays a safe no-op.
-    void teardown_payload() override
-    {
-        this->unsubscribe_all();
-        _frame = {};
-        _value = cc::nullopt;
-        async_node_base::teardown_payload();
-    }
-
 protected:
     cc::optional<T> _value;
-    cc::unique_function<async_step_status(cc::async_context&)> _frame;
+};
+
+/// Type-erased ops for async<T> (the hand-rolled vtable, see cc::async_type_ops): the typed-value destructor
+/// plus the concrete size class, reached from the untemplated base. async<T> adds no data members over
+/// async_typed_node<T>, so their size classes match — the class index is taken from async_typed_node<T>, which
+/// is complete here (async<T> is not yet). The async<T> ctor static_asserts the sizes stay equal.
+template <class T>
+struct async_typed_node_ops
+{
+    static void teardown_value(cc::async_node_base* n) { static_cast<async_typed_node<T>*>(n)->clear_value(); }
+};
+template <class T>
+inline constexpr cc::async_type_ops async_type_ops_for = {
+    &async_typed_node_ops<T>::teardown_value,
+    cc::node_class_index_for<async_typed_node<T>>(),
 };
 } // namespace impl
 
@@ -112,9 +101,15 @@ protected:
 template <class T>
 struct async : impl::async_typed_node<T>
 {
-    /// Stash this concrete type's size class for the intrusive free path (see set_class_index). Nodes are only
-    /// ever created via make_async_* / cc::make_shared<async<T>>, which allocate exactly node_class_index_for<async<T>>().
-    async() { this->set_class_index(cc::node_class_index_for<async>()); }
+    /// Install this concrete type's ops (its static async_type_ops) for the intrusive free + typed-value
+    /// teardown paths. Nodes are only ever created via make_async_* / cc::make_shared<async<T>>, which allocate
+    /// exactly node_class_index_for<async<T>>() — matching the ops' class_index (async<T> adds no data members).
+    async()
+    {
+        static_assert(sizeof(async) == sizeof(impl::async_typed_node<T>),
+                      "async<T> must add no data members over async_typed_node<T> (ops class_index relies on it)");
+        this->set_ops(&impl::async_type_ops_for<T>);
+    }
 
     // zero-copy access
 public:

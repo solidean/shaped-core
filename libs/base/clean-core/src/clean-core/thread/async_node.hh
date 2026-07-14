@@ -5,6 +5,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh> // cc::any_error
 #include <clean-core/function/function_ref.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/shared_ptr.hh> // cc::shared_ptr / cc::weak_ptr (intrusive node handles)
 
@@ -446,9 +447,21 @@ enum class async_node_state : cc::u8
     ready,            // terminal: completed with a value or an error
 };
 
+/// Type-erased per-async<T> operations, reached from the untemplated base — the hand-rolled replacement for a
+/// C++ vtable (mirrors unique_function's static descriptor). One static-constexpr instance exists per concrete
+/// async type; the node stores a pointer to it, set once at construction. It recovers the two things the base
+/// cannot derive from a base-typed pointer: how to destroy the typed value, and the node's size class (used by
+/// the intrusive free path, which runs on a base-typed weak cell after the concrete type is long erased).
+struct async_type_ops
+{
+    void (*teardown_value)(async_node_base*); // destroy the derived node's typed value (no-op-safe for trivial T)
+    cc::node_class_index class_index;         // concrete async<T> size class (free_storage frees by it)
+};
+
 /// Shared, T-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
-/// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), and the
-/// failure-channel value. The typed value and the compute frame live in the derived typed node (async.hh).
+/// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), the
+/// failure-channel value, and the type-erased compute frame (its signature carries no T). Only the typed value
+/// lives in the derived typed node (async.hh); the base reaches its destructor + size class via async_type_ops.
 ///
 /// Concurrency: safe to drive from multiple threads. A per-node spinlock serializes state transitions and
 /// continuation/subscription bookkeeping; the state word stays atomic for lock-free is_ready()/is_cold()
@@ -528,37 +541,37 @@ public:
     async_node_base& operator=(async_node_base const&) = delete;
     async_node_base& operator=(async_node_base&&) = delete;
 
-    /// Never invoked at runtime: nodes are torn down by teardown_payload (at strong 0) + free_storage (at weak
-    /// 0), not by delete. Present only for the vtable. Defaulted so it is a no-op if it ever ran.
-    virtual ~async_node_base() = default;
+    /// Nodes are never destructed: they are torn down by teardown_payload (at strong 0) + free_storage (at
+    /// weak 0), never by delete — there is no C++ vtable and no virtual dtor. The implicit (non-virtual)
+    /// destructor is never invoked.
+    ~async_node_base() = default;
 
-    // supplied by the typed node
+    // compute frame — the frame signature is T-agnostic, so it lives in the base (the typed value stays derived)
+public:
+    /// Install the compute frame — `async_step_status(async_context&)`; it resolves its outcome via the context.
+    template <class F>
+    void set_frame(F&& f)
+    {
+        _frame = cc::unique_function<async_step_status(async_context&)>(cc::forward<F>(f));
+    }
+
+    // payload teardown
 protected:
-    /// Run one step of the compute frame; the frame resolves its outcome through async_context. produced_value
-    /// means the typed value was stored (via ctx.resolve_to_value, in the derived node). produced_error means
-    /// the failure was written to ctx.out_error (the poll loop's stack local) — NOT into the node, whose result
-    /// slot still holds the live continuation head; the completion path installs it after stealing the head.
-    /// Not called for external/manual nodes (they have no frame).
-    virtual async_step_status poll_compute_step(async_context& ctx) = 0;
-
-    /// Destroy the compute frame (release its captures). Called on completion.
-    virtual void destroy_frame() = 0;
-
     /// Release ALL payload resources (frame, value, error, continuations, deps) but LEAVE the intrusive counts
-    /// alive — a weak ref may still read them after the object is gone. Called once by async_node_traits at
-    /// strong 0 (destroy_object); free_storage reclaims the raw node afterward. The typed node overrides to add
-    /// the value + frame, then chains to this base part. Resets members to empty rather than destroying them,
-    /// so the (never-called) destructor stays a safe no-op.
-    virtual void teardown_payload();
+    /// (and _ops) alive — a weak ref may still read them after the object is gone. Called once by
+    /// async_node_traits at strong 0 (destroy_object); free_storage reclaims the raw node afterward. The typed
+    /// value is destroyed via the ops table. Resets members to empty rather than destroying storage.
+    void teardown_payload();
 
     // shared helpers for the typed node
 protected:
     void set_state(async_node_state s) { _state.store(s, std::memory_order_release); }
     [[nodiscard]] async_node_state state() const { return _state.load(std::memory_order_acquire); }
 
-    /// Stash the concrete node's size class (node_class_index_for<async<T>>()), so free_storage frees the right
-    /// slot even when only a base-typed weak cell remains. Called once from the derived ctor.
-    void set_class_index(cc::node_class_index idx) { _class_index = idx; }
+    /// Stash this node's type-erased ops (its static async_type_ops), so the base can destroy the typed value
+    /// and free the right size class through a base-typed pointer. Called once from the derived ctor; the
+    /// pointer must stay valid until free (weak 0), so teardown_payload never clears it.
+    void set_ops(async_type_ops const* ops) { _ops = ops; }
 
     /// Turn this into a push/manual node: awaiting external completion. It is never run inline (schedule()
     /// bails on external_pending); only push_value / push_error complete it.
@@ -589,22 +602,22 @@ private:
     // members
 private:
     friend struct async_context;           // reaches add_pending_dependency on the generic require() path
-    friend struct impl::async_node_traits; // reaches the intrusive counts / class index / teardown_payload
+    friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
 
     /// Intrusive refcount (async_node_traits): strong owners + weak (continuation cells + the strong owners'
-    /// collective one). Born 1/1 by init_control. _class_index is this node's concrete async<T> size class,
-    /// stashed by the derived ctor so free_storage frees the right slot even through a base-typed weak cell.
+    /// collective one). Born 1/1 by init_control.
     std::atomic<cc::u32> _strong{0};
     std::atomic<cc::u32> _weak{0};
 
-    // The four byte-sized fields are grouped ahead of _lock so they fill what would otherwise be padding in
-    // front of the 4-byte-aligned spinlock — keeping the base at 48 B (node one cache line). Do not reorder.
     std::atomic<async_node_state> _state{async_node_state::cold};
-    bool _is_error = false;              // set (under _lock) at completion; also selects the active _slot member
-    bool _wake_pending = false;          // set (under _lock) when a running node is scheduled; makes it re-poll
-    cc::node_class_index _class_index{}; // this node's concrete async<T> size class (free_storage frees by it)
+    bool _is_error = false;     // set (under _lock) at completion; also selects the active _slot member
+    bool _wake_pending = false; // set (under _lock) when a running node is scheduled; makes it re-poll
 
     impl::async_spinlock _lock; // guards _state transitions, _wake_pending, and the continuation head (class doc)
+
+    /// Type-erased ops for this concrete async<T> (typed-value dtor + size class): the hand-rolled replacement
+    /// for the removed vtable. Set once at construction; must stay valid until free (weak 0) — see set_ops.
+    async_type_ops const* _ops = nullptr;
 
     /// Not-ready dependencies, rebuilt each poll (folded pending + subscribed set). Only for scheduling/wakeup;
     /// it does not own anything (the compute frame's captures keep deps alive). Poller-private (only the single
@@ -616,6 +629,11 @@ private:
     /// the failure-channel error (ready && _is_error). See impl::async_result_slot; the active member is
     /// switched/destroyed by state in the completion path and teardown_payload.
     impl::async_result_slot _slot;
+
+    /// The type-erased compute frame — `async_step_status(async_context&)`, 8 B. Null for manual/push nodes.
+    /// Invoked by the poll loop; released on completion / teardown. The frame signature carries no T, so it
+    /// lives in the base; the typed value stays in the derived node.
+    cc::unique_function<async_step_status(async_context&)> _frame;
 };
 
 // ============================================================================
@@ -657,6 +675,7 @@ inline void impl::async_node_traits::destroy_object(async_node_base* p)
 }
 inline void impl::async_node_traits::free_storage(async_node_base* p)
 {
-    cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), p->_class_index);
+    CC_ASSERT(p->_ops != nullptr, "async node freed without ops (must be created via make_async_* / make_shared)");
+    cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), p->_ops->class_index);
 }
 } // namespace cc
