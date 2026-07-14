@@ -9,20 +9,26 @@
 
 #include <initializer_list>
 #include <new>
+#include <type_traits>
 
-/// Growable vector with small-vector optimization: the first `N` elements live inline (no allocation),
-/// spilling to the heap only once the size exceeds `N`. Ideal where the common case holds a handful of
-/// elements but an occasional overflow must still be handled correctly.
+/// Growable vector with small-vector optimization: the first elements live inline (no allocation),
+/// spilling to the heap only once the size exceeds the inline capacity. Ideal where the common case holds
+/// a handful of elements but an occasional overflow must still be handled correctly.
 ///
-/// Storage mirrors `cc::string`'s SSO: a union of an inline buffer (`data_small`) and a heap
-/// representation (`data_heap`, a `cc::allocating_container<T>`), so the heap side reuses `cc::allocation`'s
-/// growth strategy, cache-line alignment, memory-resource support, and exception guarantees. The public
-/// surface mirrors `cc::vector` (create_* factories, resize_* family, pop_back/remove_back,
-/// extract_allocation) so it feels the same. `is_inline()` reports whether storage is still the inline
-/// buffer. Value semantics (deep copy); a moved-from small_vector is left empty and inline.
+/// `N` is a *minimum* inline capacity: the buffer auto-grows to fill the storage footprint, so
+/// `inline_capacity()` is >= N (e.g. `small_vector<int, 4>` holds 9 inline). Storage mirrors
+/// `cc::string`'s SSO: a union of an inline buffer and a heap representation (`data_heap`, a
+/// `cc::allocating_container<T>`), with the mode flag + memory resource folded into one tagged pointer
+/// word (the low bit of the 8-aligned resource pointer marks inline mode) — so the whole vector is
+/// **48 B** for `alignof(T) <= 8` and a small inline buffer. Larger inline buffers place the elements
+/// past the resource word and grow the struct. The heap side reuses `cc::allocation`'s growth strategy,
+/// cache-line alignment, memory-resource support, and exception guarantees. The public surface mirrors
+/// `cc::vector` (create_* factories, resize_* family, pop_back/remove_back, extract_allocation) so it
+/// feels the same. `is_inline()` reports whether storage is still the inline buffer. Value semantics
+/// (deep copy); a moved-from small_vector is left empty and inline.
 ///
 /// Usage:
-///   cc::small_vector<int, 4> v; // holds up to 4 ints without allocating
+///   cc::small_vector<int, 4> v; // holds >= 4 ints without allocating (9 in practice)
 ///   v.push_back(1);
 ///   v.emplace_back(2);
 ///   for (int x : v) { ... }
@@ -38,7 +44,7 @@ public:
     [[nodiscard]] static small_vector create_with_resource(cc::memory_resource const* resource)
     {
         small_vector v;
-        v._resource = resource;
+        v.initialize_small_empty(resource);
         return v;
     }
 
@@ -47,10 +53,9 @@ public:
     [[nodiscard]] static small_vector create_from_allocation(cc::allocation<T> data)
     {
         small_vector v;
-        v._resource = data.custom_resource;
         v._destroy();
+        // placement-new writes the (untagged) adopted resource at k_resource_offset => heap mode
         new (&v._s.heap) data_heap(data_heap::create_from_allocation(cc::move(data)));
-        v._is_small = false;
         return v;
     }
 
@@ -101,16 +106,11 @@ public:
 
     // ctors / dtor / assignment
 public:
-    small_vector()
-    {
-        _is_small = true;
-        _s.sso.size = 0;
-    }
+    small_vector() { initialize_small_empty(nullptr); }
 
     small_vector(std::initializer_list<T> init)
     {
-        _is_small = true;
-        _s.sso.size = 0;
+        initialize_small_empty(nullptr);
         reserve(isize(init.size()));
         for (auto const& e : init)
             push_back(e);
@@ -175,8 +175,8 @@ public:
         return data()[size() - 1];
     }
 
-    [[nodiscard]] T* data() { return _is_small ? _s.sso.ptr() : _s.heap.data(); }
-    [[nodiscard]] T const* data() const { return _is_small ? _s.sso.ptr() : _s.heap.data(); }
+    [[nodiscard]] T* data() { return is_small() ? _s.sso.ptr() : _s.heap.data(); }
+    [[nodiscard]] T const* data() const { return is_small() ? _s.sso.ptr() : _s.heap.data(); }
 
     // iterators
 public:
@@ -187,18 +187,22 @@ public:
 
     // queries
 public:
-    [[nodiscard]] isize size() const { return _is_small ? _s.sso.size : _s.heap.size(); }
+    [[nodiscard]] isize size() const { return is_small() ? isize(_s.sso.size) : _s.heap.size(); }
     [[nodiscard]] bool empty() const { return size() == 0; }
     [[nodiscard]] isize size_bytes() const { return size() * isize(sizeof(T)); }
-    [[nodiscard]] isize capacity() const { return _is_small ? N : _s.heap.size() + _s.heap.capacity_back(); }
+    [[nodiscard]] isize capacity() const
+    {
+        return is_small() ? k_inline_cap : _s.heap.size() + _s.heap.capacity_back();
+    }
     [[nodiscard]] isize capacity_back() const { return capacity() - size(); }
     [[nodiscard]] bool has_capacity_back_for(isize count) const { return capacity_back() >= count; }
 
-    /// Compile-time inline capacity (elements storable without any allocation).
-    [[nodiscard]] static constexpr isize inline_capacity() { return N; }
+    /// Compile-time inline capacity (elements storable without any allocation). `N` is a minimum: the
+    /// inline buffer auto-grows to fill the storage footprint, so this is >= N (e.g. 9 for <int, 4>).
+    [[nodiscard]] static constexpr isize inline_capacity() { return k_inline_cap; }
 
     /// Whether the current storage is the inline buffer (i.e. no heap allocation is held).
-    [[nodiscard]] bool is_inline() const { return _is_small; }
+    [[nodiscard]] bool is_inline() const { return is_small(); }
 
     // appending / removing
 public:
@@ -208,16 +212,16 @@ public:
     template <class... Args>
     T& emplace_back(Args&&... args)
     {
-        if (_is_small)
+        if (is_small())
         {
-            if (_s.sso.size < N)
+            if (isize(_s.sso.size) < k_inline_cap)
             {
                 T* const slot = _s.sso.ptr() + _s.sso.size;
                 new (cc::placement_new, slot) T(cc::forward<Args>(args)...);
                 ++_s.sso.size;
                 return *slot;
             }
-            _spill_to_heap(_s.sso.size + 1);
+            _spill_to_heap(isize(_s.sso.size) + 1);
         }
         return _s.heap.emplace_back(cc::forward<Args>(args)...);
     }
@@ -235,7 +239,7 @@ public:
     void remove_back()
     {
         CC_ASSERT(!empty(), "remove_back() on empty small_vector");
-        if (_is_small)
+        if (is_small())
         {
             --_s.sso.size;
             _s.sso.ptr()[_s.sso.size].~T();
@@ -249,7 +253,7 @@ public:
     T& emplace_back_stable(Args&&... args)
     {
         CC_ASSERT(has_capacity_back_for(1), "emplace_back_stable requires spare capacity (would reallocate)");
-        if (_is_small)
+        if (is_small())
         {
             T* const slot = _s.sso.ptr() + _s.sso.size;
             new (cc::placement_new, slot) T(cc::forward<Args>(args)...);
@@ -392,9 +396,9 @@ public:
     /// Destroys all elements; size becomes 0. Keeps the current storage mode and capacity.
     void clear()
     {
-        if (_is_small)
+        if (is_small())
         {
-            cc::impl::destroy_objects_in_reverse(_s.sso.ptr(), _s.sso.ptr() + _s.sso.size);
+            cc::impl::destroy_objects_in_reverse(_s.sso.ptr(), _s.sso.ptr() + isize(_s.sso.size));
             _s.sso.size = 0;
         }
         else
@@ -415,7 +419,7 @@ public:
     {
         if (capacity() >= count)
             return;
-        if (_is_small)
+        if (is_small())
             _spill_to_heap(count);
         else
             _s.heap.reserve_back(count - _s.heap.size());
@@ -426,7 +430,7 @@ public:
     {
         if (capacity() >= count)
             return;
-        if (_is_small)
+        if (is_small())
             _spill_to_heap(count, /*exact*/ true);
         else
             _s.heap.reserve_back_exact(count - _s.heap.size());
@@ -446,11 +450,11 @@ public:
         if (new_size <= size())
             return _shrink_to(new_size);
         reserve(new_size);
-        if (_is_small)
+        if (is_small())
         {
             T* p = _s.sso.ptr() + _s.sso.size;
-            cc::impl::default_create_objects_to(p, new_size - _s.sso.size);
-            _s.sso.size = new_size;
+            cc::impl::default_create_objects_to(p, new_size - isize(_s.sso.size));
+            _s.sso.size = u32(new_size);
         }
         else
             _s.heap.resize_to_defaulted(new_size);
@@ -463,11 +467,11 @@ public:
         if (new_size <= size())
             return _shrink_to(new_size);
         reserve(new_size);
-        if (_is_small)
+        if (is_small())
         {
             T* p = _s.sso.ptr() + _s.sso.size;
-            cc::impl::fill_create_objects_to(p, new_size - _s.sso.size, value);
-            _s.sso.size = new_size;
+            cc::impl::fill_create_objects_to(p, new_size - isize(_s.sso.size), value);
+            _s.sso.size = u32(new_size);
         }
         else
             _s.heap.resize_to_filled(new_size, value);
@@ -481,8 +485,8 @@ public:
         if (new_size <= size())
             return _shrink_to(new_size);
         reserve(new_size);
-        if (_is_small)
-            _s.sso.size = new_size; // new elements intentionally uninitialized
+        if (is_small())
+            _s.sso.size = u32(new_size); // new elements intentionally uninitialized
         else
             _s.heap.resize_to_uninitialized(new_size);
     }
@@ -534,19 +538,18 @@ public:
     /// (freeing the heap allocation); otherwise shrinks the heap allocation.
     void shrink_to_fit()
     {
-        if (_is_small)
+        if (is_small())
             return; // inline storage is already minimal
-        if (size() <= N)
+        if (size() <= k_inline_cap)
         {
             // Re-inline: extract the allocation, move its elements into the inline buffer, then let the
             // extracted allocation destroy the moved-from originals and free its storage.
             cc::allocation<T> alloc = _s.heap.extract_allocation();
             _s.heap.~data_heap();
-            _is_small = true;
-            _s.sso.size = 0;
+            initialize_small_empty(alloc.custom_resource); // keep the sticky resource
             T* dst = _s.sso.ptr();
             cc::impl::move_create_objects_to(dst, alloc.obj_start, alloc.obj_end);
-            _s.sso.size = alloc.obj_end - alloc.obj_start;
+            _s.sso.size = u32(alloc.obj_end - alloc.obj_start);
         }
         else
             _s.heap.shrink_to_fit();
@@ -558,12 +561,11 @@ public:
     /// materialized into a fresh heap allocation. Mirrors cc::vector::extract_allocation.
     [[nodiscard]] cc::allocation<T> extract_allocation()
     {
-        if (_is_small)
-            _spill_to_heap(_s.sso.size, /*exact*/ true);
+        if (is_small())
+            _spill_to_heap(isize(_s.sso.size), /*exact*/ true);
         cc::allocation<T> out = _s.heap.extract_allocation();
         _s.heap.~data_heap();
-        _is_small = true;
-        _s.sso.size = 0;
+        initialize_small_empty(out.custom_resource); // keep the sticky resource
         return out;
     }
 
@@ -571,12 +573,11 @@ public:
     /// inline (nothing is allocated to hand out). Leaves this empty on success.
     [[nodiscard]] cc::optional<cc::allocation<T>> try_extract_allocation()
     {
-        if (_is_small)
+        if (is_small())
             return {};
         cc::allocation<T> out = _s.heap.extract_allocation();
         _s.heap.~data_heap();
-        _is_small = true;
-        _s.sso.size = 0;
+        initialize_small_empty(out.custom_resource); // keep the sticky resource
         return out;
     }
 
@@ -590,41 +591,96 @@ private:
         static constexpr bool uses_capacity_front = false;
     };
 
-    // Inline representation: a runtime size plus raw storage for N elements.
-    struct data_small
+    // The heap allocation stores custom_resource at this offset; the SSO tag bit lives in that word, so
+    // both union members must place their resource pointer here for the mode to be readable either way.
+    static constexpr isize k_resource_offset = isize(offsetof(cc::allocation<T>, custom_resource));
+    // Element bytes available in the head layout, before the aliased resource word (minus the size field).
+    static constexpr isize k_head_bytes = k_resource_offset - isize(sizeof(u32));
+
+    // Head layout (48 B) applies when alignment allows and the requested buffer fits before the resource
+    // word; otherwise the tail layout puts elements past it and the struct grows.
+    static constexpr bool k_use_head = (alignof(T) <= alignof(cc::allocation<T>)) //
+                                    && (N * isize(sizeof(T)) <= k_head_bytes);
+
+    // Actual inline capacity — N is a minimum; the head layout fills the free space before the resource word.
+    static constexpr isize k_inline_cap = k_use_head ? k_head_bytes / isize(sizeof(T)) : N;
+
+    // Head layout: inline elements sit before the aliased resource word, so sizeof == sizeof(data_heap).
+    struct alignas(data_heap) data_small_head
     {
-        isize size;
-        alignas(T) cc::byte storage[N * sizeof(T)];
+        alignas(T) cc::byte storage[k_head_bytes];  // element bytes, offset 0
+        u32 size;                                   // element count, offset k_head_bytes
+        cc::memory_resource const* custom_resource; // tagged; offset k_resource_offset
 
         [[nodiscard]] T* ptr() { return reinterpret_cast<T*>(storage); }
         [[nodiscard]] T const* ptr() const { return reinterpret_cast<T const*>(storage); }
     };
 
+    // Tail layout: inline elements sit past the aliased resource word, so the struct grows beyond 48 B.
+    struct alignas(data_heap) data_small_tail
+    {
+        u32 size;                                              // element count, offset 0
+        cc::byte _pad[k_resource_offset - isize(sizeof(u32))]; // fill up to the resource word
+        cc::memory_resource const* custom_resource;            // tagged; offset k_resource_offset
+        alignas(T) cc::byte storage[N * isize(sizeof(T))];     // element bytes, offset >= sizeof(data_heap)
+
+        [[nodiscard]] T* ptr() { return reinterpret_cast<T*>(storage); }
+        [[nodiscard]] T const* ptr() const { return reinterpret_cast<T const*>(storage); }
+    };
+
+    using data_small = std::conditional_t<k_use_head, data_small_head, data_small_tail>;
+
+    static_assert(sizeof(data_heap) == sizeof(cc::allocation<T>), "heap representation must equal the allocation");
+    static_assert(offsetof(data_small, custom_resource) == k_resource_offset,
+                  "SSO tag word must alias the heap resource");
+
+    // SSO tag: the low bit of the resource pointer marks inline mode. Resource pointers are 8-aligned, so
+    // the bit is free. Read mode-agnostically via _s.sso (its resource word aliases the heap's).
+    [[nodiscard]] bool is_small() const { return (reinterpret_cast<uintptr_t>(_s.sso.custom_resource) & 1) != 0; }
+    [[nodiscard]] cc::memory_resource const* resource() const { return remove_small_tag(_s.sso.custom_resource); }
+
+    [[nodiscard]] static cc::memory_resource const* add_small_tag(cc::memory_resource const* r)
+    {
+        return reinterpret_cast<cc::memory_resource const*>(reinterpret_cast<uintptr_t>(r) | 1);
+    }
+    [[nodiscard]] static cc::memory_resource const* remove_small_tag(cc::memory_resource const* r)
+    {
+        return reinterpret_cast<cc::memory_resource const*>(reinterpret_cast<uintptr_t>(r) & ~uintptr_t(1));
+    }
+
+    // Establish an empty inline vector with the given (sticky) resource. Precondition: union is uninitialized.
+    void initialize_small_empty(cc::memory_resource const* resource)
+    {
+        _s.sso.size = 0;
+        _s.sso.custom_resource = add_small_tag(resource);
+    }
+
     // Move the inline elements into a fresh heap allocation of at least `min_capacity`, then switch modes.
     // Precondition: currently small. `exact` uses exact (non-exponential) allocation.
     void _spill_to_heap(isize min_capacity, bool exact = false)
     {
-        data_heap heap = data_heap::create_with_resource(_resource);
-        isize const want = min_capacity > _s.sso.size ? min_capacity : _s.sso.size;
+        isize const cur = isize(_s.sso.size);
+        data_heap heap = data_heap::create_with_resource(resource());
+        isize const want = min_capacity > cur ? min_capacity : cur;
         if (exact)
             heap.reserve_back_exact(want);
         else
             heap.reserve_back(want);
-        for (isize i = 0; i < _s.sso.size; ++i)
+        for (isize i = 0; i < cur; ++i)
             heap.emplace_back_stable(cc::move(_s.sso.ptr()[i]));
-        cc::impl::destroy_objects_in_reverse(_s.sso.ptr(), _s.sso.ptr() + _s.sso.size);
+        cc::impl::destroy_objects_in_reverse(_s.sso.ptr(), _s.sso.ptr() + cur);
 
+        // placement-new writes the untagged resource at k_resource_offset => is_small() becomes false
         new (&_s.heap) data_heap(cc::move(heap));
-        _is_small = false;
     }
 
     // Shrink to `n` (n <= size()), destroying the trailing elements.
     void _shrink_to(isize n)
     {
-        if (_is_small)
+        if (is_small())
         {
-            cc::impl::destroy_objects_in_reverse(_s.sso.ptr() + n, _s.sso.ptr() + _s.sso.size);
-            _s.sso.size = n;
+            cc::impl::destroy_objects_in_reverse(_s.sso.ptr() + n, _s.sso.ptr() + isize(_s.sso.size));
+            _s.sso.size = u32(n);
         }
         else
             _s.heap.resize_down_to(n);
@@ -633,8 +689,8 @@ private:
     // Destroy the active representation (elements + any heap allocation), leaving the union inactive.
     void _destroy()
     {
-        if (_is_small)
-            cc::impl::destroy_objects_in_reverse(_s.sso.ptr(), _s.sso.ptr() + _s.sso.size);
+        if (is_small())
+            cc::impl::destroy_objects_in_reverse(_s.sso.ptr(), _s.sso.ptr() + isize(_s.sso.size));
         else
             _s.heap.~data_heap();
     }
@@ -642,19 +698,16 @@ private:
     // Deep-copy rhs into a fresh (uninitialized) *this. Picks inline storage when the content fits.
     void _init_copy(small_vector const& rhs)
     {
-        _resource = rhs._resource;
-        if (rhs.size() <= N)
+        if (rhs.size() <= k_inline_cap)
         {
-            _is_small = true;
-            _s.sso.size = 0;
+            initialize_small_empty(rhs.resource());
             T* dst = _s.sso.ptr();
             cc::impl::copy_create_objects_to(dst, rhs.data(), rhs.data() + rhs.size());
-            _s.sso.size = rhs.size();
+            _s.sso.size = u32(rhs.size());
         }
         else
         {
-            _is_small = false;
-            new (&_s.heap) data_heap(data_heap::create_with_resource(_resource));
+            new (&_s.heap) data_heap(data_heap::create_with_resource(rhs.resource()));
             _s.heap.reserve_back(rhs.size());
             for (isize i = 0; i < rhs.size(); ++i)
                 _s.heap.push_back_stable(rhs[i]);
@@ -664,36 +717,32 @@ private:
     // Take rhs's contents into a fresh (uninitialized) *this, leaving rhs empty and inline.
     void _init_move(small_vector&& rhs) noexcept
     {
-        _resource = rhs._resource;
-        if (rhs._is_small)
+        if (rhs.is_small())
         {
-            _is_small = true;
-            _s.sso.size = 0;
-            T* dst = _s.sso.ptr();
-            cc::impl::move_create_objects_to(dst, rhs._s.sso.ptr(), rhs._s.sso.ptr() + rhs._s.sso.size);
-            _s.sso.size = rhs._s.sso.size;
-            cc::impl::destroy_objects_in_reverse(rhs._s.sso.ptr(), rhs._s.sso.ptr() + rhs._s.sso.size);
+            isize const n = isize(rhs._s.sso.size);
+            initialize_small_empty(rhs.resource());
+            T* dst = _s.sso.ptr(); // move_create_objects_to advances dst by reference (needs an lvalue)
+            cc::impl::move_create_objects_to(dst, rhs._s.sso.ptr(), rhs._s.sso.ptr() + n);
+            _s.sso.size = u32(n);
+            cc::impl::destroy_objects_in_reverse(rhs._s.sso.ptr(), rhs._s.sso.ptr() + n);
             rhs._s.sso.size = 0;
         }
         else
         {
-            // Steal the heap allocation, then reset rhs to an empty inline vector.
-            _is_small = false;
+            // Steal the heap allocation, then reset rhs to an empty inline vector (keeping its resource).
+            cc::memory_resource const* const rhs_res = rhs.resource();
             new (&_s.heap) data_heap(cc::move(rhs._s.heap));
             rhs._s.heap.~data_heap();
-            rhs._is_small = true;
-            rhs._s.sso.size = 0;
+            rhs.initialize_small_empty(rhs_res);
         }
     }
 
     union storage_t
     {
         data_heap heap;
-        data_small sso;
+        data_small sso; // NOTE: not named `small` — that is a Windows SDK macro (#define small char)
 
         storage_t() {}  // NOLINT — the small_vector picks and manages the active member
         ~storage_t() {} // NOLINT — destruction is driven by _destroy()
     } _s;
-    bool _is_small = true;
-    cc::memory_resource const* _resource = nullptr; // sticky resource, used once storage spills to the heap
 };
