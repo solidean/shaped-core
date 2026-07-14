@@ -124,6 +124,10 @@ public:
         dx12_pipeline_layout_handle layout,
         cc::span<cc::byte const> cached_pipeline,
         sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<dx12_raster_pipeline_handle> create_dx12_raster_pipeline(
+        sg::raster_pipeline_description const& desc,
+        dx12_pipeline_layout_handle layout,
+        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_raytracing_pipeline_handle> create_dx12_raytracing_pipeline(
         sg::raytracing_pipeline_description const& desc,
         dx12_pipeline_layout_handle layout,
@@ -191,6 +195,9 @@ public:
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::compute_pipeline_handle> try_create_compute_pipeline(
         sg::compute_pipeline_description const& desc,
+        sg::lifetime_scope scope) override;
+    [[nodiscard]] cc::result<sg::raster_pipeline_handle> try_create_raster_pipeline(
+        sg::raster_pipeline_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
         sg::raytracing_pipeline_description const& desc,

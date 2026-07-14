@@ -67,8 +67,8 @@ private:
     isize _size_in_bytes = 0;
 };
 
-/// Building a binding_group_layout, pipeline_layout, or compute_pipeline failed — a shader/root-signature/PSO compile or
-/// create error the driver reported. Carries the pipeline's entry point for context.
+/// Building a binding_group_layout, pipeline_layout, or compute / raster / raytracing pipeline failed — a
+/// shader/root-signature/PSO compile or create error the driver reported. Carries the pipeline's entry point for context.
 class pipeline_creation_exception final : public exception
 {
 public:

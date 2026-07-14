@@ -138,7 +138,7 @@ sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::
             d.Triangles.IndexBuffer = idx->gpu_virtual_address() + UINT64(g.index_offset_in_bytes);
             d.Triangles.IndexCount = UINT(g.index_count);
             d.Triangles.IndexFormat
-                = g.index_format == sg::accel_index_format::uint16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+                = g.index_type == sg::index_format::uint16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
         }
         else
         {

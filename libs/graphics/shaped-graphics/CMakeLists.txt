@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding_group_layout.cc
     src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc
+    src/shaped-graphics/raster_pipeline.cc
     src/shaped-graphics/raytracing_pipeline.cc
     src/shaped-graphics/raytracing_shader_table.cc
     src/shaped-graphics/binding_group.cc
@@ -65,6 +66,14 @@ target_sources(shaped-graphics
     src/shaped-graphics/acceleration_structure.hh
     src/shaped-graphics/raw_buffer.hh
     src/shaped-graphics/pixel_format.hh
+    src/shaped-graphics/primitive_topology.hh
+    src/shaped-graphics/rasterization_state.hh
+    src/shaped-graphics/blend_state.hh
+    src/shaped-graphics/depth_stencil_state.hh
+    src/shaped-graphics/vertex_input.hh
+    src/shaped-graphics/vertex_buffer_view.hh
+    src/shaped-graphics/index_buffer_view.hh
+    src/shaped-graphics/raster_pipeline.hh
     src/shaped-graphics/raw_texture.hh
     src/shaped-graphics/texture.hh
     src/shaped-graphics/texture_traits.hh
@@ -140,6 +149,7 @@ add_executable(shaped-graphics-test
     tests/texture/texture-view-test.cc
     tests/transfer/bytes_future-test.cc
     tests/binding/binding-test.cc
+    tests/pipeline/raster_pipeline-test.cc
     tests/sampler/sampler-test.cc
     tests/barrier/access_state-test.cc
     tests/barrier/subresource-test.cc

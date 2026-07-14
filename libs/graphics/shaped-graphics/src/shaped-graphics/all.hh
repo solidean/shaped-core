@@ -8,6 +8,7 @@
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/binding_group_layout.hh>
+#include <shaped-graphics/blend_state.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list.compute.hh>
 #include <shaped-graphics/command_list.copy.hh>
@@ -25,6 +26,7 @@
 #include <shaped-graphics/context.transient.hh>
 #include <shaped-graphics/context.uncached.hh>
 #include <shaped-graphics/context.upload.hh>
+#include <shaped-graphics/depth_stencil_state.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/gpu_timestamp.hh>
@@ -32,10 +34,14 @@
 #include <shaped-graphics/pipeline_cache.hh>
 #include <shaped-graphics/pipeline_layout.hh>
 #include <shaped-graphics/pixel_format.hh>
+#include <shaped-graphics/primitive_topology.hh>
+#include <shaped-graphics/raster_pipeline.hh>
+#include <shaped-graphics/rasterization_state.hh>
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/raw_texture.hh>
 #include <shaped-graphics/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing_shader_table.hh>
 #include <shaped-graphics/texture.hh>
 #include <shaped-graphics/types.hh>
+#include <shaped-graphics/vertex_input.hh>
 #include <shaped-graphics/views.hh>

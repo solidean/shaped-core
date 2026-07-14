@@ -113,7 +113,7 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 sg::exception                    // base; .message() -> cc::string_view. catch this for "any sg failure"
 sg::device_lost_exception        // device lost (sticky); .reason(). from submit/advance/fence waits + throwing creates
 sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_bytes()
-sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute_pipeline build failure; .entry_point()
+sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute|raster|raytracing pipeline build failure; .entry_point()
 sg::binding_group_exception      // binding_group wiring error (unknown/missing binding, kind mismatch) or descriptor exhaustion
 // only the throwing create_* and submit/advance raise these; the try_create_* surface never throws
 ```
@@ -175,14 +175,25 @@ cmd.query.is_supported()               // bool — backend/device supports GPU t
 cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
 
-// raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops.
-// No graphics pipeline yet -> clears/discards only; draw arrives later. vulkan is a stub. dx12 real on WARP.
+// raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops,
+// then bind a raster_pipeline and draw. vulkan is a stub. dx12 real on WARP.
 auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1))},       // -> sg::rendering_scope (RAII)
                                   .depth_stencil_target=dsv.cleared(1.0f)});              //   end_rendering() at scope exit
 // view builders: view.cleared(color/depth[,stencil]) | view.preserved() | view.discarded() -> color_target / depth_stencil_target
-// rendering_info { small_vector<color_target,8> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor }
+// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor }
 //   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
 cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
+
+// draw recording — on cmd.raster / cmd.raster.manual (NOT the rendering_scope handle); valid while a scope is open:
+cmd.raster.bind_pipeline(raster_pipeline)               // void — active raster PSO + IA topology + graphics root sig
+cmd.raster.bind_group(set, binding_group)              // void — bind at slot `set` (indexes the pipeline layout's groups)
+cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
+cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  // void
+cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
+cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state
+cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
+cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
+cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
 ```
 
 ## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
@@ -360,6 +371,7 @@ compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backe
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
 ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
+ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin). No ctx.cached yet.
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
@@ -371,6 +383,19 @@ cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / wor
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them)
+
+// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
+sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
+                                  //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; rasterization_state; depth_stencil_state;
+                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={} }
+sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=all }  — one color target's PSO state
+sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; vector<vertex_attribute> attributes }; static create<Vs...>() derives one slot per type
+                                  //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }
+// state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
+//   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
+//   blend_factor / blend_op / color_write_mask (r|g|b|a|all bit flags)  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
+raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
 // declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```
@@ -382,13 +407,13 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
 sg::blas_handle   // std::shared_ptr<sg::blas const>   — bottom-level (one mesh's triangles or AABBs); persistent
 sg::tlas_handle   // std::shared_ptr<sg::tlas const>   — top-level (instances of blas); a tlas keeps its blases alive
 // input structs (value types; build-input buffers need buffer_usage::accel_structure_build_input):
-sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indices+count+offset+index_format;
+sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indices+count+offset+index_type;
                      optional transform buffer(3x4 row-major)+offset; is_opaque=true }
 sg::blas_aabbs     { aabbs(6 floats each), aabb_count/stride/offset; is_opaque=true }
 sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transform[r*4+c], not tg col-major);
                      u32 instance_id:24; u32 hit_group_offset:24; u8 mask=0xFF; instance_cull_mode; optional opaque_override }
 sg::accel_build_flags   // none/fast_trace(default)/fast_build/allow_update/allow_compaction/minimize_memory  (|, has_flag)
-sg::accel_index_format  // uint16 | uint32
+sg::index_format        // uint16 | uint32  — index-buffer element width (shared with draw's bind_index_buffer)
 sg::instance_cull_mode  // back(default) | front | none
 
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a

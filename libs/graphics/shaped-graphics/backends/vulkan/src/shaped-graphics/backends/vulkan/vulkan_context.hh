@@ -122,6 +122,11 @@ public:
     {
         return cc::error("vulkan compute_pipeline creation is not implemented yet");
     }
+    [[nodiscard]] cc::result<sg::raster_pipeline_handle> try_create_raster_pipeline(sg::raster_pipeline_description const&,
+                                                                                    sg::lifetime_scope) override
+    {
+        return cc::error("vulkan raster_pipeline creation is not implemented yet");
+    }
     [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
         sg::raytracing_pipeline_description const&,
         sg::lifetime_scope) override
