@@ -23,36 +23,6 @@
 
 namespace cc
 {
-namespace impl
-{
-/// Tiny per-node spinlock. Critical sections are a few list ops / a single state store — never user code —
-/// so spinning stays bounded (a heavier std::mutex per node would cost more for these short holds).
-///
-/// REVIEW (revisit before this leaves incubator): spinlocks are a deliberate v1 choice, not a settled one.
-/// They are fine while critical sections are tiny and uncontended, but they degrade badly under
-/// oversubscription / preemption and give no fairness. Reconsider against a proper blocking mutex, a hybrid
-/// (spin-then-block), or a lock-free node design once the async system sees real threaded load.
-struct async_spinlock
-{
-    std::atomic_flag _flag; // C++20: default-initialized to the clear state
-    void lock()
-    {
-        while (_flag.test_and_set(std::memory_order_acquire))
-            ; // spin until acquired
-    }
-    void unlock() { _flag.clear(std::memory_order_release); }
-};
-
-struct async_spinlock_guard
-{
-    async_spinlock& _lock;
-    explicit async_spinlock_guard(async_spinlock& l) : _lock(l) { _lock.lock(); }
-    ~async_spinlock_guard() { _lock.unlock(); }
-    async_spinlock_guard(async_spinlock_guard const&) = delete;
-    async_spinlock_guard& operator=(async_spinlock_guard const&) = delete;
-};
-} // namespace impl
-
 // ============================================================================
 // async_error — the failure channel, represented as a value (not an exception)
 // ============================================================================
@@ -439,12 +409,15 @@ struct async_result_slot
 /// never be lost against that node parking itself (the classic block-vs-wake race).
 enum class async_node_state : cc::u8
 {
-    cold,             // created, never scheduled, compute not started
-    scheduled,        // runnable and (logically) queued
-    running,          // currently owned by a poller
-    blocked,          // parked on not-ready dependencies; continuations installed
-    external_pending, // awaiting external completion (a manual/promise node, no compute frame)
-    ready,            // terminal: completed with a value or an error
+    cold,             // 0  created, never scheduled, compute not started
+    scheduled,        // 1  runnable and (logically) queued
+    running,          // 2  currently owned by a poller
+    blocked,          // 3  parked on not-ready dependencies; continuations installed
+    external_pending, // 4  awaiting external completion (a manual/promise node, no compute frame)
+    ready_value,      // 5  terminal: completed with a value
+    ready_error,      // 6  terminal: completed on the failure channel
+    // 7 states -> fits 3 bits (see async_node_base's packed control word). is-error is encoded in the state
+    // itself (ready_value vs ready_error), not a separate flag.
 };
 
 /// Type-erased per-async<T> operations, reached from the untemplated base — the hand-rolled replacement for a
@@ -452,11 +425,15 @@ enum class async_node_state : cc::u8
 /// async type; the node stores a pointer to it, set once at construction. It recovers the two things the base
 /// cannot derive from a base-typed pointer: how to destroy the typed value, and the node's size class (used by
 /// the intrusive free path, which runs on a base-typed weak cell after the concrete type is long erased).
-struct async_type_ops
+/// alignas(32): the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock (see
+/// async_node_base's _state_and_ops), so every async_type_ops instance must be 32-aligned to keep those bits
+/// free. Objects are static-constexpr globals (one per async type), so the alignment costs nothing meaningful.
+struct alignas(32) async_type_ops
 {
     void (*teardown_value)(async_node_base*); // destroy the derived node's typed value (no-op-safe for trivial T)
     cc::node_class_index class_index;         // concrete async<T> size class (free_storage frees by it)
 };
+static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned so its low 5 bits are free for tags");
 
 /// Shared, T-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
 /// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), the
@@ -484,10 +461,16 @@ struct async_node_base
 {
     // queries
 public:
-    [[nodiscard]] bool is_ready() const { return _state.load(std::memory_order_acquire) == async_node_state::ready; }
-    [[nodiscard]] bool has_value() const { return is_ready() && !_is_error; }
-    [[nodiscard]] bool has_error() const { return is_ready() && _is_error; }
-    [[nodiscard]] bool is_cold() const { return _state.load(std::memory_order_acquire) == async_node_state::cold; }
+    [[nodiscard]] bool is_ready() const { return is_ready_state(load_state(std::memory_order_acquire)); }
+    [[nodiscard]] bool has_value() const
+    {
+        return load_state(std::memory_order_acquire) == async_node_state::ready_value;
+    }
+    [[nodiscard]] bool has_error() const
+    {
+        return load_state(std::memory_order_acquire) == async_node_state::ready_error;
+    }
+    [[nodiscard]] bool is_cold() const { return load_state(std::memory_order_acquire) == async_node_state::cold; }
 
     /// The failure-channel value; valid only when has_error().
     [[nodiscard]] async_error const& base_error() const { return _slot.error; }
@@ -565,17 +548,19 @@ protected:
 
     // shared helpers for the typed node
 protected:
-    void set_state(async_node_state s) { _state.store(s, std::memory_order_release); }
-    [[nodiscard]] async_node_state state() const { return _state.load(std::memory_order_acquire); }
-
     /// Stash this node's type-erased ops (its static async_type_ops), so the base can destroy the typed value
-    /// and free the right size class through a base-typed pointer. Called once from the derived ctor; the
-    /// pointer must stay valid until free (weak 0), so teardown_payload never clears it.
-    void set_ops(async_type_ops const* ops) { _ops = ops; }
+    /// and free the right size class through a base-typed pointer. Called ONCE from the derived ctor, before
+    /// the node is shared — stores the 32-aligned ops pointer into the control word with state=cold. The ops
+    /// bits never change afterwards (free_storage reads them at weak 0), so teardown_payload never clears them.
+    void set_ops(async_type_ops const* ops)
+    {
+        _state_and_ops.store(reinterpret_cast<cc::u64>(ops), std::memory_order_relaxed); // state cold, wake/lock clear
+    }
 
     /// Turn this into a push/manual node: awaiting external completion. It is never run inline (schedule()
-    /// bails on external_pending); only push_value / push_error complete it.
-    void mark_external_pending() { set_state(async_node_state::external_pending); }
+    /// bails on external_pending); only push_value / push_error complete it. Construction-time (set_manual),
+    /// before the node is shared, so no lock is needed.
+    void mark_external_pending() { store_state(async_node_state::external_pending); }
 
     /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
     /// if this node has to park).
@@ -599,25 +584,94 @@ private:
     void complete_from_compute(bool produced_error, async_error& err);
     void reschedule_self();
 
+    // packed control word (_state_and_ops) — the low 5 bits tag the 32-aligned ops pointer
+private:
+    static constexpr cc::u64 lock_bit = 0x1;  // bit 0: the spinlock
+    static constexpr cc::u64 wake_bit = 0x2;  // bit 1: re-poll requested for a running node
+    static constexpr cc::u64 state_shift = 2; // bits 2..4: async_node_state (7 values)
+    static constexpr cc::u64 state_mask = cc::u64(0x7) << state_shift;
+    static constexpr cc::u64 ops_mask = ~cc::u64(0x1F); // bits 5..63: the 32-aligned async_type_ops pointer
+
+    static bool is_ready_state(async_node_state s)
+    {
+        return s == async_node_state::ready_value || s == async_node_state::ready_error;
+    }
+    [[nodiscard]] async_node_state load_state(std::memory_order o) const
+    {
+        return async_node_state((_state_and_ops.load(o) & state_mask) >> state_shift);
+    }
+    [[nodiscard]] async_type_ops const* ops() const
+    {
+        return reinterpret_cast<async_type_ops const*>(_state_and_ops.load(std::memory_order_relaxed) & ops_mask);
+    }
+
+    // Lock protocol: acquire the lock bit via a test-and-test-and-set fetch_or, release via fetch_and. While
+    // the lock is held only this thread writes the state/wake bits (readers just acquire-load), so the mutators
+    // below are plain load/mask/store — a concurrent spinner's fetch_or only re-sets an already-set lock bit,
+    // never changing the value. State stores are release, so a lock-free is_ready() acquire-load that sees a
+    // terminal state also sees the value/error published before it.
+    void spin_lock()
+    {
+        for (;;)
+        {
+            if ((_state_and_ops.fetch_or(lock_bit, std::memory_order_acquire) & lock_bit) == 0)
+                return; // set it from clear -> acquired
+            while (_state_and_ops.load(std::memory_order_relaxed) & lock_bit)
+                ; // spin-read until the holder releases, then retry the RMW
+        }
+    }
+    void spin_unlock() { _state_and_ops.fetch_and(~lock_bit, std::memory_order_release); }
+
+    void store_state(async_node_state s) // under lock (or at construction): set state, preserve ops/lock/wake
+    {
+        cc::u64 const w = _state_and_ops.load(std::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask) | (cc::u64(s) << state_shift), std::memory_order_release);
+    }
+    void store_state_clear_wake(async_node_state s) // under lock: set state and clear the wake bit together
+    {
+        cc::u64 const w = _state_and_ops.load(std::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask & ~wake_bit) | (cc::u64(s) << state_shift), std::memory_order_release);
+    }
+    void set_wake()
+    {
+        _state_and_ops.store(_state_and_ops.load(std::memory_order_relaxed) | wake_bit, std::memory_order_release);
+    }
+    void clear_wake()
+    {
+        _state_and_ops.store(_state_and_ops.load(std::memory_order_relaxed) & ~wake_bit, std::memory_order_release);
+    }
+    [[nodiscard]] bool wake_pending() const { return (_state_and_ops.load(std::memory_order_relaxed) & wake_bit) != 0; }
+
+    struct lock_scope
+    {
+        async_node_base* n;
+        explicit lock_scope(async_node_base* node) : n(node) { n->spin_lock(); }
+        ~lock_scope() { n->spin_unlock(); }
+        lock_scope(lock_scope const&) = delete;
+        lock_scope& operator=(lock_scope const&) = delete;
+    };
+
     // members
 private:
     friend struct async_context;           // reaches add_pending_dependency on the generic require() path
     friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
 
     /// Intrusive refcount (async_node_traits): strong owners + weak (continuation cells + the strong owners'
-    /// collective one). Born 1/1 by init_control.
+    /// collective one). Born 1/1 by init_control. Kept as two independent atomics (offset 0) so inc/dec stay
+    /// plain fetch_add — the state/lock live in a separate word.
     std::atomic<cc::u32> _strong{0};
     std::atomic<cc::u32> _weak{0};
 
-    std::atomic<async_node_state> _state{async_node_state::cold};
-    bool _is_error = false;     // set (under _lock) at completion; also selects the active _slot member
-    bool _wake_pending = false; // set (under _lock) when a running node is scheduled; makes it re-poll
-
-    impl::async_spinlock _lock; // guards _state transitions, _wake_pending, and the continuation head (class doc)
-
-    /// Type-erased ops for this concrete async<T> (typed-value dtor + size class): the hand-rolled replacement
-    /// for the removed vtable. Set once at construction; must stay valid until free (weak 0) — see set_ops.
-    async_type_ops const* _ops = nullptr;
+    /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits
+    /// 2..4, the wake-pending flag in bit 1, and the spinlock in bit 0. Folding lock + state + wake in with the
+    /// ops pointer keeps the fixed header at 16 B (with _strong/_weak). Set once at construction (set_ops); the
+    /// ops bits never change, so free_storage can read them at weak 0.
+    ///
+    /// NOTE: is_ready()/is_cold() are lock-free acquire loads of this word, so they share an address with the
+    /// lock RMWs. Deliberate: nearly all is_ready() calls target already-resolved nodes, which take no lock
+    /// (completion is done) — no contention there. If a hot pre-completion is_ready() path ever contends,
+    /// steal the MSB of _weak for a dedicated ready bit instead.
+    std::atomic<cc::u64> _state_and_ops{0};
 
     /// Not-ready dependencies, rebuilt each poll (folded pending + subscribed set). Only for scheduling/wakeup;
     /// it does not own anything (the compute frame's captures keep deps alive). Poller-private (only the single
@@ -625,9 +679,9 @@ private:
     impl::async_dep_head _deps;
 
     /// The 16 B value/error/continuation slot. Holds the continuation head (dependents to wake, weak, guarded
-    /// by _lock) until completion; then either nothing (value completion — value lives in the typed node) or
-    /// the failure-channel error (ready && _is_error). See impl::async_result_slot; the active member is
-    /// switched/destroyed by state in the completion path and teardown_payload.
+    /// by the lock bit) until completion; then either nothing (value completion — value lives in the typed
+    /// node) or the failure-channel error (state == ready_error). See impl::async_result_slot; the active
+    /// member is switched/destroyed by state in the completion path and teardown_payload.
     impl::async_result_slot _slot;
 
     /// The type-erased compute frame — `async_step_status(async_context&)`, 8 B. Null for manual/push nodes.
@@ -675,7 +729,8 @@ inline void impl::async_node_traits::destroy_object(async_node_base* p)
 }
 inline void impl::async_node_traits::free_storage(async_node_base* p)
 {
-    CC_ASSERT(p->_ops != nullptr, "async node freed without ops (must be created via make_async_* / make_shared)");
-    cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), p->_ops->class_index);
+    async_type_ops const* ops = p->ops();
+    CC_ASSERT(ops != nullptr, "async node freed without ops (must be created via make_async_* / make_shared)");
+    cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), ops->class_index);
 }
 } // namespace cc

@@ -6,10 +6,11 @@
 // the node state machine / poll loop. See async_node.hh for the shape and invariants.
 //
 // Concurrency model (safe to drive from many threads):
-//   * a per-node spinlock (_lock) serializes state transitions and continuation/subscription bookkeeping;
-//   * the state word stays atomic for lock-free is_ready()/is_cold() reads;
+//   * a per-node spinlock (the low bit of the packed state/ops control word) serializes state transitions and
+//     continuation/subscription bookkeeping;
+//   * that word stays atomic for lock-free is_ready()/is_cold() reads;
 //   * at most one thread polls a node (try_begin_running); a completing dependency that wakes a running node
-//     sets _wake_pending instead of enqueuing a second copy, and the active poller re-polls;
+//     sets the wake-pending bit instead of enqueuing a second copy, and the active poller re-polls;
 //   * the lock is never held across the user compute frame;
 //   * continuations are weak_ptrs, so a wake can never touch a dependent torn down concurrently.
 
@@ -139,23 +140,23 @@ void cc::inline_scheduler::run_until(cc::function_ref<bool()> done)
 void cc::async_node_base::schedule()
 {
     {
-        impl::async_spinlock_guard g(_lock);
-        auto const s = _state.load(std::memory_order_relaxed);
+        lock_scope g(this);
+        auto const s = load_state(std::memory_order_relaxed);
 
         // terminal, already runnable, or a manual node (only external completion makes those ready)
-        if (s == async_node_state::ready || s == async_node_state::scheduled || s == async_node_state::external_pending)
+        if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
             return;
 
         if (s == async_node_state::running)
         {
             // a second poller must never run this node: record a re-poll request; the active poller reconciles
             // at its next park point instead of parking.
-            _wake_pending = true;
+            set_wake();
             return;
         }
 
         // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
-        _state.store(async_node_state::scheduled, std::memory_order_release);
+        store_state(async_node_state::scheduled);
     }
 
     route_after_schedule();
@@ -165,19 +166,19 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
 {
     bool do_submit = false;
     {
-        impl::async_spinlock_guard g(_lock);
-        auto const s = _state.load(std::memory_order_relaxed);
+        lock_scope g(this);
+        auto const s = load_state(std::memory_order_relaxed);
 
-        if (s == async_node_state::ready || s == async_node_state::scheduled || s == async_node_state::external_pending)
+        if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
             return; // terminal, already runnable elsewhere, or a manual node
 
         if (s == async_node_state::running)
         {
-            _wake_pending = true;
+            set_wake();
             return;
         }
 
-        _state.store(async_node_state::scheduled, std::memory_order_release);
+        store_state(async_node_state::scheduled);
         do_submit = true;
     }
 
@@ -209,15 +210,14 @@ void cc::async_node_base::route_after_schedule()
 
 bool cc::async_node_base::try_begin_running()
 {
-    impl::async_spinlock_guard g(_lock);
-    auto const s = _state.load(std::memory_order_relaxed);
+    lock_scope g(this);
+    auto const s = load_state(std::memory_order_relaxed);
 
     // another poller owns it, it is terminal, or it awaits external completion -> not runnable here
-    if (s == async_node_state::ready || s == async_node_state::running || s == async_node_state::external_pending)
+    if (is_ready_state(s) || s == async_node_state::running || s == async_node_state::external_pending)
         return false;
 
-    _state.store(async_node_state::running, std::memory_order_release);
-    _wake_pending = false; // start fresh; any wake during this run re-sets it
+    store_state_clear_wake(async_node_state::running); // start fresh; any wake during this run re-sets it
     return true;
 }
 
@@ -227,10 +227,9 @@ void cc::async_node_base::reschedule_self()
     // schedule() (which would leave a running node un-enqueued). A yield stays on the current, compatible
     // worker, so route_after_schedule takes the local hot path.
     {
-        impl::async_spinlock_guard g(_lock);
-        CC_ASSERT(_state.load(std::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
-        _state.store(async_node_state::scheduled, std::memory_order_release);
-        _wake_pending = false;
+        lock_scope g(this);
+        CC_ASSERT(load_state(std::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
+        store_state_clear_wake(async_node_state::scheduled);
     }
     route_after_schedule();
 }
@@ -461,8 +460,8 @@ void cc::async_node_base::drop_ready_pending_deps()
 
 bool cc::async_node_base::try_subscribe(async_node_base* dependent)
 {
-    impl::async_spinlock_guard g(_lock);
-    if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
+    lock_scope g(this);
+    if (is_ready_state(load_state(std::memory_order_relaxed)))
         return false;           // already ready under the lock: the dependent must not park on us
     _slot.conts.add(dependent); // dependent is alive (it is polling us)
     return true;
@@ -499,16 +498,16 @@ void cc::async_node_base::unsubscribe_all()
 
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
-    impl::async_spinlock_guard g(_lock);
-    CC_ASSERT(_state.load(std::memory_order_relaxed) != async_node_state::ready,
-              "add_continuation on a ready node: the continuation head has been stolen");
+    lock_scope g(this);
+    CC_ASSERT(!is_ready_state(load_state(std::memory_order_relaxed)), "add_continuation on a ready node: the "
+                                                                      "continuation head has been stolen");
     _slot.conts.add(dependent);
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
 {
-    impl::async_spinlock_guard g(_lock);
-    if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
+    lock_scope g(this);
+    if (is_ready_state(load_state(std::memory_order_relaxed)))
         return;                    // completed: the continuation head was stolen and its storage may now hold the error
     _slot.conts.remove(dependent); // drops the target and prunes any dependents that have since expired
 }
@@ -530,8 +529,8 @@ cc::async_error cc::async_node_base::propagate_error() const
 
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
 {
-    impl::async_spinlock_guard g(_lock);
-    if (_state.load(std::memory_order_relaxed) == async_node_state::ready)
+    lock_scope g(this);
+    if (is_ready_state(load_state(std::memory_order_relaxed)))
         return true; // already done: caller must not wait
     _slot.conts.add_latch(fn, ctx);
     return false;
@@ -543,20 +542,24 @@ void cc::async_node_base::mark_ready_and_notify(async_error* err)
 
     impl::async_cont_head continuations; // stolen out of the result slot below
     {
-        impl::async_spinlock_guard g(_lock);
+        lock_scope g(this);
 
         // Steal the continuation head, freeing the result slot; then, for an error completion, switch the
         // slot's active union member to the error (a value completion leaves the value in the typed node and
-        // the freed head empty). Publish `ready` LAST, so a subscriber that wins the lock after us sees the
-        // value/error already in place (I1); one that wins before us lands in `continuations` and gets woken.
+        // the freed head empty). Publish the terminal state LAST, so a subscriber that wins the lock after us
+        // sees the value/error already in place (I1); one that wins before us lands in `continuations` and is
+        // woken. The state itself records value-vs-error (ready_value / ready_error).
         continuations = cc::move(_slot.conts);
         if (err != nullptr)
         {
             _slot.conts.~async_cont_head();                                    // end the (now empty) head's lifetime
             new (cc::placement_new, &_slot.error) async_error(cc::move(*err)); // begin the error's lifetime
-            _is_error = true;
+            store_state(async_node_state::ready_error);
         }
-        _state.store(async_node_state::ready, std::memory_order_release);
+        else
+        {
+            store_state(async_node_state::ready_value);
+        }
     }
 
     // outside the lock: waking a dependent / firing a latch takes other locks, so we must not hold ours
@@ -582,9 +585,9 @@ void cc::async_node_base::teardown_payload()
     // ready, else the error once ready-with-error).
     unsubscribe_all();
     _frame = {};
-    _ops->teardown_value(this);
+    ops()->teardown_value(this);
     _deps.clear();
-    if (is_ready() && _is_error)
+    if (has_error())
         _slot.error.~async_error();
     else
         _slot.conts.~async_cont_head();
@@ -640,12 +643,12 @@ void cc::async_node_base::poll()
             bool parked = false;
             if (!found_ready)
             {
-                impl::async_spinlock_guard g(_lock);
-                if (_wake_pending)
-                    _wake_pending = false; // a dependency woke us mid-subscribe: don't park, re-evaluate
+                lock_scope g(this);
+                if (wake_pending())
+                    clear_wake(); // a dependency woke us mid-subscribe: don't park, re-evaluate
                 else
                 {
-                    _state.store(async_node_state::blocked, std::memory_order_release);
+                    store_state(async_node_state::blocked);
                     parked = true;
                 }
             }
