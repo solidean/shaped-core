@@ -246,13 +246,15 @@ struct async_scheduler;
 struct async_worker_scope;
 struct inline_scheduler;
 struct async_thread_pool;
+struct async_context_base;
+template <class T, class E = async_error>
 struct async_context;
-template <class T>
+template <class T, class E = async_error>
 struct async;
 
 /// The normal async handle: an 8 B intrusive cc::shared_ptr over one slab node (see thread/async.hh).
-template <class T>
-using shared_async = shared_ptr<async<T>, impl::async_node_traits>;
+template <class T, class E = async_error>
+using shared_async = shared_ptr<async<T, E>, impl::async_node_traits>;
 
 
 //

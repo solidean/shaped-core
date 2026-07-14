@@ -345,12 +345,12 @@ struct async_cont_cell
 };
 
 /// A node's set of dependents to wake when it completes (its "continuations"), plus at most a few
-/// one-shot completion latches. Exactly 16 B, so it shares the node's result slot with async_error
-/// (the two are mutually exclusive: continuations matter only before ready, the error only after — and an
-/// async_error is 16 B, which sets the slot size). One weak dependent sits inline — the common single-
-/// dependent case pays no allocation; the 2nd+ dependents and every latch spill into a slab-backed intrusive
-/// list. Guarded by the node _lock: unlike async_dep_head it has multiple writers (other nodes' pollers
-/// subscribing/unsubscribing, plus this node completing).
+/// one-shot completion latches. Exactly 16 B, so it fits the unresolved arm's layout (frame 8 + deps 8 +
+/// conts 16 = the 32 B scratch). The continuation head is live only BEFORE the node is ready; once ready it
+/// is stolen and the payload holds the typed value/error instead — the two never coexist. One weak dependent
+/// sits inline — the common single-dependent case pays no allocation; the 2nd+ dependents and every latch
+/// spill into a slab-backed intrusive list. Guarded by the node _lock: unlike async_dep_head it has multiple
+/// writers (other nodes' pollers subscribing/unsubscribing, plus this node completing).
 struct async_cont_head
 {
     async_cont_head() = default;
@@ -374,8 +374,8 @@ struct async_cont_head
     /// head only — never while holding the node lock, since scheduling a dependent takes its lock.
     void notify_all();
 
-    // Inline dependent capacity. Sized so the whole head stays 16 B (matching async_error, which sets the
-    // result-slot size); raising it past what fits 16 B grows the node past one cache line.
+    // Inline dependent capacity. Sized so the whole head stays 16 B (fits the 32 B unresolved scratch alongside
+    // frame + deps); raising it past what fits 16 B grows the scratch and can push the node past one cache line.
     static constexpr cc::isize inline_capacity = 1;
 
     async_node_weak _inline_deps[inline_capacity]; // a null slot is unused
@@ -391,9 +391,9 @@ struct async_cont_head
 /// and placement-destroys it when switching to the resolved value/error.
 struct async_unresolved
 {
-    cc::unique_function<async_step_status(async_context&)> frame; // 8  null for manual/push nodes
-    async_dep_head deps;                                          // 8
-    async_cont_head conts;                                        // 16
+    cc::unique_function<async_step_status(async_context_base&)> frame; // 8  null for manual/push nodes
+    async_dep_head deps;                                               // 8
+    async_cont_head conts;                                             // 16
     // Default special members: default ctor births an empty arm; the (non-trivial) default dtor frees frame
     // captures + dep-list nodes + continuation cells. move/copy are implicitly deleted.
 };
@@ -418,25 +418,27 @@ enum class async_node_state : cc::u8
     // itself (ready_value vs ready_error), not a separate flag.
 };
 
-/// Type-erased per-async<T> operations, reached from the untemplated base — the hand-rolled replacement for a
-/// C++ vtable (mirrors unique_function's static descriptor). One static-constexpr instance exists per concrete
-/// async type; the node stores a pointer to it, set once at construction. It recovers the two things the base
-/// cannot derive from a base-typed pointer: how to destroy the typed value, and the node's size class (used by
-/// the intrusive free path, which runs on a base-typed weak cell after the concrete type is long erased).
+/// Type-erased per-async<T, E> operations, reached from the untemplated base — the hand-rolled replacement for
+/// a C++ vtable (mirrors unique_function's static descriptor). One static-constexpr instance exists per concrete
+/// async type; the node stores a pointer to it, set once at construction. It recovers the things the base cannot
+/// derive from a base-typed pointer: how to destroy the typed value or the typed error, and the node's size class
+/// (used by the intrusive free path, which runs on a base-typed weak cell after the concrete type is long erased).
 /// alignas(32): the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock (see
 /// async_node_base's _state_and_ops), so every async_type_ops instance must be 32-aligned to keep those bits
 /// free. Objects are static-constexpr globals (one per async type), so the alignment costs nothing meaningful.
 struct alignas(32) async_type_ops
 {
-    void (*teardown_value)(async_node_base*); // destroy the resolved value in the payload
-    cc::node_class_index class_index;         // concrete async<T> size class (free_storage frees by it)
+    void (*teardown_value)(async_node_base*); // destroy the resolved value in the payload (ready_value)
+    void (*teardown_error)(async_node_base*); // destroy the resolved error in the payload (ready_error)
+    cc::node_class_index class_index;         // concrete async<T, E> size class (free_storage frees by it)
 };
 static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned so its low 5 bits are free for tags");
 
-/// Shared, T-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
-/// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), the
-/// failure-channel value, and the type-erased compute frame (its signature carries no T). Only the typed value
-/// lives in the derived typed node (async.hh); the base reaches its destructor + size class via async_type_ops.
+/// Shared, T/E-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
+/// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), and the
+/// type-erased compute frame (its signature carries no T/E). The typed value AND the typed error live in the
+/// derived typed node (async.hh, sharing payload offset 0 by state); the base builds them via the finish_value*
+/// / finish_error* member templates and reaches their destructors + the size class via async_type_ops.
 ///
 /// Concurrency: safe to drive from multiple threads. A per-node spinlock serializes state transitions and
 /// continuation/subscription bookkeeping; the state word stays atomic for lock-free is_ready()/is_cold()
@@ -470,13 +472,9 @@ public:
     }
     [[nodiscard]] bool is_cold() const { return load_state(std::memory_order_acquire) == async_node_state::cold; }
 
-    /// The failure-channel value; valid only when has_error().
-    [[nodiscard]] async_error const& base_error() const { return error_ref(); }
-
-    /// A fresh, independent copy of this node's error for propagation to a dependent. cc::any_error is
-    /// move-only and a shared node's error must not be moved out, so the message is re-materialized (the
-    /// context chain is not preserved — a richer error-sharing scheme is a follow-up).
-    [[nodiscard]] async_error propagate_error() const;
+    // The failure-channel value is typed (E), so it is read/propagated through the typed node (async<T, E>),
+    // not here — the base only knows a node HAS an error (has_error), not its type. See async<T, E>::try_error /
+    // propagate_error in async.hh.
 
     // debug/introspection (used by tests) — racy on a live node; call only when it is quiescent (single-threaded)
 public:
@@ -533,9 +531,9 @@ public:
     // large T (no inline cap). The base reaches the payload by pointer arithmetic on `this` (single inheritance,
     // base-first: the base subobject is at offset 0 of the node). Building the value over the frame's slot is
     // safe because the poll loop moves the frame onto its own stack for the compute step (and back into the arm
-    // if the frame parks). Manual sub-object lifetime — see finish_value / complete_with_error / teardown.
+    // if the frame parks). Manual sub-object lifetime — see finish_value / finish_error / teardown.
 protected:
-    using frame_type = cc::unique_function<async_step_status(async_context&)>;
+    using frame_type = cc::unique_function<async_step_status(async_context_base&)>;
 
     static constexpr cc::isize payload_offset = 16; // == sizeof(async_node_base); asserted below the class
 
@@ -556,34 +554,46 @@ protected:
         return reinterpret_cast<impl::async_unresolved const*>(payload())->conts;
     }
 
-    // resolved arm (active once ready); value_storage() is also where the typed node builds/reads the value
+    // resolved arm (active once ready). The value and the error share payload offset 0 (mutually exclusive by
+    // state), so both storages alias value_storage(); the typed node reinterprets it as T (ready_value) or E
+    // (ready_error). The base builds either via the finish_value*/finish_error* member templates below.
     [[nodiscard]] void* value_storage() { return payload(); }
-    [[nodiscard]] async_error& error_ref() { return *reinterpret_cast<async_error*>(payload()); }
-    [[nodiscard]] async_error const& error_ref() const { return *reinterpret_cast<async_error const*>(payload()); }
 
     /// Construct the (empty) unresolved arm into the payload. Called once from the derived ctor (after set_ops).
     void init_payload() { new (cc::placement_new, payload()) impl::async_unresolved(); }
 
     // compute frame — its signature is T-agnostic; it lives in the unresolved arm of the payload
 public:
-    /// Install the compute frame — `async_step_status(async_context&)`; it resolves its outcome via the context.
+    /// Install the compute frame — `async_step_status(async_context_base&)`; it resolves its outcome via the
+    /// context (a typed async_context<T, E> the frame closure wraps around the base for resolve/emplace).
     template <class F>
     void set_frame(F&& f)
     {
         frame() = frame_type(cc::forward<F>(f));
     }
 
-    // completion — steal the continuation head, tear down the unresolved arm, install the result, wake
-    // dependents. finish_value builds the value directly in the payload; complete_with_error installs the
-    // failure. Used by the poll loop, resolve_to_value, and push_value / push_error.
+    // completion — steal the continuation head, tear down the unresolved arm, build the result in the payload,
+    // wake dependents. finish_value / finish_error are symmetric typed member templates (the (typed) construction
+    // lives here); the emplace forms build in place from raw args so an immovable T works. Used by the poll loop,
+    // resolve_to_value / resolve_to_error, push_value / push_error, and the make_async_from_* factories.
+    //
+    // On the compute path the frame is already moved onto the poll stack, so the frame slot the result overwrites
+    // holds only a moved-from shell (the live closure is on the stack); on the push/factory path the frame slot
+    // is empty. Publishes the terminal state LAST (release), then wakes dependents outside the lock.
 protected:
-    /// Resolve with a value: build it straight into the payload (single move from `v`), under the node lock,
-    /// after stealing the continuation head and tearing down the unresolved arm. Publishes ready_value LAST,
-    /// then wakes dependents outside the lock. A member template so the (typed) construction lives here. On the
-    /// compute path the frame is already moved onto the poll stack, so the frame slot the value overwrites holds
-    /// only a moved-from shell (the live closure is on the stack); on the push path the frame slot is empty.
+    /// Resolve with a value by moving `v` into the payload. Requires nothrow-move (moved under the node lock).
     template <class T>
     void finish_value(T&& v)
+    {
+        static_assert(std::is_nothrow_move_constructible_v<std::decay_t<T>>,
+                      "finish_value moves the value under the node lock — it must be nothrow-move-constructible; "
+                      "use resolve_to_value_emplace / make_async_from_value_emplace for a non-movable value");
+        finish_value_emplace<std::decay_t<T>>(cc::forward<T>(v));
+    }
+
+    /// Resolve with a value built in place from `args` (never moved) — the immovable-T path.
+    template <class T, class... Args>
+    void finish_value_emplace(Args&&... args)
     {
         unsubscribe_all(); // the frame still pins the deps we are unsubscribing from
         impl::async_cont_head continuations;
@@ -591,13 +601,34 @@ protected:
             lock_scope g(this);
             continuations = cc::move(conts());
             unresolved().~async_unresolved(); // frame shell + deps + moved-from head
-            new (cc::placement_new, value_storage()) std::decay_t<T>(cc::forward<T>(v)); // value at payload offset 0
+            new (cc::placement_new, value_storage()) T(cc::forward<Args>(args)...); // value at payload offset 0
             store_state(async_node_state::ready_value);
         }
         continuations.notify_all(); // outside the lock: waking a dependent / firing a latch takes other locks
     }
 
-    void complete_with_error(async_error err);
+    /// Resolve on the failure channel by moving `e` into the payload (the typed twin of finish_value).
+    template <class E>
+    void finish_error(E&& e)
+    {
+        finish_error_emplace<std::decay_t<E>>(cc::forward<E>(e));
+    }
+
+    /// Resolve on the failure channel with an error built in place from `args`.
+    template <class E, class... Args>
+    void finish_error_emplace(Args&&... args)
+    {
+        unsubscribe_all();
+        impl::async_cont_head continuations;
+        {
+            lock_scope g(this);
+            continuations = cc::move(conts());
+            unresolved().~async_unresolved();
+            new (cc::placement_new, value_storage()) E(cc::forward<Args>(args)...); // error at payload offset 0
+            store_state(async_node_state::ready_error);
+        }
+        continuations.notify_all();
+    }
 
     // payload teardown
 protected:
@@ -707,7 +738,9 @@ private:
 
     // members
 private:
-    friend struct async_context;           // reaches add_pending_dependency on the generic require() path
+    friend struct async_context_base; // reaches add_pending_dependency on the generic require() path
+    template <class, class>
+    friend struct async_context;           // typed context reaches finish_value* / finish_error*
     friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
 
     /// Intrusive refcount (async_node_traits): strong owners + weak (continuation cells + the strong owners'

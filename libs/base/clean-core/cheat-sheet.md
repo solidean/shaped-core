@@ -396,34 +396,40 @@ b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe t
 ## Async / dataflow (incubator — see docs/async.md)
 
 ```cpp
-#include <clean-core/thread/async.hh>     // cc::async<T> — eventual result<T, async_error>; value/dataflow model
-cc::shared_async<T> = std::shared_ptr<cc::async<T>>;   // the normal handle (async<T> is non-copy/non-move)
+#include <clean-core/thread/async.hh>     // cc::async<T, E = async_error> — eventual result<T, E>; dataflow model
+cc::shared_async<T, E = async_error> = std::shared_ptr<cc::async<T, E>>; // the normal handle (async is non-copy/move)
 
 // creation — pick eager (scheduled) or lazy (cold) explicitly at the call site. f may take a leading
-// cc::async_context& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
-// values before f runs; errors short-circuit. T deduced or explicit.
-auto a = cc::make_async_lazy([]{ return 40; });                          // cold; no context, no deps
-auto s = cc::make_async_scheduled<int>([](cc::async_context&){ ... });   // eager (scheduled now if a worker scope active)
-auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);   // depends on a,s; f gets plain ints
+// cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
+// values before f runs; errors short-circuit. T deduced (context-free) or explicit; E defaults to async_error.
+auto a = cc::make_async_lazy([]{ return 40; });                             // cold; no context, no deps
+auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager (scheduled if worker scope active)
+auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
+// born already ready (no frame, no scheduling); _emplace builds in place (immovable T ok):
+auto rv = cc::make_async_from_value(42);   auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
+auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also *_from_error_emplace<T, E>(...)
 
 // driving BLOCKS the calling thread (busy-waits vs a real scheduler) — top-level/tests only, never in a frame:
 int v = cc::async_blocking_get(a);                               // -> T (asserts on error/cancel)
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a); // fallible drive
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a); // fallible drive -> result<T, E>
+cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
-int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value (also try_error())
-std::shared_ptr<cc::async_error const> pe = a->try_error();
+int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
+cc::async_error const* pe = a->try_error();   // typed E const*; null unless ready with an error
 m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")));  // complete a manual node
 
-// raw compute frame (perf-critical state machine): async_step_status(async_context&) — resolves via ctx,
+// raw compute frame (perf-critical state machine): async_step_status(async_context<T, E>&) — resolves via ctx,
 // returns a status. Annotate -> cc::async_step_status and give T explicitly (make_async_lazy<int>). A frame
-// may create + require new deps mid-compute (dynamic dependencies).
-[step=0, dep=cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_step_status {
+// may create + require new deps mid-compute (dynamic dependencies). Raw frames do NOT auto-propagate a dep's
+// error — check dep->try_error() and decide (transform/ignore/propagate); the make_async_* sugar DOES.
+[step=0, dep=cc::shared_async<int>()](cc::async_context<int>& actx) mutable -> cc::async_step_status {
     if (step++ == 0) { dep = cc::make_async_lazy([]{ return 10; }); actx.require(dep); return actx.wait_for_dependencies(); }
     return actx.resolve_to_value(*dep->value_ptr()); };   // or actx.success(...)
 actx.require(dep);              // -> bool ready (no subscription); else records a pending dep, return wait
-actx.resolve_to_value(v)/success(v);  actx.resolve_to_error(async_error|any_error)/error(...);  actx.wait_for_dependencies();  actx.yield();
+actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)
+actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  actx.wait_for_dependencies();  actx.yield();
 
 // driving decoupled from any executor (the seam); default is inline, on the calling thread:
 cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind scheduler to this thread
@@ -435,7 +441,8 @@ cc::install_default_async_pool(pool);                    // compute nodes route 
 int v = pool.blocking_get(root);                         // submit + block THIS (foreign) thread; not from a worker
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
-// Not here yet: co_await, plain (non-async) dep args, structured/owned children, typed/shared errors.
+// Not here yet: co_await, plain (non-async) dep args, structured/owned children, error-type conversion across
+// a heterogeneous-E dependency graph (the make_async_* sugar assumes a single E; raw frames can bridge by hand).
 ```
 
 ## Strings — encoding conversion

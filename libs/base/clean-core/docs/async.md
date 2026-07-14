@@ -1,8 +1,9 @@
 # cc::async — a value/dataflow async system
 
-`cc::async<T>` is a low-overhead async for **compute-heavy dependency graphs**. The mental model is
-values and dataflow transformations, not futures/promises or callback chains. It is the foundation for the
-CPU fan-out "task system" that `cc::threaded_actor` defers to.
+`cc::async<T, E = async_error>` is a low-overhead async for **compute-heavy dependency graphs**. The mental
+model is values and dataflow transformations, not futures/promises or callback chains. It is the foundation for
+the CPU fan-out "task system" that `cc::threaded_actor` defers to. `E` is the failure-channel type; it defaults
+to `async_error` (a move-only wrapper over `cc::any_error`), but any type works (an enum, a small struct, …).
 
 Headers: [`clean-core/thread/async.hh`](../src/clean-core/thread/async.hh) (public, templated) and
 [`clean-core/thread/async_node.hh`](../src/clean-core/thread/async_node.hh) (untemplated core + scheduler
@@ -10,30 +11,31 @@ seam). This is **incubator-stage** API — expect it to grow and change.
 
 ## Model
 
-An `async<T>` is an eventual `result<T, async_error>` produced by a **compute frame**: a callable /
-state-machine polled through an `async_context`. Failure and cancellation are **values** (`async_error`), not
-exceptions or out-of-band control flow.
+An `async<T, E>` is an eventual `result<T, E>` produced by a **compute frame**: a callable / state-machine
+polled through an `async_context<T, E>`. Failure and cancellation are **values** (the default `async_error`
+carries both), not exceptions or out-of-band control flow.
 
 ```cpp
-auto a = cc::make_async_scheduled<int>([](cc::async_context&) { return 40; });
+auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
 auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on a; f gets a plain int
 int v = cc::async_blocking_get(b);   // drives the graph on this thread -> 42
 ```
 
 The handle:
 
-* **`shared_async<T>` = `std::shared_ptr<async<T>>`** — the normal, composable handle. Many dependents may
-  observe it. `async<T>` itself is non-copyable and immovable; you copy the `shared_ptr`, never the node.
-  (clean-core has no shared pointer yet, so `std::shared_ptr` is used deliberately, as in `pinned_data`.)
+* **`shared_async<T, E>` = `cc::shared_ptr<async<T, E>>`** — the normal, composable handle (an 8 B intrusive
+  refcount handle over one slab node). Many dependents may observe it. `async<T, E>` itself is non-copyable and
+  immovable; you copy the handle, never the node.
 
 ### The raw compute frame
 
-A frame is a callable `async_step_status(async_context&)`: it resolves its outcome **through** the context and
-returns a status. It may be a hand-written state machine that adds dependencies dynamically as it runs:
+A frame is a callable `async_step_status(async_context<T, E>&)`: it resolves its outcome **through** the typed
+context and returns a status. It may be a hand-written state machine that adds dependencies dynamically as it
+runs:
 
 ```cpp
 auto a = cc::make_async_lazy<int>(
-    [step = 0, child = cc::shared_async<int>()](cc::async_context& actx) mutable -> cc::async_step_status
+    [step = 0, child = cc::shared_async<int>()](cc::async_context<int>& actx) mutable -> cc::async_step_status
     {
         switch (step++)
         {
@@ -48,17 +50,20 @@ auto a = cc::make_async_lazy<int>(
 ```
 
 A raw frame's return carries no value type (it returns a status), so its node must give `T` explicitly —
-`make_async_lazy<int>(...)`. A plain value-returning frame (`[](int x){ return x + 1; }`) deduces `T`.
+`make_async_lazy<int>(...)`. A plain value-returning frame (`[](int x){ return x + 1; }`) deduces `T`
+context-free — a value frame that *also* takes a context must give `T` explicitly.
 
-`async_context` gives a frame:
+`async_context<T, E>` gives a frame:
 
 * `require(dep) -> bool` — true if `dep` is already ready (read its value now); otherwise records it as a
   pending dependency and returns false. **No subscription happens here.** `dep` may be a `shared_async`
   created earlier or one the frame builds on the fly (dynamic dependencies) — capture it so it stays alive.
 * resolve the result — each returns the matching status, so `return actx.xxx(...)`: `resolve_to_value(v)` /
-  `resolve_to_error(async_error | any_error)` (aliased `success(v)` / `error(...)`), plus
-  `wait_for_dependencies()` and `yield()`. `resolve_to_value` stores the value into the node as the frame
-  runs; `resolve_to_error` hands the failure to the completion path.
+  `resolve_to_error(E)` (aliased `success(v)` / `error(...)`; for the default `E`, `error(any_error)` wraps),
+  plus `wait_for_dependencies()` and `yield()`. Both resolves complete the node **in place** as the frame runs.
+* **emplace resolves** — `resolve_to_value_emplace(args...)` / `resolve_to_error_emplace(args...)` build the
+  value/error **in place** from `args` (never moved), so an **immovable `T`** works (construct-in-place). The
+  by-value `resolve_to_value` requires `T` to be nothrow-move-constructible; the emplace form does not.
 
 A frame is **re-entrant**: one that waits is re-polled once its dependencies are ready. A typical two-phase
 frame (register deps → `wait`, then compute) therefore runs twice. It is never entered again after it
@@ -118,13 +123,27 @@ single dependent fits the node's inline buffer, so no allocation).
 
 ## Errors
 
-Composition **short-circuits errors** by default: if a dependency completed with an `async_error`, the
-dependent async (a `map` or a variadic dependency form) completes with that error and `f` never runs.
-`async_error` also carries cancellation.
+Two layers, two contracts:
 
-Because `cc::any_error` is move-only and a shared node's error must not be moved out, error *propagation*
-currently re-materializes the message (the context chain is not preserved) — a richer error-sharing scheme is
-a follow-up.
+* **The high-level `make_async_*` sugar auto-propagates.** If a dependency completed with an error, the
+  dependent async (a `map` or a variadic dependency form) completes with that error and `f` never runs. The
+  sugar assumes a **single failure type `E`** across the graph — a dependency's propagated error must be
+  constructible into the dependent's `E`. `async_error` also carries cancellation.
+* **A raw compute frame does NOT auto-propagate — the frame decides.** A dependency that resolved to an error
+  still counts as *ready*, so the frame is re-run; it must check `dep->try_error()` itself and choose to
+  propagate, transform, or ignore it:
+
+  ```cpp
+  if (!ctx.require(dep)) return ctx.wait_for_dependencies();
+  if (auto const* e = dep->try_error()) return ctx.resolve_to_error(/* map *e to this node's E */);
+  return ctx.resolve_to_value(*dep->try_value());
+  ```
+
+**Propagation strategy (`impl::async_error_propagate`).** Copying an error out of a shared node uses a per-`E`
+hook: a copyable custom `E` is **copied**; the default move-only `async_error` is **re-materialized** from its
+message (the context chain is not preserved — a richer error-sharing scheme is a follow-up), since a shared
+node's `any_error` must not be moved out. Cross-node propagation across a **heterogeneous-`E`** graph is not
+wired into the sugar yet; bridge it by hand in a raw frame.
 
 ## Driving (the scheduler seam)
 
@@ -140,7 +159,7 @@ them from inside a frame. Their names say so deliberately.
 ```cpp
 // convenience: drive a self-contained graph to completion on this thread (BLOCKS)
 int v = cc::async_blocking_get(root);                              // asserts on error/cancel
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get(root);   // fallible
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get(root);   // fallible -> result<T, E>
 
 // lower-level, for interleaving with external completion:
 cc::inline_scheduler sched;
@@ -157,16 +176,38 @@ auto ext = cc::make_async_manual<int>();   // external_pending until pushed
 ext->push_value(41);                       // wakes parked dependents
 ```
 
-## Zero-copy access
+## Zero-copy access & consuming
 
 ```cpp
-std::shared_ptr<int const> v = a->try_value();        // null unless ready with a value
-std::shared_ptr<cc::async_error const> e = a->try_error();
+int const* v = a->try_value();               // non-owning; null unless ready with a value
+cc::async_error const* e = a->try_error();   // non-owning, typed E const*; null unless ready with an error
 bool r = a->is_ready(); bool ok = a->has_value(); bool bad = a->has_error();
 ```
 
-`try_value()` aliases the node's own `shared_ptr` onto the stored value, so it is copy-free and keeps the node
-alive on its own.
+`try_value()` / `try_error()` return non-owning pointers **into** the node's payload — copy-free and stable
+while the node is alive (you keep it alive through the handle).
+
+To **move** the outcome out instead of reading it in place, consume the handle:
+
+```cpp
+cc::result<int, cc::async_error> r = cc::into_result(cc::move(a));  // a must be ready; MOVES value/error out
+```
+
+`into_result` takes the handle by value and moves the payload out into a `cc::result<T, E>`. Because it moves
+out of shared node storage, **any other live handle's later `try_value()`/`try_error()` reads a moved-from
+value** — use it when you are done with the async. `T` must be move-constructible (a truly immovable `T` cannot
+be `into_result`'d — that is a compile error by design; read it in place via `try_value()`).
+
+### Born-ready factories
+
+For a value/error known up front, skip the frame and scheduling entirely:
+
+```cpp
+auto rv = cc::make_async_from_value(42);                          // ready_value, drivable as a dependency
+auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
+auto ri = cc::make_async_from_value_emplace<Immovable>(7);        // build T in place (immovable T ok)
+// also make_async_from_error_emplace<T, E>(args...)
+```
 
 ## Concurrent execution: `async_thread_pool`
 
@@ -212,8 +253,8 @@ original 384 B), and the node is cacheline-aligned to avoid false sharing betwee
   separate control block) plus one `atomic<u64>` control word. That word is a **tagged pointer**: a 32-aligned
   `async_type_ops const*` in the high bits, and the lifecycle state + wake-pending flag + spinlock bit in the
   low 5 bits. There is **no C++ vtable** — the ops descriptor (a static-constexpr per-`async<T>` struct) is the
-  hand-rolled replacement, carrying the typed-value destructor and the node's size class; the frame is invoked
-  directly. `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
+  hand-rolled replacement, carrying the typed value/error destructors and the node's size class; the frame is
+  invoked directly. `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
 * **Payload slot (offset 16), one hand-managed union.** The compute frame, the not-ready dependency set, and
   the continuation head (dependents to wake) are **mutually exclusive with** the resolved value ⊍ error — the
   scratch matters only before completion, the value/error only after — so they share the slot, discriminated by
@@ -239,7 +280,9 @@ the system matures without breaking callers.
   refcounted `shared_async` children captured and required by the parent frame.
 * A **lock-free** per-worker deque (Chase-Lev) and finer per-worker routing within one pool; today the deques
   are mutex-guarded and every worker serves all work.
-* Typed and **shared errors** (today error propagation re-materializes the message; the failure channel will
-  grow typed errors and shared error payloads), plus cancellation propagation through a graph.
+* **Shared errors** and **heterogeneous-`E` propagation** — the failure channel is now typed (`async<T, E>`),
+  but the default `async_error` still re-materializes its message on propagation (no shared error payload yet),
+  and the high-level sugar assumes a single `E` across a graph. Cross-`E` bridging and cancellation propagation
+  through a graph are follow-ups.
 * `co_await` integration layered on top of the raw frame API, and plain (non-async) arguments in the variadic
   dependency form.

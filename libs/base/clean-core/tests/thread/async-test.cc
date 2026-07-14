@@ -25,8 +25,15 @@ struct big_value // 96 B: intentionally larger than one line's payload — the n
 {
     cc::i64 data[12] = {};
 };
+struct big_error // 64 B: a custom failure type larger than the 32 B unresolved scratch — grows the error arm
+{
+    cc::i64 data[8] = {};
+};
 } // namespace
 static_assert(sizeof(cc::async<big_value>) > 64, "a large value must grow the node onto further cache lines");
+// a custom E defaults to async_error; the default async<int> (== async<int, async_error>) stays one cache line
+static_assert(sizeof(cc::async<int, cc::async_error>) == 64, "async<int, async_error> should be exactly one cache line");
+static_assert(sizeof(cc::async<int, big_error>) > 64, "a large error type must grow the node onto further lines");
 
 // ============================================================================
 // basics
@@ -55,7 +62,8 @@ TEST("async - try_value is empty before completion")
 TEST("async - success via context helper")
 {
     // f keeps its async_context to exercise success(); a raw ctx-resolving frame gives its result type explicitly
-    auto a = cc::make_async_lazy<cc::string>([](async_context& actx) { return actx.success(cc::string("hi")); });
+    auto a = cc::make_async_lazy<cc::string>([](async_context<cc::string>& actx)
+                                             { return actx.success(cc::string("hi")); });
     CHECK(cc::async_blocking_get(a) == "hi");
 }
 
@@ -92,7 +100,7 @@ TEST("async - variadic dependency form unwraps async args")
 TEST("async - variadic dependency form short-circuits on a dependency error")
 {
     auto a = cc::make_async_lazy([] { return 3; });
-    auto bad = cc::make_async_lazy<int>([](async_context& actx) -> cc::async_step_status
+    auto bad = cc::make_async_lazy<int>([](async_context<int>& actx) -> cc::async_step_status
                                         { return actx.error(cc::any_error("boom")); });
 
     bool ran = false;
@@ -125,7 +133,7 @@ TEST("async - dependency frame may still take a leading async_context")
     auto a = cc::make_async_lazy([] { return 10; });
 
     // f receives the context plus the unwrapped dependency value; a ctx-resolving frame gives its result type
-    auto b = cc::make_async_lazy<int>([](async_context& actx, int x) { return actx.success(x * 2); }, a);
+    auto b = cc::make_async_lazy<int>([](async_context<int>& actx, int x) { return actx.success(x * 2); }, a);
     CHECK(cc::async_blocking_get(b) == 20);
 }
 
@@ -138,7 +146,7 @@ TEST("async - dynamic dependency added during compute, removed once ready")
     // step 0 creates a dependency mid-compute, requires it, and waits; step 1 reads its value. The dependency
     // must be gone from the pending list by the time the parent completes.
     auto p = cc::make_async_lazy<int>(
-        [step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> cc::async_step_status
+        [step = 0, child = cc::shared_async<int>()](async_context<int>& actx) mutable -> cc::async_step_status
         {
             switch (step++)
             {
@@ -161,7 +169,7 @@ TEST("async - already-ready dependency completes without parking")
     dep->push_value(7); // ready before anyone requires it
 
     auto p = cc::make_async_lazy<int>(
-        [dep](async_context& actx) -> cc::async_step_status
+        [dep](async_context<int>& actx) -> cc::async_step_status
         {
             bool const ready = actx.require(dep);
             CHECK(ready); // require on a ready dep returns true immediately
@@ -179,7 +187,7 @@ TEST("async - required cold dependency is scheduled and driven to completion")
     // scheduler drives it to completion, waking the parent — all within one async_blocking_get.
     auto dep = cc::make_async_lazy([] { return 100; });
     auto p = cc::make_async_lazy<int>(
-        [dep](async_context& actx) -> cc::async_step_status
+        [dep](async_context<int>& actx) -> cc::async_step_status
         {
             if (!actx.require(dep))
                 return actx.wait_for_dependencies();
@@ -222,7 +230,7 @@ TEST("async - a two-phase frame runs exactly twice (register deps, then compute)
     // entered exactly twice — never again after it returns success.
     auto calls = std::make_shared<int>(0);
     auto p = cc::make_async_lazy<int>(
-        [calls, step = 0, child = cc::shared_async<int>()](async_context& actx) mutable -> cc::async_step_status
+        [calls, step = 0, child = cc::shared_async<int>()](async_context<int>& actx) mutable -> cc::async_step_status
         {
             ++*calls;
             switch (step++)
@@ -251,7 +259,7 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy<int>(
-        [ext](async_context& actx) -> cc::async_step_status
+        [ext](async_context<int>& actx) -> cc::async_step_status
         {
             if (!actx.require(ext))
                 return actx.wait_for_dependencies();
@@ -285,7 +293,7 @@ TEST("async - many dependents park on one node (inline + spill), all woken on co
     cc::vector<cc::shared_async<int>> deps;
     for (int i = 0; i < n; ++i)
         deps.push_back(cc::make_async_lazy<int>(
-            [ext, i](async_context& actx) -> cc::async_step_status
+            [ext, i](async_context<int>& actx) -> cc::async_step_status
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
@@ -317,7 +325,7 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
     auto ext = cc::make_async_manual<int>();
     {
         auto p = cc::make_async_lazy<int>(
-            [ext](async_context& actx) -> cc::async_step_status
+            [ext](async_context<int>& actx) -> cc::async_step_status
             {
                 if (!actx.require(ext))
                     return actx.wait_for_dependencies();
@@ -339,7 +347,7 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
 
 TEST("async - error short-circuits a dependent transform, f never runs")
 {
-    auto a = cc::make_async_lazy<int>([](async_context& actx) -> cc::async_step_status
+    auto a = cc::make_async_lazy<int>([](async_context<int>& actx) -> cc::async_step_status
                                       { return actx.error(cc::any_error("boom")); });
 
     bool ran = false;
@@ -366,7 +374,7 @@ TEST("async - try_async_blocking_get surfaces a value")
 
 TEST("async - cancellation propagates as a value")
 {
-    auto a = cc::make_async_lazy<int>([](async_context& actx) -> cc::async_step_status
+    auto a = cc::make_async_lazy<int>([](async_context<int>& actx) -> cc::async_step_status
                                       { return actx.error(cc::async_error::make_cancelled()); });
 
     auto r = cc::try_async_blocking_get(a);
@@ -473,4 +481,206 @@ TEST("async - deep cold chain completes across the inline depth cap")
         node = cc::make_async_lazy([](cc::i64 x) { return x + 1; }, cc::move(node));
 
     CHECK(cc::async_blocking_get(node) == cc::i64(n - 1));
+}
+
+// ============================================================================
+// born-ready factories (no frame, no scheduling)
+// ============================================================================
+
+TEST("async - make_async_from_value is immediately ready and readable")
+{
+    auto a = cc::make_async_from_value(42);
+    REQUIRE(a->is_ready());
+    CHECK(a->has_value());
+    REQUIRE(a->try_value() != nullptr);
+    CHECK(*a->try_value() == 42);
+}
+
+TEST("async - make_async_from_error is immediately ready on the failure channel")
+{
+    auto a = cc::make_async_from_error<int>(cc::async_error::make_error(cc::any_error("boom")));
+    REQUIRE(a->is_ready());
+    CHECK(a->has_error());
+    REQUIRE(a->try_error() != nullptr);
+    CHECK(!a->try_error()->is_cancelled());
+}
+
+TEST("async - a born-ready value drives a dependent without a scheduler round-trip")
+{
+    auto a = cc::make_async_from_value(20);
+    auto b = cc::make_async_lazy([](int x) { return x + 22; }, a);
+    CHECK(cc::async_blocking_get(b) == 42);
+}
+
+TEST("async - a born-ready error short-circuits a dependent transform")
+{
+    auto a = cc::make_async_from_error<int>(cc::async_error::make_error(cc::any_error("nope")));
+    bool ran = false;
+    auto b = cc::make_async_lazy(
+        [&](int x)
+        {
+            ran = true;
+            return x + 1;
+        },
+        a);
+    auto r = cc::try_async_blocking_get(b);
+    CHECK(r.has_error());
+    CHECK(!ran);
+}
+
+// ============================================================================
+// emplace resolves + immovable T (constructed in place, never moved)
+// ============================================================================
+
+namespace
+{
+// move- and copy-deleted, but constructible: only the emplace paths can produce an async of this
+struct immovable
+{
+    int v;
+    explicit immovable(int x) : v(x) {}
+    immovable(immovable&&) = delete;
+    immovable(immovable const&) = delete;
+    immovable& operator=(immovable&&) = delete;
+    immovable& operator=(immovable const&) = delete;
+};
+} // namespace
+
+TEST("async - make_async_from_value_emplace constructs an immovable T in place")
+{
+    auto a = cc::make_async_from_value_emplace<immovable>(7);
+    REQUIRE(a->is_ready());
+    REQUIRE(a->try_value() != nullptr);
+    CHECK(a->try_value()->v == 7);
+}
+
+TEST("async - resolve_to_value_emplace builds an immovable T inside a compute frame")
+{
+    auto a = cc::make_async_lazy<immovable>([](cc::async_context<immovable>& ctx) -> cc::async_step_status
+                                            { return ctx.resolve_to_value_emplace(9); });
+
+    // immovable T cannot be copied out by async_blocking_get — drive inline and read in place
+    cc::inline_scheduler sched;
+    cc::async_worker_scope scope(sched);
+    a->schedule();
+    sched.run_until([&] { return a->is_ready(); });
+
+    REQUIRE(a->is_ready());
+    REQUIRE(a->try_value() != nullptr);
+    CHECK(a->try_value()->v == 9);
+}
+
+// ============================================================================
+// into_result — move the outcome out
+// ============================================================================
+
+TEST("async - into_result moves the value out")
+{
+    auto a = cc::make_async_from_value(cc::string("hello"));
+    cc::result<cc::string, cc::async_error> r = cc::into_result(cc::move(a));
+    REQUIRE(r.has_value());
+    CHECK(r.value() == "hello");
+}
+
+TEST("async - into_result surfaces the error out")
+{
+    auto a = cc::make_async_from_error<int>(cc::async_error::make_cancelled());
+    auto r = cc::into_result(cc::move(a));
+    REQUIRE(r.has_error());
+    CHECK(r.error().is_cancelled());
+}
+
+TEST("async - into_result after driving a graph")
+{
+    auto a = cc::make_async_lazy([] { return 20; });
+    auto b = cc::make_async_lazy([](int x) { return x + 22; }, a);
+    (void)cc::async_blocking_get(b); // drive to ready (keeps b alive)
+    auto r = cc::into_result(cc::move(b));
+    REQUIRE(r.has_value());
+    CHECK(r.value() == 42);
+}
+
+// ============================================================================
+// custom error type E
+// ============================================================================
+
+namespace
+{
+enum class my_err
+{
+    boom,
+    nope,
+};
+
+struct str_err // a copyable custom failure type — propagation copies it (async_error is the only re-materialize)
+{
+    cc::string msg;
+};
+} // namespace
+
+TEST("async - custom enum error round-trips through resolve / try_error / into_result")
+{
+    auto a = cc::make_async_lazy<int, my_err>([](cc::async_context<int, my_err>& ctx) -> cc::async_step_status
+                                              { return ctx.resolve_to_error(my_err::boom); });
+
+    auto r = cc::try_async_blocking_get(a);
+    REQUIRE(r.has_error());
+    CHECK(r.error() == my_err::boom);
+
+    REQUIRE(a->try_error() != nullptr);
+    CHECK(*a->try_error() == my_err::boom);
+}
+
+TEST("async - custom-E value path returns cc::result<T, E>")
+{
+    auto a = cc::make_async_lazy<int, my_err>([](cc::async_context<int, my_err>& ctx) -> cc::async_step_status
+                                              { return ctx.resolve_to_value(5); });
+    cc::result<int, my_err> r = cc::try_async_blocking_get(a);
+    REQUIRE(r.has_value());
+    CHECK(r.value() == 5);
+}
+
+TEST("async - custom copyable E auto-propagates (copied) through a dependency chain")
+{
+    auto a = cc::make_async_lazy<int, str_err>([](cc::async_context<int, str_err>& ctx) -> cc::async_step_status
+                                               { return ctx.resolve_to_error(str_err{"root failed"}); });
+
+    bool ran = false;
+    auto b = cc::make_async_lazy<int, str_err>(
+        [&](int x)
+        {
+            ran = true;
+            return x + 1;
+        },
+        a);
+
+    auto r = cc::try_async_blocking_get(b);
+    REQUIRE(r.has_error());
+    CHECK(r.error().msg == "root failed"); // propagated by copy (not re-materialized)
+    CHECK(!ran);                           // f was skipped by the auto-propagation short-circuit
+}
+
+// ============================================================================
+// low-level error handling — the raw frame decides (NO auto-propagation)
+// ============================================================================
+
+TEST("async - a raw frame that transforms a dependency error does NOT auto-propagate")
+{
+    // dep fails; the dependent requires it manually (raw frame), sees try_error(), and RESOLVES TO A VALUE
+    // instead of propagating — proving the low-level path leaves the decision to the frame.
+    auto dep = cc::make_async_from_error<int>(cc::async_error::make_error(cc::any_error("dep failed")));
+
+    auto p = cc::make_async_lazy<int>(
+        [dep](cc::async_context<int>& ctx) -> cc::async_step_status
+        {
+            if (!ctx.require(dep))
+                return ctx.wait_for_dependencies();
+            if (dep->try_error() != nullptr)
+                return ctx.resolve_to_value(-1); // transform the error into a sentinel value
+            return ctx.resolve_to_value(*dep->try_value());
+        });
+
+    auto r = cc::try_async_blocking_get(p);
+    REQUIRE(r.has_value());
+    CHECK(r.value() == -1); // the frame chose a value; no error propagated
 }

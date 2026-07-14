@@ -65,12 +65,12 @@ public:
 public:
     /// Submit `root` to this pool and block the calling thread until it completes, returning its outcome.
     /// Asserts if called from within a worker of this pool (that would park a pool thread on its own work).
-    template <class T>
-    [[nodiscard]] cc::result<T, async_error> try_blocking_get(shared_async<T> const& root);
+    template <class T, class E = async_error>
+    [[nodiscard]] cc::result<T, E> try_blocking_get(shared_async<T, E> const& root);
 
     /// Like try_blocking_get but returns the value (copy) and asserts on error/cancellation.
-    template <class T>
-    [[nodiscard]] T blocking_get(shared_async<T> const& root);
+    template <class T, class E = async_error>
+    [[nodiscard]] T blocking_get(shared_async<T, E> const& root);
 
     // internal
 private:
@@ -130,8 +130,8 @@ private:
 // blocking driver — templated, defined inline
 // ============================================================================
 
-template <class T>
-cc::result<T, async_error> async_thread_pool::try_blocking_get(shared_async<T> const& root)
+template <class T, class E>
+cc::result<T, E> async_thread_pool::try_blocking_get(shared_async<T, E> const& root)
 {
     CC_ASSERT(root != nullptr, "cannot drive a null async");
     CC_ASSERT(async_scheduler::current_or_null() != static_cast<async_scheduler*>(this),
@@ -145,8 +145,8 @@ cc::result<T, async_error> async_thread_pool::try_blocking_get(shared_async<T> c
     return *root->value_ptr(); // copy out
 }
 
-template <class T>
-T async_thread_pool::blocking_get(shared_async<T> const& root)
+template <class T, class E>
+T async_thread_pool::blocking_get(shared_async<T, E> const& root)
 {
     auto r = try_blocking_get(root);
     CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");

@@ -10,21 +10,22 @@
 
 #include <type_traits> // std::decay_t
 
-// cc::async<T> — a low-overhead value/dataflow async for compute-heavy dependency graphs.
+// cc::async<T, E = async_error> — a low-overhead value/dataflow async for compute-heavy dependency graphs.
 //
 // The mental model is values and dataflow transformations, not futures/promises or callback chains. An
-// async<T> is an eventual result<T, async_error> produced by a compute frame: a callable/state-machine
-// polled through an async_context. Polling never blocks a thread; a frame that cannot yet progress parks on
-// its not-ready dependencies and is woken when they complete.
+// async<T, E> is an eventual result<T, E> produced by a compute frame: a callable/state-machine polled through
+// an async_context<T, E>. Polling never blocks a thread; a frame that cannot yet progress parks on its not-ready
+// dependencies and is woken when they complete. E is the failure channel; the default async_error wraps a
+// move-only cc::any_error, but any type works (e.g. an enum or a small struct) — see into_result / try_error.
 //
-//   auto a = cc::make_async_scheduled<int>([](cc::async_context&) { return 40; });
+//   auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
 //   auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on a; f gets a plain int
 //   int v = cc::async_blocking_get(b);   // drives the graph on this thread -> 42
 //
 // Handles:
-//   shared_async<T> = cc::shared_ptr<async<T>, ...>  — the normal, composable, many-dependent handle (an 8 B
-//     intrusive-refcount handle over one slab node). async<T> itself is non-copyable and immovable; you copy
-//     the handle, never the node.
+//   shared_async<T, E> = cc::shared_ptr<async<T, E>, ...>  — the normal, composable, many-dependent handle (an
+//     8 B intrusive-refcount handle over one slab node). async<T, E> itself is non-copyable and immovable; you
+//     copy the handle, never the node.
 //
 // Design notes worth stating up front:
 //   * pending-dependency lists hold only NOT-ready deps, purely for scheduling/wakeup.
@@ -54,20 +55,25 @@ U async_declval() noexcept;
 namespace impl
 {
 /// Declares the node's payload storage (the offset-16 slot the base manages, see async_node_base::payload()):
-/// raw bytes holding EITHER the unresolved scratch (frame + deps + conts, ~32 B) OR the resolved value ⊍ error.
-/// Sized to the larger of the scratch and sizeof(T), so the value grows the node naturally for a large T (the
-/// node stays one cache line for sizeof(T) up to ~48 B; a larger T spills onto more lines). Cacheline-aligned so
-/// unrelated nodes never share a line; the value is 16-aligned. This layer adds only the typed read/teardown of
-/// the value — the base owns everything else (including the compute frame, in the payload's unresolved arm).
-template <class T>
+/// raw bytes holding EITHER the unresolved scratch (frame + deps + conts, ~32 B) OR the resolved value ⊍ error
+/// (value and error share offset 0, discriminated by state). Sized to the larger of the scratch, sizeof(T), and
+/// sizeof(E), so the value/error grows the node naturally for a large T/E (the node stays one cache line while
+/// both fit ~48 B; larger spills onto more lines). Cacheline-aligned so unrelated nodes never share a line; the
+/// value/error is 16-aligned. This layer adds the typed read/teardown of the value AND the error — the base owns
+/// everything else (including the compute frame, in the payload's unresolved arm).
+template <class T, class E>
 struct alignas(64) async_typed_node : cc::async_node_base
 {
-    static_assert(alignof(T) <= 16, "async<T>: T is over-aligned (> 16) — box it");
-    static_assert(std::is_nothrow_move_constructible_v<T>,
-                  "async<T>: T must be nothrow-move-constructible (it is moved under the node lock at completion)");
+    static_assert(alignof(T) <= 16, "async<T, E>: T is over-aligned (> 16) — box it");
+    static_assert(alignof(E) <= 16, "async<T, E>: E is over-aligned (> 16) — box it");
+    // NOTE: no blanket nothrow-move requirement on T — an emplace-only immovable T is supported. The nothrow-move
+    // constraint is applied per-path, only where a value is actually moved (finish_value / push_value /
+    // make_async_from_value / into_result).
 
     /// Destroy the resolved value in the payload (called through the ops table at teardown when ready_value).
     void clear_value() { reinterpret_cast<T*>(this->value_storage())->~T(); }
+    /// Destroy the resolved error in the payload (called through the ops table at teardown when ready_error).
+    void clear_error() { reinterpret_cast<E*>(this->value_storage())->~E(); }
 
     /// Pointer to the produced value; null unless ready with a value. Stable while the node is alive.
     [[nodiscard]] T const* value_ptr() const
@@ -76,46 +82,69 @@ struct alignas(64) async_typed_node : cc::async_node_base
     }
     [[nodiscard]] T* value_ptr() { return this->has_value() ? reinterpret_cast<T*>(this->payload()) : nullptr; }
 
+    /// Pointer to the produced error; null unless ready with an error. Stable while the node is alive.
+    [[nodiscard]] E const* error_ptr() const
+    {
+        return this->has_error() ? reinterpret_cast<E const*>(this->payload()) : nullptr;
+    }
+    [[nodiscard]] E* error_ptr() { return this->has_error() ? reinterpret_cast<E*>(this->payload()) : nullptr; }
+
 private:
+    static constexpr cc::isize max_of(cc::isize a, cc::isize b) { return a > b ? a : b; }
     static constexpr cc::isize payload_bytes
-        = sizeof(T) > sizeof(impl::async_unresolved) ? cc::isize(sizeof(T)) : cc::isize(sizeof(impl::async_unresolved));
+        = max_of(max_of(cc::isize(sizeof(T)), cc::isize(sizeof(E))), cc::isize(sizeof(impl::async_unresolved)));
     alignas(16) cc::byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
 
-/// Type-erased ops for async<T> (the hand-rolled vtable, see cc::async_type_ops): destroy the resolved value +
-/// the concrete size class, reached from the untemplated base. async<T> adds no data members over
-/// async_typed_node<T>, so their size classes match (class index taken from async_typed_node<T>, complete here;
-/// async<T> is not yet). The async<T> ctor static_asserts the sizes stay equal.
-template <class T>
+/// Type-erased ops for async<T, E> (the hand-rolled vtable, see cc::async_type_ops): destroy the resolved value
+/// or error + the concrete size class, reached from the untemplated base. async<T, E> adds no data members over
+/// async_typed_node<T, E>, so their size classes match (class index taken from async_typed_node<T, E>, complete
+/// here; async<T, E> is not yet). The async<T, E> ctor static_asserts the sizes stay equal.
+template <class T, class E>
 struct async_typed_node_ops
 {
-    static void teardown_value(cc::async_node_base* n) { static_cast<async_typed_node<T>*>(n)->clear_value(); }
+    static void teardown_value(cc::async_node_base* n) { static_cast<async_typed_node<T, E>*>(n)->clear_value(); }
+    static void teardown_error(cc::async_node_base* n) { static_cast<async_typed_node<T, E>*>(n)->clear_error(); }
 };
-template <class T>
+template <class T, class E>
 inline constexpr cc::async_type_ops async_type_ops_for = {
-    &async_typed_node_ops<T>::teardown_value,
-    cc::node_class_index_for<async_typed_node<T>>(),
+    &async_typed_node_ops<T, E>::teardown_value,
+    &async_typed_node_ops<T, E>::teardown_error,
+    cc::node_class_index_for<async_typed_node<T, E>>(),
 };
+
+// error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
+// The default copies (a custom E is assumed copyable where this is used); the async_error overload
+// re-materializes from the message because cc::any_error is move-only and a shared node's error must not be
+// moved out (the context chain is lost — a richer error-sharing scheme is a follow-up). Cancellation is
+// preserved. A non-template overload is chosen over the template for async_error.
+template <class E>
+[[nodiscard]] E async_error_propagate(E const& e)
+{
+    return e; // requires E copyable
+}
+[[nodiscard]] async_error async_error_propagate(async_error const& e);
 } // namespace impl
 
 // ============================================================================
 // async<T> — the normal shared handle
 // ============================================================================
 
-/// The normal composable async handle. Always used through shared_async<T> (an intrusive cc::shared_ptr); the
-/// node is non-copyable and immovable. Create with cc::make_async_lazy / cc::make_async_scheduled (the variadic
-/// dependency form handles single- and multi-dependency transforms), drive with cc::async_blocking_get.
-template <class T>
-struct async : impl::async_typed_node<T>
+/// The normal composable async handle. Always used through shared_async<T, E> (an intrusive cc::shared_ptr); the
+/// node is non-copyable and immovable. E is the failure-channel type, defaulting to async_error. Create with
+/// cc::make_async_lazy / cc::make_async_scheduled (the variadic dependency form handles single- and
+/// multi-dependency transforms) or the make_async_from_* factories, drive with cc::async_blocking_get.
+template <class T, class E>
+struct async : impl::async_typed_node<T, E>
 {
-    /// Install this concrete type's ops (its static async_type_ops) for the intrusive free + typed-value
-    /// teardown paths. Nodes are only ever created via make_async_* / cc::make_shared<async<T>>, which allocate
-    /// exactly node_class_index_for<async<T>>() — matching the ops' class_index (async<T> adds no data members).
+    /// Install this concrete type's ops (its static async_type_ops) for the intrusive free + typed value/error
+    /// teardown paths. Nodes are only ever created via make_async_* / cc::make_shared<async<T, E>>, which
+    /// allocate exactly node_class_index_for<async<T, E>>() — matching the ops' class_index (async adds no data).
     async()
     {
-        static_assert(sizeof(async) == sizeof(impl::async_typed_node<T>),
-                      "async<T> must add no data members over async_typed_node<T> (ops class_index relies on it)");
-        this->set_ops(&impl::async_type_ops_for<T>);
+        static_assert(sizeof(async) == sizeof(impl::async_typed_node<T, E>),
+                      "async<T, E> must add no data members over async_typed_node<T, E> (ops class_index needs it)");
+        this->set_ops(&impl::async_type_ops_for<T, E>);
         this->init_payload(); // birth the unresolved arm (empty frame/deps/conts) into the offset-16 slot
     }
 
@@ -125,9 +154,20 @@ public:
     /// alive (you keep it alive through the shared_async handle, not through this pointer).
     [[nodiscard]] T const* try_value() const { return this->value_ptr(); }
 
-    /// Pointer to the failure-channel value, or null unless ready with an error. Non-owning — valid while the
-    /// node is alive.
-    [[nodiscard]] async_error const* try_error() const { return this->has_error() ? &this->base_error() : nullptr; }
+    /// Pointer to the failure-channel value (typed E), or null unless ready with an error. Non-owning — valid
+    /// while the node is alive.
+    [[nodiscard]] E const* try_error() const { return this->error_ptr(); }
+
+    /// A fresh, independent copy of this node's error for propagation to a dependent (see async_error_propagate):
+    /// a move-only async_error is re-materialized from its message; a copyable custom E is copied. Requires
+    /// has_error().
+    [[nodiscard]] E propagate_error() const
+    {
+        CC_ASSERT(this->has_error(), "no error to propagate");
+        // unqualified template arg: the async_error overload wins for E = async_error (move-only, can't copy);
+        // the copy template is selected for a copyable custom E.
+        return impl::async_error_propagate(*this->error_ptr());
+    }
 
     // manual / promise-style completion (for externally produced values)
 public:
@@ -137,56 +177,39 @@ public:
     /// Complete externally with a value; wakes any parked dependents. Call at most once.
     void push_value(T v) { this->finish_value(cc::move(v)); } // builds the value into the payload, wakes dependents
 
+    /// Complete externally with a value built in place from `args` (never moved) — the immovable-T path.
+    template <class... Args>
+    void push_value_emplace(Args&&... args)
+    {
+        this->template finish_value_emplace<T>(cc::forward<Args>(args)...);
+    }
+
     /// Complete externally with an error; wakes any parked dependents. Call at most once.
-    void push_error(async_error e) { this->complete_with_error(cc::move(e)); }
+    void push_error(E e) { this->finish_error(cc::move(e)); }
+
+    /// Complete externally with an error built in place from `args`.
+    template <class... Args>
+    void push_error_emplace(Args&&... args)
+    {
+        this->template finish_error_emplace<E>(cc::forward<Args>(args)...);
+    }
 };
 
 // ============================================================================
 // async_context — handed to every compute step
 // ============================================================================
 
-/// The interface a compute frame uses to read dependencies and report its outcome. Not owned by the frame;
-/// valid only for the duration of a single step.
-struct async_context
+/// The T/E-agnostic half of the compute-step context: what the poll loop and the type-erased stored frame name
+/// (frame_type is async_step_status(async_context_base&)). It reads dependencies and reports wait/yield; the
+/// typed async_context<T, E> wraps it to add the value/error resolves. Not owned by the frame; valid only for the
+/// duration of a single step.
+struct async_context_base
 {
     async_node_base* current = nullptr;
     async_scheduler* scheduler = nullptr;
-    async_error* out_error = nullptr; // the poll loop's per-step error slot; resolve_to_error writes here
 
-    // resolving the result — each returns the matching async_step_status, so a frame can `return ctx.xxx(...)`
+    // report-a-status helpers (no T/E needed)
 public:
-    /// Resolve this frame with a value. Builds the value straight into the node's payload and completes the node
-    /// in place (the frame is a separate member the value never overlaps, so this is safe while the frame runs).
-    /// Reports produced_value; call at most once. V must match the node's result type. AFTER resolving, the frame
-    /// is spent — it must not touch the node again.
-    template <class V>
-    [[nodiscard]] async_step_status resolve_to_value(V&& v) const
-    {
-        current->finish_value(cc::forward<V>(v));
-        return async_step_status::produced_value;
-    }
-
-    /// Resolve this frame on the failure channel. The error is handed back to the poll loop (via out_error),
-    /// which installs it into the node's payload at completion — it is not stored on the node now, whose
-    /// payload still holds the live continuation head. Reports produced_error.
-    [[nodiscard]] async_step_status resolve_to_error(async_error e) const
-    {
-        *out_error = cc::move(e);
-        return async_step_status::produced_error;
-    }
-
-    // convenience aliases for readable frames: success/error resolve; wait/yield report a status
-public:
-    template <class V>
-    [[nodiscard]] async_step_status success(V&& v) const
-    {
-        return resolve_to_value(cc::forward<V>(v));
-    }
-    [[nodiscard]] async_step_status error(async_error e) const { return resolve_to_error(cc::move(e)); }
-    [[nodiscard]] async_step_status error(cc::any_error e) const
-    {
-        return resolve_to_error(async_error::make_error(cc::move(e)));
-    }
     [[nodiscard]] async_step_status wait_for_dependencies() const { return async_step_status::waiting; }
     [[nodiscard]] async_step_status yield() const { return async_step_status::yield; }
 
@@ -195,8 +218,8 @@ public:
     /// Require an existing async as a dependency. Returns true if it is already ready (read its value now);
     /// otherwise records it as a pending dependency and returns false — the frame should then return
     /// wait_for_dependencies(). No subscription happens here; that is installed late, only if this node parks.
-    template <class T>
-    bool require(shared_async<T> const& dep) const
+    template <class T, class E>
+    bool require(shared_async<T, E> const& dep) const
     {
         CC_ASSERT(dep != nullptr, "cannot require a null async");
         if (dep->is_ready())
@@ -205,6 +228,67 @@ public:
         if (dep->is_cold())
             dep->schedule(); // a required-but-cold dependency must be made runnable, else nobody drives it
         return false;
+    }
+};
+
+/// The typed compute-step context the user's frame receives: `[](cc::async_context<T, E>& ctx) -> ...`. Carries
+/// no extra state — it is a thin wrapper the frame closure builds around the async_context_base for the step,
+/// adding the value/error resolves (which need to know T/E). Inherits require / wait_for_dependencies / yield.
+template <class T, class E>
+struct async_context : async_context_base
+{
+    /// Wrap the step's base context (copies the two pointers).
+    async_context(async_context_base const& base) : async_context_base(base) {}
+
+    // resolving the result — each returns the matching async_step_status, so a frame can `return ctx.xxx(...)`.
+    // resolve completes the node IN PLACE (builds the value/error straight into the payload over the moved-out
+    // frame slot); AFTER resolving, the frame is spent and must not touch the node again.
+public:
+    /// Resolve with a value (moved into the payload). V must be convertible to T.
+    template <class V>
+    [[nodiscard]] async_step_status resolve_to_value(V&& v) const
+    {
+        current->finish_value(cc::forward<V>(v));
+        return async_step_status::produced_value;
+    }
+
+    /// Resolve with a value built in place from `args` (never moved) — the immovable-T path.
+    template <class... Args>
+    [[nodiscard]] async_step_status resolve_to_value_emplace(Args&&... args) const
+    {
+        current->template finish_value_emplace<T>(cc::forward<Args>(args)...);
+        return async_step_status::produced_value;
+    }
+
+    /// Resolve on the failure channel with E (moved into the payload).
+    [[nodiscard]] async_step_status resolve_to_error(E e) const
+    {
+        current->finish_error(cc::move(e));
+        return async_step_status::produced_error;
+    }
+
+    /// Resolve on the failure channel with an error built in place from `args`.
+    template <class... Args>
+    [[nodiscard]] async_step_status resolve_to_error_emplace(Args&&... args) const
+    {
+        current->template finish_error_emplace<E>(cc::forward<Args>(args)...);
+        return async_step_status::produced_error;
+    }
+
+    // convenience aliases for readable frames
+public:
+    template <class V>
+    [[nodiscard]] async_step_status success(V&& v) const
+    {
+        return resolve_to_value(cc::forward<V>(v));
+    }
+    [[nodiscard]] async_step_status error(E e) const { return resolve_to_error(cc::move(e)); }
+
+    /// Only for the default failure channel: wrap a cc::any_error as an async_error. Enabled when E is async_error.
+    [[nodiscard]] async_step_status error(cc::any_error e) const
+        requires(std::is_same_v<E, async_error>)
+    {
+        return resolve_to_error(async_error::make_error(cc::move(e)));
     }
 };
 
@@ -221,34 +305,37 @@ struct async_deduce_result
 template <class T>
 inline constexpr bool async_is_deduce = std::is_same_v<T, async_deduce_result>;
 
-// A dependency argument is a shared_async<U>: awaited before f runs, then unwrapped to the stored U. Plain
+// A dependency argument is a shared_async<U, Ue>: awaited before f runs, then unwrapped to the stored U. Plain
 // pass-through values are not supported yet — capture them in the closure.
 
-template <class U>
-bool async_require_arg(async_context& ctx, shared_async<U> const& dep)
+template <class U, class Ue>
+bool async_require_arg(async_context_base& ctx, shared_async<U, Ue> const& dep)
 {
     return ctx.require(dep);
 }
 
-template <class U>
-void async_collect_arg_error(cc::optional<async_error>& out, shared_async<U> const& dep)
+// Collect the first errored dep's error, propagated into THIS node's error type E (see async_error_propagate).
+// The high-level sugar assumes a single failure type across the graph: a dep's propagated error (its own Ue)
+// must be constructible into E. For the default async_error everywhere this is the identity.
+template <class E, class U, class Ue>
+void async_collect_arg_error(cc::optional<E>& out, shared_async<U, Ue> const& dep)
 {
     if (!out.has_value() && dep->has_error())
         out.emplace_value(dep->propagate_error());
 }
 
 // returns a reference into the dependency node's stored value (stable while the node is alive)
-template <class U>
-U const& async_unwrap_arg(shared_async<U> const& dep)
+template <class U, class Ue>
+U const& async_unwrap_arg(shared_async<U, Ue> const& dep)
 {
     return *dep->value_ptr();
 }
 
-// invoke the user function, with the leading async_context& if it takes one, else without it
-template <class F, class... Args>
-decltype(auto) async_invoke_frame_fn(F& f, async_context& ctx, Args&&... args)
+// invoke the user function, with the leading typed async_context<T, E>& if it takes one, else without it
+template <class T, class E, class F, class... Args>
+decltype(auto) async_invoke_frame_fn(F& f, async_context<T, E>& ctx, Args&&... args)
 {
-    if constexpr (std::is_invocable_v<F&, async_context&, Args...>)
+    if constexpr (std::is_invocable_v<F&, async_context<T, E>&, Args...>)
         return f(ctx, cc::forward<Args>(args)...);
     else
         return f(cc::forward<Args>(args)...);
@@ -257,8 +344,8 @@ decltype(auto) async_invoke_frame_fn(F& f, async_context& ctx, Args&&... args)
 // invoke the user function and resolve the node with its result. A raw frame that itself returns a status
 // (it resolves via ctx and manages its own dependencies) is passed through unchanged; any other return value
 // is a plain value that we resolve into the node here.
-template <class F, class... Args>
-async_step_status async_invoke_and_resolve(async_context& ctx, F& f, Args&&... args)
+template <class T, class E, class F, class... Args>
+async_step_status async_invoke_and_resolve(async_context<T, E>& ctx, F& f, Args&&... args)
 {
     using r_t = std::remove_cvref_t<decltype(async_invoke_frame_fn(f, ctx, cc::forward<Args>(args)...))>;
     if constexpr (std::is_same_v<r_t, async_step_status>)
@@ -267,29 +354,45 @@ async_step_status async_invoke_and_resolve(async_context& ctx, F& f, Args&&... a
         return ctx.resolve_to_value(async_invoke_frame_fn(f, ctx, cc::forward<Args>(args)...));
 }
 
-// deduced value type of a frame f applied to the unwrapped dependency arguments (with or without ctx). A raw
-// frame that returns async_step_status carries no value type — those must give the result type explicitly.
+// deduced value type of a value-returning frame f applied to the unwrapped dependency arguments (WITHOUT ctx).
+// Deduction is context-free: the typed context's own T is what we are deducing, so a value frame that also takes
+// a ctx cannot be deduced — those (like every raw async_step_status frame) must give the result type explicitly.
 template <class F, class... Deps>
-using async_deduced_frame_result_t
-    = std::remove_cvref_t<decltype(async_invoke_frame_fn(async_declval<std::decay_t<F>&>(),
-                                                         async_declval<async_context&>(),
-                                                         async_unwrap_arg(async_declval<std::decay_t<Deps> const&>())...))>;
+using async_deduced_frame_result_t = std::remove_cvref_t<decltype(async_declval<std::decay_t<F>&>()(
+    async_unwrap_arg(async_declval<std::decay_t<Deps> const&>())...))>;
 
-// The one compute-frame wrapper behind every make_async_* form. Requires all deps, short-circuits on the first
-// error, then invokes f — passing async_context& only if f wants it, and resolving f's returned value (or
-// passing through the status of a raw ctx-resolving frame). Returns the step status. A raw state-machine frame
-// is just the zero-dependency case where f takes async_context& and resolves + returns a status itself.
+// The node's value type: T verbatim, or (only when T is the deduce sentinel) the deduced frame result. A partial
+// specialization keeps the deduction LAZY — async_deduced_frame_result_t (which invokes f without a ctx) must not
+// be instantiated when T is given explicitly, e.g. for a raw ctx-resolving frame that cannot be called ctx-free.
+template <class T, class F, class... Deps>
+struct async_result_type
+{
+    using type = T;
+};
 template <class F, class... Deps>
+struct async_result_type<async_deduce_result, F, Deps...>
+{
+    using type = async_deduced_frame_result_t<F, Deps...>;
+};
+
+// The one compute-frame wrapper behind every make_async_* form. Its stored signature is the type-erased
+// async_context_base&; it builds the typed async_context<Result, E> for the step, requires all deps,
+// short-circuits on the first error, then invokes f — passing the typed context only if f wants it, and resolving
+// f's returned value (or passing through the status of a raw ctx-resolving frame). A raw state-machine frame is
+// just the zero-dependency case where f takes async_context<Result, E>& and resolves + returns a status itself.
+template <class Result, class E, class F, class... Deps>
 auto async_make_frame(F&& f, Deps&&... deps)
 {
-    return [fn = cc::forward<F>(f), ... ds = cc::forward<Deps>(deps)](async_context& ctx) mutable -> async_step_status
+    return [fn = cc::forward<F>(f), ... ds = cc::forward<Deps>(deps)](async_context_base& base) mutable -> async_step_status
     {
+        async_context<Result, E> ctx(base);
+
         bool all_ready = true;
         ((all_ready = async_require_arg(ctx, ds) && all_ready), ...); // require EVERY dep (registers pending)
         if (!all_ready)
             return async_step_status::waiting;
 
-        cc::optional<async_error> err;
+        cc::optional<E> err;
         (async_collect_arg_error(err, ds), ...); // the first errored dependency short-circuits f
         if (err.has_value())
             return ctx.resolve_to_error(cc::move(err.value()));
@@ -298,18 +401,18 @@ auto async_make_frame(F&& f, Deps&&... deps)
     };
 }
 
-// shared factory for make_async_*: build async<R> and install the wrapped frame
-template <class T, class F, class... Deps>
+// shared factory for make_async_*: build async<R, E> and install the wrapped frame
+template <class T, class E, class F, class... Deps>
 auto async_make_node(F&& f, Deps&&... deps)
 {
-    using result_t = std::conditional_t<async_is_deduce<T>, async_deduced_frame_result_t<F, Deps...>, T>;
+    using result_t = async_result_type<T, F, Deps...>::type;
     static_assert(!std::is_void_v<result_t>, "the frame must return a value (wrap void as cc::unit)");
     static_assert(!std::is_same_v<result_t, async_step_status>,
                   "a raw async_context frame resolves via ctx and returns a status, not a value — give the "
                   "result type explicitly, e.g. make_async_lazy<int>(...)");
 
-    auto node = cc::make_shared<async<result_t>, async_node_traits>();
-    node->set_frame(async_make_frame(cc::forward<F>(f), cc::forward<Deps>(deps)...));
+    auto node = cc::make_shared<async<result_t, E>, async_node_traits>();
+    node->set_frame(async_make_frame<result_t, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
     return node;
 }
 } // namespace impl
@@ -323,26 +426,27 @@ auto async_make_node(F&& f, Deps&&... deps)
 ///
 ///   * each dependency is a shared_async<U>; it is awaited and unwrapped to the stored U before f runs.
 ///     Errors short-circuit: if any dependency failed, f is skipped and the first error propagates.
-///   * f is called with the unwrapped dependency values. It may take a leading async_context& (for a raw
+///   * f is called with the unwrapped dependency values. It may take a leading async_context<T, E>& (for a raw
 ///     state-machine that manages its own dependencies) or omit it entirely — both are wrapped as needed.
-///   * T defaults to the deduced return type of f; a raw frame that resolves via async_context (and returns a
-///     status) carries no value type, so it must give T explicitly.
+///   * T defaults to the deduced return type of f (deduction is context-free — a value frame that also takes a
+///     ctx, like every raw async_context frame that returns a status, must give T explicitly). E is the failure
+///     channel, defaulting to async_error.
 ///
-///   auto a = cc::make_async_scheduled<int>([](cc::async_context&) { return 40; });  // raw frame
-///   auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);                    // depends on a; f gets int
-///   auto c = cc::make_async_lazy([] { return 7; });                                  // no deps, no context
-template <class T = impl::async_deduce_result, class F, class... Deps>
+///   auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; }); // raw frame
+///   auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);                       // depends on a; f gets int
+///   auto c = cc::make_async_lazy([] { return 7; });                                     // no deps, no context
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
 [[nodiscard]] auto make_async_lazy(F&& f, Deps&&... deps)
 {
-    return impl::async_make_node<T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
+    return impl::async_make_node<T, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
 }
 
 /// Like make_async_lazy, but eager: schedules the node immediately if a worker scope is active on this thread
 /// (otherwise it stays cold and is scheduled when first required/driven). Same forms as make_async_lazy.
-template <class T = impl::async_deduce_result, class F, class... Deps>
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
 [[nodiscard]] auto make_async_scheduled(F&& f, Deps&&... deps)
 {
-    auto node = impl::async_make_node<T>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
+    auto node = impl::async_make_node<T, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
     if (async_scheduler::current_or_null() != nullptr)
         node->schedule();
     return node;
@@ -350,12 +454,79 @@ template <class T = impl::async_deduce_result, class F, class... Deps>
 
 /// Create an async completed externally via async<T>::push_value / push_error (a promise-style node). A
 /// dependent that requires it parks until it is pushed.
-template <class T>
-[[nodiscard]] shared_async<T> make_async_manual()
+template <class T, class E = async_error>
+[[nodiscard]] shared_async<T, E> make_async_manual()
 {
-    auto node = cc::make_shared<async<T>, impl::async_node_traits>();
+    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
     node->set_manual();
     return node;
+}
+
+// ============================================================================
+// creation — born already ready (no frame, no scheduling)
+// ============================================================================
+
+/// An async that is already ready with `v` — no compute frame, no scheduling. Usable immediately as a
+/// dependency or read via try_value(). Moves `v` in (T must be nothrow-move-constructible; use the _emplace
+/// form for an immovable T).
+template <class T, class E = async_error>
+[[nodiscard]] shared_async<T, E> make_async_from_value(T v)
+{
+    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    node->push_value(cc::move(v)); // cold node, empty unresolved arm -> drives straight to ready_value
+    return node;
+}
+
+/// Like make_async_from_value, but builds the value in place from `args` (never moved) — the immovable-T path.
+/// T is explicit (args do not determine it): make_async_from_value_emplace<T>(args...).
+template <class T, class E = async_error, class... Args>
+[[nodiscard]] shared_async<T, E> make_async_from_value_emplace(Args&&... args)
+{
+    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    node->push_value_emplace(cc::forward<Args>(args)...);
+    return node;
+}
+
+/// An async that is already ready on the failure channel with `e`. T is explicit (only E is determined by the
+/// argument): make_async_from_error<T>(e).
+template <class T, class E = async_error>
+[[nodiscard]] shared_async<T, E> make_async_from_error(E e)
+{
+    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    node->push_error(cc::move(e)); // cold node, empty unresolved arm -> drives straight to ready_error
+    return node;
+}
+
+/// Like make_async_from_error, but builds the error in place from `args`. T and E are explicit:
+/// make_async_from_error_emplace<T, E>(args...).
+template <class T, class E = async_error, class... Args>
+[[nodiscard]] shared_async<T, E> make_async_from_error_emplace(Args&&... args)
+{
+    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    node->push_error_emplace(cc::forward<Args>(args)...);
+    return node;
+}
+
+// ============================================================================
+// consuming — move the outcome out
+// ============================================================================
+
+/// Consume a READY async handle and MOVE its outcome out into a cc::result<T, E>: ready_value -> the moved value,
+/// ready_error -> cc::error(moved error). Requires root to be ready. Unlike a getter, this MOVES the payload out
+/// of the shared node — any OTHER live handle's later try_value()/try_error() then reads a moved-from value, so
+/// use it when you are done with the async. T must be move-constructible (a truly immovable T cannot be
+/// into_result'd — that is a compile error by design). Takes the handle by value, consuming the caller's handle.
+template <class T, class E = async_error>
+[[nodiscard]] cc::result<T, E> into_result(shared_async<T, E> root)
+{
+    static_assert(std::is_move_constructible_v<T>, "into_result moves the value out of the node — T must be "
+                                                   "move-constructible");
+    CC_ASSERT(root != nullptr, "cannot consume a null async");
+    CC_ASSERT(root->is_ready(), "into_result requires a ready async (drive it first)");
+
+    if (root->has_error())
+        return cc::error(cc::move(*root->error_ptr()));
+    return cc::move(*root->value_ptr());
 }
 
 // ============================================================================
@@ -367,8 +538,8 @@ template <class T>
 /// waiting — so it is a top-level / test convenience, never something to call from inside a frame (park on a
 /// dependency instead). Asserts if the graph cannot complete (e.g. blocked on an external/manual node that is
 /// never pushed — drive those with an explicit inline_scheduler + async_worker_scope).
-template <class T>
-[[nodiscard]] cc::result<T, async_error> try_async_blocking_get(shared_async<T> const& root)
+template <class T, class E = async_error>
+[[nodiscard]] cc::result<T, E> try_async_blocking_get(shared_async<T, E> const& root)
 {
     CC_ASSERT(root != nullptr, "cannot drive a null async");
 
@@ -388,8 +559,8 @@ template <class T>
 /// Drive `root` to completion and return its value (copy). Asserts on error/cancellation. BLOCKS the calling
 /// thread (see try_async_blocking_get). For fallible handling use try_async_blocking_get; for zero-copy
 /// access use root->try_value() after driving.
-template <class T>
-[[nodiscard]] T async_blocking_get(shared_async<T> const& root)
+template <class T, class E = async_error>
+[[nodiscard]] T async_blocking_get(shared_async<T, E> const& root)
 {
     auto r = cc::try_async_blocking_get(root);
     CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");

@@ -516,15 +516,14 @@ void cc::async_node_base::remove_continuation(async_node_base* dependent)
 // async_node_base — completion / teardown
 // ============================================================================
 
-cc::async_error cc::async_node_base::propagate_error() const
+cc::async_error cc::impl::async_error_propagate(async_error const& e)
 {
-    CC_ASSERT(has_error(), "no error to propagate");
-    if (error_ref().is_cancelled())
+    if (e.is_cancelled())
         return async_error::make_cancelled();
 
     // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the
     // message. The context chain is lost — a richer error-sharing scheme is a follow-up.
-    return async_error::make_error(cc::any_error(error_ref().underlying().to_string()));
+    return async_error::make_error(cc::any_error(e.underlying().to_string()));
 }
 
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
@@ -536,35 +535,17 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
     return false;
 }
 
-void cc::async_node_base::complete_with_error(async_error err)
-{
-    // Mirror finish_value, but the error is untyped so the base builds it directly. On the compute path the
-    // frame is already moved onto the poll stack (the payload frame slot is a moved-from shell); on push_error
-    // the frame slot is empty. Either way the unresolved arm is destroyed and the error built in its place.
-    unsubscribe_all(); // the frame still pins the deps we are unsubscribing from
-
-    impl::async_cont_head continuations;
-    {
-        lock_scope g(this);
-        continuations = cc::move(conts());
-        unresolved().~async_unresolved(); // frame shell + deps + the moved-from head shell
-        new (cc::placement_new, value_storage()) async_error(cc::move(err)); // error at payload offset 0
-        store_state(async_node_state::ready_error);
-    }
-    continuations.notify_all(); // outside the lock: waking a dependent / firing a latch takes other locks
-}
-
 void cc::async_node_base::teardown_payload()
 {
     // Strong-0 teardown (nothing races us — strong is already 0). If ready, the unresolved arm is already gone
-    // and the payload holds the resolved value/error — destroy that; else the arm is live, so unsubscribe (the
-    // frame still pins the deps) then destroy the whole arm (frame + deps + conts). The intrusive counts and
-    // _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
+    // and the payload holds the resolved value/error — destroy that (typed, via the ops table); else the arm is
+    // live, so unsubscribe (the frame still pins the deps) then destroy the whole arm (frame + deps + conts). The
+    // intrusive counts and _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
     auto const s = load_state(std::memory_order_relaxed);
     if (s == async_node_state::ready_value)
         ops()->teardown_value(this); // destroy the resolved value at payload offset 0
     else if (s == async_node_state::ready_error)
-        error_ref().~async_error(); // destroy the resolved error at payload offset 0
+        ops()->teardown_error(this); // destroy the resolved error at payload offset 0
     else
     {
         unsubscribe_all();
@@ -583,7 +564,7 @@ void cc::async_node_base::poll()
 
     unsubscribe_all(); // re-evaluate dependencies from scratch this turn
 
-    async_context ctx;
+    async_context_base ctx;
     ctx.current = this;
     ctx.scheduler = async_scheduler::current_or_null();
 
@@ -642,20 +623,16 @@ void cc::async_node_base::poll()
         }
 
         // Move the frame onto our stack for the compute step: the value/error is built over the frame's slot in
-        // the payload, so the live closure must not sit there while it runs. If it resolves, it builds the value
-        // straight into the (now moved-from) slot and `f` drops here; if it parks (waiting/yield), we move it
-        // back into the arm for the next poll. An error is handed back via ctx.out_error (a stack local).
-        async_error step_error;
-        ctx.out_error = &step_error;
+        // the payload, so the live closure must not sit there while it runs. If it resolves (value OR error), it
+        // builds the result straight into the (now moved-from) slot via finish_value/finish_error and `f` drops
+        // here; if it parks (waiting/yield), we move it back into the arm for the next poll.
         CC_ASSERT(frame().is_valid(), "polled a node without a compute frame");
         frame_type f = cc::move(frame());
         switch (f(ctx))
         {
         case async_step_status::produced_value:
-            return; // resolve_to_value already published ready_value + woke dependents; f (spent) drops here
         case async_step_status::produced_error:
-            complete_with_error(cc::move(step_error));
-            return; // f (spent) drops here
+            return; // resolve_to_value/error already completed the node in place + woke dependents; f drops here
         case async_step_status::waiting:
             frame() = cc::move(f); // the frame parks — move it back into the payload for the next poll
             continue;              // frame added deps / asked to wait — normalize and poll them now
