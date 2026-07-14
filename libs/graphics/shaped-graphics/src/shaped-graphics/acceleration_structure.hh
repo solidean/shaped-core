@@ -18,13 +18,6 @@
 
 namespace sg
 {
-/// Index element width for an indexed-triangle geometry. Only meaningful when an index buffer is present.
-enum class accel_index_format : u8
-{
-    uint16, ///< DXGI_FORMAT_R16_UINT / VK_INDEX_TYPE_UINT16
-    uint32, ///< DXGI_FORMAT_R32_UINT / VK_INDEX_TYPE_UINT32
-};
-
 /// Trade-offs baked into a structure at build time; they cannot change afterward. Bit flags — combine with
 /// `|`, test with `has_flag`. `fast_trace` and `fast_build` are mutually exclusive (setting both asserts).
 /// Migrates to `cc::flags` once that lands (same status as buffer_usage).
@@ -66,11 +59,11 @@ struct blas_triangles
     isize vertex_offset_in_bytes = 0;
 
     /// Optional index buffer; null => non-indexed. When set, `index_count` must be a multiple of 3 and
-    /// `index_format` selects the element width.
+    /// `index_type` selects the element width.
     raw_buffer_handle indices = nullptr;
     isize index_count = 0;
     isize index_offset_in_bytes = 0;
-    accel_index_format index_format = accel_index_format::uint32;
+    index_format index_type = index_format::uint32;
 
     /// Optional per-geometry transform: a buffer holding one 3×4 **row-major** float matrix (48 bytes) at
     /// `transform_offset_in_bytes`. It is a buffer reference (DXR reads it by GPU address), unlike the inline

@@ -126,7 +126,7 @@ which a future transient variant would want — aren't implemented yet.
 
 **Today:** the single-shot build path is implemented. `sg::blas` / `sg::tlas` +
 `blas_handle`/`tlas_handle`, the input vocabulary (`blas_triangles`, `blas_aabbs`, `tlas_instance`,
-`accel_build_flags`, `instance_cull_mode`, `accel_index_format`), and the `cmd.raytracing` scope
+`accel_build_flags`, `instance_cull_mode`, `index_format`), and the `cmd.raytracing` scope
 (`build_blas` for triangles and procedural AABBs, `build_tlas`, `is_supported()`) all exist. **dx12** is the
 reference realization (prebuild-sized result + transient scratch, `BuildRaytracingAccelerationStructure`,
 gated on `D3D12_RAYTRACING_TIER`); it runs on WARP. **vulkan** stubs the build (`CC_UNREACHABLE`) and reports

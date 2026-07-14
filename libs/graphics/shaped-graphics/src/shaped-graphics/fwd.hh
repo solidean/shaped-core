@@ -38,12 +38,19 @@ struct blas_triangles;              // value type — one triangle geometry inpu
 struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
 struct tlas_instance;               // value type — one instance input to build_tlas
 enum class accel_build_flags : u32; // build-time trade-offs (see acceleration_structure.hh)
-enum class accel_index_format : u8; // index element width for indexed triangles
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
-struct texture_description;         // value type (see raw_texture.hh) — input to create_raw_texture
-enum class pixel_format : u16;      // texel format (see pixel_format.hh)
-enum class texture_usage : u32;     // texture usage flags (see types.hh)
-enum class texture_dimension : u8;  // 1D / 2D / 3D (see raw_texture.hh)
+
+/// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS
+/// triangle indices (blas_triangles). Defined here (not just forward-declared) as a general vocabulary type.
+enum class index_format : u8
+{
+    uint16, // DX12 R16_UINT / Vk INDEX_TYPE_UINT16
+    uint32, // DX12 R32_UINT / Vk INDEX_TYPE_UINT32
+};
+struct texture_description;        // value type (see raw_texture.hh) — input to create_raw_texture
+enum class pixel_format : u16;     // texel format (see pixel_format.hh)
+enum class texture_usage : u32;    // texture usage flags (see types.hh)
+enum class texture_dimension : u8; // 1D / 2D / 3D (see raw_texture.hh)
 class bytes_waiter;
 class bytes_future;
 template <class T>
@@ -146,7 +153,7 @@ struct color_target_state;          // {format, blend, write_mask} — one color
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
 
 // Draw recording (see command_list.raster.hh) — vertex/index buffer views + draw parameters.
-enum class index_format;
+// (index_format is defined above — shared with raytracing.)
 struct vertex_buffer_view;
 struct index_buffer_view;
 struct draw_config;

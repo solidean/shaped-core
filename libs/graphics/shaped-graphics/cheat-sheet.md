@@ -407,13 +407,13 @@ raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serial
 sg::blas_handle   // std::shared_ptr<sg::blas const>   — bottom-level (one mesh's triangles or AABBs); persistent
 sg::tlas_handle   // std::shared_ptr<sg::tlas const>   — top-level (instances of blas); a tlas keeps its blases alive
 // input structs (value types; build-input buffers need buffer_usage::accel_structure_build_input):
-sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indices+count+offset+index_format;
+sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indices+count+offset+index_type;
                      optional transform buffer(3x4 row-major)+offset; is_opaque=true }
 sg::blas_aabbs     { aabbs(6 floats each), aabb_count/stride/offset; is_opaque=true }
 sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transform[r*4+c], not tg col-major);
                      u32 instance_id:24; u32 hit_group_offset:24; u8 mask=0xFF; instance_cull_mode; optional opaque_override }
 sg::accel_build_flags   // none/fast_trace(default)/fast_build/allow_update/allow_compaction/minimize_memory  (|, has_flag)
-sg::accel_index_format  // uint16 | uint32
+sg::index_format        // uint16 | uint32  — index-buffer element width (shared with draw's bind_index_buffer)
 sg::instance_cull_mode  // back(default) | front | none
 
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a

@@ -8,13 +8,6 @@
 
 namespace sg
 {
-/// Element width of an index buffer.
-enum class index_format
-{
-    uint16, // DX12 R16_UINT / Vk INDEX_TYPE_UINT16
-    uint32, // DX12 R32_UINT / Vk INDEX_TYPE_UINT32
-};
-
 struct index_buffer_view
 {
     raw_buffer_handle buffer;
