@@ -351,6 +351,22 @@ TEST("sg - typed texture views carry the view dimension at compile time")
     CHECK(true); // the static_asserts are the test
 }
 
+TEST("sg - access-erased texture_view<Traits> middle")
+{
+    sg::texture_2d tex(std::make_shared<test_texture>(
+        desc_2d(sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture)));
+
+    // The typed leaves convert implicitly to the access-erased middle (dimension stays compile-time).
+    sg::texture_view<sg::tv_2d> const ro = tex.as_readonly_view();
+    static_assert(decltype(ro)::dimension == sg::texture_view_dimension::tex_2d);
+    CHECK(ro.access == sg::view_class::readonly);
+    CHECK(sg::access_of(ro.to_raw()) == sg::view_class::readonly);
+    CHECK(sg::shape_of(ro.to_raw()) == sg::view_shape::texture);
+
+    sg::texture_view<sg::tv_2d> const rw = tex.as_readwrite_view();
+    CHECK(rw.access == sg::view_class::readwrite);
+}
+
 // -- Render-target / depth-stencil views (render_target / depth_stencil). These do not erase to raw_view;
 //    their getters ARE the surface, so the tests read them directly.
 

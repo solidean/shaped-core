@@ -162,3 +162,27 @@ TEST("sg views - misuse asserts")
     auto const small = make_buffer(16, sg::buffer_usage::readonly_buffer);
     CHECK_ASSERTS(small->as_readonly_buffer<sg::u32>({.offset = 0, .size = 100}));
 }
+
+TEST("sg views - access-erased buffer_view<T> middle")
+{
+    auto const buf
+        = make_buffer(sizeof(particle) * 4, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer);
+
+    // The fully-typed leaves convert implicitly to the access-erased middle (access is a runtime field).
+    sg::buffer_view<particle> const ro = buf->as_readonly_buffer<particle>();
+    CHECK(ro.access == sg::view_class::readonly);
+    CHECK(ro.shape == sg::view_shape::structured);
+    CHECK(ro.element_count == 4);
+    CHECK(ro.stride_in_bytes == sizeof(particle));
+    CHECK(sg::access_of(ro.to_raw()) == sg::view_class::readonly);
+
+    sg::buffer_view<particle> const rw = buf->as_readwrite_buffer<particle>();
+    CHECK(rw.access == sg::view_class::readwrite);
+
+    // Uniform too — particle is a uniform_element.
+    auto const ubuf = make_buffer(256, sg::buffer_usage::uniform_buffer);
+    sg::buffer_view<particle> const u = ubuf->as_uniform_buffer<particle>();
+    CHECK(u.access == sg::view_class::uniform);
+    CHECK(u.shape == sg::view_shape::uniform_block);
+    CHECK(u.size_in_bytes == sizeof(particle));
+}

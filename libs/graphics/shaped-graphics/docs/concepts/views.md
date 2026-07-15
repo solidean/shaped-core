@@ -84,6 +84,11 @@ access / layout (what `accepts()` checks). The type safety lives in the typed vi
 also the directly-usable "raw" binding vocabulary for tooling that builds bindings without the wrappers.
 (`std::variant` for now — likely a `cc::variant` once that lands.)
 
+Between the fully-typed leaves and the erased `raw_view` sits an optional **access-erased middle**:
+`buffer_view<T>` and `texture_view<Traits>` keep the resource typing (element / view dimension) but carry
+the access class as a runtime field. Each leaf converts to it implicitly, and it erases on to `raw_view` —
+useful for code that takes "any access" of a given buffer / texture view.
+
 ## Texture views
 
 Textures have views too, but instead of an element type `T` they are typed by `Traits` — a

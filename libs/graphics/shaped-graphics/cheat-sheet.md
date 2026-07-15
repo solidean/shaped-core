@@ -331,6 +331,8 @@ sg::readonly_texture_view<VT>  // sampled texture (SRV); VT = texture_view_trait
 sg::readwrite_texture_view<VT> // storage texture (UAV); VT constrained to storage_view_dimension (no cube/MS)
 // each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
+sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (access is a runtime field); leaves convert implicitly
+sg::texture_view<VT>         // access-erased middle: any access of a texture view of dimension VT::dimension
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
 sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)

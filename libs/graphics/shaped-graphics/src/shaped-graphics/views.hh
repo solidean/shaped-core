@@ -217,6 +217,61 @@ struct readwrite_buffer_view
     operator raw_view() const { return to_raw(); }
 };
 
+/// A buffer view of `T` with its access class known only at runtime — the resource-typed, access-erased
+/// middle between the fully-typed leaves (uniform / readonly / readwrite_buffer_view<T>) and the fully
+/// erased raw_view. Each leaf converts to it implicitly; it mirrors the erased buffer fields (its `access`
+/// is runtime) and erases on to raw_view. For code that takes "any access of a buffer of T".
+template <view_element T>
+struct buffer_view
+{
+    view_class access = view_class::readonly;  ///< uniform / readonly / readwrite — runtime, unlike the leaves
+    view_shape shape = view_shape::structured; ///< uniform_block / structured / raw
+    raw_buffer_handle buffer;
+    isize offset_in_bytes = 0;
+    isize size_in_bytes = 0;   ///< [uniform_block, raw]
+    isize element_count = 0;   ///< [structured]
+    isize stride_in_bytes = 0; ///< [structured] = sizeof(T)
+
+    buffer_view() = default;
+
+    /// From a raw buffer arm (also the tooling entry point). The leaf conversions route through here so the
+    /// field mapping lives in one place (each leaf's to_raw()).
+    explicit buffer_view(raw_buffer_view const& a)
+      : access(a.access),
+        shape(a.shape),
+        buffer(a.buffer),
+        offset_in_bytes(a.offset_in_bytes),
+        size_in_bytes(a.size_in_bytes),
+        element_count(a.element_count),
+        stride_in_bytes(a.stride_in_bytes)
+    {
+    }
+
+    buffer_view(readonly_buffer_view<T> const& v) : buffer_view(std::get<raw_buffer_view>(v.to_raw())) {}
+    buffer_view(readwrite_buffer_view<T> const& v) : buffer_view(std::get<raw_buffer_view>(v.to_raw())) {}
+
+    // Only where `T` is a uniform_element; the `U = T` template defers so buffer_view<T> stays well-formed
+    // for a non-uniform `T` (naming uniform_buffer_view<T> there would be ill-formed).
+    template <class U = T>
+        requires(std::is_same_v<U, T> && uniform_element<U>)
+    buffer_view(uniform_buffer_view<U> const& v) : buffer_view(std::get<raw_buffer_view>(v.to_raw()))
+    {
+    }
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_buffer_view{.access = access,
+                               .shape = shape,
+                               .buffer = buffer,
+                               .offset_in_bytes = offset_in_bytes,
+                               .size_in_bytes = size_in_bytes,
+                               .element_count = element_count,
+                               .stride_in_bytes = stride_in_bytes};
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
 // -- Texture views. Unlike buffer views (typed by element `T`), a texture view is typed by `Traits` — a
 //    `texture_view_traits<Dim>` naming the shader-facing dimension it binds as (Texture2D / TextureCube /
 //    Texture2DArray / …). Only the dimension is compile-time; the texel `format` and subresource `range`
@@ -290,6 +345,52 @@ struct readwrite_texture_view
     /// (a 3D texture's W / Z axis — D3D12's `FirstWSlice`/`WSize`) the view exposes. Not subresources (a
     /// whole 3D mip is one), so they live here, not in `range`. Empty `{0, 0}` for every non-3D view.
     cc::start_end depth_slice_range = {.start = 0, .end = 0};
+
+    [[nodiscard]] raw_view to_raw() const
+    {
+        return raw_texture_view{.access = access,
+                                .texture = texture,
+                                .view_dimension = dimension,
+                                .format = format,
+                                .range = range,
+                                .depth_slice_range = depth_slice_range};
+    }
+
+    operator raw_view() const { return to_raw(); }
+};
+
+/// A texture view of shader-facing dimension `Traits::dimension` with its access class known only at
+/// runtime — the access-erased middle between the fully-typed leaves (readonly / readwrite_texture_view
+/// <Traits>) and raw_view. Each leaf converts to it implicitly; it erases on to raw_view. For code that
+/// takes "any access of a texture view of that dimension".
+template <class Traits>
+struct texture_view
+{
+    static constexpr texture_view_dimension dimension = Traits::dimension;
+
+    view_class access = view_class::readonly; ///< readonly / readwrite — runtime, unlike the leaves
+    raw_texture_handle texture;
+    pixel_format format = pixel_format::undefined;
+    subresource_range range;
+    cc::start_end depth_slice_range = {.start = 0, .end = 0};
+
+    texture_view() = default;
+
+    /// From a raw texture arm (also the tooling entry point). Leaf conversions route through here.
+    explicit texture_view(raw_texture_view const& a)
+      : access(a.access), texture(a.texture), format(a.format), range(a.range), depth_slice_range(a.depth_slice_range)
+    {
+    }
+
+    texture_view(readonly_texture_view<Traits> const& v) : texture_view(std::get<raw_texture_view>(v.to_raw())) {}
+
+    // readwrite exists only for a storage dimension; the `T = Traits` template defers so texture_view<Traits>
+    // stays well-formed when Traits is a cube / MS dimension (naming readwrite_texture_view<Traits> is ill-formed there).
+    template <class T = Traits>
+        requires(std::is_same_v<T, Traits> && storage_view_dimension<Traits::dimension>)
+    texture_view(readwrite_texture_view<T> const& v) : texture_view(std::get<raw_texture_view>(v.to_raw()))
+    {
+    }
 
     [[nodiscard]] raw_view to_raw() const
     {
