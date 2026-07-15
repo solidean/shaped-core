@@ -62,10 +62,14 @@ doubt, leave it out until a concrete need plus a capability query justify it.*
 
 ## What exists today
 
-Creation only: `ctx.persistent.create_raw_texture(desc)` and `ctx.transient.create_raw_texture(desc)`
-allocate a real GPU texture — **dx12** via a committed `ID3D12Resource`, **vulkan** via a dedicated
-`VkImage` (minimal, matching its buffer path). The typed factories (`create_texture_2d`, … returning
-`texture<Traits>`) come later.
+Creation: `ctx.persistent.create_raw_texture(desc)` and `ctx.transient.create_raw_texture(desc)`
+allocate a real GPU texture from a full `texture_description` — **dx12** via a committed
+`ID3D12Resource`, **vulkan** via a dedicated `VkImage` (minimal, matching its buffer path). On top of
+that, per-shape typed factories (`create_texture_2d`, `create_texture_cube`, … one per `texture<Traits>`
+typedef, on both scopes, with `try_` twins — see [texture_descriptions.hh](../../src/shaped-graphics/texture_descriptions.hh))
+take a shape-specific description that exposes only the free parameters (cubes a single `.size`, cube
+arrays a `.cube_count`, MS a `.sample_count`), expand it to a full `texture_description`, and return the
+wrapped `texture<Traits>` directly.
 
 Since first landing, textures have grown views ([views.md](views.md)), per-command-list layout tracking
 ([barriers.md](barriers.md)), and host↔device copies ([upload.inline.md](upload.inline.md) /

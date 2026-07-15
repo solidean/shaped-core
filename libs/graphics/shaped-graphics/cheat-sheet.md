@@ -263,11 +263,18 @@ t->mip_levels()/sample_count()/array_layers()  // int
 t->format()                  // sg::pixel_format
 t->is_array()/is_cube()/is_multisampled()      // bool  — derived shape queries
 sg::texture_usage            // flags: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
-// create the raw resource (typed create_texture_2d/... factories come later):
+// create the raw resource (full desc; untyped handle):
 ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedicated; throws sg::allocation_exception; + try_ twin)
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
+// typed factories (preferred): shape-specific description (only the free params) -> the wrapped texture<Traits>:
+#include <shaped-graphics/texture_descriptions.hh>
+ctx.persistent.create_texture_2d({.format=..., .width=256, .height=128, .usage=...})  // -> sg::texture_2d  (+ try_ twin)
+ctx.transient.create_texture_2d({...})         // -> sg::texture_2d  (transient; no allocation_info param)
+//   one per typedef: create_texture_1d/2d/3d/cube/1d_array/2d_array/cube_array/2d_ms/2d_array_ms/cube_ms/cube_array_ms
+//   cubes take .size (edge length; width==height); cube arrays take .cube_count; MS take .sample_count (no .mip_levels)
+//   generic core: create_texture(desc) / try_create_texture(desc) deduce the shape from the description type
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
-sg::texture_2d tex(raw_handle);                // asserts the raw shape matches; tex.raw() -> raw_texture_handle
+sg::texture_2d tex(raw_handle);                // wrap a raw handle directly; asserts the raw shape matches; tex.raw() -> raw_texture_handle
 // Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count<0=all}.
 // sampled (SRV) — needs readonly_texture usage. Natural dimension:
 tex.as_readonly_view({.mips={.start=1}})       // -> texture_readonly_view  (whole; params name only this shape's axes)
