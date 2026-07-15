@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ..core import console
 from ..core.models import StepResult
-from ..core.process import run_step
+from ..core.process import response_file, run_step
 
 
 class FormatSetupError(Exception):
@@ -180,17 +180,18 @@ def format_sources(
     """
     cmd = [clang_format]
     cmd += ["--dry-run", "-Werror"] if check else ["-i"]
-    cmd += [str(f) for f in files]
 
-    return run_step(
-        cmd,
-        step_type="format",
-        name="check" if check else "apply",
-        build_dir=root / "build",
-        cwd=root,
-        mirror=mirror,
-        verbose=verbose,
-    )
+    # a full-tree run is ~45k chars of paths -- past the Windows command-line limit
+    with response_file([str(f) for f in files], prefix="clang-format-") as tail:
+        return run_step(
+            cmd + tail,
+            step_type="format",
+            name="check" if check else "apply",
+            build_dir=root / "build",
+            cwd=root,
+            mirror=mirror,
+            verbose=verbose,
+        )
 
 
 def run_format(

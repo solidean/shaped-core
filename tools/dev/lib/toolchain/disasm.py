@@ -26,6 +26,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core.process import response_file
 from .llvm_tools import resolve_tool
 
 # Object-file suffixes across toolchains (MSVC/clang-cl emit .obj; gcc/clang .o).
@@ -104,8 +105,13 @@ def _run_nm(nm: str, objs: list[Path], demangle: bool) -> dict[Path, list[str]]:
     cmd = [nm, "--defined-only", "--print-size"]
     if demangle:
         cmd.append("--demangle")
-    cmd += [str(o) for o in objs]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # a target's object list runs to hundreds of absolute paths, past the Windows
+    # command-line limit; response_file spills to `@rsp` when it would not fit.
+    try:
+        with response_file([str(o) for o in objs], prefix="llvm-nm-") as tail:
+            proc = subprocess.run(cmd + tail, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise RuntimeError(f"could not run {nm}: {e}") from e
     # nm exits non-zero if some file has no symbols; that's not fatal for a scan.
 
     per_file: dict[Path, list[str]] = {}

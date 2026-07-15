@@ -12,9 +12,11 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -220,6 +222,47 @@ def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, s
     if preset.is_emscripten:
         return emsdk_env(emsdk_path)
     return msvc_env(preset.toolset, preset.arch)
+
+
+# ---------------------------------------------------------------------------
+# Response files
+# ---------------------------------------------------------------------------
+
+# Windows caps a command line at 32767 chars (CreateProcess). Stay well under it: the
+# limit counts the exe path and every flag too, not just the file list.
+_ARGV_LIMIT = 30000
+
+
+@contextmanager
+def response_file(args: list[str], prefix: str) -> Iterator[list[str]]:
+    """Yield the argv tail to pass for `args`, spilling to a response file when too long.
+
+    LLVM tools (clang-format, llvm-nm, llvm-objdump) expand `@file`, one argument per line.
+    A full-tree file list blows past the Windows command-line limit, so anything over
+    _ARGV_LIMIT chars is written to a temp file and passed as a single `@path`.
+
+    Short lists are yielded verbatim, which keeps real paths in the step logs for repro --
+    an `@C:\\...\\tmp.rsp` there would point at an already-deleted file.
+
+    LLVM tokenizes response files Windows-style on Windows hosts, so native backslash
+    paths need no escaping; POSIX hosts use forward slashes, where GNU tokenization's
+    backslash-escaping never triggers.
+    """
+    if sum(len(a) + 1 for a in args) <= _ARGV_LIMIT:
+        yield list(args)
+        return
+
+    # delete=False + explicit unlink: Windows cannot reopen an open NamedTemporaryFile.
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".rsp", prefix=prefix, delete=False, encoding="utf-8")
+    try:
+        with tmp:
+            tmp.write("\n".join(args))
+        yield ["@" + tmp.name]
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
