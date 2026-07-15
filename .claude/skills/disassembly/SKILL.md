@@ -31,7 +31,7 @@ instructions an invocation actually retired — use `trace`. It runs the binary 
 breaks on the symbol, and single-steps one invocation
 ([tools/instruction-tracer](../../../tools/instruction-tracer/readme.md); Windows x64, needs a
 `relwithdebinfo-*` preset for symbols). `--skip N` walks past warm-up hits to reach a steady-state
-call.
+call — see the warm-up rule below, it is not optional.
 
 ## The loop
 
@@ -62,9 +62,35 @@ call.
 To land `show` on exactly one loop, extract it into a **uniquely-named,
 `CC_DONT_INLINE`, anonymous-namespace function** and keep it referenced from a
 test (an unreferenced TU-local noinline function is dead-code-eliminated). One
-clean symbol, trivially searchable. Worked example:
+clean symbol, trivially searchable. Worked examples:
 `node_alloc_free_hotloop_probe` in
-[allocation-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/allocation-benchmark.cc).
+[allocation-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/allocation-benchmark.cc),
+`single_lazy_probe` in
+[async-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/async/async-benchmark.cc).
+
+### Warm the probe, then `--skip` past the cold hits
+
+**A probe's first invocation is not the steady state, and `trace` breaks on the
+first hit by default.** One-time costs hide there — a container's first growth (a
+real `malloc`), a lazy init, a cold branch predictor, an unresolved icall. Trace
+that and you will confidently describe a path the benchmark never actually pays.
+
+So: call the probe **several times on the same state** the benchmark reuses, and
+trace with `--skip N` to land on a settled call. Say which N in the probe's
+comment, so the next reader doesn't re-learn it.
+
+```cpp
+// Called repeatedly on ONE scheduler: the first enqueue grows the queue vector
+// from zero capacity (a real mi_malloc_aligned) that the steady state never pays.
+for (i64 i = 0; i < 3; ++i)
+    bench::sink ^= single_lazy_probe(sched, 7 + i);
+```
+```bash
+uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 -- "<test name>"
+```
+
+Sanity check: if a trace shows an allocator, a lock, or an init-guard you did not
+expect on a hot path, suspect a cold hit before you believe the finding.
 
 ## Tips
 
