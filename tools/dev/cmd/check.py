@@ -100,7 +100,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         return dev.report.summarize_tests(records, presets, ctx.root)
 
     return [
-        dev.Check("format", "clang-format libs/ sources (dirty-only; --all for the whole tree)",
+        dev.Check("format", "clang-format our C++ sources (dirty-only; --all for the whole tree)",
                   True, check_format),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("test",
