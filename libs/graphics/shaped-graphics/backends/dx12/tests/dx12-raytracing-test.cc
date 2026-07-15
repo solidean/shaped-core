@@ -6,12 +6,12 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-// dx12-specific ray-tracing smoke: build a triangle BLAS and a single-instance TLAS on WARP (which
-// implements DXR), then reach into the concrete dx12_blas/dx12_tlas to check the backend internals a
-// tier-1 test can't see — the prebuild sizes and the storage GPU virtual address. Drives everything through
-// the abstract sg API; casts only to inspect (the tier-2 rule from the sg testing guidelines).
+// Ray-tracing smoke: build a triangle BLAS and a single-instance TLAS on WARP (which implements DXR),
+// then check the results. The build, the prebuild sizes, and the instance count are all public sg API; the
+// one dx12-exclusive inspection is the storage buffer's GPU virtual address (the acceleration-structure
+// location), which has no public equivalent — reached by a dynamic cast to the concrete dx12_blas/dx12_tlas
+// (the tier-2 "cast only to inspect" rule from the sg testing guidelines).
 
 namespace
 {
@@ -60,17 +60,21 @@ TEST("sg dx12 - raytracing builds a blas and a tlas on WARP")
     handle->submit_command_list(cc::move(cmd));
     handle->advance_epoch_and_wait_for_idle(); // let the builds finish on the GPU
 
-    // Inspect the backend internals: concrete type, non-zero prebuild sizes, live storage GPU VA.
+    // Prebuild sizes and instance count are part of the public sg::blas / sg::tlas contract.
+    CHECK(blas->size_in_bytes() > 0);
+    CHECK(blas->build_scratch_size_in_bytes() > 0);
+
+    CHECK(tlas->size_in_bytes() > 0);
+    CHECK(tlas->build_scratch_size_in_bytes() > 0);
+    CHECK(tlas->instance_count() == 1);
+
+    // dx12-exclusive: the storage buffer's live GPU virtual address (the acceleration-structure location)
+    // has no public equivalent, so cast to the concrete dx12 type to confirm it is non-zero.
     auto const dx_blas = std::dynamic_pointer_cast<dx12::dx12_blas const>(blas);
     REQUIRE(dx_blas != nullptr);
-    CHECK(dx_blas->size_in_bytes() > 0);
-    CHECK(dx_blas->build_scratch_size_in_bytes() > 0);
     CHECK(dx_blas->_dx12_storage->gpu_virtual_address() != 0);
 
     auto const dx_tlas = std::dynamic_pointer_cast<dx12::dx12_tlas const>(tlas);
     REQUIRE(dx_tlas != nullptr);
-    CHECK(dx_tlas->size_in_bytes() > 0);
-    CHECK(dx_tlas->build_scratch_size_in_bytes() > 0);
-    CHECK(dx_tlas->instance_count() == 1);
     CHECK(dx_tlas->_dx12_storage->gpu_virtual_address() != 0);
 }

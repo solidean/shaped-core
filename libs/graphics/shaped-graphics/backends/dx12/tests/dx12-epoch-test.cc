@@ -18,7 +18,7 @@ TEST("sg dx12 - epoch advance and retire")
 {
     auto handle = dx12::make_warp_context(); // fresh: this asserts the epoch counter's initial value
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     CHECK(c.current_epoch() == sg::epoch::first);
     // Nothing has finished yet, so the completed epoch is first-1.
@@ -33,13 +33,13 @@ TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch re
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     bool finalized = false;
     {
-        auto buf = c.create_dx12_buffer(256, sg::buffer_usage::copy_dst, sg::allocation_info{});
-        REQUIRE(buf.has_value());
-        buf.value()->add_finalizer([&finalized] { finalized = true; });
+        auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_dst);
+        REQUIRE(buf != nullptr);
+        buf->add_finalizer([&finalized] { finalized = true; });
     } // last handle dropped here → deferred deletion staged in the current epoch
 
     // The owning epoch has not advanced/retired yet, so the resource is still (potentially) in use.
@@ -53,11 +53,11 @@ TEST("sg dx12 - submission token reports completion")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    auto const token = c.submit_dx12_command_list(cc::move(cmd.value()));
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto const token = c.submit_command_list(cc::move(cmd));
 
     c.advance_epoch_and_wait_for_idle(); // forces the GPU to catch up
     CHECK(c.is_submission_complete(token));

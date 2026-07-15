@@ -11,8 +11,6 @@
 
 namespace
 {
-namespace dx12 = sg::backend::dx12;
-
 // A pinned byte buffer filled by fn(i), moved into the pin (owns it, zero-copy).
 cc::pinned_data<cc::byte const> make_bytes(cc::isize n, auto&& fn)
 {
@@ -30,18 +28,18 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 4096});
     REQUIRE(ctx.has_value());
-    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+    auto& c = *ctx.value();
 
     cc::isize const n = 20000; // several windows, non-aligned so partial windows are exercised
-    auto buf = c.create_dx12_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
-    REQUIRE(buf.has_value());
+    auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
 
-    c.upload.bytes_to_buffer(buf.value(), make_bytes(n, [](cc::isize i) { return i * 7 + 1; }));
+    c.upload.bytes_to_buffer(buf, make_bytes(n, [](cc::isize i) { return i * 7 + 1; }));
 
-    auto down = c.create_dx12_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.bytes_from_buffer(buf.value(), 0, n);
-    c.submit_dx12_command_list(cc::move(down.value()));
+    auto down = c.create_command_list();
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, n);
+    c.submit_command_list(cc::move(down));
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
@@ -62,27 +60,26 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
-    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+    auto& c = *ctx.value();
 
     int const count = 24;
     cc::isize const each = 1024;
     cc::vector<sg::raw_buffer_handle> bufs;
     for (int k = 0; k < count; ++k)
     {
-        auto buf
-            = c.create_dx12_buffer(each, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
-        REQUIRE(buf.has_value());
-        c.upload.bytes_to_buffer(buf.value(), make_bytes(each, [k](cc::isize i) { return i + k; }));
-        bufs.push_back(buf.value());
+        auto buf = c.persistent.create_raw_buffer(each, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+        REQUIRE(buf != nullptr);
+        c.upload.bytes_to_buffer(buf, make_bytes(each, [k](cc::isize i) { return i + k; }));
+        bufs.push_back(buf);
     }
 
     bool all_ok = true;
     for (int k = 0; k < count; ++k)
     {
-        auto down = c.create_dx12_command_list();
-        REQUIRE(down.has_value());
-        auto future = down.value()->download.bytes_from_buffer(bufs[k], 0, each);
-        c.submit_dx12_command_list(cc::move(down.value()));
+        auto down = c.create_command_list();
+        REQUIRE(down != nullptr);
+        auto future = down->download.bytes_from_buffer(bufs[k], 0, each);
+        c.submit_command_list(cc::move(down));
 
         auto const bytes = c.wait_for(future);
         REQUIRE(bytes.has_value());
@@ -100,7 +97,7 @@ TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
-    auto& c = static_cast<dx12::dx12_context&>(*ctx.value());
+    auto& c = *ctx.value();
 
     // Sizes chosen so windows carry parts of two uploads and single uploads span windows; aggregate spans
     // several windows so slots recycle. Byte k*13+7 keeps each buffer's pattern distinct.
@@ -110,21 +107,20 @@ TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
     for (int k = 0; k < count; ++k)
     {
         cc::isize const n = sizes[k];
-        auto buf
-            = c.create_dx12_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
-        REQUIRE(buf.has_value());
-        c.upload.bytes_to_buffer(buf.value(), make_bytes(n, [k](cc::isize i) { return i * (k * 13 + 7); }));
-        bufs.push_back(buf.value());
+        auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+        REQUIRE(buf != nullptr);
+        c.upload.bytes_to_buffer(buf, make_bytes(n, [k](cc::isize i) { return i * (k * 13 + 7); }));
+        bufs.push_back(buf);
     }
 
     bool all_ok = true;
     for (int k = 0; k < count; ++k)
     {
         cc::isize const n = sizes[k];
-        auto down = c.create_dx12_command_list();
-        REQUIRE(down.has_value());
-        auto future = down.value()->download.bytes_from_buffer(bufs[k], 0, n);
-        c.submit_dx12_command_list(cc::move(down.value()));
+        auto down = c.create_command_list();
+        REQUIRE(down != nullptr);
+        auto future = down->download.bytes_from_buffer(bufs[k], 0, n);
+        c.submit_command_list(cc::move(down));
 
         auto const bytes = c.wait_for(future);
         REQUIRE(bytes.has_value());

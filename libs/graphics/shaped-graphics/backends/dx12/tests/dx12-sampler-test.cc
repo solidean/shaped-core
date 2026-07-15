@@ -105,14 +105,14 @@ TEST("sg dx12 - static sampler naming no binding is rejected")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     sg::binding const bindings[] = {
         {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
     sg::named_sampler const statics[] = {{.name = "Nope", .sampler = {}}}; // matches no sampler binding
 
-    auto layout = c.create_dx12_binding_group_layout(bindings, statics, sg::lifetime_scope::persistent);
+    auto layout = c.uncached.try_create_binding_group_layout(bindings, statics);
     CHECK(!layout.has_value());
 }
 
@@ -120,21 +120,21 @@ TEST("sg dx12 - a missing dynamic sampler is rejected at group creation")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     sg::binding const bindings[] = {
         {.name = "Dyn", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
-    auto layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(layout.has_value());
+    auto layout = c.uncached.create_binding_group_layout(bindings);
+    REQUIRE(layout != nullptr);
 
     // No samplers provided → the dynamic "Dyn" binding is unfilled.
-    auto group = c.create_dx12_binding_group(layout.value(), {}, {}, sg::lifetime_scope::persistent);
+    auto group = c.persistent.try_create_binding_group(layout, {}, {});
     CHECK(!group.has_value());
 
     // A sampler named for a binding that does not exist is also rejected.
     sg::named_sampler const wrong[] = {{.name = "Ghost", .sampler = {}}};
-    auto group2 = c.create_dx12_binding_group(layout.value(), {}, wrong, sg::lifetime_scope::persistent);
+    auto group2 = c.persistent.try_create_binding_group(layout, {}, wrong);
     CHECK(!group2.has_value());
 }
 

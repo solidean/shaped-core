@@ -2,11 +2,6 @@
 
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
-#include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
-#include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh>
-#include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2), reused here with an extra storage-texture
 // binding the shader doesn't touch — enough to drive the texture UAV descriptor + the dispatch barrier.
@@ -35,38 +30,34 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // storage texture → UAV
     {
-        auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::readwrite_texture), sg::allocation_info{});
-        REQUIRE(tex.has_value());
+        auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
+        REQUIRE(tex != nullptr);
         sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
-        auto layout
-            = c.create_dx12_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
-        REQUIRE(layout.has_value());
+        auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+        REQUIRE(layout != nullptr);
 
-        sg::texture_2d const typed(tex.value());
+        sg::texture_2d const typed(tex);
         sg::named_view const nv{.name = "Tex", .view = typed.as_readwrite_view()};
-        auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
-                                                 sg::lifetime_scope::persistent);
-        REQUIRE(group.has_value()); // create_texture_view UAV succeeded + the debug layer accepted it
+        auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
+        REQUIRE(group != nullptr); // create_texture_view UAV succeeded + the debug layer accepted it
     }
 
     // sampled texture → SRV
     {
-        auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::readonly_texture), sg::allocation_info{});
-        REQUIRE(tex.has_value());
+        auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readonly_texture));
+        REQUIRE(tex != nullptr);
         sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
-        auto layout
-            = c.create_dx12_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
-        REQUIRE(layout.has_value());
+        auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+        REQUIRE(layout != nullptr);
 
-        sg::texture_2d const typed(tex.value());
+        sg::texture_2d const typed(tex);
         sg::named_view const nv{.name = "Tex", .view = typed.as_readonly_view()};
-        auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
-                                                 sg::lifetime_scope::persistent);
-        REQUIRE(group.has_value());
+        auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
+        REQUIRE(group != nullptr);
     }
 }
 
@@ -74,7 +65,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     constexpr int count = 256;
 
@@ -95,41 +86,39 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
     shader.bindings.push_back(
         sg::binding{.name = "Tex", .set = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_texture});
 
-    auto buf
-        = c.create_dx12_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
-                               sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src, sg::allocation_info{});
-    REQUIRE(buf.has_value());
-    auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::readwrite_texture), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto buf = c.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
+                                              sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    REQUIRE(buf != nullptr);
+    auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
+    REQUIRE(tex != nullptr);
 
-    auto group_layout = c.create_dx12_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
-    REQUIRE(group_layout.has_value());
-    auto pipeline_layout = c.create_dx12_pipeline_layout(
-        sg::pipeline_layout_description{.groups = {group_layout.value()}}, sg::lifetime_scope::persistent);
-    REQUIRE(pipeline_layout.has_value());
-    auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), {}, sg::lifetime_scope::persistent);
-    REQUIRE(pipeline.has_value());
+    auto group_layout = c.uncached.create_binding_group_layout(shader.bindings);
+    REQUIRE(group_layout != nullptr);
+    auto pipeline_layout = c.uncached.create_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    REQUIRE(pipeline_layout != nullptr);
+    auto pipeline = c.uncached.create_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
+    REQUIRE(pipeline != nullptr);
 
-    sg::texture_2d const typed(tex.value());
+    sg::texture_2d const typed(tex);
     sg::named_view const views[] = {
-        {.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()},
+        {.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()},
         {.name = "Tex", .view = typed.as_readwrite_view()},
     };
-    auto group = c.create_dx12_binding_group(group_layout.value(), cc::span<sg::named_view const>(views, 2), {},
-                                             sg::lifetime_scope::persistent);
-    REQUIRE(group.has_value());
+    auto group = c.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
+    REQUIRE(group != nullptr);
 
-    auto disp = c.create_dx12_command_list();
-    REQUIRE(disp.has_value());
-    disp.value()->compute.bind_pipeline(*pipeline.value());
-    disp.value()->compute.bind_group(0, *group.value());
-    disp.value()->compute.dispatch_threads(count);
-    c.submit_dx12_command_list(cc::move(disp.value()));
+    auto disp = c.create_command_list();
+    REQUIRE(disp != nullptr);
+    disp->compute.bind_pipeline(*pipeline);
+    disp->compute.bind_group(0, *group);
+    disp->compute.dispatch_threads(count);
+    c.submit_command_list(cc::move(disp));
 
-    auto down = c.create_dx12_command_list();
-    REQUIRE(down.has_value());
-    auto future = down.value()->download.data_from_buffer<sg::u32>(buf.value(), 0, count);
-    c.submit_dx12_command_list(cc::move(down.value()));
+    auto down = c.create_command_list();
+    REQUIRE(down != nullptr);
+    auto future = down->download.data_from_buffer<sg::u32>(buf, 0, count);
+    c.submit_command_list(cc::move(down));
 
     auto const data = c.wait_for(future);
     REQUIRE(data.has_value());
