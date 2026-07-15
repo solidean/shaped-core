@@ -2,8 +2,8 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 
-// Untemplated core of the async runtime: the per-thread scheduler binding, the inline scheduler pump, and
-// the node state machine / poll loop. See async_node.hh for the shape and invariants.
+// Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump,
+// and the node state machine / poll loop. See async_node.hh for the shape and invariants.
 //
 // Concurrency model (safe to drive from many threads):
 //   * a per-node spinlock (the low bit of the packed state/ops control word) serializes state transitions and
@@ -110,12 +110,12 @@ cc::async_worker_scope::~async_worker_scope()
     s_current_scheduler = _previous;
 }
 
-void cc::inline_scheduler::enqueue(async_node_ptr node)
+void cc::singlethreaded_scheduler::enqueue(async_node_ptr node)
 {
     _queue.push_back(cc::move(node));
 }
 
-bool cc::inline_scheduler::run_one()
+bool cc::singlethreaded_scheduler::run_one()
 {
     if (_queue.empty())
         return false;
@@ -126,7 +126,7 @@ bool cc::inline_scheduler::run_one()
     return true;
 }
 
-void cc::inline_scheduler::run_until(cc::function_ref<bool()> done)
+void cc::singlethreaded_scheduler::run_until(cc::function_ref<bool()> done)
 {
     while (!done() && run_one())
     {
@@ -458,6 +458,20 @@ void cc::async_node_base::drop_ready_pending_deps()
     deps().remove_ready();
 }
 
+void cc::async_node_base::schedule_pending_deps(async_node_base* except)
+{
+    // Only COLD deps: those are the ones nobody has taken responsibility for yet. A dep that is already
+    // scheduled/running is accounted for, and one that is `blocked` is parked on its OWN deps — schedule()
+    // would drag it back to `scheduled` and re-enqueue it, and it would just re-subscribe and re-park. Down a
+    // chain past the inline depth cap that turns every park into a re-poll storm.
+    deps().for_each(
+        [except](impl::async_dep_entry e)
+        {
+            if (e.dep() != except && e.dep()->is_cold())
+                e.dep()->schedule();
+        });
+}
+
 bool cc::async_node_base::try_subscribe(async_node_base* dependent)
 {
     lock_scope g(this);
@@ -580,20 +594,22 @@ void cc::async_node_base::poll()
 
         if (!deps().empty())
         {
-            // Eager depth-first drive: require() already made every dependency runnable, so rather than parking
-            // we try to satisfy one right here — drive it inline on this stack (better locality, no scheduler
-            // round-trip, no wakeup). A work-stealing pool can still steal the other, already-scheduled deps in
-            // parallel; whichever finishes first, we re-evaluate and drop it. We only fall back to the old
-            // subscribe+park path when the picked dep cannot be completed inline (a manual/push node, one
-            // already running on another worker, or one whose own deps aren't ready) or the recursion depth cap
-            // is hit. Subscription therefore becomes the exception, not the rule.
-            //
-            // TODO: in a pure-inline run every dep also sits in the scheduler queue (require() enqueued it) and
-            // is popped later as a ready no-op. Harmless, but the enqueue could be gated on "are there
-            // steal-capable peers" (a scheduler property) to avoid the churn.
+            // Eager depth-first drive: rather than parking we try to satisfy one dependency right here — drive
+            // it inline on this stack (better locality, no scheduler round-trip, no wakeup). We only fall back
+            // to the subscribe+park path when the picked dep cannot be completed inline (a manual/push node,
+            // one already running on another worker, or one whose own deps aren't ready) or the recursion depth
+            // cap is hit. Subscription therefore becomes the exception, not the rule.
             if (s_inline_depth < async_max_inline_depth)
             {
                 async_node_base* const pick = deps().first(); // non-null: deps() is not empty
+
+                // Publish all-but-one: `pick` runs here, so enqueuing it would only churn — it would be popped
+                // later as a ready no-op, and until then the queue's strong ref pins it alive. The siblings are
+                // worth publishing only if someone could actually steal them; a singlethreaded scheduler has no
+                // peers, so it publishes nothing and drives the whole graph on this stack.
+                if (ctx.scheduler != nullptr && ctx.scheduler->has_steal_capable_peers)
+                    schedule_pending_deps(pick);
+
                 {
                     inline_depth_guard const ds;
                     pick->poll();
@@ -602,6 +618,11 @@ void cc::async_node_base::poll()
                     continue; // progress: drop the finished dep and re-evaluate (drives siblings left-to-right)
                 // pick could not be completed inline -> fall through to subscribe + park on the not-ready set
             }
+
+            // About to park, so nothing on this stack will drive them: every remaining dep must be runnable
+            // now, or nobody ever wakes us. require() no longer does this, and the depth-cap path above skips
+            // the inline drive entirely.
+            schedule_pending_deps(nullptr);
 
             // Install wakeup continuations late, then decide whether to park.
             bool const found_ready = subscribe_to_pending_deps();

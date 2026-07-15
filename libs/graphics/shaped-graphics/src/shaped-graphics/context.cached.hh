@@ -26,12 +26,12 @@ public:
     /// sg::pipeline_creation_exception on a creation failure.
     [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(pipeline_layout_description const& desc);
 
-    /// The async compute_pipeline for `desc`, built on a miss. Drive with cc::async_blocking_get, or
+    /// The async compute_pipeline for `desc`, built on a miss. Drive with cc::async_blocking_get_singlethreaded, or
     /// poll .is_ready() / .try_value(); a build failure surfaces as an async error. Acquire the pipeline
     /// layout through this scope too for full dedup (see pipeline_cache).
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(compute_pipeline_description const& desc);
 
-    /// The async raytracing_pipeline for `desc`, built on a miss. Drive with cc::async_blocking_get, or
+    /// The async raytracing_pipeline for `desc`, built on a miss. Drive with cc::async_blocking_get_singlethreaded, or
     /// poll .is_ready() / .try_value(); a build failure surfaces as an async error. Acquire the pipeline
     /// layout through this scope too for full dedup (see pipeline_cache).
     [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(raytracing_pipeline_description const& desc);

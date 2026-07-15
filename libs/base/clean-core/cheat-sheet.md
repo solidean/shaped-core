@@ -400,7 +400,7 @@ b->process_messages_if_unthreaded();      // one cycle -> bool "more to do"; no-
 b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe to call every frame
 ```
 
-## Async / dataflow (incubator — see docs/async.md)
+## Async / dataflow (incubator — see docs/systems/async.md)
 
 ```cpp
 #include <clean-core/thread/async.hh>     // cc::async<T, E = async_error> — eventual result<T, E>; dataflow model
@@ -418,9 +418,10 @@ auto m = cc::make_async_manual<int>();               // promise-style: external_
 auto rv = cc::make_async_from_value(42);   auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
 auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also *_from_error_emplace<T, E>(...)
 
-// driving BLOCKS the calling thread (busy-waits vs a real scheduler) — top-level/tests only, never in a frame:
-int v = cc::async_blocking_get(a);                               // -> T (asserts on error/cancel)
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a); // fallible drive -> result<T, E>
+// you never block on an async: a SCHEDULER drives it. These build a throwaway singlethreaded_scheduler and
+// BLOCK the calling thread — top-level/tests only, never in a frame. Verbose name = deliberately discouraged:
+int v = cc::async_blocking_get_singlethreaded(a);                                 // -> T (asserts on error/cancel)
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get_singlethreaded(a); // fallible -> result<T, E>
 cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
 int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
@@ -434,13 +435,17 @@ m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")
 [step=0, dep=cc::shared_async<int>()](cc::async_context<int>& actx) mutable -> cc::async_step_status {
     if (step++ == 0) { dep = cc::make_async_lazy([]{ return 10; }); actx.require(dep); return actx.wait_for_dependencies(); }
     return actx.resolve_to_value(*dep->value_ptr()); };   // or actx.success(...)
-actx.require(dep);              // -> bool ready (no subscription); else records a pending dep, return wait
+actx.require(dep);              // -> bool ready (NEITHER subscribes NOR schedules — the poll loop owns both);
+                                //    else records a pending dep, return wait
 actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)
 actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  actx.wait_for_dependencies();  actx.yield();
 
-// driving decoupled from any executor (the seam); default is inline, on the calling thread:
-cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind scheduler to this thread
-root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // pump; interleave external push here
+// two schedulers, same surface. singlethreaded = drives inline + NEVER publishes, so deps cannot run
+// concurrently however many cores idle (single-threaded by construction, not by circumstance):
+cc::singlethreaded_scheduler sched;  int v = sched.blocking_get(root);  // mirrors pool.blocking_get(root)
+cc::async_worker_scope scope(sched);   // bind scheduler to this thread (blocking_get does this itself)
+root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump; interleave external push here
+sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
 cc::async_thread_pool pool(cc::num_hardware_threads());  // >=1 workers; every worker serves all compute work

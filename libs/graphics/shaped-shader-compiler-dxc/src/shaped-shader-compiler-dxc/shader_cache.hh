@@ -14,7 +14,7 @@
 /// node, so a shader is never compiled twice.
 ///
 /// Compilation runs on the installed default async pool (cc::install_default_async_pool); with none
-/// installed, cc::async_blocking_get drives it inline on the calling thread. Each worker uses its own
+/// installed, cc::async_blocking_get_singlethreaded drives it inline on the calling thread. Each worker uses its own
 /// thread-local ssc::dxc::compiler (the compiler is one-per-thread / not thread-safe).
 
 namespace ssc::dxc
@@ -29,7 +29,7 @@ public:
     void add_default_in_memory_provider(cc::isize max_entries = 4096);
 
     /// The async compiled shader for (desc, options), reusing a cached node if present. Drive with
-    /// cc::async_blocking_get(sh) or poll sh->try_value() (yields sg::compiled_shader_handle); on a
+    /// cc::async_blocking_get_singlethreaded(sh) or poll sh->try_value() (yields sg::compiled_shader_handle); on a
     /// compile failure the node carries the DXC diagnostics as an async error.
     ///
     /// `desc.source` must already be preprocessed (compile() rejects #includes) — resolve includes via

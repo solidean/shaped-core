@@ -159,7 +159,7 @@
 auto a = cc::make_async_lazy([]{ <span class="k">return</span> 3; });                  <span class="c">// async&lt;int&gt;</span>
 auto b = cc::make_async_lazy([]{ <span class="k">return</span> 4; });                  <span class="c">// async&lt;int&gt;</span>
 auto c = cc::make_async_lazy([](int x, int y){ <span class="k">return</span> x + y; }, a, b); <span class="c">// c waits for a,b</span>
-int v = cc::async_blocking_get(c);                          <span class="c">// drives the graph -&gt; 7</span></pre>
+int v = cc::async_blocking_get_singlethreaded(c);                          <span class="c">// drives the graph -&gt; 7</span></pre>
     </div>
     <p class="hint">Use ← / → (or the buttons below) to move between slides.</p>
   </section>
@@ -431,7 +431,7 @@ int v = cc::async_blocking_get(c);                          <span class="c">// d
           <g>
             <rect x="22"  y="260" width="150" height="38" rx="7" fill="var(--deps)"></rect><text class="lbl" x="97"  y="284" text-anchor="middle" font-size="11">dep-list cells (slab)</text>
             <rect x="182" y="260" width="180" height="38" rx="7" fill="var(--rc)"></rect><text class="lbl" x="272" y="284" text-anchor="middle" font-size="11">scheduler queue (heap vector)</text>
-            <rect x="372" y="260" width="266" height="38" rx="7" fill="var(--conts)"></rect><text class="lbl" x="505" y="278" text-anchor="middle" font-size="11">caller stack: handles a,b,c · inline_scheduler</text><text class="lbl" x="505" y="292" text-anchor="middle" font-size="10">· worker_scope · the frame while it computes</text>
+            <rect x="372" y="260" width="266" height="38" rx="7" fill="var(--conts)"></rect><text class="lbl" x="505" y="278" text-anchor="middle" font-size="11">caller stack: handles a,b,c · singlethreaded_scheduler</text><text class="lbl" x="505" y="292" text-anchor="middle" font-size="10">· worker_scope · the frame while it computes</text>
           </g>
         </g>
       </svg>
@@ -443,7 +443,7 @@ int v = cc::async_blocking_get(c);                          <span class="c">// d
 
   <!-- 8 — walkthrough -->
   <section class="slide">
-    <h2><span class="kicker">Execution</span>Step through <code class="inl">async_blocking_get(c)</code></h2>
+    <h2><span class="kicker">Execution</span>Step through <code class="inl">async_blocking_get_singlethreaded(c)</code></h2>
     <div class="wk-controls">
       <button id="wkPrev" class="ghost">◀ Prev</button>
       <button id="wkNext">Next ▶</button>
@@ -591,7 +591,7 @@ int v = cc::async_blocking_get(c);                          <span class="c">// d
       thread.</p>
     <p class="sub">Source: <code class="inl">clean-core/thread/async.hh</code> ·
       <code class="inl">async_node.hh</code> · <code class="inl">async.cc</code> · prose in
-      <code class="inl">docs/async.md</code>.</p>
+      <code class="inl">docs/systems/async.md</code>.</p>
   </section>
 
 </div>
@@ -689,8 +689,8 @@ int v = cc::async_blocking_get(c);                          <span class="c">// d
         { name:"b", state:"cold", payload:{kind:"scratch"}, note:"frame []{return 4;}" },
         { name:"c", state:"cold", payload:{kind:"scratch"}, note:"frame captures a,b" }
       ] },
-    { cap: "async_blocking_get(c) schedules c.",
-      alloc: "An inline_scheduler + worker_scope go on the stack. <span class='mono-t'>c-&gt;schedule()</span> flips cold → scheduled and pushes a handle to c onto the scheduler queue.",
+    { cap: "async_blocking_get_singlethreaded(c) schedules c.",
+      alloc: "An singlethreaded_scheduler + worker_scope go on the stack. <span class='mono-t'>c-&gt;schedule()</span> flips cold → scheduled and pushes a handle to c onto the scheduler queue.",
       hl: 2,
       nodes: [
         { name:"a", state:"cold", payload:{kind:"scratch"}, note:"" },
@@ -730,7 +730,7 @@ int v = cc::async_blocking_get(c);                          <span class="c">// d
         { name:"c", state:"ready_value", payload:{kind:"value", v:7}, note:"frame torn down" }
       ] },
     { cap: "Value copied out → 7; teardown.",
-      alloc: "async_blocking_get copies c's value into a result&lt;int, async_error&gt; and returns 7. As the caller's handles a, b, c drop, the three nodes are freed back to the slab.",
+      alloc: "async_blocking_get_singlethreaded copies c's value into a result&lt;int, async_error&gt; and returns 7. As the caller's handles a, b, c drop, the three nodes are freed back to the slab.",
       hl: 2,
       nodes: [
         { name:"a", state:"ready_value", payload:{kind:"value", v:3}, note:"handle dropping" },

@@ -1,10 +1,10 @@
 // Single-thread cc::async drive benchmark — Phase 1 of the async performance gate.
 //
 // Measures the "async tax": the per-async overhead of create -> drive-to-completion -> destroy on ONE
-// thread (the inline scheduler), with nothing multithreaded involved. If this is expensive, no
+// thread (a singlethreaded_scheduler), with nothing multithreaded involved. If this is expensive, no
 // work-stealing work matters, so it is measured first.
 //
-// For each case we build a small async graph, drive it to completion with a reused inline_scheduler +
+// For each case we build a small async graph, drive it to completion with a reused singlethreaded_scheduler +
 // async_worker_scope, and read the result zero-copy via try_value(). Every case is reported next to a
 // hand-written DIRECT baseline that computes the same thing, so the tax (async ns / direct ns) is
 // explicit. One "op" = one async node processed; units are chosen so the reported rate is nodes/second,
@@ -110,8 +110,13 @@ void report(char const* label, isize nodes, double async_ops_per_sec, double dir
     std::printf("%-22s %8lld %13.1f %13.2f %14.2f %9.1fx\n", label, (long long)nodes, a_mops, a_ns, d_ns, tax);
 }
 
-// Drive a freshly-built root to completion on the calling thread's inline scheduler, return its value.
-i64 drive(cc::inline_scheduler& sched, cc::shared_async<i64> const& root)
+// Drive a freshly-built root to completion on the calling thread's scheduler, return its value.
+//
+// The scheduler is reused across every iteration, so this only measures the graph if the queue settles on its
+// own. It does: a singlethreaded_scheduler has no steal-capable peers, so the poll loop never publishes a
+// dependency it is about to drive inline, and nothing is left queued to pin nodes alive. Were that not so, the
+// live-node set would grow without bound and this would degrade into a memory-growth benchmark.
+i64 drive(cc::singlethreaded_scheduler& sched, cc::shared_async<i64> const& root)
 {
     root->schedule();
     sched.run_until([&] { return root->is_ready(); });
@@ -158,7 +163,7 @@ void case_born_ready()
 }
 
 // Single lazy node driven inline: node alloc + closure + one poll + finish + teardown + scheduler push/pop.
-void case_single_lazy(cc::inline_scheduler& sched)
+void case_single_lazy(cc::singlethreaded_scheduler& sched)
 {
     constexpr isize nodes = 1;
     int const G = graphs_for(nodes);
@@ -188,7 +193,7 @@ void case_single_lazy(cc::inline_scheduler& sched)
 }
 
 // Single-dependency transform a -> b: the two-phase frame (register dep, wait, compute).
-void case_single_dep(cc::inline_scheduler& sched)
+void case_single_dep(cc::singlethreaded_scheduler& sched)
 {
     constexpr isize nodes = 2;
     int const G = graphs_for(nodes);
@@ -221,7 +226,7 @@ void case_single_dep(cc::inline_scheduler& sched)
 
 // Deep linear chain: amortized per-node cost. `n` straddles the inline depth cap (async_max_inline_depth
 // == 128): below it the drive is depth-first inline, above it the poll loop falls back to subscribe+park.
-void case_chain(cc::inline_scheduler& sched, char const* label, int n)
+void case_chain(cc::singlethreaded_scheduler& sched, char const* label, int n)
 {
     isize const nodes = n;
     int const G = graphs_for(nodes);
@@ -252,7 +257,7 @@ void case_chain(cc::inline_scheduler& sched, char const* label, int n)
 }
 
 // Fan-in c = f(a, b): per-dep unwrap + short-circuit on a two-leaf sum.
-void case_fan_in(cc::inline_scheduler& sched)
+void case_fan_in(cc::singlethreaded_scheduler& sched)
 {
     constexpr isize nodes = 3;
     int const G = graphs_for(nodes);
@@ -286,7 +291,7 @@ void case_fan_in(cc::inline_scheduler& sched)
 }
 
 // Balanced sum-tree driven single-threaded: per-node cost at scale (depth 13 -> 16383 nodes).
-void case_sum_tree(cc::inline_scheduler& sched, int depth)
+void case_sum_tree(cc::singlethreaded_scheduler& sched, int depth)
 {
     isize const nodes = (isize(1) << (depth + 1)) - 1;
     int const G = graphs_for(nodes); // == 1 for depth 13
@@ -319,7 +324,7 @@ void run_all()
 
     case_born_ready();
 
-    cc::inline_scheduler sched;
+    cc::singlethreaded_scheduler sched;
     cc::async_worker_scope scope(sched); // bind once; reused across every driven case
 
     case_single_lazy(sched);

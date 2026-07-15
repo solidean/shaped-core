@@ -18,7 +18,9 @@
 
 thread_local cc::async_thread_pool::worker* cc::async_thread_pool::s_current_worker = nullptr;
 
-cc::async_thread_pool::async_thread_pool(int worker_count)
+// A 1-worker pool has nobody to steal from it, so it reports no steal-capable peers and the poll loop stops
+// publishing deps it is about to drive inline anyway.
+cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(worker_count > 1)
 {
     CC_ASSERT(worker_count >= 1, "a thread pool needs at least one worker");
 

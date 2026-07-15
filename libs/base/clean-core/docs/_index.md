@@ -52,6 +52,8 @@ Deep dives on the internal machinery, including holes and gotchas not obvious fr
   hatch across container types works today; `retype` and the ergonomic API around it do not yet.
 - [systems/node-allocation](systems/node-allocation.md) — the slab allocator for small nodes:
   size classes, wait-free cross-thread free, and the by-design slab leak in the current refill path.
+- [systems/async](systems/async.md) — `cc::async<T, E>`, the value/dataflow async: the frame model, the
+  never-blocking poll loop, the 64 B node layout, the work-stealing pool, and the direct-path cost breakdown.
 
 ## Conventions
 

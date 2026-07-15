@@ -5,8 +5,8 @@ model is values and dataflow transformations, not futures/promises or callback c
 the CPU fan-out "task system" that `cc::threaded_actor` defers to. `E` is the failure-channel type; it defaults
 to `async_error` (a move-only wrapper over `cc::any_error`), but any type works (an enum, a small struct, …).
 
-Headers: [`clean-core/thread/async.hh`](../src/clean-core/thread/async.hh) (public, templated) and
-[`clean-core/thread/async_node.hh`](../src/clean-core/thread/async_node.hh) (untemplated core + scheduler
+Headers: [`clean-core/thread/async.hh`](../../src/clean-core/thread/async.hh) (public, templated) and
+[`clean-core/thread/async_node.hh`](../../src/clean-core/thread/async_node.hh) (untemplated core + scheduler
 seam). This is **incubator-stage** API — expect it to grow and change.
 
 ## Model
@@ -18,7 +18,7 @@ carries both), not exceptions or out-of-band control flow.
 ```cpp
 auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
 auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on a; f gets a plain int
-int v = cc::async_blocking_get(b);   // drives the graph on this thread -> 42
+int v = cc::async_blocking_get_singlethreaded(b);   // drives the graph on this thread -> 42
 ```
 
 The handle:
@@ -56,8 +56,9 @@ context-free — a value frame that *also* takes a context must give `T` explici
 `async_context<T, E>` gives a frame:
 
 * `require(dep) -> bool` — true if `dep` is already ready (read its value now); otherwise records it as a
-  pending dependency and returns false. **No subscription happens here.** `dep` may be a `shared_async`
-  created earlier or one the frame builds on the fly (dynamic dependencies) — capture it so it stays alive.
+  pending dependency and returns false. **It neither subscribes nor schedules** — the poll loop owns both (see
+  publish all-but-one). `dep` may be a `shared_async` created earlier or one the frame builds on the fly
+  (dynamic dependencies) — capture it so it stays alive.
 * resolve the result — each returns the matching status, so `return actx.xxx(...)`: `resolve_to_value(v)` /
   `resolve_to_error(E)` (aliased `success(v)` / `error(...)`; for the default `E`, `error(any_error)` wraps),
   plus `wait_for_dependencies()` and `yield()`. Both resolves complete the node **in place** as the frame runs.
@@ -91,12 +92,12 @@ Plain non-async arguments in the variadic dependency form are not wired up yet.
 ## Polling never blocks
 
 `poll()` drives a node forward until it completes, fails as a value, or **parks** on not-ready dependencies.
-Its loop: drop ready deps; if any remain, **drive one inline, depth-first** — `require()` already made every
-dependency runnable, so the poller descends into a not-ready dependency's own `poll()` on the current stack
-(bounded by a per-worker depth cap) and re-evaluates. Only when a dependency cannot be completed inline — a
-manual/push node, one already running on another worker, or the depth cap — does it fall back to installing
-wakeup continuations and parking. Otherwise it runs a compute step, and on completion publishes the result and
-wakes dependents. It never blocks a thread.
+Its loop: drop ready deps; if any remain, **drive one inline, depth-first** — the poller descends into a
+not-ready dependency's own `poll()` on the current stack (a cold node polls fine, which is what lets `require()`
+stay out of scheduling) and re-evaluates. Only when a dependency cannot be completed inline — a manual/push
+node, one already running on another worker, or the depth cap — does it fall back to scheduling the remaining
+deps, installing wakeup continuations, and parking. Otherwise it runs a compute step, and on completion
+publishes the result and wakes dependents. It never blocks a thread.
 
 **Execution order among a node's dependencies is unspecified.** The eager drive visits them in an unspecified
 order and a work-stealing pool may complete them in any order; only the resulting *values* are guaranteed. The
@@ -147,26 +148,60 @@ wired into the sugar yet; bridge it by hand in a raw frame.
 
 ## Driving (the scheduler seam)
 
-The async graph is **decoupled from any executor**. A worker binds a scheduler to its thread with
-`async_worker_scope`; nodes reach it via `async_scheduler::current()`. The default is `inline_scheduler`: a
-worker-local LIFO stack pumped on the calling thread — the shipped default, and what makes the whole system
-testable without threads.
+**You never block on an async — a scheduler makes progress on it**, and blocking is a convenience that
+scheduler offers. The graph itself is **decoupled from any executor**: a worker binds a scheduler to its thread
+with `async_worker_scope`, and nodes reach it via `async_scheduler::current()`.
 
-The `async_blocking_get` / `try_async_blocking_get` drivers **block the calling thread**, pumping the graph
-here on an inline scheduler. They are a top-level / test convenience for self-contained graphs — never call
-them from inside a frame. Their names say so deliberately.
+There are two schedulers, and they present the same surface:
+
+| | drives | publishes work | use |
+|---|---|---|---|
+| `singlethreaded_scheduler` | inline, on the calling thread | never | tests, debug, deterministic runs |
+| `async_thread_pool` | worker threads | yes (unless 1 worker) | real concurrent work |
 
 ```cpp
-// convenience: drive a self-contained graph to completion on this thread (BLOCKS)
-int v = cc::async_blocking_get(root);                              // asserts on error/cancel
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get(root);   // fallible -> result<T, E>
+cc::singlethreaded_scheduler sched;
+int v = sched.blocking_get(root);        // drives + blocks THIS thread
+cc::async_thread_pool pool(cc::num_hardware_threads());
+int v = pool.blocking_get(root);         // submits + blocks the (foreign) calling thread
+```
 
-// lower-level, for interleaving with external completion:
-cc::inline_scheduler sched;
+`singlethreaded_scheduler` is single-threaded **by construction, not by circumstance**: it has no peers, so it
+never publishes work and a graph's nodes cannot run concurrently however many cores sit idle. That is what
+makes the whole system testable without threads.
+
+For a self-contained graph, the free functions build a throwaway one for you. The verbose names are
+deliberate — this is a test/debug convenience, not how real work gets scheduled:
+
+```cpp
+int v = cc::async_blocking_get_singlethreaded(root);                       // asserts on error/cancel
+cc::result<int, cc::async_error> r = cc::try_async_blocking_get_singlethreaded(root); // fallible
+```
+
+`run_one` / `run_until` / `drain` are the underlying pump, and the pump is what you need when a graph parks on
+a manual node: nothing progresses while you are not inside it, so call it again after the external push.
+
+```cpp
+cc::singlethreaded_scheduler sched;
 cc::async_worker_scope scope(sched);
 root->schedule();
-sched.run_until([&] { return root->is_ready(); });
+sched.run_until([&] { return root->is_ready(); }); // interleave an external push here, then pump again
 ```
+
+### Publish all-but-one
+
+A node's poll loop drives one dependency inline on its own stack, so enqueuing *that* one would be pure churn:
+it would be popped later as a ready no-op, and until then the queue's strong handle would pin it alive. The
+loop therefore publishes only the **other** dependencies, and only when
+`async_scheduler::has_steal_capable_peers` says someone could actually claim them. `require()` neither
+schedules nor subscribes — the poll loop owns both, and schedules whatever is left before it parks.
+
+For a `singlethreaded_scheduler` this means chains and single-dependency transforms enqueue **nothing at all**;
+for a pool, a fan-out of n publishes n−1 stealable siblings. A 1-worker pool reports no peers, so it behaves
+like the single-threaded case.
+
+This is a lifetime property as much as a perf one: a queued entry is a strong node handle, so work abandoned in
+a queue pins its graph alive. It is pinned by the "reused scheduler settles empty" test.
 
 Externally produced values use a promise-style node:
 
@@ -211,7 +246,7 @@ auto ri = cc::make_async_from_value_emplace<Immovable>(7);        // build T in 
 
 ## Concurrent execution: `async_thread_pool`
 
-`cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../src/clean-core/thread/async_thread_pool.hh))
+`cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../../src/clean-core/thread/async_thread_pool.hh))
 is a **work-stealing** scheduler that runs graphs on real threads. Each worker has a private LIFO deque (freshly
 spawned children stay hot) and steals from siblings when idle; a shared injection queue takes work from foreign
 threads and cross-thread wakeups.
@@ -275,6 +310,69 @@ original 384 B), and the node is cacheline-aligned to avoid false sharing betwee
 
 The **semantics and the public API are the contract**; the node layout is not, and can change under the hood as
 the system matures without breaking callers.
+
+## The direct path: measured cost & optimization ideas
+
+The floor case — `make_async_manual<int>()` created and dropped, no frame, no scheduler — costs **~17 ns /
+~80 cycles** and retires **167 instructions** (i9-12900H, `relwithdebinfo-clang`). The raw slab alloc+free of
+the same node class is ~2 ns, so ~15 ns is node overhead. Reproduce the ladder with
+[born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) and the instruction counts by
+tracing its pinned probes (`dev.py assembly trace --target clean-core-test --symbol make_async_manual_probe`).
+
+For 64 B of storage plus an alloc *and* a dealloc, ~80 cycles is not alarming. The ideas below are recorded
+because the traces show *where* it goes, not because the number is a problem today. None is committed work.
+
+**The two `lock dec` are over half the budget.** Teardown does `lock dec [node]` (strong) then `lock dec
+[node+4]` (weak) — ~20 cycles each uncontended. Since `_strong`/`_weak` are adjacent `atomic<u32>` in one
+aligned 8 B word, a single 64-bit load could check for the sole-owner `(1,1)` case and skip both locked RMWs
+(libstdc++'s `_M_release` does exactly this). **Caveat:** any scheme that fuses the two counters into one word
+makes weak and strong traffic contend on the same cacheline word where they previously only shared a line —
+fine if weak refs stay rare (continuations hold them), potentially worse if they don't. Needs measuring, not
+assuming.
+
+**~45 instructions are pure overhead** and are unambiguously safe to remove:
+
+* Three trivially-inlinable header functions that clang left out-of-line in `teardown_payload`
+  (`async_dep_head::for_each`, `~async_dep_head`, `~poly_node_allocation`) — collectively ~31 instructions and
+  three stack frames to test three pointers against zero.
+* The node ctor stores the ops pointer, then **reloads, masks, and re-stores it** to pack the initial state
+  into its low bits. Both are compile-time constants, so this should be one store — it doesn't fold because
+  `_state_and_ops` is `std::atomic<u64>` and the compiler won't forward across atomic accesses. During
+  construction the node isn't published yet, so the atomic is unnecessary there.
+* A `/GS` stack cookie in `free_storage`, which has no buffers, on the hottest free path.
+* `free_storage` chases `node -> ops -> class_index` (a dependent load into a cold cacheline) to fetch a
+  constant, then bounds-checks it.
+
+**The lazy path allocates twice.** `make_async_lazy` costs a second node alloc for the closure (16 B poly node
+— no SSO) on top of the 64 B node, and installing that 8 B pointer into the frame slot costs **four**
+out-of-line calls (~60 instructions) because `poly_node_allocation::operator=(&&)` and its temporaries never
+inline. Small-closure SSO in the node's payload would remove the second alloc entirely.
+
+**Deferring teardown** to another thread is possible today at the user level (hand the handle to a reclaim
+thread) and is not planned as a built-in.
+
+### What publish-all-but-one was worth
+
+Before it, `require()` scheduled every cold dependency and the eager drive then completed it inline anyway,
+leaving a ready no-op in the queue that `run_until` never popped. A reused scheduler's live-node set grew
+without bound, the slab stopped recycling hot 64 B slots, and the working set thrashed the caches. Measured on
+the drive benchmark ([async-benchmark.cc](../../tests/benchmarks/async/async-benchmark.cc), i9-12900H):
+
+| case | before | after |
+|---|---|---|
+| single-dep a→b | 1732 ns/op | 81 |
+| chain N=64 | 6352 ns/op | 69 |
+| chain N=512 (past the depth cap) | 8561 ns/op | 154 |
+| fan-in c=f(a,b) | 6306 ns/op | 80 |
+| sum-tree depth 13 | 12329 ns/op | 84 |
+
+`born-ready` (~31 ns) and `single lazy` (~90 ns) were never affected — they have no dependencies, so they
+retained nothing.
+
+One subtlety worth keeping: the park path schedules only **cold** deps. `schedule()` drags a `blocked` node
+back to `scheduled` and re-enqueues it, so scheduling a dep that is itself parked makes it re-subscribe and
+re-park — down a chain past the inline depth cap that becomes a re-poll storm (measured: 21672 ns/op on
+`chain N=512`, 50x worse than doing nothing).
 
 ## Not yet here (follow-ups)
 

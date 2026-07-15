@@ -20,7 +20,7 @@
 //
 //   auto a = cc::make_async_scheduled<int>([](cc::async_context<int>&) { return 40; });
 //   auto b = cc::make_async_lazy([](int x) { return x + 2; }, a);   // b depends on a; f gets a plain int
-//   int v = cc::async_blocking_get(b);   // drives the graph on this thread -> 42
+//   int v = cc::async_blocking_get_singlethreaded(b);   // drives the graph on this thread -> 42
 //
 // Handles:
 //   shared_async<T, E> = cc::shared_ptr<async<T, E>, ...>  — the normal, composable, many-dependent handle (an
@@ -149,7 +149,7 @@ template <class E>
 /// The normal composable async handle. Always used through shared_async<T, E> (an intrusive cc::shared_ptr); the
 /// node is non-copyable and immovable. E is the failure-channel type, defaulting to async_error. Create with
 /// cc::make_async_lazy / cc::make_async_scheduled (the variadic dependency form handles single- and
-/// multi-dependency transforms) or the make_async_from_* factories, drive with cc::async_blocking_get.
+/// multi-dependency transforms) or the make_async_from_* factories, drive with cc::async_blocking_get_singlethreaded.
 template <class T, class E>
 struct async : impl::async_typed_node<T, E>
 {
@@ -233,7 +233,11 @@ public:
 public:
     /// Require an existing async as a dependency. Returns true if it is already ready (read its value now);
     /// otherwise records it as a pending dependency and returns false — the frame should then return
-    /// wait_for_dependencies(). No subscription happens here; that is installed late, only if this node parks.
+    /// wait_for_dependencies().
+    ///
+    /// Neither subscribes nor schedules: the poll loop owns both. It drives one dependency inline on this
+    /// stack, publishes the rest only if some other thread could actually steal them, and schedules whatever
+    /// is left before it parks. Scheduling here instead would enqueue a node we are about to run ourselves.
     template <class T, class E>
     bool require(shared_async<T, E> const& dep) const
     {
@@ -241,8 +245,6 @@ public:
         if (dep->is_ready())
             return true;
         current->add_pending_dependency(dep.get());
-        if (dep->is_cold())
-            dep->schedule(); // a required-but-cold dependency must be made runnable, else nobody drives it
         return false;
     }
 };
@@ -438,7 +440,7 @@ auto async_make_node(F&& f, Deps&&... deps)
 // ============================================================================
 
 /// Create a cold (lazy) async — it runs only once scheduled (required by another async, or driven by
-/// async_blocking_get). The compute frame is `f`, optionally followed by dependency arguments:
+/// async_blocking_get_singlethreaded). The compute frame is `f`, optionally followed by dependency arguments:
 ///
 ///   * each dependency is a shared_async<U>; it is awaited and unwrapped to the stored U before f runs.
 ///     Errors short-circuit: if any dependency failed, f is skipped and the first error propagates.
@@ -546,24 +548,21 @@ template <class T, class E = async_error>
 }
 
 // ============================================================================
-// driving — BLOCKING (top-level / tests only)
+// driving — a scheduler makes progress; blocking is its convenience
 // ============================================================================
 
-/// Drive `root` to completion on the calling thread and return its outcome. This BLOCKS the calling thread:
-/// with the inline scheduler it pumps work here, and against a future concurrent scheduler it would busy-spin
-/// waiting — so it is a top-level / test convenience, never something to call from inside a frame (park on a
-/// dependency instead). Asserts if the graph cannot complete (e.g. blocked on an external/manual node that is
-/// never pushed — drive those with an explicit inline_scheduler + async_worker_scope).
-template <class T, class E = async_error>
-[[nodiscard]] cc::result<T, E> try_async_blocking_get(shared_async<T, E> const& root)
+// You never block on an async — a scheduler drives it, and these block the CALLING thread while that happens.
+// Mirrors async_thread_pool::blocking_get / try_blocking_get, so the two schedulers read the same.
+
+template <class T, class E>
+cc::result<T, E> singlethreaded_scheduler::try_blocking_get(shared_async<T, E> const& root)
 {
     CC_ASSERT(root != nullptr, "cannot drive a null async");
 
-    inline_scheduler scheduler;
-    async_worker_scope scope(scheduler);
+    async_worker_scope scope(*this); // nests harmlessly if this scheduler is already bound here
 
     root->schedule();
-    scheduler.run_until([&] { return root->is_ready(); });
+    run_until([&] { return root->is_ready(); });
 
     CC_ASSERT(root->is_ready(), "async graph could not complete (blocked on external work?)");
 
@@ -572,14 +571,35 @@ template <class T, class E = async_error>
     return *root->value_ptr(); // copy out
 }
 
-/// Drive `root` to completion and return its value (copy). Asserts on error/cancellation. BLOCKS the calling
-/// thread (see try_async_blocking_get). For fallible handling use try_async_blocking_get; for zero-copy
-/// access use root->try_value() after driving.
-template <class T, class E = async_error>
-[[nodiscard]] T async_blocking_get(shared_async<T, E> const& root)
+template <class T, class E>
+T singlethreaded_scheduler::blocking_get(shared_async<T, E> const& root)
 {
-    auto r = cc::try_async_blocking_get(root);
+    auto r = try_blocking_get(root);
     CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
     return cc::move(r).value();
+}
+
+/// Drive `root` to completion on a throwaway singlethreaded_scheduler and return its outcome. BLOCKS the
+/// calling thread, and the whole graph runs HERE — no dependency executes concurrently, however many cores are
+/// idle. Never call it from inside a frame (park on a dependency instead). Asserts if the graph cannot
+/// complete (e.g. parked on a manual node that is never pushed — keep a singlethreaded_scheduler and pump it
+/// with run_until around the external push instead).
+///
+/// The verbose name is deliberate: this is a top-level / test convenience. Real work belongs on a scheduler
+/// you own — a singlethreaded_scheduler you pump, or an async_thread_pool.
+template <class T, class E = async_error>
+[[nodiscard]] cc::result<T, E> try_async_blocking_get_singlethreaded(shared_async<T, E> const& root)
+{
+    singlethreaded_scheduler scheduler;
+    return scheduler.try_blocking_get(root);
+}
+
+/// try_async_blocking_get_singlethreaded, but returns the value (copy) and asserts on error/cancellation. For
+/// zero-copy access use root->try_value() after driving.
+template <class T, class E = async_error>
+[[nodiscard]] T async_blocking_get_singlethreaded(shared_async<T, E> const& root)
+{
+    singlethreaded_scheduler scheduler;
+    return scheduler.blocking_get(root);
 }
 } // namespace cc

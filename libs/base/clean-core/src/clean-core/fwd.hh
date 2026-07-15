@@ -244,7 +244,7 @@ struct async_node_traits;
 }
 struct async_scheduler;
 struct async_worker_scope;
-struct inline_scheduler;
+struct singlethreaded_scheduler;
 struct async_thread_pool;
 struct async_context_base;
 template <class T, class E = async_error>

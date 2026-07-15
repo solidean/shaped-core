@@ -13,11 +13,11 @@
 
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency /
 // continuation bookkeeping, the scheduler seam, and the failure-channel value type. The templated public
-// surface (async<T>, async_context, make_async_*, async_blocking_get) lives in async.hh.
+// surface (async<T>, async_context, make_async_*, async_blocking_get_singlethreaded) lives in async.hh.
 //
 // Nothing here ever blocks a thread: poll() drives a node's compute frame forward until it completes, fails
 // as a value, or parks on not-ready dependencies with wakeup continuations installed. The default driver
-// runs everything inline on the calling thread (see inline_scheduler), which is both the shipped default and
+// runs everything inline on the calling thread (see singlethreaded_scheduler), which is both the shipped default and
 // what makes the system testable without threads. A real work-stealing pool is a future layer on the same
 // async_scheduler seam.
 
@@ -127,13 +127,21 @@ using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 
 /// Where runnable nodes go. The async machinery only ever asks a scheduler to make a node runnable; it never
 /// owns execution or blocks. A worker binds a scheduler to its thread with async_worker_scope; nodes then
-/// reach it via async_scheduler::current(). The default is inline_scheduler (runs on the calling thread); a
+/// reach it via async_scheduler::current(). The default is singlethreaded_scheduler (runs on the calling thread); a
 /// future work-stealing pool implements the same interface.
 ///
 /// A queued node is passed as a shared handle so the scheduler co-owns it while it waits: a node cannot be
 /// destroyed while runnable, which is what makes required dependencies freely schedulable (and steal-safe).
 struct async_scheduler
 {
+    /// True if a node enqueued here may be picked up by ANOTHER thread. Fixed at construction, so the poll
+    /// loop reads it as a plain field rather than paying a virtual call per step.
+    ///
+    /// The poll loop publishes a node's dependencies only when this holds: it is about to drive one of them
+    /// inline on this stack anyway, so with nobody to steal the rest, enqueuing them is pure churn — every
+    /// entry would be popped later as a ready no-op, and until then its strong ref pins the node alive.
+    bool const has_steal_capable_peers;
+
     /// Make a node runnable on the CURRENT worker (local / hot enqueue). Called only when a worker scope is
     /// active on this thread.
     virtual void enqueue(async_node_ptr node) = 0;
@@ -144,6 +152,10 @@ struct async_scheduler
 
     virtual ~async_scheduler() = default;
 
+protected:
+    explicit async_scheduler(bool steal_capable_peers) : has_steal_capable_peers(steal_capable_peers) {}
+
+public:
     /// The scheduler bound to the current thread. Asserts if no async_worker_scope is active.
     [[nodiscard]] static async_scheduler& current();
     [[nodiscard]] static async_scheduler* current_or_null();
@@ -173,17 +185,42 @@ private:
     async_scheduler* _previous = nullptr;
 };
 
-/// The default scheduler: a worker-local LIFO stack pumped on the calling thread. No global lock, no thread
-/// ever blocks. LIFO keeps freshly spawned children hot in cache, matching explicit-stack recursion.
-struct inline_scheduler final : async_scheduler
+/// The default scheduler: a LIFO stack pumped on the calling thread, driving everything inline. No global
+/// lock, no thread ever blocks. LIFO keeps freshly spawned children hot in cache, matching explicit-stack
+/// recursion.
+///
+/// Single-threaded by construction, not by circumstance: it has no peers, so it never publishes work and a
+/// graph's nodes cannot run concurrently even when other threads sit idle. Progress happens only while this
+/// thread is inside blocking_get / run_one / run_until — which is why a graph that parks on a manual node
+/// needs the pump called again after the external push.
+struct singlethreaded_scheduler final : async_scheduler
 {
+    singlethreaded_scheduler() : async_scheduler(false) {}
+
     void enqueue(async_node_ptr node) override; // out-of-line: needs the node handle's traits complete
+
+    /// Drive `root` to completion on this thread and return its outcome. Asserts if the graph cannot complete
+    /// (e.g. parked on a manual node that is never pushed — pump those with run_until instead).
+    /// Defined in async.hh, which has the typed handle.
+    template <class T, class E = async_error>
+    [[nodiscard]] cc::result<T, E> try_blocking_get(shared_async<T, E> const& root);
+
+    /// try_blocking_get, but returns the value directly; asserts on error/cancellation.
+    template <class T, class E = async_error>
+    [[nodiscard]] T blocking_get(shared_async<T, E> const& root);
 
     /// Poll one queued node (LIFO). Returns false if the queue was empty.
     bool run_one();
 
-    /// Pump the queue until `done` returns true or the queue drains.
+    /// Pump the queue until `done` returns true or the queue drains. May return with work still queued (that
+    /// is what `done` means) — the scheduler owns it until drained or destroyed.
     void run_until(cc::function_ref<bool()> done);
+
+    /// Pump until the queue is empty.
+    void drain()
+    {
+        run_until([] { return false; });
+    }
 
     [[nodiscard]] bool empty() const { return _queue.empty(); }
 
@@ -673,6 +710,7 @@ protected:
 private:
     bool try_begin_running();
     void drop_ready_pending_deps();
+    void schedule_pending_deps(async_node_base* except); // make pending deps runnable; skips `except` if non-null
     bool subscribe_to_pending_deps();               // returns true if a dep was found already ready (abort parking)
     bool try_subscribe(async_node_base* dependent); // on the dep: subscribe unless already ready
     void route_after_schedule();                    // enqueue exactly once after a cold/blocked -> scheduled transition
