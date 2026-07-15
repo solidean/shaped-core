@@ -46,8 +46,11 @@ One-liner per library:
 Supporting directories:
 
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
-  see [docs/dev-py-driver.md](docs/dev-py-driver.md)) and `bin/` (checked-in
-  binaries, e.g. `diag-launcher.exe`).
+  see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in
+  binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules),
+  and `instruction-tracer/` (a C++ tool — see
+  [its readme](tools/instruction-tracer/readme.md) — that records what optimized
+  code actually executed; drive it via `dev.py assembly trace`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry
   points.
@@ -154,6 +157,9 @@ build, `test_diag` after a test (dev.py prints the exact selector). Full referen
 * `uv run dev.py list-presets` / `list-targets` show what's available.
 * `relwithdebinfo-*` has `CC_ASSERT` **on**; `release-*` has it **off**. If you
   touch assertion-gated code, build a `release-*` preset too.
+* `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` gate the `*-test` binaries and `tools/`.
+  Both default to ON for a top-level build (the normal flow) and OFF when
+  shaped-core is consumed via `add_subdirectory`.
 
 ---
 
@@ -295,6 +301,8 @@ how to write one (keep it current when public API changes).
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
+| See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
+| See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
 | Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |

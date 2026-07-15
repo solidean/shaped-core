@@ -88,25 +88,27 @@ target_link_libraries(nexus
 )
 
 # Test executable
-add_executable(nexus-test
-    tests/main.cc
-    tests/test-api-test.cc
-    tests/test-check-test.cc
-    tests/test-export-test.cc
-    tests/test-registry-test.cc
-    tests/test-section-test.cc
-    tests/test-invocable-test.cc
-    tests/test-alias-test.cc
-    tests/test-typed-value-test.cc
-    tests/fuzz-engine-test.cc
-    tests/fuzz-minimize-test.cc
-    tests/fuzz-regression-test.cc
-)
+if(SC_BUILD_TESTS)
+    add_executable(nexus-test
+        tests/main.cc
+        tests/test-api-test.cc
+        tests/test-check-test.cc
+        tests/test-export-test.cc
+        tests/test-registry-test.cc
+        tests/test-section-test.cc
+        tests/test-invocable-test.cc
+        tests/test-alias-test.cc
+        tests/test-typed-value-test.cc
+        tests/fuzz-engine-test.cc
+        tests/fuzz-minimize-test.cc
+        tests/fuzz-regression-test.cc
+    )
 
-target_link_libraries(nexus-test
-    PRIVATE
-    nexus
-)
+    target_link_libraries(nexus-test
+        PRIVATE
+        nexus
+    )
 
-# Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
-sc_add_nexus_web_runner(nexus-test)
+    # Browser test runner (Emscripten only): nexus-test-web.html drives these tests one per frame.
+    sc_add_nexus_web_runner(nexus-test)
+endif()

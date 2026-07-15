@@ -132,60 +132,62 @@ endif()
 # INVOCABLE_TESTs run against every available backend and are gated on a backend being present (below), since
 # the nexus orphan check fails an enabled invocable that no driver invokes. Per-backend smoke tests and
 # internal invariants live with their backend as their own *-test binary (see backends/dx12/tests).
-add_executable(shaped-graphics-test
-    tests/main.cc
-    tests/buffer/views-test.cc
-    tests/texture/texture-test.cc
-    tests/texture/texture-view-test.cc
-    tests/transfer/bytes_future-test.cc
-    tests/binding/binding-test.cc
-    tests/sampler/sampler-test.cc
-    tests/barrier/access_state-test.cc
-    tests/barrier/subresource-test.cc
-    tests/barrier/slot-test.cc
-)
-
-# Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
-# contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
-# each invocable runnable by name across all backends. Only meaningful when at least one backend is present.
-#
-# TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
-# support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
-# It would make this `if(_sg_backends)` guard unnecessary (a backend is always present), let large parts of
-# the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
-# against. Future work.
-if(_sg_backends)
-    target_sources(shaped-graphics-test PRIVATE
-        tests/backends/backends.cc
-        tests/context/context-test.cc
-        tests/buffer/buffer-test.cc
-        tests/texture/texture-create-test.cc
-        tests/command_list/command_list-test.cc
-        tests/transfer/transfer-test.cc
-        tests/transfer/transfer-fuzz-test.cc
-        tests/transfer/upload-async-test.cc
-        tests/transfer/download-async-test.cc
-        tests/copy/copy-test.cc
-        tests/transient/transient-test.cc
-        tests/barrier/barrier-test.cc
-        tests/error-handling/error-handling-test.cc
-        tests/raytracing/raytracing-test.cc
-        tests/query/query-test.cc
+if(SC_BUILD_TESTS)
+    add_executable(shaped-graphics-test
+        tests/main.cc
+        tests/buffer/views-test.cc
+        tests/texture/texture-test.cc
+        tests/texture/texture-view-test.cc
+        tests/transfer/bytes_future-test.cc
+        tests/binding/binding-test.cc
+        tests/sampler/sampler-test.cc
+        tests/barrier/access_state-test.cc
+        tests/barrier/subresource-test.cc
+        tests/barrier/slot-test.cc
     )
-    if(WIN32)
-        target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
+
+    # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
+    # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
+    # each invocable runnable by name across all backends. Only meaningful when at least one backend is present.
+    #
+    # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
+    # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
+    # It would make this `if(_sg_backends)` guard unnecessary (a backend is always present), let large parts of
+    # the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
+    # against. Future work.
+    if(_sg_backends)
+        target_sources(shaped-graphics-test PRIVATE
+            tests/backends/backends.cc
+            tests/context/context-test.cc
+            tests/buffer/buffer-test.cc
+            tests/texture/texture-create-test.cc
+            tests/command_list/command_list-test.cc
+            tests/transfer/transfer-test.cc
+            tests/transfer/transfer-fuzz-test.cc
+            tests/transfer/upload-async-test.cc
+            tests/transfer/download-async-test.cc
+            tests/copy/copy-test.cc
+            tests/transient/transient-test.cc
+            tests/barrier/barrier-test.cc
+            tests/error-handling/error-handling-test.cc
+            tests/raytracing/raytracing-test.cc
+            tests/query/query-test.cc
+        )
+        if(WIN32)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
+        endif()
+        if(Vulkan_FOUND)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
+        endif()
     endif()
-    if(Vulkan_FOUND)
-        target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
-    endif()
+
+    target_link_libraries(shaped-graphics-test
+        PRIVATE
+        shaped-graphics
+        ${_sg_backends}
+        nexus
+    )
+
+    # Browser test runner (Emscripten only); a no-op on native toolchains.
+    sc_add_nexus_web_runner(shaped-graphics-test)
 endif()
-
-target_link_libraries(shaped-graphics-test
-    PRIVATE
-    shaped-graphics
-    ${_sg_backends}
-    nexus
-)
-
-# Browser test runner (Emscripten only); a no-op on native toolchains.
-sc_add_nexus_web_runner(shaped-graphics-test)

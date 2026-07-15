@@ -48,34 +48,36 @@ target_compile_options(shaped-shader-compiler-dxc
 )
 
 # Test binary. Named *-test so the dev.py runner discovers it.
-add_executable(shaped-shader-compiler-dxc-test
-    tests/main.cc
-    tests/preprocess-test.cc
-    tests/compile-test.cc
-    tests/reflect-raytracing-test.cc
-    tests/shader_cache-test.cc
-)
-
-target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-shader-compiler-dxc nexus)
-
-# The dx12 backend is added before this lib (root CMakeLists order), so its target exists here and can be
-# linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch on WARP -> read back.
-if(TARGET shaped-graphics-dx12)
-    target_sources(shaped-shader-compiler-dxc-test PRIVATE
-        tests/end-to-end-sampler-test.cc
-        tests/end-to-end-multigroup-test.cc
-        tests/end-to-end-inline-constants-test.cc
-        tests/end-to-end-inline-raytracing-test.cc
-        tests/end-to-end-raytracing-test.cc
+if(SC_BUILD_TESTS)
+    add_executable(shaped-shader-compiler-dxc-test
+        tests/main.cc
+        tests/preprocess-test.cc
+        tests/compile-test.cc
+        tests/reflect-raytracing-test.cc
+        tests/shader_cache-test.cc
     )
-    target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
-endif()
 
-# Stage the DXC runtime DLLs (dxcompiler + its dxil.dll signer) next to the test binary so it loads
-# them at run time. DXC_RUNTIME_DLLS is set by extern/dxc; dxil.dll isn't the imported target, so
-# $<TARGET_RUNTIME_DLLS> alone would miss it.
-add_custom_command(TARGET shaped-shader-compiler-dxc-test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:shaped-shader-compiler-dxc-test>
-    COMMAND_EXPAND_LISTS
-)
+    target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-shader-compiler-dxc nexus)
+
+    # The dx12 backend is added before this lib (root CMakeLists order), so its target exists here and can be
+    # linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch on WARP -> read back.
+    if(TARGET shaped-graphics-dx12)
+        target_sources(shaped-shader-compiler-dxc-test PRIVATE
+            tests/end-to-end-sampler-test.cc
+            tests/end-to-end-multigroup-test.cc
+            tests/end-to-end-inline-constants-test.cc
+            tests/end-to-end-inline-raytracing-test.cc
+            tests/end-to-end-raytracing-test.cc
+        )
+        target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
+    endif()
+
+    # Stage the DXC runtime DLLs (dxcompiler + its dxil.dll signer) next to the test binary so it loads
+    # them at run time. DXC_RUNTIME_DLLS is set by extern/dxc; dxil.dll isn't the imported target, so
+    # $<TARGET_RUNTIME_DLLS> alone would miss it.
+    add_custom_command(TARGET shaped-shader-compiler-dxc-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:shaped-shader-compiler-dxc-test>
+        COMMAND_EXPAND_LISTS
+    )
+endif()

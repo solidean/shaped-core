@@ -4,19 +4,28 @@ A local godbolt over the object code the current preset produced:
 
     assembly search <pattern>   list matching symbols (mangled + demangled), grouped by target
     assembly show <symbol>      disassemble one function (Intel syntax, labeled branches)
+    assembly trace <symbol>     record what a function ACTUALLY executed at run time
 
-Objects, not the linked binary, are the source of truth: a release .exe is stripped
-of its symbol table, while every .obj keeps a full one and holds the real inlined
-codegen of a function. See tools/dev/lib/toolchain/disasm.py for the rationale and
-docs/guides/disassembly.md for the workflow.
+search/show answer the static question — what the code might do. Objects, not the linked
+binary, are the source of truth there: a release .exe is stripped of its symbol table, while
+every .obj keeps a full one and holds the real inlined codegen of a function. See
+tools/dev/lib/toolchain/disasm.py for the rationale and docs/guides/disassembly.md.
+
+trace answers the dynamic one — which branch was taken, where an indirect call landed, how many
+instructions an invocation really retired. It drives tools/instruction-tracer (Windows x64 only);
+see that tool's readme.md.
 """
 
 from __future__ import annotations
 
 import argparse
+import platform
 import re
+import subprocess
+import sys
 from pathlib import Path
 
+from tools import dev
 from tools.dev import console
 from tools.dev.lib.toolchain import disasm
 
@@ -24,6 +33,9 @@ from . import args as a
 from .context import Context
 
 NAME = "assembly"
+
+# Built by tools/instruction-tracer/CMakeLists.txt; only exists on Windows with SC_BUILD_TOOLS.
+TRACER_TARGET = "instruction-tracer"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -49,6 +61,45 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Interleave source lines (best-effort; needs debug info, i.e. a relwithdebinfo preset)")
     d.add_argument("--bytes", action="store_true", help="Show raw instruction bytes")
     d.add_argument("--att", action="store_true", help="AT&T syntax instead of Intel")
+
+    t = asm_sub.add_parser(
+        "trace",
+        help="Record the instructions a function actually retired at run time (Windows x64)",
+        description="Run --target under the debugger, break on a symbol, and print what one "
+                    "invocation actually executed. Everything after `--` is passed to the traced "
+                    "binary (e.g. a nexus test-name filter).",
+    )
+    a.preset(t)
+    t.add_argument("--target", required=True, metavar="TARGET",
+                   help="Executable target to trace, e.g. clean-core-test (built automatically)")
+
+    # Exactly one, mirroring the tracer. `--spec` rather than `--target` because --target already
+    # means a build target across this command.
+    where = t.add_mutually_exclusive_group(required=True)
+    where.add_argument("--symbol", help="Break on a symbol; a unique substring is enough")
+    where.add_argument("--address", help="Break on an absolute runtime address, e.g. 0x7ff611203410")
+    where.add_argument("--spec", help="Target spec: foo::bar | 0x7ff6... | mod.exe!foo::bar | mod.exe+0x3410")
+
+    t.add_argument("--skip", type=int, metavar="N", help="Ignore the first N entry hits (default: 0)")
+    t.add_argument("--traces", type=int, metavar="N", help="Record N invocations (default: 1)")
+    t.add_argument("--instructions", type=int, metavar="N",
+                   help="Max retired instructions per trace (default: 100)")
+
+    # BooleanOptionalAction gives each its --no- form; default None means "don't pass it, let the
+    # tracer's own default stand" — so the defaults live in one place, not two.
+    for flag, help_text in (
+        ("until-return", "Stop once the entry frame returns (default: on)"),
+        ("stop-at-syscall", "Stop before executing a syscall (default: on)"),
+        ("stack", "Print the stack at entry (default: on)"),
+        ("source", "Annotate with source file/line and text (default: on)"),
+        ("register-diffs", "Show the registers each instruction changed (default: off)"),
+        ("terminate-after-traces", "Kill the debuggee once done (default: on)"),
+    ):
+        t.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None, help=help_text)
+
+    t.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
+    t.add_argument("debuggee_args", nargs="*", metavar="-- ARGS...",
+                   help="Args passed verbatim to the traced binary")
     return p
 
 
@@ -58,6 +109,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             _search(args, ctx)
         case "show":
             _show(args, ctx)
+        case "trace":
+            _trace(args, ctx)
         case _:  # argparse required=True should prevent this
             ctx.die(f"unknown assembly subcommand {args.assembly_cmd!r}")
 
@@ -315,3 +368,86 @@ def _format_intel(raw: str) -> str:
         out.append(f"  {addr}  {colored_mnem}\t{rest}".rstrip())
         i += 2 if (i + 1 < n and insns[i + 1] is None and _RELOC.search(lines[i + 1])) else 1
     return "\n".join(out)
+
+
+# --- trace --------------------------------------------------------------------
+
+def _artifact_of(ctx: Context, preset, name: str) -> Path | None:
+    """The built executable for target `name`, or None if it is not an executable target here."""
+    for t in ctx.discover(preset):
+        if t.name == name and t.kind == "EXECUTABLE" and t.artifact:
+            return t.artifact
+    return None
+
+
+def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]:
+    """Translate our flags into the tracer's CLI. Flags left at None are simply not passed, so the
+    tracer's own defaults apply and we never restate them."""
+    argv = [str(tracer), "--exe", str(exe)]
+
+    if args.symbol:
+        argv += ["--symbol", args.symbol]
+    elif args.address:
+        argv += ["--address", args.address]
+    else:
+        argv += ["--target", args.spec]
+
+    for flag, value in (("--skip", args.skip), ("--traces", args.traces),
+                        ("--instructions", args.instructions)):
+        if value is not None:
+            argv += [flag, str(value)]
+
+    for flag, value in (
+        ("until-return", args.until_return),
+        ("stop-at-syscall", args.stop_at_syscall),
+        ("stack", args.stack),
+        ("source", args.source),
+        ("register-diffs", args.register_diffs),
+        ("terminate-after-traces", args.terminate_after_traces),
+    ):
+        if value is not None:
+            argv.append(f"--{flag}" if value else f"--no-{flag}")
+
+    # dev.py already resolved the color question (--colored/--plain/auto); make its answer
+    # authoritative rather than letting the child re-detect against an inherited terminal.
+    argv.append("--colored" if console.enabled() else "--plain")
+
+    if args.debuggee_args:
+        argv += ["--"] + list(args.debuggee_args)
+
+    return argv
+
+
+def _trace(args: argparse.Namespace, ctx: Context) -> None:
+    if platform.system() != "Windows":
+        ctx.die("assembly trace needs the Win32 debug API — it is Windows-only")
+
+    preset = ctx.resolve_presets(args.preset)[0]
+
+    if not args.no_build:
+        results = dev.build([preset], [TRACER_TARGET, args.target], root=ctx.root,
+                            auto_configure=True, mirror=args.mirror_output, verbose=args.verbose)
+        if not all(r.ok for r in results):
+            ctx.fail_build(results, [preset])
+
+    tracer = _artifact_of(ctx, preset, TRACER_TARGET)
+    if tracer is None:
+        ctx.die(f"{TRACER_TARGET} is not built for preset {preset.name!r} — it needs "
+                f"SC_BUILD_TOOLS=ON, Windows, and the fetched Zydis "
+                f"(uv run extern/zydis/fetch-zydis.py)")
+
+    exe = _artifact_of(ctx, preset, args.target)
+    if exe is None:
+        ctx.die(f"no executable target named {args.target!r} in preset {preset.name!r} — "
+                f"see: uv run dev.py list-targets")
+
+    if "release" in preset.name:
+        print(console.yellow(f"note: {preset.name} has no PDB; the trace will show raw addresses "
+                             f"without symbols or source. Use a relwithdebinfo preset."), file=sys.stderr)
+
+    argv = _tracer_argv(args, tracer, exe)
+    if args.verbose:
+        print(console.dim(f"  $ {' '.join(argv)}"), file=sys.stderr)
+
+    # Streamed, not captured: a trace is the output the user came for, not a build log to file away.
+    sys.exit(subprocess.run(argv, cwd=ctx.root).returncode)

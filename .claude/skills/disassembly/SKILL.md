@@ -1,7 +1,7 @@
 ---
 name: disassembly
-description: Inspect the optimizer's actual codegen for shaped-core with `dev.py assembly` — search built symbols and disassemble a function (a local godbolt over the object files). Use when you need to confirm what machine code a function compiled to.
-when_to_use: "disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt", "why is X slower/faster", "attribute a perf delta to a cause", "is this microbenchmark representative", "does the real code match the benchmark mock"
+description: Inspect the optimizer's actual codegen for shaped-core with `dev.py assembly` — search built symbols, disassemble a function (a local godbolt over the object files), and trace what a function really executed at run time. Use when you need to confirm what machine code a function compiled to, or which path it actually took.
+when_to_use: "disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt", "why is X slower/faster", "attribute a perf delta to a cause", "is this microbenchmark representative", "does the real code match the benchmark mock", "which branch was taken", "where did that indirect call go", "what did it actually execute", "trace instructions", "how many instructions"
 allowed-tools: Bash mcp__repo_tools__repo_search Read
 ---
 
@@ -22,7 +22,16 @@ diff its disassembly against the mock's; the mock is usually the optimistic one
 ```bash
 uv run dev.py assembly search <pattern> [--preset P] [--target T] [--regex] [--all] [--limit N]
 uv run dev.py assembly show   <symbol>  [--preset P] [--target T] [--source] [--att] [--bytes]
+uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] -- <args>
 ```
+
+**`search`/`show` are static — `trace` is dynamic.** When the question is "what *did* it do" rather
+than "what *might* it do" — which branch was taken, where an indirect/virtual call landed, how many
+instructions an invocation actually retired — use `trace`. It runs the binary under a debugger,
+breaks on the symbol, and single-steps one invocation
+([tools/instruction-tracer](../../../tools/instruction-tracer/readme.md); Windows x64, needs a
+`relwithdebinfo-*` preset for symbols). `--skip N` walks past warm-up hits to reach a steady-state
+call.
 
 ## The loop
 

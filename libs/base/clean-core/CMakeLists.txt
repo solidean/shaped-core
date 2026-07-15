@@ -181,86 +181,89 @@ if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc")
 endif()
 
 # Test executable
-add_executable(clean-core-test
-    tests/main.cc
+if(SC_BUILD_TESTS)
+    add_executable(clean-core-test
+        tests/main.cc
 
-    tests/benchmarks/string-hash-bench.cc
-    tests/benchmarks/hash-benchmark.cc
-    tests/benchmarks/allocation-benchmark.cc
-    tests/benchmarks/async/async-benchmark.cc
-    tests/benchmarks/async/born-ready-benchmark.cc
-    tests/benchmarks/node-allocation-design-benchmark.cc
-    tests/benchmarks/node-allocation-design-refill.cc
+        tests/benchmarks/string-hash-bench.cc
+        tests/benchmarks/hash-benchmark.cc
+        tests/benchmarks/allocation-benchmark.cc
+        tests/benchmarks/async/async-benchmark.cc
+        tests/benchmarks/async/born-ready-benchmark.cc
+        tests/benchmarks/node-allocation-design-benchmark.cc
+        tests/benchmarks/node-allocation-design-refill.cc
 
-    # tests grouped by topic, mirroring src/clean-core/
-    tests/common/assert-test.cc
-    tests/common/hash-test.cc
-    tests/common/hash-types-test.cc
-    tests/common/hash128-test.cc
-    tests/common/invocable-test.cc
-    tests/common/macros-test.cc
-    tests/common/utility-test.cc
+        # tests grouped by topic, mirroring src/clean-core/
+        tests/common/assert-test.cc
+        tests/common/hash-test.cc
+        tests/common/hash-types-test.cc
+        tests/common/hash128-test.cc
+        tests/common/invocable-test.cc
+        tests/common/macros-test.cc
+        tests/common/utility-test.cc
 
-    tests/math/bit-test.cc
-    tests/math/random-test.cc
-    tests/math/wide_arith-test.cc
+        tests/math/bit-test.cc
+        tests/math/random-test.cc
+        tests/math/wide_arith-test.cc
 
-    tests/memory/allocation-test.cc
-    tests/memory/node_allocation-test.cc
-    tests/memory/node_allocation-default-test.cc
-    tests/memory/node_allocation-patterns-test.cc
-    tests/memory/node_allocation-sizes-test.cc
-    tests/memory/node_allocation-slabs-test.cc
-    tests/memory/node_allocation-handles-test.cc
-    tests/memory/unique_ptr-test.cc
-    tests/memory/shared_ptr-test.cc
+        tests/memory/allocation-test.cc
+        tests/memory/node_allocation-test.cc
+        tests/memory/node_allocation-default-test.cc
+        tests/memory/node_allocation-patterns-test.cc
+        tests/memory/node_allocation-sizes-test.cc
+        tests/memory/node_allocation-slabs-test.cc
+        tests/memory/node_allocation-handles-test.cc
+        tests/memory/unique_ptr-test.cc
+        tests/memory/shared_ptr-test.cc
 
-    tests/container/array-test.cc
-    tests/container/fixed-array-test.cc
-    tests/container/small_vector-test.cc
-    tests/container/span-test.cc
-    tests/container/strided_span-test.cc
-    tests/container/pinned_data-test.cc
-    tests/container/vector-test.cc
-    tests/container/map-test.cc
-    tests/container/set-test.cc
-    tests/container/byte_stream_builder-test.cc
-    tests/container/key_value_cache-test.cc
+        tests/container/array-test.cc
+        tests/container/fixed-array-test.cc
+        tests/container/small_vector-test.cc
+        tests/container/span-test.cc
+        tests/container/strided_span-test.cc
+        tests/container/pinned_data-test.cc
+        tests/container/vector-test.cc
+        tests/container/map-test.cc
+        tests/container/set-test.cc
+        tests/container/byte_stream_builder-test.cc
+        tests/container/key_value_cache-test.cc
 
-    tests/string/conversion-test.cc
-    tests/string/format-test.cc
-    tests/string/print-test.cc
-    tests/string/string-test.cc
-    tests/string/string_view-test.cc
-    tests/string/to_debug_string-test.cc
+        tests/string/conversion-test.cc
+        tests/string/format-test.cc
+        tests/string/print-test.cc
+        tests/string/string-test.cc
+        tests/string/string_view-test.cc
+        tests/string/to_debug_string-test.cc
 
-    tests/function/function_ref-test.cc
-    tests/function/unique_function-test.cc
+        tests/function/function_ref-test.cc
+        tests/function/unique_function-test.cc
 
-    tests/error/optional-test.cc
-    tests/error/result-test.cc
+        tests/error/optional-test.cc
+        tests/error/result-test.cc
 
-    tests/thread/async-test.cc
-    tests/thread/async-pool-test.cc
-    tests/thread/mutex-test.cc
-    tests/thread/thread-test.cc
-    tests/thread/threaded_actor-test.cc
-)
+        tests/thread/async-test.cc
+        tests/thread/async-pool-test.cc
+        tests/thread/mutex-test.cc
+        tests/thread/thread-test.cc
+        tests/thread/threaded_actor-test.cc
+    )
 
-target_link_libraries(clean-core-test
-    PRIVATE
-    clean-core
-    nexus
-    xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
-)
+    target_link_libraries(clean-core-test
+        PRIVATE
+        clean-core
+        nexus
+        xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
+    )
 
-# Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
-sc_add_nexus_web_runner(clean-core-test)
+    # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
+    sc_add_nexus_web_runner(clean-core-test)
+endif()
 
 # Coverage
 option(CC_COVERAGE_MSVC "Enable MSVC native coverage" OFF)
 
-if(CC_COVERAGE_MSVC AND MSVC)
+# TARGET clean-core-test: coverage instruments the test binary, which SC_BUILD_TESTS=OFF does not build.
+if(CC_COVERAGE_MSVC AND MSVC AND TARGET clean-core-test)
     # Debug info is required for sensible mapping
     target_compile_options(clean-core PRIVATE /Zi /Od)
     target_compile_options(clean-core-test PRIVATE /Zi /Od)

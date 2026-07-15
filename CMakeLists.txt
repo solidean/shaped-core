@@ -7,6 +7,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Build gating. Both default ON for a top-level build (the normal dev flow) and OFF when
+# shaped-core is consumed via add_subdirectory, where a dependent wants the libraries but not
+# our test and tool binaries. Must precede add_subdirectory(extern): the tools' externals gate
+# on SC_BUILD_TOOLS.
+option(SC_BUILD_TESTS "Build the per-library *-test executables" ${PROJECT_IS_TOP_LEVEL})
+option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEVEL})
+
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
@@ -50,6 +57,13 @@ add_subdirectory(libs/graphics/shaped-viewer)
 # does this automatically) to enable it.
 if(WIN32 AND TARGET dxc)
     add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
+endif()
+
+# Developer tools. instruction-tracer needs the Win32 debug API, dbghelp and the fetched Zydis
+# decoder (extern/zydis); it gates itself on the `zydis` target existing, so a checkout that has
+# not fetched it still configures.
+if(SC_BUILD_TOOLS AND WIN32 AND TARGET zydis)
+    add_subdirectory(tools/instruction-tracer)
 endif()
 
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):

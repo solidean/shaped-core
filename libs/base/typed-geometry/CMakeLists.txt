@@ -75,33 +75,35 @@ target_compile_options(typed-geometry
 )
 
 # Test executable
-add_executable(typed-geometry-test
-    tests/main.cc
+if(SC_BUILD_TESTS)
+    add_executable(typed-geometry-test
+        tests/main.cc
 
-    tests/scalar/scalar-test.cc
-    tests/scalar/angle-test.cc
+        tests/scalar/scalar-test.cc
+        tests/scalar/angle-test.cc
 
-    tests/linalg/comp-test.cc
-    tests/linalg/vec-test.cc
-    tests/linalg/pos-test.cc
-    tests/linalg/bivec-test.cc
-    tests/linalg/mat-test.cc
-    tests/linalg/quat-test.cc
+        tests/linalg/comp-test.cc
+        tests/linalg/vec-test.cc
+        tests/linalg/pos-test.cc
+        tests/linalg/bivec-test.cc
+        tests/linalg/mat-test.cc
+        tests/linalg/quat-test.cc
 
-    tests/geometry/aabb-test.cc
-    tests/geometry/triangle-test.cc
-    tests/geometry/segment-test.cc
-    tests/geometry/ray-test.cc
-    tests/geometry/line-test.cc
-    tests/geometry/plane-test.cc
-    tests/geometry/object-traits-test.cc
-)
+        tests/geometry/aabb-test.cc
+        tests/geometry/triangle-test.cc
+        tests/geometry/segment-test.cc
+        tests/geometry/ray-test.cc
+        tests/geometry/line-test.cc
+        tests/geometry/plane-test.cc
+        tests/geometry/object-traits-test.cc
+    )
 
-target_link_libraries(typed-geometry-test
-    PRIVATE
-    typed-geometry
-    nexus
-)
+    target_link_libraries(typed-geometry-test
+        PRIVATE
+        typed-geometry
+        nexus
+    )
 
-# Browser test runner (Emscripten only): typed-geometry-test-web.html drives these tests one per frame.
-sc_add_nexus_web_runner(typed-geometry-test)
+    # Browser test runner (Emscripten only): typed-geometry-test-web.html drives these tests one per frame.
+    sc_add_nexus_web_runner(typed-geometry-test)
+endif()
