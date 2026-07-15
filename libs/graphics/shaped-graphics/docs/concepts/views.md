@@ -6,16 +6,16 @@
 
 A **view** is a lightweight, strongly-typed value describing how a shader reads a (sub-range of a)
 resource — "this buffer, these elements, as a read-only array of `T`". A rendering routine takes the
-exact view it operates on (`readwrite_view<pixel>`), so a caller passes a slice of a resource without
+exact view it operates on (`readwrite_buffer_view<pixel>`), so a caller passes a slice of a resource without
 a soup of overloads and without a struct whose fields could be mis-set. A view owns a
 [`raw_buffer_handle`](../../src/shaped-graphics/fwd.hh) (it may outlive the call that made it) but no GPU
 memory of its own — it is a pure value, produced by a `buffer.as_*()` factory.
 
 ## Typed by the element type
 
-A buffer view is `access_view<T>`, where the **access class** is the type
-(`uniform_view` / `readonly_view` / `readwrite_view`) and `T` is the element type of the array
-(`readonly_view<particle>`) or the block type (`uniform_view<globals>`). There is no intermediate
+A buffer view is `<access>_buffer_view<T>`, where the **access class** is the type
+(`uniform_buffer_view` / `readonly_buffer_view` / `readwrite_buffer_view`) and `T` is the element type of
+the array (`readonly_buffer_view<particle>`) or the block type (`uniform_buffer_view<globals>`). There is no intermediate
 "shape" wrapper: the raw / byte-addressed case is simply `T = byte` — the degenerate element (stride
 1). `T` must satisfy the `view_element` concept: `byte`, or `sizeof(T) % 4 == 0`, because GPUs load at
 4-byte (DWORD) alignment. Ranges passed to the factories are in **elements of `T`**.
@@ -27,10 +27,10 @@ matches), not replaced by it. Because the call site already fixed `T`, much of t
 compile-time.
 
 **Uniform blocks are stricter.** Constant buffers / UBOs have placement rules storage buffers don't,
-so `uniform_view<T>` uses a tighter `uniform_element` concept and asserts the portable limits (the
+so `uniform_buffer_view<T>` uses a tighter `uniform_element` concept and asserts the portable limits (the
 strictest across backends, so a satisfying view binds everywhere): a block's size must be a **multiple
 of 16** (std140 / HLSL cbuffer packing) and **at most 64 KiB** (D3D12 max CBV; WebGPU default max
-binding) — both compile-time from `sizeof(T)`, which also rejects `uniform_view<byte>` — and its byte
+binding) — both compile-time from `sizeof(T)`, which also rejects `uniform_buffer_view<byte>` — and its byte
 **offset must be 256-byte aligned** (D3D12 CBV placement; WebGPU default; Vulkan's is ≤256 so 256 is
 always valid) — a runtime assert, since the offset is a value.
 
@@ -51,11 +51,11 @@ Per-language mapping:
 
 | view | HLSL / Slang | GLSL / Vulkan | MSL | WGSL |
 |---|---|---|---|---|
-| `uniform_view<T>` | `ConstantBuffer<T>` | std140 UBO | `constant T&` | `var<uniform>` |
-| `readonly_view<T>` | `StructuredBuffer<T>` | `readonly buffer{ T[] }` | `const device T*` | `var<storage, read>` |
-| `readwrite_view<T>` | `RWStructuredBuffer<T>` | `buffer{ T[] }` | `device T*` | `var<storage, read_write>` |
-| `readonly_view<byte>` | `ByteAddressBuffer` | `readonly buffer{ uint[] }` | `const device uchar*` | `array<u32>` |
-| `readwrite_view<byte>` | `RWByteAddressBuffer` | `buffer{ uint[] }` | `device uchar*` | (raw storage) |
+| `uniform_buffer_view<T>` | `ConstantBuffer<T>` | std140 UBO | `constant T&` | `var<uniform>` |
+| `readonly_buffer_view<T>` | `StructuredBuffer<T>` | `readonly buffer{ T[] }` | `const device T*` | `var<storage, read>` |
+| `readwrite_buffer_view<T>` | `RWStructuredBuffer<T>` | `buffer{ T[] }` | `device T*` | `var<storage, read_write>` |
+| `readonly_buffer_view<byte>` | `ByteAddressBuffer` | `readonly buffer{ uint[] }` | `const device uchar*` | `array<u32>` |
+| `readwrite_buffer_view<byte>` | `RWByteAddressBuffer` | `buffer{ uint[] }` | `device uchar*` | (raw storage) |
 
 Two things this factoring settles:
 
@@ -71,14 +71,18 @@ Two things this factoring settles:
   not spelled in the type name.
 
 The relationship a caller must uphold: a buffer's creation `buffer_usage` must be a **superset** of
-every view's access (a `readwrite_view` requires `readwrite_buffer`, etc.). The factories assert this.
+every view's access (a `readwrite_buffer_view` requires `readwrite_buffer`, etc.). The factories assert this.
 
 ## The erased `raw_view`
 
-Every typed view converts (`to_raw()`, or implicitly) into one plain
-[`raw_view`](../../src/shaped-graphics/views.hh) — a tagged struct (access + shape enums + handle +
-params) that a backend `switch`es on to build its native descriptor. The type safety lives entirely
-in the typed views; users never touch `raw_view`, only the backend does.
+Every typed view converts (`to_raw()`, or implicitly) into one
+[`raw_view`](../../src/shaped-graphics/views.hh) — a `std::variant` over one cohesive payload per
+resource kind: `raw_buffer_view` (access + shape + buffer + byte layout), `raw_texture_view` (access +
+texture + dimension + format + range), and `raw_tlas_view` (the TLAS). A backend `std::visit`s / `get_if`s
+the active arm to build its native descriptor; `access_of(rv)` / `shape_of(rv)` read the active arm's
+access / layout (what `accepts()` checks). The type safety lives in the typed views; the raw arms are
+also the directly-usable "raw" binding vocabulary for tooling that builds bindings without the wrappers.
+(`std::variant` for now — likely a `cc::variant` once that lands.)
 
 ## Texture views
 

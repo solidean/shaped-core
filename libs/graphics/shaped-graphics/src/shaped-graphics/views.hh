@@ -8,6 +8,7 @@
 #include <typed-geometry/linalg/vec.hh>   // tg::vec4f (clear color builder)
 
 #include <type_traits>
+#include <variant>
 
 /// Strongly-typed resource *views*: a lightweight, typed handle onto a (sub-range of a) buffer,
 /// interpreted as a shader-facing binding. A routine takes exactly the view it operates on instead of
@@ -26,7 +27,7 @@ concept view_element = std::is_same_v<T, cc::byte> || (sizeof(T) % 4 == 0);
 constexpr isize uniform_buffer_offset_alignment = 256; // Vk minUniformBufferOffsetAlignment / WGPU / DX12 CBV placement
 constexpr isize max_uniform_buffer_size = 65536;       // 64 KiB — DX12 max CBV / WGPU max uniform binding
 
-/// A `uniform_view` block type: a `view_element` whose size obeys the uniform block rules above (a
+/// A `uniform_buffer_view` block type: a `view_element` whose size obeys the uniform block rules above (a
 /// multiple of 16, at most 64 KiB). Excludes `byte` — a uniform block of raw bytes is meaningless.
 template <class T>
 concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(sizeof(T)) <= max_uniform_buffer_size);
@@ -72,37 +73,73 @@ enum class texture_view_dimension : u8
     cube_array,
 };
 
-/// The erased form every typed view converts into — the value a backend reads (via `(access, shape)`)
-/// to build a native descriptor. Fields not relevant to a given `(access, shape)` stay zero.
-struct raw_view
+// The erased form every typed view converts into is `raw_view` (below) — a sum over one cohesive payload
+// per resource kind. The three payload arms are also the directly-usable "raw" binding vocabulary for
+// tooling that builds bindings without the typed wrappers.
+
+/// A buffer view's erased payload: the access class, byte layout, and buffer a backend reads to build a
+/// CBV / SRV / UAV. `shape` picks the interpretation (uniform block / structured array / raw bytes).
+struct raw_buffer_view
 {
-    view_class access;
-    view_shape shape;
+    view_class access = view_class::readonly;  ///< uniform / readonly / readwrite
+    view_shape shape = view_shape::structured; ///< uniform_block / structured / raw
+    raw_buffer_handle buffer;                  ///< the viewed buffer
+    isize offset_in_bytes = 0;                 ///< start of the view within the buffer
+    isize size_in_bytes = 0;                   ///< [uniform_block, raw] visible byte size
+    isize element_count = 0;                   ///< [structured] number of elements
+    isize stride_in_bytes = 0;                 ///< [structured] element stride (= sizeof(T))
+};
 
-    // Buffer views (shape uniform_block / structured / raw). `buffer` is null for a texture view.
-    raw_buffer_handle buffer;  ///< the viewed buffer
-    isize offset_in_bytes = 0; ///< start of the view within the buffer
-    isize size_in_bytes = 0;   ///< [uniform_block, raw] visible byte size
-    isize element_count = 0;   ///< [structured] number of elements
-    isize stride_in_bytes = 0; ///< [structured] element stride (= sizeof(T))
-
-    // Texture views (shape texture). `texture` is null for a buffer view.
+/// A texture view's erased payload: the sampled (SRV) / storage (UAV) descriptor a backend builds over a
+/// subresource range. Dimension / format are a reinterpretation the view chose, not the texture's shape.
+struct raw_texture_view
+{
+    view_class access = view_class::readonly;                               ///< readonly (SRV) / readwrite (UAV)
     raw_texture_handle texture;                                             ///< the viewed texture
     texture_view_dimension view_dimension = texture_view_dimension::tex_2d; ///< shader-facing SRV/UAV dimension
     pixel_format format = pixel_format::undefined; ///< the format the descriptor reads/writes as
     subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
     cc::start_end depth_slice_range
         = {.start = 0, .end = 0}; ///< [3D storage view] depth (W/Z) slice window; empty otherwise
+};
 
-    // Acceleration-structure view (shape acceleration_structure). Null for buffer / texture views. Carries the
-    // abstract TLAS, not a buffer: each backend binds it its own way (dx12 reads its storage GPU VA; vulkan
-    // takes the native VkAccelerationStructureKHR handle; metal an MTLAccelerationStructure).
+/// An acceleration-structure view's erased payload: the abstract TLAS a backend binds its own way (dx12 by
+/// the AS's storage GPU VA; vulkan by the native VkAccelerationStructureKHR handle). Its access class is
+/// always acceleration_structure.
+struct raw_tlas_view
+{
     tlas_handle tlas; ///< the viewed top-level acceleration structure
 };
 
+/// The erased form every typed view converts into — a sum over the per-resource payloads. A backend
+/// `std::visit`s it (or `get_if`s an arm) to build the native descriptor; `named_view` carries one.
+/// NOTE: `std::variant` for now — likely a `cc::variant` once that lands.
+using raw_view = std::variant<raw_buffer_view, raw_texture_view, raw_tlas_view>;
+
+/// The access class the erased view carries — the active arm's (a tlas is always acceleration_structure).
+[[nodiscard]] inline view_class access_of(raw_view const& v)
+{
+    if (auto const* b = std::get_if<raw_buffer_view>(&v))
+        return b->access;
+    if (auto const* t = std::get_if<raw_texture_view>(&v))
+        return t->access;
+    return view_class::acceleration_structure;
+}
+
+/// The layout the erased view carries — the buffer arm's `shape`; a texture arm is `texture`, a tlas arm
+/// `acceleration_structure`.
+[[nodiscard]] inline view_shape shape_of(raw_view const& v)
+{
+    if (auto const* b = std::get_if<raw_buffer_view>(&v))
+        return b->shape;
+    if (std::holds_alternative<raw_texture_view>(v))
+        return view_shape::texture;
+    return view_shape::acceleration_structure;
+}
+
 /// A uniform block of `T` — a constant buffer / UBO binding (read-only). {buffer, offset, sizeof(T)}.
 template <uniform_element T>
-struct uniform_view
+struct uniform_buffer_view
 {
     static constexpr view_class access = view_class::uniform;
 
@@ -112,7 +149,7 @@ struct uniform_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_view{
+        return raw_buffer_view{
             .access = access,
             .shape = view_shape::uniform_block,
             .buffer = buffer,
@@ -127,7 +164,7 @@ struct uniform_view
 /// A read-only storage view of an array of `T` (SRV / read SSBO). With `T == byte` it is a raw,
 /// byte-addressed view; otherwise a structured array strided by `sizeof(T)`.
 template <view_element T>
-struct readonly_view
+struct readonly_buffer_view
 {
     static constexpr view_class access = view_class::readonly;
 
@@ -138,7 +175,7 @@ struct readonly_view
     [[nodiscard]] raw_view to_raw() const
     {
         constexpr bool is_raw = std::is_same_v<T, cc::byte>;
-        return raw_view{
+        return raw_buffer_view{
             .access = access,
             .shape = is_raw ? view_shape::raw : view_shape::structured,
             .buffer = buffer,
@@ -155,7 +192,7 @@ struct readonly_view
 /// A read-write storage view of an array of `T` (UAV / read-write SSBO). With `T == byte` it is a
 /// raw, byte-addressed view; otherwise a structured array strided by `sizeof(T)`.
 template <view_element T>
-struct readwrite_view
+struct readwrite_buffer_view
 {
     static constexpr view_class access = view_class::readwrite;
 
@@ -166,7 +203,7 @@ struct readwrite_view
     [[nodiscard]] raw_view to_raw() const
     {
         constexpr bool is_raw = std::is_same_v<T, cc::byte>;
-        return raw_view{
+        return raw_buffer_view{
             .access = access,
             .shape = is_raw ? view_shape::raw : view_shape::structured,
             .buffer = buffer,
@@ -194,12 +231,11 @@ struct texture_readonly_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_view{.access = access,
-                        .shape = view_shape::texture,
-                        .texture = texture,
-                        .view_dimension = dimension,
-                        .format = format,
-                        .range = range};
+        return raw_texture_view{.access = access,
+                                .texture = texture,
+                                .view_dimension = dimension,
+                                .format = format,
+                                .range = range};
     }
 
     operator raw_view() const { return to_raw(); }
@@ -224,13 +260,12 @@ struct texture_readwrite_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_view{.access = access,
-                        .shape = view_shape::texture,
-                        .texture = texture,
-                        .view_dimension = dimension,
-                        .format = format,
-                        .range = range,
-                        .depth_slice_range = depth_slice_range};
+        return raw_texture_view{.access = access,
+                                .texture = texture,
+                                .view_dimension = dimension,
+                                .format = format,
+                                .range = range,
+                                .depth_slice_range = depth_slice_range};
     }
 
     operator raw_view() const { return to_raw(); }
@@ -240,20 +275,13 @@ struct texture_readwrite_view
 /// `RaytracingAccelerationStructure`. Unlike buffer / texture views it has no element type, no layout, and no
 /// range; it carries the abstract `tlas` so each backend can bind it its own way (dx12 by the AS's GPU VA,
 /// vulkan by the native VkAccelerationStructureKHR handle). Obtain one from `tlas::as_view()`.
-struct acceleration_structure_view
+struct tlas_view
 {
     static constexpr view_class access = view_class::acceleration_structure;
 
     tlas_handle tlas; ///< the top-level acceleration structure to bind
 
-    [[nodiscard]] raw_view to_raw() const
-    {
-        return raw_view{
-            .access = access,
-            .shape = view_shape::acceleration_structure,
-            .tlas = tlas,
-        };
-    }
+    [[nodiscard]] raw_view to_raw() const { return raw_tlas_view{.tlas = tlas}; }
 
     operator raw_view() const { return to_raw(); }
 };

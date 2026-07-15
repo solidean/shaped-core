@@ -3,6 +3,7 @@
 #include <shaped-graphics/views.hh>
 
 #include <memory>
+#include <variant> // std::get — the erased raw_view is a variant; buffer views live in its raw_buffer_view arm
 
 // Views are pure value types over a buffer, so they need no GPU backend — a minimal concrete
 // buffer subclass (shape metadata only) is enough to exercise every factory + the erased raw_view.
@@ -52,9 +53,9 @@ TEST("sg views - uniform view")
     CHECK(v.buffer == buf);
     CHECK(v.offset_in_bytes == 0);
     CHECK(v.size_in_bytes == sizeof(particle));
-    CHECK(sg::uniform_view<particle>::access == sg::view_class::uniform);
+    CHECK(sg::uniform_buffer_view<particle>::access == sg::view_class::uniform);
 
-    auto const raw = v.to_raw();
+    auto const raw = std::get<sg::raw_buffer_view>(v.to_raw());
     CHECK(raw.access == sg::view_class::uniform);
     CHECK(raw.shape == sg::view_shape::uniform_block);
     CHECK(raw.buffer == buf);
@@ -81,7 +82,7 @@ TEST("sg views - readonly structured view")
     CHECK(whole.offset_in_bytes == 0);
     CHECK(whole.element_count == 10);
 
-    auto const raw = whole.to_raw();
+    auto const raw = std::get<sg::raw_buffer_view>(whole.to_raw());
     CHECK(raw.access == sg::view_class::readonly);
     CHECK(raw.shape == sg::view_shape::structured);
     CHECK(raw.element_count == 10);
@@ -91,7 +92,7 @@ TEST("sg views - readonly structured view")
     auto const sub = buf->as_readonly_buffer<sg::u32>({.offset = 2, .size = 3});
     CHECK(sub.offset_in_bytes == 2 * sizeof(sg::u32));
     CHECK(sub.element_count == 3);
-    CHECK(sub.to_raw().stride_in_bytes == sizeof(sg::u32));
+    CHECK(std::get<sg::raw_buffer_view>(sub.to_raw()).stride_in_bytes == sizeof(sg::u32));
 }
 
 TEST("sg views - readwrite structured view")
@@ -101,7 +102,7 @@ TEST("sg views - readwrite structured view")
     auto const v = buf->as_readwrite_buffer<particle>();
     CHECK(v.element_count == 4);
 
-    auto const raw = v.to_raw();
+    auto const raw = std::get<sg::raw_buffer_view>(v.to_raw());
     CHECK(raw.access == sg::view_class::readwrite);
     CHECK(raw.shape == sg::view_shape::structured);
     CHECK(raw.stride_in_bytes == sizeof(particle));
@@ -112,14 +113,14 @@ TEST("sg views - raw byte views")
     auto const buf = make_buffer(256, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer);
 
     auto const ro = buf->as_raw_readonly();
-    auto const ro_raw = ro.to_raw();
+    auto const ro_raw = std::get<sg::raw_buffer_view>(ro.to_raw());
     CHECK(ro_raw.access == sg::view_class::readonly);
     CHECK(ro_raw.shape == sg::view_shape::raw);
     CHECK(ro_raw.size_in_bytes == 256);
     CHECK(ro_raw.stride_in_bytes == 0);
 
     auto const rw = buf->as_raw_readwrite();
-    auto const rw_raw = rw.to_raw();
+    auto const rw_raw = std::get<sg::raw_buffer_view>(rw.to_raw());
     CHECK(rw_raw.access == sg::view_class::readwrite);
     CHECK(rw_raw.shape == sg::view_shape::raw);
     CHECK(rw_raw.size_in_bytes == 256);
@@ -127,7 +128,7 @@ TEST("sg views - raw byte views")
     // Subrange, in bytes.
     auto const sub = buf->as_raw_readonly({.offset = 64, .size = 128});
     CHECK(sub.offset_in_bytes == 64);
-    auto const sub_raw = sub.to_raw();
+    auto const sub_raw = std::get<sg::raw_buffer_view>(sub.to_raw());
     CHECK(sub_raw.shape == sg::view_shape::raw);
     CHECK(sub_raw.size_in_bytes == 128);
 }
@@ -138,8 +139,8 @@ TEST("sg views - implicit conversion to raw_view")
 
     // The typed view converts implicitly to the erased form a backend consumes.
     sg::raw_view const rv = buf->as_readonly_buffer<sg::u32>();
-    CHECK(rv.shape == sg::view_shape::structured);
-    CHECK(rv.element_count == 16);
+    CHECK(sg::shape_of(rv) == sg::view_shape::structured);
+    CHECK(std::get<sg::raw_buffer_view>(rv).element_count == 16);
 }
 
 TEST("sg views - empty buffer yields empty view")

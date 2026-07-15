@@ -43,7 +43,7 @@ TEST("sg sampler - binding_type::sampler is not a view")
     CHECK(!sg::is_sampler(sg::binding_type::uniform_buffer));
 
     // A sampler binding is never satisfied by a resource view — samplers are bound as descriptions.
-    sg::raw_view const not_a_sampler{.access = sg::view_class::readonly, .shape = sg::view_shape::texture};
+    sg::raw_view const not_a_sampler = sg::raw_texture_view{.access = sg::view_class::readonly};
     CHECK(!sg::accepts(sg::binding_type::sampler, not_a_sampler));
 }
 

@@ -48,19 +48,19 @@ public:
     // to the raw_buffer view factory and asserts the matching buffer_usage; ranges are in elements of `T`.
     //
     // The `template <class U = T> requires std::is_same_v<U, T>` shape is a deferral trick, not a
-    // reinterpretation hook: the constrained view return type (readonly_view<T> requires view_element<T>,
-    // uniform_view<T> requires uniform_element<T>) must not be *formed* until the view is actually used —
-    // otherwise a buffer<u16> (a valid index buffer) would be ill-formed just for naming readonly_view<u16>,
+    // reinterpretation hook: the constrained view return type (readonly_buffer_view<T> requires view_element<T>,
+    // uniform_buffer_view<T> requires uniform_element<T>) must not be *formed* until the view is actually used —
+    // otherwise a buffer<u16> (a valid index buffer) would be ill-formed just for naming readonly_buffer_view<u16>,
     // whose element constraint u16 fails. Making the member a template defers that; pinning U == T keeps it
     // T-only. If explicit reinterpretation is ever wanted, it gets its own named API.
 
     /// Binds one element of the buffer as a uniform block (constant buffer / UBO) — `element_index` picks
-    /// which (default: the first). A uniform_view is a single block, not a range. The element's byte offset
+    /// which (default: the first). A uniform_buffer_view is a single block, not a range. The element's byte offset
     /// (element_index * sizeof(T)) must be 256-byte aligned, so addressing past the first element needs `T`
     /// sized to a multiple of 256; drop to `raw()` for an arbitrary byte offset. Only where `T` obeys the
     /// uniform block rules. Requires uniform_buffer usage.
     template <class U = T>
-    [[nodiscard]] uniform_view<U> as_uniform_buffer(isize element_index = 0) const
+    [[nodiscard]] uniform_buffer_view<U> as_uniform_buffer(isize element_index = 0) const
         requires(std::is_same_v<U, T> && uniform_element<U>)
     {
         return _raw->template as_uniform_buffer<U>(element_index * isize(sizeof(U)));
@@ -68,7 +68,7 @@ public:
 
     /// A read-only storage view of the whole buffer as an array of `T` (SRV). Requires readonly_buffer usage.
     template <class U = T>
-    [[nodiscard]] readonly_view<U> as_readonly_buffer() const
+    [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         return _raw->template as_readonly_buffer<U>();
@@ -76,7 +76,7 @@ public:
 
     /// A read-only storage view of `range` elements of `T` (SRV). Requires readonly_buffer usage.
     template <class U = T>
-    [[nodiscard]] readonly_view<U> as_readonly_buffer(cc::offset_size range) const
+    [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         return _raw->template as_readonly_buffer<U>(range);
@@ -84,7 +84,7 @@ public:
 
     /// A read-write storage view of the whole buffer as an array of `T` (UAV). Requires readwrite_buffer usage.
     template <class U = T>
-    [[nodiscard]] readwrite_view<U> as_readwrite_buffer() const
+    [[nodiscard]] readwrite_buffer_view<U> as_readwrite_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         return _raw->template as_readwrite_buffer<U>();
@@ -92,7 +92,7 @@ public:
 
     /// A read-write storage view of `range` elements of `T` (UAV). Requires readwrite_buffer usage.
     template <class U = T>
-    [[nodiscard]] readwrite_view<U> as_readwrite_buffer(cc::offset_size range) const
+    [[nodiscard]] readwrite_buffer_view<U> as_readwrite_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         return _raw->template as_readwrite_buffer<U>(range);

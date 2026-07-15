@@ -227,12 +227,12 @@ b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient a
 b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 // view factories — a strongly-typed view onto this buffer (buffer's usage must cover the access):
-b.as_uniform_buffer<T>(offset=0)           // -> sg::uniform_view<T>    (CBV/UBO; needs uniform_buffer usage; offset 256-aligned)
+b.as_uniform_buffer<T>(offset=0)           // -> sg::uniform_buffer_view<T>    (CBV/UBO; needs uniform_buffer usage; offset 256-aligned)
                                            //   T is a uniform_element: size multiple of 16, <= 64 KiB (not byte)
-b.as_readonly_buffer<T>({.offset=, .size=})// -> sg::readonly_view<T>   (SRV; range in elements of T; default = whole)
-b.as_readwrite_buffer<T>({.offset=,.size=})// -> sg::readwrite_view<T>  (UAV; needs readwrite_buffer usage)
-b.as_raw_readonly({.offset=,.size=})       // -> readonly_view<byte>    (raw / byte-addressed; range in bytes; default = whole)
-b.as_raw_readwrite({.offset=,.size=})      // -> readwrite_view<byte>   (raw / byte-addressed; range in bytes; default = whole)
+b.as_readonly_buffer<T>({.offset=, .size=})// -> sg::readonly_buffer_view<T>   (SRV; range in elements of T; default = whole)
+b.as_readwrite_buffer<T>({.offset=,.size=})// -> sg::readwrite_buffer_view<T>  (UAV; needs readwrite_buffer usage)
+b.as_raw_readonly({.offset=,.size=})       // -> readonly_buffer_view<byte>    (raw / byte-addressed; range in bytes; default = whole)
+b.as_raw_readwrite({.offset=,.size=})      // -> readwrite_buffer_view<byte>   (raw / byte-addressed; range in bytes; default = whole)
 ```
 
 ## buffer<T> — typed buffer wrapper  (element type fixed at compile time)
@@ -247,9 +247,9 @@ sg::buffer<T> buf(raw_handle);             // or wrap a raw handle directly (mus
 buf.element_count()                        // isize — size_in_bytes / sizeof(T) (truncates)
 buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usage
 // view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
-buf.as_uniform_buffer(element_index=0)     // -> uniform_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
-buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_view<T>   (only where T is a view_element; range in elements of T)
-buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_view<T>  (only where T is a view_element)
+buf.as_uniform_buffer(element_index=0)     // -> uniform_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
+buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_buffer_view<T>   (only where T is a view_element; range in elements of T)
+buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_buffer_view<T>  (only where T is a view_element)
 buf.as_vertex_buffer() / (range)           // -> vertex_buffer_view (stride = sizeof(T); range in vertices of T)
                                            //   stride only for now — not yet tied to the pipeline's vertex_input_layout
 buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer<u16>/buffer<u32>; width follows T; range in indices)
@@ -323,19 +323,20 @@ tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face a
 #include <shaped-graphics/views.hh>
 sg::view_element<T>          // concept: T is `byte`, or sizeof(T) % 4 == 0 (GPUs load DWORD-aligned)
 sg::uniform_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
-sg::uniform_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
-sg::readonly_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
-sg::readwrite_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
+sg::uniform_buffer_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
+sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
+sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
 sg::texture_readonly_view    // sampled texture (SRV) — view_class::readonly,  shape texture
 sg::texture_readwrite_view   // storage texture (UAV) — view_class::readwrite, shape texture
 // each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view().
-sg::acceleration_structure_view // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
+sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
 sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
-sg::raw_view                 // erased tagged struct every typed view converts into — what backends consume
-v.to_raw()  /  (implicit)    // sg::raw_view  { access, shape, buffer|texture, offset/size/... | format+range }
-// backends switch on (access, shape) to build the native descriptor (SRV/UAV/CBV/texture SRV/UAV)
+sg::raw_view                 // = std::variant<raw_buffer_view, raw_texture_view, raw_tlas_view> — erased sum every typed view converts into
+v.to_raw()  /  (implicit)    // -> raw_view; sg::access_of(rv) / sg::shape_of(rv) read the active arm's access/shape
+// backends std::visit / get_if the arm (raw_buffer_view | raw_texture_view | raw_tlas_view) to build the native descriptor
+// raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // deferred: texel buffers (typed linear buffers). samplers: see sampler.hh
 ```
 
@@ -476,7 +477,7 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> b
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 // blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); geometry_count()/instance_count(); build_flags();
 //   allows_update(); is_expired()/expire()/add_finalizer(). dx12 real (WARP); vulkan is_supported()==false + stubs.
-tlas.as_view()  // -> acceleration_structure_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RT / RayQuery)
+tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RT / RayQuery)
 ```
 
 ## raytracing pipeline + shader table + dispatch_rays  (dx12 real on WARP; see docs/concepts/raytracing-pipeline.md)
