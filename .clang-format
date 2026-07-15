@@ -1,8 +1,10 @@
 # Style file for clang-format ( http://clang.llvm.org/docs/ClangFormatStyleOptions.html )
 # Current style version: 2026-06-24
-# Requires: clang-format >= 21 (config uses modern, non-deprecated option spellings)
+# Requires: clang-format >= 22 (config uses modern, non-deprecated option spellings)
 
 # Changelog:
+#   2026-07-15 - require v22: the LLVM tooling family moves together and clangd 21
+#                crashes on this codebase. v22 reflows a handful of files.
 #   2026-06-24 - AllowShortCaseLabelsOnASingleLine off (case statement on its own
 #                line); IndentCaseBlocks made explicit (brace at the `case` level)
 #   2026-06-22 - custom brace wrapping, ReflowComments off, explicit BinPackArguments,

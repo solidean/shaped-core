@@ -72,7 +72,7 @@ nexus    typed-geometry  ←────────────────┘
 * **Dependency direction.** No upward or cyclic dependencies. Shared API usually
   belongs in a lower library.
 * **`.clang-format` is authoritative.** Source must not change under it (requires
-  clang-format >= 21); it wins over prose docs. `.clang-tidy` is still being
+  clang-format >= 22); it wins over prose docs. `.clang-tidy` is still being
   calibrated — treat its warnings as advisory, not gospel.
 * **Building or testing requires the `building-and-testing` skill.** Activate it
   before the first `dev.py` build/test in a session — do not drive `dev.py` from

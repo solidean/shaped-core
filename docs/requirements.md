@@ -103,11 +103,11 @@ MSVC uses its own linker.
 
 | Tool             | Minimum | Role                                                                   |
 |------------------|---------|------------------------------------------------------------------------|
-| **clang-format** | **21**  | Authoritative formatter; the [.clang-format](../.clang-format) config uses v21-only option spellings. |
-| **clangd**       | 21 fam. | IDE code intelligence; `dev.py doctor` and `dev.py diagnose clangd` use it. |
+| **clang-format** | **22**  | Authoritative formatter; the [.clang-format](../.clang-format) config uses v22-only option spellings. |
+| **clangd**       | 22 fam. | IDE code intelligence; `dev.py doctor` and `dev.py diagnose clangd` use it. clangd 21 crashes on this codebase. |
 | clang-tidy       | —       | Advisory only; still being calibrated. Not gating.                     |
 
-The repo's LLVM-based tooling tracks the **21** family — pair `clang-format`,
+The repo's LLVM-based tooling tracks the **22** family — pair `clang-format`,
 `clangd`, and (on the clang path) the compiler from the same major version to
 avoid format churn and stale diagnostics.
 

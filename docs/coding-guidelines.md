@@ -64,7 +64,7 @@ Cross-library and repo-wide docs live in [docs/](_index.md).
 
 ### General Principles
 
-- **clang-format is mandatory** (requires clang-format >= 21). Source files must not change under
+- **clang-format is mandatory** (requires clang-format >= 22). Source files must not change under
   clang-format execution. Use trailing `//` comments to steer formatting locally when necessary.
   Header include order is also handled by clang-format.
 - **Brace style: Allman** (opening brace on its own line) — clang-format-enforced. Short *inline*
@@ -614,7 +614,7 @@ container& operator=(container&& rhs)
 
 - [ ] East const (`T const`)
 - [ ] Almost-always-auto style
-- [ ] clang-format applied (120 cols, Allman, clang-format >= 21)
+- [ ] clang-format applied (120 cols, Allman, clang-format >= 22)
 - [ ] Headers compile standalone
 - [ ] Designated initializers where possible
 - [ ] Non-trivial logic uses static factory methods, not constructors

@@ -47,7 +47,7 @@ class FormatResult:
 
 # Default if `.clang-format`'s `Requires:` header can't be read. Keep in sync
 # with the header, which remains the authoritative source.
-_DEFAULT_MAJOR = 21
+_DEFAULT_MAJOR = 22
 
 _SOURCE_SUFFIXES = (".cc", ".hh")
 
@@ -214,7 +214,8 @@ def run_format(
     clang_format = find_clang_format()
     if clang_format is None:
         raise FormatSetupError(
-            "clang-format not found on PATH. Install LLVM/clang-format (>= 21) or add it to PATH."
+            f"clang-format not found on PATH. Install LLVM/clang-format (>= {required_major(root)}) "
+            "or add it to PATH."
         )
 
     # clang-format output is not stable across major versions, so enforce the
