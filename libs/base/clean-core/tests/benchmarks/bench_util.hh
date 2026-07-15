@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 
+#include <algorithm>
 #include <chrono>
 
 // Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/. These are guide benchmarks
@@ -63,5 +64,19 @@ double measure_units_per_sec(double units_per_pass, Pass&& pass)
     sink = acc;
 
     return (units_per_pass * double(reps)) / seconds;
+}
+
+// Median of `Runs` independent measure_units_per_sec calls (each does its own prewarm), returned as
+// units/second. The simplest robust noise filter for micro-benchmarks — call it in place of a single
+// measure_units_per_sec when run-to-run variance matters.
+template <int Runs = 5, class Pass>
+double median_units_per_sec(double units_per_pass, Pass&& pass)
+{
+    static_assert(Runs >= 1);
+    double results[Runs];
+    for (int i = 0; i < Runs; ++i)
+        results[i] = measure_units_per_sec(units_per_pass, pass);
+    std::sort(results, results + Runs);
+    return results[Runs / 2];
 }
 } // namespace bench
