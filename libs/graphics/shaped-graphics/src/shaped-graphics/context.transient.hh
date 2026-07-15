@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/buffer.hh> // typed buffer<T> wrapper (returned by create_buffer below)
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
 #include <shaped-graphics/types.hh>
@@ -35,6 +36,25 @@ public:
 
     /// Fallible core of create_raw_buffer — returns an error instead of throwing.
     [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usage usage);
+
+    // Typed buffer factory — allocates `element_count` elements of `T` (byte size element_count * sizeof(T))
+    // and returns the wrapped `buffer<T>`, whose view factories are typed by `T`. `element_count` must be
+    // >= 0 (0 is a valid empty buffer). Error behaviour mirrors create_raw_buffer.
+
+    template <class T>
+    [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usage usage)
+    {
+        return buffer<T>(create_raw_buffer(element_count * isize(sizeof(T)), usage));
+    }
+
+    template <class T>
+    [[nodiscard]] cc::result<buffer<T>> try_create_buffer(isize element_count, buffer_usage usage)
+    {
+        auto r = try_create_raw_buffer(element_count * isize(sizeof(T)), usage);
+        if (r.has_value())
+            return buffer<T>(cc::move(r).value());
+        return cc::error(cc::move(r).error());
+    }
 
     // textures
 public:

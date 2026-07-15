@@ -126,6 +126,20 @@ public:
                                   .stride_in_bytes = isize(sizeof(T))};
     }
 
+    /// A vertex buffer over `range` vertices of `T` (stride `sizeof(T)`). Requires vertex_buffer usage.
+    template <class T>
+    [[nodiscard]] vertex_buffer_view as_vertex_buffer(cc::offset_size range) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
+        auto const stride = isize(sizeof(T));
+        CC_ASSERT(range.offset >= 0 && range.size >= 0, "view range must be non-negative");
+        CC_ASSERT((range.offset + range.size) * stride <= _size_in_bytes, "view range exceeds buffer size");
+        return vertex_buffer_view{.buffer = shared_from_this(),
+                                  .offset_in_bytes = range.offset * stride,
+                                  .size_in_bytes = range.size * stride,
+                                  .stride_in_bytes = stride};
+    }
+
     /// The whole buffer as an index buffer of `format` elements. Requires index_buffer usage.
     [[nodiscard]] index_buffer_view as_index_buffer(index_format format = index_format::uint16) const
     {
@@ -134,6 +148,19 @@ public:
                                  .format = format,
                                  .offset_in_bytes = 0,
                                  .size_in_bytes = _size_in_bytes};
+    }
+
+    /// An index buffer over `range` indices of `format` width. Requires index_buffer usage.
+    [[nodiscard]] index_buffer_view as_index_buffer(index_format format, cc::offset_size range) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::index_buffer), "buffer lacks index_buffer usage");
+        auto const stride = isize(format == index_format::uint16 ? 2 : 4);
+        CC_ASSERT(range.offset >= 0 && range.size >= 0, "view range must be non-negative");
+        CC_ASSERT((range.offset + range.size) * stride <= _size_in_bytes, "view range exceeds buffer size");
+        return index_buffer_view{.buffer = shared_from_this(),
+                                 .format = format,
+                                 .offset_in_bytes = range.offset * stride,
+                                 .size_in_bytes = range.size * stride};
     }
 
     /// Registers a callback to run once this buffer's GPU storage is released *and* no longer in

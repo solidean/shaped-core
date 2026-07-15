@@ -235,6 +235,26 @@ b.as_raw_readonly({.offset=,.size=})       // -> readonly_view<byte>    (raw / b
 b.as_raw_readwrite({.offset=,.size=})      // -> readwrite_view<byte>   (raw / byte-addressed; range in bytes; default = whole)
 ```
 
+## buffer<T> — typed buffer wrapper  (element type fixed at compile time)
+
+```cpp
+#include <shaped-graphics/buffer.hh>       // the typed buffer<T> wrapper
+sg::buffer<T>                              // GPU-side span<T>: wraps a raw_buffer_handle, T fixed at compile time
+// create typed (preferred): element_count -> byte size = count * sizeof(T); returns the wrapped buffer<T>:
+ctx.persistent.create_buffer<Particle>(1000, usage, alloc={})  // -> sg::buffer<Particle>  (+ try_ twin)
+ctx.transient.create_buffer<Particle>(64, usage)               // -> sg::buffer<Particle>  (transient; no allocation_info)
+sg::buffer<T> buf(raw_handle);             // or wrap a raw handle directly (must be non-null); buf.raw() -> raw_buffer_handle
+buf.element_count()                        // isize — size_in_bytes / sizeof(T) (truncates)
+buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usage
+// view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
+buf.as_uniform_buffer(element_index=0)     // -> uniform_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
+buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_view<T>   (only where T is a view_element; range in elements of T)
+buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_view<T>  (only where T is a view_element)
+buf.as_vertex_buffer() / (range)           // -> vertex_buffer_view (stride = sizeof(T); range in vertices of T)
+                                           //   stride only for now — not yet tied to the pipeline's vertex_input_layout
+buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer<u16>/buffer<u32>; width follows T; range in indices)
+```
+
 ## pixel_format — texel formats  (restrictive; all backends have an equivalent)
 
 ```cpp
