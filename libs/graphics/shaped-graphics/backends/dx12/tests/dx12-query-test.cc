@@ -15,27 +15,27 @@ TEST("sg dx12 - gpu timestamp round-trips")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // A bit of GPU work between the two timestamps (contents are irrelevant — only the tick gap matters).
-    auto src = c.create_dx12_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
-    auto dst = c.create_dx12_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst, sg::allocation_info{});
-    REQUIRE(src.has_value());
-    REQUIRE(dst.has_value());
+    auto src = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto dst = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(src != nullptr);
+    REQUIRE(dst != nullptr);
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    CHECK(cmd.value()->query.is_supported());
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    CHECK(cmd->query.is_supported());
 
-    auto t0 = cmd.value()->query.record_gpu_timestamp();
-    cmd.value()->copy.buffer_bytes_region({.src = src.value(), .dst = dst.value(), .size_in_bytes = 256});
-    auto t1 = cmd.value()->query.record_gpu_timestamp();
+    auto t0 = cmd->query.record_gpu_timestamp();
+    cmd->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 256});
+    auto t1 = cmd->query.record_gpu_timestamp();
 
     CHECK(t0.is_valid());
     CHECK(t1.is_valid());
     CHECK(!t0.is_ready()); // not submitted yet
 
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    c.submit_command_list(cc::move(cmd));
 
     auto const tick1 = c.wait_for_ticks(t1);
     auto const tick0 = c.wait_for_ticks(t0);
@@ -58,10 +58,10 @@ TEST("sg dx12 - timestamp heap rollover across leases")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
 
     int const per_heap = dx12::dx12_query_system::SlotsPerHeap;
     int const n = per_heap + 5; // spills into a second leased heap
@@ -69,9 +69,9 @@ TEST("sg dx12 - timestamp heap rollover across leases")
     cc::vector<sg::gpu_timestamp> ts;
     ts.reserve(n);
     for (int i = 0; i < n; ++i)
-        ts.push_back(cmd.value()->query.record_gpu_timestamp());
+        ts.push_back(cmd->query.record_gpu_timestamp());
 
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    c.submit_command_list(cc::move(cmd));
 
     // The last query lives in the second heap; the actor drains heaps in submission order, so waiting on
     // it implies the first heap's readback has landed too.
@@ -97,14 +97,14 @@ TEST("sg dx12 - dropped list leaves its timestamps not ready")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    auto t = cmd.value()->query.record_gpu_timestamp();
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto t = cmd->query.record_gpu_timestamp();
     CHECK(t.is_valid());
 
-    c.drop_dx12_command_list(cc::move(cmd.value()));
+    c.drop_command_list(cc::move(cmd));
 
     // A dropped list never resolves: the handle stays valid but never becomes ready, and blocking fails
     // instead of hanging (like a cancelled download).
@@ -113,9 +113,9 @@ TEST("sg dx12 - dropped list leaves its timestamps not ready")
     CHECK(!c.wait_for_ticks(t).has_value());
 
     // The heap returned to the pool: a subsequent list records + reads back fine.
-    auto cmd2 = c.create_dx12_command_list();
-    REQUIRE(cmd2.has_value());
-    auto t2 = cmd2.value()->query.record_gpu_timestamp();
-    c.submit_dx12_command_list(cc::move(cmd2.value()));
+    auto cmd2 = c.create_command_list();
+    REQUIRE(cmd2 != nullptr);
+    auto t2 = cmd2->query.record_gpu_timestamp();
+    c.submit_command_list(cc::move(cmd2));
     REQUIRE(c.wait_for_ticks(t2).has_value());
 }
