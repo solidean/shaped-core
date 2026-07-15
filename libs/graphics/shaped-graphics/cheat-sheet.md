@@ -297,14 +297,14 @@ ctx.transient.create_texture_2d({...})         // -> sg::texture_2d  (transient;
 sg::texture_2d tex(raw_handle);                // wrap a raw handle directly; asserts the raw shape matches; tex.raw() -> raw_texture_handle
 // Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count<0=all}.
 // sampled (SRV) — needs readonly_texture usage. Natural dimension:
-tex.as_readonly_view({.mips={.start=1}})       // -> texture_readonly_view  (whole; params name only this shape's axes)
+tex.as_readonly_view({.mips={.start=1}})       // -> readonly_texture_view<VT>  (VT deduced; whole; params name only this shape's axes)
 //   read_only_params fields: .mips always; .slices (arrays); .cubes (cube arrays)
 tex.as_readonly_2d_view({.slice=3})            // array/cube -> Texture2D: one slice/.face/{.cube,.face}
 tex.as_readonly_1d_view({.slice=3})            // 1D array -> Texture1D
 tex.as_readonly_cube_view({.cube=2})           // cube array -> one TextureCube
 tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
 // storage (UAV) — needs readwrite_texture; single mip; not on MS (a cube UAV is a 2D array):
-tex.as_readwrite_view({.mip=1})                // -> texture_readwrite_view  (whole, natural dimension)
+tex.as_readwrite_view({.mip=1})                // -> readwrite_texture_view<VT>  (VT deduced; whole, natural dimension)
 //   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
 tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
 // render-target / depth-stencil views (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
@@ -327,9 +327,10 @@ sg::uniform_buffer_view<T>          // uniform block of T   (cbuffer/UBO)       
 sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
 sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
-sg::texture_readonly_view    // sampled texture (SRV) — view_class::readonly,  shape texture
-sg::texture_readwrite_view   // storage texture (UAV) — view_class::readwrite, shape texture
-// each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view().
+sg::readonly_texture_view<VT>  // sampled texture (SRV); VT = texture_view_traits<Dim> — view_class::readonly
+sg::readwrite_texture_view<VT> // storage texture (UAV); VT constrained to storage_view_dimension (no cube/MS)
+// each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view() (returns the precise VT).
+// view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
 sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)

@@ -86,11 +86,14 @@ also the directly-usable "raw" binding vocabulary for tooling that builds bindin
 
 ## Texture views
 
-Textures have views too, but they don't fit the buffer `<T>` slot (there is no element type — a texel
-`pixel_format` and a subresource range instead). So they are distinct, non-templated types —
-`texture_readonly_view` (sampled / SRV) and `texture_readwrite_view` (storage / UAV) — each carrying
-`{raw_texture_handle, texture_view_dimension, pixel_format, subresource_range}` (plus a
-`depth_slice_range` on the storage view for 3D) and erasing to a `raw_view` with `shape == texture`.
+Textures have views too, but instead of an element type `T` they are typed by `Traits` — a
+`texture_view_traits<Dim>` naming the shader-facing dimension (`tv_2d` / `tv_cube` / `tv_2d_array` / …),
+which is the only compile-time part (the texel `pixel_format` and subresource range stay runtime). So the
+leaves are `readonly_texture_view<Traits>` (sampled / SRV) and `readwrite_texture_view<Traits>` (storage /
+UAV, `Traits::dimension` constrained to a `storage_view_dimension` — no cube, no MSAA), each carrying
+`{raw_texture_handle, pixel_format, subresource_range}` (plus a `depth_slice_range` on the storage view for
+3D) and erasing to a `raw_view` holding a `raw_texture_view`. `texture<Traits>::as_*_view()` computes the
+view dimension at compile time and returns the precisely-typed leaf.
 
 ### The view *dimension* is a reinterpretation, not the texture's shape
 

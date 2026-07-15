@@ -333,6 +333,24 @@ TEST("sg - texture binding types accept the matching texture view")
     CHECK(!sg::accepts(sg::binding_type::readonly_structured_buffer, tex.as_readonly_view().to_raw())); // wrong shape
 }
 
+TEST("sg - typed texture views carry the view dimension at compile time")
+{
+    sg::texture_2d tex(std::make_shared<test_texture>(
+        desc_2d(sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture)));
+    static_assert(std::is_same_v<decltype(tex.as_readonly_view()), sg::readonly_texture_view<sg::tv_2d>>);
+    static_assert(std::is_same_v<decltype(tex.as_readwrite_view()), sg::readwrite_texture_view<sg::tv_2d>>);
+
+    // Reinterpreting factories retype to the reinterpreted dimension.
+    sg::texture_cube cube(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
+    static_assert(decltype(cube.as_readonly_view())::dimension == sg::texture_view_dimension::cube);
+    static_assert(decltype(cube.as_readonly_2d_view({.face = 0}))::dimension == sg::texture_view_dimension::tex_2d);
+
+    sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 4)));
+    static_assert(decltype(arr.as_readonly_view())::dimension == sg::texture_view_dimension::tex_2d_array);
+
+    CHECK(true); // the static_asserts are the test
+}
+
 // -- Render-target / depth-stencil views (render_target / depth_stencil). These do not erase to raw_view;
 //    their getters ARE the surface, so the tests read them directly.
 

@@ -84,65 +84,65 @@ public:
     // and asserts the matching texture_usage.
 
     /// Sampled (SRV) view over the whole texture in its natural dimension.
-    [[nodiscard]] texture_readonly_view as_readonly_view(read_only_params const& params = {}) const
+    [[nodiscard]] auto as_readonly_view(read_only_params const& params = {}) const
     {
-        return _make_readonly(_srv_whole_dim(), _natural_array_range(params), _mips(params));
+        return _make_readonly<_srv_whole_dim()>(_natural_array_range(params), _mips(params));
     }
 
     /// Sampled view of one array slice, bound as a Texture2D (or Texture2DMS). Only on 2D array shapes.
-    [[nodiscard]] texture_readonly_view as_readonly_2d_view(read_only_2d_params const& params = {}) const
+    [[nodiscard]] auto as_readonly_2d_view(read_only_2d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
-        auto const dim = Traits::is_multisampled ? texture_view_dimension::tex_2d_ms : texture_view_dimension::tex_2d;
-        return _make_readonly(dim, _single(_pick_slice(params)), _mips(params));
+        constexpr auto dim = Traits::is_multisampled ? texture_view_dimension::tex_2d_ms : texture_view_dimension::tex_2d;
+        return _make_readonly<dim>(_single(_pick_slice(params)), _mips(params));
     }
 
     /// Sampled view of one array slice, bound as a Texture1D. Only on 1D array textures.
-    [[nodiscard]] texture_readonly_view as_readonly_1d_view(read_only_1d_params const& params = {}) const
+    [[nodiscard]] auto as_readonly_1d_view(read_only_1d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _make_readonly(texture_view_dimension::tex_1d, _single(_pick_slice(params)), _mips(params));
+        return _make_readonly<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), _mips(params));
     }
 
     /// Sampled view of one cube (all 6 faces) of a cube array, bound as a TextureCube. Only on cube arrays.
-    [[nodiscard]] texture_readonly_view as_readonly_cube_view(read_only_cube_params const& params = {}) const
+    [[nodiscard]] auto as_readonly_cube_view(read_only_cube_params const& params = {}) const
         requires(Traits::is_cube && Traits::is_array && !Traits::is_multisampled)
     {
         CC_ASSERT(params.cube >= 0 && params.cube < _raw->array_layers(), "cube index out of range");
-        return _make_readonly(texture_view_dimension::cube,
-                              {.start = isize(params.cube) * 6, .end = isize(params.cube) * 6 + 6}, _mips(params));
+        return _make_readonly<texture_view_dimension::cube>(
+            {.start = isize(params.cube) * 6, .end = isize(params.cube) * 6 + 6}, _mips(params));
     }
 
     /// Sampled view of a cube's faces as a plain Texture2DArray (all faces, or a slice sub-range). Only on
     /// cubes — the alternative to the natural TextureCube view.
-    [[nodiscard]] texture_readonly_view as_readonly_2d_array_view(read_only_2d_array_params const& params = {}) const
+    [[nodiscard]] auto as_readonly_2d_array_view(read_only_2d_array_params const& params = {}) const
         requires(Traits::is_cube && !Traits::is_multisampled)
     {
-        return _make_readonly(texture_view_dimension::tex_2d_array, _natural_array_range(params), _mips(params));
+        return _make_readonly<texture_view_dimension::tex_2d_array>(_natural_array_range(params), _mips(params));
     }
 
     /// Storage (UAV) view over the whole texture at one mip level. Not on multisampled textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_view(read_write_params const& params = {}) const
+    [[nodiscard]] auto as_readwrite_view(read_write_params const& params = {}) const
         requires(!Traits::is_multisampled)
     {
-        return _make_readwrite(_uav_whole_dim(), _natural_array_range(params), params.mip, _depth_slices(params));
+        return _make_readwrite<_uav_whole_dim()>(_natural_array_range(params), params.mip, _depth_slices(params));
     }
 
     /// Storage view of one array slice / cube face, bound as a Texture2D. Only on non-MS 2D array shapes.
-    [[nodiscard]] texture_readwrite_view as_readwrite_2d_view(read_write_2d_params const& params = {}) const
+    [[nodiscard]] auto as_readwrite_2d_view(read_write_2d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
                  && (Traits::is_array || Traits::is_cube))
     {
-        return _make_readwrite(texture_view_dimension::tex_2d, _single(_pick_slice(params)), params.mip,
-                               _whole_depth_slice_range());
+        return _make_readwrite<texture_view_dimension::tex_2d>(_single(_pick_slice(params)), params.mip,
+                                                               _whole_depth_slice_range());
     }
 
     /// Storage view of one array slice, bound as a Texture1D. Only on non-MS 1D array textures.
-    [[nodiscard]] texture_readwrite_view as_readwrite_1d_view(read_write_1d_params const& params = {}) const
+    [[nodiscard]] auto as_readwrite_1d_view(read_write_1d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _make_readwrite(texture_view_dimension::tex_1d, _single(_pick_slice(params)), params.mip,
-                               _whole_depth_slice_range());
+        return _make_readwrite<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), params.mip,
+                                                               _whole_depth_slice_range());
     }
 
     // Render-target / depth-stencil views — bind the texture as a graphics-pipeline color / depth-stencil
@@ -302,22 +302,24 @@ private:
 
     // -- View assembly (assert usage, fill the subresource range). --
 
-    [[nodiscard]] texture_readonly_view _make_readonly(texture_view_dimension dim,
-                                                       cc::start_end array_range,
-                                                       cc::start_end mip_range) const
+    // The shader-facing view dimension is compile-time (constexpr from Traits), so it becomes the view's
+    // `Traits` type parameter here rather than a runtime field.
+    template <texture_view_dimension Dim>
+    [[nodiscard]] readonly_texture_view<texture_view_traits<Dim>> _make_readonly(cc::start_end array_range,
+                                                                                 cc::start_end mip_range) const
     {
         CC_ASSERT(has_flag(_raw->usage(), texture_usage::readonly_texture), "texture lacks readonly_texture usage");
         subresource_range r;
         r.mip_range = mip_range;
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
-        return texture_readonly_view{.texture = _raw, .dimension = dim, .format = _raw->format(), .range = r};
+        return readonly_texture_view<texture_view_traits<Dim>>{.texture = _raw, .format = _raw->format(), .range = r};
     }
 
-    [[nodiscard]] texture_readwrite_view _make_readwrite(texture_view_dimension dim,
-                                                         cc::start_end array_range,
-                                                         int mip,
-                                                         cc::start_end depth_slice_range) const
+    template <texture_view_dimension Dim>
+    [[nodiscard]] readwrite_texture_view<texture_view_traits<Dim>> _make_readwrite(cc::start_end array_range,
+                                                                                   int mip,
+                                                                                   cc::start_end depth_slice_range) const
     {
         CC_ASSERT(has_flag(_raw->usage(), texture_usage::readwrite_texture), "texture lacks readwrite_texture usage");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "readwrite view mip level out of range");
@@ -325,11 +327,10 @@ private:
         r.mip_range = {.start = mip, .end = mip + 1}; // a UAV targets a single mip level
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
-        return texture_readwrite_view{.texture = _raw,
-                                      .dimension = dim,
-                                      .format = _raw->format(),
-                                      .range = r,
-                                      .depth_slice_range = depth_slice_range};
+        return readwrite_texture_view<texture_view_traits<Dim>>{.texture = _raw,
+                                                                .format = _raw->format(),
+                                                                .range = r,
+                                                                .depth_slice_range = depth_slice_range};
     }
 
     [[nodiscard]] render_target_view _make_render_target(texture_view_dimension dim, cc::start_end array_range, int mip) const

@@ -217,15 +217,46 @@ struct readwrite_buffer_view
     operator raw_view() const { return to_raw(); }
 };
 
-/// A read-only (sampled / SRV) texture view over a subresource range. Unlike buffer views it is not
-/// templated on an element type — the texel format is a runtime `pixel_format`, and dimension / array /
-/// cube / samples come from the bound texture. Built via `texture<Traits>::as_readonly_view()`.
-struct texture_readonly_view
+// -- Texture views. Unlike buffer views (typed by element `T`), a texture view is typed by `Traits` — a
+//    `texture_view_traits<Dim>` naming the shader-facing dimension it binds as (Texture2D / TextureCube /
+//    Texture2DArray / …). Only the dimension is compile-time; the texel `format` and subresource `range`
+//    stay runtime. `texture<Traits>::as_*_view()` returns the precisely-typed leaf.
+
+/// The compile-time shape of a texture *view* — the shader-facing dimension it binds as, a reinterpretation
+/// the view chose (distinct from the texture's own dimension). The single template argument of the typed
+/// texture view types. Prefer the `tv_2d` / `tv_cube` / … aliases over spelling this.
+template <texture_view_dimension Dim>
+struct texture_view_traits
+{
+    static constexpr texture_view_dimension dimension = Dim;
+};
+
+using tv_1d = texture_view_traits<texture_view_dimension::tex_1d>;
+using tv_1d_array = texture_view_traits<texture_view_dimension::tex_1d_array>;
+using tv_2d = texture_view_traits<texture_view_dimension::tex_2d>;
+using tv_2d_array = texture_view_traits<texture_view_dimension::tex_2d_array>;
+using tv_2d_ms = texture_view_traits<texture_view_dimension::tex_2d_ms>;
+using tv_2d_ms_array = texture_view_traits<texture_view_dimension::tex_2d_ms_array>;
+using tv_3d = texture_view_traits<texture_view_dimension::tex_3d>;
+using tv_cube = texture_view_traits<texture_view_dimension::cube>;
+using tv_cube_array = texture_view_traits<texture_view_dimension::cube_array>;
+
+/// A dimension a storage (UAV) view may bind as: no cube, no multisampling (a cube UAV is a 2D array; MSAA
+/// has no UAV). Constrains `readwrite_texture_view`.
+template <texture_view_dimension Dim>
+concept storage_view_dimension
+    = Dim != texture_view_dimension::cube && Dim != texture_view_dimension::cube_array
+   && Dim != texture_view_dimension::tex_2d_ms && Dim != texture_view_dimension::tex_2d_ms_array;
+
+/// A read-only (sampled / SRV) texture view of shader-facing dimension `Traits::dimension`, over a
+/// subresource range. Built via `texture<Traits>::as_readonly_view()` and the reinterpreting variants.
+template <class Traits>
+struct readonly_texture_view
 {
     static constexpr view_class access = view_class::readonly;
+    static constexpr texture_view_dimension dimension = Traits::dimension;
 
     raw_texture_handle texture;
-    texture_view_dimension dimension = texture_view_dimension::tex_2d;
     pixel_format format = pixel_format::undefined;
     subresource_range range;
 
@@ -241,21 +272,23 @@ struct texture_readonly_view
     operator raw_view() const { return to_raw(); }
 };
 
-/// A read-write (storage / UAV) texture view over a subresource range (a single mip level). Built via
+/// A read-write (storage / UAV) texture view of dimension `Traits::dimension`, over a single mip level. The
+/// dimension must be a `storage_view_dimension` (no cube / no MSAA). Built via
 /// `texture<Traits>::as_readwrite_view()` and friends.
-struct texture_readwrite_view
+template <class Traits>
+    requires storage_view_dimension<Traits::dimension>
+struct readwrite_texture_view
 {
     static constexpr view_class access = view_class::readwrite;
+    static constexpr texture_view_dimension dimension = Traits::dimension;
 
     raw_texture_handle texture;
-    texture_view_dimension dimension = texture_view_dimension::tex_2d;
     pixel_format format = pixel_format::undefined;
     subresource_range range;
 
     /// For a 3D storage view (`dimension == tex_3d`): the half-open `[start, end)` window of depth slices
-    /// (a 3D texture's W / Z axis — D3D12's `FirstWSlice`/`WSize`) the view exposes, in slices of the
-    /// selected mip. These are *not* subresources (a whole 3D mip is one), so they live here, not in
-    /// `range`. Empty `{0, 0}` for every non-3D view, which ignore it.
+    /// (a 3D texture's W / Z axis — D3D12's `FirstWSlice`/`WSize`) the view exposes. Not subresources (a
+    /// whole 3D mip is one), so they live here, not in `range`. Empty `{0, 0}` for every non-3D view.
     cc::start_end depth_slice_range = {.start = 0, .end = 0};
 
     [[nodiscard]] raw_view to_raw() const
