@@ -1,6 +1,5 @@
-#include <shaped-graphics/impl/texture_copy_region.hh>
-
 #include <clean-core/common/assertf.hh>
+#include <shaped-graphics/impl/texture_copy_region.hh>
 
 namespace sg::impl
 {
@@ -18,10 +17,11 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
 {
     CC_ASSERT(texture != nullptr, "texture is null");
     texture_description const& desc = texture->description();
-    CC_ASSERTF(sub.mip_level >= 0 && sub.mip_level < desc.mip_levels, "mip level {} out of range [0, {})", sub.mip_level,
-               desc.mip_levels);
+    CC_ASSERTF(sub.mip_level >= 0 && sub.mip_level < desc.mip_levels, "mip level {} out of range [0, {})",
+               sub.mip_level, desc.mip_levels);
     int const layers = desc.array_layers.value_or(1) * (desc.is_cube ? 6 : 1);
-    CC_ASSERTF(sub.array_layer >= 0 && sub.array_layer < layers, "array layer {} out of range [0, {})", sub.array_layer, layers);
+    CC_ASSERTF(sub.array_layer >= 0 && sub.array_layer < layers, "array layer {} out of range [0, {})", sub.array_layer,
+               layers);
     CC_ASSERT(sub.aspect == texture_aspect::color, "only the color aspect is supported for texture copies yet");
 }
 
@@ -29,8 +29,8 @@ texture_region full_subresource_region(raw_texture_handle const& texture, subres
 {
     CC_ASSERT(texture != nullptr, "texture is null");
     texture_description const& desc = texture->description();
-    CC_ASSERTF(sub.mip_level >= 0 && sub.mip_level < desc.mip_levels, "mip level {} out of range [0, {})", sub.mip_level,
-               desc.mip_levels);
+    CC_ASSERTF(sub.mip_level >= 0 && sub.mip_level < desc.mip_levels, "mip level {} out of range [0, {})",
+               sub.mip_level, desc.mip_levels);
 
     int const w = mip_extent(desc.width, sub.mip_level);
     int const h = desc.dimension == texture_dimension::d1 ? 1 : mip_extent(desc.height, sub.mip_level);
@@ -38,7 +38,9 @@ texture_region full_subresource_region(raw_texture_handle const& texture, subres
     return texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(w, h, d)};
 }
 
-void assert_texture_region_in_bounds(raw_texture_handle const& texture, subresource_index const& sub, texture_region const& region)
+void assert_texture_region_in_bounds(raw_texture_handle const& texture,
+                                     subresource_index const& sub,
+                                     texture_region const& region)
 {
     texture_region const full = full_subresource_region(texture, sub);
     CC_ASSERTF(region.offset[0] >= 0 && region.offset[1] >= 0 && region.offset[2] >= 0,

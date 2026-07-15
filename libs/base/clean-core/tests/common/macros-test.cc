@@ -276,7 +276,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     SECTION("Stringify simple value")
     {
 #define MY_VALUE 42
-        const char* str = CC_STRINGIFY_EXPR(MY_VALUE);
+        char const* str = CC_STRINGIFY_EXPR(MY_VALUE);
         CHECK(std::strcmp(str, "42") == 0);
 #undef MY_VALUE
     }
@@ -284,7 +284,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     SECTION("Stringify identifier")
     {
 #define MY_IDENT foo
-        const char* str = CC_STRINGIFY_EXPR(MY_IDENT);
+        char const* str = CC_STRINGIFY_EXPR(MY_IDENT);
         CHECK(std::strcmp(str, "foo") == 0);
 #undef MY_IDENT
     }
@@ -292,7 +292,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     SECTION("Stringify expression")
     {
 #define MY_EXPR (1 + 2)
-        const char* str = CC_STRINGIFY_EXPR(MY_EXPR);
+        char const* str = CC_STRINGIFY_EXPR(MY_EXPR);
         CHECK(std::strcmp(str, "(1 + 2)") == 0);
 #undef MY_EXPR
     }

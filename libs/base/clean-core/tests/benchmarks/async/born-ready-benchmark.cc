@@ -26,7 +26,6 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
-
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -86,7 +85,8 @@ void run()
                                                          u64 acc = 0;
                                                          for (int g = 0; g < G; ++g)
                                                          {
-                                                             cc::byte* p = na.allocate_node_bytes(cls, node_size, node_align);
+                                                             cc::byte* p
+                                                                 = na.allocate_node_bytes(cls, node_size, node_align);
                                                              acc ^= reinterpret_cast<u64>(p);
                                                              cc::node_allocation_free(p, cls);
                                                          }
@@ -95,56 +95,56 @@ void run()
 
     // Empty node: make_shared control init + node base ctor/dtor, no payload (manual node dropped unresolved).
     double const manual = bench::median_units_per_sec(units,
+                                                      [&]
+                                                      {
+                                                          u64 acc = 0;
+                                                          for (int g = 0; g < G; ++g)
+                                                          {
+                                                              auto n = cc::make_async_manual<int>();
+                                                              acc ^= reinterpret_cast<u64>(n.get());
+                                                          }
+                                                          return acc;
+                                                      });
+
+    // + push_value: a born-ready value node, not read.
+    double const value = bench::median_units_per_sec(units,
                                                      [&]
                                                      {
                                                          u64 acc = 0;
                                                          for (int g = 0; g < G; ++g)
                                                          {
-                                                             auto n = cc::make_async_manual<int>();
+                                                             auto n = cc::make_async_from_value(int(g));
                                                              acc ^= reinterpret_cast<u64>(n.get());
                                                          }
                                                          return acc;
                                                      });
 
-    // + push_value: a born-ready value node, not read.
-    double const value = bench::median_units_per_sec(units,
+    // + try_value: the full born-ready read path.
+    double const full = bench::median_units_per_sec(units,
                                                     [&]
                                                     {
                                                         u64 acc = 0;
                                                         for (int g = 0; g < G; ++g)
                                                         {
                                                             auto n = cc::make_async_from_value(int(g));
-                                                            acc ^= reinterpret_cast<u64>(n.get());
+                                                            acc ^= u64(*n->try_value());
                                                         }
                                                         return acc;
                                                     });
 
-    // + try_value: the full born-ready read path.
-    double const full = bench::median_units_per_sec(units,
-                                                   [&]
-                                                   {
-                                                       u64 acc = 0;
-                                                       for (int g = 0; g < G; ++g)
-                                                       {
-                                                           auto n = cc::make_async_from_value(int(g));
-                                                           acc ^= u64(*n->try_value());
-                                                       }
-                                                       return acc;
-                                                   });
-
     // Separate: a cold lazy node's frame/closure build + destroy, never scheduled/driven.
     double const lazy = bench::median_units_per_sec(units,
-                                                   [&]
-                                                   {
-                                                       u64 acc = 0;
-                                                       for (int g = 0; g < G; ++g)
-                                                       {
-                                                           int const s = g;
-                                                           auto n = cc::make_async_lazy<int>([s] { return s; });
-                                                           acc ^= reinterpret_cast<u64>(n.get());
-                                                       }
-                                                       return acc;
-                                                   });
+                                                    [&]
+                                                    {
+                                                        u64 acc = 0;
+                                                        for (int g = 0; g < G; ++g)
+                                                        {
+                                                            int const s = g;
+                                                            auto n = cc::make_async_lazy<int>([s] { return s; });
+                                                            acc ^= reinterpret_cast<u64>(n.get());
+                                                        }
+                                                        return acc;
+                                                    });
 
     std::printf("\n=== born-ready cost decomposition (median of 5; async<int> = %lld B, node class %d) ===\n",
                 (long long)node_size, int(cls));

@@ -24,7 +24,6 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/thread/async.hh>
-
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -46,7 +45,7 @@ CC_FORCE_INLINE void opaque(i64& v)
 #if defined(__clang__) || defined(__GNUC__)
     __asm__ volatile("" : "+r"(v));
 #else
-    volatile i64 tmp = v; // MSVC fallback: a volatile round-trip the optimizer cannot see through
+    i64 volatile tmp = v; // MSVC fallback: a volatile round-trip the optimizer cannot see through
     v = tmp;
 #endif
 }
@@ -137,24 +136,24 @@ void case_born_ready()
     double const units = double(nodes) * G;
 
     double const a = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                              {
-                                                  auto n = cc::make_async_from_value(i64(g));
-                                                  acc ^= u64(*n->try_value());
-                                              }
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                     {
+                                                         auto n = cc::make_async_from_value(i64(g));
+                                                         acc ^= u64(*n->try_value());
+                                                     }
+                                                     return acc;
+                                                 });
     double const d = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(direct_leaf(i64(g)));
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                         acc ^= u64(direct_leaf(i64(g)));
+                                                     return acc;
+                                                 });
     report("born-ready read", nodes, a, d);
 }
 
@@ -166,25 +165,25 @@ void case_single_lazy(cc::inline_scheduler& sched)
     double const units = double(nodes) * G;
 
     double const a = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                              {
-                                                  i64 const seed = i64(g);
-                                                  auto n = cc::make_async_lazy<i64>([seed] { return seed; });
-                                                  acc ^= u64(drive(sched, n));
-                                              }
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                     {
+                                                         i64 const seed = i64(g);
+                                                         auto n = cc::make_async_lazy<i64>([seed] { return seed; });
+                                                         acc ^= u64(drive(sched, n));
+                                                     }
+                                                     return acc;
+                                                 });
     double const d = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(direct_leaf(i64(g)));
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                         acc ^= u64(direct_leaf(i64(g)));
+                                                     return acc;
+                                                 });
     report("single lazy inline", nodes, a, d);
 }
 
@@ -195,27 +194,28 @@ void case_single_dep(cc::inline_scheduler& sched)
     int const G = graphs_for(nodes);
     double const units = double(nodes) * G;
 
-    double const a = bench::median_units_per_sec(units,
-                                          [&]
+    double const a
+        = bench::median_units_per_sec(units,
+                                      [&]
+                                      {
+                                          u64 acc = 0;
+                                          for (int g = 0; g < G; ++g)
                                           {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                              {
-                                                  i64 const seed = i64(g);
-                                                  auto n0 = cc::make_async_lazy<i64>([seed] { return seed; });
-                                                  auto n1 = cc::make_async_lazy([](i64 x) { return x + 1; }, cc::move(n0));
-                                                  acc ^= u64(drive(sched, n1));
-                                              }
-                                              return acc;
-                                          });
+                                              i64 const seed = i64(g);
+                                              auto n0 = cc::make_async_lazy<i64>([seed] { return seed; });
+                                              auto n1 = cc::make_async_lazy([](i64 x) { return x + 1; }, cc::move(n0));
+                                              acc ^= u64(drive(sched, n1));
+                                          }
+                                          return acc;
+                                      });
     double const d = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(direct_step(direct_leaf(i64(g))));
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                         acc ^= u64(direct_step(direct_leaf(i64(g))));
+                                                     return acc;
+                                                 });
     report("single-dep a->b", nodes, a, d);
 }
 
@@ -228,26 +228,26 @@ void case_chain(cc::inline_scheduler& sched, char const* label, int n)
     double const units = double(nodes) * G;
 
     double const a = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(drive(sched, build_chain(n, i64(g))));
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                         acc ^= u64(drive(sched, build_chain(n, i64(g))));
+                                                     return acc;
+                                                 });
     double const d = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                              {
-                                                  i64 x = direct_leaf(i64(g));
-                                                  for (int i = 1; i < n; ++i)
-                                                      x = direct_step(x);
-                                                  acc ^= u64(x);
-                                              }
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                     {
+                                                         i64 x = direct_leaf(i64(g));
+                                                         for (int i = 1; i < n; ++i)
+                                                             x = direct_step(x);
+                                                         acc ^= u64(x);
+                                                     }
+                                                     return acc;
+                                                 });
     report(label, nodes, a, d);
 }
 
@@ -258,28 +258,30 @@ void case_fan_in(cc::inline_scheduler& sched)
     int const G = graphs_for(nodes);
     double const units = double(nodes) * G;
 
-    double const a = bench::median_units_per_sec(units,
-                                          [&]
+    double const a
+        = bench::median_units_per_sec(units,
+                                      [&]
+                                      {
+                                          u64 acc = 0;
+                                          for (int g = 0; g < G; ++g)
                                           {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                              {
-                                                  i64 const s = i64(g);
-                                                  auto la = cc::make_async_lazy<i64>([s] { return s; });
-                                                  auto lb = cc::make_async_lazy<i64>([s] { return s + 1; });
-                                                  auto c = cc::make_async_lazy([](i64 l, i64 r) { return l + r; }, la, lb);
-                                                  acc ^= u64(drive(sched, c));
-                                              }
-                                              return acc;
-                                          });
-    double const d = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(direct_add(direct_leaf(i64(g)), direct_leaf(i64(g) + 1)));
-                                              return acc;
-                                          });
+                                              i64 const s = i64(g);
+                                              auto la = cc::make_async_lazy<i64>([s] { return s; });
+                                              auto lb = cc::make_async_lazy<i64>([s] { return s + 1; });
+                                              auto c = cc::make_async_lazy([](i64 l, i64 r) { return l + r; }, la, lb);
+                                              acc ^= u64(drive(sched, c));
+                                          }
+                                          return acc;
+                                      });
+    double const d
+        = bench::median_units_per_sec(units,
+                                      [&]
+                                      {
+                                          u64 acc = 0;
+                                          for (int g = 0; g < G; ++g)
+                                              acc ^= u64(direct_add(direct_leaf(i64(g)), direct_leaf(i64(g) + 1)));
+                                          return acc;
+                                      });
     report("fan-in c=f(a,b)", nodes, a, d);
 }
 
@@ -291,21 +293,21 @@ void case_sum_tree(cc::inline_scheduler& sched, int depth)
     double const units = double(nodes) * G;
 
     double const a = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(drive(sched, build_sum_tree(depth, i64(g))));
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                         acc ^= u64(drive(sched, build_sum_tree(depth, i64(g))));
+                                                     return acc;
+                                                 });
     double const d = bench::median_units_per_sec(units,
-                                          [&]
-                                          {
-                                              u64 acc = 0;
-                                              for (int g = 0; g < G; ++g)
-                                                  acc ^= u64(direct_sum_tree(depth, i64(g)));
-                                              return acc;
-                                          });
+                                                 [&]
+                                                 {
+                                                     u64 acc = 0;
+                                                     for (int g = 0; g < G; ++g)
+                                                         acc ^= u64(direct_sum_tree(depth, i64(g)));
+                                                     return acc;
+                                                 });
     report("sum-tree (depth 13)", nodes, a, d);
 }
 
