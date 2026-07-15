@@ -48,7 +48,9 @@ CC_DONT_INLINE u64 make_async_manual_probe()
 
 // A single make_async_lazy<int> create + destroy of a cold (undriven) node, pinned for disassembly:
 // `dev.py assembly show make_async_lazy_probe`. Used to count node allocations — if the frame closure is a
-// separate unique_function node alloc (no SSO), this shows TWO default_node_allocator/allocate paths, not one.
+// separate unique_function node alloc (no SSO), this shows TWO alloc paths, not one. Each is an inline TLS
+// load of detail::default_node_alloc + the slab fast path; an out-of-line allocator fetch would be a
+// regression (see default_node_allocator).
 CC_DONT_INLINE u64 make_async_lazy_probe()
 {
     int const s = 7;

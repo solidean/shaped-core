@@ -193,13 +193,30 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
 }
 #endif // CC_HAS_THREADS
 
+/// The system resource's per-thread allocator, plus self-deregistration.
+/// This is the one allocator that stays installed as the thread default until thread exit, so a
+/// plain ~node_allocator assert would fire on it. Clearing the slot here is sound precisely where
+/// the general case is not: this wrapper is itself thread_local, so its dtor provably runs on the
+/// one thread whose slot it clears. detail::default_node_alloc is trivially destructible, so its
+/// storage outlives this dtor on both the Itanium and MSVC TLS teardown paths.
+struct tls_default_allocator
+{
+    cc::node_allocator alloc{&system_node_memory_resource};
+
+    ~tls_default_allocator()
+    {
+        if (cc::detail::default_node_alloc == &alloc)
+            cc::detail::default_node_alloc = nullptr;
+    }
+};
+
 /// Returns a thread-local node_allocator for the system node memory resource.
 /// The allocator is lazy-initialized with all slabs nullptr.
 cc::node_allocator& system_get_allocator(void* userdata)
 {
     CC_UNUSED(userdata);
-    thread_local cc::node_allocator tls_allocator(&system_node_memory_resource);
-    return tls_allocator;
+    thread_local tls_default_allocator tls_allocator;
+    return tls_allocator.alloc;
 }
 
 // 24-byte large-node header, sitting immediately BEFORE the returned payload: [size][alignment][resource*].
@@ -444,13 +461,33 @@ cc::byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
     return this->refill_slabs_and_allocate_node_bytes(idx);
 }
 
-cc::node_allocator& cc::default_node_allocator()
+cc::node_allocator* cc::detail::node_alloc_hydrate_default()
 {
-    return cc::default_node_memory_resource->get_allocator(cc::default_node_memory_resource->userdata);
+    auto* const a = &cc::default_node_memory_resource->get_allocator(cc::default_node_memory_resource->userdata);
+    cc::detail::default_node_alloc = a;
+    return a;
+}
+
+void cc::set_default_node_allocator(cc::node_allocator* alloc)
+{
+    cc::detail::default_node_alloc = alloc;
+}
+
+cc::node_allocator* cc::get_default_node_allocator()
+{
+    return cc::detail::default_node_alloc;
 }
 
 cc::node_allocator::~node_allocator()
 {
+    // A destroyed allocator that is still installed leaves the slot dangling, and the next alloc on
+    // this thread hands out slots from freed slabs. Best-effort: only this thread's slot is visible,
+    // so a cross-thread install/destroy still slips through. The system's own thread-default is
+    // exempt because tls_default_allocator clears the slot before we get here.
+    CC_ASSERT(cc::detail::default_node_alloc != this,
+              "node allocator destroyed while still installed as this thread's default -- deregister it first "
+              "(set_default_node_allocator / scoped_default_node_allocator)");
+
 #if CC_HAS_THREADS
     // hand our retained slabs back to the resource so later threads adopt them instead of leaking.
     // no-op for resources without the hook (they keep today's leak-on-exit behavior).

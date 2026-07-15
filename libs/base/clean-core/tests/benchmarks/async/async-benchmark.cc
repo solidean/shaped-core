@@ -2,7 +2,7 @@
 //
 // Measures the "async tax": the per-async overhead of create -> drive-to-completion -> destroy on ONE
 // thread (the inline scheduler), with nothing multithreaded involved. If this is expensive, no
-// work-stealing work matters, so it is measured first. See .tmp/handover-async-perf-followups.md.
+// work-stealing work matters, so it is measured first.
 //
 // For each case we build a small async graph, drive it to completion with a reused inline_scheduler +
 // async_worker_scope, and read the result zero-copy via try_value(). Every case is reported next to a

@@ -207,6 +207,7 @@ add_executable(clean-core-test
 
     tests/memory/allocation-test.cc
     tests/memory/node_allocation-test.cc
+    tests/memory/node_allocation-default-test.cc
     tests/memory/node_allocation-patterns-test.cc
     tests/memory/node_allocation-sizes-test.cc
     tests/memory/node_allocation-slabs-test.cc

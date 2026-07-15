@@ -286,6 +286,13 @@ cc::system_memory_resource;                               // malloc/free opt-out
 #include <clean-core/memory/node_allocation.hh>   // cc::node_allocation<T> — move-only single-object slab handle
 auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args...);
 *na;  na->member;  na.is_valid();
+cc::default_node_allocator();                             // node_allocator& — this thread's default; inline TLS load,
+                                                          // resolved once per thread (never null)
+cc::set_default_node_allocator(&a);                       // repoint this thread's default; nullptr resets (re-resolves)
+cc::get_default_node_allocator();                         // node_allocator* — raw slot, null if not resolved yet
+cc::scoped_default_node_allocator g(&a);                  // scoped override; restores the previous slot (nests)
+// GOTCHA: an allocator must outlive every node allocated from it — frees are pointer-derived and never consult an
+// allocator, so nothing detects a violation. Deregister before it dies (~node_allocator asserts it isn't installed).
 
 #include <clean-core/memory/unique_ptr.hh>        // cc::unique_ptr<T> — move-only single-object owner (wraps node_allocation)
 auto p = cc::make_unique<T>(args...);              // *p; p->member; p.get(); p.is_valid(); if (p) ...
