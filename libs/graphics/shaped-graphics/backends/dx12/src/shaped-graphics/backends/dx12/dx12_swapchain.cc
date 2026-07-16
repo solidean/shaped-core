@@ -44,7 +44,7 @@ void apply_hdr_colorspace(IDXGISwapChain3* swapchain, sg::pixel_format format)
 cc::result<dx12_swapchain_handle> dx12_context::create_dx12_swapchain(sg::swapchain_description const& desc)
 {
     // Validate the contract before any DXGI work, so a bad desc asserts at the entry point.
-    sg::swapchain::validate_description(desc);
+    desc.assert_valid();
 
     HWND const hwnd = static_cast<HWND>(desc.native_window_handle);
     tg::vec2i const size = client_size_of(hwnd);

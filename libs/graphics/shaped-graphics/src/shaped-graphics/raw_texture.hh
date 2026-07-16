@@ -45,6 +45,15 @@ struct texture_description
     bool is_cube = false;
 
     texture_usage usage = texture_usage::none;
+
+    /// Whether the shape contract holds: concrete format, extents >= 1, mip/sample >= 1, and the valid
+    /// dimension/array/cube/MSAA combinations. The non-asserting counterpart of assert_valid().
+    [[nodiscard]] bool is_valid() const;
+
+    /// Asserts the shape contract (see is_valid) with a per-invariant message. Runs from raw_texture's
+    /// constructor; a backend also calls it at the top of its create path so the contract is enforced
+    /// before any fallible GPU work (rather than a bad desc surfacing as a driver error).
+    void assert_valid() const;
 };
 
 /// A GPU-resident texture with immutable shape (its texture_description). Contents change through
@@ -58,12 +67,6 @@ class raw_texture : public std::enable_shared_from_this<raw_texture>
 {
 public:
     virtual ~raw_texture();
-
-    /// Asserts `desc` satisfies the shape contract (concrete format, extents >= 1, mip/sample >= 1, and
-    /// the valid dimension/array/cube/MSAA combinations). Runs from the constructor; a backend also calls
-    /// it at the top of its create path so the contract is enforced before any fallible GPU work (rather
-    /// than a bad desc surfacing as a driver error).
-    static void validate_description(texture_description const& desc);
 
     /// The full shape this texture was created with.
     [[nodiscard]] texture_description const& description() const { return _desc; }
