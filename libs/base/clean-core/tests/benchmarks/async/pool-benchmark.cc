@@ -17,14 +17,20 @@
 //   nested parallel-for  a parallel-for whose leaf is itself a parallel-for -> deque depth + nested spawn
 //   spawn tree           trivial leaves, so per-node scheduling overhead IS the measurement
 //
-// Two things about the numbers, both learned the hard way and neither obvious from a table:
+// Four things about the numbers, none obvious from a table and each one learned by getting it wrong:
 //
-// * The i9-12900H this was developed on is heterogeneous (P+E cores) and SMT. "Near-linear" is only meaningful
-//   against the P-core count; the curve bends at the E-core and hyperthread boundaries and that is a property
-//   of the machine, not a defect in the scheduler. Judge the knee, not the top.
-// * Leaf work is deliberately compute-bound (a few rounds of ALU mixing per element). A memory-bound leaf would
-//   cap speedup at DRAM bandwidth — a real effect, but it would measure the machine instead of the scheduler,
-//   which is what this file exists to measure.
+// * A "w worker" row runs w+1 THREADS. blocking_get makes the calling thread participate as a worker for the
+//   duration (see async_thread_pool.hh), so the sweep tops out at hardware-concurrency MINUS ONE, and the "vs
+//   1w" column is anchored on a 2-thread config rather than a serial one. Compare rows, not absolutes.
+// * The machine matters and this file cannot know it. A heterogeneous part (P+E cores, SMT) bends the curve at
+//   the E-core and hyperthread boundaries, which is a property of the machine and not a defect in the
+//   scheduler. Judge the knee, not the top, against the count of *performance* cores on whatever you ran.
+// * Leaf work must stay compute-bound, and that is a live constraint, not a note: a memory-bound leaf caps
+//   speedup at DRAM bandwidth and measures the machine instead of the scheduler. It broke exactly once already
+//   — see mix(), whose eight LCG rounds were folded into one multiply-add by clang until it was made
+//   non-affine. If a case stops scaling past ~8 workers, check the codegen before blaming the pool.
+// * The spawn tree is the only case whose leaf does nothing, so it is the only one where per-node scheduling
+//   cost IS the measurement — and correspondingly the one most sensitive to idle-worker policy.
 //
 // Every fork-join frame is kept at or under the node's 32 B inline frame slot: a closure over 32 B falls back
 // to a heap-boxed cc::unique_function, which would put an allocation in every task. That is why the grain sizes
@@ -104,14 +110,25 @@ CC_FORCE_INLINE void opaque(i64& v)
 #endif
 }
 
-// A few rounds of LCG mixing: cheap, data-dependent, and compute-bound so the benchmark measures scheduling
-// rather than DRAM bandwidth. Shared verbatim by the serial baselines and the async leaves — the comparison is
-// only honest if both do exactly the same arithmetic.
+// Cheap, data-dependent, compute-bound mixing, so the benchmark measures scheduling rather than DRAM
+// bandwidth. Shared verbatim by the serial baselines and the async leaves — the comparison is only honest if
+// both do exactly the same arithmetic.
+//
+// It must NOT be affine. This was eight rounds of `x = x*1664525 + 1013904223`, and clang composed all eight
+// into a single multiply-add — the emitted loop was one `imul` by 0xea890021 plus one `add` of 0xa3d95fa8,
+// which are exactly 1664525^8 and the matching addend mod 2^32. That silently turned the parallel-for and
+// reduction leaves into memory-bandwidth streamers, i.e. the precise failure this file's header warns against:
+// they measured the machine, not the scheduler, and capped out around 8 workers. lowbias32 (Chris Wellons'
+// hash-prospector search) is xor-shift/multiply and so is not affine over Z_2^32; rounds of it cannot collapse.
 CC_FORCE_INLINE i32 mix(i32 x)
 {
-    for (int i = 0; i < 8; ++i)
-        x = x * 1664525 + 1013904223;
-    return x;
+    cc::u32 h = cc::u32(x);
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return i32(h);
 }
 
 CC_FORCE_INLINE void mix_range(cc::span<i32> d)
@@ -367,25 +384,29 @@ cc::vector<i32> make_random(isize n)
     return v;
 }
 
-// The worker counts the full table sweeps. P is the last entry.
+// The worker counts the full table sweeps. The top entry is P-1, NOT P: blocking_get makes the calling thread
+// participate as a worker, so a w-worker pool runs w+1 threads and P would oversubscribe the machine. That is
+// not a rounding detail — at 32 workers on 32 hardware threads the extra thread cost the reduction case 2x
+// (0.04 vs 0.02 ns/elem) purely in scheduler thrash, which reads as a scheduler defect and is not one.
 cc::vector<int> sweep_workers()
 {
-    int const p = cc::num_hardware_threads();
+    int const p = cc::num_hardware_threads() - 1;
     cc::vector<int> ws;
     for (int w : {1, 2, 4, 8})
         if (w < p)
             ws.push_back(w);
-    ws.push_back(p);
+    ws.push_back(p < 1 ? 1 : p);
     return ws;
 }
 
-// What the guide benchmark measures: just the two ends. 1 worker anchors the scaling ratio, P is the number
+// What the guide benchmark measures: just the two ends. 1 worker anchors the scaling ratio, P-1 is the number
 // that matters; the intermediate points only shape the human-facing curve.
 cc::vector<int> guide_workers()
 {
+    int const p = cc::num_hardware_threads() - 1;
     cc::vector<int> ws;
     ws.push_back(1);
-    ws.push_back(cc::num_hardware_threads());
+    ws.push_back(p < 2 ? 2 : p);
     return ws;
 }
 
@@ -550,7 +571,9 @@ sweep_result case_tree(cc::span<int const> workers)
 
 void run_all()
 {
-    std::printf("\n### cc::async_thread_pool sweep (median of 5, %d hardware threads) ###\n", cc::num_hardware_threads());
+    std::printf("\n### cc::async_thread_pool sweep (median of 5, %d hardware threads; +1 participating caller per row) "
+                "###\n",
+                cc::num_hardware_threads());
 
     auto const ws = sweep_workers();
     (void)case_quicksort(ws);
@@ -566,9 +589,11 @@ void run_all()
     std::printf("  vs serial serial ns / pool ns, an ADJACENT pair -- valid even when the canary drifts.\n");
     std::printf("  vs 1w     the scheduler's own scaling, but 1w and Pw are rows apart in time -- so only trust\n");
     std::printf("            it where the serial column above it is flat.\n");
-    std::printf("Judge near-linearity against the P-core count, not the thread count: the curve bends at the\n");
-    std::printf("E-core and SMT boundaries by design. The spawn tree's 'vs serial' is expected to be ~0 and is\n");
-    std::printf("not a defect -- its serial analog is a bare recursive call; read its ns/node and 'vs 1w'.\n");
+    std::printf("A 'w worker' row runs w+1 THREADS: blocking_get makes the calling thread participate, so the\n");
+    std::printf("sweep tops out at hardware concurrency MINUS ONE and '1w' is a 2-thread config, not a serial\n");
+    std::printf("one. Judge near-linearity against the P-core count, not the thread count: the curve bends at\n");
+    std::printf("the E-core and SMT boundaries by design. The spawn tree's 'vs serial' is expected to be ~0 and\n");
+    std::printf("is not a defect -- its serial analog is a bare recursive call; read its ns/node and 'vs 1w'.\n");
     std::fflush(stdout);
 }
 } // namespace

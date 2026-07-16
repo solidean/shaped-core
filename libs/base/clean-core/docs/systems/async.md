@@ -173,14 +173,20 @@ There are two schedulers, and they present the same surface:
 | | drives | publishes work | use |
 |---|---|---|---|
 | `singlethreaded_scheduler` | inline, on the calling thread | never | tests, debug, deterministic runs |
-| `async_thread_pool` | worker threads | yes (unless 1 worker) | real concurrent work |
+| `async_thread_pool` | worker threads **plus the calling thread** | yes | real concurrent work |
 
 ```cpp
 cc::singlethreaded_scheduler sched;
 int v = sched.blocking_get(root);        // drives + blocks THIS thread
-cc::async_thread_pool pool(cc::num_hardware_threads());
-int v = pool.blocking_get(root);         // submits + blocks the (foreign) calling thread
+cc::async_thread_pool pool;              // defaults to hardware concurrency - 1 (the caller is the other thread)
+int v = pool.blocking_get(root);         // the calling thread PARTICIPATES, then blocks
 ```
+
+`async_thread_pool::blocking_get` does not hand the graph over and park. The calling thread borrows a pool slot
+and runs the graph itself, stealing like any worker, and parks only once nothing is left for it. So a graph that
+never forks costs ~27 ns rather than a cross-thread round trip, and a large one still spreads across the pool
+(the caller's deque is stealable like any other). That is why the default worker count is one *fewer* than the
+hardware concurrency, and why a 1-worker pool still publishes work — its caller is a second participant.
 
 `singlethreaded_scheduler` is single-threaded **by construction, not by circumstance**: it has no peers, so it
 never publishes work and a graph's nodes cannot run concurrently however many cores sit idle. That is what

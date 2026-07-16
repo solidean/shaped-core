@@ -60,14 +60,22 @@
 
 thread_local cc::async_thread_pool::worker* cc::async_thread_pool::s_current_worker = nullptr;
 
-// A 1-worker pool has nobody to steal from it, so it reports no steal-capable peers and the poll loop stops
-// publishing deps it is about to drive inline anyway.
-cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(worker_count > 1)
+int cc::async_thread_pool::default_worker_count()
+{
+    int const n = cc::num_hardware_threads() - 1; // the blocking_get caller runs work too; leave it a core
+    return n < 1 ? 1 : n;
+}
+
+// Always steal-capable, even at worker_count == 1: the external slots mean a foreign blocking_get caller is a
+// second participant that can steal from the worker and be stolen from, so the poll loop must keep publishing
+// dependencies rather than assume it is alone and drive them all inline.
+cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(true)
 {
     CC_ASSERT(worker_count >= 1, "a thread pool needs at least one worker");
+    _thread_count = worker_count;
 
-    _workers.reserve(worker_count);
-    for (int i = 0; i < worker_count; ++i)
+    _workers.reserve(worker_count + external_slot_count);
+    for (int i = 0; i < worker_count + external_slot_count; ++i)
     {
         auto w = cc::make_unique<worker>();
         w->pool = this;
@@ -75,9 +83,9 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(wor
         _workers.push_back(cc::move(w));
     }
 
-    // start threads only after every worker slot exists, so a stealer always sees all deques
-    for (auto& w : _workers)
-        w->thread = std::thread([this, wp = w.get()] { worker_main(*wp); });
+    // start threads only after every slot exists (external ones included), so a stealer always sees all deques
+    for (int i = 0; i < _thread_count; ++i)
+        _workers[i]->thread = std::thread([this, wp = _workers[i].get()] { worker_main(*wp); });
 }
 
 cc::async_thread_pool::~async_thread_pool()
@@ -125,9 +133,11 @@ void cc::async_thread_pool::submit(async_node_ptr node)
     CC_ASSERT(node != nullptr, "cannot submit a null node");
 
     // The injection queue stays a plain mutex, deliberately: only genuinely foreign threads reach submit() (a
-    // worker waking a node routes through enqueue via async_scheduler::current_or_null), so this is cold by
-    // construction and a lock-free rewrite would buy nothing.
+    // worker waking a node routes through enqueue via async_scheduler::current_or_null), so the PUSH side is
+    // cold by construction and a lock-free rewrite would buy nothing. Its POP side is not cold — that is what
+    // _injection_hint exists for; see the member.
     _injection.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(cc::move(node)); });
+    _injection_hint.fetch_add(1, std::memory_order_relaxed);
     wake_one();
 }
 
@@ -159,7 +169,7 @@ void cc::async_thread_pool::wake_one()
     _wait_cv.notify_one();
 }
 
-cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w)
+cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w, bool authoritative)
 {
     // 1. our own deque, LIFO (hot: freshly spawned children). Uncontended in the common case.
     async_node_base* raw = nullptr;
@@ -177,6 +187,11 @@ cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w)
     int const n = int(_workers.size());
     if (n > 1)
     {
+        // Bounding this to a small fixed sample (4 of n, rather than 2n) looks tempting -- one idle worker's
+        // scan is O(N) and N idle workers make it O(N^2). It measured badly on BOTH axes: an 8-node graph at 32
+        // workers went 3.4 -> 23 us and the spawn tree 6.4 -> 7.0 ns/node, because a worker that samples 4 of 36
+        // slots usually misses the one deque holding the work and sleeps instead. The scan is what finds work;
+        // sampling it is the same mistake as backing it off (see async_pool_spin_rounds).
         int const attempts = 2 * n;
         for (int i = 0; i < attempts; ++i)
         {
@@ -189,27 +204,60 @@ cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w)
         }
     }
 
-    // 3. the shared injection queue (foreign submits). Strong handles: it is cold, so it stays a plain mutex.
-    if (auto n = _injection.lock(
+    // 3. the shared injection queue (foreign submits). Strong handles, so it stays a plain mutex — but taking
+    //    that mutex on every scan is what made N idle workers contend on it, so it sits behind the hint (and,
+    //    off the authoritative path, the poller token). See the members for why the two filters differ.
+    auto const poll_injection = [&]() -> async_node_ptr
+    {
+        auto n = _injection.lock(
             [](cc::vector<async_node_ptr>& q) -> async_node_ptr
             {
                 if (q.empty())
                     return nullptr;
                 return q.pop_back();
-            }))
+            });
+        if (n)
+            _injection_hint.fetch_sub(1, std::memory_order_relaxed);
         return n;
+    };
+
+    if (authoritative)
+        return poll_injection();
+
+    if (_injection_hint.load(std::memory_order_relaxed) > 0
+        && _injection_poller.exchange(1, std::memory_order_acquire) == 0)
+    {
+        auto n = poll_injection();
+        _injection_poller.store(0, std::memory_order_release);
+        if (n)
+            return n;
+    }
 
     return nullptr;
 }
 
-// How many times a worker re-scans for work before committing to the condvar. Not a micro-optimization: a
-// condvar round-trip is ~1-10 us, while a spinning worker picks it up in ~100 ns, and fork-join graphs run tasks
-// that cost ~100 ns each and go briefly dry all the time -- sleeping instantly pays microseconds to save
-// nanoseconds.
+// How many times an idle scanner re-scans before committing to the condvar. Used by both a worker and a
+// foreign caller participating in participate_until_ready. Not a micro-optimization: a condvar round-trip is
+// ~1-10 us while a spinning scanner picks work up in ~100 ns, and fork-join graphs run tasks that cost ~100 ns
+// each and go briefly dry all the time -- sleeping instantly pays microseconds to save nanoseconds.
 //
-// Measured, not guessed (spawn tree at 20 workers, i9-12900H, ns/node): 0 -> 18.2, 16 -> 14.2, 64 -> 13.6,
-// 256 -> 14.0. So spinning at all is worth ~25%, and past ~64 the workers just burn cores that the graph itself
-// wants (256 was clearly worse on parallel-for). 16 vs 64 is close; 64 won consistently on repeat.
+// Two variants were tried here and BOTH measured worse; the shape below is flat-pause-then-sleep on purpose
+// (32 workers, spawn tree ns/node | 8-node graph us):
+//
+//   yield between scans        3.5 | 25.4   Great for the tree, catastrophic for latency, and no cadence fixed
+//                                           it -- every 16th round still cost 24 us. The lesson: a yielding
+//                                           worker is worse than a SLEEPING one. A sleeper gets notify_one'd;
+//                                           a yielder is told nothing and must poll to notice, so it reacts
+//                                           slower AND burns a syscall doing it.
+//   exponential pause backoff  9.2 | ----   Same pause budget, ~7 scans instead of 128. A scan is not merely a
+//                                           cost, it is what FINDS work -- backing it off blinds a worker while
+//                                           fork-join is producing tasks every ~100 ns. PAUSE is the cheap part;
+//                                           the SCAN budget is the one that buys throughput, so spend it.
+//
+// One case still prefers yielding: the spawn tree (trivial leaves, so scheduling IS the workload) wants idle
+// workers off-CPU and gets 3.5 vs 6.1 ns/node. It is the only one -- quicksort and reduction are both BETTER
+// without. Buying it back without the latency cost needs bounded searchers (one hot scanner, the rest properly
+// asleep), which is a design change, not a constant.
 static constexpr int async_pool_spin_rounds = 64;
 
 void cc::async_thread_pool::worker_main(worker& w)
@@ -226,8 +274,9 @@ void cc::async_thread_pool::worker_main(worker& w)
             continue;
         }
 
-        // 1. nothing right now -- spin a bounded while before paying for a sleep. No shared writes here, just
-        //    re-scans, so a worker that is about to be handed work costs nobody anything.
+        // 1. nothing right now -- scan a bounded while before paying for a sleep. No shared writes here, just
+        //    re-scans, so a worker that is about to be handed work costs nobody anything. See the constant for
+        //    the two backoff schemes that were tried and lost.
         bool found = false;
         for (int i = 0; i < async_pool_spin_rounds && !_stop.load(std::memory_order_relaxed); ++i)
         {
@@ -254,7 +303,8 @@ void cc::async_thread_pool::worker_main(worker& w)
         // 3. the re-scan that closes the race: a producer that pushed before our registration became visible may
         //    have already read _sleepers == 0 and skipped notifying us. Seq_cst says at least one of us sees the
         //    other -- so if they missed us, we see their work here.
-        if (auto n = try_get_work(w))
+        // authoritative: this scan is what decides we may sleep, so it must not let the poller token filter it
+        if (auto n = try_get_work(w, /*authoritative*/ true))
         {
             _sleepers.fetch_sub(1, std::memory_order_relaxed);
             n->poll();
@@ -273,7 +323,9 @@ void cc::async_thread_pool::worker_main(worker& w)
     s_current_worker = nullptr;
 }
 
-void cc::async_thread_pool::block_until_ready(async_node_base& root)
+// Park the calling thread until `root` completes. Does NOT schedule it — the caller has already placed it (and
+// re-scheduling a running node would only force a redundant re-poll).
+void cc::async_thread_pool::wait_for_completion(async_node_base& root)
 {
     struct sync
     {
@@ -283,7 +335,7 @@ void cc::async_thread_pool::block_until_ready(async_node_base& root)
     };
     sync s;
 
-    // notify UNDER the lock so this hook (running on a worker) fully returns before block_until_ready's frame
+    // notify UNDER the lock so this hook (running on a worker) fully returns before wait_for_completion's frame
     // (and thus `s`) is destroyed.
     bool const already = root.install_completion_hook_or_ready(
         [](void* p)
@@ -295,13 +347,105 @@ void cc::async_thread_pool::block_until_ready(async_node_base& root)
         },
         &s);
 
-    root.schedule_on(*this); // force the root onto this pool (works whether or not it is the installed default)
-
     if (already)
         return; // completed before we installed the hook: no wait, no notify pending
 
     std::unique_lock<std::mutex> lk(s.m);
     s.cv.wait(lk, [&] { return s.done; });
+}
+
+cc::async_thread_pool::worker* cc::async_thread_pool::try_claim_external_slot()
+{
+    for (int i = _thread_count; i < int(_workers.size()); ++i)
+    {
+        bool expected = false;
+        if (_workers[i]->claimed.compare_exchange_strong(expected, true, std::memory_order_acquire,
+                                                         std::memory_order_relaxed))
+            return _workers[i].get();
+    }
+    return nullptr; // every slot is busy; the caller falls back to submit-and-park
+}
+
+// Hand whatever is still queued on a departing external slot back to the pool.
+//
+// This is not an optimization, it is the correctness cost of borrowing a slot. The deque dies with the drive,
+// and a node left `scheduled` in it would be stranded forever: schedule()/schedule_on() are idempotent on
+// `scheduled`, so no other scheduler could ever reclaim it and a blocking_get on that node would hang. (The
+// singlethreaded_scheduler pays the same debt by drain()ing — see the note on its try_blocking_get.) Unlike the
+// destructor's drain, which abandons work deliberately, this must RE-HOME it: the graph is still live.
+void cc::async_thread_pool::drain_slot_to_injection(worker& w)
+{
+    // try_take is owner-only, and for an external slot the owner is this thread. Thieves may race us for the
+    // top end; that is exactly what Chase-Lev's take/steal protocol resolves.
+    async_node_base* raw = nullptr;
+    bool any = false;
+    while (w.deque.try_take(raw))
+    {
+        _injection.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(async_node_ptr::adopt(raw)); });
+        _injection_hint.fetch_add(1, std::memory_order_relaxed);
+        any = true;
+    }
+    if (any)
+        wake_one();
+}
+
+void cc::async_thread_pool::participate_until_ready(async_node_base& root)
+{
+    worker* const slot = try_claim_external_slot();
+    if (slot == nullptr)
+    {
+        // No free slot: fall back to handing the root over and parking, the pre-participation behavior.
+        root.schedule_on(*this);
+        wait_for_completion(root);
+        return;
+    }
+
+    worker* const previous = s_current_worker;
+    s_current_worker = slot;
+    {
+        async_worker_scope const scope(*this); // binds THIS pool, so the root's children route to our own deque
+
+        // Drive the root HERE rather than schedule() it. Publishing it would push it onto our deque, wake a
+        // worker for it, and then race that worker to take it back — for a graph we are about to run anyway.
+        // At 32 workers the thief usually wins, and the caller ends up parked on a node it could have run
+        // inline (measured: 328 ns -> 1535 ns for a single-node graph). Anything the root forks off is still
+        // published normally by the poll loop, so a real graph still spreads.
+        root.poll();
+
+        while (!root.is_ready())
+        {
+            if (auto n = try_get_work(*slot))
+            {
+                n->poll();
+                continue;
+            }
+
+            // Dry. Spin like a worker before giving up: the rest of the graph is in flight on the pool and work
+            // may come back to us within nanoseconds, whereas parking costs microseconds.
+            bool found = false;
+            for (int i = 0; i < async_pool_spin_rounds && !root.is_ready(); ++i)
+            {
+                cc::spin_pause();
+                if (auto n = try_get_work(*slot))
+                {
+                    n->poll();
+                    found = true;
+                    break;
+                }
+            }
+            if (found || root.is_ready())
+                continue;
+
+            // Genuinely nothing for us and the root is still out there — park on it rather than burn a core the
+            // pool wants. Anything we queued stays stealable while we sleep.
+            wait_for_completion(root);
+            break;
+        }
+
+        drain_slot_to_injection(*slot);
+    }
+    s_current_worker = previous;
+    slot->claimed.store(false, std::memory_order_release);
 }
 
 void cc::install_default_async_pool(async_thread_pool& pool)
