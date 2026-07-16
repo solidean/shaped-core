@@ -356,7 +356,7 @@ void run_all()
 } // namespace
 
 // Single-thread async overhead vs a hand-written baseline. Manual: run by exact name, e.g.
-//   uv run dev.py test "bench-async (single-thread drive)" --mirror-output
+//   uv run dev.py --mirror-test-output test "bench-async (single-thread drive)"
 TEST("bench-async (single-thread drive)", nx::config::manual)
 {
     run_all();

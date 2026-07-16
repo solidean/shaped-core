@@ -170,7 +170,7 @@ void run()
 } // namespace
 
 // Breakdown of the born-ready async overhead over the raw node alloc+free. Run by exact name:
-//   uv run dev.py test "bench-async born-ready decomposition" --mirror-output
+//   uv run dev.py --mirror-test-output test "bench-async born-ready decomposition"
 TEST("bench-async born-ready decomposition", nx::config::manual)
 {
     run();

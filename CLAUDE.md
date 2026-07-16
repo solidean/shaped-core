@@ -79,8 +79,8 @@ nexus    typed-geometry  ←────────────────┘
   calibrated — treat its warnings as advisory, not gospel.
 * **Building or testing requires the `building-and-testing` skill.** Activate it
   before the first `dev.py` build/test in a session — do not drive `dev.py` from
-  memory (piping into `tail`/`head` masks failures; `--mirror-output` shows live
-  stdout).
+  memory (piping into `tail`/`head` masks failures; `--mirror-test-output` shows a
+  binary's live stdout).
 * **Test binaries are named `*-test`.** Never run one directly — go through
   `uv run dev.py test` (auto-configures, builds, discovers, records). See the
   `building-and-testing` skill.
@@ -115,7 +115,8 @@ caller — treat growing it as a first-class option.
 **Before you build or test in a session, activate the `building-and-testing`
 skill** — it carries the non-obvious rules that keep the loop correct (never pipe
 `dev.py` into `tail`/`head`/`grep` — it masks the real exit code; use the global
-`--mirror-output` to see a binary's live stdout, e.g. a benchmark's printed table;
+`--mirror-test-output` to see a binary's live stdout, e.g. a benchmark's printed
+table, without the build wall (`--mirror-output` streams both);
 `--preset` goes *after* the subcommand; diagnose with `build_diag` / `test_diag`).
 Don't reconstruct these from memory — load the skill.
 
@@ -152,8 +153,9 @@ build, `test_diag` after a test (dev.py prints the exact selector). Full referen
 * Default preset per platform: `relwithdebinfo-clang` (Windows),
   `relwithdebinfo-linux-clang` (Linux), `macos-arm-llvm-relwithdebinfo` (macOS).
   Override with `--preset`, a **per-subcommand flag — it goes *after* the
-  subcommand**: `uv run dev.py test --preset release-clang`. Only `--verbose` /
-  `--mirror-output` are global (before the subcommand).
+  subcommand**: `uv run dev.py test --preset release-clang`. Only `--verbose`,
+  `--mirror-output` / `--mirror-test-output`, `--collect-logs` and `--colored` /
+  `--plain` are global (before the subcommand).
 * `uv run dev.py list-presets` / `list-targets` show what's available.
 * `relwithdebinfo-*` has `CC_ASSERT` **on**; `release-*` has it **off**. If you
   touch assertion-gated code, build a `release-*` preset too.

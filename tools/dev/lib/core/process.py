@@ -29,6 +29,22 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
+_mirror_test_output = False
+
+
+def configure_mirroring(*, mirror_test_output: bool = False) -> None:
+    """Mirror every "test" step live, whatever its caller passed for `mirror`.
+
+    Process-wide presentation, set once from the CLI (like console.configure) — `run_step` is the
+    only reader. Backs --mirror-test-output: the common case is a quiet build and a loud test
+    binary, and setting it here rather than at each dev.test() call site also covers the paths that
+    run test binaries without going through one (coverage run, pgo train). Mirroring is additive to
+    capture, so this never affects the logs.
+    """
+    global _mirror_test_output
+    _mirror_test_output = mirror_test_output
+
+
 # ---------------------------------------------------------------------------
 # MSVC environment setup (Windows only)
 # ---------------------------------------------------------------------------
@@ -297,13 +313,16 @@ def run_step(
     `step_type` is the kind of step ("configure"/"build"/"test") and `name` the
     specific thing it acts on (a target, "all", or a test binary). Prints a
     one-line `[ts] [step_type] name` banner, captures both streams to per-step
-    log files under build_dir/run-logs/ (mirrored live when `mirror`), then
+    log files under build_dir/run-logs/ (mirrored live when `mirror`, or when a
+    "test" step and configure_mirroring enabled it), then
     prints capture pointers and a pass/fail summary. `summary_extra`, when given,
     is called with the finished StepResult and its return value is appended to
     the summary line (e.g. build/test stats); it is skipped on timeout and any
     exception it raises is swallowed. On timeout the process is killed and the
     step reports returncode 124 (conventional timeout code).
     """
+    mirror = mirror or (_mirror_test_output and step_type == "test")
+
     print(console.dim(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else "")), file=sys.stderr)
     if verbose:
         print(console.dim(f"  $ {' '.join(cmd)}"), file=sys.stderr)
