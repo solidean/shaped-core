@@ -409,8 +409,11 @@ GUIDE_BENCHMARK("bench-async (single-thread drive)")
 }
 
 // The full human-facing table: every case, no recording. Run by exact name, e.g.
-//   uv run dev.py --mirror-test-output test "bench-async (single-thread drive, full sweep)"
-TEST("bench-async (single-thread drive, full sweep)", nx::config::manual)
+//   uv run dev.py --mirror-test-output test "bench-async (single-thread drive - full sweep)"
+//
+// No comma in the name: nexus splits a filter on commas, so "a, b" is two filters and would also run whatever
+// else happens to contain " b" (a comma here matched bench-hash's own "..., full sweep" and ran that instead).
+TEST("bench-async (single-thread drive - full sweep)", nx::config::manual)
 {
     run_all(/*record*/ false);
 }
