@@ -91,8 +91,8 @@ enum class async_step_status : cc::u8
 
 namespace impl
 {
-/// Refcount traits for the async node: strong + weak counts live inline in async_node_base (offset 0), so a
-/// node needs no separate control block and the handle is one pointer. Keyed on the BASE, so every async<T>
+/// Refcount traits for the async node: one fused strong/weak count lives inline in async_node_base (offset 0),
+/// so a node needs no separate control block and the handle is one pointer. Keyed on the BASE, so every async<T>
 /// shares it via upcast and continuations can hold weak_ptr<async_node_base> cells that actually point at
 /// larger async<T> nodes. free_storage frees by the concrete size class stashed at construction; destroy_object
 /// tears down only the payload (frame/value/error/continuations) and leaves the counts alive — a weak ref may
@@ -910,21 +910,21 @@ private:
     friend void impl::async_typed_teardown(async_node_base*); // reaches value_storage for the typed dtor
     friend struct impl::async_node_traits;                    // reaches the intrusive counts / ops / teardown_payload
 
-    /// Intrusive refcount (async_node_traits): strong owners + weak (continuation cells + the strong owners'
-    /// collective one). Born 1/1 by init_control. Kept as two independent atomics (offset 0) so inc/dec stay
-    /// plain fetch_add — the state/lock live in a separate word.
-    std::atomic<cc::u32> _strong{0};
-    std::atomic<cc::u32> _weak{0};
+    /// Intrusive refcount (async_node_traits): strong owners in the high half, weak (continuation cells + the
+    /// strong owners' collective one) in the low half. Born 1/1 by init_control. Fused into one word (offset 0)
+    /// so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the
+    /// sole owner — see cc::fused_refcount. The state/lock live in a separate word.
+    std::atomic<cc::u64> _counts{0};
 
     /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits
     /// 2..4, the wake-pending flag in bit 1, and the spinlock in bit 0. Folding lock + state + wake in with the
-    /// ops pointer keeps the fixed header at 16 B (with _strong/_weak). Set once at construction (set_ops); the
+    /// ops pointer keeps the fixed header at 16 B (with _counts). Set once at construction (set_ops); the
     /// ops bits never change, so free_storage can read them at weak 0.
     ///
     /// NOTE: is_ready()/is_cold() are lock-free acquire loads of this word, so they share an address with the
     /// lock RMWs. Deliberate: nearly all is_ready() calls target already-resolved nodes, which take no lock
     /// (completion is done) — no contention there. If a hot pre-completion is_ready() path ever contends,
-    /// steal the MSB of _weak for a dedicated ready bit instead.
+    /// steal the MSB of _counts' weak half for a dedicated ready bit instead.
     std::atomic<cc::u64> _state_and_ops{0};
 
     // No further members: this is a 16 B header. The payload (unresolved scratch ⊍ resolved value/error, incl.
@@ -938,32 +938,27 @@ static_assert(sizeof(async_node_base) == 16, "async_node_base must be a 16 B hea
 
 inline void impl::async_node_traits::init_control(async_node_base* p)
 {
-    p->_strong.store(1, std::memory_order_relaxed);
-    p->_weak.store(1, std::memory_order_relaxed);
+    cc::fused_refcount::init(p->_counts);
 }
 inline void impl::async_node_traits::inc_strong(async_node_base* p)
 {
-    p->_strong.fetch_add(1, std::memory_order_relaxed);
+    cc::fused_refcount::inc_strong(p->_counts);
 }
 inline cc::shared_release impl::async_node_traits::release_strong(async_node_base* p)
 {
-    return {p->_strong.fetch_sub(1, std::memory_order_acq_rel) == 1, false};
+    return cc::fused_refcount::release_strong(p->_counts);
 }
 inline void impl::async_node_traits::inc_weak(async_node_base* p)
 {
-    p->_weak.fetch_add(1, std::memory_order_relaxed);
+    cc::fused_refcount::inc_weak(p->_counts);
 }
 inline bool impl::async_node_traits::release_weak(async_node_base* p)
 {
-    return p->_weak.fetch_sub(1, std::memory_order_acq_rel) == 1;
+    return cc::fused_refcount::release_weak(p->_counts);
 }
 inline bool impl::async_node_traits::try_lock_strong(async_node_base* p)
 {
-    cc::u32 cur = p->_strong.load(std::memory_order_relaxed);
-    while (cur != 0)
-        if (p->_strong.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel, std::memory_order_relaxed))
-            return true;
-    return false; // lost the race to the last strong drop -> the node is (being) torn down
+    return cc::fused_refcount::try_lock_strong(p->_counts);
 }
 inline void impl::async_node_traits::destroy_object(async_node_base* p)
 {

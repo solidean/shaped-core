@@ -63,6 +63,45 @@ struct shared_release
     bool free;    ///< also the last reference of any kind: run free_storage, and skip release_weak
 };
 
+/// The fused strong/weak counter both stock Traits build on: strong in the high 32 bits, weak in the low 32.
+/// The weak half counts every weak_ptr PLUS one collective count shared by all strong owners, so the two halves
+/// move independently — never as a unit. Fusing buys exactly one thing: release_strong can test both counts
+/// with a single load, and the sole-owner case then needs no locked RMW at all.
+///
+/// Weak is the LOW half, so a weak overflow carries straight into the strong count. 2^32 live weak refs is
+/// unreachable in practice (each costs a pointer somewhere) — an invariant, not a check.
+struct fused_refcount
+{
+    static constexpr cc::u64 strong_unit = cc::u64(1) << 32;
+    static constexpr cc::u64 weak_unit = 1;
+    static constexpr cc::u64 sole_owner = strong_unit | weak_unit; // strong == 1 && weak == 1
+
+    static void init(std::atomic<cc::u64>& c) { c.store(sole_owner, std::memory_order_relaxed); }
+    static void inc_strong(std::atomic<cc::u64>& c) { c.fetch_add(strong_unit, std::memory_order_relaxed); }
+    static void inc_weak(std::atomic<cc::u64>& c) { c.fetch_add(weak_unit, std::memory_order_relaxed); }
+
+    static shared_release release_strong(std::atomic<cc::u64>& c)
+    {
+        cc::u64 const old = c.fetch_sub(strong_unit, std::memory_order_acq_rel);
+        return {(old >> 32) == 1, false}; // free is never decided here: the collective weak is still held
+    }
+    static bool release_weak(std::atomic<cc::u64>& c)
+    {
+        return (c.fetch_sub(weak_unit, std::memory_order_acq_rel) & 0xFFFF'FFFF) == 1;
+    }
+    /// Strong +1 iff strong != 0. Guards the HIGH half, so concurrent weak traffic cannot end the loop early —
+    /// though it can make the CAS spuriously fail, which is the one price fusing charges.
+    static bool try_lock_strong(std::atomic<cc::u64>& c)
+    {
+        cc::u64 cur = c.load(std::memory_order_relaxed);
+        while ((cur >> 32) != 0)
+            if (c.compare_exchange_weak(cur, cur + strong_unit, std::memory_order_acq_rel, std::memory_order_relaxed))
+                return true; // strong > 0 held, so the collective weak already exists and is shared
+        return false;        // lost the race to the last strong drop -> object is (being) destroyed
+    }
+};
+static_assert(std::atomic<cc::u64>::is_always_lock_free, "fused refcounts need a lock-free 64-bit atomic");
+
 // ============================================================================
 // default_shared_traits — non-intrusive: control trails the payload in the node
 // ============================================================================
