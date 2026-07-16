@@ -12,7 +12,7 @@
 // the handle stores exactly the payload pointer (get() is a no-op), and the reference counts live in the SAME
 // node, located by a Traits type. Two layouts fall out of one protocol:
 //   * default (cc::default_shared_traits): the node is [ T payload | trailing control ]; the counts sit at a
-//     fixed offset after T, so nothing intrudes on T itself. e.g. shared_ptr<int> is a 12 B node (16 B class).
+//     fixed offset after T, so nothing intrudes on T itself. e.g. shared_ptr<int> is a 16 B node (16 B class).
 //   * intrusive (e.g. cc::async's own traits): the counts are members of T, so the node IS the object and the
 //     handle needs no extra storage. Requires that destroy_object tears down only the payload and leaves the
 //     counts alive (weak must outlive the object) — see the lifetime note below.
@@ -111,8 +111,7 @@ struct default_shared_traits
 {
     struct control
     {
-        std::atomic<cc::u32> strong;
-        std::atomic<cc::u32> weak;
+        std::atomic<cc::u64> counts; // fused strong:weak — see cc::fused_refcount
     };
 
     static constexpr bool supports_weak = true;
@@ -132,26 +131,14 @@ struct default_shared_traits
     static void init_control(T* p)
     {
         control* const c = ctrl(p);
-        new (cc::placement_new, c) control; // begin the atomics' lifetime in the raw trailing storage
-        c->strong.store(1, std::memory_order_relaxed);
-        c->weak.store(1, std::memory_order_relaxed);
+        new (cc::placement_new, c) control; // begin the atomic's lifetime in the raw trailing storage
+        fused_refcount::init(c->counts);
     }
-    static void inc_strong(T* p) { ctrl(p)->strong.fetch_add(1, std::memory_order_relaxed); }
-    static shared_release release_strong(T* p)
-    {
-        return {ctrl(p)->strong.fetch_sub(1, std::memory_order_acq_rel) == 1, false};
-    }
-    static void inc_weak(T* p) { ctrl(p)->weak.fetch_add(1, std::memory_order_relaxed); }
-    static bool release_weak(T* p) { return ctrl(p)->weak.fetch_sub(1, std::memory_order_acq_rel) == 1; }
-    static bool try_lock_strong(T* p)
-    {
-        auto& s = ctrl(p)->strong;
-        cc::u32 cur = s.load(std::memory_order_relaxed);
-        while (cur != 0)
-            if (s.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel, std::memory_order_relaxed))
-                return true;
-        return false; // lost the race to the last strong drop -> object is (being) destroyed
-    }
+    static void inc_strong(T* p) { fused_refcount::inc_strong(ctrl(p)->counts); }
+    static shared_release release_strong(T* p) { return fused_refcount::release_strong(ctrl(p)->counts); }
+    static void inc_weak(T* p) { fused_refcount::inc_weak(ctrl(p)->counts); }
+    static bool release_weak(T* p) { return fused_refcount::release_weak(ctrl(p)->counts); }
+    static bool try_lock_strong(T* p) { return fused_refcount::try_lock_strong(ctrl(p)->counts); }
     static void destroy_object(T* p) { p->~T(); } // control trails in separate storage, so this is weak-safe
     static void free_storage(T* p)
     {

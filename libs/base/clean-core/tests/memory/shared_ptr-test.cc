@@ -182,6 +182,20 @@ TEST("shared_ptr - default traits: plain value type (shared_ptr<int>)")
     CHECK(*p == 7); // same object
 }
 
+// The fused control is 8-aligned, so control_offset rounds sizeof(T) up to 8 and the node grows by up to 4 B
+// over a split-u32 control. That never crosses a size class: the node goes from 8m+4 to 8m+8 bytes, and the
+// only power of two in [8m+4, 8m+8) would have to be 8m+8 itself. shared_ptr<int> is the tight case — a 16 B
+// node in the 16 B class, where a split control gave a 12 B node in the same class.
+namespace
+{
+using int_traits = cc::default_shared_traits<int>;
+static_assert(int_traits::node_size(sizeof(int), alignof(int)) == 16);
+static_assert(int_traits::node_align(alignof(int)) == 8);
+static_assert(cc::node_class_index_from_size_and_align(int_traits::node_size(sizeof(int), alignof(int)),
+                                                       int_traits::node_align(alignof(int)))
+              == cc::node_class_index(4)); // 2^4 == 16 B class, unchanged by the fusion
+} // namespace
+
 // ============================================================================
 // intrusive traits (the async shape): counts as members, weak outlives destroy
 // ============================================================================
