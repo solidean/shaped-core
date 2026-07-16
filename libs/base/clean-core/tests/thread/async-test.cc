@@ -76,6 +76,18 @@ TEST("async - success via context helper")
     CHECK(cc::async_blocking_get_singlethreaded(a) == "hi");
 }
 
+TEST("async - a frame result merely convertible to T is converted, not stored raw")
+{
+    // The node's payload type is T, never the frame's return type: a resolve must convert at the call site.
+    // char const* -> cc::string is the sharp case (storing the pointer raw would run ~string() over it).
+    auto s = cc::make_async_lazy<cc::string>([] { return "hi"; });
+    CHECK(cc::async_blocking_get_singlethreaded(s) == "hi");
+
+    // the same hazard without a teardown: an int stored into an i64 payload leaves the high half undefined
+    auto n = cc::make_async_lazy<cc::i64>([] { return 42; });
+    CHECK(cc::async_blocking_get_singlethreaded(n) == 42);
+}
+
 // ============================================================================
 // single-dependency transform (the one-argument variadic form)
 // ============================================================================

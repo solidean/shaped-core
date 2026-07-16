@@ -288,11 +288,12 @@ struct async_context : async_context_base
     // resolve completes the node IN PLACE (builds the value/error straight into the payload over the moved-out
     // frame slot); AFTER resolving, the frame is spent and must not touch the node again.
 public:
-    /// Resolve with a value (moved into the payload). V must be convertible to T.
-    template <class V>
-    [[nodiscard]] async_step_status resolve_to_value(V&& v) const
+    /// Resolve with a value (moved into the payload). Anything convertible to T works — by value, so the
+    /// conversion to T happens at the call site: what reaches the node is a stack temporary of the payload's
+    /// exact type, never a reference into (say) a dependency's payload that the frame's captures pin alive.
+    [[nodiscard]] async_step_status resolve_to_value(T v) const
     {
-        current->finish_value(cc::forward<V>(v));
+        current->finish_value(cc::move(v)); // T exactly, so finish_value's decay deduces the payload type
         return async_step_status::produced_value;
     }
 
@@ -321,11 +322,7 @@ public:
 
     // convenience aliases for readable frames
 public:
-    template <class V>
-    [[nodiscard]] async_step_status success(V&& v) const
-    {
-        return resolve_to_value(cc::forward<V>(v));
-    }
+    [[nodiscard]] async_step_status success(T v) const { return resolve_to_value(cc::move(v)); }
     [[nodiscard]] async_step_status error(E e) const { return resolve_to_error(cc::move(e)); }
 
     /// Only for the default failure channel: wrap a cc::any_error as an async_error. Enabled when E is async_error.
