@@ -191,6 +191,7 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/async/async-benchmark.cc
         tests/benchmarks/async/born-ready-benchmark.cc
         tests/benchmarks/async/pool-benchmark.cc
+        tests/benchmarks/async/grain-benchmark.cc
         tests/benchmarks/node-allocation-design-benchmark.cc
         tests/benchmarks/node-allocation-design-refill.cc
 
