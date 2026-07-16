@@ -307,7 +307,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
             });
             cmd->raster.bind_pipeline(*pipeline);
             cmd->raster.set_inline_constants(mvp);
-            cmd->raster.bind_vertex_buffers({vbuf->as_vertex_buffer<vertex>()});
+            cmd->raster.bind_vertex_buffers({sg::buffer<vertex>::from_raw(vbuf).as_vertex_buffer()});
             cmd->raster.draw({.vertex_range = {.offset = 0, .size = cc::isize(cube.size())}});
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));

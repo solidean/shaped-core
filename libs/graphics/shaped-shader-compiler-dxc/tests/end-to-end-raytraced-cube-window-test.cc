@@ -451,7 +451,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
         sg::named_view const rt_views[] = {
             {.name = "scene", .view = tlas->as_view()},
             {.name = "Output", .view = image.as_readwrite_view()},
-            {.name = "Camera", .view = cam_buf->as_uniform_buffer<camera_data>()},
+            {.name = "Camera", .view = sg::buffer<camera_data>::from_raw(cam_buf).as_uniform_buffer()},
         };
         auto rt_group = ctx.transient.create_binding_group(rt_group_layout, rt_views);
         cmd->raytracing.bind_pipeline(*rt_pipeline);

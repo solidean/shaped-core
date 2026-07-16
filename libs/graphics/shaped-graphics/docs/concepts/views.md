@@ -173,5 +173,5 @@ sampler descriptor heap).
 ## See also
 
 - [views.hh](../../src/shaped-graphics/views.hh) — the view types (shader-facing views plus `render_target_view` / `depth_stencil_view`), `view_class` / `view_shape`, and `raw_view`.
-- [buffer.hh](../../src/shaped-graphics/raw_buffer.hh) — the `buffer.as_*()` view factories.
+- [buffer.hh](../../src/shaped-graphics/buffer.hh) — the typed `buffer<T>.as_*()` view factories (raw_buffer itself has only the byte-level `as_raw_*`).
 - [memory](memory.md) — the resource-backing model views sit on top of.

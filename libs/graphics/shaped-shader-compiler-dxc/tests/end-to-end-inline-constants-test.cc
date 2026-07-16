@@ -93,8 +93,8 @@ TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias")
     REQUIRE(out1_buf != nullptr);
     REQUIRE(out2_buf != nullptr);
 
-    sg::named_view const g1_view{.name = "Out", .view = out1_buf->as_readwrite_buffer<sg::u32>()};
-    sg::named_view const g2_view{.name = "Out", .view = out2_buf->as_readwrite_buffer<sg::u32>()};
+    sg::named_view const g1_view{.name = "Out", .view = sg::buffer<sg::u32>::from_raw(out1_buf).as_readwrite_buffer()};
+    sg::named_view const g2_view{.name = "Out", .view = sg::buffer<sg::u32>::from_raw(out2_buf).as_readwrite_buffer()};
     auto group1 = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&g1_view, 1));
     auto group2 = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&g2_view, 1));
     REQUIRE(group1 != nullptr);

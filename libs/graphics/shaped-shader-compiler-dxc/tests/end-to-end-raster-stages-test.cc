@@ -193,7 +193,7 @@ TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle")
         auto pass
             = cmd->raster.render_to({.color_targets = {typed.as_render_target_view().cleared(tg::vec4f(0, 0, 1, 1))}});
         cmd->raster.bind_pipeline(*pipeline);
-        cmd->raster.bind_vertex_buffers({vbuf->as_vertex_buffer<pos_vertex>()});
+        cmd->raster.bind_vertex_buffers({sg::buffer<pos_vertex>::from_raw(vbuf).as_vertex_buffer()});
         cmd->raster.draw({.vertex_range = {.offset = 0, .size = 1}});
     }
     auto future = cmd->download.bytes_from_texture(tex);
@@ -291,7 +291,7 @@ TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle")
         auto pass
             = cmd->raster.render_to({.color_targets = {typed.as_render_target_view().cleared(tg::vec4f(0, 0, 1, 1))}});
         cmd->raster.bind_pipeline(*pipeline);
-        cmd->raster.bind_vertex_buffers({vbuf->as_vertex_buffer<pos_vertex>()});
+        cmd->raster.bind_vertex_buffers({sg::buffer<pos_vertex>::from_raw(vbuf).as_vertex_buffer()});
         cmd->raster.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     auto future = cmd->download.bytes_from_texture(tex);

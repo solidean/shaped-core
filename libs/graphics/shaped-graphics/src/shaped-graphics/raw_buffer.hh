@@ -32,112 +32,112 @@ public:
     /// How the buffer may be used (copy source/dest, vertex, index, ...).
     [[nodiscard]] buffer_usage usage() const { return _usage; }
 
-    // Typed views onto this buffer — a strongly-typed handle a rendering routine binds. Each returns
-    // the view for its access class (uniform / readonly / readwrite), typed by the element/block type
-    // `T` (`byte` for a raw, byte-addressed view). Ranges are in elements of `T`; the default is the
-    // whole buffer. The buffer's usage must cover the view's access. See views.hh.
+    // Byte-level views onto this buffer — the low-level path. Every factory here works in *bytes* (a
+    // cc::offset_size byte range, an explicit stride), with no C++ element type: as_raw_readonly /
+    // as_raw_readwrite (byte-addressed, or structured via an explicit stride), as_raw_uniform_buffer,
+    // as_raw_vertex_buffer, and as_index_buffer / as_raw_index_buffer. The buffer's usage must cover the access.
+    //
+    // For the ergonomic, element-typed path (as_readonly_buffer(), as_uniform_buffer(), … inferring `T`)
+    // wrap the buffer in a `buffer<T>` (buffer.hh) — the friction here is deliberate.
 
-    /// A uniform block of `T` (constant buffer / UBO) at `offset_in_bytes` (default: the buffer start —
-    /// pass an offset to select one block of a UBO array). The offset must be 256-byte aligned; `T`'s
-    /// size rules (multiple of 16, <= 64 KiB) are enforced by uniform_element. Requires uniform_buffer usage.
-    template <uniform_element T>
-    [[nodiscard]] uniform_buffer_view<T> as_uniform_buffer(isize offset_in_bytes = 0) const
+    /// Raw uniform (constant buffer) view over an explicit byte range. The offset must be 256-byte aligned,
+    /// the range must fit, and its size must be <= 64 KiB (max CBV). Returns the erased arm (there is no
+    /// untyped uniform view). Requires uniform_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_uniform_buffer(cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
-        CC_ASSERT(offset_in_bytes % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte "
-                                                                          "aligned");
-        CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + isize(sizeof(T)) <= _size_in_bytes, "uniform block does "
-                                                                                                "not fit in buffer");
-        return uniform_buffer_view<T>{.buffer = shared_from_this(),
-                                      .offset_in_bytes = offset_in_bytes,
-                                      .size_in_bytes = isize(sizeof(T))};
+        CC_ASSERT(byte_range.offset % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte "
+                                                                            "aligned");
+        CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0, "view range must be non-negative");
+        CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "uniform range exceeds buffer size");
+        CC_ASSERT(byte_range.size <= max_uniform_buffer_size, "uniform range exceeds the 64 KiB max CBV size");
+        return raw_buffer_view{.access = view_class::uniform,
+                               .shape = view_shape::uniform_block,
+                               .buffer = shared_from_this(),
+                               .offset_in_bytes = byte_range.offset,
+                               .size_in_bytes = byte_range.size};
     }
 
-    /// A read-only storage view of the whole buffer as an array of `T` (SRV). Requires readonly_buffer usage.
-    template <view_element T>
-    [[nodiscard]] readonly_buffer_view<T> as_readonly_buffer() const
+    /// A raw, byte-addressed read-only view (SRV, `shape == raw`) of the whole buffer. Requires readonly_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_readonly() const
+    {
+        return as_raw_readonly({.offset = 0, .size = _size_in_bytes});
+    }
+
+    /// A raw, byte-addressed read-only view of `byte_range` bytes (SRV, `shape == raw`). Requires readonly_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
-        return readonly_buffer_view<T>{.buffer = shared_from_this(),
-                                       .offset_in_bytes = 0,
-                                       .element_count = _size_in_bytes / isize(sizeof(T))};
+        assert_byte_range(byte_range);
+        return raw_buffer_view{.access = view_class::readonly,
+                               .shape = view_shape::raw,
+                               .buffer = shared_from_this(),
+                               .offset_in_bytes = byte_range.offset,
+                               .size_in_bytes = byte_range.size};
     }
 
-    /// A read-only storage view of `range` elements of `T` (SRV). Requires readonly_buffer usage.
-    template <view_element T>
-    [[nodiscard]] readonly_buffer_view<T> as_readonly_buffer(cc::offset_size range) const
+    /// A raw *structured* read-only view (SRV, `shape == structured`) over `byte_range` bytes with an explicit
+    /// element `stride_in_bytes`; element_count = byte_range.size / stride. Requires readonly_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range, isize stride_in_bytes) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
-        return readonly_buffer_view<T>{.buffer = shared_from_this(),
-                                       .offset_in_bytes = element_offset<T>(range),
-                                       .element_count = range.size};
+        assert_structured_range(byte_range, stride_in_bytes);
+        return raw_buffer_view{.access = view_class::readonly,
+                               .shape = view_shape::structured,
+                               .buffer = shared_from_this(),
+                               .offset_in_bytes = byte_range.offset,
+                               .element_count = byte_range.size / stride_in_bytes,
+                               .stride_in_bytes = stride_in_bytes};
     }
 
-    /// A read-write storage view of the whole buffer as an array of `T` (UAV). Requires readwrite_buffer usage.
-    template <view_element T>
-    [[nodiscard]] readwrite_buffer_view<T> as_readwrite_buffer() const
+    /// A raw, byte-addressed read-write view (UAV, `shape == raw`) of the whole buffer. Requires readwrite_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_readwrite() const
+    {
+        return as_raw_readwrite({.offset = 0, .size = _size_in_bytes});
+    }
+
+    /// A raw, byte-addressed read-write view of `byte_range` bytes (UAV, `shape == raw`). Requires readwrite_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
-        return readwrite_buffer_view<T>{.buffer = shared_from_this(),
-                                        .offset_in_bytes = 0,
-                                        .element_count = _size_in_bytes / isize(sizeof(T))};
+        assert_byte_range(byte_range);
+        return raw_buffer_view{.access = view_class::readwrite,
+                               .shape = view_shape::raw,
+                               .buffer = shared_from_this(),
+                               .offset_in_bytes = byte_range.offset,
+                               .size_in_bytes = byte_range.size};
     }
 
-    /// A read-write storage view of `range` elements of `T` (UAV). Requires readwrite_buffer usage.
-    template <view_element T>
-    [[nodiscard]] readwrite_buffer_view<T> as_readwrite_buffer(cc::offset_size range) const
+    /// A raw *structured* read-write view (UAV, `shape == structured`) over `byte_range` bytes with an explicit
+    /// element `stride_in_bytes`; element_count = byte_range.size / stride. Requires readwrite_buffer usage.
+    [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range, isize stride_in_bytes) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
-        return readwrite_buffer_view<T>{.buffer = shared_from_this(),
-                                        .offset_in_bytes = element_offset<T>(range),
-                                        .element_count = range.size};
-    }
-
-    /// A raw, byte-addressed read-only view (SRV over `byte`) of the whole buffer. Requires readonly_buffer usage.
-    [[nodiscard]] readonly_buffer_view<cc::byte> as_raw_readonly() const { return as_readonly_buffer<cc::byte>(); }
-
-    /// A raw, byte-addressed read-only view of `range` bytes (SRV over `byte`). Requires readonly_buffer usage.
-    [[nodiscard]] readonly_buffer_view<cc::byte> as_raw_readonly(cc::offset_size range) const
-    {
-        return as_readonly_buffer<cc::byte>(range);
-    }
-
-    /// A raw, byte-addressed read-write view (UAV over `byte`) of the whole buffer. Requires readwrite_buffer usage.
-    [[nodiscard]] readwrite_buffer_view<cc::byte> as_raw_readwrite() const { return as_readwrite_buffer<cc::byte>(); }
-
-    /// A raw, byte-addressed read-write view of `range` bytes (UAV over `byte`). Requires readwrite_buffer usage.
-    [[nodiscard]] readwrite_buffer_view<cc::byte> as_raw_readwrite(cc::offset_size range) const
-    {
-        return as_readwrite_buffer<cc::byte>(range);
+        assert_structured_range(byte_range, stride_in_bytes);
+        return raw_buffer_view{.access = view_class::readwrite,
+                               .shape = view_shape::structured,
+                               .buffer = shared_from_this(),
+                               .offset_in_bytes = byte_range.offset,
+                               .element_count = byte_range.size / stride_in_bytes,
+                               .stride_in_bytes = stride_in_bytes};
     }
 
     // Attachment-less draw-input views — a vertex or index buffer bound at draw time (not shader-visible,
     // so they don't go through views.hh / binding groups). Bind via cmd.raster.bind_vertex_buffers /
     // bind_index_buffer.
 
-    /// The whole buffer as a vertex buffer with per-vertex stride `sizeof(T)`. Requires vertex_buffer usage.
-    template <class T>
-    [[nodiscard]] vertex_buffer_view as_vertex_buffer() const
+    /// Raw vertex buffer view over an explicit byte range with an explicit per-vertex `stride_in_bytes`
+    /// (which must match the pipeline's slot). Requires vertex_buffer usage.
+    [[nodiscard]] vertex_buffer_view as_raw_vertex_buffer(cc::offset_size byte_range, isize stride_in_bytes) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
+        CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0 && stride_in_bytes >= 0, "view range / stride must be "
+                                                                                          "non-negative");
+        CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "view range exceeds buffer size");
         return vertex_buffer_view{.buffer = shared_from_this(),
-                                  .offset_in_bytes = 0,
-                                  .size_in_bytes = _size_in_bytes,
-                                  .stride_in_bytes = isize(sizeof(T))};
-    }
-
-    /// A vertex buffer over `range` vertices of `T` (stride `sizeof(T)`). Requires vertex_buffer usage.
-    template <class T>
-    [[nodiscard]] vertex_buffer_view as_vertex_buffer(cc::offset_size range) const
-    {
-        CC_ASSERT(has_flag(_usage, buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
-        auto const stride = isize(sizeof(T));
-        CC_ASSERT(range.offset >= 0 && range.size >= 0, "view range must be non-negative");
-        CC_ASSERT((range.offset + range.size) * stride <= _size_in_bytes, "view range exceeds buffer size");
-        return vertex_buffer_view{.buffer = shared_from_this(),
-                                  .offset_in_bytes = range.offset * stride,
-                                  .size_in_bytes = range.size * stride,
-                                  .stride_in_bytes = stride};
+                                  .offset_in_bytes = byte_range.offset,
+                                  .size_in_bytes = byte_range.size,
+                                  .stride_in_bytes = stride_in_bytes};
     }
 
     /// The whole buffer as an index buffer of `format` elements. Requires index_buffer usage.
@@ -150,17 +150,16 @@ public:
                                  .size_in_bytes = _size_in_bytes};
     }
 
-    /// An index buffer over `range` indices of `format` width. Requires index_buffer usage.
-    [[nodiscard]] index_buffer_view as_index_buffer(index_format format, cc::offset_size range) const
+    /// Raw index buffer view over an explicit byte range (index width follows `format`). Requires index_buffer usage.
+    [[nodiscard]] index_buffer_view as_raw_index_buffer(index_format format, cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::index_buffer), "buffer lacks index_buffer usage");
-        auto const stride = isize(format == index_format::uint16 ? 2 : 4);
-        CC_ASSERT(range.offset >= 0 && range.size >= 0, "view range must be non-negative");
-        CC_ASSERT((range.offset + range.size) * stride <= _size_in_bytes, "view range exceeds buffer size");
+        CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0, "view range must be non-negative");
+        CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "view range exceeds buffer size");
         return index_buffer_view{.buffer = shared_from_this(),
                                  .format = format,
-                                 .offset_in_bytes = range.offset * stride,
-                                 .size_in_bytes = range.size * stride};
+                                 .offset_in_bytes = byte_range.offset,
+                                 .size_in_bytes = byte_range.size};
     }
 
     /// Registers a callback to run once this buffer's GPU storage is released *and* no longer in
@@ -195,14 +194,19 @@ protected:
     /// storage (backends defer it until the owning epoch retires). Default: nothing to release.
     virtual void on_expired() const {}
 
-    /// Validates a `range` given in elements of `T` against the buffer bounds and returns its byte offset.
-    template <view_element T>
-    [[nodiscard]] isize element_offset(cc::offset_size range) const
+    /// Bounds-checks a byte range against the buffer size (non-negative, within bounds).
+    void assert_byte_range(cc::offset_size byte_range) const
     {
-        auto const stride = isize(sizeof(T));
-        CC_ASSERT(range.offset >= 0 && range.size >= 0, "view range must be non-negative");
-        CC_ASSERT((range.offset + range.size) * stride <= _size_in_bytes, "view range exceeds buffer size");
-        return range.offset * stride;
+        CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0, "view range must be non-negative");
+        CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "view range exceeds buffer size");
+    }
+
+    /// Bounds-checks a structured byte range: positive stride, in bounds, size a whole number of elements.
+    void assert_structured_range(cc::offset_size byte_range, isize stride_in_bytes) const
+    {
+        CC_ASSERT(stride_in_bytes > 0, "structured view stride must be positive");
+        assert_byte_range(byte_range);
+        CC_ASSERT(byte_range.size % stride_in_bytes == 0, "structured view size must be a whole number of elements");
     }
 
     isize _size_in_bytes = 0;

@@ -44,7 +44,7 @@ public:
     template <class T>
     [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usage usage)
     {
-        return buffer<T>(create_raw_buffer(element_count * isize(sizeof(T)), usage));
+        return buffer<T>::from_raw(create_raw_buffer(element_count * isize(sizeof(T)), usage));
     }
 
     template <class T>
@@ -52,7 +52,7 @@ public:
     {
         auto r = try_create_raw_buffer(element_count * isize(sizeof(T)), usage);
         if (r.has_value())
-            return buffer<T>(cc::move(r).value());
+            return buffer<T>::from_raw(cc::move(r).value());
         return cc::error(cc::move(r).error());
     }
 

@@ -119,7 +119,7 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
 
     sg::named_view const sample_views[] = {
         {.name = "Src", .view = tex.as_readonly_view()},
-        {.name = "Out", .view = buf->as_readwrite_buffer<float>()},
+        {.name = "Out", .view = sg::buffer<float>::from_raw(buf).as_readwrite_buffer()},
     };
     sg::named_sampler const sample_samplers[] = {{.name = "Samp",
                                                   .sampler = {.min_filter = sg::sampler_filter::nearest,

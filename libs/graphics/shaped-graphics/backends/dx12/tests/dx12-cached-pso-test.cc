@@ -46,7 +46,7 @@ void check_doubles(sg::context& ctx,
                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
 
-    sg::named_view const out{.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()};
+    sg::named_view const out{.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()};
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));
     REQUIRE(group != nullptr);
 

@@ -66,7 +66,7 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     REQUIRE(pipeline.has_value());
 
     // Bind the output buffer's read-write structured view to "Output".
-    sg::named_view const out{.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()};
+    sg::named_view const out{.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf.value()).as_readwrite_buffer()};
     auto group = c.create_dx12_binding_group(group_layout.value(), cc::span<sg::named_view const>(&out, 1), {},
                                              sg::lifetime_scope::persistent);
     REQUIRE(group.has_value());
@@ -126,7 +126,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
         REQUIRE(buf != nullptr);
 
-        sg::named_view const out{.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()};
+        sg::named_view const out{.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()};
         auto group = c.transient.create_binding_group(group_layout.value(), cc::span<sg::named_view const>(&out, 1));
         REQUIRE(group != nullptr);
 
@@ -174,7 +174,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
 
     for (int i = 0; i < 50; ++i)
     {
-        sg::named_view const out{.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()};
+        sg::named_view const out{.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()};
         auto group = c.create_dx12_binding_group(group_layout.value(), cc::span<sg::named_view const>(&out, 1), {},
                                                  sg::lifetime_scope::persistent);
         REQUIRE(group.has_value());          // never exhausts: released ranges are reclaimed

@@ -112,7 +112,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
 
     sg::texture_2d const typed(tex.value());
     sg::named_view const views[] = {
-        {.name = "Output", .view = buf.value()->as_readwrite_buffer<sg::u32>()},
+        {.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf.value()).as_readwrite_buffer()},
         {.name = "Tex", .view = typed.as_readwrite_view()},
     };
     auto group = c.create_dx12_binding_group(group_layout.value(), cc::span<sg::named_view const>(views, 2), {},

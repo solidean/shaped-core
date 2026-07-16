@@ -226,13 +226,16 @@ b.usage()                          // sg::buffer_usage
 b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient auto-expires at advance_epoch
 b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
-// view factories — a strongly-typed view onto this buffer (buffer's usage must cover the access):
-b.as_uniform_buffer<T>(offset=0)           // -> sg::uniform_buffer_view<T>    (CBV/UBO; needs uniform_buffer usage; offset 256-aligned)
-                                           //   T is a uniform_element: size multiple of 16, <= 64 KiB (not byte)
-b.as_readonly_buffer<T>({.offset=, .size=})// -> sg::readonly_buffer_view<T>   (SRV; range in elements of T; default = whole)
-b.as_readwrite_buffer<T>({.offset=,.size=})// -> sg::readwrite_buffer_view<T>  (UAV; needs readwrite_buffer usage)
-b.as_raw_readonly({.offset=,.size=})       // -> readonly_buffer_view<byte>    (raw / byte-addressed; range in bytes; default = whole)
-b.as_raw_readwrite({.offset=,.size=})      // -> readwrite_buffer_view<byte>   (raw / byte-addressed; range in bytes; default = whole)
+// view factories are BYTE-LEVEL only (no C++ element type); the buffer's usage must cover the access.
+// For the ergonomic, element-typed views (as_readonly_buffer(), as_uniform_buffer(), …) wrap in buffer<T>.
+b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed SRV, shape=raw; range in bytes; default = whole)
+b.as_raw_readonly({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED SRV; explicit byte stride; element_count = size/stride)
+b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=raw)
+b.as_raw_readwrite({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED UAV; explicit byte stride)
+b.as_raw_uniform_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (uniform_block; offset 256-aligned; size <= 64 KiB)
+b.as_raw_vertex_buffer({.offset=,.size=}, stride_in_bytes)  // -> vertex_buffer_view (explicit stride)
+b.as_index_buffer(format)                  // -> index_buffer_view (whole buffer)
+b.as_raw_index_buffer(format, {.offset=,.size=})            // -> index_buffer_view (byte range; width from format)
 ```
 
 ## buffer<T> — typed buffer wrapper  (element type fixed at compile time)
@@ -243,7 +246,10 @@ sg::buffer<T>                              // GPU-side span<T>: wraps a raw_buff
 // create typed (preferred): element_count -> byte size = count * sizeof(T); returns the wrapped buffer<T>:
 ctx.persistent.create_buffer<Particle>(1000, usage, alloc={})  // -> sg::buffer<Particle>  (+ try_ twin)
 ctx.transient.create_buffer<Particle>(64, usage)               // -> sg::buffer<Particle>  (transient; no allocation_info)
-sg::buffer<T> buf(raw_handle);             // or wrap a raw handle directly (must be non-null); buf.raw() -> raw_buffer_handle
+sg::buffer<T>::from_raw(raw_handle)         // wrap a raw handle: byte size must be a whole number of T (asserts); try_from_raw -> cc::optional
+sg::buffer<T>::from_raw_clamped(raw_handle) // wrap, flooring to whole elements (a trailing partial element is ignored)
+buf.reinterpret_as<U>()                     // -> buffer<U>; static_assert sizeof(T)%sizeof(U)==0 (U tiles T, e.g. buffer<vec3f>->buffer<float>)
+buf.try_reinterpret_as<U>()                 // -> cc::optional<buffer<U>>; general case (any U); nullopt when size % sizeof(U) != 0
 buf.element_count()                        // isize — size_in_bytes / sizeof(T) (truncates)
 buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usage
 // view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
