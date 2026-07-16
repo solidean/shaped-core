@@ -398,8 +398,25 @@ because the traces show *where* it goes, not because the number is a problem tod
 low), so `release_strong` tests both with a **single acquire load**: reading exactly `(1,1)` proves we hold the
 only reference of any kind — no other thread can mint one, because minting requires already holding one — so
 there is nobody to race and no RMW is needed. libstdc++'s `_M_release` does exactly this. The manual floor went
-**2 atomics → 0** at the same 128 instructions, and **4.54 → 3.78 ns** in `release-clang`; the driven leaf went
-10 → 8.
+**2 atomics → 0** at the same 128 instructions; the driven leaf went 10 → 8.
+
+> **Single-threaded, this is a wash — and that is the interesting result.** A clean A/B on an idle i9-12900H
+> (`release-clang`, medians over 3–4 runs) says the empty manual node improves **4.24 → 3.83 ns (−10%)**, but
+> the full born-ready path *regresses* **11.94 → 12.57 ns (+5%)**, and the driven leaf's ns/op tracks its
+> instruction count (488 → **509**) rather than its atomics (10 → 8).
+>
+> The premise this work was planned on — the two `lock dec` being over half the budget at ~20 cycles each —
+> **does not hold on this core**. An uncontended locked RMW on an L1-hot line is cheap enough that the ~5 extra
+> ALU ops the fast-path load costs on every *non-firing* strong drop outweigh the two RMWs it saves on the one
+> that fires. That recalibration reaches further than this section: **any estimate that prices an uncontended
+> atomic at ~20 cycles is suspect** — including the case for eliding the per-node spinlock, which is argued from
+> the same assumption. Price atomics by measurement, not by the rule of thumb.
+>
+> It is kept because the expected payoff is **Phase 2**, not here: the fast path replaces two RMWs (each needing
+> the line **Exclusive**) with one acquire load (satisfied in **Shared**). On a node whose line a pool worker
+> last touched, that is the difference between two invalidations and none — which is where a locked RMW stops
+> being cheap. Nothing measures that yet; the current pool is the interim debug one. **Re-measure against the
+> real work-stealing pool, and revert if it does not show.**
 
 Three things are worth knowing about the shape:
 
@@ -415,10 +432,12 @@ Three things are worth knowing about the shape:
   coherence is per line. `fetch_add`/`fetch_sub` are `lock xadd` on x86: they cannot fail, they serialize, and
   that costs the same on one word as on two words in one line. ARM's LL/SC reservation granule is already ≥ a
   cacheline.
-* **The real costs are elsewhere.** (a) The non-sole-owner path gets slightly *worse*: the fast-path load brings
-  the line in Shared and the `fetch_sub` then needs Exclusive — an S→M upgrade the old code went straight to.
-  The whole change bets sole ownership dominates, which it does for a dying leaf; the driven leaf's instruction
-  count actually rose **488 → 509** because it has four non-firing strong drops against one that fires. (b)
+* **The real costs are elsewhere.** (a) Every *non-sole-owner* strong drop pays the fast-path load for nothing,
+  and then its `fetch_sub` needs the line Exclusive after the load brought it in Shared — an S→M upgrade the old
+  code went straight to. The driven leaf has **four** such drops (`run_one`, `enqueue`'s by-value parameter, the
+  queue element's destroy, `route_after_schedule`) against **one** that fires, which is why it rose 488 → 509.
+  All four are the queue round-trip; driving a root directly instead of `schedule`→enqueue→pop would delete most
+  of them from that path. (b)
   `try_lock_strong` now CASes the fused word, so concurrent *weak* traffic can spuriously fail its loop where it
   could not before. That is the one place fusing genuinely charges something.
 
