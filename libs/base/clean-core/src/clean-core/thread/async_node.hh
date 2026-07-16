@@ -273,14 +273,19 @@ struct async_dep_list_node
 struct async_dep_head
 {
     async_dep_head() = default;
-    ~async_dep_head() { clear(); }
+    ~async_dep_head()
+    {
+        if (_head != 0) // empty is the leaf/common case: skip the out-of-line clear entirely
+            clear();
+    }
 
     async_dep_head(async_dep_head&& o) noexcept : _head(o._head) { o._head = 0; }
     async_dep_head& operator=(async_dep_head&& o) noexcept
     {
         if (this != &o)
         {
-            clear();
+            if (_head != 0)
+                clear();
             _head = o._head;
             o._head = 0;
         }
@@ -315,7 +320,11 @@ struct async_dep_head
     /// Append a not-ready dependency (order irrelevant). The entry starts unsubscribed.
     void add(async_node_base* dep);
     /// Remove (and free) every entry whose dependency is already ready.
-    void remove_ready();
+    void remove_ready()
+    {
+        if (_head != 0) // empty: nothing to scan (the poll loop calls this every turn, incl. on leaves)
+            remove_ready_slow();
+    }
     /// Free all list nodes and reset to empty.
     void clear();
 
@@ -356,7 +365,8 @@ private:
         return reinterpret_cast<async_dep_list_node*>(_head & ~tag_is_list);
     }
     void set_list_head(async_dep_list_node* n) { _head = reinterpret_cast<cc::u64>(n) | tag_is_list; }
-    void normalize(); // collapse a 0/1-entry list back to empty/single mode
+    void normalize();         // collapse a 0/1-entry list back to empty/single mode
+    void remove_ready_slow(); // non-empty scan behind remove_ready's inline empty-guard
 
     cc::u64 _head = 0;
 };
@@ -394,12 +404,27 @@ struct async_cont_cell
 struct async_cont_head
 {
     async_cont_head() = default;
-    ~async_cont_head();
+    ~async_cont_head()
+    {
+        if (_spill != nullptr) // leaf/common case has no spill; the inline weak_ptrs auto-destroy below
+            free_spill();
+    }
 
     async_cont_head(async_cont_head&& o) noexcept;
     async_cont_head& operator=(async_cont_head&& o) noexcept;
     async_cont_head(async_cont_head const&) = delete;
     async_cont_head& operator=(async_cont_head const&) = delete;
+
+    /// True if no dependents and no latches are installed (the leaf case). Cheap; safe to test under the lock.
+    [[nodiscard]] bool empty() const
+    {
+        if (_spill != nullptr)
+            return false;
+        for (auto const& w : _inline_deps)
+            if (w.get() != nullptr)
+                return false;
+        return true;
+    }
 
     /// Subscribe a dependent (held weakly). Fills a free inline slot if any, else prepends a spill cell.
     void add(async_node_base* dependent);
@@ -420,6 +445,9 @@ struct async_cont_head
 
     async_node_weak _inline_deps[inline_capacity]; // a null slot is unused
     async_cont_cell* _spill = nullptr;             // 2nd+ dependents and all latches
+
+private:
+    void free_spill(); // frees the spill list behind the destructor's inline empty-guard
 };
 
 /// The node's transient scratch while it is UNRESOLVED: the compute frame, the not-ready dependency set, and
@@ -648,12 +676,14 @@ protected:
         impl::async_cont_head continuations;
         {
             lock_scope g(this);
-            continuations = cc::move(conts());
-            unresolved().~async_unresolved(); // frame shell + deps + moved-from head
+            if (!conts().empty())                  // leaf/common case has no dependents: skip the steal + wake
+                continuations = cc::move(conts()); // steal dependents to wake after we release the lock
+            unresolved().~async_unresolved();      // frame shell + deps + (now-empty) head
             new (cc::placement_new, value_storage()) T(cc::forward<Args>(args)...); // value at payload offset 0
             store_state(async_node_state::ready_value);
         }
-        continuations.notify_all(); // outside the lock: waking a dependent / firing a latch takes other locks
+        if (!continuations.empty())
+            continuations.notify_all(); // outside the lock: waking a dependent / firing a latch takes other locks
     }
 
     /// Resolve on the failure channel by moving `e` into the payload (the typed twin of finish_value).
@@ -671,12 +701,14 @@ protected:
         impl::async_cont_head continuations;
         {
             lock_scope g(this);
-            continuations = cc::move(conts());
+            if (!conts().empty())
+                continuations = cc::move(conts());
             unresolved().~async_unresolved();
             new (cc::placement_new, value_storage()) E(cc::forward<Args>(args)...); // error at payload offset 0
             store_state(async_node_state::ready_error);
         }
-        continuations.notify_all();
+        if (!continuations.empty())
+            continuations.notify_all();
     }
 
     // payload teardown
@@ -706,11 +738,17 @@ protected:
     /// if this node has to park).
     void add_pending_dependency(async_node_base* dep) { deps().add(dep); }
 
-    /// Remove this node's continuations from every dependency it subscribed to.
-    void unsubscribe_all();
+    /// Remove this node's continuations from every dependency it subscribed to. No-op with no deps (a leaf, or
+    /// a node that never parked) — the poll loop and every completion/teardown path call it unconditionally.
+    void unsubscribe_all()
+    {
+        if (!deps().empty())
+            unsubscribe_all_slow();
+    }
 
     // internal
 private:
+    void unsubscribe_all_slow(); // non-empty walk behind unsubscribe_all's inline empty-guard
     bool try_begin_running();
     void drop_ready_pending_deps();
     void schedule_pending_deps(async_node_base* except); // make pending deps runnable; skips `except` if non-null

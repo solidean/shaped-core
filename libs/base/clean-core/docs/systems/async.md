@@ -351,14 +351,16 @@ the system matures without breaking callers.
 
 ## The direct path: measured cost & optimization ideas
 
-The floor case — `make_async_manual<int>()` created and dropped, no frame, no scheduler — costs **~17 ns /
-~80 cycles** and retires **167 instructions** (i9-12900H, `relwithdebinfo-clang`). The raw slab alloc+free of
-the same node class is ~2 ns, so ~15 ns is node overhead. Reproduce the ladder with
+The floor case — `make_async_manual<int>()` created and dropped, no frame, no scheduler — retires
+**146 instructions** (i9-12900H, `relwithdebinfo-clang`); a driven `make_async_lazy<i64>` leaf, the full
+create→drive→destroy cycle, retires **624**. The raw slab alloc+free of the same node class is ~3 ns, the rest
+is node overhead. Reproduce the ladder with
 [born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) and the instruction counts by
-tracing its pinned probes (`dev.py assembly trace --target clean-core-test --symbol make_async_manual_probe`).
+`--stats`-tracing its pinned probes (`dev.py assembly trace --target clean-core-test --symbol
+make_async_manual_probe --stats`, or `single_lazy_probe --skip 2` for the driven leaf).
 
-For 64 B of storage plus an alloc *and* a dealloc, ~80 cycles is not alarming. The ideas below are recorded
-because the traces show *where* it goes, not because the number is a problem today. None is committed work.
+For 64 B of storage plus an alloc *and* a dealloc this is not alarming. The remaining ideas below are recorded
+because the traces show *where* it goes, not because the number is a problem today; they are not committed work.
 
 **The two `lock dec` are over half the budget.** Teardown does `lock dec [node]` (strong) then `lock dec
 [node+4]` (weak) — ~20 cycles each uncontended. Since `_strong`/`_weak` are adjacent `atomic<u32>` in one
@@ -368,11 +370,16 @@ makes weak and strong traffic contend on the same cacheline word where they prev
 fine if weak refs stay rare (continuations hold them), potentially worse if they don't. Needs measuring, not
 assuming.
 
-**~45 instructions are pure overhead** and are unambiguously safe to remove:
+**A leaf pays no empty-set teardown** (done). A node with no dependency and no dependent used to walk both sets
+out-of-line on every completion and teardown — `unsubscribe_all`, `dep_head::remove_ready`/`clear`, and the
+continuation steal + `notify_all` + `~async_cont_head`. Each now sits behind an inline empty-guard with the
+scan in an out-of-line slow path, so the leaf skips them entirely: the driven leaf fell **797 → 624**
+instructions (nine of the removed direct calls were empty-set walks), the manual floor **167 → 146**. The
+guards are safe because a leaf's dep set is poller-owned and its continuation set, checked under the node lock,
+is provably empty.
 
-* Three trivially-inlinable header functions that clang left out-of-line in `teardown_payload`
-  (`async_dep_head::for_each`, `~async_dep_head`, `~poly_node_allocation`) — collectively ~31 instructions and
-  three stack frames to test three pointers against zero.
+**More instructions are still pure overhead** and unambiguously safe to remove:
+
 * The node ctor stores the ops pointer, then **reloads, masks, and re-stores it** to pack the initial state
   into its low bits. Both are compile-time constants, so this should be one store — it doesn't fold because
   `_state_and_ops` is `std::atomic<u64>` and the compiler won't forward across atomic accesses. During

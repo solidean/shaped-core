@@ -256,11 +256,9 @@ void cc::impl::async_dep_head::add(async_node_base* dep)
     set_list_head(n);
 }
 
-void cc::impl::async_dep_head::remove_ready()
+void cc::impl::async_dep_head::remove_ready_slow()
 {
-    if (_head == 0)
-        return;
-
+    // empty is handled by the inline remove_ready guard; here _head != 0.
     if ((_head & tag_is_list) == 0)
     {
         auto* dep = reinterpret_cast<async_node_base*>(_head & async_dep_entry::dep_mask);
@@ -317,11 +315,13 @@ void cc::impl::async_dep_head::clear()
 }
 
 // ============================================================================
-// async_cont_head — continuation set (up to 3 inline weak dependents + a spill list; see async_node.hh)
+// async_cont_head — continuation set (one inline weak dependent + a spill list; see async_node.hh)
 // ============================================================================
 
-cc::impl::async_cont_head::~async_cont_head()
+void cc::impl::async_cont_head::free_spill()
 {
+    // empty (_spill == nullptr) is handled by the inline destructor guard; the inline weak_ptrs auto-destroy
+    // (dec_weak) with the object regardless.
     for (auto* c = _spill; c != nullptr;)
     {
         auto* const next = c->_next;
@@ -329,7 +329,6 @@ cc::impl::async_cont_head::~async_cont_head()
         c = next;
     }
     _spill = nullptr;
-    // the inline weak_ptrs auto-destroy (dec_weak) as this object is destroyed
 }
 
 cc::impl::async_cont_head::async_cont_head(async_cont_head&& o) noexcept : _spill(o._spill)
@@ -366,7 +365,7 @@ void cc::impl::async_cont_head::add(async_node_base* dependent)
             return;
         }
 
-    auto* c = cont_alloc_cell(); // 4th+ dependent: prepend a weak spill cell
+    auto* c = cont_alloc_cell(); // 2nd+ dependent: prepend a weak spill cell
     c->_fn = nullptr;
     new (cc::placement_new, &c->_weak) async_node_weak(async_node_weak::from_alive(dependent));
     c->_next = _spill;
@@ -497,8 +496,9 @@ bool cc::async_node_base::subscribe_to_pending_deps()
         });
 }
 
-void cc::async_node_base::unsubscribe_all()
+void cc::async_node_base::unsubscribe_all_slow()
 {
+    // empty deps are handled by the inline unsubscribe_all guard; here the set is non-empty.
     deps().for_each(
         [this](impl::async_dep_entry e)
         {
