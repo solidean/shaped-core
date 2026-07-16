@@ -339,8 +339,11 @@ bytes on every node.)
 A node is a **16 B header** followed by a payload slot; `async<int>` is **64 B — one cache line** (down from an
 original 384 B), and the node is cacheline-aligned to avoid false sharing between unrelated nodes.
 
-* **16 B header.** Two `atomic<u32>` intrusive refcounts (strong + weak — the handle is one pointer, no
-  separate control block) plus one `atomic<u64>` control word. That word is a **tagged pointer**: a 32-aligned
+* **16 B header.** One `atomic<u64>` intrusive refcount — strong in the high half, weak in the low half (the
+  handle is one pointer, no separate control block) — plus one `atomic<u64>` control word. Fusing the counts is
+  what lets the last strong drop test both with a **single acquire load** and skip both locked RMWs when it is
+  the sole owner (`cc::fused_refcount`, see [the direct path](#the-direct-path-measured-cost--optimization-ideas)).
+  That word is a **tagged pointer**: a 32-aligned
   `async_type_ops const*` in the high bits, and the lifecycle state + wake-pending flag + spinlock bit in the
   low 5 bits. There is **no C++ vtable** — a static-constexpr `async_type_ops` descriptor is the hand-rolled
   replacement, carrying the typed value/error destructors, the inline frame's invoke/destroy, and the node's
@@ -378,9 +381,9 @@ the system matures without breaking callers.
 ## The direct path: measured cost & optimization ideas
 
 The floor case — `make_async_manual<int>()` created and dropped, no frame, no scheduler — retires
-**142 instructions** (i9-12900H, `relwithdebinfo-clang`); a driven `make_async_lazy<i64>` leaf, the full
-create→drive→destroy cycle, retires **488**. The raw slab alloc+free of the same node class is ~3 ns, the rest
-is node overhead. Reproduce the ladder with
+**128 instructions and no locked RMW at all** (i9-12900H, `relwithdebinfo-clang`); a driven `make_async_lazy<i64>`
+leaf, the full create→drive→destroy cycle, retires **509** with 8 atomics. The raw slab alloc+free of the same
+node class is ~3 ns, the rest is node overhead. Reproduce the ladder with
 [born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) and its pinned probes
 (`dev.py assembly trace --target clean-core-test --symbol make_async_manual_probe --stats`); the driven leaf's
 probe lives in [async-benchmark.cc](../../tests/benchmarks/async/async-benchmark.cc) under a different test
@@ -389,13 +392,34 @@ probe lives in [async-benchmark.cc](../../tests/benchmarks/async/async-benchmark
 For 64 B of storage plus an alloc *and* a dealloc this is not alarming. The remaining ideas below are recorded
 because the traces show *where* it goes, not because the number is a problem today; they are not committed work.
 
-**The two `lock dec` are over half the budget.** Teardown does `lock dec [node]` (strong) then `lock dec
-[node+4]` (weak) — ~20 cycles each uncontended. Since `_strong`/`_weak` are adjacent `atomic<u32>` in one
-aligned 8 B word, a single 64-bit load could check for the sole-owner `(1,1)` case and skip both locked RMWs
-(libstdc++'s `_M_release` does exactly this). **Caveat:** any scheme that fuses the two counters into one word
-makes weak and strong traffic contend on the same cacheline word where they previously only shared a line —
-fine if weak refs stay rare (continuations hold them), potentially worse if they don't. Needs measuring, not
-assuming.
+**A node dies with zero locked RMWs** (done). Teardown used to do `lock dec [node]` (strong) then `lock dec
+[node+4]` (weak). The counts are now fused into one `atomic<u64>` (`cc::fused_refcount`, strong high / weak
+low), so `release_strong` tests both with a **single acquire load**: reading exactly `(1,1)` proves we hold the
+only reference of any kind — no other thread can mint one, because minting requires already holding one — so
+there is nobody to race and no RMW is needed. libstdc++'s `_M_release` does exactly this. The manual floor went
+**2 atomics → 0** at the same 128 instructions, and **4.54 → 3.78 ns** in `release-clang`; the driven leaf went
+10 → 8.
+
+Three things are worth knowing about the shape:
+
+* **Only the *read* is fused, not the accounting.** Strong owners still hold **one collective weak count**, and
+  `inc`/`release` each touch a single half. Giving every strong owner its own weak count (so one RMW drops both
+  halves) was considered and **rejected**: it releases the weak count *before* `destroy_object` runs, so a
+  racing `weak_ptr` drop can free the storage while teardown is still running user destructors. The last strong
+  dropper must release the collective weak **after** `destroy_object` returns, which is why `release_strong`
+  never reports `free` on that path. The white-box `fused_refcount` tests pin this.
+* **The earlier contention caveat here was over-cautious.** It warned that fusing makes weak and strong traffic
+  contend on the same *word* where they previously shared a *line* — but `_strong`/`_weak` were already adjacent
+  `atomic<u32>` in one aligned 8 B word of a 64-aligned node, so they already ping-ponged the same line, and
+  coherence is per line. `fetch_add`/`fetch_sub` are `lock xadd` on x86: they cannot fail, they serialize, and
+  that costs the same on one word as on two words in one line. ARM's LL/SC reservation granule is already ≥ a
+  cacheline.
+* **The real costs are elsewhere.** (a) The non-sole-owner path gets slightly *worse*: the fast-path load brings
+  the line in Shared and the `fetch_sub` then needs Exclusive — an S→M upgrade the old code went straight to.
+  The whole change bets sole ownership dominates, which it does for a dying leaf; the driven leaf's instruction
+  count actually rose **488 → 509** because it has four non-firing strong drops against one that fires. (b)
+  `try_lock_strong` now CASes the fused word, so concurrent *weak* traffic can spuriously fail its loop where it
+  could not before. That is the one place fusing genuinely charges something.
 
 **A leaf pays no empty-set teardown** (done). A node with no dependency and no dependent used to walk both sets
 out-of-line on every completion and teardown — `unsubscribe_all`, `dep_head::remove_ready`/`clear`, and the
