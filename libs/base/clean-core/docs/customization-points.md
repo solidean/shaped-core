@@ -97,5 +97,5 @@ convention for ADL-dispatched ops and is *not* strongly enforced (see the note
 above); pick what reads best for the operation. Then have the entry point dispatch
 trait → (friend) → (member) with `if constexpr (requires { ... })`, trait first
 (dropping tiers that don't apply). Mirror the [hash.hh](../src/clean-core/common/hash.hh)
-`detail::hash_one` dispatch. Document the type's expected contract (for hashing:
+`impl::hash_one` dispatch. Document the type's expected contract (for hashing:
 `make_hash` is composable and must not finalize).

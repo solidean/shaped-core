@@ -106,7 +106,7 @@ struct readwrite_2d_of_cube_array_params ///< one face of one cube of a cube arr
     int mip = 0;
 };
 
-namespace detail
+namespace impl
 {
 // Each picker maps a compile-time shape to the parameter bag its factory takes; a shape that lacks the
 // view returns `no_params`. `texture_traits` turns these into its nested `*_params` aliases.
@@ -229,7 +229,7 @@ consteval auto pick_target_view_2d_params()
     else
         return no_params{};
 }
-} // namespace detail
+} // namespace impl
 
 /// The compile-time shape of a texture — the single template argument of `texture<Traits>`. Carries the
 /// shape as static members, a `matches()` runtime shape check against a texture_description, and the
@@ -252,19 +252,19 @@ struct texture_traits
             && (d.sample_count > 1) == Multisampled;
     }
 
-    using read_only_params = decltype(detail::pick_read_only_params<Dim, Array, Cube, Multisampled>());
-    using read_write_params = decltype(detail::pick_read_write_params<Dim, Array, Cube, Multisampled>());
-    using read_only_2d_params = decltype(detail::pick_read_only_2d_params<Dim, Array, Cube, Multisampled>());
-    using read_only_1d_params = decltype(detail::pick_read_only_1d_params<Dim, Array, Cube, Multisampled>());
-    using read_only_cube_params = decltype(detail::pick_read_only_cube_params<Dim, Array, Cube, Multisampled>());
-    using read_only_2d_array_params = decltype(detail::pick_read_only_2d_array_params<Dim, Array, Cube, Multisampled>());
-    using read_write_2d_params = decltype(detail::pick_read_write_2d_params<Dim, Array, Cube, Multisampled>());
-    using read_write_1d_params = decltype(detail::pick_read_write_1d_params<Dim, Array, Cube, Multisampled>());
+    using read_only_params = decltype(impl::pick_read_only_params<Dim, Array, Cube, Multisampled>());
+    using read_write_params = decltype(impl::pick_read_write_params<Dim, Array, Cube, Multisampled>());
+    using read_only_2d_params = decltype(impl::pick_read_only_2d_params<Dim, Array, Cube, Multisampled>());
+    using read_only_1d_params = decltype(impl::pick_read_only_1d_params<Dim, Array, Cube, Multisampled>());
+    using read_only_cube_params = decltype(impl::pick_read_only_cube_params<Dim, Array, Cube, Multisampled>());
+    using read_only_2d_array_params = decltype(impl::pick_read_only_2d_array_params<Dim, Array, Cube, Multisampled>());
+    using read_write_2d_params = decltype(impl::pick_read_write_2d_params<Dim, Array, Cube, Multisampled>());
+    using read_write_1d_params = decltype(impl::pick_read_write_1d_params<Dim, Array, Cube, Multisampled>());
 
     // Render-target / depth-stencil views share the storage-view axes (single mip + slice selection); RTV
     // and DSV use the same bags. `render_target_params` / `render_target_2d_params` name them for the factories.
-    using render_target_params = decltype(detail::pick_target_view_params<Dim, Array, Cube, Multisampled>());
-    using render_target_2d_params = decltype(detail::pick_target_view_2d_params<Dim, Array, Cube, Multisampled>());
+    using render_target_params = decltype(impl::pick_target_view_params<Dim, Array, Cube, Multisampled>());
+    using render_target_2d_params = decltype(impl::pick_target_view_2d_params<Dim, Array, Cube, Multisampled>());
     using depth_stencil_params = render_target_params;
     using depth_stencil_2d_params = render_target_2d_params;
 };

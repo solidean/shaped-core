@@ -60,7 +60,7 @@ struct borrowing_sub_result
 // Plain-u64 fallbacks. Only instantiated on MSVC (its consteval path, and the ARM64 add/sub path that has
 // no carry intrinsic); the clang/gcc __int128 backend never references them.
 #if defined(CC_COMPILER_MSVC)
-namespace detail
+namespace impl
 {
 [[nodiscard]] constexpr u128 wide_umul128(u64 a, u64 b)
 {
@@ -109,7 +109,7 @@ namespace detail
     u64 const b2 = (d < borrow_in) ? 1u : 0u;
     return {r, b1 + b2};
 }
-} // namespace detail
+} // namespace impl
 #endif
 
 /// Full 128-bit product of two unsigned 64-bit values (never overflows).
@@ -130,7 +130,7 @@ namespace detail
         return {lo, hi};
 #endif
     }
-    return detail::wide_umul128(a, b);
+    return impl::wide_umul128(a, b);
 #endif
 }
 
@@ -153,7 +153,7 @@ namespace detail
         return {u64(lo), i64(hi)};
 #endif
     }
-    return detail::wide_imul128(a, b);
+    return impl::wide_imul128(a, b);
 #endif
 }
 
@@ -164,7 +164,7 @@ namespace detail
     __uint128_t const s = static_cast<__uint128_t>(a) + b + carry_in;
     return {u64(s), u64(s >> 64)};
 #elif defined(CC_ARCH_ARM64) // MSVC ARM64: no _addcarry_u64 intrinsic
-    return detail::wide_add_with_carry(a, b, carry_in);
+    return impl::wide_add_with_carry(a, b, carry_in);
 #else                        // MSVC x64
     if !consteval
     {
@@ -172,7 +172,7 @@ namespace detail
         unsigned char const c = _addcarry_u64(static_cast<unsigned char>(carry_in), a, b, &out);
         return {out, c};
     }
-    return detail::wide_add_with_carry(a, b, carry_in);
+    return impl::wide_add_with_carry(a, b, carry_in);
 #endif
 }
 
@@ -184,7 +184,7 @@ namespace detail
     __uint128_t const d = static_cast<__uint128_t>(a) - b - borrow_in;
     return {u64(d), static_cast<u64>(d >> 64) & 1u};
 #elif defined(CC_ARCH_ARM64) // MSVC ARM64: no _subborrow_u64 intrinsic
-    return detail::wide_sub_with_borrow(a, b, borrow_in);
+    return impl::wide_sub_with_borrow(a, b, borrow_in);
 #else                        // MSVC x64
     if !consteval
     {
@@ -192,7 +192,7 @@ namespace detail
         unsigned char const bw = _subborrow_u64(static_cast<unsigned char>(borrow_in), a, b, &out);
         return {out, bw};
     }
-    return detail::wide_sub_with_borrow(a, b, borrow_in);
+    return impl::wide_sub_with_borrow(a, b, borrow_in);
 #endif
 }
 } // namespace cc
