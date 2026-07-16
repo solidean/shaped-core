@@ -42,9 +42,9 @@ struct register_snapshot
 
 /// One retired instruction.
 ///
-/// The live loop fills only rip/next_rip/rsp/bytes; `length`, `text` and `category` come from the
-/// decoder afterwards, and file/line/target_symbol from symbol enrichment. Everything past the raw
-/// capture is best-effort and stays empty when unavailable.
+/// The live loop fills only rip/next_rip/rsp/bytes; `length`, `text`, `category` and the is_/…_memory
+/// flags come from the decoder afterwards, and file/line/target_symbol/owner_symbol from symbol
+/// enrichment. Everything past the raw capture is best-effort and stays empty/false when unavailable.
 struct recorded_instruction
 {
     u64 rip = 0;
@@ -59,11 +59,40 @@ struct recorded_instruction
     cc::string text;
     insn_category category = insn_category::other;
 
+    /// A locked read-modify-write: a `lock` prefix, or an `xchg` with memory (locked implicitly).
+    bool is_atomic = false;
+    /// A call/jmp through a register or memory — a vtable, function_ref or unique_function hop.
+    bool is_indirect = false;
+    /// Has an explicit memory operand it reads / writes. Both are true for a read-modify-write.
+    bool reads_memory = false;
+    bool writes_memory = false;
+
+    /// This instruction's name when it is one that costs tens to hundreds of cycles where the rest of
+    /// the stream costs ~1 — `idiv`, `rdtsc`, a fence, a `rep`-prefixed string op. Null otherwise.
+    /// A static string, valid for the process lifetime.
+    ///
+    /// Deliberately not a cost model: it flags that the instruction count will mislead here, and
+    /// leaves the reader to look. See slow_mnemonic_of.
+    char const* slow_mnemonic = nullptr;
+
     cc::string file;
     u32 line = 0;
     /// Where a taken transfer landed, symbolized. Only set when control actually diverged.
     cc::string target_symbol;
+    /// The function containing `rip`, without an offset. Only filled when stats are requested.
+    cc::string owner_symbol;
 };
+
+/// True when control did not simply fall through to the next instruction — the authority for whether
+/// a conditional branch was taken. False when unknowable: an undecoded record, or the last one (whose
+/// successor we never saw).
+inline bool diverged(recorded_instruction const& insn)
+{
+    if (insn.next_rip == 0 || insn.length == 0)
+        return false;
+
+    return insn.next_rip != insn.rip + insn.length;
+}
 
 /// Why a trace stopped collecting.
 enum class step_reason
@@ -99,7 +128,11 @@ struct trace
 
     cc::vector<stack_frame> entry_stack;
     cc::vector<recorded_instruction> instructions;
-    /// Parallel to `instructions`; empty unless --register-diffs.
+    /// One snapshot sampled *before* each instruction, plus a trailing one holding what the last
+    /// instruction left behind — so instruction i's effect is registers[i] vs registers[i+1], and
+    /// size is instructions.size() + 1. The trailing entry is absent where the last instruction never
+    /// retired (the syscall stop, which records the gate but refuses to step it). Empty unless
+    /// --register-diffs.
     cc::vector<register_snapshot> registers;
 
     step_reason reason = step_reason::instruction_budget;

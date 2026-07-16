@@ -9,6 +9,9 @@
 
 namespace itrace
 {
+/// What --instructions defaults to under --stats, absent an explicit value.
+inline constexpr u32 stats_instruction_default = 100000;
+
 /// Parsed command line. See usage_text() for the flags and readme.md for what they mean.
 struct options
 {
@@ -17,9 +20,11 @@ struct options
     /// Everything after `--`, passed to the debuggee verbatim.
     cc::vector<cc::string> target_args;
 
-    u64 skip = 0;           // entry hits to ignore before the first recorded trace
-    u32 traces = 1;         // invocations to record, across all threads
-    u32 instructions = 100; // max retired instructions per trace
+    u64 skip = 0;   // entry hits to ignore before the first recorded trace
+    u32 traces = 1; // invocations to record, across all threads
+    /// Max retired instructions per trace. Defaults to stats_instruction_default under --stats: a
+    /// truncated trace silently produces a wrong table, and 100 would truncate anything interesting.
+    u32 instructions = 100;
 
     bool until_return = true;
     bool stop_at_syscall = true;
@@ -27,6 +32,8 @@ struct options
     bool source = true;
     bool terminate_after_traces = true;
     bool register_diffs = false;
+    /// Print a per-symbol table instead of the trace.
+    bool stats = false;
 
     /// --colored / --plain; auto-detects otherwise.
     color_mode color = color_mode::automatic;

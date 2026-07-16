@@ -7,6 +7,7 @@
 #include <instruction-tracer/report/console.hh>
 #include <instruction-tracer/report/source_cache.hh>
 #include <instruction-tracer/report/trace_formatter.hh>
+#include <instruction-tracer/report/trace_stats.hh>
 
 namespace
 {
@@ -32,13 +33,17 @@ int run(itrace::options const& opts)
 
     itrace::debug_session session(cc::move(config));
 
+    // The stats table prints no source lines, so resolving them would be a PDB lookup per instruction
+    // for output nobody sees — and --stats raises the instruction cap a thousandfold.
+    bool const want_source = opts.source && !opts.stats;
+
     // Enrichment needs the debuggee's symbols, so it happens inside run()'s lifetime via the
     // callback below rather than after the session tears down.
     auto traces = session.run(
         [&](itrace::trace& t, itrace::symbol_session const& symbols)
         {
             itrace::instruction_decoder const decoder;
-            itrace::enrich_trace(t, symbols, decoder, opts.source);
+            itrace::enrich_trace(t, symbols, decoder, want_source, opts.stats);
         });
 
     if (traces.has_error())
@@ -52,6 +57,12 @@ int run(itrace::options const& opts)
         cc::eprintln("no traces recorded: '{}' was never entered (--skip {} may exceed the hit count)",
                      opts.target.to_string(), opts.skip);
         return exit_unresolved;
+    }
+
+    if (opts.stats)
+    {
+        cc::print(itrace::format_stats(itrace::collect_stats(traces.value())));
+        return exit_ok;
     }
 
     itrace::format_options fmt;

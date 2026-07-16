@@ -22,7 +22,7 @@ diff its disassembly against the mock's; the mock is usually the optimistic one
 ```bash
 uv run dev.py assembly search <pattern> [--preset P] [--target T] [--regex] [--all] [--limit N]
 uv run dev.py assembly show   <symbol>  [--preset P] [--target T] [--source] [--att] [--bytes]
-uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] -- <args>
+uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--stats] -- <args>
 ```
 
 **`search`/`show` are static — `trace` is dynamic.** When the question is "what *did* it do" rather
@@ -32,6 +32,18 @@ breaks on the symbol, and single-steps one invocation
 ([tools/instruction-tracer](../../../tools/instruction-tracer/readme.md); Windows x64, needs a
 `relwithdebinfo-*` preset for symbols). `--skip N` walks past warm-up hits to reach a steady-state
 call — see the warm-up rule below, it is not optional.
+
+**`--stats` first, then read the trace.** It replaces the trace with one row per symbol — self
+instructions, atomics, slow ops, direct/indirect calls, memory reads/writes, branches taken — sorted
+by cost. An 800-line trace is a bad first look; the table tells you which rows are worth reading, and
+the atomics column earns its keep (10 of 797 instructions were ~43% of the cycles on the async probe).
+Do not hand-bucket a trace with a throwaway script — that is what this flag is.
+
+The `slow` column catches what an instruction count cannot: `idiv` (a `%` on a non-power-of-two),
+`rdtsc`, fences, `pause` (a spinlock actually spinning), `rep` string ops. A footer names them — it
+is how we found that `std::unordered_map` float-divides on every insert for its load factor. All
+zeros is also a result: it means the count is a fair proxy. It cannot see a cache miss, which is
+usually what actually costs you.
 
 ## The loop
 

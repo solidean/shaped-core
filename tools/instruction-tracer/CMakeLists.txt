@@ -21,6 +21,7 @@ add_library(instruction-tracer-core STATIC
     src/instruction-tracer/report/console.cc
     src/instruction-tracer/report/source_cache.cc
     src/instruction-tracer/report/trace_formatter.cc
+    src/instruction-tracer/report/trace_stats.cc
 )
 
 target_compile_features(instruction-tracer-core PUBLIC cxx_std_23)
@@ -50,6 +51,7 @@ if(SC_BUILD_TESTS)
         tests/decode/instruction_decoder-test.cc
         tests/report/console-test.cc
         tests/report/trace_formatter-test.cc
+        tests/report/trace_stats-test.cc
     )
 
     target_link_libraries(instruction-tracer-test PRIVATE instruction-tracer-core nexus)

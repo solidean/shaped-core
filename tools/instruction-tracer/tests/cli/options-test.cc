@@ -28,6 +28,7 @@ TEST("options - defaults")
     CHECK(o.source);
     CHECK(o.terminate_after_traces);
     CHECK(!o.register_diffs);
+    CHECK(!o.stats);
     CHECK(o.target_args.empty());
 }
 
@@ -48,7 +49,7 @@ TEST("options - every bool flag has a --no- form")
 {
     auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", //
                     "--no-until-return", "--no-stop-at-syscall", "--no-stack", "--no-source",
-                    "--no-terminate-after-traces", "--register-diffs"});
+                    "--no-terminate-after-traces", "--register-diffs", "--no-stats"});
     REQUIRE(r.has_value());
 
     auto const& o = r.value();
@@ -58,6 +59,33 @@ TEST("options - every bool flag has a --no- form")
     CHECK(!o.source);
     CHECK(!o.terminate_after_traces);
     CHECK(o.register_diffs);
+    CHECK(!o.stats);
+}
+
+TEST("options - --stats raises the instruction cap, since a truncated trace tables wrong")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--stats"});
+    REQUIRE(r.has_value());
+    CHECK(r.value().stats);
+    CHECK(r.value().instructions == stats_instruction_default);
+}
+
+TEST("options - an explicit --instructions beats --stats, whichever comes first")
+{
+    auto after = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--stats", "--instructions", "500"});
+    REQUIRE(after.has_value());
+    CHECK(after.value().instructions == 500);
+
+    auto before = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--instructions", "500", "--stats"});
+    REQUIRE(before.has_value());
+    CHECK(before.value().instructions == 500);
+}
+
+TEST("options - --no-stats leaves the instruction default alone")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--no-stats"});
+    REQUIRE(r.has_value());
+    CHECK(r.value().instructions == 100);
 }
 
 TEST("options - explicit positive form overrides a default-on flag")

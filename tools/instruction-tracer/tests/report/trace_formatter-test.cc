@@ -23,6 +23,26 @@ cc::string render(trace const& t, format_options opts = {})
     return format_trace(t, 1, opts, sources);
 }
 
+/// The first line containing `needle`, or empty. A register diff lives on its own instruction's line,
+/// and the entry dump names every register — so an assertion about a diff has to be line-scoped or it
+/// would match the dump instead.
+cc::string_view line_containing(cc::string_view text, cc::string_view needle)
+{
+    isize start = 0;
+    for (isize i = 0; i <= text.size(); ++i)
+    {
+        if (i != text.size() && text[i] != '\n')
+            continue;
+
+        auto const line = text.subview({.start = start, .end = i});
+        if (line.contains(needle))
+            return line;
+
+        start = i + 1;
+    }
+    return {};
+}
+
 trace one_instruction_trace()
 {
     trace t;
@@ -227,18 +247,141 @@ TEST("formatter - register diffs show only what changed")
     t.registers.push_back(before);
     t.registers.push_back(after);
 
+    // Scoped to the instruction's own line: the entry dump lists rcx too, by design.
     auto const out = render(t, {.stack = false, .source = false, .register_diffs = true});
-    CHECK(out.contains("rax=0x3"));
-    CHECK(!out.contains("rcx="));
+    auto const line = line_containing(out, "add rax, rcx"); // a view into `out` — it must outlive this
+
+    CHECK(line.contains("rax=0x3"));
+    CHECK(!line.contains("rcx=")); // "rcx" is in the mnemonic; "rcx=" would be a diff
+}
+
+TEST("formatter - the last instruction's effect is shown, not dropped")
+{
+    // Snapshots are sampled *before* each instruction, so the final one needs the trailing snapshot
+    // the session records after its last step. Without it a `ret`'s rsp move is invisible.
+    trace t;
+    t.index = 1;
+    t.entry_symbol = "foo";
+    t.instructions.push_back(insn_at(0x1000, 1, "ret", insn_category::ret));
+
+    register_snapshot before;
+    before.gpr[4] = 0x1000; // rsp
+
+    register_snapshot after = before;
+    after.gpr[4] = 0x1008; // the ret popped
+
+    t.registers.push_back(before);
+    t.registers.push_back(after); // the trailing snapshot: one more than there are instructions
+
+    auto const out = render(t, {.stack = false, .source = false, .register_diffs = true});
+    CHECK(out.contains("rsp=0x1008"));
+}
+
+TEST("formatter - flag changes print by name and value")
+{
+    trace t;
+    t.index = 1;
+    t.entry_symbol = "foo";
+    t.instructions.push_back(insn_at(0x1000, 3, "sub rax, rcx"));
+
+    register_snapshot before;
+    before.rflags = 0;
+
+    register_snapshot after;
+    after.rflags = (1u << 6) | (1u << 0); // ZF and CF set
+
+    t.registers.push_back(before);
+    t.registers.push_back(after);
+
+    auto const out = render(t, {.stack = false, .source = false, .register_diffs = true});
+    CHECK(out.contains("ZF=1"));
+    CHECK(out.contains("CF=1"));
+    CHECK(!out.contains("rflags=0x41")); // by name and value, never the raw word
+}
+
+TEST("formatter - a cleared flag reads as 0, not as absent")
+{
+    trace t;
+    t.index = 1;
+    t.entry_symbol = "foo";
+    t.instructions.push_back(insn_at(0x1000, 3, "add rax, rcx"));
+
+    register_snapshot before;
+    before.rflags = 1u << 6; // ZF set
+
+    register_snapshot after;
+    after.rflags = 0; // ZF cleared
+
+    t.registers.push_back(before);
+    t.registers.push_back(after);
+
+    auto const out = render(t, {.stack = false, .source = false, .register_diffs = true});
+    CHECK(out.contains("ZF=0"));
+}
+
+TEST("formatter - the trap flag is the tracer's own, and is never reported")
+{
+    // We set TF to single-step. Reporting it would describe the debugger, not the debuggee. Same for
+    // IF and RF, which the traced code does not author either.
+    trace t;
+    t.index = 1;
+    t.entry_symbol = "foo";
+    t.instructions.push_back(insn_at(0x1000, 1, "nop"));
+
+    register_snapshot before;
+    before.rflags = 0;
+
+    register_snapshot after;
+    after.rflags = (1u << 8) | (1u << 9) | (1u << 16); // TF, IF, RF
+
+    t.registers.push_back(before);
+    t.registers.push_back(after);
+
+    auto const out = render(t, {.stack = false, .source = false, .register_diffs = true});
+    CHECK(!out.contains("TF"));
+    CHECK(!out.contains("IF"));
+    CHECK(!out.contains("RF"));
+}
+
+TEST("formatter - the entry dump gives the diffs a baseline")
+{
+    trace t;
+    t.index = 1;
+    t.entry_symbol = "foo";
+    t.instructions.push_back(insn_at(0x1000, 1, "nop"));
+
+    register_snapshot entry;
+    entry.gpr[0] = 0x64;                  // rax
+    entry.gpr[15] = 0xdead;               // r15 — the far end of the array must render too
+    entry.rflags = (1u << 6) | (1u << 2); // ZF, PF
+
+    t.registers.push_back(entry);
+    t.registers.push_back(entry);
+
+    auto const out = render(t, {.stack = false, .source = false, .register_diffs = true});
+
+    CHECK(out.contains("registers:"));
+    CHECK(out.contains("rax=0x0000000000000064"));
+    CHECK(out.contains("r15=0x000000000000dead"));
+    CHECK(out.contains("rflags=0x00000044"));
+    CHECK(out.contains("[PF ZF]")); // decoded, in bit order
+}
+
+TEST("formatter - no register dump without --register-diffs")
+{
+    trace t = one_instruction_trace();
+    t.registers.push_back({});
+
+    CHECK(!render(t, {.register_diffs = false}).contains("registers:"));
 }
 
 TEST("formatter - ambiguity report lists every candidate")
 {
     symbol_error e;
     e.message = "symbol 'process' is ambiguous";
-    e.candidates.push_back({0x1000, "foo::process(item const&)", "mymodule.exe"});
-    e.candidates.push_back({0x2000, "foo::process(batch const&)", "mymodule.exe"});
-    e.candidates.push_back({0x3000, "detail::process", "helper.dll"});
+    e.candidates.push_back({.address = 0x1000, .name = "foo::process(item const&)", .module = "mymodule.exe"});
+    e.candidates.push_back({.address = 0x2000, .name = "foo::process(batch const&)", .module = "mymodule.exe"});
+    e.candidates.push_back({.address = 0x3000, .name = "detail::process", .module = "helper.dll"});
 
     auto const out = format_symbol_error(e);
     CHECK(out.contains("is ambiguous"));

@@ -90,6 +90,14 @@ bool trace_session::record_at(void const* context)
     return true;
 }
 
+void trace_session::record_final_registers(void const* context)
+{
+    if (!_config.capture_registers)
+        return;
+
+    _trace.registers.push_back(snapshot_of(*static_cast<CONTEXT const*>(context)));
+}
+
 bool trace_session::on_step(void const* context)
 {
     CC_ASSERT(_active, "on_step outside an active trace");
@@ -105,6 +113,7 @@ bool trace_session::on_step(void const* context)
     if (_config.until_return && _trace.return_rip != 0 && ctx.Rip == _trace.return_rip
         && ctx.Rsp >= _entry_rsp + sizeof(u64))
     {
+        record_final_registers(context);
         _trace.reason = step_reason::returned;
         _active = false;
         return false;
@@ -112,6 +121,7 @@ bool trace_session::on_step(void const* context)
 
     if (u32(_trace.instructions.size()) >= _config.max_instructions)
     {
+        record_final_registers(context);
         _trace.reason = step_reason::instruction_budget;
         _active = false;
         return false;
@@ -119,6 +129,9 @@ bool trace_session::on_step(void const* context)
 
     if (!record_at(context))
     {
+        // The step itself landed; only reading the *next* instruction failed, so the state here is
+        // still the last recorded instruction's result.
+        record_final_registers(context);
         _trace.reason = step_reason::exception;
         _active = false;
         return false;

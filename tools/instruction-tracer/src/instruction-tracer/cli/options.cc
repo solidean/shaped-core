@@ -73,6 +73,10 @@ output:
   --stack                print the stack at entry                 (default on)
   --source               annotate with source file/line and text  (default on)
   --register-diffs       show registers changed by each instruction (default off)
+  --stats                print a per-symbol table instead of the trace (default off)
+                         instructions are charged to the function containing them;
+                         raises the --instructions default to 100000, since a
+                         truncated trace makes for a silently wrong table
 
 process:
   --terminate-after-traces  kill the debuggee once done           (default on)
@@ -87,6 +91,7 @@ cc::result<options> parse_options(cc::span<char const* const> args)
 {
     options opts;
     bool has_target = false;
+    bool explicit_instructions = false;
 
     // argv[0] is the program itself.
     for (isize i = 1; i < args.size(); ++i)
@@ -185,9 +190,14 @@ cc::result<options> parse_options(cc::span<char const* const> args)
                 return cc::error(cc::format("{} must be at least 1", arg));
 
             if (arg == "--traces")
+            {
                 opts.traces = u32(cc::min<u64>(n.value(), u32(-1)));
+            }
             else
+            {
                 opts.instructions = u32(cc::min<u64>(n.value(), u32(-1)));
+                explicit_instructions = true;
+            }
             continue;
         }
 
@@ -203,6 +213,8 @@ cc::result<options> parse_options(cc::span<char const* const> args)
             continue;
         if (match_bool(arg, "register-diffs", opts.register_diffs))
             continue;
+        if (match_bool(arg, "stats", opts.stats))
+            continue;
 
         return cc::error(cc::format("unknown argument '{}' (see --help)", arg));
     }
@@ -211,6 +223,11 @@ cc::result<options> parse_options(cc::span<char const* const> args)
         return cc::error("--exe is required (see --help)");
     if (!has_target)
         return cc::error("one of --symbol / --address / --target is required (see --help)");
+
+    // Order-independent: --stats only raises the cap where the user did not set one, whichever came
+    // first on the command line.
+    if (opts.stats && !explicit_instructions)
+        opts.instructions = stats_instruction_default;
 
     return opts;
 }

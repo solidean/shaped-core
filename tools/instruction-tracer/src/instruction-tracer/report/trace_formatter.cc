@@ -49,14 +49,13 @@ void append_branch_note(cc::string& out, recorded_instruction const& insn)
     if (insn.length == 0 || insn.next_rip == 0)
         return;
 
-    bool const fell_through = insn.next_rip == insn.rip + insn.length;
     auto const target = insn.target_symbol.empty() ? cc::string() : cc::format(" -> {}", cyan(insn.target_symbol));
 
     switch (insn.category)
     {
     case insn_category::conditional_branch:
         // The one case where "not taken" is worth saying: the branch had a choice.
-        if (fell_through)
+        if (!diverged(insn))
             out += dim("  ; not taken");
         else
             out += yellow("  ; taken") + target;
@@ -76,6 +75,69 @@ void append_branch_note(cc::string& out, recorded_instruction const& insn)
     }
 }
 
+struct flag_bit
+{
+    u32 bit;
+    char const* name;
+};
+
+/// The status flags — what the code computes with, and what a conditional branch reads.
+///
+/// TF (8) is deliberately absent: it is the trap bit *we* set to single-step, so reporting it would
+/// report the tracer. IF (9) and RF (16) are system state the debuggee does not author either.
+constexpr flag_bit flag_bits[] = {
+    {0, "CF"}, {2, "PF"}, {4, "AF"}, {6, "ZF"}, {7, "SF"}, {10, "DF"}, {11, "OF"},
+};
+
+bool flag_set(u64 rflags, u32 bit)
+{
+    return ((rflags >> bit) & 1) != 0;
+}
+
+/// "PF ZF" — the status flags currently set, in bit order.
+cc::string format_flags(u64 rflags)
+{
+    cc::string out;
+    for (auto const& f : flag_bits)
+        if (flag_set(rflags, f.bit))
+            out += cc::string(out.empty() ? "" : " ") + f.name;
+
+    return out;
+}
+
+/// The full state at entry, so the per-instruction diffs have a baseline to be read against. Without
+/// it "rcx=0x64" says what rcx became but never what it was.
+void append_register_dump(cc::string& out, register_snapshot const& s)
+{
+    out += "\n" + dim("registers:") + "\n";
+
+    for (int i = 0; i < gpr_count; ++i)
+    {
+        if (i % 4 == 0)
+            out += "  ";
+
+        // Pad the name, not the cell: r8/r9 are a character short, and unaligned hex columns are the
+        // whole reason a dump like this is hard to read.
+        cc::string name = gpr_names[i];
+        while (name.size() < 3)
+            name += ' ';
+
+        auto cell = cc::format("{}={:#018x}", name, s.gpr[i]);
+        if (i % 4 != 3)
+            cell += "  ";
+
+        out += cell;
+        if (i % 4 == 3)
+            out += '\n';
+    }
+
+    auto const names = format_flags(s.rflags);
+    cc::format_append(out, "  rflags={:#010x}", s.rflags);
+    if (!names.empty())
+        out += " " + dim("[" + names + "]");
+    out += '\n';
+}
+
 void append_register_diff(cc::string& out, register_snapshot const& before, register_snapshot const& after)
 {
     cc::string diff;
@@ -85,6 +147,15 @@ void append_register_diff(cc::string& out, register_snapshot const& before, regi
             continue;
 
         cc::format_append(diff, "{}{}={:#x}", diff.empty() ? "" : " ", gpr_names[i], after.gpr[i]);
+    }
+
+    // Flags by name and new value: the raw word would say "rflags=0x246", which answers nothing.
+    for (auto const& f : flag_bits)
+    {
+        if (flag_set(before.rflags, f.bit) == flag_set(after.rflags, f.bit))
+            continue;
+
+        cc::format_append(diff, "{}{}={}", diff.empty() ? "" : " ", f.name, flag_set(after.rflags, f.bit) ? 1 : 0);
     }
 
     if (!diff.empty())
@@ -136,6 +207,9 @@ cc::string format_trace(trace const& t, u32 total_traces, format_options const& 
             out += '\n';
         }
     }
+
+    if (opts.register_diffs && !t.registers.empty())
+        append_register_dump(out, t.registers.front());
 
     out += '\n';
 

@@ -246,6 +246,53 @@ def check_address_form_agrees(t: Tracer) -> None:
         raise Failure(f"--address resolved to {by_address.entry!r}, --symbol to {by_symbol.entry!r}")
 
 
+def check_stats_replaces_the_trace(t: Tracer) -> None:
+    """--stats prints a table instead of the trace, and charges the work to the traced symbol.
+
+    Optimizer-independent: the fixture's noinline function must own at least one instruction, and its
+    self count can never exceed the total.
+    """
+    code, out, err = t("--symbol", SYMBOL, "--skip", "100", "--stats")
+    if code != 0:
+        raise Failure(f"tracer exited {code} with --stats\n{out}\n{err}")
+
+    if "=== trace " in out:
+        raise Failure(f"--stats must replace the trace, not accompany it:\n{out}")
+    for column in ("self", "atomics", "calls d/i", "mem r/w", "symbol"):
+        if column not in out:
+            raise Failure(f"--stats table is missing the {column!r} column:\n{out}")
+    if "total (1 trace)" not in out:
+        raise Failure(f"--stats table is missing its totals row:\n{out}")
+
+    rows = [line for line in out.splitlines() if line.rstrip().endswith(SYMBOL)]
+    if len(rows) != 1:
+        raise Failure(f"expected exactly one {SYMBOL} row, got {len(rows)}:\n{out}")
+
+    self_count = int(rows[0].split()[0])
+    total = int(next(line for line in out.splitlines() if "total (" in line).split()[0])
+    if self_count < 1:
+        raise Failure(f"the traced function retired no instructions of its own:\n{out}")
+    if self_count > total:
+        raise Failure(f"self ({self_count}) exceeds the total ({total}):\n{out}")
+
+
+def check_stats_counts_match_the_trace(t: Tracer) -> None:
+    """The table's total must equal what the trace itself reported retiring.
+
+    A relation between two renderings of one run: it holds whatever the fixture compiles to, and only
+    a bucketing bug can break it.
+    """
+    trace = t.traces("--symbol", SYMBOL, "--skip", "100")[0]
+
+    code, out, err = t("--symbol", SYMBOL, "--skip", "100", "--stats")
+    if code != 0:
+        raise Failure(f"tracer exited {code} with --stats\n{out}\n{err}")
+
+    total = int(next(line for line in out.splitlines() if "total (" in line).split()[0])
+    if total != len(trace.instructions):
+        raise Failure(f"--stats totalled {total} instructions, the trace printed {len(trace.instructions)}")
+
+
 def check_missing_symbol_fails(t: Tracer) -> None:
     """A symbol that cannot exist must fail loudly rather than trace nothing quietly."""
     code, out, err = t("--symbol", "itrace_definitely_not_a_real_symbol")
@@ -262,6 +309,8 @@ CHECKS = [
     ("captures the entry stack", check_stack),
     ("reports an ambiguous symbol with candidates", check_ambiguity_is_reported),
     ("--address agrees with --symbol", check_address_form_agrees),
+    ("--stats tables the run instead of tracing it", check_stats_replaces_the_trace),
+    ("--stats totals agree with the trace", check_stats_counts_match_the_trace),
     ("a missing symbol fails loudly", check_missing_symbol_fails),
 ]
 

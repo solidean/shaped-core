@@ -94,6 +94,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
         ("source", "Annotate with source file/line and text (default: on)"),
         ("register-diffs", "Show the registers each instruction changed (default: off)"),
         ("terminate-after-traces", "Kill the debuggee once done (default: on)"),
+        ("stats", "Print a per-symbol table instead of the trace; raises the --instructions "
+                  "default to 100000 (default: off)"),
     ):
         t.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None, help=help_text)
 
@@ -404,6 +406,7 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]
         ("source", args.source),
         ("register-diffs", args.register_diffs),
         ("terminate-after-traces", args.terminate_after_traces),
+        ("stats", args.stats),
     ):
         if value is not None:
             argv.append(f"--{flag}" if value else f"--no-{flag}")

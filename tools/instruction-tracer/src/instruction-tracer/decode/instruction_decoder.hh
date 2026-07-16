@@ -10,8 +10,9 @@ namespace itrace
 class instruction_decoder
 {
 public:
-    /// Decode one instruction's bytes. `rip` only affects how rip-relative operands render.
-    /// `length` stays 0 and `text` empty when the bytes do not decode.
+    /// Decode one instruction's bytes, filling text/category and the is_atomic / is_indirect /
+    /// reads_memory / writes_memory facts. `rip` only affects how rip-relative operands render.
+    /// `length` stays 0, `text` empty and the flags false when the bytes do not decode.
     void decode_one(recorded_instruction& insn) const;
 
     /// decode_one over a whole trace.

@@ -35,6 +35,7 @@ BOOL CALLBACK collect_symbol(SYMBOL_INFO* info, ULONG, void* raw)
 
     symbol_match match;
     match.address = info->Address;
+    match.size = info->Size;
     match.name = cc::string_view(info->Name, isize(info->NameLen));
     if (auto const* m = ctx->modules->find_by_address(info->Address))
         match.module = m->name;
@@ -101,6 +102,7 @@ cc::optional<symbol_match> symbol_session::symbol_at(u64 address) const
 
     symbol_match match;
     match.address = buffer.info.Address;
+    match.size = buffer.info.Size;
     match.name = cc::string_view(buffer.info.Name, isize(buffer.info.NameLen));
     if (auto const* m = _modules.find_by_address(address))
         match.module = m->name;

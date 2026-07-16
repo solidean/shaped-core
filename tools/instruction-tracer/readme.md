@@ -83,12 +83,13 @@ narrow the spec, or use --target module!symbol / --address.
 |---|---|---|
 | `--skip <n>` | `0` | Ignore the first n entry hits. The first recorded trace is hit n+1. |
 | `--traces <n>` | `1` | Record n invocations, counted across all threads. |
-| `--instructions <n>` | `100` | Max retired instructions per trace. |
+| `--instructions <n>` | `100` (`100000` under `--stats`) | Max retired instructions per trace. |
 | `--until-return` | on | Stop once the entry frame returns. |
 | `--stop-at-syscall` | on | Stop before executing a syscall, rather than stepping into the kernel. |
 | `--stack` | on | Print the stack at entry. |
 | `--source` | on | Annotate with source file/line and the source text. |
-| `--register-diffs` | off | Show the registers each instruction changed. |
+| `--register-diffs` | off | Dump the registers at entry, then show what each instruction changed. See below. |
+| `--stats` | off | Print a per-symbol table instead of the trace. See below. |
 | `--terminate-after-traces` | on | Kill the debuggee once the last trace lands. |
 
 Every boolean has a `--no-` form (`--no-source`). `-h` / `--help` prints all of this.
@@ -145,6 +146,97 @@ jumps and returns the interesting part is only ever *where it landed*.
 
 Bytes that fail to decode print as hex in parentheses rather than being dropped.
 
+### `--register-diffs`
+
+The full state at entry, then only what each instruction changed:
+
+```
+registers:
+  rax=0x00000000000000c6  rcx=0x0000000000000064  rdx=0x0000000000000001  rbx=0x00000000000039a0
+  rsp=0x0000005c3f58fe48  rbp=0x0000000000000000  rsi=0x0000000000000064  rdi=0x0000000000003a66
+  r8 =0x000001ca585e0a00  r9 =0x00007ff7f90c0298  r10=0x00002660fad4cd66  r11=0x0000005c3f58fe48
+  r12=0x0000000000000000  r13=0x0000000000000000  r14=0x0000000000000000  r15=0x0000000000000000
+  rflags=0x00000293 [CF AF SF]
+
+  00007ff7`f90c1000  push rax        ; rsp=0xb3eb2ffac0
+  00007ff7`f90c100c  mov eax, [rsp]  ; rax=0x1
+  00007ff7`f90c100f  add eax, ecx    ; rax=0x65 CF=0 PF=1 AF=0 SF=0
+  00007ff7`f90c1012  ret             ; -> fixture.exe!drive+0x1c  ; rsp=0xb3eb2ffad0
+```
+
+The dump is what makes the diffs readable: `rcx=0x64` says what rcx *became*, never what it was.
+
+Flags print by name and new value, because `rflags=0x293` answers nothing. Only the status flags the
+code computes with are shown — `CF PF AF ZF SF DF OF`. **`TF` is excluded on purpose:** it is the
+trap bit the tracer sets to single-step, so reporting it would describe the debugger rather than the
+debuggee. `IF` and `RF` are system state the traced code does not author either.
+
+Snapshots are sampled *before* each instruction, and one more is recorded after the last one retires
+— otherwise a trailing `ret`'s `rsp` move would be invisible, which is exactly the instruction you
+are usually looking at.
+
+### `--stats`
+
+Answers "where did the instructions go" without reading the trace. One row per symbol, sorted by
+instruction count descending, aggregated over every recorded trace:
+
+```
+  self  atomics  slow  calls d/i  mem r/w  br (taken)  symbol
+   109        2     0        8/0    20/22       9 (0)  clean-core-test.exe!`anonymous namespace'::single_lazy_probe
+    84        2     0        3/1    12/10      10 (5)  clean-core-test.exe!cc::async_node_base::poll
+    78        0     0        0/1     13/5       7 (3)  clean-core-test.exe!cc::poly_node_allocation::~poly_node_allocation
+     9        0     0        1/0      2/1       0 (0)  clean-core-test.exe!cc::detail::unique_function_invoke
+  ---------------------------------------------------
+   797       10     0       24/5   142/92     77 (34)  total (1 trace)
+```
+
+| column | meaning |
+|---|---|
+| `self` | Instructions charged to the function **containing** them, so a callee's work never lands on its caller. Not cumulative. |
+| `atomics` | Locked read-modify-writes — a `lock` prefix, or an `xchg` against memory (which locks implicitly). The highest instruction-to-cycle ratio on the table: 10 of 797 instructions above are ~43% of the cycles. |
+| `slow` | Instructions that are categorically not single-cycle. Usually 0; when it is not, a footer names them. See below. |
+| `calls d/i` | Direct / indirect. An indirect call is a vtable, `function_ref` or `unique_function` hop — what you are hunting when you ask why something did not inline. |
+| `mem r/w` | Instructions with an explicit memory operand they read / write. Finds pointer chases and RFO-heavy zeroing. Implicit stack traffic (`push`/`pop`) does not count, or a prologue would drown out the signal. |
+| `br (taken)` | Conditional branches, and how many were taken. A mispredict candidate is a hot branch near half taken. |
+
+Template arguments are stripped (`cc::vector<int>::push_back` → `cc::vector::push_back`) — the real
+names run to 300+ chars — so two instantiations of one function share a row.
+
+#### The `slow` column
+
+Every column above assumes one instruction ≈ one cycle. `slow` is where that assumption is *known* to
+break: `idiv`, `div`, float divide and `sqrt`, `cpuid`, `rdtsc`, `rdrand`, fences, `pause`,
+`rep`-prefixed string ops, gathers/scatters, x87 transcendentals. Tens to hundreds of cycles each,
+sitting in a stream where everything else is one.
+
+They are named rather than only counted, because which one it is *is* the finding:
+
+```
+slow ops (tens of cycles each — the instruction count does not show these)
+  scasd  x12  ntdll.dll!RtlCompareMemoryUlong
+  stosq   x3  ntdll.dll!RtlSetExtendedFeaturesMask
+  divss   x1  clean-core-test.exe!std::unordered_map::_Insert_or_assign
+```
+
+That last line is the point of the column: `std::unordered_map` does a **float divide on every
+insert** — the `size() / bucket_count() > max_load_factor()` check — and nothing about an instruction
+count would ever show it. (`cc::map` masks power-of-two buckets instead, which is why it has no such
+row.) The usual way one appears is a `%` on a non-power-of-two, or profiling code built out of
+`rdtsc`. A `pause` means a spinlock is actually spinning.
+
+**It is not a cost model, on purpose.** Exact latencies are microarchitecture-specific, so nothing
+here estimates or weighs — membership is the whole claim: *the instruction count will mislead you
+here, go look*. An all-zero column is a real result too: it says the count is a fair proxy.
+
+The cost it **cannot** see is the one that usually matters. A `mov` that misses to DRAM is 200+
+cycles and is indistinguishable from an L1 hit. This finds landmines in the opcode stream, not where
+the time went.
+
+`--stats` raises the `--instructions` default to 100000: a trace cut short by the budget produces a
+silently wrong table, and 100 truncates anything worth tabling. An explicit `--instructions` still
+wins, and a table built from a truncated trace says so loudly. Note that single-stepping costs a
+debug-event round trip per instruction, so a genuinely 100k-instruction trace is slow.
+
 ## How it works
 
 At each entry-breakpoint hit:
@@ -177,6 +269,14 @@ than committed: the amalgamated source is ~12 MB of generated instruction tables
   `relwithdebinfo-*` build.
 - **No inline frames.** The stack is physical frames only; a heavily inlined caller shows as one
   frame. `SymQueryInlineTrace` would fix this.
+- **`--register-diffs` is GPRs + rflags only — no XMM/YMM.** Vectorized code moves through `xmm0-15`
+  invisibly, so a trace of it shows the loads and none of the arithmetic. TODO: capture `Xmm0-15`
+  from `CONTEXT` (they are already in the struct we read) and diff them like the GPRs; the open
+  question is rendering 128 bits per register without swamping the line, which probably means
+  printing only the changed lanes and only on request.
+- **The syscall stop has no trailing register snapshot.** Every other stop records the state the last
+  instruction left behind; the syscall gate is recorded but deliberately never stepped, so its effect
+  is unknown rather than missing.
 - **Recursion during a trace is not counted.** The breakpoint stays unarmed for the duration of a
   trace, so a recursive re-entry is stepped as ordinary instructions rather than starting a new one.
 - **`--stop-at-syscall` rarely fires.** Raw `syscall` lives in ntdll, not in user code, so a trace

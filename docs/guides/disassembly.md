@@ -114,6 +114,16 @@ of an invocation. **Windows x64 only**, and it needs a `relwithdebinfo-*` preset
 release has no PDB, so the trace degrades to raw addresses. Full reference and
 limits: [tools/instruction-tracer/readme.md](../../tools/instruction-tracer/readme.md).
 
+`--stats` answers "where did the instructions go" without reading an 800-line
+trace: a table of one row per symbol — self instructions, atomics, direct/indirect
+calls, memory reads/writes, branches taken — sorted by cost. Usually the first move
+on a new probe; read the trace afterwards for the rows that look wrong.
+
+```bash
+uv run dev.py assembly trace --target clean-core-test \
+    --symbol single_lazy_probe --skip 2 --stats -- "bench-async (single-thread drive)"
+```
+
 ## Limitations
 
 These apply to `search`/`show`; `trace` has its own list in its

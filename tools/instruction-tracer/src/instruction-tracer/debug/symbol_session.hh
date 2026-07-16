@@ -14,6 +14,8 @@ namespace itrace
 struct symbol_match
 {
     u64 address = 0;
+    /// Extent in bytes, for [address, address + size). 0 when the PDB does not say.
+    u64 size = 0;
     cc::string name;
     cc::string module;
 };

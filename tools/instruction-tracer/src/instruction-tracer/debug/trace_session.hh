@@ -52,6 +52,11 @@ private:
     /// Append a record for the instruction at `context`'s rip. False if its bytes are unreadable.
     bool record_at(void const* context);
 
+    /// Append the trailing snapshot: the state left behind by the last instruction that retired.
+    /// Only call where stepping is stopping *after* a step — not where the last recorded instruction
+    /// never ran (the syscall stop), which has no "after" to record.
+    void record_final_registers(void const* context);
+
     void* _process = nullptr;
     trace_config _config;
 
