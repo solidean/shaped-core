@@ -82,6 +82,14 @@ struct fused_refcount
 
     static shared_release release_strong(std::atomic<cc::u64>& c)
     {
+        // Reading exactly (1,1) proves we hold the only reference of any kind: no other thread can mint one,
+        // because minting requires already holding one. So there is nobody to race and no RMW is needed — this
+        // is the whole point of fusing. The ACQUIRE is load-bearing: it pairs with the release of whoever
+        // dropped the second-to-last reference, ordering their writes before our teardown. Note this leaves the
+        // counts reading (1,1) through destroy_object / free_storage; nothing may read them there.
+        if (c.load(std::memory_order_acquire) == sole_owner)
+            return {true, true};
+
         cc::u64 const old = c.fetch_sub(strong_unit, std::memory_order_acq_rel);
         return {(old >> 32) == 1, false}; // free is never decided here: the collective weak is still held
     }
