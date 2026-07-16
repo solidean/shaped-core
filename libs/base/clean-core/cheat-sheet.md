@@ -408,7 +408,7 @@ b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe t
 
 ```cpp
 #include <clean-core/thread/async.hh>     // cc::async<T, E = async_error> — eventual result<T, E>; dataflow model
-cc::shared_async<T, E = async_error> = std::shared_ptr<cc::async<T, E>>; // the normal handle (async is non-copy/move)
+cc::shared_async<T, E = async_error> = cc::shared_ptr<cc::async<T, E>, impl::async_node_traits>; // 8 B intrusive handle
 
 // creation — pick eager (scheduled) or lazy (cold) explicitly at the call site. f may take a leading
 // cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain

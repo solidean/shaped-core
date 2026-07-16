@@ -42,8 +42,10 @@ Running list of known follow-ups. Bigger design intent lives in
   [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md)); still open there are **local root
   signatures**, a **dedicated shader-table buffer usage** (`types.hh` reserves `shader_binding_table`), a
   **state-object cached blob**, and the **vulkan** trace implementation.
-- **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder. Surface a
-  `cc::shared_ptr` in clean-core and switch handles to it (keeps sg off `std::`). See the
+- **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder.
+  [`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) has landed (8 B, intrusive,
+  Traits-keyed), so what remains is switching the handles to it (keeps sg off `std::`). Needs a Traits for the
+  sg shapes — `cc::default_shared_traits` gives a trailing control block with no source change. See the
   [coding-guidelines](coding-guidelines.md) note.
 - **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
   `cc::flags` once that clean-core type is implemented.

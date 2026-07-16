@@ -133,7 +133,8 @@ single dependent fits the node's inline buffer, so no allocation).
 * **Frame captures** retain whatever the computation needs later — including observed `shared_async`
   dependencies (a dependency the frame builds on the fly must be captured so it stays alive). The
   pending-dependency list does **not** own anything; it only tracks not-ready deps for scheduling.
-* Each node is heap-owned via `std::shared_ptr`, and `schedule()` enqueues a `shared_ptr`, so a queued node
+* Each node is heap-owned via `cc::shared_ptr` (8 B, intrusive — see the node layout below), and `schedule()`
+  enqueues a `shared_ptr`, so a queued node
   can never be destroyed out from under the scheduler — which is what lets a required dependency be **freely
   scheduled** (and, later, stolen) while its dependents hold it alive.
 
