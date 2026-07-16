@@ -228,18 +228,20 @@ thread. A graph driven from an st scheduler can therefore finish on a pool (a de
 worker) or vice versa.
 
 That migration is why `singlethreaded_scheduler::try_blocking_get` returns an **optional**: a drained queue does
-not mean the graph is stuck, only that *this* scheduler cannot advance it — it may be parked on an unpushed
+not mean the graph is stuck, only that *this* scheduler cannot advance its root — it may be parked on an unpushed
 manual node, or have migrated onto another scheduler that is still driving it. `nullopt` is "not from here, not
 yet"; push/retry, or let the owning scheduler finish. An st scheduler cannot assume it will ever see every node
 of "its" graph, so it reports rather than asserts.
 
-> **Known limitation (migration stranding).** The dual case is not yet handled: a node parked on a pool, woken
-> on an st thread that then stops pumping (its `blocking_get` returned once *its* root was ready), is left
-> `scheduled` in an abandoned st queue. Because `schedule()` / `schedule_on()` are idempotent on `scheduled`, no
-> other scheduler can reclaim it, and a `pool.blocking_get` waiting on it hangs. Re-homing abandoned queue
-> entries to the default scheduler is a follow-up; until then, do not drive two *separate* roots that share a
-> subtree on two schedulers concurrently and then block on the one that can migrate. Driving one shared subtree
-> plus a single st-side dependent (the common shape) is fine.
+Migration also runs the other way, and it used to strand: a node parked on a pool can be woken on an st thread
+(a dependency completed there) and get enqueued onto the st scheduler, which then stops pumping once *its* own
+root is ready — leaving the migrated node `scheduled` in a queue nobody drives. Since `schedule()` /
+`schedule_on()` are idempotent on `scheduled`, no other scheduler could reclaim it and a `pool.blocking_get` on
+it would hang. `try_blocking_get` / `blocking_get` therefore **drain their queue before returning** (with the
+worker scope still bound): any migrated-in node is settled — completed, or re-parked as `blocked` and re-woken
+later onto whichever scheduler finishes its dependency — rather than left stranded. This runs migrated-in work
+single-threaded on the returning thread, the same single-threading a shared subtree already incurs here; the
+drain is a no-op in the common case (publish-all-but-one leaves the queue empty once the root is ready).
 
 Externally produced values use a promise-style node:
 

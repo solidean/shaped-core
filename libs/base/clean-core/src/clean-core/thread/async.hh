@@ -591,8 +591,21 @@ cc::optional<cc::result<T, E>> singlethreaded_scheduler::try_blocking_get(shared
     root->schedule();
     run_until([&] { return root->is_ready(); });
 
-    // A drained queue does not mean the graph is stuck — only that WE cannot advance it: it may be parked on a
-    // manual node awaiting an external push, or have migrated onto another scheduler that is still driving it.
+    // Pump anything still queued out of the `scheduled` state before we stop driving. run_until stops the moment
+    // `root` is ready, which can leave a foreign node that MIGRATED into our queue mid-drive (a dependency
+    // completing on this thread woke a dependent that another scheduler had parked; route_after_schedule enqueued
+    // it here). Left `scheduled` in a queue we no longer pump, that node is stranded: schedule()/schedule_on() are
+    // idempotent on `scheduled`, so no other scheduler could reclaim it and a blocking_get on it would hang.
+    // Draining now (with our worker scope still bound, so children route correctly) settles each such node into a
+    // self-consistent state — completed, or re-parked as `blocked` and re-woken later onto whichever scheduler
+    // finishes its dependency. No-op in the common case: publish-all-but-one leaves the queue empty once `root` is
+    // ready. This does run migrated-in work single-threaded here rather than on its origin scheduler — accepted,
+    // the same single-threading a shared subtree already incurs when this scheduler drives it (see
+    // libs/base/clean-core/docs/systems/async.md "Multi-scheduler correctness").
+    drain();
+
+    // A drained queue does not mean the graph completed — only that WE could not advance `root`: it may be parked
+    // on a manual node awaiting an external push, or have migrated onto another scheduler that is still driving it.
     // Neither is ours to assert on; report it and let the caller push, retry, or wait.
     if (!root->is_ready())
         return cc::nullopt;

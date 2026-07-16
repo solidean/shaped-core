@@ -205,4 +205,35 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
     }
 }
 
+TEST("async - a node migrated into a singlethreaded_scheduler is not stranded when it stops driving")
+{
+    // Regression for the migration-stranding hang. TWO separate roots share a subtree: root_mt is submitted to
+    // the pool, root_st is driven on a singlethreaded_scheduler. When st wins the race to drive `shared` inline,
+    // `shared` completes on the ST THREAD, so root_mt (parked on it in the pool) is woken there and
+    // route_after_schedule enqueues it onto st's queue. st's try_blocking_get returns once root_st is ready,
+    // which used to leave root_mt sitting `scheduled` in an abandoned queue — and because schedule_on is
+    // idempotent on `scheduled`, the later pool.blocking_get(root_mt) could never reclaim it and hung forever.
+    //
+    // try_blocking_get now drains its queue before returning (while its worker scope is still bound), settling
+    // root_mt into a completed or re-parked state instead of leaving it stranded. This must finish, not hang.
+    cc::async_thread_pool pool(4);
+    cc::scoped_default_async_pool as_default(pool);
+
+    cc::i64 const expected = cc::i64(1) << 6;
+    for (int iter = 0; iter < 50; ++iter)
+    {
+        auto shared = build_sum_tree(6); // 64 leaves, reachable from both roots
+        auto root_mt = cc::make_async_lazy([](cc::i64 v) { return v; }, shared);
+        auto root_st = cc::make_async_lazy([](cc::i64 v) { return v; }, shared);
+
+        root_mt->schedule_on(pool); // the multi-threaded call
+
+        cc::singlethreaded_scheduler sched;
+        (void)sched.try_blocking_get(root_st); // the single-threaded call, same subtree; may win or migrate
+
+        CHECK(pool.blocking_get(root_mt) == expected); // must not hang: root_mt was drained out of `scheduled`
+        CHECK(pool.blocking_get(root_st) == expected);
+    }
+}
+
 #endif // CC_HAS_THREADS
