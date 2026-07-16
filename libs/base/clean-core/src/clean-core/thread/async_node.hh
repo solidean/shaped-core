@@ -811,11 +811,6 @@ protected:
         _state_and_ops.store(reinterpret_cast<cc::u64>(ops) | (cc::u64(state) << state_shift), std::memory_order_relaxed);
     }
 
-    /// Turn this into a push/manual node: awaiting external completion. It is never run inline (schedule()
-    /// bails on external_pending); only push_value / push_error complete it. Construction-time (set_manual),
-    /// before the node is shared, so no lock is needed.
-    void mark_external_pending() { store_state(async_node_state::external_pending); }
-
     /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
     /// if this node has to park).
     void add_pending_dependency(async_node_base* dep) { deps().add(dep); }

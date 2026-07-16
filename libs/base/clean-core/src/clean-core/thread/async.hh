@@ -202,8 +202,8 @@ struct async : impl::async_typed_node<T, E>
     }
 
     /// The manual/promise node: born external_pending, awaiting push_value / push_error. Sets ops and the
-    /// external_pending state in ONE store (the node isn't shared yet), rather than set_ops + a separate
-    /// mark_external_pending that would not fold across the atomic control word. See make_async_manual.
+    /// external_pending state in ONE store (the node isn't shared yet); a separate post-construction state
+    /// store would not fold across the atomic control word. See make_async_manual.
     explicit async(impl::async_manual_tag)
     {
         check_layout();
@@ -272,9 +272,6 @@ public:
 
     // manual / promise-style completion (for externally produced values)
 public:
-    /// Mark this node as awaiting external completion (no compute frame; never run inline). See make_async_manual.
-    void set_manual() { this->mark_external_pending(); }
-
     /// Complete externally with a value; wakes any parked dependents. Call at most once.
     void push_value(T v) { this->finish_value(cc::move(v)); } // builds the value into the payload, wakes dependents
 
@@ -604,7 +601,7 @@ template <class T = impl::async_deduce_result, class E = async_error, class F, c
 template <class T, class E = async_error>
 [[nodiscard]] shared_async<T, E> make_async_manual()
 {
-    // The manual-tag ctor births the node external_pending in one store (no separate set_manual step).
+    // The manual-tag ctor births the node external_pending in one store.
     return cc::make_shared<async<T, E>, impl::async_node_traits>(impl::async_manual_tag{});
 }
 
