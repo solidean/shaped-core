@@ -594,7 +594,9 @@ void cc::async_node_base::teardown_payload()
     else
     {
         unsubscribe_all();
-        unresolved().~async_unresolved(); // destroy frame (releases captures) + deps + conts
+        destroy_frame();                  // a never-resolved frame (dropped cold, or parked) — a plain ~F, so
+                                          // no re-entrancy contract applies here; it just releases its captures
+        unresolved().~async_unresolved(); // deps + conts
     }
 }
 
@@ -674,22 +676,18 @@ void cc::async_node_base::poll()
             continue;
         }
 
-        // Move the frame onto our stack for the compute step: the value/error is built over the frame's slot in
-        // the payload, so the live closure must not sit there while it runs. If it resolves (value OR error), it
-        // builds the result straight into the (now moved-from) slot via finish_value/finish_error and `f` drops
-        // here; if it parks (waiting/yield), we move it back into the arm for the next poll.
-        CC_ASSERT(frame().is_valid(), "polled a node without a compute frame");
-        frame_type f = cc::move(frame());
-        switch (f(ctx))
+        // Run the compute step with the frame in place — it is never moved, so parking is free and a stateful
+        // (mutable) closure just picks up where it left off. If it resolves (value OR error) it has already
+        // destroyed itself: finish_value/finish_error builds the result over the frame's own slot.
+        CC_ASSERT(ops()->frame_invoke != nullptr, "polled a node without a compute frame");
+        switch (ops()->frame_invoke(frame_storage(), ctx))
         {
         case async_step_status::produced_value:
         case async_step_status::produced_error:
-            return; // resolve_to_value/error already completed the node in place + woke dependents; f drops here
+            return; // resolve_to_value/error already completed the node in place + woke dependents
         case async_step_status::waiting:
-            frame() = cc::move(f); // the frame parks — move it back into the payload for the next poll
-            continue;              // frame added deps / asked to wait — normalize and poll them now
+            continue; // frame added deps / asked to wait — normalize and poll them now
         case async_step_status::yield:
-            frame() = cc::move(f); // move the frame back, then reschedule
             reschedule_self();
             return;
         }

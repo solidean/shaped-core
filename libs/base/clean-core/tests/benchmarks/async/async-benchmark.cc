@@ -126,10 +126,10 @@ i64 drive(cc::singlethreaded_scheduler& sched, cc::shared_async<i64> const& root
 // One full single-lazy cycle — create, schedule, drive, read, destroy — pinned as one searchable symbol so its
 // codegen can be disassembled or traced directly:
 //   dev.py assembly trace --target clean-core-test --symbol single_lazy_probe -- "bench-async (single-thread drive)"
-// This is the "single lazy inline" row (~100 ns, ~470 cycles): the ~35 ns born-ready floor plus the frame's
-// closure node alloc, the scheduler push/pop, try_begin_running, one poll turn through the frame, finish_value,
-// and teardown. `sched` must already be bound by an async_worker_scope. Kept alive by a reference from the test
-// below (a TU-local noinline function is otherwise dead-code-eliminated).
+// This is the "single lazy inline" row: the born-ready floor plus the scheduler push/pop, try_begin_running,
+// one poll turn through the (inline) frame, finish_value, and teardown. `sched` must already be bound by an
+// async_worker_scope. Kept alive by a reference from the test below (a TU-local noinline function is otherwise
+// dead-code-eliminated).
 CC_DONT_INLINE u64 single_lazy_probe(cc::singlethreaded_scheduler& sched, i64 seed)
 {
     auto n = cc::make_async_lazy<i64>([seed] { return seed; });

@@ -301,6 +301,146 @@ TEST("async - a two-phase frame runs exactly twice (register deps, then compute)
 }
 
 // ============================================================================
+// inline frame storage & lifetime
+// ============================================================================
+
+namespace
+{
+// Tracks LIVE instances, not destructor calls: building a lambda copies the capture around, so counting
+// destructions alone cannot tell a frame's own capture from the temporaries. A frame holding one of these
+// keeps the count at 1; a leaked frame leaves it at 1, a double-destroyed one drives it negative.
+struct live_counter
+{
+    int* live;
+    explicit live_counter(int* c) : live(c) { ++*live; }
+    live_counter(live_counter const& o) : live(o.live) { ++*live; }
+    ~live_counter() { --*live; }
+};
+} // namespace
+
+TEST("async - a resolving frame destroys its captures exactly once")
+{
+    // The frame lives inline in the payload and the value is built over its slot, so resolving destroys the
+    // live, executing closure (the `delete this;` idiom). Exactly once, on both channels — a leaked frame
+    // leaves the capture live, a double-destroyed one drives the count negative.
+    int value_live = 0;
+    {
+        auto a = cc::make_async_lazy<int>([c = live_counter(&value_live)](async_context<int>& actx) -> cc::async_step_status
+                                          { return actx.success(1); });
+        CHECK(value_live == 1); // the installed frame holds it
+        CHECK(cc::async_blocking_get_singlethreaded(a) == 1);
+        CHECK(value_live == 0); // released by the resolve, while the node itself is still alive
+    }
+    CHECK(value_live == 0); // ...and not destroyed a second time when the handle drops
+
+    int error_live = 0;
+    {
+        auto a = cc::make_async_lazy<int>([c = live_counter(&error_live)](async_context<int>& actx) -> cc::async_step_status
+                                          { return actx.error(cc::any_error("nope")); });
+        cc::singlethreaded_scheduler sched;
+        cc::async_worker_scope const scope(sched);
+        a->schedule();
+        sched.run_until([&] { return a->is_ready(); });
+        REQUIRE(a->try_error() != nullptr);
+        CHECK(error_live == 0); // the error channel tears the frame down the same way
+    }
+    CHECK(error_live == 0);
+}
+
+TEST("async - a frame dropped before it resolves still destroys its captures")
+{
+    // teardown_payload's not-ready branch: the in-place frame was never invoked (cold) or is parked. Both are
+    // a plain ~F over the inline slot — no resolve, so no re-entrancy contract applies.
+    int cold_live = 0;
+    {
+        auto a = cc::make_async_lazy<int>([c = live_counter(&cold_live)] { return 1; });
+        CHECK(cold_live == 1); // never scheduled; the frame is sitting in the payload
+    } // dropped cold
+    CHECK(cold_live == 0);
+
+    int parked_live = 0;
+    {
+        cc::singlethreaded_scheduler sched;
+        cc::async_worker_scope const scope(sched);
+        auto ext = cc::make_async_manual<int>();
+        auto p = cc::make_async_lazy<int>(
+            [ext, c = live_counter(&parked_live)](async_context<int>& actx) -> cc::async_step_status
+            {
+                if (!actx.require(ext))
+                    return actx.wait_for_dependencies();
+                return actx.success(*ext->value_ptr());
+            });
+        p->schedule();
+        sched.run_until([&] { return false; }); // p parks on ext, frame still sitting in the payload
+        CHECK(parked_live == 1);
+    } // p dropped while parked
+    CHECK(parked_live == 0);
+}
+
+TEST("async - a parked frame keeps its state in place across polls")
+{
+    // The frame is never moved, so a mutable closure just picks up where it left off. (The two-phase test
+    // above pins the call count; this pins that per-poll mutations to the captures actually survive.)
+    auto ext = cc::make_async_manual<int>();
+    auto p = cc::make_async_lazy<int>(
+        [ext, polls = 0](async_context<int>& actx) mutable -> cc::async_step_status
+        {
+            ++polls;
+            if (!actx.require(ext))
+                return actx.wait_for_dependencies();
+            return actx.success(polls * 100 + *ext->value_ptr());
+        });
+
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope scope(sched);
+    p->schedule();
+    sched.run_until([&] { return false; }); // poll 1: parks
+    ext->push_value(7);
+    sched.run_until([&] { return p->is_ready(); }); // poll 2: the same closure, polls == 2
+
+    REQUIRE(p->try_value() != nullptr);
+    CHECK(*p->try_value() == 207);
+}
+
+namespace
+{
+// > 32 B, so it cannot live in the node's inline frame slot and gets boxed instead
+struct fat_frame_capture
+{
+    cc::i64 pad[6] = {1, 2, 3, 4, 5, 6};
+};
+
+// immovable AND uncopyable: constructible only in place, so only the emplace path can install it
+struct pinned_frame
+{
+    int seed;
+    explicit pinned_frame(int s) : seed(s) {}
+    pinned_frame(pinned_frame&&) = delete;
+    pinned_frame& operator=(pinned_frame&&) = delete;
+    int operator()() const { return seed * 2; }
+};
+} // namespace
+
+TEST("async - a frame too big for the inline slot is boxed and still runs")
+{
+    int live = 0;
+    {
+        auto a = cc::make_async_lazy<cc::i64>([fat = fat_frame_capture{}, c = live_counter(&live)]
+                                              { return fat.pad[0] + fat.pad[5]; });
+        CHECK(live == 1);
+        CHECK(cc::async_blocking_get_singlethreaded(a) == 7);
+        CHECK(live == 0); // the box is torn down by the resolve, same as an inline frame
+    }
+    CHECK(live == 0);
+}
+
+TEST("async - an immovable frame is constructed in place and driven end to end")
+{
+    auto a = cc::make_async_lazy_emplace<int, cc::async_error, pinned_frame>(21);
+    CHECK(cc::async_blocking_get_singlethreaded(a) == 42);
+}
+
+// ============================================================================
 // late subscription / external completion
 // ============================================================================
 

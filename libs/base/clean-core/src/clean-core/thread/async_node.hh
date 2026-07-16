@@ -474,19 +474,26 @@ private:
 /// the continuation head (dependents to wake). All three are mutually exclusive with the resolved value/error,
 /// which reuses the same storage — so this arm shares the node's payload slot (offset 16) with the value ⊍
 /// error (a union discriminated by state; see async_node_base). The value is built straight over this arm at
-/// resolution; the frame is safe because the poll loop moves it onto its own stack for the compute step (and
-/// back into the arm if the frame parks). Manual lifetime: async_node_base placement-constructs this at birth
-/// and placement-destroys it when switching to the resolved value/error.
+/// resolution — over the frame, which by then has destroyed itself (see async_node_base's frame section).
+/// Manual lifetime: async_node_base placement-constructs this at birth and placement-destroys it when
+/// switching to the resolved value/error.
 struct async_unresolved
 {
-    cc::unique_function<async_step_status(async_context_base&)> frame; // 8  null for manual/push nodes
-    async_dep_head deps;                                               // 8
-    async_cont_head conts;                                             // 8
-    // Default special members: default ctor births an empty arm; the (non-trivial) default dtor frees frame
-    // captures + dep-list nodes + continuation cells. move/copy are implicitly deleted.
+    /// The compute frame, stored INLINE: raw storage, not a self-destroying object — only the ops table knows
+    /// F, so async_node_base owns this slot's lifetime (install_frame builds it, ops->frame_destroy ends it)
+    /// and ~async_unresolved deliberately leaves it alone. Empty for a frameless (manual/push) node. A closure
+    /// too big for 32 B falls back to an 8 B cc::unique_function stored here instead.
+    alignas(16) cc::byte frame[32];
+    async_dep_head deps;   // 8
+    async_cont_head conts; // 8
+    // Default special members: default ctor births an empty arm (the frame slot is left raw); the
+    // (non-trivial) default dtor frees dep-list nodes + continuation cells. move/copy are implicitly deleted.
 };
 static_assert(sizeof(async_cont_head) == 8, "async_cont_head must stay one word — the arm budgets it 8 B");
 static_assert(sizeof(async_dep_head) == 8, "async_dep_head must stay one word — the arm budgets it 8 B");
+// The arm is what a 64 B node's payload has room for: 16 B header + 48 B payload. Growing it past 48 pushes
+// async<int> into the 128 B size class (see the sizeof guards in async-test.cc).
+static_assert(sizeof(async_unresolved) == 48, "the unresolved arm must stay 48 B: frame 32 + deps 8 + conts 8");
 } // namespace impl
 
 // ============================================================================
@@ -508,19 +515,28 @@ enum class async_node_state : cc::u8
     // itself (ready_value vs ready_error), not a separate flag.
 };
 
-/// Type-erased per-async<T, E> operations, reached from the untemplated base — the hand-rolled replacement for
-/// a C++ vtable (mirrors unique_function's static descriptor). One static-constexpr instance exists per concrete
-/// async type; the node stores a pointer to it, set once at construction. It recovers the things the base cannot
-/// derive from a base-typed pointer: how to destroy the typed value or the typed error, and the node's size class
-/// (used by the intrusive free path, which runs on a base-typed weak cell after the concrete type is long erased).
+/// Type-erased per-async<T, E, F> operations, reached from the untemplated base — the hand-rolled replacement
+/// for a C++ vtable (mirrors unique_function's static descriptor). One static-constexpr instance exists per
+/// distinct op set; the node stores a pointer to it, set at construction (and again when a frame is installed,
+/// which is what picks F). It recovers the things the base cannot derive from a base-typed pointer: how to
+/// destroy the typed value or the typed error, how to run and destroy the inline compute frame, and the node's
+/// size class (used by the intrusive free path, which runs on a base-typed weak cell after the concrete type is
+/// long erased).
 /// alignas(32): the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock (see
 /// async_node_base's _state_and_ops), so every async_type_ops instance must be 32-aligned to keep those bits
-/// free. Objects are static-constexpr globals (one per async type), so the alignment costs nothing meaningful.
+/// free. Objects are static-constexpr globals (one per op set), so the alignment costs nothing meaningful.
 struct alignas(32) async_type_ops
 {
     void (*teardown_value)(async_node_base*); // destroy the resolved value in the payload (ready_value)
     void (*teardown_error)(async_node_base*); // destroy the resolved error in the payload (ready_error)
-    cc::node_class_index class_index;         // concrete async<T, E> size class (free_storage frees by it)
+
+    // The compute frame, stored inline in the unresolved arm at payload offset 0. Both null for a frameless
+    // node (manual/push, or a born-ready factory). There is deliberately no frame_move: the frame is
+    // constructed once in place, run in place, and destroyed in place — see async_node_base's frame section.
+    async_step_status (*frame_invoke)(void* frame, async_context_base& ctx);
+    void (*frame_destroy)(void* frame);
+
+    cc::node_class_index class_index; // concrete async<T, E> size class (free_storage frees by it)
 };
 static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned so its low 5 bits are free for tags");
 
@@ -628,9 +644,9 @@ public:
     // union of the UNRESOLVED scratch (frame + deps + conts) and the RESOLVED value ⊍ error, discriminated by
     // state. The resolved value/error is built straight over the scratch, so it grows the node naturally for a
     // large T (no inline cap). The base reaches the payload by pointer arithmetic on `this` (single inheritance,
-    // base-first: the base subobject is at offset 0 of the node). Building the value over the frame's slot is
-    // safe because the poll loop moves the frame onto its own stack for the compute step (and back into the arm
-    // if the frame parks). Manual sub-object lifetime — see finish_value / finish_error / teardown.
+    // base-first: the base subobject is at offset 0 of the node). The value overwrites the frame's slot, which
+    // is safe because a resolving frame destroys itself first — see the frame section below. Manual sub-object
+    // lifetime — see finish_value / finish_error / teardown.
 protected:
     using frame_type = cc::unique_function<async_step_status(async_context_base&)>;
 
@@ -641,7 +657,7 @@ protected:
 
     // unresolved arm (active while not ready)
     [[nodiscard]] impl::async_unresolved& unresolved() { return *reinterpret_cast<impl::async_unresolved*>(payload()); }
-    [[nodiscard]] frame_type& frame() { return unresolved().frame; }
+    [[nodiscard]] void* frame_storage() { return unresolved().frame; }
     [[nodiscard]] impl::async_dep_head& deps() { return unresolved().deps; }
     [[nodiscard]] impl::async_dep_head const& deps() const
     {
@@ -661,14 +677,47 @@ protected:
     /// Construct the (empty) unresolved arm into the payload. Called once from the derived ctor (after set_ops).
     void init_payload() { new (cc::placement_new, payload()) impl::async_unresolved(); }
 
-    // compute frame — its signature is T-agnostic; it lives in the unresolved arm of the payload
-public:
-    /// Install the compute frame — `async_step_status(async_context_base&)`; it resolves its outcome via the
-    /// context (a typed async_context<T, E> the frame closure wraps around the base for resolve/emplace).
+    // compute frame — its signature is T-agnostic; it lives INLINE in the unresolved arm at payload offset 0.
+    //
+    // The frame is constructed once in place, invoked in place, and destroyed in place — it is never moved, so
+    // parking costs nothing and an immovable frame works. The catch is that the resolved value is built over
+    // the frame's own slot, and a frame resolves RE-ENTRANTLY (`return actx.success(v)` runs finish_value while
+    // the closure is still on the stack). So finish_* destroys the live, executing frame before building the
+    // value: the `delete this;` idiom, and it carries `delete this;`'s rule —
+    //
+    //   A FRAME MUST NOT TOUCH ITS CAPTURES AFTER CALLING A resolve_* ACTION. resolve is terminal; a tail
+    //   `return ctx.success(v)` touches nothing afterwards, which is what makes this safe.
+    //
+    // The resolve arguments themselves are fine: resolve_to_value/_to_error take their value BY VALUE, so what
+    // reaches finish_* is a stack temporary, never a reference into the captures (or into a dependency the
+    // captures pin). The *_emplace forms forward by reference and are the documented exception — see async.hh.
+    //
+    // Installing a frame needs T/E (to pick the ops instance), so the public entry points are async<T, E>'s
+    // set_frame / set_frame_emplace; these are the untyped half they build on.
+protected:
+    /// True if F is stored inline rather than boxed. 32 B covers the frames the sugar builds (the wrapper's
+    /// captured fn + its shared_async dependency handles); anything larger falls back to a heap-boxed
+    /// cc::unique_function, which is itself one pointer and so always fits.
     template <class F>
-    void set_frame(F&& f)
+    static constexpr bool frame_fits_inline = sizeof(F) <= 32 && alignof(F) <= 16;
+
+    /// Build the frame in place and re-point the node at the ops instance that knows how to run and destroy it
+    /// (installing the frame is what determines F). Construction-time only: init_control_word writes the
+    /// control word with a plain relaxed store, which is only safe before the node is shared.
+    template <class G, class... Args>
+    void install_frame(async_type_ops const* ops, Args&&... args)
     {
-        frame() = frame_type(cc::forward<F>(f));
+        static_assert(frame_fits_inline<G>, "frame does not fit the inline slot — set_frame boxes those");
+        new (cc::placement_new, frame_storage()) G(cc::forward<Args>(args)...);
+        init_control_word(ops, async_node_state::cold);
+    }
+
+    /// End the in-place frame's lifetime, if this node has one (frameless: manual/push and the born-ready
+    /// factories). Idempotent only in the sense that each teardown path calls it exactly once.
+    void destroy_frame()
+    {
+        if (auto const f = ops()->frame_destroy) // null for a frameless node
+            f(frame_storage());
     }
 
     // completion — steal the continuation head, tear down the unresolved arm, build the result in the payload,
@@ -676,9 +725,7 @@ public:
     // lives here); the emplace forms build in place from raw args so an immovable T works. Used by the poll loop,
     // resolve_to_value / resolve_to_error, push_value / push_error, and the make_async_from_* factories.
     //
-    // On the compute path the frame is already moved onto the poll stack, so the frame slot the result overwrites
-    // holds only a moved-from shell (the live closure is on the stack); on the push/factory path the frame slot
-    // is empty. Publishes the terminal state LAST (release), then wakes dependents outside the lock.
+    // Publishes the terminal state LAST (release), then wakes dependents outside the lock.
 protected:
     /// Resolve with a value by moving `v` into the payload. Requires nothrow-move (moved under the node lock).
     template <class T>
@@ -694,13 +741,16 @@ protected:
     template <class T, class... Args>
     void finish_value_emplace(Args&&... args)
     {
-        unsubscribe_all(); // the frame still pins the deps we are unsubscribing from
+        unsubscribe_all(); // the frame is still live and still pins the deps we are unsubscribing from
+        destroy_frame();   // the `delete this;` moment: the value goes where the frame is. Before the lock —
+                           // releasing the captures runs arbitrary user destructors (a dropped dependency
+                           // handle can free its node), which must not happen under our spinlock.
         impl::async_cont_head continuations;
         {
             lock_scope g(this);
             if (!conts().empty())                  // leaf/common case has no dependents: skip the steal + wake
                 continuations = cc::move(conts()); // steal dependents to wake after we release the lock
-            unresolved().~async_unresolved();      // frame shell + deps + (now-empty) head
+            unresolved().~async_unresolved();      // deps + (now-empty) head; the frame slot is raw storage
             new (cc::placement_new, value_storage()) T(cc::forward<Args>(args)...); // value at payload offset 0
             store_state(async_node_state::ready_value);
         }
@@ -720,6 +770,7 @@ protected:
     void finish_error_emplace(Args&&... args)
     {
         unsubscribe_all();
+        destroy_frame(); // see finish_value_emplace: same ordering, same reasons
         impl::async_cont_head continuations;
         {
             lock_scope g(this);

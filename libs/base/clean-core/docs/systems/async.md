@@ -62,13 +62,28 @@ context-free — a value frame that *also* takes a context must give `T` explici
 * resolve the result — each returns the matching status, so `return actx.xxx(...)`: `resolve_to_value(v)` /
   `resolve_to_error(E)` (aliased `success(v)` / `error(...)`; for the default `E`, `error(any_error)` wraps),
   plus `wait_for_dependencies()` and `yield()`. Both resolves complete the node **in place** as the frame runs.
+  They take their value **by value**, so anything convertible to `T` / `E` works and the conversion happens at
+  the call site — the node only ever sees its exact payload type.
 * **emplace resolves** — `resolve_to_value_emplace(args...)` / `resolve_to_error_emplace(args...)` build the
   value/error **in place** from `args` (never moved), so an **immovable `T`** works (construct-in-place). The
-  by-value `resolve_to_value` requires `T` to be nothrow-move-constructible; the emplace form does not.
+  by-value `resolve_to_value` requires `T` to be nothrow-move-constructible; the emplace form does not. `args`
+  are forwarded by reference into the payload slot, and resolving destroys the frame first (below), so they
+  **must not reference the frame's own captures** — nor anything only those captures keep alive, such as a
+  dependency's value. The by-value resolves have no such caveat.
 
 A frame is **re-entrant**: one that waits is re-polled once its dependencies are ready. A typical two-phase
-frame (register deps → `wait`, then compute) therefore runs twice. It is never entered again after it
-produces a value or error — the frame is destroyed the moment it completes.
+frame (register deps → `wait`, then compute) therefore runs twice. Its state persists across polls untouched —
+the frame is never moved, so a `mutable` closure just picks up where it left off.
+
+**Resolving is terminal, in the `delete this;` sense.** The frame is stored inline in the node, and the value
+is built over the frame's own slot — so a resolve destroys the closure *while it is still running*, then builds
+the result there. The rule that makes this safe:
+
+> **A frame must not touch its captures, or the context, after calling a `resolve_*` action.**
+> `return actx.success(v);` is the shape — a tail resolve touches nothing afterwards.
+
+The resolve's *arguments* are fine (they are evaluated before the call, and the by-value resolves copy into a
+stack temporary first); it is code *after* the resolve that is the hazard. Resolving twice trips an assert.
 
 ### Composition without hand-writing a frame
 
@@ -328,25 +343,34 @@ original 384 B), and the node is cacheline-aligned to avoid false sharing betwee
   separate control block) plus one `atomic<u64>` control word. That word is a **tagged pointer**: a 32-aligned
   `async_type_ops const*` in the high bits, and the lifecycle state + wake-pending flag + spinlock bit in the
   low 5 bits. There is **no C++ vtable** — a static-constexpr `async_type_ops` descriptor is the hand-rolled
-  replacement, carrying the typed value/error destructors and the node's size class; the frame is invoked
-  directly. The descriptor is keyed on `(size class, value-teardown, error-teardown)`, not on `(T, E)`, so it
-  **collapses**: a trivially-destructible type uses a null teardown, and every async whose value/error land in
-  the same size class with the same teardowns shares one descriptor instance — e.g. `async<int, async_error>` and
-  `async<float, async_error>` get the same pointer. `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
+  replacement, carrying the typed value/error destructors, the inline frame's invoke/destroy, and the node's
+  size class. The descriptor is keyed on what actually distinguishes it — `(size class, value-teardown,
+  error-teardown, frame-invoke, frame-destroy)`, not on `(T, E)` — so it **collapses**: a trivially-destructible
+  type uses a null teardown, and every *frameless* async (manual/push, born-ready) whose value/error land in the
+  same size class with the same teardowns shares one instance — e.g. `async<int, async_error>` and
+  `async<float, async_error>` get the same pointer. The frame ops are per frame type, so a framed descriptor is
+  one instance per closure — fine, since each closure already emits its own code.
+  `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
 * **Payload slot (offset 16), one hand-managed union.** The compute frame, the not-ready dependency set, and
   the continuation head (dependents to wake) are **mutually exclusive with** the resolved value ⊍ error — the
   scratch matters only before completion, the value/error only after — so they share the slot, discriminated by
-  the node state. The value is built **straight into the slot** at resolution: the poll loop moves the frame
-  onto its own stack for the compute step (so the value can overwrite its slot; the frame is moved back if it
-  parks), and completion steals the continuation head under the node lock, tears down the scratch, constructs
-  the value/error, and publishes `ready` last — so a late subscriber never observes `ready` before the result
-  is in place. The value **grows the node naturally** for a large `T` (no inline cap): `async<int>` /
-  `async<vector<T>>` / `async<string>` are one line; a bigger `T` spills onto further lines.
-* The continuation head keeps **one inline weak dependent** (the common single-dependent case pays no
-  allocation) and spills the rest, plus any one-shot completion latch, into slab-backed cells.
-* The compute frame is a **one-pointer `unique_function`** (closure + type-erased ops in one node; see
-  `cc::poly_node_allocation`). Cacheline alignment lives on the concrete typed node so unrelated nodes never
-  share a line.
+  the node state. The 48 B scratch is **frame 32 + deps 8 + conts 8**. The value is built **straight into the
+  slot** at resolution, over the frame: completion destroys the frame, steals the continuation head under the
+  node lock, tears down the rest of the scratch, constructs the value/error, and publishes `ready` last — so a
+  late subscriber never observes `ready` before the result is in place. The value **grows the node naturally**
+  for a large `T` (no inline cap): `async<int>` / `async<vector<T>>` / `async<string>` are one line; a bigger
+  `T` spills onto further lines.
+* Both heads are **one tagged word**: `0` = empty, bit 0 clear = a single inline entry in the high bits, bit 0
+  set = a slab-backed spill list (nodes are 64-aligned, so the low bits are free). The common
+  single-dependency / single-dependent case therefore pays no allocation. The continuation head's entries are
+  weak, and its inline slot holds its one weak count by hand (`weak_ptr::adopt` / `release`); a 2nd dependent,
+  and every one-shot completion latch, promotes that entry into the list.
+* **The compute frame is stored inline** in the scratch's 32 B, which fits the closures the sugar builds (the
+  wrapper's captured `f` plus its `shared_async` dependency handles). It is constructed once, invoked, and
+  destroyed **in place** — never moved, so parking is free and an immovable frame works
+  (`make_async_lazy_emplace`). Running and destroying it are two more `async_type_ops` entries, keyed per
+  frame type. A closure over 32 B falls back to a boxed one-pointer `cc::unique_function`, which itself fits
+  the slot. Cacheline alignment lives on the concrete typed node so unrelated nodes never share a line.
 
 The **semantics and the public API are the contract**; the node layout is not, and can change under the hood as
 the system matures without breaking callers.
@@ -354,12 +378,13 @@ the system matures without breaking callers.
 ## The direct path: measured cost & optimization ideas
 
 The floor case — `make_async_manual<int>()` created and dropped, no frame, no scheduler — retires
-**146 instructions** (i9-12900H, `relwithdebinfo-clang`); a driven `make_async_lazy<i64>` leaf, the full
-create→drive→destroy cycle, retires **624**. The raw slab alloc+free of the same node class is ~3 ns, the rest
+**142 instructions** (i9-12900H, `relwithdebinfo-clang`); a driven `make_async_lazy<i64>` leaf, the full
+create→drive→destroy cycle, retires **488**. The raw slab alloc+free of the same node class is ~3 ns, the rest
 is node overhead. Reproduce the ladder with
-[born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) and the instruction counts by
-`--stats`-tracing its pinned probes (`dev.py assembly trace --target clean-core-test --symbol
-make_async_manual_probe --stats`, or `single_lazy_probe --skip 2` for the driven leaf).
+[born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) and its pinned probes
+(`dev.py assembly trace --target clean-core-test --symbol make_async_manual_probe --stats`); the driven leaf's
+probe lives in [async-benchmark.cc](../../tests/benchmarks/async/async-benchmark.cc) under a different test
+(`--symbol single_lazy_probe --skip 2 -- "bench-async (single-thread drive)"`).
 
 For 64 B of storage plus an alloc *and* a dealloc this is not alarming. The remaining ideas below are recorded
 because the traces show *where* it goes, not because the number is a problem today; they are not committed work.
@@ -388,16 +413,24 @@ relaxed store (safe: the node is not shared during construction), via a manual-t
 selects. Shaved the `make_async_manual` floor 146 → 142 instructions. The cold (lazy/scheduled) ctor never had
 the second store — it births `cold`, whose state bits are zero — so it is unchanged.
 
+**The frame is stored inline** (done). `make_async_lazy` used to cost a second node alloc for the closure (a
+16 B poly node — no SSO) on top of the 64 B node, and installing that 8 B pointer cost **four** out-of-line
+calls (~60 instructions) because `poly_node_allocation::operator=(&&)` and its temporaries never inline;
+`~poly_node_allocation` alone was 78 instructions on the driven-leaf trace. The closure now lives in the
+scratch's 32 B, reached through two `async_type_ops` entries. The driven leaf fell **624 → 488** instructions
+and lost an entire malloc/free pair — a cold `make_async_lazy` is now only **+0.51 ns** over an empty node.
+`async_frame_destroy` for a trivial closure is one instruction.
+
+Making room for it meant folding `async_cont_head` from 16 B to one tagged word, so the arm is frame 32 +
+deps 8 + conts 8 = 48. Dropping the move also made parking free (the frame is re-entered in place) and let an
+immovable frame work at all; the cost is that a resolve now destroys the closure mid-call, which is the
+`delete this;` rule documented under the raw compute frame.
+
 **More instructions are still pure overhead** and unambiguously safe to remove:
 
 * A `/GS` stack cookie in `free_storage`, which has no buffers, on the hottest free path.
 * `free_storage` chases `node -> ops -> class_index` (a dependent load into a cold cacheline) to fetch a
   constant, then bounds-checks it.
-
-**The lazy path allocates twice.** `make_async_lazy` costs a second node alloc for the closure (16 B poly node
-— no SSO) on top of the 64 B node, and installing that 8 B pointer into the frame slot costs **four**
-out-of-line calls (~60 instructions) because `poly_node_allocation::operator=(&&)` and its temporaries never
-inline. Small-closure SSO in the node's payload would remove the second alloc entirely.
 
 **Deferring teardown** to another thread is possible today at the user level (hand the handle to a reclaim
 thread) and is not planned as a built-in.

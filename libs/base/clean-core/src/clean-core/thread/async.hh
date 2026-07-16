@@ -116,18 +116,47 @@ consteval async_teardown_fn async_teardown_ptr()
         return &async_typed_teardown<U>;
 }
 
-/// The ops descriptor (hand-rolled vtable, see cc::async_type_ops) keyed on what actually distinguishes it: the
-/// node size class + the value/error teardowns. Two async types with the same size class and the same (possibly
-/// null) teardowns therefore share ONE static instance — e.g. async<int, async_error> and async<float,
-/// async_error> get the SAME async_type_ops pointer (both: null value teardown, async_error error teardown,
-/// same 64 B class). class_index comes from async_typed_node<T, E>, which is complete here (async<T, E> is not).
-template <cc::node_class_index Cls, async_teardown_fn TV, async_teardown_fn TE>
-inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, Cls};
+/// Run / destroy an inline compute frame of type G, through the type-erased ops table. G is whatever set_frame
+/// installed: the frame closure itself, or a boxed cc::unique_function when it was too big to store inline.
+template <class G>
+async_step_status async_frame_invoke(void* frame, cc::async_context_base& ctx)
+{
+    return (*static_cast<G*>(frame))(ctx);
+}
+template <class G>
+void async_frame_destroy(void* frame)
+{
+    static_cast<G*>(frame)->~G();
+}
 
-/// The descriptor for a concrete async<T, E> — a reference into the shared, collapsed instance above.
+using async_frame_invoke_fn = async_step_status (*)(void*, cc::async_context_base&);
+using async_frame_destroy_fn = void (*)(void*);
+
+/// The ops descriptor (hand-rolled vtable, see cc::async_type_ops) keyed on what actually distinguishes it: the
+/// node size class, the value/error teardowns, and the frame ops. Two async types agreeing on all of those
+/// share ONE static instance — e.g. async<int, async_error> and async<float, async_error> get the SAME
+/// async_type_ops pointer (both: null value teardown, async_error error teardown, same 64 B class). The frame
+/// ops are per-frame-type, so a framed descriptor no longer collapses across closures — fine, since each
+/// closure already emits its own code; the frameless descriptors below still collapse exactly as before.
+/// class_index comes from async_typed_node<T, E>, which is complete here (async<T, E> is not).
+template <cc::node_class_index Cls, async_teardown_fn TV, async_teardown_fn TE, async_frame_invoke_fn FI, async_frame_destroy_fn FD>
+inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, FI, FD, Cls};
+
+/// The descriptor for a concrete async<T, E> with NO compute frame — a manual/push node, or a born-ready
+/// factory. A reference into the shared, collapsed instance above.
 template <class T, class E>
 inline constexpr cc::async_type_ops const& async_type_ops_for
-    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(), async_teardown_ptr<T>(), async_teardown_ptr<E>()>;
+    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(), async_teardown_ptr<T>(), async_teardown_ptr<E>(), nullptr, nullptr>;
+
+/// The descriptor for an async<T, E> running an inline frame of type G. Installed by set_frame, which is what
+/// determines G — the node births frameless and is re-pointed here before it is shared.
+template <class T, class E, class G>
+inline constexpr cc::async_type_ops const& async_type_ops_for_frame
+    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(),
+                       async_teardown_ptr<T>(),
+                       async_teardown_ptr<E>(),
+                       &async_frame_invoke<G>,
+                       &async_frame_destroy<G>>;
 
 // error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
 // The default copies (a custom E is assumed copyable where this is used); the async_error overload
@@ -189,7 +218,37 @@ private:
                       "async<T, E> must add no data members over async_typed_node<T, E> (ops class_index needs it)");
     }
 
+    // compute frame
 public:
+    /// Install the compute frame — `async_step_status(async_context_base&)`; it resolves its outcome via the
+    /// context (a typed async_context<T, E> the frame closure wraps around the base for resolve/emplace).
+    /// `f` is moved in once, here; it is never moved again (see async_node_base's frame section).
+    template <class F>
+    void set_frame(F&& f)
+    {
+        set_frame_emplace<std::decay_t<F>>(cc::forward<F>(f));
+    }
+
+    /// Install the compute frame by building it in place from `args` — F never has to be movable at all.
+    ///
+    /// Call before the node is shared (make_async_* does): installing the frame is what determines F, and thus
+    /// which ops instance the node points at, which is written with a plain relaxed store.
+    template <class F, class... Args>
+    void set_frame_emplace(Args&&... args)
+    {
+        if constexpr (async::template frame_fits_inline<F>)
+            this->template install_frame<F>(&impl::async_type_ops_for_frame<T, E, F>, cc::forward<Args>(args)...);
+        else
+        {
+            // too big for the inline slot: box it. A cc::unique_function is one pointer, so IT fits inline, and
+            // create_from emplaces the closure into the box — an immovable F still works.
+            using boxed_t = typename async::frame_type;
+            this->template install_frame<boxed_t>(
+                &impl::async_type_ops_for_frame<T, E, boxed_t>,
+                boxed_t::template create_from<F>(cc::default_node_allocator(), cc::forward<Args>(args)...));
+        }
+    }
+
     // zero-copy access
 public:
     /// Pointer to the stored value, or null unless ready with a value. Non-owning — valid while the node is
@@ -268,6 +327,7 @@ public:
     bool require(shared_async<T, E> const& dep) const
     {
         CC_ASSERT(dep != nullptr, "cannot require a null async");
+        CC_ASSERT(!current->is_ready(), "this async already resolved — a spent frame must not touch its context");
         if (dep->is_ready())
             return true;
         current->add_pending_dependency(dep.get());
@@ -285,22 +345,29 @@ struct async_context : async_context_base
     async_context(async_context_base const& base) : async_context_base(base) {}
 
     // resolving the result — each returns the matching async_step_status, so a frame can `return ctx.xxx(...)`.
-    // resolve completes the node IN PLACE (builds the value/error straight into the payload over the moved-out
-    // frame slot); AFTER resolving, the frame is spent and must not touch the node again.
+    // Resolving completes the node IN PLACE, over the frame's own slot: it destroys the frame — the live,
+    // executing closure — and builds the value/error there. So resolve is terminal in the `delete this;` sense:
+    // the frame must not touch its captures, or the context, afterwards. `return ctx.success(v);` is the shape.
 public:
     /// Resolve with a value (moved into the payload). Anything convertible to T works — by value, so the
     /// conversion to T happens at the call site: what reaches the node is a stack temporary of the payload's
     /// exact type, never a reference into (say) a dependency's payload that the frame's captures pin alive.
     [[nodiscard]] async_step_status resolve_to_value(T v) const
     {
+        CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
         current->finish_value(cc::move(v)); // T exactly, so finish_value's decay deduces the payload type
         return async_step_status::produced_value;
     }
 
     /// Resolve with a value built in place from `args` (never moved) — the immovable-T path.
+    ///
+    /// `args` are forwarded by reference into the payload slot, and resolving destroys the frame first, so they
+    /// must NOT reference the frame's own captures (nor anything only those captures keep alive, e.g. a
+    /// dependency's value). Pass owned or stack-local arguments; resolve_to_value has no such caveat.
     template <class... Args>
     [[nodiscard]] async_step_status resolve_to_value_emplace(Args&&... args) const
     {
+        CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
         current->template finish_value_emplace<T>(cc::forward<Args>(args)...);
         return async_step_status::produced_value;
     }
@@ -308,14 +375,17 @@ public:
     /// Resolve on the failure channel with E (moved into the payload).
     [[nodiscard]] async_step_status resolve_to_error(E e) const
     {
+        CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
         current->finish_error(cc::move(e));
         return async_step_status::produced_error;
     }
 
-    /// Resolve on the failure channel with an error built in place from `args`.
+    /// Resolve on the failure channel with an error built in place from `args`. Same aliasing caveat as
+    /// resolve_to_value_emplace: `args` must not reference the frame's captures.
     template <class... Args>
     [[nodiscard]] async_step_status resolve_to_error_emplace(Args&&... args) const
     {
+        CC_ASSERT(!current->is_ready(), "this async already resolved — resolve exactly once");
         current->template finish_error_emplace<E>(cc::forward<Args>(args)...);
         return async_step_status::produced_error;
     }
@@ -442,6 +512,26 @@ auto async_make_frame(F&& f, Deps&&... deps)
     };
 }
 
+// The emplace twin of async_make_frame's lambda. That lambda captures `fn` by move, which an immovable F
+// cannot do; this holds F as a member built in place from the caller's args. No dependency arguments — the
+// variadic dep form has to move its shared_async handles in anyway, so it stays on the lambda.
+template <class Result, class E, class F>
+struct async_frame_holder
+{
+    F fn;
+
+    template <class... Args>
+    explicit async_frame_holder(Args&&... args) : fn(cc::forward<Args>(args)...)
+    {
+    }
+
+    async_step_status operator()(async_context_base& base)
+    {
+        async_context<Result, E> ctx(base);
+        return async_invoke_and_resolve(ctx, fn);
+    }
+};
+
 // shared factory for make_async_*: build async<R, E> and install the wrapped frame
 template <class T, class E, class F, class... Deps>
 auto async_make_node(F&& f, Deps&&... deps)
@@ -480,6 +570,22 @@ template <class T = impl::async_deduce_result, class E = async_error, class F, c
 [[nodiscard]] auto make_async_lazy(F&& f, Deps&&... deps)
 {
     return impl::async_make_node<T, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...);
+}
+
+/// Like make_async_lazy, but builds the frame in place from `args` rather than moving a callable in — so an
+/// IMMOVABLE frame works (one with a pinned capture, a hand-written state machine that cannot move). The frame
+/// is never moved after installation either, not even when it parks.
+///
+/// T must be given explicitly: deducing it would mean invoking F, and F does not exist yet. No dependency
+/// arguments — capture what the frame needs and require() it, or use make_async_lazy.
+///
+///   auto n = cc::make_async_lazy_emplace<int, cc::async_error, my_pinned_frame>(7);
+template <class T, class E = async_error, class F, class... Args>
+[[nodiscard]] shared_async<T, E> make_async_lazy_emplace(Args&&... args)
+{
+    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
+    node->template set_frame_emplace<impl::async_frame_holder<T, E, F>>(cc::forward<Args>(args)...);
+    return node;
 }
 
 /// Like make_async_lazy, but eager: schedules the node immediately if a worker scope is active on this thread

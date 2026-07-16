@@ -414,6 +414,8 @@ auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // 
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
+auto p = cc::make_async_lazy_emplace<int, cc::async_error, PinnedFrame>(7); // builds the FRAME in place: immovable f
+                                                     // ok. T explicit, no dep args (capture + require instead)
 // born already ready (no frame, no scheduling); _emplace builds in place (immovable T ok):
 auto rv = cc::make_async_from_value(42);   auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
 auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also *_from_error_emplace<T, E>(...)
@@ -440,6 +442,10 @@ actx.require(dep);              // -> bool ready (NEITHER subscribes NOR schedul
                                 //    else records a pending dep, return wait
 actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)
 actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  actx.wait_for_dependencies();  actx.yield();
+// RESOLVE IS TERMINAL (`delete this;`): the frame lives inline in the node and the value is built over its slot,
+// so resolving destroys the running closure. Never touch captures or ctx after it — `return actx.success(v);`.
+// State DOES persist across polls (the frame is never moved). *_emplace args must not alias the frame's captures
+// (nor a dep's value they pin) — they are forwarded by reference; the by-value resolves are always safe.
 
 // two schedulers, same surface. singlethreaded = drives inline + NEVER publishes, so deps cannot run
 // concurrently however many cores idle (single-threaded by construction, not by circumstance):
