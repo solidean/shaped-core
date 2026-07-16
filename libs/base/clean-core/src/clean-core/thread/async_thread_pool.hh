@@ -34,8 +34,13 @@
 //   int v = pool.blocking_get(a);                         // drive on the pool, block THIS (foreign) thread
 //
 // Lifetime: the pool must outlive every node routed to it (a woken node reaches its pool through the installed
-// default, by design). The destructor stops the workers and joins them; it does not drain outstanding work, so
-// finish (or abandon) your graphs before tearing a pool down.
+// default, by design). The destructor stops the workers and joins them; it does not RUN outstanding work, so
+// finish your graphs before tearing a pool down -- or abandon them deliberately, which is supported: queued
+// work is released rather than leaked (see the drain in the destructor).
+//
+// Note the destructor cannot interrupt a running frame, and the eager depth-first drive means one frame can be
+// most of a graph, so tearing down a pool mid-flight blocks until that unwinds. Workers only see the stop
+// between tasks.
 
 namespace cc
 {

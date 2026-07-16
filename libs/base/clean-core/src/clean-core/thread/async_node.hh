@@ -16,10 +16,10 @@
 // surface (async<T>, async_context, make_async_*, async_blocking_get_singlethreaded) lives in async.hh.
 //
 // Nothing here ever blocks a thread: poll() drives a node's compute frame forward until it completes, fails
-// as a value, or parks on not-ready dependencies with wakeup continuations installed. The default driver
-// runs everything inline on the calling thread (see singlethreaded_scheduler), which is both the shipped default and
-// what makes the system testable without threads. A real work-stealing pool is a future layer on the same
-// async_scheduler seam.
+// as a value, or parks on not-ready dependencies with wakeup continuations installed. singlethreaded_scheduler
+// runs everything inline on the calling thread, which is what makes the system testable without threads;
+// cc::async_thread_pool (async_thread_pool.hh) runs graphs concurrently over lock-free work-stealing deques.
+// Both are just implementations of the async_scheduler seam below.
 
 namespace cc
 {
@@ -127,8 +127,8 @@ using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 
 /// Where runnable nodes go. The async machinery only ever asks a scheduler to make a node runnable; it never
 /// owns execution or blocks. A worker binds a scheduler to its thread with async_worker_scope; nodes then
-/// reach it via async_scheduler::current(). The default is singlethreaded_scheduler (runs on the calling thread); a
-/// future work-stealing pool implements the same interface.
+/// reach it via async_scheduler::current(). Two implementations ship: singlethreaded_scheduler (inline, on the
+/// calling thread) and async_thread_pool (work-stealing, concurrent).
 ///
 /// A queued node is passed as a shared handle so the scheduler co-owns it while it waits: a node cannot be
 /// destroyed while runnable, which is what makes required dependencies freely schedulable (and steal-safe).

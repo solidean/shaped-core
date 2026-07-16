@@ -223,6 +223,15 @@ like the single-threaded case.
 This is a lifetime property as much as a perf one: a queued entry is a strong node handle, so work abandoned in
 a queue pins its graph alive. It is pinned by the "reused scheduler settles empty" test.
 
+**What a published sibling actually costs** (measured, Phase 2): the deque round-trip is nearly free — pushing is
+~15 instructions with **no refcount traffic at all**, because a queue entry is a raw pointer whose strong count
+is moved in and out by `shared_ptr`'s `release`/`adopt` (a load and a store, no RMW). The real cost is the
+**two refcount atomics per published node**, and they are *not* in the deque: they are `route_after_schedule`'s
+`from_alive` (`inc_strong`) and the worker dropping the handle after `poll()` (`dec_strong`). That pair is
+inherent to a queued entry co-owning its node — a lifetime invariant, not an optimization target — so the way to
+remove it is to stop the queue owning the node at all (the same pair is 4 of the 5 strong drops on a driven
+leaf; see "The direct path"). That is a node-lifetime redesign, not a scheduler change.
+
 ### Multi-scheduler correctness
 
 A node or subgraph **may be reached from more than one scheduler at once** — e.g. an outer API that alternates
@@ -303,9 +312,13 @@ auto ri = cc::make_async_from_value_emplace<Immovable>(7);        // build T in 
 ## Concurrent execution: `async_thread_pool`
 
 `cc::async_thread_pool` ([`clean-core/thread/async_thread_pool.hh`](../../src/clean-core/thread/async_thread_pool.hh))
-is a **work-stealing** scheduler that runs graphs on real threads. Each worker has a private LIFO deque (freshly
-spawned children stay hot) and steals from siblings when idle; a shared injection queue takes work from foreign
-threads and cross-thread wakeups.
+is a **work-stealing** scheduler that runs graphs on real threads. Each worker owns a lock-free **Chase-Lev
+deque** ([`impl/chase_lev_deque.hh`](../../src/clean-core/thread/impl/chase_lev_deque.hh)): it pushes and pops
+its own bottom end LIFO — freshly spawned children stay hot, and the common path takes no cross-thread sync at
+all — while idle workers steal from the top of a *randomly chosen* sibling's deque, which is the only place
+threads meet. A shared, mutex-guarded injection queue takes work from foreign threads; it is deliberately not
+lock-free, because only genuinely foreign submits reach it (a worker waking a node enqueues locally), so it is
+cold by construction.
 
 ```cpp
 cc::async_thread_pool pool(cc::num_hardware_threads());
@@ -322,6 +335,78 @@ The node machinery is thread-safe under this: a per-node spinlock serializes sta
 continuation bookkeeping, at most one thread polls a node, a completing dependency that wakes a running node
 records a re-poll instead of enqueuing a second copy, and continuations are held as `weak_ptr`s so a wake can
 never touch a dependent being torn down concurrently.
+
+### The hot path costs no shared RMW
+
+The design rule is **no MPMC contention when nobody is actively stealing**, and the thing that matters there is
+**coherence traffic, not instruction count**. A `fence(seq_cst)` drains *this core's* store buffer: it touches no
+memory and invalidates nothing, so N cores fencing cost O(1) each. A `lock xadd` on a shared counter needs the
+line **Exclusive**, so it invalidates every other core's copy and ping-pongs — O(N).
+
+Publishing a node therefore compiles to ~15 instructions with **zero refcount atomics** and exactly one locked
+instruction, which is the fence, and which clang lowers to a `lock inc` on a **private stack slot**:
+
+```text
+mov  r14, [r8]             ; node.release(): the whole ownership transfer is a load...
+mov  qword [r8], 0         ; ...and a store. Count-neutral, no RMW.
+mov  [rax+8*rcx+0x10], r14 ; the slot store
+mov  [rdi+0x80], rbx       ; publish _bottom (relaxed)
+lock inc dword [rbp-0xc]   ; fence(seq_cst) -- private line, no coherence traffic
+mov  eax, [rsi+0xc8]       ; _sleepers (relaxed load of a Shared, read-mostly line)
+test eax, eax
+je   .L1                   ; nobody asleep -> the whole wake path is branched over
+```
+
+That the deque holds **raw node pointers** rather than handles is what makes the transfer free: a Chase-Lev slot
+is read speculatively by thieves that may lose the race for it, so it cannot hold a smart pointer at all. Each
+entry owns one strong count by hand via `cc::shared_ptr`'s `release`/`adopt` pair. **The pool therefore owes
+every queued entry a release**, and `~async_thread_pool` drains its deques after joining — without that,
+abandoning a 131k-node graph leaks ~49k nodes (pinned by a test).
+
+**Wake protocol.** There is deliberately no counter of claimable work: a worker's scan of the deques already
+answers "is there work", so a counter would be a hot-path RMW serving a cold-path question. Instead, a Dekker
+store-load cross-pairing, and both sides pay:
+
+* the producer's push ends in a **relaxed** `_bottom` store, so it fences before loading `_sleepers`;
+* a would-be sleeper does a seq_cst RMW on `_sleepers`, then **re-scans** before committing to the condvar.
+
+Seq_cst gives one total order over the two, so at least one side sees the other — either the sleeper finds the
+work, or the producer sees it and notifies. The producer still passes through the wait mutex on the wake path
+(an epoch counter does not remove that: only `wait()`'s atomic release-and-enqueue closes the check-then-wait
+window), but that is the wake path only. `_wake_epoch` is the condvar predicate — monotonic, and touched only
+when a sleeper exists.
+
+Workers **spin ~64 rounds before sleeping**. Not a micro-optimization: a condvar round-trip is ~1–10 µs against
+fork-join tasks that cost ~100 ns, and it is worth ~25% on a spawn-tree (18.2 → 13.6 ns/node). Steal victims are
+**randomized** with bounded attempts — a linear scan points every idle worker at worker 0, which is both a
+contention hotspot and unfair.
+
+### Measured (i9-12900H, 6P+8E, `relwithdebinfo-clang`)
+
+Scaling is pool-at-P vs pool-at-1-worker, so it is independent of leaf cost. Judge it against the **6 P-cores**,
+not the 20 threads: the curve bends at the E-core and SMT boundaries by design.
+
+| case | scaling | note |
+|---|---|---|
+| reduction | **6.08x** | at/near the machine's ceiling |
+| parallel quicksort | **5.42x** | irregular subproblems — the steal-quality case |
+| spawn tree (131k nodes, trivial leaves) | **4.97x** | 60.7 → 12.2 ns/node over 1..20 workers |
+| nested parallel-for | 4.73x | |
+| parallel-for transform | 4.51x | |
+
+The spawn tree is the pure-overhead metric — its leaves do nothing, so its ns/node *is* the pool's cost. The
+mutex-guarded predecessor **anti-scaled** on it: 151 ns/node at 1 worker, 1292 at 4 (an 8.5x *slowdown* from
+adding three workers). Reproduce with
+[pool-benchmark.cc](../../tests/benchmarks/async/pool-benchmark.cc):
+`dev.py --mirror-test-output test "bench-async-pool (worker sweep)"`.
+
+Two things that table will not tell you, and that cost real time to learn:
+
+* **This is a laptop, and sustained all-core load throttles it.** The benchmark re-measures its serial baseline
+  on *every row* and prints it, precisely so it can be used as a contamination canary: flat = clean, drifting =
+  that case's cross-row numbers are not comparable. Absolute ns is only comparable within one run.
+* **`vs serial` is an adjacent pair and survives throttling; `vs 1w` spans rows and does not.** Trust the latter
+  only where the canary is flat.
 
 ### Routing to a specific pool
 
@@ -400,23 +485,37 @@ only reference of any kind — no other thread can mint one, because minting req
 there is nobody to race and no RMW is needed. libstdc++'s `_M_release` does exactly this. The manual floor went
 **2 atomics → 0** at the same 128 instructions; the driven leaf went 10 → 8.
 
-> **Single-threaded, this is a wash — and that is the interesting result.** A clean A/B on an idle i9-12900H
-> (`release-clang`, medians over 3–4 runs) says the empty manual node improves **4.24 → 3.83 ns (−10%)**, but
-> the full born-ready path *regresses* **11.94 → 12.57 ns (+5%)**, and the driven leaf's ns/op tracks its
-> instruction count (488 → **509**) rather than its atomics (10 → 8).
+> **This was on probation, and the probation is over: it stays.** An earlier A/B recorded here said the fast
+> path was a single-threaded *wash-to-regression* (empty manual node 4.24 → 3.83 ns, but full born-ready 11.94 →
+> 12.57 ns, +5%), and it was kept only on the promise of a payoff against a real work-stealing pool, with a
+> pre-committed rule: *re-measure against that pool, and revert if it does not show*.
 >
-> The premise this work was planned on — the two `lock dec` being over half the budget at ~20 cycles each —
-> **does not hold on this core**. An uncontended locked RMW on an L1-hot line is cheap enough that the ~5 extra
-> ALU ops the fast-path load costs on every *non-firing* strong drop outweigh the two RMWs it saves on the one
-> that fires. That recalibration reaches further than this section: **any estimate that prices an uncontended
-> atomic at ~20 cycles is suspect** — including the case for eliding the per-node spinlock, which is argued from
-> the same assumption. Price atomics by measurement, not by the rule of thumb.
+> Both halves were re-measured against the real pool (Phase 2). **The rule does not fire, because its premise
+> turned out to be false.** Toggling only the fast path — with it off, `release_strong` always `fetch_sub`s and
+> the caller then pays `release_weak`, so 0 RMWs vs 2 — interleaved, on `release-clang`:
 >
-> It is kept because the expected payoff is **Phase 2**, not here: the fast path replaces two RMWs (each needing
-> the line **Exclusive**) with one acquire load (satisfied in **Shared**). On a node whose line a pool worker
-> last touched, that is the difference between two invalidations and none — which is where a locked RMW stops
-> being cheap. Nothing measures that yet; the current pool is the interim debug one. **Re-measure against the
-> real work-stealing pool, and revert if it does not show.**
+> | | make_async_manual (empty node) | born-ready full |
+> |---|---|---|
+> | fast path **on** | **3.58 / 3.59 ns** | **25.3 / 26.0 ns** |
+> | fast path **off** | 12.25 / 12.46 ns | 31.2 / 30.4 ns |
+>
+> Removing it costs **3.4x on the node floor** and ~20% on born-ready. It is not a regression being tolerated on
+> a promise; it is a large single-threaded win outright. On the pool the effect is below the noise floor (spawn
+> tree at 20 workers: on {12.7, 14.9, 12.9, 13.3, 13.7} vs off {12.5, 12.7, 19.4, 14.7, 12.7}) — which is what
+> the old rule asked about, but reverting would trade a measured 3.4x for an unmeasurable one.
+>
+> **Two caveats, because the old numbers above do not reproduce and that is unexplained.** The old A/B compared
+> *fused+fastpath vs pre-fusion separate `u32` counts*; the new one compares *fused+fastpath vs fused, no fast
+> path*. Both "before" states do two locked RMWs and ought to cost the same — yet the old pre-fusion floor reads
+> 4.24 ns where the fused-2-RMW floor reads 12.25 ns. And the old absolute born-ready figure (11.94 ns) is ~2x
+> faster than anything measurable today on the same preset (25–26 ns), so the two runs are probably not measuring
+> the same thing at all. Worth a second pair of eyes before trusting either set as a baseline.
+>
+> One consequence: the recalibration this section used to assert — *"any estimate that prices an uncontended
+> atomic at ~20 cycles is suspect"* — does not survive. The 8.9 ns delta for two RMWs on the node floor implies
+> roughly that price. The claim it was used to undercut (the case for eliding the per-node spinlock) is therefore
+> **open again, not settled**. Price atomics by measurement — but measure them, and re-measure before quoting a
+> recorded number as fact.
 
 Three things are worth knowing about the shape:
 
@@ -507,8 +606,8 @@ re-park — down a chain past the inline depth cap that becomes a re-poll storm 
 * **Structured/owned children** — a parent frame spawning children with borrow-by-reference lifetime. An
   earlier `spawn_child` / `await` subsystem was removed pending a real use case; fork/join today uses regular
   refcounted `shared_async` children captured and required by the parent frame.
-* A **lock-free** per-worker deque (Chase-Lev) and finer per-worker routing within one pool; today the deques
-  are mutex-guarded and every worker serves all work.
+* Finer per-worker routing within one pool — today every worker serves all work. (The lock-free per-worker
+  deque has landed; see "Concurrent execution".)
 * **Shared errors** and **heterogeneous-`E` propagation** — the failure channel is now typed (`async<T, E>`),
   but the default `async_error` still re-materializes its message on propagation (no shared error payload yet),
   and the high-level sugar assumes a single `E` across a graph. Cross-`E` bridging and cancellation propagation
