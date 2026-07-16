@@ -378,12 +378,16 @@ instructions (nine of the removed direct calls were empty-set walks), the manual
 guards are safe because a leaf's dep set is poller-owned and its continuation set, checked under the node lock,
 is provably empty.
 
+**The manual node births in one store** (done). A promise-style node used to store the ops pointer, then
+**reload, mask, and re-store it** to pack `external_pending` into the control word's low bits — two
+compile-time constants that would not fold, because `_state_and_ops` is `std::atomic<u64>` and the compiler
+will not forward a value across atomic accesses. `init_control_word(ops, state)` writes both in a single
+relaxed store (safe: the node is not shared during construction), via a manual-tag constructor `make_async_manual`
+selects. Shaved the `make_async_manual` floor 146 → 142 instructions. The cold (lazy/scheduled) ctor never had
+the second store — it births `cold`, whose state bits are zero — so it is unchanged.
+
 **More instructions are still pure overhead** and unambiguously safe to remove:
 
-* The node ctor stores the ops pointer, then **reloads, masks, and re-stores it** to pack the initial state
-  into its low bits. Both are compile-time constants, so this should be one store — it doesn't fold because
-  `_state_and_ops` is `std::atomic<u64>` and the compiler won't forward across atomic accesses. During
-  construction the node isn't published yet, so the atomic is unnecessary there.
 * A `/GS` stack cookie in `free_storage`, which has no buffers, on the hottest free path.
 * `free_storage` chases `node -> ops -> class_index` (a dependent load into a cold cacheline) to fetch a
   constant, then bounds-checks it.

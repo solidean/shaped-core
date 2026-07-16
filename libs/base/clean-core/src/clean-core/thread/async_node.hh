@@ -729,6 +729,15 @@ protected:
         _state_and_ops.store(reinterpret_cast<cc::u64>(ops), std::memory_order_relaxed); // state cold, wake/lock clear
     }
 
+    /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain
+    /// relaxed store suffices — no reload/mask/re-store. Folds set_ops + an initial state transition (the
+    /// manual/push node births external_pending) that would otherwise not merge across the atomic. `ops` must be
+    /// 32-aligned (bits 0..4 free); wake/lock start clear.
+    void init_control_word(async_type_ops const* ops, async_node_state state)
+    {
+        _state_and_ops.store(reinterpret_cast<cc::u64>(ops) | (cc::u64(state) << state_shift), std::memory_order_relaxed);
+    }
+
     /// Turn this into a push/manual node: awaiting external completion. It is never run inline (schedule()
     /// bails on external_pending); only push_value / push_error complete it. Construction-time (set_manual),
     /// before the node is shared, so no lock is needed.

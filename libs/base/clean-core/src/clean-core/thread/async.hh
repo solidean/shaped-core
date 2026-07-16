@@ -146,6 +146,15 @@ template <class E>
 // async<T> — the normal shared handle
 // ============================================================================
 
+namespace impl
+{
+/// Tag selecting async's manual/promise constructor (born external_pending in a single store). Passed by
+/// make_async_manual through make_shared; not part of the public surface.
+struct async_manual_tag
+{
+};
+} // namespace impl
+
 /// The normal composable async handle. Always used through shared_async<T, E> (an intrusive cc::shared_ptr); the
 /// node is non-copyable and immovable. E is the failure-channel type, defaulting to async_error. Create with
 /// cc::make_async_lazy / cc::make_async_scheduled (the variadic dependency form handles single- and
@@ -158,12 +167,29 @@ struct async : impl::async_typed_node<T, E>
     /// allocate exactly node_class_index_for<async<T, E>>() — matching the ops' class_index (async adds no data).
     async()
     {
-        static_assert(sizeof(async) == sizeof(impl::async_typed_node<T, E>),
-                      "async<T, E> must add no data members over async_typed_node<T, E> (ops class_index needs it)");
+        check_layout();
         this->set_ops(&impl::async_type_ops_for<T, E>);
         this->init_payload(); // birth the unresolved arm (empty frame/deps/conts) into the offset-16 slot
     }
 
+    /// The manual/promise node: born external_pending, awaiting push_value / push_error. Sets ops and the
+    /// external_pending state in ONE store (the node isn't shared yet), rather than set_ops + a separate
+    /// mark_external_pending that would not fold across the atomic control word. See make_async_manual.
+    explicit async(impl::async_manual_tag)
+    {
+        check_layout();
+        this->init_control_word(&impl::async_type_ops_for<T, E>, async_node_state::external_pending);
+        this->init_payload();
+    }
+
+private:
+    static void check_layout()
+    {
+        static_assert(sizeof(async) == sizeof(impl::async_typed_node<T, E>),
+                      "async<T, E> must add no data members over async_typed_node<T, E> (ops class_index needs it)");
+    }
+
+public:
     // zero-copy access
 public:
     /// Pointer to the stored value, or null unless ready with a value. Non-owning — valid while the node is
@@ -475,9 +501,8 @@ template <class T = impl::async_deduce_result, class E = async_error, class F, c
 template <class T, class E = async_error>
 [[nodiscard]] shared_async<T, E> make_async_manual()
 {
-    auto node = cc::make_shared<async<T, E>, impl::async_node_traits>();
-    node->set_manual();
-    return node;
+    // The manual-tag ctor births the node external_pending in one store (no separate set_manual step).
+    return cc::make_shared<async<T, E>, impl::async_node_traits>(impl::async_manual_tag{});
 }
 
 // ============================================================================
