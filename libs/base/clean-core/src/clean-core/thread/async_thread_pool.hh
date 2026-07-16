@@ -4,6 +4,7 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
@@ -89,6 +90,10 @@ private:
         // The pool therefore owes every queued entry a release -- see the drain in ~async_thread_pool.
         cc::impl::chase_lev_deque<async_node_base*> deque;
 
+        // Picks steal victims. Worker-private, so it needs no synchronization. Randomizing matters: a linear
+        // scan points every idle worker at worker 0, which is both a contention hotspot and unfair.
+        cc::random rng;
+
         std::thread thread;
     };
 
@@ -104,8 +109,11 @@ private:
     cc::vector<cc::unique_ptr<worker>> _workers; // unique_ptr: stable addresses for deque/thread + stealing
     cc::mutex<cc::vector<async_node_ptr>> _injection;
 
-    std::atomic<int> _pending{0};  // claimable tasks across all deques + injection (drives sleep/wake)
-    std::atomic<int> _sleepers{0}; // workers currently blocked on _wait_cv
+    // The wake state. There is deliberately no counter of claimable tasks here: a worker's scan of the deques
+    // already answers "is there work", authoritatively and without shared writes, so a counter would be a
+    // hot-path RMW serving a cold-path question. See the protocol block in the .cc.
+    alignas(64) std::atomic<cc::i64> _wake_epoch{0}; // bumped only when a sleeper actually needs waking
+    std::atomic<int> _sleepers{0};                   // workers blocked on (or committing to) _wait_cv
     std::atomic<bool> _stop{false};
     std::mutex _wait_m;
     std::condition_variable _wait_cv;

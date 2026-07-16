@@ -218,6 +218,38 @@ TEST("async - destroying a pool releases work abandoned in its deques")
     CHECK(counted::live.load(std::memory_order_relaxed) == 0);
 }
 
+TEST("async - the wake protocol survives workers repeatedly draining to empty")
+{
+    // The wake path has no counter of claimable work: a producer fences, reads _sleepers, and only bumps the
+    // epoch if somebody is actually asleep. Losing that race means a task sits in a deque while every worker
+    // sleeps -- a HANG, not a wrong answer, so it cannot be caught by checking a value.
+    //
+    // This drives the window on purpose: many small graphs, submitted one at a time from a foreign thread, so
+    // the pool is repeatedly emptied (workers commit to sleeping) and then handed a task (a producer must wake
+    // them). A lost wakeup shows up as this test never finishing; dev.py's per-binary timeout reports that
+    // rather than hanging the suite forever.
+    cc::async_thread_pool pool(4);
+
+    for (int iter = 0; iter < 400; ++iter)
+    {
+        auto root = build_sum_tree(3); // tiny: finishes fast, so the pool goes idle between iterations
+        CHECK(pool.blocking_get(root) == (cc::i64(1) << 3));
+    }
+}
+
+TEST("async - a pool with one worker still wakes for injected work")
+{
+    // A 1-worker pool has no peers to steal from, so an injected task is only ever found by the sleeping worker
+    // itself -- the wake protocol is the only thing that can deliver it.
+    cc::async_thread_pool pool(1);
+
+    for (int iter = 0; iter < 200; ++iter)
+    {
+        auto root = cc::make_async_lazy([iter] { return cc::i64(iter); });
+        CHECK(pool.blocking_get(root) == cc::i64(iter));
+    }
+}
+
 // ============================================================================
 // multi-scheduler correctness — a graph reached from two schedulers at once
 // ============================================================================
