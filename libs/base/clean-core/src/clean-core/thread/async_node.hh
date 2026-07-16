@@ -107,9 +107,9 @@ struct async_node_traits
 
     static void init_control(async_node_base* p);
     static void inc_strong(async_node_base* p);
-    static bool dec_strong(async_node_base* p);
+    static cc::shared_release release_strong(async_node_base* p);
     static void inc_weak(async_node_base* p);
-    static bool dec_weak(async_node_base* p);
+    static bool release_weak(async_node_base* p);
     static bool try_lock_strong(async_node_base* p);
     static void destroy_object(async_node_base* p);
     static void free_storage(async_node_base* p);
@@ -945,15 +945,15 @@ inline void impl::async_node_traits::inc_strong(async_node_base* p)
 {
     p->_strong.fetch_add(1, std::memory_order_relaxed);
 }
-inline bool impl::async_node_traits::dec_strong(async_node_base* p)
+inline cc::shared_release impl::async_node_traits::release_strong(async_node_base* p)
 {
-    return p->_strong.fetch_sub(1, std::memory_order_acq_rel) == 1;
+    return {p->_strong.fetch_sub(1, std::memory_order_acq_rel) == 1, false};
 }
 inline void impl::async_node_traits::inc_weak(async_node_base* p)
 {
     p->_weak.fetch_add(1, std::memory_order_relaxed);
 }
-inline bool impl::async_node_traits::dec_weak(async_node_base* p)
+inline bool impl::async_node_traits::release_weak(async_node_base* p)
 {
     return p->_weak.fetch_sub(1, std::memory_order_acq_rel) == 1;
 }

@@ -22,15 +22,25 @@
 //   static constexpr bool supports_weak;                              // false => strong-only, no weak_ptr
 //   static constexpr cc::isize node_size(cc::isize psize, cc::isize palign);  // total node bytes for a T
 //   static constexpr cc::isize node_align(cc::isize palign);                  // total node alignment
-//   static void init_control(T*);          // establish strong = 1 (and weak = 1 if supports_weak)
+//   static void init_control(T*);              // establish strong = 1 (and weak = 1 if supports_weak)
 //   static void inc_strong(T*);
-//   static bool dec_strong(T*);            // true iff the strong count reached 0
-//   static void destroy_object(T*);        // tear down the payload; called exactly once, when strong hits 0
-//   static void free_storage(T*);          // free the node; called exactly once (see lifetime)
+//   static shared_release release_strong(T*);  // drop one strong ref; says what the caller must do next
+//   static void destroy_object(T*);            // tear down the payload; called exactly once, when strong hits 0
+//   static void free_storage(T*);              // free the node; called exactly once (see lifetime)
 //   // required only when supports_weak:
 //   static void inc_weak(T*);
-//   static bool dec_weak(T*);              // true iff the weak count reached 0
+//   static bool release_weak(T*);          // drop one weak ref; true iff the weak count reached 0 => free_storage
 //   static bool try_lock_strong(T*);       // atomically inc strong iff currently != 0; true on success
+//
+// release_strong reports what the caller must do, IN ORDER:
+//   {false, false} -> nothing.
+//   {true,  false} -> destroy_object(p), THEN release_weak(p) to drop the strong owners' collective weak count;
+//                     free_storage(p) iff that returns true. The order is load-bearing: releasing the collective
+//                     weak before destroy_object would let a racing weak_ptr drop free the storage under it.
+//   {true,  true}  -> destroy_object(p), then free_storage(p). Do NOT call release_weak: no other reference
+//                     exists (a strong-only Traits, or the sole-owner fast path — see cc::fused_refcount).
+// It is one call rather than a dec_strong(T*) -> bool so a Traits CAN answer both questions from a single load.
+// The protocol says nothing about representation: two u32s, one fused u64, or a lone strong count all fit.
 //
 // Lifetime — standard shared/weak counting: the strong owners collectively hold ONE weak count. With weak
 // support destroy_object fires when strong hits 0 and free_storage fires when weak then hits 0; without weak
@@ -45,6 +55,14 @@
 
 namespace cc
 {
+/// What dropping a strong reference leaves for the caller to do, in this order. `free` without `destroy` never
+/// happens. See the protocol block above for the full contract.
+struct shared_release
+{
+    bool destroy; ///< this was the last strong reference: run destroy_object
+    bool free;    ///< also the last reference of any kind: run free_storage, and skip release_weak
+};
+
 // ============================================================================
 // default_shared_traits — non-intrusive: control trails the payload in the node
 // ============================================================================
@@ -80,9 +98,12 @@ struct default_shared_traits
         c->weak.store(1, std::memory_order_relaxed);
     }
     static void inc_strong(T* p) { ctrl(p)->strong.fetch_add(1, std::memory_order_relaxed); }
-    static bool dec_strong(T* p) { return ctrl(p)->strong.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+    static shared_release release_strong(T* p)
+    {
+        return {ctrl(p)->strong.fetch_sub(1, std::memory_order_acq_rel) == 1, false};
+    }
     static void inc_weak(T* p) { ctrl(p)->weak.fetch_add(1, std::memory_order_relaxed); }
-    static bool dec_weak(T* p) { return ctrl(p)->weak.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+    static bool release_weak(T* p) { return ctrl(p)->weak.fetch_sub(1, std::memory_order_acq_rel) == 1; }
     static bool try_lock_strong(T* p)
     {
         auto& s = ctrl(p)->strong;
@@ -155,18 +176,21 @@ public:
     /// weak (or the last strong, without weak support) goes.
     void reset()
     {
-        if (_ptr != nullptr && Traits::dec_strong(_ptr))
+        if (_ptr != nullptr)
         {
-            Traits::destroy_object(_ptr);
-            if constexpr (Traits::supports_weak)
+            auto const r = Traits::release_strong(_ptr);
+            if (r.destroy)
             {
-                if (Traits::dec_weak(_ptr)) // release the strong owners' collective weak count
+                Traits::destroy_object(_ptr);
+                bool do_free = r.free;
+                if constexpr (Traits::supports_weak)
+                    if (!do_free) // release the strong owners' collective weak count — only AFTER teardown
+                        do_free = Traits::release_weak(_ptr);
+                if (do_free)
                     Traits::free_storage(_ptr);
             }
-            else
-                Traits::free_storage(_ptr);
+            _ptr = nullptr;
         }
-        _ptr = nullptr;
     }
 
     // access
@@ -269,7 +293,7 @@ public:
 
     void reset()
     {
-        if (_ptr != nullptr && Traits::dec_weak(_ptr))
+        if (_ptr != nullptr && Traits::release_weak(_ptr))
             Traits::free_storage(_ptr);
         _ptr = nullptr;
     }

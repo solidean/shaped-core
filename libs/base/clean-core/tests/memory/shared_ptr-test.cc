@@ -69,9 +69,12 @@ struct node_traits
         p->weak.store(1, std::memory_order_relaxed);
     }
     static void inc_strong(node_base* p) { p->strong.fetch_add(1, std::memory_order_relaxed); }
-    static bool dec_strong(node_base* p) { return p->strong.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+    static cc::shared_release release_strong(node_base* p)
+    {
+        return {p->strong.fetch_sub(1, std::memory_order_acq_rel) == 1, false};
+    }
     static void inc_weak(node_base* p) { p->weak.fetch_add(1, std::memory_order_relaxed); }
-    static bool dec_weak(node_base* p) { return p->weak.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+    static bool release_weak(node_base* p) { return p->weak.fetch_sub(1, std::memory_order_acq_rel) == 1; }
     static bool try_lock_strong(node_base* p)
     {
         cc::u32 cur = p->strong.load(std::memory_order_relaxed);
@@ -111,7 +114,11 @@ struct only_strong_traits
     static constexpr cc::isize node_align(cc::isize palign) { return palign; }
     static void init_control(only_strong* p) { p->strong.store(1, std::memory_order_relaxed); }
     static void inc_strong(only_strong* p) { p->strong.fetch_add(1, std::memory_order_relaxed); }
-    static bool dec_strong(only_strong* p) { return p->strong.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+    static cc::shared_release release_strong(only_strong* p)
+    {
+        bool const last = p->strong.fetch_sub(1, std::memory_order_acq_rel) == 1;
+        return {last, last}; // no weak count to wait on: destroy and free together
+    }
     static void destroy_object(only_strong* p) { ++only_strong::torn; }
     static void free_storage(only_strong* p)
     {
