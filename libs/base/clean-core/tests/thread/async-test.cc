@@ -362,7 +362,7 @@ TEST("async - many dependents park on one node (inline + spill), all woken on co
 
     auto ext = cc::make_async_manual<int>();
 
-    // 5 dependents: fills the 3 inline continuation slots + spills 2 into the slab list
+    // 5 dependents: the 1st takes the inline continuation slot, the 2nd promotes it into the slab list
     constexpr int n = 5;
     cc::vector<cc::shared_async<int>> deps;
     for (int i = 0; i < n; ++i)
@@ -378,7 +378,7 @@ TEST("async - many dependents park on one node (inline + spill), all woken on co
         d->schedule();
     sched.run_until([&] { return false; }); // drain: every dependent parks + subscribes on ext
 
-    CHECK(ext->continuation_count() == n); // 3 inline + 2 spill
+    CHECK(ext->continuation_count() == n); // all 5 in the spill list once the 2nd promotes the inline entry
 
     ext->push_value(100); // wakes all n dependents in one completion
     sched.run_until([&] { return false; });
@@ -413,6 +413,60 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
     // completing ext must not touch the torn-down dependent (weak lock fails) — no crash, count sees it gone
     ext->push_value(7);
     CHECK(ext->continuation_count() == 0);
+}
+
+TEST("async - continuation head: inline slot promotes into the spill list and back to empty")
+{
+    // White-box over async_cont_head's tagged word: the inline slot holds its weak count by hand, so every
+    // transition (fill, promote, prune, drop) has to hand that count over exactly once. A leak or a double
+    // dec_weak here is invisible to the graph tests; the node's weak count is what actually pins its storage.
+    auto a = cc::make_async_manual<int>();
+    auto b = cc::make_async_manual<int>();
+
+    cc::impl::async_cont_head h;
+    CHECK(h.empty());
+    CHECK(h.count() == 0);
+
+    h.add(a.get()); // empty -> inline
+    CHECK(!h.empty());
+    CHECK(h.count() == 1);
+
+    h.add(b.get()); // inline -> list (the inline entry is promoted, not dropped)
+    CHECK(h.count() == 2);
+
+    h.remove(a.get());
+    CHECK(h.count() == 1);
+    h.remove(b.get()); // list emptied -> normalize() repairs the bare tag back to empty
+    CHECK(h.empty());
+    CHECK(h.count() == 0);
+
+    // a latch cannot live inline either, so it promotes an inline dependent the same way
+    int fired = 0;
+    h.add(a.get());
+    h.add_latch([](void* ctx) { ++*static_cast<int*>(ctx); }, &fired);
+    CHECK(h.count() == 1); // latches are not dependents
+    CHECK(!h.empty());     // ...but a latch-only head must still notify
+
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope scope(sched);
+    h.notify_all(); // does not consume: the head still owes both entries at destruction
+    CHECK(fired == 1);
+    CHECK(h.count() == 1);
+}
+
+TEST("async - continuation head prunes an inline dependent that expired")
+{
+    auto keep = cc::make_async_manual<int>();
+    cc::impl::async_cont_head h;
+    {
+        auto gone = cc::make_async_manual<int>();
+        h.add(gone.get()); // takes the inline slot
+        CHECK(h.count() == 1);
+    } // gone's node is torn down; h's weak ref keeps only its storage readable
+
+    // remove() of an unrelated dependent still prunes the expired inline entry (its weak lock fails)
+    h.remove(keep.get());
+    CHECK(h.empty());
 }
 
 // ============================================================================

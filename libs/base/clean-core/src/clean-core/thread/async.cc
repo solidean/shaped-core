@@ -315,86 +315,101 @@ void cc::impl::async_dep_head::clear()
 }
 
 // ============================================================================
-// async_cont_head — continuation set (one inline weak dependent + a spill list; see async_node.hh)
+// async_cont_head — continuation set (one tagged word: inline dependent | spill list; see async_node.hh)
 // ============================================================================
 
-void cc::impl::async_cont_head::free_spill()
+void cc::impl::async_cont_head::spill_inline()
 {
-    // empty (_spill == nullptr) is handled by the inline destructor guard; the inline weak_ptrs auto-destroy
-    // (dec_weak) with the object regardless.
-    for (auto* c = _spill; c != nullptr;)
+    // The inline slot cannot hold a 2nd entry or a latch, so its dependent moves into a cell first. adopt()
+    // takes over the weak count we were holding by hand — no inc/dec pair, and the cell owns it from here.
+    auto* c = cont_alloc_cell();
+    c->_fn = nullptr;
+    new (cc::placement_new, &c->_weak) async_node_weak(async_node_weak::adopt(inline_dep()));
+    c->_next = nullptr;
+    set_list_head(c);
+}
+
+void cc::impl::async_cont_head::normalize()
+{
+    if ((_head & tag_is_list) == 0)
+        return; // empty or inline already
+
+    if (list_head() == nullptr)
+        _head = 0; // list emptied (remove() can leave a null list head, i.e. the bare tag)
+    // NOTE: a 1-entry list is deliberately NOT collapsed back to the inline slot. Unlike async_dep_head's
+    // normalize (on the poll loop's hot path), remove() is rare, and a latch cell cannot live inline at all.
+}
+
+void cc::impl::async_cont_head::clear()
+{
+    // empty is handled by the destructor's inline guard; here _head != 0.
+    if ((_head & tag_is_list) == 0)
     {
-        auto* const next = c->_next;
-        cont_free_cell(c);
-        c = next;
+        release_inline();
     }
-    _spill = nullptr;
-}
-
-cc::impl::async_cont_head::async_cont_head(async_cont_head&& o) noexcept : _spill(o._spill)
-{
-    o._spill = nullptr;
-    for (cc::isize i = 0; i < inline_capacity; ++i)
-        _inline_deps[i] = cc::move(o._inline_deps[i]);
-}
-
-cc::impl::async_cont_head& cc::impl::async_cont_head::operator=(async_cont_head&& o) noexcept
-{
-    if (this != &o)
+    else
     {
-        for (auto* c = _spill; c != nullptr;) // release our current spill
+        for (auto* c = list_head(); c != nullptr;)
         {
             auto* const next = c->_next;
             cont_free_cell(c);
             c = next;
         }
-        _spill = o._spill;
-        o._spill = nullptr;
-        for (cc::isize i = 0; i < inline_capacity; ++i)
-            _inline_deps[i] = cc::move(o._inline_deps[i]); // weak_ptr move-assign resets ours, steals o's
     }
-    return *this;
+    _head = 0;
 }
 
 void cc::impl::async_cont_head::add(async_node_base* dependent)
 {
-    for (auto& w : _inline_deps)
-        if (w.get() == nullptr) // free inline slot: no allocation for the common small fan-out
-        {
-            w = async_node_weak::from_alive(dependent); // dependent is alive (it is polling us)
-            return;
-        }
+    if (_head == 0) // empty -> inline (bit0 == 0 => not a list); no allocation for a single dependent
+    {
+        // dependent is alive (it is polling us); release() hands its weak count to the inline slot
+        _head = reinterpret_cast<cc::u64>(async_node_weak::from_alive(dependent).release());
+        return;
+    }
 
-    auto* c = cont_alloc_cell(); // 2nd+ dependent: prepend a weak spill cell
+    if ((_head & tag_is_list) == 0)
+        spill_inline(); // 2nd dependent: the inline entry moves into the list first
+
+    auto* c = cont_alloc_cell(); // prepend a weak cell
     c->_fn = nullptr;
     new (cc::placement_new, &c->_weak) async_node_weak(async_node_weak::from_alive(dependent));
-    c->_next = _spill;
-    _spill = c;
+    c->_next = list_head();
+    set_list_head(c);
 }
 
 void cc::impl::async_cont_head::add_latch(void (*fn)(void*), void* ctx)
 {
-    auto* c = cont_alloc_cell(); // latches always spill (rare; the pool blocking driver only)
+    // latches always live in cells (rare; the pool blocking driver only), so an inline dependent moves first
+    if (_head != 0 && (_head & tag_is_list) == 0)
+        spill_inline();
+
+    auto* c = cont_alloc_cell();
     c->_fn = fn;
     c->_ctx = ctx;
-    c->_next = _spill;
-    _spill = c;
+    c->_next = list_head(); // null in empty mode: _head 0 decodes to a null list head
+    set_list_head(c);
 }
 
 void cc::impl::async_cont_head::remove(async_node_base* dependent)
 {
     // drop the target, and opportunistically prune any dependents that have since expired
-    for (auto& w : _inline_deps)
+    if (_head == 0)
+        return;
+
+    if ((_head & tag_is_list) == 0)
     {
-        if (w.get() == nullptr)
-            continue;
-        auto sp = w.lock();
+        auto w = async_node_weak::adopt(inline_dep()); // borrow our hand-held ref for the liveness test
+        auto const sp = w.lock();
         if (!sp.is_valid() || sp.get() == dependent)
-            w = {};
+            _head = 0; // dropped: w's destructor pays the dec_weak
+        else
+            _head = reinterpret_cast<cc::u64>(w.release()); // kept: hand the ref back to the inline slot
+        return;
     }
 
     async_cont_cell* prev = nullptr;
-    for (auto* c = _spill; c != nullptr;)
+    for (auto* c = list_head(); c != nullptr;)
     {
         auto* const next = c->_next;
         bool drop = false;
@@ -408,22 +423,25 @@ void cc::impl::async_cont_head::remove(async_node_base* dependent)
             if (prev != nullptr)
                 prev->_next = next;
             else
-                _spill = next;
+                set_list_head(next);
             cont_free_cell(c);
         }
         else
             prev = c;
         c = next;
     }
+    normalize(); // set_list_head(nullptr) above leaves the bare tag; this repairs it to empty
 }
 
 cc::isize cc::impl::async_cont_head::count() const
 {
+    if (_head == 0)
+        return 0;
+    if ((_head & tag_is_list) == 0)
+        return 1;
+
     cc::isize n = 0;
-    for (auto const& w : _inline_deps)
-        if (w.get() != nullptr)
-            ++n;
-    for (auto* c = _spill; c != nullptr; c = c->_next)
+    for (auto* c = list_head(); c != nullptr; c = c->_next)
         if (c->_fn == nullptr)
             ++n;
     return n;
@@ -431,12 +449,19 @@ cc::isize cc::impl::async_cont_head::count() const
 
 void cc::impl::async_cont_head::notify_all()
 {
-    for (auto& w : _inline_deps)
-        if (w.get() != nullptr)
-            if (auto c = w.lock()) // skips any dependent that is being torn down
-                c->schedule();
+    if (_head == 0)
+        return;
 
-    for (auto* c = _spill; c != nullptr; c = c->_next)
+    if ((_head & tag_is_list) == 0)
+    {
+        auto w = async_node_weak::adopt(inline_dep()); // borrowed: handed straight back below
+        if (auto const s = w.lock())                   // skips a dependent that is being torn down
+            s->schedule();
+        _head = reinterpret_cast<cc::u64>(w.release()); // notify_all does not consume — our dtor still owes it
+        return;
+    }
+
+    for (auto* c = list_head(); c != nullptr; c = c->_next)
     {
         if (c->_fn == nullptr)
         {

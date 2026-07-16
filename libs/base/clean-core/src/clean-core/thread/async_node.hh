@@ -395,38 +395,49 @@ struct async_cont_cell
 };
 
 /// A node's set of dependents to wake when it completes (its "continuations"), plus at most a few
-/// one-shot completion latches. Exactly 16 B, so it fits the unresolved arm's layout (frame 8 + deps 8 +
-/// conts 16 = the 32 B scratch). The continuation head is live only BEFORE the node is ready; once ready it
-/// is stolen and the payload holds the typed value/error instead — the two never coexist. One weak dependent
-/// sits inline — the common single-dependent case pays no allocation; the 2nd+ dependents and every latch
-/// spill into a slab-backed intrusive list. Guarded by the node _lock: unlike async_dep_head it has multiple
-/// writers (other nodes' pollers subscribing/unsubscribing, plus this node completing).
+/// one-shot completion latches. One tagged word (8 B), so it fits the unresolved arm's layout (frame 32 +
+/// deps 8 + conts 8 = the 48 B scratch). The continuation head is live only BEFORE the node is ready; once
+/// ready it is stolen and the payload holds the typed value/error instead — the two never coexist. Guarded by
+/// the node _lock: unlike async_dep_head it has multiple writers (other nodes' pollers subscribing /
+/// unsubscribing, plus this node completing).
+///
+/// Encoding mirrors async_dep_head: 0 = empty, bit0 == 0 = one dependent inline (the common single-dependent
+/// case pays no allocation), bit0 == 1 = spill-list head. Nodes are alignas(64), so the low bits are free.
+/// EITHER one inline dependent OR a list, never both — a 2nd dependent, and every latch, promotes the inline
+/// entry into the list first.
+///
+/// The one real difference from async_dep_head: its entries are non-owning raw pointers, ours are WEAK. The
+/// inline slot has no weak_ptr to do that for it, so it holds exactly one weak count BY HAND — every store
+/// inc_weaks, every drop dec_weaks (weak_ptr::adopt / release move the count in and out without a redundant
+/// inc/dec pair). Spill cells keep their own async_node_weak and are self-managing.
 struct async_cont_head
 {
     async_cont_head() = default;
     ~async_cont_head()
     {
-        if (_spill != nullptr) // leaf/common case has no spill; the inline weak_ptrs auto-destroy below
-            free_spill();
+        if (_head != 0) // empty is the leaf/common case: skip the out-of-line clear entirely
+            clear();
     }
 
-    async_cont_head(async_cont_head&& o) noexcept;
-    async_cont_head& operator=(async_cont_head&& o) noexcept;
+    async_cont_head(async_cont_head&& o) noexcept : _head(o._head) { o._head = 0; }
+    async_cont_head& operator=(async_cont_head&& o) noexcept
+    {
+        if (this != &o)
+        {
+            if (_head != 0)
+                clear();
+            _head = o._head;
+            o._head = 0;
+        }
+        return *this;
+    }
     async_cont_head(async_cont_head const&) = delete;
     async_cont_head& operator=(async_cont_head const&) = delete;
 
     /// True if no dependents and no latches are installed (the leaf case). Cheap; safe to test under the lock.
-    [[nodiscard]] bool empty() const
-    {
-        if (_spill != nullptr)
-            return false;
-        for (auto const& w : _inline_deps)
-            if (w.get() != nullptr)
-                return false;
-        return true;
-    }
+    [[nodiscard]] bool empty() const { return _head == 0; }
 
-    /// Subscribe a dependent (held weakly). Fills a free inline slot if any, else prepends a spill cell.
+    /// Subscribe a dependent (held weakly). Takes the inline slot if free, else prepends a spill cell.
     void add(async_node_base* dependent);
     /// Install a one-shot completion latch (always spills; latches are rare — the pool blocking driver only).
     void add_latch(void (*fn)(void*), void* ctx);
@@ -436,18 +447,27 @@ struct async_cont_head
     [[nodiscard]] cc::isize count() const;
 
     /// Fire every entry: schedule each still-live dependent, call each latch. Call on a stolen (local)
-    /// head only — never while holding the node lock, since scheduling a dependent takes its lock.
+    /// head only — never while holding the node lock, since scheduling a dependent takes its lock. Does not
+    /// consume the entries; the caller's destructor releases them.
     void notify_all();
 
-    // Inline dependent capacity. Sized so the whole head stays 16 B (fits the 32 B unresolved scratch alongside
-    // frame + deps); raising it past what fits 16 B grows the scratch and can push the node past one cache line.
-    static constexpr cc::isize inline_capacity = 1;
-
-    async_node_weak _inline_deps[inline_capacity]; // a null slot is unused
-    async_cont_cell* _spill = nullptr;             // 2nd+ dependents and all latches
-
 private:
-    void free_spill(); // frees the spill list behind the destructor's inline empty-guard
+    static constexpr cc::u64 tag_is_list = 0x1;
+
+    // inline mode (bit0 == 0, _head != 0): the 64-aligned dependent, on which we hold one weak count by hand
+    [[nodiscard]] async_node_base* inline_dep() const { return reinterpret_cast<async_node_base*>(_head); }
+    [[nodiscard]] async_cont_cell* list_head() const
+    {
+        return reinterpret_cast<async_cont_cell*>(_head & ~tag_is_list);
+    }
+    void set_list_head(async_cont_cell* c) { _head = reinterpret_cast<cc::u64>(c) | tag_is_list; }
+
+    void spill_inline(); // move the inline entry into a fresh 1-cell list (2nd dependent, or any latch)
+    void release_inline() { auto const w = async_node_weak::adopt(inline_dep()); } // dtor pays our dec_weak
+    void normalize(); // collapse an emptied list back to empty
+    void clear();     // release the inline ref, or free the whole spill list
+
+    cc::u64 _head = 0;
 };
 
 /// The node's transient scratch while it is UNRESOLVED: the compute frame, the not-ready dependency set, and
@@ -461,10 +481,12 @@ struct async_unresolved
 {
     cc::unique_function<async_step_status(async_context_base&)> frame; // 8  null for manual/push nodes
     async_dep_head deps;                                               // 8
-    async_cont_head conts;                                             // 16
+    async_cont_head conts;                                             // 8
     // Default special members: default ctor births an empty arm; the (non-trivial) default dtor frees frame
     // captures + dep-list nodes + continuation cells. move/copy are implicitly deleted.
 };
+static_assert(sizeof(async_cont_head) == 8, "async_cont_head must stay one word — the arm budgets it 8 B");
+static_assert(sizeof(async_dep_head) == 8, "async_dep_head must stay one word — the arm budgets it 8 B");
 } // namespace impl
 
 // ============================================================================

@@ -307,6 +307,25 @@ public:
         return r;
     }
 
+    /// Take over one weak count the caller already holds — no inc_weak. The twin of release(): together they
+    /// move a weak reference into and out of hand-rolled storage (e.g. a tagged word) without a redundant
+    /// inc/dec pair. The caller must not also release its own count.
+    [[nodiscard]] static weak_ptr adopt(T* p)
+    {
+        weak_ptr r;
+        r._ptr = p;
+        return r;
+    }
+
+    /// Give up ownership of the weak count without dec_weak, returning the raw pointer (null if empty). The
+    /// caller takes over releasing it.
+    [[nodiscard]] T* release()
+    {
+        T* const p = _ptr;
+        _ptr = nullptr;
+        return p;
+    }
+
 private:
     void inc()
     {
