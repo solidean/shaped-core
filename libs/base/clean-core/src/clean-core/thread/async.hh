@@ -552,10 +552,12 @@ template <class T, class E = async_error>
 // ============================================================================
 
 // You never block on an async — a scheduler drives it, and these block the CALLING thread while that happens.
-// Mirrors async_thread_pool::blocking_get / try_blocking_get, so the two schedulers read the same.
+// Mirrors async_thread_pool::blocking_get / try_blocking_get, with one deliberate difference: this scheduler
+// never blocks, so "pumped out, still not ready" is a real outcome for it and try_ returns an optional. The
+// pool waits on a completion latch instead, so it has no such outcome and returns the result directly.
 
 template <class T, class E>
-cc::result<T, E> singlethreaded_scheduler::try_blocking_get(shared_async<T, E> const& root)
+cc::optional<cc::result<T, E>> singlethreaded_scheduler::try_blocking_get(shared_async<T, E> const& root)
 {
     CC_ASSERT(root != nullptr, "cannot drive a null async");
 
@@ -564,31 +566,37 @@ cc::result<T, E> singlethreaded_scheduler::try_blocking_get(shared_async<T, E> c
     root->schedule();
     run_until([&] { return root->is_ready(); });
 
-    CC_ASSERT(root->is_ready(), "async graph could not complete (blocked on external work?)");
+    // A drained queue does not mean the graph is stuck — only that WE cannot advance it: it may be parked on a
+    // manual node awaiting an external push, or have migrated onto another scheduler that is still driving it.
+    // Neither is ours to assert on; report it and let the caller push, retry, or wait.
+    if (!root->is_ready())
+        return cc::nullopt;
 
     if (root->has_error())
-        return cc::error(root->propagate_error());
-    return *root->value_ptr(); // copy out
+        return cc::result<T, E>(cc::error(root->propagate_error()));
+    return cc::result<T, E>(*root->value_ptr()); // copy out
 }
 
 template <class T, class E>
 T singlethreaded_scheduler::blocking_get(shared_async<T, E> const& root)
 {
     auto r = try_blocking_get(root);
-    CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
-    return cc::move(r).value();
+    CC_ASSERT(r.has_value(), "async graph could not complete on this scheduler (parked on an external push that "
+                             "never came, or being driven by another scheduler — use try_blocking_get)");
+    CC_ASSERT(r.value().has_value(), "async completed with an error or was cancelled");
+    return cc::move(r).value().value();
 }
 
-/// Drive `root` to completion on a throwaway singlethreaded_scheduler and return its outcome. BLOCKS the
-/// calling thread, and the whole graph runs HERE — no dependency executes concurrently, however many cores are
-/// idle. Never call it from inside a frame (park on a dependency instead). Asserts if the graph cannot
-/// complete (e.g. parked on a manual node that is never pushed — keep a singlethreaded_scheduler and pump it
-/// with run_until around the external push instead).
+/// Drive `root` to completion on a throwaway singlethreaded_scheduler and return its outcome, or nullopt if it
+/// could not complete here (e.g. parked on a manual node that is never pushed — a throwaway scheduler cannot
+/// be pumped around the external push, so keep a singlethreaded_scheduler for that). BLOCKS the calling thread,
+/// and the whole graph runs HERE — no dependency executes concurrently, however many cores are idle. Never call
+/// it from inside a frame (park on a dependency instead).
 ///
 /// The verbose name is deliberate: this is a top-level / test convenience. Real work belongs on a scheduler
 /// you own — a singlethreaded_scheduler you pump, or an async_thread_pool.
 template <class T, class E = async_error>
-[[nodiscard]] cc::result<T, E> try_async_blocking_get_singlethreaded(shared_async<T, E> const& root)
+[[nodiscard]] cc::optional<cc::result<T, E>> try_async_blocking_get_singlethreaded(shared_async<T, E> const& root)
 {
     singlethreaded_scheduler scheduler;
     return scheduler.try_blocking_get(root);

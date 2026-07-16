@@ -199,13 +199,16 @@ struct singlethreaded_scheduler final : async_scheduler
 
     void enqueue(async_node_ptr node) override; // out-of-line: needs the node handle's traits complete
 
-    /// Drive `root` to completion on this thread and return its outcome. Asserts if the graph cannot complete
-    /// (e.g. parked on a manual node that is never pushed — pump those with run_until instead).
-    /// Defined in async.hh, which has the typed handle.
+    /// Drive `root` on this thread and return its outcome, or nullopt if this scheduler pumped everything
+    /// reachable from here and `root` is still not ready. Nullopt means "not from here, not yet" — the graph
+    /// may be parked on an unpushed manual node, or may have migrated onto another scheduler (see
+    /// "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md). Re-driving after the push,
+    /// or letting
+    /// the owning scheduler finish, resolves it. Defined in async.hh, which has the typed handle.
     template <class T, class E = async_error>
-    [[nodiscard]] cc::result<T, E> try_blocking_get(shared_async<T, E> const& root);
+    [[nodiscard]] cc::optional<cc::result<T, E>> try_blocking_get(shared_async<T, E> const& root);
 
-    /// try_blocking_get, but returns the value directly; asserts on error/cancellation.
+    /// try_blocking_get, but returns the value directly; asserts on error/cancellation and on no-progress.
     template <class T, class E = async_error>
     [[nodiscard]] T blocking_get(shared_async<T, E> const& root);
 

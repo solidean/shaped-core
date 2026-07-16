@@ -420,8 +420,9 @@ auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also
 
 // you never block on an async: a SCHEDULER drives it. These build a throwaway singlethreaded_scheduler and
 // BLOCK the calling thread — top-level/tests only, never in a frame. Verbose name = deliberately discouraged:
-int v = cc::async_blocking_get_singlethreaded(a);                                 // -> T (asserts on error/cancel)
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get_singlethreaded(a); // fallible -> result<T, E>
+int v = cc::async_blocking_get_singlethreaded(a);                    // -> T (asserts on error/cancel/no-progress)
+cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(a); // nullopt if it
+                    // couldn't complete here (parked on an unpushed manual node, or migrated to another scheduler)
 cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
 int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
@@ -443,6 +444,8 @@ actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  a
 // two schedulers, same surface. singlethreaded = drives inline + NEVER publishes, so deps cannot run
 // concurrently however many cores idle (single-threaded by construction, not by circumstance):
 cc::singlethreaded_scheduler sched;  int v = sched.blocking_get(root);  // mirrors pool.blocking_get(root)
+cc::optional<...> o = sched.try_blocking_get(root);  // st: nullopt if pumped out but not ready (see async.md
+                                                     // "Multi-scheduler correctness"); pool's try_ returns result
 cc::async_worker_scope scope(sched);   // bind scheduler to this thread (blocking_get does this itself)
 root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump; interleave external push here
 sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)

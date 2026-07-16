@@ -121,8 +121,9 @@ TEST("async - variadic dependency form short-circuits on a dependency error")
         },
         a, bad);
 
-    auto r = cc::try_async_blocking_get_singlethreaded(c);
-    CHECK(r.has_error());
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(c);
+    REQUIRE(outcome.has_value()); // the graph completed
+    CHECK(outcome.value().has_error());
     CHECK(!ran);
 }
 
@@ -320,6 +321,28 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
     CHECK(ext->continuation_count() == 0); // detached on completion
 }
 
+TEST("async - try_blocking_get reports no-progress instead of asserting")
+{
+    // A drained queue does NOT mean the graph is stuck — it means THIS scheduler can make no further progress.
+    // Here that is an unpushed manual node; the multi-scheduler case is a graph that migrated onto a pool (see
+    // async-pool-test.cc). Either way `try_` must report it, not abort the process. Re-driving after the push
+    // succeeds, so nullopt is "not yet", not "never".
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope const scope(sched); // so the push below can route the woken dependent somewhere
+
+    auto ext = cc::make_async_manual<int>();
+    auto p = cc::make_async_lazy([](int v) { return v + 1; }, ext);
+
+    CHECK(!sched.try_blocking_get(p).has_value());
+    CHECK(!p->is_ready());
+
+    ext->push_value(41);
+
+    auto const r = sched.try_blocking_get(p);
+    REQUIRE(r.has_value());
+    CHECK(r.value().value() == 42);
+}
+
 TEST("async - many dependents park on one node (inline + spill), all woken on completion")
 {
     cc::singlethreaded_scheduler sched;
@@ -398,17 +421,19 @@ TEST("async - error short-circuits a dependent transform, f never runs")
         },
         a);
 
-    auto r = cc::try_async_blocking_get_singlethreaded(b);
-    CHECK(r.has_error());
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(b);
+    REQUIRE(outcome.has_value()); // the graph completed
+    CHECK(outcome.value().has_error());
     CHECK(!ran);
 }
 
 TEST("async - try_async_blocking_get_singlethreaded surfaces a value")
 {
     auto a = cc::make_async_lazy([] { return 3; });
-    auto r = cc::try_async_blocking_get_singlethreaded(a);
-    REQUIRE(r.has_value());
-    CHECK(r.value() == 3);
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value()); // the graph completed
+    REQUIRE(outcome.value().has_value());
+    CHECK(outcome.value().value() == 3);
 }
 
 TEST("async - cancellation propagates as a value")
@@ -416,9 +441,10 @@ TEST("async - cancellation propagates as a value")
     auto a = cc::make_async_lazy<int>([](async_context<int>& actx) -> cc::async_step_status
                                       { return actx.error(cc::async_error::make_cancelled()); });
 
-    auto r = cc::try_async_blocking_get_singlethreaded(a);
-    REQUIRE(r.has_error());
-    CHECK(r.error().is_cancelled());
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value()); // the graph completed
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().is_cancelled());
 }
 
 // ============================================================================
@@ -562,8 +588,9 @@ TEST("async - a born-ready error short-circuits a dependent transform")
             return x + 1;
         },
         a);
-    auto r = cc::try_async_blocking_get_singlethreaded(b);
-    CHECK(r.has_error());
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(b);
+    REQUIRE(outcome.has_value()); // the graph completed
+    CHECK(outcome.value().has_error());
     CHECK(!ran);
 }
 
@@ -662,9 +689,10 @@ TEST("async - custom enum error round-trips through resolve / try_error / into_r
     auto a = cc::make_async_lazy<int, my_err>([](cc::async_context<int, my_err>& ctx) -> cc::async_step_status
                                               { return ctx.resolve_to_error(my_err::boom); });
 
-    auto r = cc::try_async_blocking_get_singlethreaded(a);
-    REQUIRE(r.has_error());
-    CHECK(r.error() == my_err::boom);
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value()); // the graph completed
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error() == my_err::boom);
 
     REQUIRE(a->try_error() != nullptr);
     CHECK(*a->try_error() == my_err::boom);
@@ -674,9 +702,10 @@ TEST("async - custom-E value path returns cc::result<T, E>")
 {
     auto a = cc::make_async_lazy<int, my_err>([](cc::async_context<int, my_err>& ctx) -> cc::async_step_status
                                               { return ctx.resolve_to_value(5); });
-    cc::result<int, my_err> r = cc::try_async_blocking_get_singlethreaded(a);
-    REQUIRE(r.has_value());
-    CHECK(r.value() == 5);
+    cc::optional<cc::result<int, my_err>> const outcome = cc::try_async_blocking_get_singlethreaded(a);
+    REQUIRE(outcome.has_value()); // the graph completed
+    REQUIRE(outcome.value().has_value());
+    CHECK(outcome.value().value() == 5);
 }
 
 TEST("async - custom copyable E auto-propagates (copied) through a dependency chain")
@@ -693,10 +722,11 @@ TEST("async - custom copyable E auto-propagates (copied) through a dependency ch
         },
         a);
 
-    auto r = cc::try_async_blocking_get_singlethreaded(b);
-    REQUIRE(r.has_error());
-    CHECK(r.error().msg == "root failed"); // propagated by copy (not re-materialized)
-    CHECK(!ran);                           // f was skipped by the auto-propagation short-circuit
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(b);
+    REQUIRE(outcome.has_value()); // the graph completed
+    REQUIRE(outcome.value().has_error());
+    CHECK(outcome.value().error().msg == "root failed"); // propagated by copy (not re-materialized)
+    CHECK(!ran);                                         // f was skipped by the auto-propagation short-circuit
 }
 
 // ============================================================================
@@ -719,7 +749,8 @@ TEST("async - a raw frame that transforms a dependency error does NOT auto-propa
             return ctx.resolve_to_value(*dep->try_value());
         });
 
-    auto r = cc::try_async_blocking_get_singlethreaded(p);
-    REQUIRE(r.has_value());
-    CHECK(r.value() == -1); // the frame chose a value; no error propagated
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(p);
+    REQUIRE(outcome.has_value()); // the graph completed
+    REQUIRE(outcome.value().has_value());
+    CHECK(outcome.value().value() == -1); // the frame chose a value; no error propagated
 }

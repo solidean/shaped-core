@@ -174,9 +174,13 @@ For a self-contained graph, the free functions build a throwaway one for you. Th
 deliberate — this is a test/debug convenience, not how real work gets scheduled:
 
 ```cpp
-int v = cc::async_blocking_get_singlethreaded(root);                       // asserts on error/cancel
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get_singlethreaded(root); // fallible
+int v = cc::async_blocking_get_singlethreaded(root);                       // asserts on error/cancel/no-progress
+cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(root); // fallible
 ```
+
+The `try_` form returns an **optional** result: `nullopt` means the scheduler pumped everything reachable from
+here and `root` is still not ready — see "Multi-scheduler correctness" below. `blocking_get` asserts on that
+outcome (as well as on an error), so keep it for graphs you know complete inline.
 
 `run_one` / `run_until` / `drain` are the underlying pump, and the pump is what you need when a graph parks on
 a manual node: nothing progresses while you are not inside it, so call it again after the external push.
@@ -202,6 +206,40 @@ like the single-threaded case.
 
 This is a lifetime property as much as a perf one: a queued entry is a strong node handle, so work abandoned in
 a queue pins its graph alive. It is pinned by the "reused scheduler settles empty" test.
+
+### Multi-scheduler correctness
+
+A node or subgraph **may be reached from more than one scheduler at once** — e.g. an outer API that alternates
+single- and multi-threaded computation over asyncs shared with earlier calls, so one subtree is visited by a
+`singlethreaded_scheduler` and an `async_thread_pool` concurrently. This is supported and must stay correct. It
+is **not optimized for**: performance for a genuinely shared subgraph is not a goal, only correctness.
+
+**Guaranteed under concurrent scheduling.** At most one thread polls a node (`try_begin_running`); a per-node
+spinlock serializes state transitions and continuation bookkeeping; a dependency completing while a node runs
+records a re-poll instead of enqueuing a second copy; and continuations are held as `weak_ptr`s, so a wake can
+never touch a dependent being torn down. No data race, no double-compute — whichever scheduler runs a node, the
+result is the same.
+
+**Not guaranteed: which scheduler runs a node.** `has_steal_capable_peers` is read from the *current thread's*
+scheduler, so a `singlethreaded_scheduler` driving a subtree inline forces it into single-threaded execution
+even where a pool could have parallelized it. And a node can **migrate mid-flight**: when a dependency
+completes, `route_after_schedule` sends the woken dependent to whatever scheduler is bound on the **waking**
+thread. A graph driven from an st scheduler can therefore finish on a pool (a dependency completed on a pool
+worker) or vice versa.
+
+That migration is why `singlethreaded_scheduler::try_blocking_get` returns an **optional**: a drained queue does
+not mean the graph is stuck, only that *this* scheduler cannot advance it — it may be parked on an unpushed
+manual node, or have migrated onto another scheduler that is still driving it. `nullopt` is "not from here, not
+yet"; push/retry, or let the owning scheduler finish. An st scheduler cannot assume it will ever see every node
+of "its" graph, so it reports rather than asserts.
+
+> **Known limitation (migration stranding).** The dual case is not yet handled: a node parked on a pool, woken
+> on an st thread that then stops pumping (its `blocking_get` returned once *its* root was ready), is left
+> `scheduled` in an abandoned st queue. Because `schedule()` / `schedule_on()` are idempotent on `scheduled`, no
+> other scheduler can reclaim it, and a `pool.blocking_get` waiting on it hangs. Re-homing abandoned queue
+> entries to the default scheduler is a follow-up; until then, do not drive two *separate* roots that share a
+> subtree on two schedulers concurrently and then block on the one that can migrate. Driving one shared subtree
+> plus a single st-side dependent (the common shape) is fine.
 
 Externally produced values use a promise-style node:
 

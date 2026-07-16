@@ -76,6 +76,7 @@ TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
     desc.source = "[numthreads(1,1,1)] void main() { this is not valid HLSL }";
 
     auto async_shader = cache.compile(desc);
-    auto result = cc::try_async_blocking_get_singlethreaded(async_shader);
-    CHECK(result.has_error());
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(async_shader);
+    REQUIRE(outcome.has_value()); // the graph completed
+    CHECK(outcome.value().has_error());
 }

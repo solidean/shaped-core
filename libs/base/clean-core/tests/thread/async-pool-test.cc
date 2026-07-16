@@ -141,4 +141,68 @@ TEST("async - stress: many small graphs on a pool")
     }
 }
 
+// ============================================================================
+// multi-scheduler correctness — a graph reached from two schedulers at once
+// ============================================================================
+// Supported and must stay correct; not optimized for. See "Multi-scheduler correctness" in
+// libs/base/clean-core/docs/systems/async.md for what is and is not guaranteed.
+
+TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked in a pool")
+{
+    // The graph is parked on an unpushed manual node inside the pool, so a singlethreaded_scheduler cannot
+    // advance it however hard it pumps. That is a report, not an abort: it is not this scheduler's graph to
+    // fail. The push then routes the woken dependent to the default pool, which finishes it.
+    cc::async_thread_pool pool(1);
+    cc::scoped_default_async_pool as_default(pool);
+
+    auto ext = cc::make_async_manual<int>();
+    auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
+
+    p->schedule_on(pool);
+
+    cc::singlethreaded_scheduler sched;
+    CHECK(!sched.try_blocking_get(p).has_value());
+    CHECK(!p->is_ready());
+
+    ext->push_value(41);
+    CHECK(pool.blocking_get(p) == 42);
+}
+
+TEST("async - a subtree shared between a pool and a singlethreaded_scheduler stays correct")
+{
+    // The real shape of the hybrid case: an outer API that alternates single/multi-threaded over asyncs shared
+    // with previous calls, so one subtree is reachable from both schedulers at once. `shared` below is that
+    // subtree, driven on the pool; root_st is a dependent driven right here on a singlethreaded_scheduler.
+    //
+    // Both outcomes for the st driver are legal, and which one happens is a genuine race:
+    //   * st drives `shared` inline itself (or finds it already done) and returns the value; or
+    //   * `shared` is mid-flight on a worker, so st parks root_st on it. When `shared` completes ON THE POOL
+    //     THREAD, route_after_schedule reads the waking thread's scheduler — the pool — so root_st migrates
+    //     there and st pumps itself empty: no-progress, and the pool finishes it.
+    // A wrong value or an abort is not legal. Correctness only: st never publishes, so it may drag a subtree
+    // the pool could have parallelized into single-threaded execution. That is accepted.
+    cc::async_thread_pool pool(4);
+    cc::scoped_default_async_pool as_default(pool);
+
+    cc::i64 const expected = cc::i64(1) << 6;
+    for (int iter = 0; iter < 50; ++iter)
+    {
+        auto shared = build_sum_tree(6); // 64 leaves, reachable from the pool root and from root_st
+        auto root_st = cc::make_async_lazy([](cc::i64 v) { return v; }, shared);
+
+        shared->schedule_on(pool); // the multi-threaded call drives the shared subtree
+
+        cc::singlethreaded_scheduler sched;
+        auto const outcome = sched.try_blocking_get(root_st); // the single-threaded call, same subtree
+        if (outcome.has_value())
+        {
+            REQUIRE(outcome.value().has_value());
+            CHECK(outcome.value().value() == expected);
+        }
+        // else: root_st migrated onto the pool mid-drive — no-progress is the correct report, not a failure
+
+        CHECK(pool.blocking_get(root_st) == expected); // resolves once, to the same value, whoever got there
+    }
+}
+
 #endif // CC_HAS_THREADS
