@@ -461,6 +461,47 @@ cc::install_crash_handler();                        // segfault/abort/etc -> std
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 
+## Streams (byte I/O)
+
+```cpp
+#include <clean-core/streams/stream.hh>       // non-owning, MOVE-ONLY byte stream views over an adapter
+cc::read_stream  cc::write_stream  cc::read_write_stream          // + cc::seekable_read_stream, seekable_write_stream, ...
+// seekable_* promise FAST seeks (O(1)/O(log n)); a linear-seek source must present as non-seekable instead.
+s.flush();                                // -> result<i64> plain flush: refill (read) / drain (write); pos, or -1 if none
+s.is_valid();                             // false after a move consumed it
+// read (read capability):
+s.ready_bytes();                          // -> span<byte const> buffered & ready right now: [curr, end)
+s.consume(n);                             // consume n ready bytes
+s.at_end();                               // -> result<bool>; dry check on seekable, else refills once
+s.read(dst);                              // -> result<isize> up to dst.size(); 0 only at end-of-data
+s.read_full(dst);  s.read_pod<T>();      // -> result<unit> / result<T>; error if the stream ends early
+// write (write capability):
+s.writable_bytes();                           // -> span<byte> free space to write into: [curr, end)
+s.produce(n);                              // mark n bytes (written into writable_bytes()) as produced
+s.write(src);  s.write_pod(v);            // -> result<unit>; a bounded sink that is full => error
+// seekable only:
+s.seek_to(abs);  s.skip(delta);  s.seek_from_end(off);   // -> result<i64> new position
+s.position();  s.size();  s.remaining_bytes();  // -> result<i64>; dry queries — do NOT disturb the buffer
+cc::move(s).try_as_seekable();            // -> optional<seekable_*>; consumes s on success, else s stays valid
+
+#include <clean-core/streams/span_stream.hh> // in-memory adapters (seekable, unbuffered — whole span is the window)
+cc::span_read_stream_adapter(bytes);  cc::span_write_stream_adapter(buf);  cc::span_read_write_stream_adapter(buf);
+// construct explicitly; converts IMPLICITLY to the matching stream (or a legal narrowing). Must outlive the stream.
+
+#include <clean-core/streams/file_stream.hh> // buffered file adapters (seekable; 4 KiB inline buffer)
+cc::file_read_stream_adapter::open(path);        // -> result<...>  existing file, read
+cc::file_write_stream_adapter::create(path);     // -> result<...>  create / truncate, write from 0
+cc::file_write_stream_adapter::open(path);       // -> result<...>  keep contents, overwrite in place from 0
+cc::file_write_stream_adapter::append(path);     // -> result<...>  window starts at EOF; writing grows the file
+cc::file_read_write_stream_adapter::open(path);  // -> result<...>  existing file, read + overwrite + grow-while-writing
+adapter.stream();                         // -> the natural seekable_* stream (or implicit conversion, incl. non-seekable)
+// Growth: create/open/append differentiate write intent; a read_write stream grows too (write past EOF,
+// including a fresh seek-to-end + write) — it tracks the read boundary and write capacity as separate ends.
+
+#include <clean-core/streams/stream_flush.hh> // authoring: write your own adapter (socket, compressor, ...)
+cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see docs/writing-a-stream.md
+```
+
 ## Gotchas
 
 - **Assertions are on in debug & relwithdebinfo, off in release.** The default
@@ -486,3 +527,11 @@ cc::add_crash_context_hook(&fn);                    // void()noexcept printed be
 - **Not yet implemented (stubs — don't reach for these):** `map`, `set`,
   `ringbuffer`, `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`,
   and `flags`. Check the header before relying on one.
+- **Streams are move-only real types (private-inheritance wrappers over one engine).**
+  Streams do NOT convert to each other — the ADAPTER converts straight to any legal
+  narrowing (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write`
+  never). A moved-from stream asserts on use.
+- **Flush a write stream before dropping its adapter** — buffered bytes are lost
+  otherwise (there is no auto-flush). A stream borrows into its adapter, so the
+  adapter must outlive it; the file adapter's 4 KiB buffer is *inline*, so once a
+  stream is taken the adapter is effectively pinned (don't move it).

@@ -32,6 +32,9 @@ clean-core/
   clean-core is allowed to depend on directly, and why.
 - [customization-points](customization-points.md) — the `cc::custom::` trait +
   hidden-friend protocol that operations like hashing use to let types opt in.
+- [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter:
+  the `cc::seek_dir` / flush contract, a minimal worked example, and the buffered /
+  write / read_write cases.
 - [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) — XXH3 vs
   hand-rolled short-string hashers across a length sweep (the small-key cost in hash maps).
 - [benchmarks/hash-benchmark](benchmarks/hash-benchmark.md) — raw xxHash 64/128 vs the
@@ -39,6 +42,9 @@ clean-core/
   the `CC_PURE` attribute that frees the wrapper.
 - [benchmarks/allocation-benchmark](benchmarks/allocation-benchmark.md) — mimalloc vs the
   system allocator across sizes; mimalloc leads at every size and is only mildly `/Ob1`-sensitive.
+- [benchmarks/file-stream-benchmark](benchmarks/file-stream-benchmark.md) — the file stream
+  adapters vs `std::fstream` across a granularity sweep: ~11×/16× faster single-byte via the
+  buffer window, narrowing to parity as records grow.
 
 Add further deep-dive docs here as kebab-case `.md` files and link them from this
 list.
