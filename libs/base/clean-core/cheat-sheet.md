@@ -136,7 +136,7 @@ cache.add_default_in_memory_provider(max=4096);   // or add_provider(shared_ptr<
 V v = cache.acquire(key, [&]{ return make(); });  // first tier to hit backfills faster tiers; full miss runs factory
 cache.apply_bookkeeping();                        // e.g. in-memory eviction (clear past max_entries)
 // tiers: cc::key_value_provider<K,V> (try_get/set/apply_bookkeeping) — extension seam for disk/network caches.
-// TODO(clean-core): std::unordered_map inside, to migrate to cc::map when it lands.
+// TODO(clean-core): std::unordered_map inside; cc::map has landed, the migration has not.
 ```
 
 ## Views — non-owning (must not outlive their data)
@@ -505,6 +505,6 @@ cc::add_crash_context_hook(&fn);                    // void()noexcept printed be
   (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
   state alive.
 - **`create_uninitialized` requires a trivial `T`.**
-- **Not yet implemented (stubs — don't reach for these):** `map`, `set`,
-  `ringbuffer`, `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`,
-  and `flags`. Check the header before relying on one.
+- **Not yet implemented (stubs — don't reach for these):** `ringbuffer`,
+  `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`, and `flags`.
+  Check the header before relying on one.
