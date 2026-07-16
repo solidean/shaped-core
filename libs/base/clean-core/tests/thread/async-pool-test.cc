@@ -141,6 +141,83 @@ TEST("async - stress: many small graphs on a pool")
     }
 }
 
+namespace
+{
+// A value type that counts its own live instances. This is the leak detector, and it has to be the VALUE rather
+// than something in the frame: the abandoned entries are overwhelmingly nodes that already RESOLVED (see the
+// test below), and resolving destroys the frame. A leaked resolved node still holds its value, so this sees it;
+// a frame-side guard would not.
+struct counted
+{
+    static inline std::atomic<int> live{0};
+
+    cc::i64 v = 0;
+
+    counted() { live.fetch_add(1, std::memory_order_relaxed); }
+    explicit counted(cc::i64 x) : v(x) { live.fetch_add(1, std::memory_order_relaxed); }
+    counted(counted const& o) : v(o.v) { live.fetch_add(1, std::memory_order_relaxed); }
+    counted(counted&& o) noexcept : v(o.v) { live.fetch_add(1, std::memory_order_relaxed); }
+    counted& operator=(counted const&) = delete;
+    counted& operator=(counted&&) = delete;
+    ~counted() { live.fetch_sub(1, std::memory_order_relaxed); }
+};
+
+// A fork-join tree that spawns its children dynamically, so the work is published BY the workers into their own
+// deques -- which is the only way anything ever lands there.
+cc::shared_async<counted> spawn_counted_tree(int depth)
+{
+    return cc::make_async_lazy<counted>(
+        [depth, l = cc::shared_async<counted>(),
+         r = cc::shared_async<counted>()](async_context<counted>& actx) mutable -> cc::async_step_status
+        {
+            if (depth == 0)
+                return actx.success(counted(1));
+            if (l == nullptr)
+            {
+                l = spawn_counted_tree(depth - 1);
+                r = spawn_counted_tree(depth - 1);
+                (void)actx.require(l);
+                (void)actx.require(r);
+                return actx.wait_for_dependencies();
+            }
+            return actx.success(counted(l->value_ptr()->v + r->value_ptr()->v));
+        });
+}
+} // namespace
+
+TEST("async - destroying a pool releases work abandoned in its deques")
+{
+    // Abandoning a graph is explicitly allowed (see the pool's lifetime note), and a pool torn down with work
+    // still queued must drop those nodes' strong refs -- otherwise the abandoned work pins its whole graph.
+    //
+    // A queue of handles gets this for free. A queue of RAW pointers, each carrying a hand-held strong count
+    // (which is what a lock-free deque requires), only gets it if the destructor drains explicitly. This is the
+    // leak the deque rewrite invites, and no other pool test can see it: they all drive to completion first.
+    //
+    // What actually gets abandoned is worth knowing, because it is not what you would guess. Publish-all-but-one
+    // pushes a node's siblings onto the worker's own deque and then drives them inline anyway, so they finish
+    // and their queue entries survive as READY NO-OPS that only a later pop would clear. Set _stop while a
+    // worker is deep in an inline drive and it leaves the loop with a deque full of exactly those -- resolved
+    // nodes, strong refs held, frames long gone. Hence `counted` on the value.
+    //
+    // Two sizing traps, both hit while writing this: schedule_on() routes to the INJECTION queue (whose entries
+    // are handles and free themselves), so the tree must be spawned by the workers to reach a deque at all; and
+    // a small tree simply completes, leaving the deques empty and the test green for the wrong reason.
+    counted::live.store(0, std::memory_order_relaxed);
+    {
+        cc::async_thread_pool pool(4);
+
+        auto root = spawn_counted_tree(16); // 131k nodes: too many to be finished inside the window below
+        root->schedule_on(pool);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        // pool and root both die here. The destructor cannot interrupt a running frame -- and the eager
+        // depth-first drive means "a running frame" is most of the tree -- so it blocks until that unwinds,
+        // then the workers exit with whatever is still queued.
+    }
+    CHECK(counted::live.load(std::memory_order_relaxed) == 0);
+}
+
 // ============================================================================
 // multi-scheduler correctness — a graph reached from two schedulers at once
 // ============================================================================

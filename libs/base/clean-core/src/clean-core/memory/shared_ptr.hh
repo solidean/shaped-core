@@ -48,10 +48,15 @@
 // points, so destroy_object must NOT destroy them: with trailing control this is automatic (separate storage);
 // intrusive control must run a payload-only teardown and leave the count members intact until free_storage.
 //
-// Create only via cc::make_shared<T, Traits>(...): no adoption of an arbitrary raw pointer (a node is born
-// owned, strong = 1). Upcasts to a base with the SAME Traits are allowed; aliasing/projection to a subobject
-// is not (deferred). from_alive() is the one intrusive escape hatch: mint a handle from a pointer whose
-// storage is known to still be alive (strong or weak > 0).
+// Create only via cc::make_shared<T, Traits>(...): a node is born owned, strong = 1. Upcasts to a base with the
+// SAME Traits are allowed; aliasing/projection to a subobject is not (deferred).
+//
+// Two intrusive escape hatches, and the difference between them is the whole point:
+//   from_alive(p)       MINTS a new count. Requires storage known to still be alive (strong or weak > 0).
+//   release() / adopt() MOVE an existing count and mint nothing — count-neutral by construction. They exist so a
+//                       count can live in hand-rolled storage (a tagged word, a lock-free array of raw pointers)
+//                       without a redundant inc/dec round trip. Whoever holds the raw pointer owes the release.
+// Neither adopts an *arbitrary* raw pointer: from_alive needs live storage, adopt needs a count you already own.
 
 namespace cc
 {
@@ -261,14 +266,27 @@ public:
         return r;
     }
 
-private:
-    // adopt an already-held strong reference without bumping (make_shared's birth ref, weak::lock's upgrade).
+    /// Take over one strong count the caller already holds — no inc_strong. The twin of release(): together they
+    /// move a strong reference into and out of hand-rolled storage (e.g. a lock-free deque of raw node pointers)
+    /// without a redundant inc/dec pair. The caller must not also release its own count.
+    /// Also make_shared's birth ref and weak_ptr::lock's upgrade, which likewise own a count already.
     [[nodiscard]] static shared_ptr adopt(T* p)
     {
         shared_ptr r;
         r._ptr = p;
         return r;
     }
+
+    /// Give up ownership of the strong count without releasing it, returning the raw pointer (null if empty).
+    /// The caller takes over releasing it — via adopt(), or the object leaks.
+    [[nodiscard]] T* release()
+    {
+        T* const p = _ptr;
+        _ptr = nullptr;
+        return p;
+    }
+
+private:
     void inc()
     {
         if (_ptr != nullptr)

@@ -53,6 +53,22 @@ cc::async_thread_pool::~async_thread_pool()
     for (auto& w : _workers)
         if (w->thread.joinable())
             w->thread.join();
+
+    // Every worker is joined, so two things are now true and both are load-bearing:
+    //
+    //  * The deques hold RAW pointers, each owning a strong count nobody will ever claim. Unlike a queue of
+    //    handles, they do not free themselves -- abandoned work would pin its entire graph forever. So drain
+    //    them by hand: adopting and immediately dropping each entry pays back the count push_local handed over.
+    //  * try_take is owner-only, but "owner" means "the one thread touching this deque", and with the workers
+    //    gone that is us. Same reason ~chase_lev_deque may free its retired buffers: no thief can exist.
+    //
+    // The injection queue needs none of this -- it holds real handles, so its vector frees them itself.
+    for (auto& w : _workers)
+    {
+        async_node_base* raw = nullptr;
+        while (w->deque.try_take(raw))
+            (void)async_node_ptr::adopt(raw); // adopt + immediate drop == release the count
+    }
 }
 
 void cc::async_thread_pool::enqueue(async_node_ptr node)
@@ -73,7 +89,10 @@ void cc::async_thread_pool::submit(async_node_ptr node)
 
 void cc::async_thread_pool::push_local(worker& w, async_node_ptr node)
 {
-    w.deque.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(cc::move(node)); });
+    // Hand the strong count to the deque: release() gives up ownership without dropping the count, so this is
+    // count-neutral -- no inc/dec pair for the round trip. From here the deque owes the release, either to
+    // whoever claims the entry or to the pool destructor's drain.
+    w.deque.push(node.release());
     _pending.fetch_add(1, std::memory_order_seq_cst);
     wake_one();
 }
@@ -91,34 +110,24 @@ void cc::async_thread_pool::wake_one()
 
 cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w)
 {
-    // 1. our own deque, LIFO (hot: freshly spawned children)
-    if (auto n = w.deque.lock(
-            [](cc::vector<async_node_ptr>& q) -> async_node_ptr
-            {
-                if (q.empty())
-                    return nullptr;
-                return q.pop_back();
-            }))
-        return n;
+    // 1. our own deque, LIFO (hot: freshly spawned children). Uncontended in the common case.
+    async_node_base* raw = nullptr;
+    if (w.deque.try_take(raw))
+        return async_node_ptr::adopt(raw); // take the strong count back out of the deque
 
-    // 2. steal from a sibling's opposite (old) end
+    // 2. steal from a sibling's opposite (old) end -- the oldest entry is the coldest and usually roots the
+    //    biggest subtree. An `abort` (lost the race) just moves on to the next victim: someone else got that
+    //    node, so it is accounted for, and _pending still holds the worker off the condvar if work remains.
     for (auto& other : _workers)
     {
         if (other.get() == &w)
             continue;
 
-        auto stolen = other->deque.try_lock(
-            [&](cc::vector<async_node_ptr>& q) -> async_node_ptr
-            {
-                if (q.empty())
-                    return nullptr;
-                return q.pop_at(0);
-            });
-        if (stolen.has_value() && stolen.value() != nullptr)
-            return stolen.value();
+        if (other->deque.try_steal(raw) == cc::impl::steal_result::success)
+            return async_node_ptr::adopt(raw);
     }
 
-    // 3. the shared injection queue (foreign submits / cross-thread wakeups)
+    // 3. the shared injection queue (foreign submits). Strong handles: it is cold, so it stays a plain mutex.
     if (auto n = _injection.lock(
             [](cc::vector<async_node_ptr>& q) -> async_node_ptr
             {

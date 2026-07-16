@@ -18,12 +18,15 @@
 // realistic hand-written call-based analog, NOT maximally-optimized straight-line code — that is the
 // honest per-node comparison. Results are XOR-folded into the u64 returned from each pass -> bench::sink.
 //
-// Manual test (nx::config::manual): not part of the normal sweep; run by exact name.
+// Two entry points: a GUIDE_BENCHMARK recording three representative points for the perf gate (this is what
+// guards Phase 1's result against regression), and a manual full sweep printing the whole table. Neither runs
+// in the normal test sweep; both are reachable by exact name.
 
 #include "../bench_util.hh"
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/thread/async.hh>
+#include <nexus/guide.hh>
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -101,13 +104,17 @@ cc::shared_async<i64> build_sum_tree(int depth, i64 seed)
 // --- measurement plumbing -------------------------------------------------------------------------------
 
 // One table row: async vs direct, in Mop/s (nodes/s) and ns/op (per node), plus the tax = async / direct.
-void report(char const* label, isize nodes, double async_ops_per_sec, double direct_ops_per_sec)
+// `record` also files the async ns/node as a guide metric — see run_guide().
+void report(char const* label, isize nodes, double async_ops_per_sec, double direct_ops_per_sec, bool record)
 {
     double const a_mops = async_ops_per_sec / 1e6;
     double const a_ns = 1e9 / async_ops_per_sec;
     double const d_ns = 1e9 / direct_ops_per_sec;
     double const tax = a_ns / d_ns;
     std::printf("%-22s %8lld %13.1f %13.2f %14.2f %9.1fx\n", label, (long long)nodes, a_mops, a_ns, d_ns, tax);
+
+    if (record)
+        nx::guide::report_raw(label, a_ns, "ns/node", /*higher_is_better*/ false);
 }
 
 // Drive a freshly-built root to completion on the calling thread's scheduler, return its value.
@@ -125,7 +132,8 @@ i64 drive(cc::singlethreaded_scheduler& sched, cc::shared_async<i64> const& root
 
 // One full single-lazy cycle — create, schedule, drive, read, destroy — pinned as one searchable symbol so its
 // codegen can be disassembled or traced directly:
-//   dev.py assembly trace --target clean-core-test --symbol single_lazy_probe -- "bench-async (single-thread drive)"
+//   dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 \
+//     -- "bench-async (single-thread drive)"
 // This is the "single lazy inline" row: the born-ready floor plus the scheduler push/pop, try_begin_running,
 // one poll turn through the (inline) frame, finish_value, and teardown. `sched` must already be bound by an
 // async_worker_scope. Kept alive by a reference from the test below (a TU-local noinline function is otherwise
@@ -149,7 +157,7 @@ int graphs_for(isize nodes)
 // --- cases (simplest -> up) -----------------------------------------------------------------------------
 
 // Floor: born-ready node (no scheduler, no frame) — node alloc + one finish + teardown.
-void case_born_ready()
+void case_born_ready(bool record)
 {
     constexpr isize nodes = 1;
     int const G = graphs_for(nodes);
@@ -174,11 +182,11 @@ void case_born_ready()
                                                          acc ^= u64(direct_leaf(i64(g)));
                                                      return acc;
                                                  });
-    report("born-ready read", nodes, a, d);
+    report("born-ready read", nodes, a, d, record);
 }
 
 // Single lazy node driven inline: node alloc + closure + one poll + finish + teardown + scheduler push/pop.
-void case_single_lazy(cc::singlethreaded_scheduler& sched)
+void case_single_lazy(cc::singlethreaded_scheduler& sched, bool record)
 {
     constexpr isize nodes = 1;
     int const G = graphs_for(nodes);
@@ -204,11 +212,11 @@ void case_single_lazy(cc::singlethreaded_scheduler& sched)
                                                          acc ^= u64(direct_leaf(i64(g)));
                                                      return acc;
                                                  });
-    report("single lazy inline", nodes, a, d);
+    report("single lazy inline", nodes, a, d, record);
 }
 
 // Single-dependency transform a -> b: the two-phase frame (register dep, wait, compute).
-void case_single_dep(cc::singlethreaded_scheduler& sched)
+void case_single_dep(cc::singlethreaded_scheduler& sched, bool record)
 {
     constexpr isize nodes = 2;
     int const G = graphs_for(nodes);
@@ -236,12 +244,12 @@ void case_single_dep(cc::singlethreaded_scheduler& sched)
                                                          acc ^= u64(direct_step(direct_leaf(i64(g))));
                                                      return acc;
                                                  });
-    report("single-dep a->b", nodes, a, d);
+    report("single-dep a->b", nodes, a, d, record);
 }
 
 // Deep linear chain: amortized per-node cost. `n` straddles the inline depth cap (async_max_inline_depth
 // == 128): below it the drive is depth-first inline, above it the poll loop falls back to subscribe+park.
-void case_chain(cc::singlethreaded_scheduler& sched, char const* label, int n)
+void case_chain(cc::singlethreaded_scheduler& sched, char const* label, int n, bool record)
 {
     isize const nodes = n;
     int const G = graphs_for(nodes);
@@ -268,11 +276,11 @@ void case_chain(cc::singlethreaded_scheduler& sched, char const* label, int n)
                                                      }
                                                      return acc;
                                                  });
-    report(label, nodes, a, d);
+    report(label, nodes, a, d, record);
 }
 
 // Fan-in c = f(a, b): per-dep unwrap + short-circuit on a two-leaf sum.
-void case_fan_in(cc::singlethreaded_scheduler& sched)
+void case_fan_in(cc::singlethreaded_scheduler& sched, bool record)
 {
     constexpr isize nodes = 3;
     int const G = graphs_for(nodes);
@@ -302,11 +310,11 @@ void case_fan_in(cc::singlethreaded_scheduler& sched)
                                               acc ^= u64(direct_add(direct_leaf(i64(g)), direct_leaf(i64(g) + 1)));
                                           return acc;
                                       });
-    report("fan-in c=f(a,b)", nodes, a, d);
+    report("fan-in c=f(a,b)", nodes, a, d, record);
 }
 
 // Balanced sum-tree driven single-threaded: per-node cost at scale (depth 13 -> 16383 nodes).
-void case_sum_tree(cc::singlethreaded_scheduler& sched, int depth)
+void case_sum_tree(cc::singlethreaded_scheduler& sched, int depth, bool record)
 {
     isize const nodes = (isize(1) << (depth + 1)) - 1;
     int const G = graphs_for(nodes); // == 1 for depth 13
@@ -328,38 +336,67 @@ void case_sum_tree(cc::singlethreaded_scheduler& sched, int depth)
                                                          acc ^= u64(direct_sum_tree(depth, i64(g)));
                                                      return acc;
                                                  });
-    report("sum-tree (depth 13)", nodes, a, d);
+    report("sum-tree (depth 13)", nodes, a, d, record);
 }
 
-void run_all()
+void print_header()
 {
-    std::printf("\n=== cc::async single-thread drive (median of 5) ===\n");
     std::printf("%-22s %8s %13s %13s %14s %10s\n", "case", "nodes", "async Mop/s", "async ns/op", "direct ns/op", "tax");
     std::printf("%-22s %8s %13s %13s %14s %10s\n", "----", "-----", "-----------", "-----------", "------------", "---");
+}
 
-    case_born_ready();
+void run_all(bool record)
+{
+    std::printf("\n=== cc::async single-thread drive (median of 5) ===\n");
+    print_header();
+
+    case_born_ready(record);
 
     cc::singlethreaded_scheduler sched;
     cc::async_worker_scope scope(sched); // bind once; reused across every driven case
 
-    case_single_lazy(sched);
-    case_single_dep(sched);
-    case_chain(sched, "chain N=64 (in-cap)", 64);
-    case_chain(sched, "chain N=512 (>cap)", 512);
-    case_fan_in(sched);
-    case_sum_tree(sched, 13);
+    case_single_lazy(sched, record);
+    case_single_dep(sched, record);
+    case_chain(sched, "chain N=64 (in-cap)", 64, record);
+    case_chain(sched, "chain N=512 (>cap)", 512, record);
+    case_fan_in(sched, record);
+    case_sum_tree(sched, 13, record);
 
     std::printf("\nop = one async node (create -> drive -> destroy). tax = async ns/op / direct ns/op\n");
     std::printf("direct = hand-written non-inlined analog (not folded); baseline must read non-zero.\n");
     std::fflush(stdout);
 }
+
+// The three points the guide benchmark records. Chosen to cover the distinct cost shapes with the fewest
+// measurements: the undriven floor, one full scheduler round-trip, and the amortized per-node cost at scale
+// (which is also the only case that exercises the dependency path). The full sweep's other rows are
+// interpolations between these, so they add runtime without adding regression coverage — and guide benchmarks
+// are swept across every binary by dev.py pgo.
+void run_guide()
+{
+    std::printf("\n=== cc::async single-thread drive (guide points, median of 5) ===\n");
+    print_header();
+
+    case_born_ready(/*record*/ true);
+
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope const scope(sched);
+
+    case_single_lazy(sched, /*record*/ true);
+    case_sum_tree(sched, 13, /*record*/ true);
+    std::fflush(stdout);
+}
 } // namespace
 
-// Single-thread async overhead vs a hand-written baseline. Manual: run by exact name, e.g.
-//   uv run dev.py --mirror-test-output test "bench-async (single-thread drive)"
-TEST("bench-async (single-thread drive)", nx::config::manual)
+// The regression guard for Phase 1's single-thread result: three representative points, recorded for the perf
+// gate. Also hosts the disassembly probe, so the documented trace command targets this (leaner) test:
+//   uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 --stats \
+//     -- "bench-async (single-thread drive)"
+// An exact (non-wildcard) name runs a test regardless of bucket, so this is also reachable via a plain
+// `dev.py test "bench-async (single-thread drive)"`.
+GUIDE_BENCHMARK("bench-async (single-thread drive)")
 {
-    run_all();
+    run_guide();
 
     // Keep the disassembly probe alive (TU-local + noinline would otherwise be dead-code-eliminated). Called
     // repeatedly on ONE scheduler so a trace can skip past the cold hits: the first enqueue grows the
@@ -369,4 +406,11 @@ TEST("bench-async (single-thread drive)", nx::config::manual)
     cc::async_worker_scope const scope(sched);
     for (i64 i = 0; i < 3; ++i)
         bench::sink ^= single_lazy_probe(sched, 7 + i);
+}
+
+// The full human-facing table: every case, no recording. Run by exact name, e.g.
+//   uv run dev.py --mirror-test-output test "bench-async (single-thread drive, full sweep)"
+TEST("bench-async (single-thread drive, full sweep)", nx::config::manual)
+{
+    run_all(/*record*/ false);
 }

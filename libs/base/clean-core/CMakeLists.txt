@@ -190,6 +190,7 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/allocation-benchmark.cc
         tests/benchmarks/async/async-benchmark.cc
         tests/benchmarks/async/born-ready-benchmark.cc
+        tests/benchmarks/async/pool-benchmark.cc
         tests/benchmarks/node-allocation-design-benchmark.cc
         tests/benchmarks/node-allocation-design-refill.cc
 
@@ -243,6 +244,7 @@ if(SC_BUILD_TESTS)
 
         tests/thread/async-test.cc
         tests/thread/async-pool-test.cc
+        tests/thread/chase_lev_deque-test.cc
         tests/thread/mutex-test.cc
         tests/thread/thread-test.cc
         tests/thread/threaded_actor-test.cc

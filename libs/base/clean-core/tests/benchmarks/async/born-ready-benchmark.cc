@@ -19,13 +19,15 @@
 // Anti-fold: each node is heap-allocated (unelidable) and its address/value is XOR-folded into the u64
 // returned from each pass -> bench::sink, so nothing is optimized away.
 //
-// Manual test (nx::config::manual): run by exact name.
+// Runs as a GUIDE_BENCHMARK: not part of the normal sweep, but recorded for the perf gate and reachable by
+// exact name.
 
 #include "../bench_util.hh"
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
+#include <nexus/guide.hh>
 #include <nexus/test.hh>
 
 #include <cstdio>
@@ -60,16 +62,21 @@ CC_DONT_INLINE u64 make_async_lazy_probe()
 }
 
 // One ladder row: ns/op and the delta from a reference stage (prev_ns < 0 prints "-" for the floor row).
-void report(char const* label, double ops_per_sec, double prev_ns, char const* note)
+// `metric` names the row as a guide metric; null records nothing (the intermediate rows are only interesting
+// as deltas, so recording them would add gate noise without adding coverage).
+void report(char const* label, double ops_per_sec, double prev_ns, char const* note, char const* metric = nullptr)
 {
     double const ns = 1e9 / ops_per_sec;
     if (prev_ns < 0)
         std::printf("%-34s %9.2f %12s   %s\n", label, ns, "-", note);
     else
         std::printf("%-34s %9.2f %+12.2f   %s\n", label, ns, ns - prev_ns, note);
+
+    if (metric != nullptr)
+        nx::guide::report_raw(metric, ns, "ns/op", /*higher_is_better*/ false);
 }
 
-void run()
+void run(bool record)
 {
     constexpr int G = 1024; // ops per timed pass; each op is one create(+read)+destroy cycle
     double const units = double(G);
@@ -158,11 +165,15 @@ void run()
     double const manual_ns = 1e9 / manual;
     double const value_ns = 1e9 / value;
 
-    report("raw node alloc+free (floor)", floor, -1, "allocator only");
-    report("+ make_async_manual", manual, floor_ns, "control init + node ctor/dtor");
+    // The recorded rows: the allocator floor doubles as the contamination canary (nothing here touches it, so
+    // if it moves the run is dirty), and the other three are the numbers the async system docs quote.
+    report("raw node alloc+free (floor)", floor, -1, "allocator only", record ? "node-alloc-free (canary)" : nullptr);
+    report("+ make_async_manual", manual, floor_ns, "control init + node ctor/dtor",
+           record ? "make_async_manual" : nullptr);
     report("+ make_async_from_value", value, manual_ns, "push_value: build slot + ready + teardown");
-    report("+ try_value (full born-ready)", full, value_ns, "value read");
-    report("cold make_async_lazy (undriven)", lazy, manual_ns, "frame/closure build + teardown");
+    report("+ try_value (full born-ready)", full, value_ns, "value read", record ? "born-ready full" : nullptr);
+    report("cold make_async_lazy (undriven)", lazy, manual_ns, "frame/closure build + teardown",
+           record ? "cold make_async_lazy" : nullptr);
 
     std::printf("\nladder deltas are cumulative (vs the row above); the lazy row is vs the empty node.\n");
     std::printf("op = one create(+read)+destroy cycle. full born-ready total = the '+ try_value' ns/op.\n");
@@ -170,11 +181,15 @@ void run()
 }
 } // namespace
 
-// Breakdown of the born-ready async overhead over the raw node alloc+free. Run by exact name:
-//   uv run dev.py --mirror-test-output test "bench-async born-ready decomposition"
-TEST("bench-async born-ready decomposition", nx::config::manual)
+// Breakdown of the born-ready async overhead over the raw node alloc+free, recorded for the perf gate. The
+// whole ladder runs either way (the rows are cumulative deltas — you cannot measure one without the ones below
+// it); `record` only selects which rows are filed as metrics. Also hosts the disassembly probes, so the
+// documented trace command targets this name:
+//   uv run dev.py assembly trace --target clean-core-test --symbol make_async_manual_probe --stats \
+//     -- "bench-async born-ready decomposition"
+GUIDE_BENCHMARK("bench-async born-ready decomposition")
 {
-    run();
+    run(/*record*/ true);
 
     // Keep the disassembly probes alive (TU-local + noinline would otherwise be dead-code-eliminated).
     bench::sink ^= make_async_manual_probe();

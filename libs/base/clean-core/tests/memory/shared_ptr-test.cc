@@ -173,6 +173,25 @@ TEST("shared_ptr - default traits: weak lock while alive, expired after last str
     w = nullptr;                 // last weak -> storage freed (no crash / double free)
 }
 
+TEST("shared_ptr - default traits: release/adopt round trip keeps the sole-owner path intact")
+{
+    // node_traits (below) pins count-neutrality on hand-rolled counts; this pins the same round trip through the
+    // DEFAULT traits, which are the ones built on cc::fused_refcount. Since release/adopt never touch the
+    // counter, the sole-owner (1,1) no-RMW fast path must still fire on the adopter's drop.
+    tracked::reset();
+    {
+        auto p = cc::make_shared<tracked>(42);
+        tracked* const raw = p.release();
+        CHECK(tracked::live == 1); // released, not destroyed
+        CHECK(tracked::destroyed == 0);
+
+        auto back = cc::shared_ptr<tracked>::adopt(raw);
+        CHECK(back->value == 42);
+    }
+    CHECK(tracked::live == 0);
+    CHECK(tracked::destroyed == 1); // exactly once, via the adopted count
+}
+
 TEST("shared_ptr - default traits: plain value type (shared_ptr<int>)")
 {
     auto p = cc::make_shared<int>(123);
@@ -274,6 +293,100 @@ TEST("shared_ptr - intrusive: from_alive mints an extra strong handle")
     }
     CHECK(node_base::payload_torn == 1);
     CHECK(node_base::freed == 1);
+}
+
+// --- release()/adopt(): moving a strong count into and out of hand-rolled storage ---------------------------
+// The twin of weak_ptr's pair. These exist so a count can live somewhere shared_ptr itself cannot (a lock-free
+// deque of raw node pointers, a tagged word), so the property that matters is COUNT-NEUTRALITY: the round trip
+// must not touch the refcount at all. Behavior alone would pass even if it did an inc/dec pair, hence the
+// explicit count assertions.
+
+TEST("shared_ptr - intrusive: release/adopt round trip is count-neutral")
+{
+    node_base::reset();
+    {
+        auto p = cc::make_shared<node_derived, node_traits>(7);
+        node_base* const raw = p.get();
+        CHECK(raw->strong.load() == 1);
+        CHECK(raw->weak.load() == 1);
+
+        node_base* const handed_off = p.release(); // hand the count to raw storage: no dec, nothing destroyed
+        CHECK(handed_off == raw);
+        CHECK(p == nullptr); // the released handle is empty and owes nothing
+        CHECK(node_base::payload_torn == 0);
+        CHECK(raw->strong.load() == 1); // still exactly one strong: the count MOVED, it was not dropped
+        CHECK(raw->weak.load() == 1);
+
+        auto back = node_ptr::adopt(handed_off); // take it back: no inc either
+        CHECK(back.get() == raw);
+        CHECK(raw->strong.load() == 1);
+        CHECK(raw->weak.load() == 1);
+        CHECK(node_base::payload_torn == 0);
+    }
+    CHECK(node_base::payload_torn == 1); // the adopted count still fires teardown exactly once
+    CHECK(node_base::freed == 1);
+}
+
+TEST("shared_ptr - intrusive: an adopted count is the one that destroys")
+{
+    node_base::reset();
+    node_base* raw = nullptr;
+    node_weak w;
+    {
+        auto p = cc::make_shared<node_derived, node_traits>(1);
+        raw = p.get();
+        w = p; // a weak ref, so storage outlives the object
+
+        raw = p.release();
+        CHECK(w.lock().is_valid()); // still alive: the count sits in raw storage, but it is still a count
+    }
+    CHECK(node_base::payload_torn == 0); // p going out of scope destroyed nothing: it no longer owned anything
+
+    {
+        auto owner = node_ptr::adopt(raw);
+        CHECK(owner->strong.load() == 1);
+    }
+    CHECK(node_base::payload_torn == 1); // dropping the adopter is what tore it down
+    CHECK(node_base::freed == 0);        // ... but the weak still pins the storage
+    CHECK(!w.lock().is_valid());         // and can no longer be upgraded
+
+    w = nullptr;
+    CHECK(node_base::freed == 1);
+}
+
+TEST("shared_ptr - release/adopt on an empty handle is a safe no-op")
+{
+    node_base::reset();
+    {
+        node_ptr empty;
+        CHECK(empty.release() == nullptr);
+
+        auto adopted = node_ptr::adopt(nullptr);
+        CHECK(adopted == nullptr); // and dropping it must not touch a null
+    }
+    CHECK(node_base::payload_torn == 0);
+    CHECK(node_base::freed == 0);
+}
+
+TEST("shared_ptr - intrusive: release from a derived handle, adopt into the base")
+{
+    // The exact shape the async pool's deque uses: shared_async<T> is released to a raw async_node_base*, and
+    // the count is later adopted back through the base-typed handle.
+    node_base::reset();
+    {
+        auto d = cc::make_shared<node_derived, node_traits>(5);
+        node_ptr b = d; // upcast: same control, now 2 strong
+        CHECK(d->strong.load() == 2);
+
+        node_base* const raw = b.release();
+        CHECK(d->strong.load() == 2); // the released count is still held, just not by a handle
+
+        auto back = node_ptr::adopt(raw);
+        CHECK(d->strong.load() == 2);
+        CHECK(back.get() == static_cast<node_base*>(d.get()));
+    }
+    CHECK(node_base::payload_torn == 1);
+    CHECK(node_base::freed == 1); // freed once, with the derived size class
 }
 
 TEST("shared_ptr - strong-only traits: no weak, destroy + free together")

@@ -7,6 +7,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
+#include <clean-core/thread/impl/chase_lev_deque.hh>
 #include <clean-core/thread/mutex.hh>
 
 #if CC_HAS_THREADS
@@ -18,9 +19,13 @@
 
 // cc::async_thread_pool — a work-stealing scheduler that actually runs cc::async graphs concurrently.
 //
-// Each worker thread has a private LIFO deque (freshly spawned children stay hot) and steals from siblings
-// when idle; a shared injection queue takes work from foreign threads and cross-thread wakeups. The pool
-// implements the async_scheduler seam: schedule()/completion routing places nodes here (see async_node.hh).
+// Each worker thread owns a lock-free Chase-Lev deque (see impl/chase_lev_deque.hh): it pushes and pops its own
+// bottom end LIFO, so freshly spawned children stay hot and the common path takes no cross-thread sync at all;
+// idle workers steal from the top of a sibling's deque, which is the only place threads meet. A shared,
+// mutex-guarded injection queue takes work from foreign threads -- it is deliberately not lock-free, because
+// only genuinely foreign submits reach it (a worker waking a node enqueues locally), so it is cold by
+// construction. The pool implements the async_scheduler seam: schedule()/completion routing places nodes here
+// (see async_node.hh).
 //
 //   cc::async_thread_pool pool(cc::num_hardware_threads());
 //   cc::install_default_async_pool(pool);                 // compute nodes now route here
@@ -78,7 +83,12 @@ private:
     {
         async_thread_pool* pool = nullptr;
         int id = 0;
-        cc::mutex<cc::vector<async_node_ptr>> deque;
+
+        // Raw node pointers, each owning one strong count by hand (shared_ptr::release / adopt): a Chase-Lev
+        // slot is read speculatively by thieves that may lose the race for it, so it cannot hold a smart handle.
+        // The pool therefore owes every queued entry a release -- see the drain in ~async_thread_pool.
+        cc::impl::chase_lev_deque<async_node_base*> deque;
+
         std::thread thread;
     };
 
