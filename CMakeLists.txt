@@ -26,6 +26,15 @@ option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEV
 # so it is a whole-build switch: never set it per-target. Must precede include(Emscripten) below.
 option(SC_THREADS "Build with OS thread support; OFF forces a single-threaded build" ON)
 
+# Target CPU is x86-64. Only the instruction-tracer tool and its Zydis decoder ask — both are x86-64 by
+# construction, not by omission — so this is a plain variable rather than a cached option: it describes the
+# target, it is not a choice. Must precede add_subdirectory(extern), which gates the zydis build on it.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Mm][Dd]64|[Xx]86_64)$")
+    set(SC_ARCH_X64 ON)
+else()
+    set(SC_ARCH_X64 OFF)
+endif()
+
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
@@ -74,7 +83,11 @@ endif()
 # Developer tools. instruction-tracer needs the Win32 debug API, dbghelp and the fetched Zydis
 # decoder (extern/zydis); it gates itself on the `zydis` target existing, so a checkout that has
 # not fetched it still configures.
-if(SC_BUILD_TOOLS AND WIN32 AND TARGET zydis)
+#
+# x86-64 only, and not incidentally: it single-steps a debuggee through the x86-64 CONTEXT registers
+# (Rip/Rsp/EFlags) and decodes with Zydis, an x86 decoder. Windows on ARM64 has neither, so the tool is
+# absent there rather than ported — see SC_ARCH_X64 above.
+if(SC_BUILD_TOOLS AND WIN32 AND SC_ARCH_X64 AND TARGET zydis)
     add_subdirectory(tools/instruction-tracer)
 endif()
 

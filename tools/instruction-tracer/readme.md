@@ -12,7 +12,9 @@ It is deliberately not a general debugger. The narrow scope is what makes a few 
 debug loop preferable to DynamoRIO or Pin.
 
 **Windows x64 only.** Built by default in a top-level build (`SC_BUILD_TOOLS`), skipped when
-shaped-core is consumed via `add_subdirectory`.
+shaped-core is consumed via `add_subdirectory`. Also skipped — tool, tests and Zydis alike — on
+Windows ARM64: the x64 in the line above is structural (the x86-64 `CONTEXT` registers, an x86
+decoder), so there the tool is absent rather than ported.
 
 ## Quick start
 

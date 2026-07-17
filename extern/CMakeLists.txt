@@ -16,7 +16,8 @@ option(SC_USE_VENDORED_DXC "Wrap the built-from-source DXC in extern/dxc/.instal
 # Zydis is generated-on-demand rather than vendored as source (its amalgamated TU is ~12 MB of
 # instruction tables) and is only consumed by the optional, Windows-only instruction-tracer tool.
 # Wire it only when it has actually been fetched, so a plain checkout still configures; the tool
-# gates itself on the `zydis` target existing.
+# gates itself on the `zydis` target existing. SC_ARCH_X64 keeps that 12 MB TU off ARM64 builds,
+# where it decodes an instruction set nothing present can execute.
 option(SC_USE_VENDORED_ZYDIS "Build the fetched Zydis in extern/zydis/.install (OFF expects an external `zydis` target)" ON)
 
 if(SC_USE_VENDORED_MIMALLOC)
@@ -31,6 +32,6 @@ if(SC_USE_VENDORED_DXC AND WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.in
     add_subdirectory(dxc)
 endif()
 
-if(SC_USE_VENDORED_ZYDIS AND SC_BUILD_TOOLS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/zydis/.install/pin.txt")
+if(SC_USE_VENDORED_ZYDIS AND SC_BUILD_TOOLS AND SC_ARCH_X64 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/zydis/.install/pin.txt")
     add_subdirectory(zydis)
 endif()
