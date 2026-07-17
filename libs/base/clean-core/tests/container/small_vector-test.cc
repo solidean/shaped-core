@@ -1,3 +1,4 @@
+#include <clean-core/common/macros.hh> // CC_HAS_64BIT_POINTERS
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/small_vector.hh>
 #include <nexus/test.hh>
@@ -34,7 +35,52 @@ struct MoveOnly
     MoveOnly(MoveOnly const&) = delete;
     MoveOnly& operator=(MoveOnly const&) = delete;
 };
+
+// Over-aligned element types: exercise the k_align > 8 path (struct alignment bumped to alignof(T)).
+// Over16 mirrors a 16 B / 16-aligned float4; Over32 a 32 B / 32-aligned float8.
+struct alignas(16) Over16
+{
+    int value = 0;
+    Over16() = default;
+    explicit Over16(int v) : value(v) {}
+};
+struct alignas(32) Over32
+{
+    int value = 0;
+    Over32() = default;
+    explicit Over32(int v) : value(v) {}
+};
 } // namespace
+
+// The layout claims that hold on every target: N is a *minimum* inline capacity (a single raw buffer holds the
+// elements at the front, a u32 size, then the tagged resource word; the buffer auto-grows to fill the
+// footprint), and a larger inline buffer grows the struct without wasting leading bytes.
+static_assert(cc::small_vector<int, 4>::inline_capacity() >= 4, "inline_capacity is at least N");
+static_assert(cc::small_vector<cc::u16, 3>::inline_capacity() >= 3, "inline_capacity is at least N");
+static_assert(cc::small_vector<int, 64>::inline_capacity() >= 64, "keeps at least N inline");
+static_assert(sizeof(cc::small_vector<int, 64>) > sizeof(cc::small_vector<int, 4>),
+              "a large inline buffer grows the struct");
+static_assert(sizeof(cc::small_vector<int, 64>) < sizeof(cc::small_vector<int, 4>) + 64 * sizeof(int),
+              "no wasted leading region (tail waste gone)");
+// Over-aligned T needs no special dependency on alignof(T) <= 8: the struct picks up alignof(T) (elements sit
+// at offset 0, so they get T's alignment) and grows only as needed.
+static_assert(alignof(cc::small_vector<Over16, 2>) == 16, "over-aligned T bumps the struct alignment");
+static_assert(alignof(cc::small_vector<Over32, 1>) == 32, "32-aligned T bumps struct alignment to 32");
+static_assert(cc::small_vector<Over16, 2>::inline_capacity() >= 2, "keeps at least N inline");
+static_assert(cc::small_vector<Over32, 1>::inline_capacity() >= 1, "keeps at least N inline");
+
+// The byte counts are 64-bit-POINTER statements, not universal ones: the footprint is derived from
+// sizeof(cc::allocation<T>), so it tracks pointer width and wasm32 folds the same layout to a smaller struct
+// (see CC_HAS_64BIT_POINTERS). The SSO fold (mode flag + resource in one tagged word) keeps the common case at
+// 48 B — one line under the old 64 B — and a 16 B/16-aligned element still lands there, while a 32 B/32-aligned
+// one rounds the footprint up to 64 B.
+#if CC_HAS_64BIT_POINTERS
+static_assert(sizeof(cc::small_vector<int, 4>) == 48, "small_vector<int,4> should be 48 B");
+static_assert(sizeof(cc::small_vector<cc::u16, 3>) == 48, "small_vector<u16,3> should be 48 B");
+static_assert(cc::small_vector<int, 4>::inline_capacity() == 9, "auto-grows <int,4> to 9 inline");
+static_assert(sizeof(cc::small_vector<Over16, 2>) == 48, "16 B/16-aligned element still fits the 48 B footprint");
+static_assert(sizeof(cc::small_vector<Over32, 1>) == 64, "32 B/32-aligned element rounds the footprint to 64 B");
+#endif
 
 TEST("small_vector - empty is inline")
 {
@@ -42,8 +88,8 @@ TEST("small_vector - empty is inline")
     CHECK(v.size() == 0);
     CHECK(v.empty());
     CHECK(v.is_inline());
-    CHECK(v.capacity() == 4);
-    CHECK((cc::small_vector<int, 4>::inline_capacity() == 4));
+    CHECK((v.capacity() == cc::small_vector<int, 4>::inline_capacity())); // N=4 is a minimum; the layout grows it
+    CHECK(v.capacity() >= 4);
     CHECK(v.begin() == v.end());
 }
 
@@ -56,7 +102,7 @@ TEST("small_vector - fill within inline capacity does not allocate")
     v.push_back(40);
 
     CHECK(v.size() == 4);
-    CHECK(v.is_inline()); // still inline at exactly N
+    CHECK(v.is_inline()); // within inline capacity
     CHECK(v[0] == 10);
     CHECK(v[3] == 40);
     CHECK(v.front() == 10);
@@ -223,10 +269,10 @@ TEST("small_vector - factories mirror cc::vector")
     CHECK(d[0] == 0);
     CHECK(d.is_inline());
 
-    auto f = cc::small_vector<int, 2>::create_filled(5, 7); // > N -> heap
-    CHECK(f.size() == 5);
+    auto f = cc::small_vector<int, 2>::create_filled(20, 7); // exceeds inline capacity -> heap
+    CHECK(f.size() == 20);
     CHECK(!f.is_inline());
-    CHECK(f[4] == 7);
+    CHECK(f[19] == 7);
 
     int const src[3] = {1, 2, 3};
     auto c = cc::small_vector<int, 4>::create_copy_of(cc::span<int const>(src, 3));
@@ -264,12 +310,12 @@ TEST("small_vector - extract_allocation and try_extract_allocation")
         CHECK(inl.size() == 1);
 
         cc::small_vector<int, 2> heap;
-        for (int i = 0; i < 5; ++i)
+        for (int i = 0; i < 20; ++i)
             heap.push_back(i);
         CHECK(!heap.is_inline());
         auto taken = heap.try_extract_allocation();
         REQUIRE(taken.has_value());
-        CHECK(taken.value().obj_end - taken.value().obj_start == 5);
+        CHECK(taken.value().obj_end - taken.value().obj_start == 20);
         CHECK(heap.empty());
     }
 
@@ -309,23 +355,23 @@ TEST("small_vector - element lifetimes balance across a spill")
 TEST("small_vector - move-only element type")
 {
     cc::small_vector<MoveOnly, 2> v;
-    v.emplace_back(1);
-    v.emplace_back(2);
-    v.emplace_back(3); // spill to heap, move-constructing the inline elements over
+    for (int i = 1; i <= 12; ++i)
+        v.emplace_back(i); // exceeds inline capacity -> spill, move-constructing the inline elements over
 
-    CHECK(v.size() == 3);
+    CHECK(v.size() == 12);
+    CHECK(!v.is_inline());
     CHECK(v[0].value == 1);
-    CHECK(v[2].value == 3);
+    CHECK(v[11].value == 12);
 
     cc::small_vector<MoveOnly, 2> w(cc::move(v));
-    CHECK(w.size() == 3);
+    CHECK(w.size() == 12);
     CHECK(w[1].value == 2);
     CHECK(v.size() == 0);
 }
 
 TEST("small_vector - initializer list and hash")
 {
-    cc::small_vector<int, 4> v = {1, 2, 3, 4, 5}; // > N -> heap
+    cc::small_vector<int, 4> v = {1, 2, 3, 4, 5}; // within inline capacity (N is a minimum)
     CHECK(v.size() == 5);
     CHECK(v[0] == 1);
     CHECK(v[4] == 5);
@@ -346,7 +392,8 @@ TEST("small_vector - stable appenders require capacity")
     CHECK(v[1] == 2);
 
     cc::small_vector<int, 1> full;
-    full.push_back(1);                          // size == capacity (1)
+    while (full.size() < full.capacity()) // fill to the (auto-grown) inline capacity
+        full.push_back(1);
     CHECK_ASSERTS(full.emplace_back_stable(3)); // no spare capacity -> asserts
 }
 
@@ -436,4 +483,26 @@ TEST("small_vector - shrink_to_fit returns to inline when it fits")
     CHECK(v.size() == 3);
     CHECK(v[0] == 0);
     CHECK(v[2] == 2);
+}
+
+TEST("small_vector - over-aligned element type spills and re-inlines")
+{
+    cc::small_vector<Over16, 2> v;
+    CHECK(v.is_inline());
+    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0); // elements carry T's alignment
+
+    for (int i = 0; i < 20; ++i)
+        v.push_back(Over16(i));
+    CHECK(!v.is_inline()); // spilled to heap
+    CHECK(v.size() == 20);
+    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0);
+    for (int i = 0; i < 20; ++i)
+        CHECK(v[i].value == i);
+
+    v.resize_down_to(2);
+    v.shrink_to_fit();
+    CHECK(v.is_inline()); // back inline
+    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0);
+    CHECK(v[0].value == 0);
+    CHECK(v[1].value == 1);
 }

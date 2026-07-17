@@ -50,8 +50,7 @@ struct dx12_resource_download
     /// Records the next readback copy and returns the deferred CPU copy to run after GPU completion.
     /// A zero-byte result means the allocation was too small to make progress.
     [[nodiscard]] virtual dx12_pending_copy execute_next_job(ID3D12GraphicsCommandList& list,
-                                                             dx12_download_allocation const& alloc)
-        = 0;
+                                                             dx12_download_allocation const& alloc) = 0;
 };
 
 /// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into

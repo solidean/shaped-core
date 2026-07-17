@@ -24,12 +24,12 @@ struct test_schedule_config
     bool run_disabled_tests = false;
 
     // selected_bucket: the bucket an automatic sweep selects (normal by default, manual via --manual,
-    // guide_benchmark via --guide-benchmarks). match_any_bucket: a non-wildcard filter was given without an
-    // explicit bucket flag, so the sweep is not restricted to selected_bucket — an explicitly named test runs
-    // regardless of its bucket. A disabled test is separate: it runs only on an exact name match (see
-    // name_matches_exact / would_run) or the bulk run_disabled_tests flag, never via a bare substring filter.
+    // guide_benchmark via --guide-benchmarks). allow_cross_bucket_naming: no explicit bucket flag was given, so
+    // a filter naming a test *exactly* may still pull it in from another bucket — checked per-test in
+    // is_eligible. Neither bucket nor disabled status ever opens up to a bare substring filter: a test outside
+    // selected_bucket, or a disabled one, needs its exact name (or its enabling flag / run_disabled_tests).
     nx::config::test_bucket selected_bucket = nx::config::test_bucket::normal;
-    bool match_any_bucket = false;
+    bool allow_cross_bucket_naming = false;
     bool is_catch2_xml_discovery = false;
     bool report_catch2_xml_results = false;
     bool verbose = false;
@@ -54,20 +54,30 @@ struct test_schedule_config
     bool name_matches(test_declaration const& decl) const;
 
     // True if some non-empty filter equals the test name *exactly* (not a substring). An exact name is
-    // what pulls in an otherwise-excluded disabled test; a substring filter does not. Always false when
-    // filters is empty.
+    // what pulls in an otherwise-excluded disabled test, or one from another bucket; a substring filter
+    // does not. Always false when filters is empty.
     bool name_matches_exact(test_declaration const& decl) const;
 
-    // True if the test would be scheduled under this config: name_matches() AND the
-    // bucket gate (match_any_bucket, or same bucket) AND the disabled gate (enabled,
-    // or run_disabled_tests, or an exact name match). This is exactly the predicate
-    // test_schedule::create uses.
+    // Bucket + disabled eligibility for `decl`, given whether the filter that selected it named its target
+    // *exactly* — the test's own name for a direct match, the alias name for an alias fragment. A test
+    // outside selected_bucket, or a disabled one, is eligible only on that exact name (or its enabling
+    // flag: a bucket flag / run_disabled_tests). Filters are not applied here; see would_run.
+    bool is_eligible(test_declaration const& decl, bool named_exactly) const;
+
+    // True if the test would be scheduled under this config: is_eligible() for its bucket/disabled status
+    // AND name_matches(). This is exactly the predicate test_schedule::create uses for a directly named
+    // test (aliases route through is_eligible with the alias name as the key).
     bool would_run(test_declaration const& decl) const;
 
     // True if some non-empty filter is a substring of the alias name. Always false when filters is empty: a
     // full sweep already runs every driver unscoped (invoking every invocable), so expanding aliases too
     // would double-run them. Aliases therefore only take effect under an explicit filter.
     bool alias_matches(test_alias const& alias) const;
+
+    // True if some non-empty filter equals the alias name *exactly*. An exact alias name is what pulls its
+    // fragments' drivers in across a bucket, or enables a disabled driver — a substring filter does not.
+    // Always false when filters is empty.
+    bool alias_matches_exact(test_alias const& alias) const;
 
     static test_schedule_config create_from_args(int argc, char** argv);
 };

@@ -98,8 +98,25 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
         CHECK(!cfg.would_run(beta));   // ...but the disabled gate still excludes it
     }
 
+    // The same, per-test, for the bucket axis: "amm" is a substring of the manual test "gamma" but not its
+    // whole name, so the sweep must not reach it — a bare `test "async"` must not drag in manual benchmarks.
+    {
+        char const* const args[] = {"prog", "amm"};
+        auto const cfg = config_from(args);
+        CHECK(cfg.name_matches(gamma)); // substring matches the name
+        CHECK(!cfg.would_run(gamma));   // ...but the bucket gate still excludes it
+    }
+
+    // An EXACT name crosses the bucket, the same way it enables a disabled test.
+    {
+        char const* const args[] = {"prog", "gamma"};
+        auto const cfg = config_from(args);
+        CHECK(cfg.would_run(gamma));
+        CHECK(!cfg.would_run(alpha));
+    }
+
     // Explicit bucket mode: a name in another bucket matches by name but is excluded by the bucket gate — the
-    // "matched but wrong bucket" case the dev.py diagnostics explain.
+    // "matched but wrong bucket" case the dev.py diagnostics explain. An exact name does not override a flag.
     {
         char const* const args[] = {"prog", "--guide-benchmarks", "alpha"};
         auto const cfg = config_from(args);

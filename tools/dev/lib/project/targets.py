@@ -141,24 +141,27 @@ def select_test_binaries(
     """Pick which test binaries to run and the optional test-name filter.
 
     Three modes, in order: `wanted_names` (from --target) selects matching
-    executables, keeping `name_arg` as a test-name filter across them; a
-    `name_arg` that names a binary runs just that one; otherwise `name_arg` is a
-    name filter applied across every `is_test` binary. Returns
+    test binaries, keeping `name_arg` as a test-name filter across them; a
+    `name_arg` that names a test binary runs just that one; otherwise `name_arg`
+    is a name filter applied across every `is_test` binary. Returns
     `(binary_names, test_name, error)` — `error` is a message string when nothing
     matched (the caller decides how to surface it), else None.
+
+    Both name lookups are restricted to `is_test` binaries: the repo also builds
+    non-test executables (tools/), and running one as a test would just feed it
+    `--junit-xml` and report the resulting usage error as a test failure.
     """
     test_targets = [t for t in all_targets if is_test(t)]
-    exes = executables(all_targets)
 
     if wanted_names is not None:
         wanted = set(wanted_names)
-        names = [t.name for t in exes if t.name in wanted]
+        names = [t.name for t in test_targets if t.name in wanted]
         if not names:
             return [], None, f"No test binary matches --target {target_label}"
         return names, name_arg, None
 
     if name_arg:
-        named = next((t for t in exes if t.name == name_arg), None)
+        named = next((t for t in test_targets if t.name == name_arg), None)
         if named is not None:
             return [named.name], None, None
         names = [t.name for t in test_targets]

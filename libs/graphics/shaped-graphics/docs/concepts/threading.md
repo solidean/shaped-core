@@ -48,6 +48,31 @@ concurrently**, even against the same resource — each takes an access-tracking
 per-resource state, so their recording does not share mutable state. See
 [barriers](barriers.md) for the slot model and the revert-to-canonical contract on submit.
 
+## Builds without threads
+
+Where `CC_HAS_THREADS == 0` — WebAssembly, or any build configured `-DSC_THREADS=OFF` — nothing about the
+API changes. The transfer systems still hand their copies to a
+[`cc::threaded_actor`](../../../../base/clean-core/src/clean-core/thread/threaded_actor.hh); the actor
+simply runs on whoever pumps it instead of on a thread of its own.
+
+That shifts one obligation onto sg: **every blocking wait must drain the actors before it blocks.**
+`sg::context::pump_transfers()` (a backend seam; dx12 drives its upload/download copy actors) runs one
+cycle and reports whether more work may remain. It does nothing and returns false where the actors have
+their own threads, so the drain collapses to a single test and the code path stays the same either way.
+
+The rule is: **a wait that only an actor can satisfy has to pump it first.** Those waits are
+
+- `wait_for(future)` and `wait_for_ticks` / `wait_for_seconds` — the readback actor delivers the bytes.
+- `wait_for_epoch` (so also `wait_for_next_inflight_epoch` and `advance_epoch`'s throttle) — *not* just a
+  GPU wait: a submitted list can be parked on the async-upload completion fence, and that fence is
+  signalled by the copy actor. Without the drain the GPU never reaches the epoch fence.
+- the inline-download ring's back-pressure and its drain-to-idle — only the actor frees ring space and
+  decrements the outstanding count.
+
+The last two are the traps: they look like waits on the GPU or on an atomic, not on an actor. Adding an
+actor, or a wait that an actor unblocks, means extending `pump_transfers` or draining at the new wait —
+otherwise it deadlocks with no threads and passes every threaded test.
+
 ## Backends today
 
 - **dx12** — `multi_threaded`. `create` / `submit` / `drop` are thread-safe: the open-command-list

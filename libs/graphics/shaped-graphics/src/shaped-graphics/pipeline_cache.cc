@@ -210,7 +210,7 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
                                       // rather than the description's reference.
                                       return cc::make_async_scheduled<compute_pipeline_handle>(
                                           [ctx_ptr = &ctx, shader = compiled_shader(desc.shader), layout = desc.layout](
-                                              cc::async_context& actx) -> cc::async_result<compute_pipeline_handle>
+                                              cc::async_context<compute_pipeline_handle>& actx) -> cc::async_step_status
                                           {
                                               compute_pipeline_description const d{.shader = shader, .layout = layout};
                                               auto res = ctx_ptr->uncached.try_create_compute_pipeline(d);
@@ -225,20 +225,21 @@ async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& c
                                                                       raytracing_pipeline_description const& desc)
 {
     auto const key = this->compute_raytracing_pipeline_key(desc);
-    return _raytracing_cache.acquire(key,
-                                     [&]() -> async_raytracing_pipeline
-                                     {
-                                         // The build frame runs later (possibly on a worker), so deep-copy the whole description (it owns
-                                         // its shader vectors + layout handle) rather than referencing the caller's.
-                                         return cc::make_async_scheduled<raytracing_pipeline_handle>(
-                                             [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](
-                                                 cc::async_context& actx) -> cc::async_result<raytracing_pipeline_handle>
-                                             {
-                                                 auto res = ctx_ptr->uncached.try_create_raytracing_pipeline(d);
-                                                 if (res.has_error())
-                                                     return actx.error(cc::move(res.error()));
-                                                 return actx.success(cc::move(res.value()));
-                                             });
-                                     });
+    return _raytracing_cache.acquire(
+        key,
+        [&]() -> async_raytracing_pipeline
+        {
+            // The build frame runs later (possibly on a worker), so deep-copy the whole description (it owns
+            // its shader vectors + layout handle) rather than referencing the caller's.
+            return cc::make_async_scheduled<raytracing_pipeline_handle>(
+                [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](
+                    cc::async_context<raytracing_pipeline_handle>& actx) -> cc::async_step_status
+                {
+                    auto res = ctx_ptr->uncached.try_create_raytracing_pipeline(d);
+                    if (res.has_error())
+                        return actx.error(cc::move(res.error()));
+                    return actx.success(cc::move(res.value()));
+                });
+        });
 }
 } // namespace sg

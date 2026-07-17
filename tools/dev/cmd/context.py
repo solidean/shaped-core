@@ -28,6 +28,7 @@ class Policy:
     default_build: dict[str, str]
     default_debug: dict[str, str]
     default_release: dict[str, str]
+    default_singlethreaded: dict[str, str]
     default_sanitize: dict[str, str]
     coverage_build: dict[str, str]
     pgo_generate: dict[str, str]

@@ -46,7 +46,7 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
     out += "],\n";
 
     out.appendf("  \"selected_bucket\": \"{}\",\n", bucket_name(config.selected_bucket));
-    out.appendf("  \"match_any_bucket\": {},\n", config.match_any_bucket);
+    out.appendf("  \"allow_cross_bucket_naming\": {},\n", config.allow_cross_bucket_naming);
     out.appendf("  \"run_disabled_tests\": {},\n", config.run_disabled_tests);
     out.appendf("  \"eligible_count\": {},\n", eligible_count);
     out.appendf("  \"eligible_alias_count\": {},\n", eligible_alias_count);

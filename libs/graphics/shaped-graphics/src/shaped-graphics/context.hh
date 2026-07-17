@@ -144,17 +144,30 @@ public:
     /// to call from any thread.
     virtual void wait_for_next_inflight_epoch() = 0;
 
+    /// Runs one cycle of the transfer work that normally lives on its own thread (the upload/download
+    /// copy actors). Returns true if there may be more work.
+    ///
+    /// Returns false without doing anything where the platform has threads — the actors drive themselves
+    /// there, and this is pure overhead. Where it matters is CC_HAS_THREADS == 0: a cc::threaded_actor
+    /// falls back to running on its caller, so nothing advances a copy unless someone pumps it. Every
+    /// blocking wait therefore has to drain this first, or it waits on work that will never happen —
+    /// including GPU waits, since an async upload's copy-queue fence is signalled by the actor.
+    /// Backends with no actors can leave this alone.
+    virtual bool pump_transfers() { return false; }
+
     /// Blocks until a download future is delivered, then returns its bytes (nullopt if invalid,
     /// unsubmitted, or cancelled). The only completion guarantee for a download — advance_epoch* drain
     /// GPU work but not the readback actor. Waitable once submitted; safe to call from any thread.
     [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_for(bytes_future const& future)
     {
+        drive_transfers_until_ready(future);
         return future.wait_get_bytes();
     }
 
     template <class T>
     [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_for(data_future<T> const& future)
     {
+        drive_transfers_until_ready(future);
         return future.wait_get_data();
     }
 
@@ -178,6 +191,18 @@ public:
 
 protected:
     context(backend_kind backend, thread_model threading);
+
+    /// Pumps transfers until `future` is ready or no transfer work is left. Collapses to a single false
+    /// test where the platform has threads (pump_transfers does nothing there); without them it is what
+    /// makes a blocking wait terminate. Leaving the future unready is fine — the wait below it reports
+    /// the cancelled / not-yet-submitted cases rather than blocking.
+    template <class FutureT>
+    void drive_transfers_until_ready(FutureT const& future)
+    {
+        while (!future.is_ready() && pump_transfers())
+        {
+        }
+    }
 
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     friend class context_persistent_scope;
@@ -203,16 +228,14 @@ protected:
     /// have buffer_usage::copy_dst; offset_in_bytes + data.size() must be within the buffer.
     virtual void async_upload_bytes_to_buffer(raw_buffer_handle buffer,
                                               cc::pinned_data<cc::byte const> data,
-                                              isize offset_in_bytes)
-        = 0;
+                                              isize offset_in_bytes) = 0;
 
     /// Streams tightly-packed `data` into one region of `texture` off the frame path (reached via
     /// ctx.upload). See libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
     virtual void async_upload_bytes_to_texture(raw_texture_handle texture,
                                                cc::pinned_data<cc::byte const> data,
                                                subresource_index const& subresource,
-                                               texture_region const& region)
-        = 0;
+                                               texture_region const& region) = 0;
 
     /// Streams `size_in_bytes` from `buffer` at `offset_in_bytes` back to the host on a dedicated copy queue
     /// (reached via ctx.download). Returns a bytes_future delivered once the readback lands in the host
@@ -221,16 +244,14 @@ protected:
     /// empty future. Buffer must have buffer_usage::copy_src; offset_in_bytes + size_in_bytes within bounds.
     [[nodiscard]] virtual bytes_future async_download_bytes_from_buffer(raw_buffer_handle buffer,
                                                                         isize offset_in_bytes,
-                                                                        isize size_in_bytes)
-        = 0;
+                                                                        isize size_in_bytes) = 0;
 
     /// Streams one region of `texture` back to the host off the frame path (reached via ctx.download),
     /// returning a bytes_future of tightly-packed bytes. See
     /// libs/graphics/shaped-graphics/docs/concepts/download.async.md.
     [[nodiscard]] virtual bytes_future async_download_bytes_from_texture(raw_texture_handle texture,
                                                                          subresource_index const& subresource,
-                                                                         texture_region const& region)
-        = 0;
+                                                                         texture_region const& region) = 0;
 
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
     // change applied at a later safe point (an epoch boundary, or the copy actor between windows), never
@@ -258,15 +279,13 @@ protected:
     /// façades (ctx.persistent / ctx.transient) wrap this into try_create_raw_buffer / create_raw_buffer.
     [[nodiscard]] virtual cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
                                                                               buffer_usage usage,
-                                                                              allocation_info const& alloc)
-        = 0;
+                                                                              allocation_info const& alloc) = 0;
 
     /// Allocates a GPU-resident texture from a description. `alloc` selects the backing memory (see
     /// allocation_info). This is the raw, general create — the typed factories (create_texture_2d, …) that
     /// return `texture<Traits>` wrappers (context.persistent.hh / context.transient.hh) layer on top of it.
     [[nodiscard]] virtual cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
-                                                                                allocation_info const& alloc)
-        = 0;
+                                                                                allocation_info const& alloc) = 0;
 
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into. Size
     /// must be >= 0 (0 is a valid empty heap that holds no placements). A heap is persistent — it
@@ -285,36 +304,39 @@ protected:
     [[nodiscard]] virtual cc::result<binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<binding const> bindings,
         cc::span<named_sampler const> static_samplers,
-        lifetime_scope scope)
-        = 0;
+        lifetime_scope scope) = 0;
 
     /// Builds a pipeline_layout (the binding interface) from an ordered list of group layouts.
-    [[nodiscard]] virtual cc::result<pipeline_layout_handle>
-    try_create_pipeline_layout(pipeline_layout_description const& desc, lifetime_scope scope) = 0;
+    [[nodiscard]] virtual cc::result<pipeline_layout_handle> try_create_pipeline_layout(
+        pipeline_layout_description const& desc,
+        lifetime_scope scope) = 0;
 
     /// Builds a compute_pipeline from a description (compute shader + pipeline layout).
-    [[nodiscard]] virtual cc::result<compute_pipeline_handle>
-    try_create_compute_pipeline(compute_pipeline_description const& desc, lifetime_scope scope) = 0;
+    [[nodiscard]] virtual cc::result<compute_pipeline_handle> try_create_compute_pipeline(
+        compute_pipeline_description const& desc,
+        lifetime_scope scope) = 0;
 
     /// Builds a raster_pipeline from a description (vertex/fragment shaders + pipeline layout + state).
-    [[nodiscard]] virtual cc::result<raster_pipeline_handle>
-    try_create_raster_pipeline(raster_pipeline_description const& desc, lifetime_scope scope) = 0;
+    [[nodiscard]] virtual cc::result<raster_pipeline_handle> try_create_raster_pipeline(
+        raster_pipeline_description const& desc,
+        lifetime_scope scope) = 0;
 
     /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).
-    [[nodiscard]] virtual cc::result<raytracing_pipeline_handle>
-    try_create_raytracing_pipeline(raytracing_pipeline_description const& desc, lifetime_scope scope) = 0;
+    [[nodiscard]] virtual cc::result<raytracing_pipeline_handle> try_create_raytracing_pipeline(
+        raytracing_pipeline_description const& desc,
+        lifetime_scope scope) = 0;
 
     /// Builds a raytracing_shader_table over a raytracing_pipeline (references its shader identifiers).
-    [[nodiscard]] virtual cc::result<raytracing_shader_table_handle>
-    try_create_raytracing_shader_table(raytracing_shader_table_description const& desc, lifetime_scope scope) = 0;
+    [[nodiscard]] virtual cc::result<raytracing_shader_table_handle> try_create_raytracing_shader_table(
+        raytracing_shader_table_description const& desc,
+        lifetime_scope scope) = 0;
 
     /// Instantiates group `layout` with the given name→view bindings (validated against the layout) and
     /// dynamic `samplers` (one per non-static sampler binding).
     [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                                     cc::span<named_view const> views,
                                                                                     cc::span<named_sampler const> samplers,
-                                                                                    lifetime_scope scope)
-        = 0;
+                                                                                    lifetime_scope scope) = 0;
 
     backend_kind _backend;
     thread_model _thread_model;

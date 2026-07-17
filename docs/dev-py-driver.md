@@ -19,8 +19,10 @@ The experience it aims for:
 
 - **Quiet by default.** Child stdout/stderr is captured to
   `build/<preset>/run-logs/`, not mirrored to the terminal. The terminal shows a terse
-  colored summary; `--mirror-output` streams live when you want it. This is what makes the
-  driver pleasant to run by hand *and* legible when an agent runs it.
+  colored summary; `--mirror-output` streams all of it live when you want it, and
+  `--mirror-test-output` streams only the test binaries (quiet build, loud test). Mirroring is
+  additive to capture, so the logs read the same either way. This is what makes the driver
+  pleasant to run by hand *and* legible when an agent runs it.
 - **Machine-readable sidecars.** Every step writes a JSON sidecar
   (`configure.json` / `build.json` / `test.json`) and tests write `*.results.xml`. These
   are the contract the `repo_tools` `build_diag` / `test_diag` tools read — so the loop is

@@ -8,7 +8,12 @@ is the loop vectorized?). Back to [guides](_index.md).
 ```bash
 uv run dev.py assembly search <pattern>    # find symbols (mangled + demangled), grouped by target
 uv run dev.py assembly show <symbol>       # disassemble one function
+uv run dev.py assembly trace --target T --symbol S -- <args>   # what one invocation actually ran
 ```
+
+`search`/`show` answer the **static** question — what the code might do. [`trace`](#trace)
+answers the **dynamic** one: which branch a real invocation took, where an indirect call landed,
+how many instructions it retired.
 
 ## Why object files (and why that's fine)
 
@@ -80,7 +85,49 @@ for a worked example — it isolates the node allocator's fast path so
 `assembly show node_alloc_free_hotloop_probe` lands on the `lock and` (allocate)
 and `lock or` (free) directly.
 
+## trace
+
+`show` tells you what the optimizer emitted; `trace` tells you what the CPU
+actually ran. It launches a target under the Win32 debug API, breaks on a symbol,
+skips the warm-up hits, and single-steps one invocation:
+
+```bash
+uv run dev.py assembly trace --target clean-core-test \
+    --symbol "cc::async_node_base::schedule" --skip 100 -- "async - basic"
+```
+
+Everything after `--` goes to the traced binary — above, a nexus test-name filter,
+so only the test that exercises the code runs. `--skip N` walks past N entry hits
+to reach a steady-state call rather than the cold first one.
+
+Because each annotation comes from where the CPU actually went next, `trace` is
+exact where `show` has to guess:
+
+```
+je   0x1120342a        ; taken -> mymodule.exe!zero_path
+call rax               ; -> allocator.dll!allocate+0x20
+```
+
+Reach for it when the question is *which* path ran, not which paths exist: real
+branch outcomes, virtual/indirect dispatch targets, and the true instruction count
+of an invocation. **Windows x64 only**, and it needs a `relwithdebinfo-*` preset —
+release has no PDB, so the trace degrades to raw addresses. Full reference and
+limits: [tools/instruction-tracer/readme.md](../../tools/instruction-tracer/readme.md).
+
+`--stats` answers "where did the instructions go" without reading an 800-line
+trace: a table of one row per symbol — self instructions, atomics, direct/indirect
+calls, memory reads/writes, branches taken — sorted by cost. Usually the first move
+on a new probe; read the trace afterwards for the rows that look wrong.
+
+```bash
+uv run dev.py assembly trace --target clean-core-test \
+    --symbol single_lazy_probe --skip 2 --stats -- "bench-async (single-thread drive)"
+```
+
 ## Limitations
+
+These apply to `search`/`show`; `trace` has its own list in its
+[readme](../../tools/instruction-tracer/readme.md#limits).
 
 - **Release only shows the code, not source.** `--source` needs debug line info,
   which release objects don't carry — run a **relwithdebinfo** preset for source

@@ -4,7 +4,7 @@
 
 // The shader_cache wraps ssc::dxc::compiler in an async, hash-keyed get-or-create: the same
 // (description, options) returns the same async node without recompiling. No async pool is installed
-// here, so the scheduled node is driven inline by cc::async_blocking_get.
+// here, so the scheduled node is driven inline by cc::async_blocking_get_singlethreaded.
 
 namespace
 {
@@ -37,7 +37,7 @@ TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
     auto async_shader = cache.compile(make_desc());
     REQUIRE(async_shader != nullptr);
 
-    sg::compiled_shader shader = cc::async_blocking_get(async_shader);
+    sg::compiled_shader shader = cc::async_blocking_get_singlethreaded(async_shader);
     CHECK(shader.stage == sg::shader_stage::compute);
     CHECK(shader.format == sg::shader_format::dxil);
     CHECK(!shader.bytecode.empty());
@@ -76,6 +76,7 @@ TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
     desc.source = "[numthreads(1,1,1)] void main() { this is not valid HLSL }";
 
     auto async_shader = cache.compile(desc);
-    auto result = cc::try_async_blocking_get(async_shader);
-    CHECK(result.has_error());
+    auto const outcome = cc::try_async_blocking_get_singlethreaded(async_shader);
+    REQUIRE(outcome.has_value()); // the graph completed
+    CHECK(outcome.value().has_error());
 }

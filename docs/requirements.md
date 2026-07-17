@@ -73,9 +73,14 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` →
 `emcc` on `PATH`. Tests run under Node (`-s NODERAWFS=1` gives the binaries real-filesystem access so
 the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code). Only the
-single-threaded, no-WebGPU, `-fexceptions` combination is wired today; the `SC_WASM_THREADS` /
+single-threaded, no-WebGPU, `-fexceptions` combination is wired today; the `SC_THREADS=ON` /
 `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear
 "not yet supported" message (Tier 3).
+
+Threads are the repo-wide `SC_THREADS` option (not a wasm-local knob): the `wasm-emscripten-*` presets
+set it `OFF`, and a hand-rolled wasm configure must too — leaving the `ON` default fails rather than
+silently building single-threaded. To develop that mode natively, use a `singlethreaded-*` preset
+instead of a wasm build; see [platforms.md](platforms.md#threading-sc_threads).
 
 ### `std::stacktrace`
 
@@ -103,11 +108,11 @@ MSVC uses its own linker.
 
 | Tool             | Minimum | Role                                                                   |
 |------------------|---------|------------------------------------------------------------------------|
-| **clang-format** | **21**  | Authoritative formatter; the [.clang-format](../.clang-format) config uses v21-only option spellings. |
-| **clangd**       | 21 fam. | IDE code intelligence; `dev.py doctor` and `dev.py diagnose clangd` use it. |
+| **clang-format** | **22**  | Authoritative formatter; the [.clang-format](../.clang-format) config uses v22-only option spellings. |
+| **clangd**       | 22 fam. | IDE code intelligence; `dev.py doctor` and `dev.py diagnose clangd` use it. clangd 21 crashes on this codebase. |
 | clang-tidy       | —       | Advisory only; still being calibrated. Not gating.                     |
 
-The repo's LLVM-based tooling tracks the **21** family — pair `clang-format`,
+The repo's LLVM-based tooling tracks the **22** family — pair `clang-format`,
 `clangd`, and (on the clang path) the compiler from the same major version to
 avoid format churn and stale diagnostics.
 

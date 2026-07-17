@@ -41,8 +41,8 @@ struct dx12_resource_upload
 
     /// Copies the next chunk into the allocation window and records the GPU copy. Returns bytes
     /// consumed from the window (0 if it is too small to make progress).
-    [[nodiscard]] virtual cc::isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc)
-        = 0;
+    [[nodiscard]] virtual cc::isize execute_next_job(ID3D12GraphicsCommandList& list,
+                                                     dx12_upload_allocation const& alloc) = 0;
 };
 
 /// Buffer upload: copies `data` into `dst` at `dst_offset` via CopyBufferRegion. Resumable — each

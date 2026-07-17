@@ -70,7 +70,8 @@ default is chosen by platform:
 
 Override with `--preset`. **It is a per-subcommand flag — it goes *after* the subcommand**
 (`uv run dev.py test --preset release-clang`). `--emsdk-path` (for WASM) is likewise
-per-subcommand. Only `--verbose`, `--mirror-output`, and `--colored` / `--plain` are global (before the subcommand).
+per-subcommand. Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs`, and
+`--colored` / `--plain` are global (before the subcommand).
 Presets accept comma-lists, repeated flags, and shell-style wildcards, and dev.py operates on
 all that match:
 
@@ -185,7 +186,9 @@ So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 | test run   | `test_diag`  | `test_diag path="build/<preset>/**/*.results.xml" errors_only=true` |
 
 These read the artifacts dev.py already emitted — far better than scrolling raw logs. Pass
-`--mirror-output` only when you want the live stream (e.g. to watch a crashing binary).
+`--mirror-output` only when you want the live stream (e.g. to watch a crashing binary), or
+`--mirror-test-output` to stream just the binaries and stay quiet through configure and build
+(what you want to watch a benchmark's table print).
 
 **Don't pipe dev.py into `tail`/`head`/`grep`.** The output is already terse, and
 `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
@@ -331,7 +334,7 @@ which is Catch2 v3 CLI–compatible (see
 [nexus' catch2-runner-compat](../../libs/base/nexus/docs/catch2-runner-compat.md)). dev.py
 discovers them via the CMake File API, runs each with the optional name filter, and synthesizes a
 JUnit result from the process — so a binary that **crashes before printing anything** is still
-recorded as a failure (non-zero exit). Re-run that binary with `--mirror-output` to see what
+recorded as a failure (non-zero exit). Re-run that binary with `--mirror-test-output` to see what
 happened.
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and
@@ -360,6 +363,9 @@ remains available for manually ASan-checking exception-free code paths.
 ## Useful flags
 
 - `--mirror-output` / `--verbose` — global (before the subcommand); stream child output / be chatty.
+- `--mirror-test-output` — global; stream only the test binaries live, staying quiet through
+  configure and build. The usual choice when you want a binary's own output (a benchmark table)
+  without the build wall.
 - `--colored` / `--plain` — global; force or disable colored output. The default auto-detects:
   colored when stdout and stderr are both a terminal, plain when either is piped (e.g. run by an
   agent). In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.

@@ -75,25 +75,21 @@ protected:
     virtual void upload_bytes_to_texture(raw_texture_handle texture,
                                          cc::span<cc::byte const> pixels,
                                          subresource_index const& subresource,
-                                         texture_region const& region)
-        = 0;
+                                         texture_region const& region) = 0;
 
     [[nodiscard]] virtual bytes_future download_bytes_from_buffer(raw_buffer_handle buffer,
                                                                   cc::isize offset_in_bytes,
-                                                                  cc::isize size_in_bytes)
-        = 0;
+                                                                  cc::isize size_in_bytes) = 0;
 
     [[nodiscard]] virtual bytes_future download_bytes_from_texture(raw_texture_handle texture,
                                                                    subresource_index const& subresource,
-                                                                   texture_region const& region)
-        = 0;
+                                                                   texture_region const& region) = 0;
 
     virtual void copy_buffer_region(raw_buffer_handle src,
                                     raw_buffer_handle dst,
                                     cc::isize src_offset_in_bytes,
                                     cc::isize dst_offset_in_bytes,
-                                    cc::isize size_in_bytes)
-        = 0;
+                                    cc::isize size_in_bytes) = 0;
 
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
     virtual void compute_bind_group(int set, binding_group const& group) = 0;
@@ -103,11 +99,9 @@ protected:
     // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
     // Split by resource family: buffers carry no layout, textures do.
     virtual void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                                     cc::span<array_buffer_access const> elements)
-        = 0;
+                                                     cc::span<array_buffer_access const> elements) = 0;
     virtual void compute_declare_array_texture_access(cc::string_view binding_name,
-                                                      cc::span<array_texture_access const> elements)
-        = 0;
+                                                      cc::span<array_texture_access const> elements) = 0;
 
     // Raster rendering scope (reached through cmd.raster). begin_rendering transitions each target to
     // its render-target / depth-stencil layout, binds the color/depth targets to the output-merger, and
@@ -138,14 +132,11 @@ protected:
     // scratch, and returns the handle. raytracing_is_supported gates them (a backend without RT returns false).
     [[nodiscard]] virtual bool raytracing_is_supported() const = 0;
     [[nodiscard]] virtual blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
-                                                                      accel_build_flags flags)
-        = 0;
+                                                                      accel_build_flags flags) = 0;
     [[nodiscard]] virtual blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
-                                                                  accel_build_flags flags)
-        = 0;
+                                                                  accel_build_flags flags) = 0;
     [[nodiscard]] virtual tlas_handle raytracing_build_tlas(cc::span<tlas_instance const> instances,
-                                                            accel_build_flags flags)
-        = 0;
+                                                            accel_build_flags flags) = 0;
 
     // Ray-tracing dispatch (reached through cmd.raytracing). bind_pipeline sets the DXR state object + global
     // root signature; bind_group binds through that root signature (like compute); dispatch_rays traces a
@@ -156,8 +147,7 @@ protected:
                                           raygen_index raygen,
                                           int width,
                                           int height,
-                                          int depth)
-        = 0;
+                                          int depth) = 0;
 
     // GPU queries (reached through cmd.query). record_gpu_timestamp records a point-in-time timestamp and
     // returns a handle whose tick is resolved + read back when the list is submitted. A backend without

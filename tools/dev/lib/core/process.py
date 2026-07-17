@@ -12,9 +12,11 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +27,22 @@ from .models import Preset, StepResult
 
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+_mirror_test_output = False
+
+
+def configure_mirroring(*, mirror_test_output: bool = False) -> None:
+    """Mirror every "test" step live, whatever its caller passed for `mirror`.
+
+    Process-wide presentation, set once from the CLI (like console.configure) — `run_step` is the
+    only reader. Backs --mirror-test-output: the common case is a quiet build and a loud test
+    binary, and setting it here rather than at each dev.test() call site also covers the paths that
+    run test binaries without going through one (coverage run, pgo train). Mirroring is additive to
+    capture, so this never affects the logs.
+    """
+    global _mirror_test_output
+    _mirror_test_output = mirror_test_output
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +241,47 @@ def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, s
 
 
 # ---------------------------------------------------------------------------
+# Response files
+# ---------------------------------------------------------------------------
+
+# Windows caps a command line at 32767 chars (CreateProcess). Stay well under it: the
+# limit counts the exe path and every flag too, not just the file list.
+_ARGV_LIMIT = 30000
+
+
+@contextmanager
+def response_file(args: list[str], prefix: str) -> Iterator[list[str]]:
+    """Yield the argv tail to pass for `args`, spilling to a response file when too long.
+
+    LLVM tools (clang-format, llvm-nm, llvm-objdump) expand `@file`, one argument per line.
+    A full-tree file list blows past the Windows command-line limit, so anything over
+    _ARGV_LIMIT chars is written to a temp file and passed as a single `@path`.
+
+    Short lists are yielded verbatim, which keeps real paths in the step logs for repro --
+    an `@C:\\...\\tmp.rsp` there would point at an already-deleted file.
+
+    LLVM tokenizes response files Windows-style on Windows hosts, so native backslash
+    paths need no escaping; POSIX hosts use forward slashes, where GNU tokenization's
+    backslash-escaping never triggers.
+    """
+    if sum(len(a) + 1 for a in args) <= _ARGV_LIMIT:
+        yield list(args)
+        return
+
+    # delete=False + explicit unlink: Windows cannot reopen an open NamedTemporaryFile.
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".rsp", prefix=prefix, delete=False, encoding="utf-8")
+    try:
+        with tmp:
+            tmp.write("\n".join(args))
+        yield ["@" + tmp.name]
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Step runner
 # ---------------------------------------------------------------------------
 
@@ -254,13 +313,16 @@ def run_step(
     `step_type` is the kind of step ("configure"/"build"/"test") and `name` the
     specific thing it acts on (a target, "all", or a test binary). Prints a
     one-line `[ts] [step_type] name` banner, captures both streams to per-step
-    log files under build_dir/run-logs/ (mirrored live when `mirror`), then
+    log files under build_dir/run-logs/ (mirrored live when `mirror`, or when a
+    "test" step and configure_mirroring enabled it), then
     prints capture pointers and a pass/fail summary. `summary_extra`, when given,
     is called with the finished StepResult and its return value is appended to
     the summary line (e.g. build/test stats); it is skipped on timeout and any
     exception it raises is swallowed. On timeout the process is killed and the
     step reports returncode 124 (conventional timeout code).
     """
+    mirror = mirror or (_mirror_test_output and step_type == "test")
+
     print(console.dim(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else "")), file=sys.stderr)
     if verbose:
         print(console.dim(f"  $ {' '.join(cmd)}"), file=sys.stderr)

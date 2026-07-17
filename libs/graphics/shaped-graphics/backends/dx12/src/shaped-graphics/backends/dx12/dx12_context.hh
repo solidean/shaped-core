@@ -300,6 +300,28 @@ public:
     void set_inline_upload_budget(cc::isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(cc::isize bytes) override { _download_inline.set_budget(bytes); }
 
+    /// Drives all three copy actors one cycle each. Only does anything when they have no thread of their
+    /// own; see sg::context::pump_transfers. Every actor is pumped (no short-circuit): they are
+    /// independent, and an upload's copy-queue fence can be what a download is waiting behind.
+    bool pump_transfers() override
+    {
+        bool more = _upload_async.pump_unthreaded();
+        more |= _download_async.pump_unthreaded();
+        more |= _download_inline.pump_unthreaded();
+        return more;
+    }
+
+    /// Drains every copy actor until none reports more work. Costs one false test wherever the actors
+    /// have their own threads. Without them it is a precondition of any GPU wait: a submitted list can be
+    /// parked on the async-upload completion fence, which only the copy actor signals, so the GPU would
+    /// never reach the epoch fence — leaving the wait blocked on work only this thread can produce.
+    void drain_transfers()
+    {
+        while (pump_transfers())
+        {
+        }
+    }
+
     // Epoch contract — bodies in dx12_epoch.cc. These return sg vocabulary types (no backend-typed
     // variant needed), so the whole body lives in the override.
 

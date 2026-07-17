@@ -1,10 +1,10 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <nexus/test.hh>
 
-#include <atomic>
 #include <memory>
 
 using namespace cc::primitive_defines;
@@ -22,8 +22,8 @@ class int_log_actor : public cc::threaded_actor_impl<int>
 {
 public:
     cc::vector<int> log;
-    std::atomic<int> init_count{0};
-    std::atomic<int> shutdown_count{0};
+    cc::atomic<int> init_count{0};
+    cc::atomic<int> shutdown_count{0};
 
 protected:
     void on_thread_init() override { init_count++; }
@@ -92,7 +92,7 @@ class batching_actor : public cc::threaded_actor_impl<int>
 public:
     cc::vector<int> local_queue;
     std::shared_ptr<cc::vector<int>> output;
-    std::atomic<int> process_calls{0};
+    cc::atomic<int> process_calls{0};
 
     explicit batching_actor(std::shared_ptr<cc::vector<int>> out) : output(std::move(out)) {}
 

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ..core import console
 from ..core.models import StepResult
-from ..core.process import run_step
+from ..core.process import response_file, run_step
 
 
 class FormatSetupError(Exception):
@@ -47,7 +47,7 @@ class FormatResult:
 
 # Default if `.clang-format`'s `Requires:` header can't be read. Keep in sync
 # with the header, which remains the authoritative source.
-_DEFAULT_MAJOR = 21
+_DEFAULT_MAJOR = 22
 
 _SOURCE_SUFFIXES = (".cc", ".hh")
 
@@ -140,26 +140,39 @@ def _git_dirty_files(root: Path) -> list[Path]:
     return paths
 
 
-def discover_files(root: Path, *, dirty_only: bool) -> list[Path]:
-    """Return the sorted list of `.cc`/`.hh` files under `libs/` to format.
+def source_roots(root: Path) -> list[Path]:
+    """The directories whose `.cc`/`.hh` files clang-format owns.
 
-    With `dirty_only`, restrict to git-dirty/untracked files (intersected with
-    the same `libs/**` `.cc`/`.hh` scope).
+    A whitelist, not a repo-wide sweep: extern/ is vendored third-party code we must not reformat,
+    and a stray source elsewhere should not silently become our problem. Add a root here when the
+    repo grows first-party C++ outside libs/.
     """
-    libs = root / "libs"
+    return [
+        root / "libs",
+        root / "tools" / "instruction-tracer",
+    ]
+
+
+def discover_files(root: Path, *, dirty_only: bool) -> list[Path]:
+    """Return the sorted list of `.cc`/`.hh` files under the source roots to format.
+
+    With `dirty_only`, restrict to git-dirty/untracked files (intersected with the same scope).
+    """
+    roots = [r for r in source_roots(root) if r.is_dir()]
 
     if dirty_only:
         selected = [
             p for p in _git_dirty_files(root)
-            if p.suffix in _SOURCE_SUFFIXES and libs in p.parents
+            if p.suffix in _SOURCE_SUFFIXES and any(r in p.parents for r in roots)
         ]
         return sorted(set(selected))
 
     found: list[Path] = []
-    for dirpath, _dirnames, filenames in os.walk(libs):
-        for f in filenames:
-            if f.endswith(_SOURCE_SUFFIXES):
-                found.append(Path(dirpath) / f)
+    for source_root in roots:
+        for dirpath, _dirnames, filenames in os.walk(source_root):
+            for f in filenames:
+                if f.endswith(_SOURCE_SUFFIXES):
+                    found.append(Path(dirpath) / f)
     return sorted(found)
 
 
@@ -180,17 +193,18 @@ def format_sources(
     """
     cmd = [clang_format]
     cmd += ["--dry-run", "-Werror"] if check else ["-i"]
-    cmd += [str(f) for f in files]
 
-    return run_step(
-        cmd,
-        step_type="format",
-        name="check" if check else "apply",
-        build_dir=root / "build",
-        cwd=root,
-        mirror=mirror,
-        verbose=verbose,
-    )
+    # a full-tree run is ~45k chars of paths -- past the Windows command-line limit
+    with response_file([str(f) for f in files], prefix="clang-format-") as tail:
+        return run_step(
+            cmd + tail,
+            step_type="format",
+            name="check" if check else "apply",
+            build_dir=root / "build",
+            cwd=root,
+            mirror=mirror,
+            verbose=verbose,
+        )
 
 
 def run_format(
@@ -213,7 +227,8 @@ def run_format(
     clang_format = find_clang_format()
     if clang_format is None:
         raise FormatSetupError(
-            "clang-format not found on PATH. Install LLVM/clang-format (>= 21) or add it to PATH."
+            f"clang-format not found on PATH. Install LLVM/clang-format (>= {required_major(root)}) "
+            "or add it to PATH."
         )
 
     # clang-format output is not stable across major versions, so enforce the

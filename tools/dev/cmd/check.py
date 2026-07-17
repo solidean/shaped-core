@@ -67,16 +67,19 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
     def check_tests(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
         # Build + run the full suite across build variants: debug (-O0 + mimalloc's
         # MI_DEBUG heap) and relwithdebinfo exercise CC_ASSERT on, release exercises
-        # it off, and — where supported — a sanitizer (ASan+UBSan) preset adds a
-        # memory/UB pass. Together they catch allocator misuse, assert regressions,
-        # and undefined behavior the optimized presets miss. Warm builds are the norm
-        # at commit time — uncompiled code couldn't have been tested — so the real
-        # cost is the test run. Not fixable; fix/all_scope ignored.
+        # it off, a single-threaded preset exercises CC_HAS_THREADS 0 (otherwise only
+        # reachable via a wasm build), and — where supported — a sanitizer (ASan+UBSan)
+        # preset adds a memory/UB pass. Together they catch allocator misuse, assert
+        # regressions, threading-fallback rot, and undefined behavior the optimized
+        # presets miss. Warm builds are the norm at commit time — uncompiled code
+        # couldn't have been tested — so the real cost is the test run. Not fixable;
+        # fix/all_scope ignored.
         system = platform.system()
         specs = [ctx.default_preset_name()]
         for sibling in (
             ctx.policy.default_debug.get(system),
             ctx.policy.default_release.get(system),
+            ctx.policy.default_singlethreaded.get(system),
             ctx.policy.default_sanitize.get(system),
         ):
             if sibling:
@@ -100,7 +103,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         return dev.report.summarize_tests(records, presets, ctx.root)
 
     return [
-        dev.Check("format", "clang-format libs/ sources (dirty-only; --all for the whole tree)",
+        dev.Check("format", "clang-format our C++ sources (dirty-only; --all for the whole tree)",
                   True, check_format),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("test",

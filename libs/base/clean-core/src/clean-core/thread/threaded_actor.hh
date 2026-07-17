@@ -6,9 +6,9 @@
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 
-#include <atomic>
 #include <concepts>
 #include <condition_variable>
 #include <memory>
@@ -51,7 +51,7 @@
 //
 // Note: messages are stored in a std::variant<Msg...> for now (mid-term: replace with a cc variant
 // once one exists), and the polymorphic impl is held by std::unique_ptr (cc::unique_ptr forbids the
-// upcast/downcast this needs). std::thread and the std::atomic/condition_variable are kept as-is.
+// upcast/downcast this needs). std::thread and the cc::atomic/condition_variable are kept as-is.
 
 namespace cc
 {
@@ -137,9 +137,9 @@ private:
 private:
     std::thread _thread;
     std::condition_variable _inbox_cond_var; // one wake point shared by all message types
-    std::atomic_bool _is_started = false;
-    std::atomic_bool _is_shutting_down = false;
-    std::atomic_bool _is_shut_down = false;
+    cc::atomic<bool> _is_started = false;
+    cc::atomic<bool> _is_shutting_down = false;
+    cc::atomic<bool> _is_shut_down = false;
     bool _is_unthreaded = false; // set once at start(); no background thread touches it
 
     template <class... MessageT>

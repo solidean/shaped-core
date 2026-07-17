@@ -19,5 +19,7 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
 
 /// Asserts `region` lies within `texture`'s subresource `sub` — offset non-negative and offset+size within
 /// the mip extent (so a 2D/1D texture's depth axis stays a single slice at z 0, size.z 1).
-void assert_texture_region_in_bounds(raw_texture_handle const& texture, subresource_index const& sub, texture_region const& region);
+void assert_texture_region_in_bounds(raw_texture_handle const& texture,
+                                     subresource_index const& sub,
+                                     texture_region const& region);
 } // namespace sg::impl

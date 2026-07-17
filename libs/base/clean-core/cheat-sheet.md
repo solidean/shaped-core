@@ -78,10 +78,11 @@ v.clear();  v.fill(x);  auto a = v.extract_allocation();
 cc::fixed_array<int, 3> fa = {1, 2, 3};            // operator[], front/back, data, begin/end, size()
 auto& [a, b, c] = fa;                              // tuple protocol: get<I>(), structured bindings
 
-#include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, first N inline (SVO)
-cc::small_vector<int, 4> sv;                       // no alloc up to N; spills to heap past N
+#include <clean-core/container/small_vector.hh>   // cc::small_vector<T, N> — growable, N-min inline (SVO)
+cc::small_vector<int, 4> sv;                       // 48 B here; N is a MINIMUM inline cap; over-aligned T OK
 sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
+sv.inline_capacity();                              // actual inline cap >= N (auto-grows to fill footprint; 9 here)
 ```
 
 ## Associative
@@ -135,7 +136,7 @@ cache.add_default_in_memory_provider(max=4096);   // or add_provider(shared_ptr<
 V v = cache.acquire(key, [&]{ return make(); });  // first tier to hit backfills faster tiers; full miss runs factory
 cache.apply_bookkeeping();                        // e.g. in-memory eviction (clear past max_entries)
 // tiers: cc::key_value_provider<K,V> (try_get/set/apply_bookkeeping) — extension seam for disk/network caches.
-// TODO(clean-core): std::unordered_map inside, to migrate to cc::map when it lands.
+// TODO(clean-core): std::unordered_map inside; cc::map has landed, the migration has not.
 ```
 
 ## Views — non-owning (must not outlive their data)
@@ -285,10 +286,31 @@ cc::system_memory_resource;                               // malloc/free opt-out
 #include <clean-core/memory/node_allocation.hh>   // cc::node_allocation<T> — move-only single-object slab handle
 auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args...);
 *na;  na->member;  na.is_valid();
+cc::default_node_allocator();                             // node_allocator& — this thread's default; inline TLS load,
+                                                          // resolved once per thread (never null)
+cc::set_default_node_allocator(&a);                       // repoint this thread's default; nullptr resets (re-resolves)
+cc::get_default_node_allocator();                         // node_allocator* — raw slot, null if not resolved yet
+cc::scoped_default_node_allocator g(&a);                  // scoped override; restores the previous slot (nests)
+// GOTCHA: an allocator must outlive every node allocated from it — frees are pointer-derived and never consult an
+// allocator, so nothing detects a violation. Deregister before it dies (~node_allocator asserts it isn't installed).
 
 #include <clean-core/memory/unique_ptr.hh>        // cc::unique_ptr<T> — move-only single-object owner (wraps node_allocation)
 auto p = cc::make_unique<T>(args...);              // *p; p->member; p.get(); p.is_valid(); if (p) ...
 p = nullptr;                                       // destroys + clears (no reset()); ==/!= vs ptr/nullptr; hidden-friend hash
+
+#include <clean-core/memory/shared_ptr.hh>         // cc::shared_ptr<T, Traits=default_shared_traits<T>> — 8 B, intrusive
+auto s = cc::make_shared<T>(args...);              // only way to construct (strong=1); *s; s->m; s.get(); default: [T|control]
+cc::weak_ptr<T> w = s;  w.lock();                   // weak (if Traits::supports_weak); lock() -> shared_ptr or empty
+// custom Traits (all static, on T*) for intrusive counts: node_size/node_align + init_control/inc_strong/
+// release_strong->{destroy,free}/destroy_object/free_storage (+weak: inc_weak/release_weak->bool/try_lock_strong).
+// release_strong {true,false} => destroy_object THEN release_weak (order is load-bearing); {true,true} => both, skip
+// release_weak. Base-keyed Traits serves derived T via upcast (cc::async keys one on async_node_base);
+// from_alive(T*) MINTS a handle from a pointer known alive (strong > 0).
+T* raw = s.release();  auto back = cc::shared_ptr<T>::adopt(raw);   // MOVE a count out of / into a handle: count-neutral
+// release/adopt (twin of weak_ptr's) park a strong count in hand-rolled storage (tagged word, lock-free array of
+// raw ptrs) with no inc/dec pair. Whoever holds the raw pointer owes the release, or it leaks.
+cc::fused_refcount                                 // strong hi / weak lo in one atomic<u64>; both stock Traits use it
+// sole-owner (1,1) teardown = one acquire load, ZERO locked RMWs; leaves the counts untouched (nothing may read them)
 ```
 
 ## Utility & bit
@@ -308,7 +330,6 @@ cc::overloaded{ [](int){}, [](float){} }; // combine callables into one overload
 cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
-cc::atomic_add(v, x);                     // also atomic_sub/and/or/xor (via std::atomic_ref) -> old value
 
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
@@ -357,6 +378,16 @@ cc::sequence{v}.to_vector();  .to_array();  .to_container<C>();  .push_to(existi
 ## Threading
 
 ```cpp
+#include <clean-core/thread/atomic.hh>     // MANDATORY seam: never name std::atomic directly (see docs/blessed-stdlib-headers.md)
+cc::atomic<T> a{0};                        // == std::atomic<T>; a plain T with the same API when CC_HAS_THREADS == 0
+a.load(cc::memory_order_acquire);  a.store(v, cc::memory_order_release);  a.fetch_add(1, cc::memory_order_relaxed);
+a.compare_exchange_weak(expected, desired, cc::memory_order_acq_rel, cc::memory_order_relaxed);
+cc::atomic_ref<T> r(plain_lvalue);         // == std::atomic_ref<T>; atomics over memory you own as a plain value
+cc::atomic_flag f;                         // constinit-able, trivially destructible (survives static teardown)
+cc::atomic_thread_fence(cc::memory_order_seq_cst);   // no-op without threads
+cc::atomic_add(v, x);                      // also atomic_sub/and/or/xor — RMW on a plain lvalue -> OLD value (seq_cst)
+                                           // no wait()/notify(): without threads nobody could ever satisfy the wait
+
 #include <clean-core/thread/mutex.hh>      // cc::mutex<T> — Rust-style: data only reachable under the lock
 cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback
@@ -385,54 +416,76 @@ b->process_messages_if_unthreaded();      // one cycle -> bool "more to do"; no-
 b->process_messages_if_unthreaded_for_ms(4.0); // loop until idle or 4ms; safe to call every frame
 ```
 
-## Async / dataflow (incubator — see docs/async.md)
+## Async / dataflow (incubator — see docs/systems/async.md)
 
 ```cpp
-#include <clean-core/thread/async.hh>     // cc::async<T> — eventual result<T, async_error>; value/dataflow model
-cc::shared_async<T> = std::shared_ptr<cc::async<T>>;   // the normal handle (async<T> is non-copy/non-move)
+#include <clean-core/thread/async.hh>     // cc::async<T, E = async_error> — eventual result<T, E>; dataflow model
+cc::shared_async<T, E = async_error> = cc::shared_ptr<cc::async<T, E>, impl::async_node_traits>; // 8 B intrusive handle
 
 // creation — pick eager (scheduled) or lazy (cold) explicitly at the call site. f may take a leading
-// cc::async_context& or omit it; extra args are dependencies (shared_async or shared_ptr<once_async>),
-// awaited + unwrapped to plain values before f runs; errors short-circuit. T deduced or explicit.
-auto a = cc::make_async_lazy([]{ return 40; });                          // cold; no context, no deps
-auto s = cc::make_async_scheduled<int>([](cc::async_context&){ ... });   // eager (scheduled now if a worker scope active)
-auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);   // depends on a,s; f gets plain ints
-auto d = a->map_lazy([](int x){ return x + 2; });   // single-dep transform (also map_scheduled; no plain `map`)
-auto o = cc::make_once_lazy([]{ return 7; });        // std::shared_ptr<once_async<int>>; consume as a dep exactly once
+// cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
+// values before f runs; errors short-circuit. T deduced (context-free) or explicit; E defaults to async_error.
+auto a = cc::make_async_lazy([]{ return 40; });                             // cold; no context, no deps
+auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager (scheduled if worker scope active)
+auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
+auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
+auto p = cc::make_async_lazy_emplace<int, cc::async_error, PinnedFrame>(7); // builds the FRAME in place: immovable f
+                                                     // ok. T explicit, no dep args (capture + require instead)
+// born already ready (no frame, no scheduling); _emplace builds in place (immovable T ok):
+auto rv = cc::make_async_from_value(42);   auto re = cc::make_async_from_error<int>(async_error::make_cancelled());
+auto rvE = cc::make_async_from_value_emplace<Immovable>(7);  // T explicit; also *_from_error_emplace<T, E>(...)
 
-// driving BLOCKS the calling thread (busy-waits vs a real scheduler) — top-level/tests only, never in a frame:
-int v = cc::async_blocking_get(a);                               // -> T (asserts on error/cancel)
-cc::result<int, cc::async_error> r = cc::try_async_blocking_get(a); // fallible drive
+// you never block on an async: a SCHEDULER drives it. These build a throwaway singlethreaded_scheduler and
+// BLOCK the calling thread — top-level/tests only, never in a frame. Verbose name = deliberately discouraged:
+int v = cc::async_blocking_get_singlethreaded(a);                    // -> T (asserts on error/cancel/no-progress)
+cc::optional<cc::result<int, cc::async_error>> r = cc::try_async_blocking_get_singlethreaded(a); // nullopt if it
+                    // couldn't complete here (parked on an unpushed manual node, or migrated to another scheduler)
+cc::result<int, cc::async_error> r2 = cc::into_result(cc::move(a)); // CONSUME a ready handle: MOVES value/error out
 a->is_ready();  a->has_value();  a->has_error();
-std::shared_ptr<int const> pv = a->try_value();   // zero-copy alias; null unless ready with a value
-std::shared_ptr<cc::async_error const> pe = a->try_error();
+int const* pv = a->try_value();   // zero-copy, non-owning; null unless ready with a value
+cc::async_error const* pe = a->try_error();   // typed E const*; null unless ready with an error
 m->push_value(41);  m->push_error(cc::async_error::make_error(cc::any_error("x")));  // complete a manual node
 
-// raw compute frame (perf-critical state machine): async_result<T>(async_context&). Multi-branch frames MUST
-// annotate -> cc::async_result<T>.
-[step=0](cc::async_context& actx) mutable -> cc::async_result<int> {
-    if (step++ == 0) return actx.await([]{ return 10; });   // child frame may also omit async_context
-    return actx.success(5); };
-actx.require(dep);              // -> bool ready (no subscription); else records a pending dep, return wait
-actx.spawn_child(frame);       // -> once_async<CT>* owned child dep (child frame dies before parent frame)
-actx.await(frame);             // spawn_child + wait_for_dependencies()
-actx.success(v);  actx.error(async_error|any_error);  actx.wait_for_dependencies();  actx.yield();
+// raw compute frame (perf-critical state machine): async_step_status(async_context<T, E>&) — resolves via ctx,
+// returns a status. Annotate -> cc::async_step_status and give T explicitly (make_async_lazy<int>). A frame
+// may create + require new deps mid-compute (dynamic dependencies). Raw frames do NOT auto-propagate a dep's
+// error — check dep->try_error() and decide (transform/ignore/propagate); the make_async_* sugar DOES.
+[step=0, dep=cc::shared_async<int>()](cc::async_context<int>& actx) mutable -> cc::async_step_status {
+    if (step++ == 0) { dep = cc::make_async_lazy([]{ return 10; }); actx.require(dep); return actx.wait_for_dependencies(); }
+    return actx.resolve_to_value(*dep->value_ptr()); };   // or actx.success(...)
+actx.require(dep);              // -> bool ready (NEITHER subscribes NOR schedules — the poll loop owns both);
+                                //    else records a pending dep, return wait
+actx.resolve_to_value(v)/success(v);  actx.resolve_to_value_emplace(args...);  // emplace: build T in place (immovable ok)
+actx.resolve_to_error(E)/error(...);  actx.resolve_to_error_emplace(args...);  actx.wait_for_dependencies();  actx.yield();
+// RESOLVE IS TERMINAL (`delete this;`): the frame lives inline in the node and the value is built over its slot,
+// so resolving destroys the running closure. Never touch captures or ctx after it — `return actx.success(v);`.
+// State DOES persist across polls (the frame is never moved). *_emplace args must not alias the frame's captures
+// (nor a dep's value they pin) — they are forwarded by reference; the by-value resolves are always safe.
 
-// driving decoupled from any executor (the seam); default is inline, on the calling thread:
-cc::inline_scheduler sched;  cc::async_worker_scope scope(sched);   // bind scheduler to this thread
-root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // pump; interleave external push here
-cc::once_async<T>                 // single-consumer owned child (2nd subscription asserts); not a default type
+// two schedulers, same surface. singlethreaded = drives inline + NEVER publishes, so deps cannot run
+// concurrently however many cores idle (single-threaded by construction, not by circumstance):
+cc::singlethreaded_scheduler sched;  int v = sched.blocking_get(root);  // mirrors pool.blocking_get(root)
+cc::optional<...> o = sched.try_blocking_get(root);  // st: nullopt if pumped out but not ready (see async.md
+                                                     // "Multi-scheduler correctness"); pool's try_ returns result
+cc::async_worker_scope scope(sched);   // bind scheduler to this thread (blocking_get does this itself)
+root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump; interleave external push here
+sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
-cc::async_thread_pool pool(cc::num_hardware_threads());  // >=1 workers serving general (bit 0) by default
-cc::install_default_async_pool(pool);                    // general-compute nodes route here
-int v = pool.blocking_get(root);                         // submit + block THIS (foreign) thread; not from a worker
-// affinity: typed u32 mask, overlap => eligible; bit 0 = general (default). One pool per class:
-cc::async_thread_pool rpool(2, cc::async_affinity{0b10});     // serves bit 1
-auto t = cc::make_async_lazy([]{ ... });                      // create LAZY, then:
-t->set_affinity(cc::async_affinity{0b10}, &route_to_rpool);   // freeze-on-schedule; route = raw fn ptr to its pool
-// Not here yet: co_await, plain (non-async) dep args, nested once deps, typed/shared errors, eager child reclaim.
+cc::async_thread_pool pool;                              // >=1 workers; default = hardware concurrency - 1 (below)
+cc::install_default_async_pool(pool);                    // compute nodes route here when off-worker
+int v = pool.blocking_get(root);                         // caller PARTICIPATES (runs the graph, steals), then blocks
+// ^ hence the -1 default: the calling thread is a worker for the duration. A graph that never forks stays on it
+//   entirely (~27 ns, no cross-thread round trip). Never call blocking_get from inside a worker of that pool.
+// route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
+cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
+// WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.
+// It starts nothing, worker_count() == 0, the ctor's count is ignored, and blocking_get drives the graph
+// inline on the caller (it reports no steal-capable peers, so nothing is published). It cannot WAIT though:
+// a graph parked on another thread's work never completes, and blocking_get's is_ready() assert says so.
+// Not here yet: co_await, plain (non-async) dep args, structured/owned children, error-type conversion across
+// a heterogeneous-E dependency graph (the make_async_* sugar assumes a single E; raw frames can bridge by hand).
 ```
 
 ## Strings — encoding conversion
@@ -461,6 +514,47 @@ cc::install_crash_handler();                        // segfault/abort/etc -> std
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 
+## Streams (byte I/O)
+
+```cpp
+#include <clean-core/streams/stream.hh>       // non-owning, MOVE-ONLY byte stream views over an adapter
+cc::read_stream  cc::write_stream  cc::read_write_stream          // + cc::seekable_read_stream, seekable_write_stream, ...
+// seekable_* promise FAST seeks (O(1)/O(log n)); a linear-seek source must present as non-seekable instead.
+s.flush();                                // -> result<i64> plain flush: refill (read) / drain (write); pos, or -1 if none
+s.is_valid();                             // false after a move consumed it
+// read (read capability):
+s.ready_bytes();                          // -> span<byte const> buffered & ready right now: [curr, end)
+s.consume(n);                             // consume n ready bytes
+s.at_end();                               // -> result<bool>; dry check on seekable, else refills once
+s.read(dst);                              // -> result<isize> up to dst.size(); 0 only at end-of-data
+s.read_full(dst);  s.read_pod<T>();      // -> result<unit> / result<T>; error if the stream ends early
+// write (write capability):
+s.writable_bytes();                           // -> span<byte> free space to write into: [curr, end)
+s.produce(n);                              // mark n bytes (written into writable_bytes()) as produced
+s.write(src);  s.write_pod(v);            // -> result<unit>; a bounded sink that is full => error
+// seekable only:
+s.seek_to(abs);  s.skip(delta);  s.seek_from_end(off);   // -> result<i64> new position
+s.position();  s.size();  s.remaining_bytes();  // -> result<i64>; dry queries — do NOT disturb the buffer
+cc::move(s).try_as_seekable();            // -> optional<seekable_*>; consumes s on success, else s stays valid
+
+#include <clean-core/streams/span_stream.hh> // in-memory adapters (seekable, unbuffered — whole span is the window)
+cc::span_read_stream_adapter(bytes);  cc::span_write_stream_adapter(buf);  cc::span_read_write_stream_adapter(buf);
+// construct explicitly; converts IMPLICITLY to the matching stream (or a legal narrowing). Must outlive the stream.
+
+#include <clean-core/streams/file_stream.hh> // buffered file adapters (seekable; 4 KiB inline buffer)
+cc::file_read_stream_adapter::open(path);        // -> result<...>  existing file, read
+cc::file_write_stream_adapter::create(path);     // -> result<...>  create / truncate, write from 0
+cc::file_write_stream_adapter::open(path);       // -> result<...>  keep contents, overwrite in place from 0
+cc::file_write_stream_adapter::append(path);     // -> result<...>  window starts at EOF; writing grows the file
+cc::file_read_write_stream_adapter::open(path);  // -> result<...>  existing file, read + overwrite + grow-while-writing
+adapter.stream();                         // -> the natural seekable_* stream (or implicit conversion, incl. non-seekable)
+// Growth: create/open/append differentiate write intent; a read_write stream grows too (write past EOF,
+// including a fresh seek-to-end + write) — it tracks the read boundary and write capacity as separate ends.
+
+#include <clean-core/streams/stream_flush.hh> // authoring: write your own adapter (socket, compressor, ...)
+cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see docs/writing-a-stream.md
+```
+
 ## Gotchas
 
 - **Assertions are on in debug & relwithdebinfo, off in release.** The default
@@ -483,6 +577,14 @@ cc::add_crash_context_hook(&fn);                    // void()noexcept printed be
   (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
   state alive.
 - **`create_uninitialized` requires a trivial `T`.**
-- **Not yet implemented (stubs — don't reach for these):** `map`, `set`,
-  `ringbuffer`, `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`,
-  and `flags`. Check the header before relying on one.
+- **Not yet implemented (stubs — don't reach for these):** `ringbuffer`,
+  `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`, and `flags`.
+  Check the header before relying on one.
+- **Streams are move-only real types (private-inheritance wrappers over one engine).**
+  Streams do NOT convert to each other — the ADAPTER converts straight to any legal
+  narrowing (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write`
+  never). A moved-from stream asserts on use.
+- **Flush a write stream before dropping its adapter** — buffered bytes are lost
+  otherwise (there is no auto-flush). A stream borrows into its adapter, so the
+  adapter must outlive it; the file adapter's 4 KiB buffer is *inline*, so once a
+  stream is taken the adapter is effectively pinned (don't move it).

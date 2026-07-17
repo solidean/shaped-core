@@ -34,16 +34,18 @@ target_compile_options(shaped-viewer
 )
 
 # Test executable
-add_executable(shaped-viewer-test
-    tests/main.cc
-    tests/smoke-test.cc
-)
+if(SC_BUILD_TESTS)
+    add_executable(shaped-viewer-test
+        tests/main.cc
+        tests/smoke-test.cc
+    )
 
-target_link_libraries(shaped-viewer-test
-    PRIVATE
-    shaped-viewer
-    nexus
-)
+    target_link_libraries(shaped-viewer-test
+        PRIVATE
+        shaped-viewer
+        nexus
+    )
 
-# Browser test runner (Emscripten only); a no-op on native toolchains.
-sc_add_nexus_web_runner(shaped-viewer-test)
+    # Browser test runner (Emscripten only); a no-op on native toolchains.
+    sc_add_nexus_web_runner(shaped-viewer-test)
+endif()

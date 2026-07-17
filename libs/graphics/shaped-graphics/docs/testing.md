@@ -99,6 +99,20 @@ CHECK(c._descriptor_heap.watermark == ...)`) only where you must read backend gu
 integration tests in dependent libraries (e.g. `shaped-shader-compiler-dxc/tests`): create the concrete
 context as the entry point, then drive it as a plain `sg::context&`.
 
+**A tier-2 test may name backend API in exactly three places — everything else routes through `sg::context`:**
+
+1. **Entry point** — `sg::create_<backend>_context({...})` to bring the context up, including to set a
+   backend-specific knob the test is about (ring sizes, descriptor-heap capacity, …). What it returns is a
+   plain `sg::context_handle`; from there, drive it as one.
+2. **Late inspection cast** — `static_cast<<backend>_context&>(ctx)` (or a resource downcast) *inside an
+   assertion*, to read internal state the abstract surface doesn't expose.
+3. **Backend-exclusive resources** — features with no public `sg` entry point yet (e.g. dx12 RTV/DSV
+   descriptors). Legitimately backend-typed end to end; keep the backend-typed span minimal and say why.
+
+Quick self-check when writing or reviewing a tier-2 test: every `create_<backend>_*` / `submit_<backend>_*`
+and every up-front `static_cast<…_context&>` used *as the driver* is the smell — grep the file for them and
+confirm each surviving one is case 1, 2, or 3 above. If a call is none of those, it has a public form; use it.
+
 See [concepts/backends.md](concepts/backends.md) for the backend-side rationale and the dx12 topic layout.
 
 ---

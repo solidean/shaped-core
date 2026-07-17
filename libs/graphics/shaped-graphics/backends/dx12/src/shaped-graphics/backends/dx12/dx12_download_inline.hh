@@ -132,6 +132,10 @@ public:
     /// Shuts the actor down (draining pending copies), then unmaps + releases the ring buffer.
     void shutdown();
 
+    /// Runs one cycle of the copy actor on the calling thread; true if there may be more work. A no-op
+    /// returning false wherever the actor has its own thread — see sg::context::pump_transfers.
+    bool pump_unthreaded() { return _actor != nullptr && _actor->process_messages_if_unthreaded(); }
+
     // --- test-only escape hatches --------------------------------------------------------------------
     // Backend tests peel the abstraction to assert ring-cursor behavior (e.g. seam-splitting). See
     // libs/graphics/shaped-graphics/docs/testing.md. Not part of the production surface.

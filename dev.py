@@ -37,9 +37,10 @@ The default preset is chosen by platform but can be overridden with --preset.
 
 dev.py is quiet by default: child stdout/stderr is captured to
 build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt rather than
-mirrored to the terminal — pass --mirror-output to stream it live. Each command
-also writes a machine-readable sidecar (configure.json / build.json / test.json)
-next to the build directory.
+mirrored to the terminal — pass --mirror-output to stream all of it live, or
+--mirror-test-output to stream only the test binaries (quiet build, loud test).
+Each command also writes a machine-readable sidecar (configure.json /
+build.json / test.json) next to the build directory.
 
 Output is colored (green/orange/red) when stdout and stderr are both a terminal,
 and plain when either is piped (e.g. run by an agent). Force it either way with
@@ -137,6 +138,17 @@ DEFAULT_RELEASE_PRESETS: dict[str, str] = {
     "Darwin": "macos-arm-llvm-release",
 }
 
+# Single-threaded sibling of each default preset (SC_THREADS=OFF -> CC_HAS_THREADS 0), run by the `test`
+# check so precommit exercises both threading modes rather than only the threaded one. RelWithDebInfo, so
+# it also carries CC_ASSERT. Without it this mode is only reachable via a wasm build, which is how it came
+# to be under-exercised in the first place. Deliberately one preset, not a matrix: it is a compile-time
+# axis, and the check tail is already the slow part.
+DEFAULT_SINGLETHREADED_PRESETS: dict[str, str] = {
+    "Windows": "singlethreaded-clang",
+    "Linux": "singlethreaded-linux-clang",
+    "Darwin": "singlethreaded-macos-arm-llvm",
+}
+
 # Sanitizer (ASan+UBSan) preset per platform, run by the `test` check as an extra
 # defensive pass. Windows is intentionally absent: clang-cl's ASan is broken with
 # C++ exceptions (any throw/catch faults during EH dispatch — a toolchain bug, not
@@ -185,6 +197,7 @@ def build_policy() -> cmd.Policy:
         default_build=DEFAULT_BUILD_PRESETS,
         default_debug=DEFAULT_DEBUG_PRESETS,
         default_release=DEFAULT_RELEASE_PRESETS,
+        default_singlethreaded=DEFAULT_SINGLETHREADED_PRESETS,
         default_sanitize=DEFAULT_SANITIZE_PRESETS,
         coverage_build=COVERAGE_BUILD_PRESETS,
         pgo_generate=PGO_GENERATE_PRESETS,
@@ -206,6 +219,9 @@ def main() -> None:
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--mirror-output", action="store_true",
                         help="Stream child stdout/stderr live instead of only capturing it")
+    parser.add_argument("--mirror-test-output", action="store_true",
+                        help="Stream the test binaries' stdout/stderr live, but stay quiet through "
+                             "configure and build (the common case; --mirror-output does both)")
     parser.add_argument("--collect-logs", metavar="FILE", default=None,
                         help="On exit (pass or fail), bundle all captured run logs and step sidecars "
                              "under build/ into a zip at FILE — last-resort raw diagnostics for CI.")
@@ -232,6 +248,7 @@ def main() -> None:
         parser.error("unrecognized arguments: %s" % " ".join(forwarded))
     args.runner_args = forwarded
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
+    dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
 
     # Capture logs on the way out regardless of how the command exits (including
     # sys.exit on a failed build/test) — atexit fires on SystemExit too.

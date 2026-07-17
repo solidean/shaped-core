@@ -21,7 +21,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
     c.transient.set_budget(cc::isize(512) * 1024); // applied at the next advance_epoch (see set_budget)
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
@@ -35,15 +35,15 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
         for (int i = 0; i < 256; ++i)
             src[i] = cc::byte((i + e) & 0xFF);
 
-        auto up = c.create_dx12_command_list();
-        REQUIRE(up.has_value());
-        up.value()->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
-        c.submit_dx12_command_list(cc::move(up.value()));
+        auto up = c.create_command_list();
+        REQUIRE(up != nullptr);
+        up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+        c.submit_command_list(cc::move(up));
 
-        auto down = c.create_dx12_command_list();
-        REQUIRE(down.has_value());
-        auto future = down.value()->download.bytes_from_buffer(buf, 0, 256);
-        c.submit_dx12_command_list(cc::move(down.value()));
+        auto down = c.create_command_list();
+        REQUIRE(down != nullptr);
+        auto future = down->download.bytes_from_buffer(buf, 0, 256);
+        c.submit_command_list(cc::move(down));
 
         auto const bytes = c.wait_for(future);
         REQUIRE(bytes.has_value());

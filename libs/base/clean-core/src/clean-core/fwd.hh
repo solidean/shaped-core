@@ -80,6 +80,10 @@ template <class T, class NodeTraits>
 struct poly_node_allocation;
 template <class T>
 struct unique_ptr;
+template <class T, class Traits>
+struct shared_ptr;
+template <class T, class Traits>
+struct weak_ptr;
 
 
 //
@@ -233,19 +237,24 @@ struct threaded_actor_impl;
 //
 
 struct async_error;
-struct async_affinity;
 struct async_node_base;
+namespace impl
+{
+struct async_node_traits;
+}
 struct async_scheduler;
 struct async_worker_scope;
-struct inline_scheduler;
+struct singlethreaded_scheduler;
 struct async_thread_pool;
+struct async_context_base;
+template <class T, class E = async_error>
 struct async_context;
-template <class T>
-struct async_result;
-template <class T>
+template <class T, class E = async_error>
 struct async;
-template <class T>
-struct once_async;
+
+/// The normal async handle: an 8 B intrusive cc::shared_ptr over one slab node (see thread/async.hh).
+template <class T, class E = async_error>
+using shared_async = shared_ptr<async<T, E>, impl::async_node_traits>;
 
 
 //
@@ -253,6 +262,29 @@ struct once_async;
 //
 
 struct hash128;
+
+
+//
+// Streams
+//
+
+enum class seek_dir : u8; // the flush direction (public authoring API; defined in streams/stream_flush.hh)
+
+// The six non-owning stream views (concrete types over the shared engine; defined in streams/stream.hh).
+struct read_stream;
+struct write_stream;
+struct read_write_stream;
+struct seekable_read_stream;
+struct seekable_write_stream;
+struct seekable_read_write_stream;
+
+// Their owning adapters:
+class span_read_stream_adapter;
+class span_write_stream_adapter;
+class span_read_write_stream_adapter;
+class file_read_stream_adapter;
+class file_write_stream_adapter;
+class file_read_write_stream_adapter;
 
 
 //

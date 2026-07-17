@@ -103,31 +103,33 @@ target_compile_options(shaped-graphics-dx12
 # topic; see libs/graphics/shaped-graphics/docs/concepts/backends.md. Named *-test so the dev.py
 # runner discovers it. Only exists
 # on Windows because this whole subdirectory is gated there by the sg CMakeLists.
-add_executable(shaped-graphics-dx12-test
-    tests/main.cc
-    tests/dx12-context-test.cc
-    tests/dx12-epoch-test.cc
-    tests/dx12-command-pool-test.cc
-    tests/dx12-transfer-test.cc
-    tests/dx12-transfer-resize-test.cc
-    tests/dx12-transfer-wrap-test.cc
-    tests/dx12-upload-async-test.cc
-    tests/dx12-download-async-test.cc
-    tests/dx12-copy-test.cc
-    tests/dx12-compute-test.cc
-    tests/dx12-pipeline-cache-test.cc
-    tests/dx12-cached-pso-test.cc
-    tests/dx12-placed-test.cc
-    tests/dx12-transient-test.cc
-    tests/dx12-texture-barrier-test.cc
-    tests/dx12-texture-view-test.cc
-    tests/dx12-rtv-dsv-test.cc
-    tests/dx12-clear-test.cc
-    tests/dx12-swapchain-test.cc
-    tests/dx12-sampler-test.cc
-    tests/dx12-texture-copy-test.cc
-    tests/dx12-raytracing-test.cc
-    tests/dx12-query-test.cc
-)
+if(SC_BUILD_TESTS)
+    add_executable(shaped-graphics-dx12-test
+        tests/main.cc
+        tests/dx12-context-test.cc
+        tests/dx12-epoch-test.cc
+        tests/dx12-command-pool-test.cc
+        tests/dx12-transfer-test.cc
+        tests/dx12-transfer-resize-test.cc
+        tests/dx12-transfer-wrap-test.cc
+        tests/dx12-upload-async-test.cc
+        tests/dx12-download-async-test.cc
+        tests/dx12-copy-test.cc
+        tests/dx12-compute-test.cc
+        tests/dx12-pipeline-cache-test.cc
+        tests/dx12-cached-pso-test.cc
+        tests/dx12-placed-test.cc
+        tests/dx12-transient-test.cc
+        tests/dx12-texture-barrier-test.cc
+        tests/dx12-texture-view-test.cc
+        tests/dx12-rtv-dsv-test.cc
+        tests/dx12-clear-test.cc
+        tests/dx12-swapchain-test.cc
+        tests/dx12-sampler-test.cc
+        tests/dx12-texture-copy-test.cc
+        tests/dx12-raytracing-test.cc
+        tests/dx12-query-test.cc
+    )
 
-target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)
+    target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)
+endif()

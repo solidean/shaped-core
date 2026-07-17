@@ -39,10 +39,11 @@ like (see [clean-core's benchmarks](../../libs/base/clean-core/tests/benchmarks/
 Every nexus test is in exactly one bucket — `normal` (default), `manual`, or
 `guide_benchmark`. A sweep selects one bucket: the default run sweeps `normal`,
 `--manual` sweeps `manual`, and `--guide-benchmarks` sweeps `guide_benchmark`.
-Guide benchmarks therefore never run in a normal `dev.py test` sweep. `disabled`
-is orthogonal and can apply to any bucket. Naming a test by an exact (non-wildcard)
-filter runs it regardless of bucket, so `dev.py test "hash - throughput"` still
-works.
+Guide benchmarks therefore never run in a normal `dev.py test` sweep — not even
+when a substring filter matches their names, so `dev.py test "hash"` leaves them
+alone. `disabled` is orthogonal and can apply to any bucket. Naming a test by its
+**exact** name runs it regardless of bucket, so `dev.py test "hash - throughput"`
+still works.
 
 ## Running and the sidecar
 

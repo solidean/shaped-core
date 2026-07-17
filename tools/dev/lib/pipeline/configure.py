@@ -45,8 +45,9 @@ def _publish_compile_commands(preset: Preset) -> None:
 def _configure_one(
     preset: Preset, *, root: Path, mirror: bool, verbose: bool, emsdk_path: str | None = None
 ) -> StepResult:
-    # Ensure external prerequisites (DXC) exist before cmake sees them. Cheap once built.
+    # Ensure external prerequisites (DXC, Zydis) exist before cmake sees them. Cheap once built.
     prereqs.ensure_dxc(root, preset.name)
+    prereqs.ensure_zydis(root, preset.name)
 
     # Request a File API codemodel so target discovery works after configure.
     targets.write_query(preset.build_dir)

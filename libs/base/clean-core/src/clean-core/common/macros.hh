@@ -16,7 +16,8 @@
 //   Platform: CC_PLATFORM_{DESKTOP, MOBILE, WEB, CONSOLE} — coarse device class (orthogonal to OS: an Xbox
 //             is OS=WINDOWS, Platform=CONSOLE)
 //
-// Exactly one macro is defined per axis.
+// Exactly one macro is defined per axis. CC_HAS_64BIT_POINTERS (0 or 1) is derived from Arch — pointer
+// width is not an axis of its own, but it is the thing byte-count code actually means.
 
 // --- Compiler ---
 // clang is checked first: clang-cl also defines _MSC_VER but is clang, and bucketing it as CLANG (not MSVC)
@@ -46,11 +47,32 @@
 #error "Unknown architecture"
 #endif
 
+// --- Pointer width (derived from Arch; always defined, 0 or 1) ---
+// Register width and pointer width are separate questions here, and only one of them is settled:
+//
+//   * 64-bit REGISTERS are required. Everything we ship assumes 64-bit arithmetic is a single operation
+//     (cc::atomic<u64>, the fused refcount, the tagged control words).
+//   * Pointer width is NOT 64 everywhere. wasm32 is the case that matters: 64-bit registers, 32-bit
+//     pointers. So a pointer is 4 B there, and every struct footprint derived from one shrinks with it —
+//     cc::small_vector's 48 B is a 64-bit-pointer statement, not a universal one.
+//
+// Branch on this — never on the arch, and never on a hand-rolled sizeof(void*) == 8 at the use site.
+#if defined(CC_ARCH_WASM32) || defined(CC_ARCH_X86) || defined(CC_ARCH_ARM32)
+#define CC_HAS_64BIT_POINTERS 0
+#else
+#define CC_HAS_64BIT_POINTERS 1
+#endif
+
 // =========================================================================================================
 // Compilation modes
 // =========================================================================================================
-// Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS, CC_ASSERT_ENABLED
-// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO
+// Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS
+// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS
+// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED
+//
+// CMake only ever defines inputs; this header owns every derivation and defines the outputs
+// unconditionally. So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, and CC_SINGLE_THREADED feeds
+// CC_HAS_THREADS — none of the derived macros is itself overridable.
 
 #ifdef CC_COMPILER_MSVC
 #ifdef _CPPRTTI
@@ -145,8 +167,16 @@
 // (and SharedArrayBuffer-backed std::thread) when built with -pthread, which predefines
 // __EMSCRIPTEN_PTHREADS__. Single-threaded wasm still compiles <mutex>/<thread>/thread_local fine — they
 // degrade to no-ops — so this flag gates behavior, not compilation.
+//
+// CC_SINGLE_THREADED (from CMake: SC_THREADS=OFF) forces 0 on a platform that HAS threads, which is what
+// makes the single-threaded mode developable natively instead of only under wasm. It forces threads OFF
+// only: wasm without -pthread genuinely has none, so there is deliberately no way to force them ON.
+// Absent the define the autodetect below stands, which is also the path when clean-core is consumed via
+// add_subdirectory without our root CMakeLists.
 
-#if defined(CC_PLATFORM_WEB)
+#if defined(CC_SINGLE_THREADED)
+#define CC_HAS_THREADS 0
+#elif defined(CC_PLATFORM_WEB)
 #if defined(__EMSCRIPTEN_PTHREADS__)
 #define CC_HAS_THREADS 1
 #else
