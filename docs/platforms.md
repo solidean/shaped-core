@@ -10,6 +10,12 @@ tests* see [guides/ci.md](guides/ci.md). (Back to [_index.md](_index.md).)
 All targets are **64-bit**; no 32-bit support is planned. (WebAssembly's `wasm32` has a 32-bit
 *address space* but is a 64-bit *register* target — it counts as part of the 64-bit family.)
 
+That split has teeth: 64-bit *registers* are assumed everywhere, but 64-bit *pointers* are not, so
+anything sized off a pointer is smaller on wasm32 (`cc::small_vector` is 48 B on x64/arm64, less on
+wasm32). Code that pins a byte count branches on clean-core's **`CC_HAS_64BIT_POINTERS`** (0 or 1,
+from [macros.hh](../libs/base/clean-core/src/clean-core/common/macros.hh)) — never on the arch, and
+never on a hand-rolled `sizeof(void*) == 8`.
+
 ## Support tiers
 
 - **Tier 1** — built **and tested in CI** on every push and pull request. The bar for "it works".

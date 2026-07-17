@@ -16,7 +16,8 @@
 //   Platform: CC_PLATFORM_{DESKTOP, MOBILE, WEB, CONSOLE} — coarse device class (orthogonal to OS: an Xbox
 //             is OS=WINDOWS, Platform=CONSOLE)
 //
-// Exactly one macro is defined per axis.
+// Exactly one macro is defined per axis. CC_HAS_64BIT_POINTERS (0 or 1) is derived from Arch — pointer
+// width is not an axis of its own, but it is the thing byte-count code actually means.
 
 // --- Compiler ---
 // clang is checked first: clang-cl also defines _MSC_VER but is clang, and bucketing it as CLANG (not MSVC)
@@ -44,6 +45,22 @@
 #define CC_ARCH_ARM32
 #else
 #error "Unknown architecture"
+#endif
+
+// --- Pointer width (derived from Arch; always defined, 0 or 1) ---
+// Register width and pointer width are separate questions here, and only one of them is settled:
+//
+//   * 64-bit REGISTERS are required. Everything we ship assumes 64-bit arithmetic is a single operation
+//     (cc::atomic<u64>, the fused refcount, the tagged control words).
+//   * Pointer width is NOT 64 everywhere. wasm32 is the case that matters: 64-bit registers, 32-bit
+//     pointers. So a pointer is 4 B there, and every struct footprint derived from one shrinks with it —
+//     cc::small_vector's 48 B is a 64-bit-pointer statement, not a universal one.
+//
+// Branch on this — never on the arch, and never on a hand-rolled sizeof(void*) == 8 at the use site.
+#if defined(CC_ARCH_WASM32) || defined(CC_ARCH_X86) || defined(CC_ARCH_ARM32)
+#define CC_HAS_64BIT_POINTERS 0
+#else
+#define CC_HAS_64BIT_POINTERS 1
 #endif
 
 // =========================================================================================================

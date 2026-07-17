@@ -1,3 +1,4 @@
+#include <clean-core/common/macros.hh> // CC_HAS_64BIT_POINTERS
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/small_vector.hh>
 #include <nexus/test.hh>
@@ -51,29 +52,35 @@ struct alignas(32) Over32
 };
 } // namespace
 
-// The SSO fold (mode flag + resource in one tagged word) keeps the common case at 48 B — one line under the
-// old 64 B. N is a *minimum* inline capacity: a single raw buffer holds the elements at the front, a u32 size,
-// then the tagged resource word (trailing 8 B); the buffer auto-grows to fill the footprint. A larger inline
-// buffer grows the struct but wastes no leading bytes (still >= N).
+// The layout claims that hold on every target: N is a *minimum* inline capacity (a single raw buffer holds the
+// elements at the front, a u32 size, then the tagged resource word; the buffer auto-grows to fill the
+// footprint), and a larger inline buffer grows the struct without wasting leading bytes.
+static_assert(cc::small_vector<int, 4>::inline_capacity() >= 4, "inline_capacity is at least N");
+static_assert(cc::small_vector<cc::u16, 3>::inline_capacity() >= 3, "inline_capacity is at least N");
+static_assert(cc::small_vector<int, 64>::inline_capacity() >= 64, "keeps at least N inline");
+static_assert(sizeof(cc::small_vector<int, 64>) > sizeof(cc::small_vector<int, 4>),
+              "a large inline buffer grows the struct");
+static_assert(sizeof(cc::small_vector<int, 64>) < sizeof(cc::small_vector<int, 4>) + 64 * sizeof(int),
+              "no wasted leading region (tail waste gone)");
+// Over-aligned T needs no special dependency on alignof(T) <= 8: the struct picks up alignof(T) (elements sit
+// at offset 0, so they get T's alignment) and grows only as needed.
+static_assert(alignof(cc::small_vector<Over16, 2>) == 16, "over-aligned T bumps the struct alignment");
+static_assert(alignof(cc::small_vector<Over32, 1>) == 32, "32-aligned T bumps struct alignment to 32");
+static_assert(cc::small_vector<Over16, 2>::inline_capacity() >= 2, "keeps at least N inline");
+static_assert(cc::small_vector<Over32, 1>::inline_capacity() >= 1, "keeps at least N inline");
+
+// The byte counts are 64-bit-POINTER statements, not universal ones: the footprint is derived from
+// sizeof(cc::allocation<T>), so it tracks pointer width and wasm32 folds the same layout to a smaller struct
+// (see CC_HAS_64BIT_POINTERS). The SSO fold (mode flag + resource in one tagged word) keeps the common case at
+// 48 B — one line under the old 64 B — and a 16 B/16-aligned element still lands there, while a 32 B/32-aligned
+// one rounds the footprint up to 64 B.
+#if CC_HAS_64BIT_POINTERS
 static_assert(sizeof(cc::small_vector<int, 4>) == 48, "small_vector<int,4> should be 48 B");
 static_assert(sizeof(cc::small_vector<cc::u16, 3>) == 48, "small_vector<u16,3> should be 48 B");
 static_assert(cc::small_vector<int, 4>::inline_capacity() == 9, "auto-grows <int,4> to 9 inline");
-static_assert(cc::small_vector<int, 4>::inline_capacity() >= 4, "inline_capacity is at least N");
-static_assert(cc::small_vector<cc::u16, 3>::inline_capacity() >= 3, "inline_capacity is at least N");
-// A large inline buffer grows the struct, but the unified layout wastes no leading bytes: it stays strictly
-// below the old tail layout's footprint (48 B header + N elements).
-static_assert(sizeof(cc::small_vector<int, 64>) > 48, "a large inline buffer grows past 48 B");
-static_assert(sizeof(cc::small_vector<int, 64>) < 48 + 64 * sizeof(int), "no wasted leading region (tail waste gone)");
-static_assert(cc::small_vector<int, 64>::inline_capacity() >= 64, "keeps at least N inline");
-// Over-aligned T is handled with no special dependency on alignof(T) <= 8: the struct picks up alignof(T)
-// (elements sit at offset 0, so they get T's alignment) and grows only as needed. A 16 B/16-aligned element
-// still lands the common case at 48 B; a 32 B/32-aligned element rounds the footprint up to 64 B.
-static_assert(alignof(cc::small_vector<Over16, 2>) == 16, "over-aligned T bumps the struct alignment");
 static_assert(sizeof(cc::small_vector<Over16, 2>) == 48, "16 B/16-aligned element still fits the 48 B footprint");
-static_assert(cc::small_vector<Over16, 2>::inline_capacity() >= 2, "keeps at least N inline");
-static_assert(alignof(cc::small_vector<Over32, 1>) == 32, "32-aligned T bumps struct alignment to 32");
 static_assert(sizeof(cc::small_vector<Over32, 1>) == 64, "32 B/32-aligned element rounds the footprint to 64 B");
-static_assert(cc::small_vector<Over32, 1>::inline_capacity() >= 1, "keeps at least N inline");
+#endif
 
 TEST("small_vector - empty is inline")
 {
@@ -81,8 +88,7 @@ TEST("small_vector - empty is inline")
     CHECK(v.size() == 0);
     CHECK(v.empty());
     CHECK(v.is_inline());
-    CHECK(v.capacity() == 9); // N=4 is a minimum; head layout grows it
-    CHECK((cc::small_vector<int, 4>::inline_capacity() == 9));
+    CHECK((v.capacity() == cc::small_vector<int, 4>::inline_capacity())); // N=4 is a minimum; the layout grows it
     CHECK(v.capacity() >= 4);
     CHECK(v.begin() == v.end());
 }

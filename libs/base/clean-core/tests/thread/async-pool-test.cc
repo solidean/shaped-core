@@ -151,6 +151,11 @@ TEST("async - stress: many small graphs on a pool")
     }
 }
 
+// Gated, helpers and all: the leak this pins can only exist where there ARE deques. Without threads the pool has
+// none -- its _queue holds real handles that free themselves when the vector dies (see async_thread_pool.cc), so
+// the hand-held strong count that needs an explicit drain never comes into being, and there is no worker to
+// catch mid-drive either. The test would pass for a reason that has nothing to do with what it checks.
+#if CC_HAS_THREADS
 namespace
 {
 // A value type that counts its own live instances. This is the leak detector, and it has to be the VALUE rather
@@ -227,6 +232,7 @@ TEST("async - destroying a pool releases work abandoned in its deques")
     }
     CHECK(counted::live.load(cc::memory_order_relaxed) == 0);
 }
+#endif
 
 TEST("async - the wake protocol survives workers repeatedly draining to empty")
 {
