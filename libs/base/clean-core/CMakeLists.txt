@@ -117,6 +117,7 @@ target_sources(clean-core
     src/clean-core/error/optional.hh
     src/clean-core/error/crash_handler.hh
 
+    src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
     src/clean-core/thread/threaded_actor.hh
@@ -162,12 +163,23 @@ target_compile_options(clean-core
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# Define build configuration macros
+# SC_THREADS is the root CMakeLists' option. Default it for a standalone add_subdirectory() consumer that
+# has no root of ours: undefined, the generator expression below reads as OFF and would silently force a
+# single-threaded build. option() would also do, but this says "fallback default", not "second declaration".
+if(NOT DEFINED SC_THREADS)
+    set(SC_THREADS ON)
+endif()
+
+# Define build configuration macros. These are the inputs macros.hh derives from; it owns the outputs
+# (CC_ASSERT_ENABLED, CC_HAS_THREADS). PUBLIC because they must agree across the whole build: consumers
+# branch on them, and CC_SINGLE_THREADED additionally changes struct layout (node_allocation's slab header),
+# so a target compiled without it could not share objects with one compiled with it.
 target_compile_definitions(clean-core
     PUBLIC
     $<$<CONFIG:Debug>:CC_DEBUG>
     $<$<CONFIG:Release>:CC_RELEASE>
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
+    $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
 )
 
 # Detect and link the correct library for std::stacktrace support.
@@ -192,88 +204,99 @@ if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc")
 endif()
 
 # Test executable
-add_executable(clean-core-test
-    tests/main.cc
+if(SC_BUILD_TESTS)
+    add_executable(clean-core-test
+        tests/main.cc
 
-    tests/benchmarks/string-hash-bench.cc
-    tests/benchmarks/hash-benchmark.cc
-    tests/benchmarks/allocation-benchmark.cc
-    tests/benchmarks/node-allocation-design-benchmark.cc
-    tests/benchmarks/node-allocation-design-refill.cc
-    tests/benchmarks/file-stream-benchmark.cc
+        tests/benchmarks/string-hash-bench.cc
+        tests/benchmarks/hash-benchmark.cc
+        tests/benchmarks/allocation-benchmark.cc
+        tests/benchmarks/async/async-benchmark.cc
+        tests/benchmarks/async/born-ready-benchmark.cc
+        tests/benchmarks/async/pool-benchmark.cc
+        tests/benchmarks/async/grain-benchmark.cc
+        tests/benchmarks/node-allocation-design-benchmark.cc
+        tests/benchmarks/node-allocation-design-refill.cc
+        tests/benchmarks/file-stream-benchmark.cc
 
-    # tests grouped by topic, mirroring src/clean-core/
-    tests/common/assert-test.cc
-    tests/common/hash-test.cc
-    tests/common/hash-types-test.cc
-    tests/common/hash128-test.cc
-    tests/common/invocable-test.cc
-    tests/common/macros-test.cc
-    tests/common/utility-test.cc
+        # tests grouped by topic, mirroring src/clean-core/
+        tests/common/assert-test.cc
+        tests/common/hash-test.cc
+        tests/common/hash-types-test.cc
+        tests/common/hash128-test.cc
+        tests/common/invocable-test.cc
+        tests/common/macros-test.cc
+        tests/common/utility-test.cc
 
-    tests/math/bit-test.cc
-    tests/math/random-test.cc
-    tests/math/wide_arith-test.cc
+        tests/math/bit-test.cc
+        tests/math/random-test.cc
+        tests/math/wide_arith-test.cc
 
-    tests/memory/allocation-test.cc
-    tests/memory/node_allocation-test.cc
-    tests/memory/node_allocation-patterns-test.cc
-    tests/memory/node_allocation-sizes-test.cc
-    tests/memory/node_allocation-slabs-test.cc
-    tests/memory/node_allocation-handles-test.cc
-    tests/memory/unique_ptr-test.cc
+        tests/memory/allocation-test.cc
+        tests/memory/node_allocation-test.cc
+        tests/memory/node_allocation-default-test.cc
+        tests/memory/node_allocation-patterns-test.cc
+        tests/memory/node_allocation-sizes-test.cc
+        tests/memory/node_allocation-slabs-test.cc
+        tests/memory/node_allocation-handles-test.cc
+        tests/memory/unique_ptr-test.cc
+        tests/memory/shared_ptr-test.cc
 
-    tests/container/array-test.cc
-    tests/container/fixed-array-test.cc
-    tests/container/small_vector-test.cc
-    tests/container/fixed_vector-test.cc
-    tests/container/span-test.cc
-    tests/container/strided_span-test.cc
-    tests/container/pinned_data-test.cc
-    tests/container/vector-test.cc
-    tests/container/map-test.cc
-    tests/container/set-test.cc
-    tests/container/byte_stream_builder-test.cc
-    tests/container/key_value_cache-test.cc
+        tests/container/array-test.cc
+        tests/container/fixed-array-test.cc
+        tests/container/small_vector-test.cc
+        tests/container/fixed_vector-test.cc
+        tests/container/span-test.cc
+        tests/container/strided_span-test.cc
+        tests/container/pinned_data-test.cc
+        tests/container/vector-test.cc
+        tests/container/map-test.cc
+        tests/container/set-test.cc
+        tests/container/byte_stream_builder-test.cc
+        tests/container/key_value_cache-test.cc
 
-    tests/string/conversion-test.cc
-    tests/string/format-test.cc
-    tests/string/print-test.cc
-    tests/string/string-test.cc
-    tests/string/string_view-test.cc
-    tests/string/to_debug_string-test.cc
+        tests/string/conversion-test.cc
+        tests/string/format-test.cc
+        tests/string/print-test.cc
+        tests/string/string-test.cc
+        tests/string/string_view-test.cc
+        tests/string/to_debug_string-test.cc
 
-    tests/function/function_ref-test.cc
-    tests/function/unique_function-test.cc
+        tests/function/function_ref-test.cc
+        tests/function/unique_function-test.cc
 
-    tests/error/optional-test.cc
-    tests/error/result-test.cc
+        tests/error/optional-test.cc
+        tests/error/result-test.cc
 
-    tests/streams/stream-test.cc
-    tests/streams/span_stream-test.cc
-    tests/streams/file_stream-test.cc
+        tests/streams/stream-test.cc
+        tests/streams/span_stream-test.cc
+        tests/streams/file_stream-test.cc
 
-    tests/thread/async-test.cc
-    tests/thread/async-pool-test.cc
-    tests/thread/mutex-test.cc
-    tests/thread/thread-test.cc
-    tests/thread/threaded_actor-test.cc
-)
+        tests/thread/async-test.cc
+        tests/thread/async-pool-test.cc
+        tests/thread/atomic-test.cc
+        tests/thread/chase_lev_deque-test.cc
+        tests/thread/mutex-test.cc
+        tests/thread/thread-test.cc
+        tests/thread/threaded_actor-test.cc
+    )
 
-target_link_libraries(clean-core-test
-    PRIVATE
-    clean-core
-    nexus
-    xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
-)
+    target_link_libraries(clean-core-test
+        PRIVATE
+        clean-core
+        nexus
+        xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
+    )
 
-# Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
-sc_add_nexus_web_runner(clean-core-test)
+    # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
+    sc_add_nexus_web_runner(clean-core-test)
+endif()
 
 # Coverage
 option(CC_COVERAGE_MSVC "Enable MSVC native coverage" OFF)
 
-if(CC_COVERAGE_MSVC AND MSVC)
+# TARGET clean-core-test: coverage instruments the test binary, which SC_BUILD_TESTS=OFF does not build.
+if(CC_COVERAGE_MSVC AND MSVC AND TARGET clean-core-test)
     # Debug info is required for sensible mapping
     target_compile_options(clean-core PRIVATE /Zi /Od)
     target_compile_options(clean-core-test PRIVATE /Zi /Od)
@@ -296,6 +319,14 @@ if(CC_PRINT_CONFIG)
         set(_cc_linker_name "${_CC_LINKER}")
     endif()
 
+    # Threading mode: worth printing because SC_THREADS=OFF changes both behavior and struct layout, and a
+    # stale build directory is otherwise indistinguishable from a fresh one.
+    if(SC_THREADS)
+        set(_cc_threads_name "OS threads (SC_THREADS=ON)")
+    else()
+        set(_cc_threads_name "single-threaded (SC_THREADS=OFF -> CC_HAS_THREADS 0)")
+    endif()
+
     message(STATUS "")
     message(STATUS "[clean-core] Configuration:")
     if(CMAKE_C_COMPILER_ID)
@@ -304,5 +335,6 @@ if(CC_PRINT_CONFIG)
     message(STATUS "  C++ compiler : ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
     message(STATUS "  OS           : ${CMAKE_SYSTEM_NAME}")
     message(STATUS "  Linker       : ${_cc_linker_name}")
+    message(STATUS "  Threading    : ${_cc_threads_name}")
     message(STATUS "")
 endif()

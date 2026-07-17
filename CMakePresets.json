@@ -299,6 +299,36 @@
             }
         },
         {
+            "name": "x64-windows-clang-ninja-singlethreaded",
+            "displayName": "Single-threaded Clang (Ninja, Windows)",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "OFF"
+            }
+        },
+        {
+            "name": "x64-linux-clang-ninja-singlethreaded",
+            "displayName": "Single-threaded Clang (Ninja, Linux)",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "OFF"
+            }
+        },
+        {
+            "name": "macos-arm-llvm-singlethreaded",
+            "displayName": "Single-threaded Clang (macOS ARM)",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "OFF"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-pgo-generate",
             "displayName": "PGO Generate Clang (Ninja, Windows)",
             "description": "Release build instrumented for PGO profile generation",
@@ -527,7 +557,7 @@
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "SC_WASM_EXCEPTIONS": "fexceptions",
-                "SC_WASM_THREADS": "OFF",
+                "SC_THREADS": "OFF",
                 "SC_WASM_WEBGPU": "OFF"
             },
             "hidden": true
@@ -636,6 +666,18 @@
         {
             "name": "coverage-macos-arm-llvm",
             "configurePreset": "macos-arm-llvm-coverage"
+        },
+        {
+            "name": "singlethreaded-clang",
+            "configurePreset": "x64-windows-clang-ninja-singlethreaded"
+        },
+        {
+            "name": "singlethreaded-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-singlethreaded"
+        },
+        {
+            "name": "singlethreaded-macos-arm-llvm",
+            "configurePreset": "macos-arm-llvm-singlethreaded"
         },
         {
             "name": "pgo-generate-clang",

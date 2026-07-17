@@ -1,0 +1,4 @@
+# The amalgamated Zydis sources are generated on demand (fetch-zydis.py), never committed:
+# Zydis.c is ~12 MB of generated instruction tables and only the optional instruction-tracer
+# tool needs it.
+/.install/

@@ -4,44 +4,71 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 
 #if CC_HAS_THREADS
+#include <clean-core/thread/impl/chase_lev_deque.hh>
 
-#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#endif
 
 // cc::async_thread_pool — a work-stealing scheduler that actually runs cc::async graphs concurrently.
 //
-// Each worker thread has a private LIFO deque (freshly spawned children stay hot) and steals from siblings
-// when idle; a shared injection queue takes work from foreign threads and cross-affinity wakeups. The pool
-// implements the async_scheduler seam: schedule()/completion routing places nodes here (see async_node.hh).
+// Each worker thread owns a lock-free Chase-Lev deque (see impl/chase_lev_deque.hh): it pushes and pops its own
+// bottom end LIFO, so freshly spawned children stay hot and the common path takes no cross-thread sync at all;
+// idle workers steal from the top of a sibling's deque, which is the only place threads meet. A shared,
+// mutex-guarded injection queue takes work from foreign threads -- deliberately not lock-free, because only
+// genuinely foreign submits PUSH to it (a worker waking a node enqueues locally). Note the asymmetry: its pop
+// side is not cold at all, since every idle worker used to scan it, which is what _injection_hint is for. The
+// pool implements the async_scheduler seam: schedule()/completion routing places nodes here (see async_node.hh).
 //
-//   cc::async_thread_pool pool(cc::num_hardware_threads());
-//   cc::install_default_async_pool(pool);                 // general-compute nodes now route here
+//   cc::async_thread_pool pool;                           // hardware concurrency - 1; see the constructor
+//   cc::install_default_async_pool(pool);                 // compute nodes now route here
 //   auto a = cc::make_async_lazy([] { return heavy(); });
 //   int v = pool.blocking_get(a);                         // drive on the pool, block THIS (foreign) thread
 //
-// Affinity: a pool serves one affinity mask (default general / bit 0). Every worker serves that mask, so a
-// steal within a pool is always affinity-compatible. Nodes with a user-defined affinity (set via
-// node->set_affinity) route to their own pool through their reschedule fn; construct one pool per task class
-// and coexist them freely.
+// blocking_get does NOT just hand the graph over and park: the calling thread borrows a slot and runs the graph
+// itself, stealing like any worker, and only parks once there is genuinely nothing for it. A graph that never
+// forks therefore touches no other thread at all (~27 ns, vs ~21 us for submit-and-park). That is also why the
+// default worker count is one FEWER than the hardware concurrency -- the caller is the other thread.
 //
-// Lifetime: the pool must outlive every node routed to it (nodes hold only a raw reschedule fn, by design).
-// The destructor stops the workers and joins them; it does not drain outstanding work, so finish (or abandon)
-// your graphs before tearing a pool down.
+// Lifetime: the pool must outlive every node routed to it (a woken node reaches its pool through the installed
+// default, by design). The destructor stops the workers and joins them; it does not RUN outstanding work, so
+// finish your graphs before tearing a pool down -- or abandon them deliberately, which is supported: queued
+// work is released rather than leaked (see the drain in the destructor).
+//
+// Note the destructor cannot interrupt a running frame, and the eager depth-first drive means one frame can be
+// most of a graph, so tearing down a pool mid-flight blocks until that unwinds. Workers only see the stop
+// between tasks.
+//
+// WITHOUT THREADS (CC_HAS_THREADS == 0 — WASM, or -DSC_THREADS=OFF) the pool keeps its entire API and falls
+// back rather than disappearing, so calling code stays identical across platforms. It starts no threads and
+// becomes a facade over an inline pump on the calling thread: worker_count() is 0, enqueue/submit push onto a
+// LIFO queue, and blocking_get drives the graph itself. It reports no steal-capable peers, so the poll loop
+// stops publishing dependencies and drives the whole graph on the caller's stack — i.e. the pool behaves as
+// cc::singlethreaded_scheduler wearing the pool's API. What it cannot do is wait: a graph parked on work only
+// another thread could supply never completes, and blocking_get's is_ready() assert reports that rather than
+// hanging.
 
 namespace cc
 {
 struct async_thread_pool final : async_scheduler
 {
-    /// Starts `worker_count` (>= 1) worker threads, each serving `served` (default general-purpose compute).
-    explicit async_thread_pool(int worker_count, async_affinity served = async_affinity::general());
+    /// Starts `worker_count` (>= 1) worker threads. Defaults to one FEWER than the hardware concurrency: a
+    /// foreign thread in blocking_get participates as a worker for the duration, so the default leaves it a core.
+    /// Without threads nothing is started and the count is ignored (see the fallback note above).
+    explicit async_thread_pool(int worker_count = default_worker_count());
+
+    /// num_hardware_threads() - 1, floored at 1 — see the constructor on why it is not the full count.
+    /// 0 without threads: the blocking_get caller is the only worker there ever is.
+    [[nodiscard]] static int default_worker_count();
 
     /// Stops and joins all workers. Asserts the pool is not still the installed default (uninstall it first —
     /// see uninstall_default_async_pool / scoped_default_async_pool). Does not drain queued work — outstanding
@@ -56,58 +83,127 @@ struct async_thread_pool final : async_scheduler
     // async_scheduler seam
 public:
     /// Local/hot enqueue onto the current worker's deque. Must be called from a worker of THIS pool (it is the
-    /// route taken by a running frame scheduling a child / cold dependency).
-    void enqueue(std::shared_ptr<async_node_base> node) override;
+    /// route taken by a running frame scheduling a child / cold dependency). Without threads there are no
+    /// workers and no such restriction: it queues onto the pump whoever calls blocking_get will drive.
+    void enqueue(async_node_ptr node) override;
 
-    /// Affinity-routed injection from any thread (foreign submits, cross-affinity wakeups). Asserts the node's
-    /// affinity overlaps this pool's served mask.
-    void submit(std::shared_ptr<async_node_base> node) override;
+    /// Injection from any thread (foreign submits, cross-thread wakeups).
+    void submit(async_node_ptr node) override;
 
     // queries
 public:
-    [[nodiscard]] async_affinity served() const { return _served; }
-    [[nodiscard]] int worker_count() const { return int(_workers.size()); }
+    /// Worker THREADS. Excludes the external slots that foreign blocking_get callers borrow. 0 without threads:
+    /// the blocking_get caller is the only worker there is.
+    [[nodiscard]] int worker_count() const { return _thread_count; }
 
     // blocking driver (call from a foreign thread — never from inside a worker/frame)
 public:
-    /// Submit `root` to this pool and block the calling thread until it completes, returning its outcome.
-    /// Asserts if called from within a worker of this pool (that would park a pool thread on its own work).
-    template <class T>
-    [[nodiscard]] cc::result<T, async_error> try_blocking_get(shared_async<T> const& root);
+    /// Drive `root` to completion and return its outcome. The calling thread PARTICIPATES — it borrows a pool
+    /// slot and runs the graph itself rather than handing it over, so a small graph never leaves this thread;
+    /// it only parks once there is nothing left for it to run. Asserts if called from within a worker of this
+    /// pool (that would park a pool thread on its own work). Without threads the caller does not merely
+    /// participate, it is the only participant: it runs the whole graph inline.
+    template <class T, class E = async_error>
+    [[nodiscard]] cc::result<T, E> try_blocking_get(shared_async<T, E> const& root);
 
     /// Like try_blocking_get but returns the value (copy) and asserts on error/cancellation.
-    template <class T>
-    [[nodiscard]] T blocking_get(shared_async<T> const& root);
+    template <class T, class E = async_error>
+    [[nodiscard]] T blocking_get(shared_async<T, E> const& root);
 
     // internal
 private:
+    /// Drives `root` to completion on the calling thread. The one seam the two frontends implement differently:
+    /// with threads the caller borrows a slot and steals alongside the workers; without them it just pumps.
+    void participate_until_ready(async_node_base& root);
+
+#if CC_HAS_THREADS
     struct worker
     {
         async_thread_pool* pool = nullptr;
         int id = 0;
-        async_affinity served;
-        cc::mutex<cc::vector<std::shared_ptr<async_node_base>>> deque;
-        std::thread thread;
+
+        // Raw node pointers, each owning one strong count by hand (shared_ptr::release / adopt): a Chase-Lev
+        // slot is read speculatively by thieves that may lose the race for it, so it cannot hold a smart handle.
+        // The pool therefore owes every queued entry a release -- see the drain in ~async_thread_pool.
+        cc::impl::chase_lev_deque<async_node_base*> deque;
+
+        // Picks steal victims. Worker-private, so it needs no synchronization. Randomizing matters: a linear
+        // scan points every idle worker at worker 0, which is both a contention hotspot and unfair.
+        cc::random rng;
+
+        std::thread thread; // empty on an external slot: those are driven by whichever foreign thread claims them
+
+        // External slots only (index >= _thread_count). Foreign blocking_get callers claim one for the duration
+        // of their drive; worker slots are never claimed.
+        cc::atomic<bool> claimed{false};
     };
 
     void worker_main(worker& w);
-    [[nodiscard]] std::shared_ptr<async_node_base> try_get_work(worker& w);
-    void push_local(worker& w, std::shared_ptr<async_node_base> node);
+
+    /// `authoritative` = this scan decides whether the caller may sleep, so it must not skip the injection queue
+    /// (see the poller-token note on the member below). Cold path; the spin path passes false.
+    [[nodiscard]] async_node_ptr try_get_work(worker& w, bool authoritative = false);
+    void push_local(worker& w, async_node_ptr node);
     void wake_one();
-    void block_until_ready(async_node_base& root);
+    void wait_for_completion(async_node_base& root);
+
+    // External participation: a foreign thread in blocking_get borrows a slot and runs the graph itself rather
+    // than handing it over and parking. For a small graph that removes the submit/wake/wake round trip entirely
+    // — the root lands in the caller's OWN deque and it polls it on the spot. Its deque is stealable like any
+    // other, so a large graph still spreads across the pool.
+    [[nodiscard]] worker* try_claim_external_slot();
+    void drain_slot_to_injection(worker& w);
+
+    // Concurrent foreign callers are rare (usually one main thread), and an unclaimed slot only ever costs a
+    // thief an empty probe. More would just dilute the steal rotation.
+    static constexpr int external_slot_count = 4;
 
     // the worker whose loop is running on the calling thread (null on foreign threads); used by enqueue
     static thread_local worker* s_current_worker;
 
+    // _workers holds _thread_count real workers followed by external_slot_count borrowable slots. Thieves scan
+    // the whole vector: an unclaimed slot is simply an empty deque.
     cc::vector<cc::unique_ptr<worker>> _workers; // unique_ptr: stable addresses for deque/thread + stealing
-    cc::mutex<cc::vector<std::shared_ptr<async_node_base>>> _injection;
-    async_affinity _served;
+    int _thread_count = 0;
+    cc::mutex<cc::vector<async_node_ptr>> _injection;
 
-    std::atomic<int> _pending{0};  // claimable tasks across all deques + injection (drives sleep/wake)
-    std::atomic<int> _sleepers{0}; // workers currently blocked on _wait_cv
-    std::atomic<bool> _stop{false};
+    // The injection fast path, and the asymmetry it exists for: the queue is cold on the PUSH side (only foreign
+    // threads submit) but its POP side sat on every idle worker's every scan — so N idle workers contended on
+    // the one mutex a foreign submit needs, whether or not anything was ever in it.
+    //
+    //   _injection_hint   relaxed "may be non-empty". While it is 0 the line is read-only for every core and
+    //                     sits Shared in each L1 — an L1 read, no traffic, same as _sleepers.
+    //   _injection_poller grants ONE worker the right to look when the hint does go positive, so a submit wakes
+    //                     a single poll rather than an N-way pile-up on the mutex.
+    //
+    // The hint is safe everywhere: the would-be sleeper's seq_cst fence orders it exactly as the protocol block
+    // argues for _bottom. The POLLER TOKEN IS NOT — it is mutual exclusion, so it can make a scan miss work that
+    // is really there. On a spin round that costs nothing (we loop again); on the pre-sleep re-scan it would
+    // strand a node with every worker asleep. Hence try_get_work(authoritative=true) skips both filters.
+    alignas(64) cc::atomic<int> _injection_hint{0};
+    cc::atomic<int> _injection_poller{0};
+
+    // The wake state. There is deliberately no counter of claimable tasks here: a worker's scan of the deques
+    // already answers "is there work", authoritatively and without shared writes, so a counter would be a
+    // hot-path RMW serving a cold-path question. See the protocol block in the .cc.
+    alignas(64) cc::atomic<cc::i64> _wake_epoch{0}; // bumped only when a sleeper actually needs waking
+    cc::atomic<int> _sleepers{0};                   // workers blocked on (or committing to) _wait_cv
+    cc::atomic<bool> _stop{false};
     std::mutex _wait_m;
     std::condition_variable _wait_cv;
+
+#else // CC_HAS_THREADS == 0
+
+    // The whole pool without threads. None of the machinery above has anything to do: work-stealing needs
+    // thieves, and the wake protocol exists to park and wake threads that do not exist. What is left is the
+    // queue, held as real handles (so it frees itself, unlike the threaded deques' hand-counted raw pointers).
+    //
+    // LIFO, matching singlethreaded_scheduler and the workers' own deques: a freshly spawned child is the
+    // hottest thing in cache, and running it next is what makes the drive depth-first.
+    cc::vector<async_node_ptr> _queue;
+    int _thread_count = 0; // never anything else; kept so worker_count() reads the same either way
+
+#endif
 };
 
 /// Install `pool` as the process-wide default: general-compute (bit 0) nodes that cannot run on the current
@@ -139,14 +235,14 @@ private:
 // blocking driver — templated, defined inline
 // ============================================================================
 
-template <class T>
-cc::result<T, async_error> async_thread_pool::try_blocking_get(shared_async<T> const& root)
+template <class T, class E>
+cc::result<T, E> async_thread_pool::try_blocking_get(shared_async<T, E> const& root)
 {
     CC_ASSERT(root != nullptr, "cannot drive a null async");
     CC_ASSERT(async_scheduler::current_or_null() != static_cast<async_scheduler*>(this),
               "do not call blocking_get from inside a worker of this pool (it would park a pool thread)");
 
-    block_until_ready(*root);
+    participate_until_ready(*root);
 
     CC_ASSERT(root->is_ready(), "async graph could not complete (blocked on external work?)");
     if (root->has_error())
@@ -154,13 +250,11 @@ cc::result<T, async_error> async_thread_pool::try_blocking_get(shared_async<T> c
     return *root->value_ptr(); // copy out
 }
 
-template <class T>
-T async_thread_pool::blocking_get(shared_async<T> const& root)
+template <class T, class E>
+T async_thread_pool::blocking_get(shared_async<T, E> const& root)
 {
     auto r = try_blocking_get(root);
     CC_ASSERT(r.has_value(), "async completed with an error or was cancelled");
     return cc::move(r).value();
 }
 } // namespace cc
-
-#endif // CC_HAS_THREADS

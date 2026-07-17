@@ -2,8 +2,7 @@
 
 #include <clean-core/math/bit.hh>
 #include <clean-core/memory/allocation.hh>
-
-#include <atomic>
+#include <clean-core/thread/atomic.hh>
 
 namespace
 {
@@ -42,7 +41,7 @@ bool node_slab_drain_and_is_fully_free(cc::byte* base, cc::node_class_index idx)
 {
     cc::u64 local = *cc::node_slab_freemap_for_base(base);
 #if CC_HAS_THREADS
-    local |= std::atomic_ref<cc::u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, std::memory_order_relaxed);
+    local |= cc::atomic_ref<cc::u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_relaxed);
     *cc::node_slab_freemap_for_base(base) = local;
 #endif
     return local == cc::node_seed_local_freemaps[cc::isize(idx)];
@@ -116,22 +115,22 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
 // to remote until it is adopted -- no plain-local writer can race the future adopter. See the lifecycle
 // section of libs/base/clean-core/docs/systems/node-allocation.md.
 //
-// The bin is a constinit std::atomic_flag spinlock, not a std::mutex: it is trivially destructible and
+// The bin is a constinit cc::atomic_flag spinlock, not a std::mutex: it is trivially destructible and
 // never torn down, so the main thread's tls_allocator can reclaim safely even during static teardown (a
 // std::mutex static might already be destroyed). Abandonment/adoption are rare and latency-tolerant, so a
 // spinlock's short holds are fine. The lock's release/acquire is the sole ordering for the handoff of a
 // slab's local/owner/next fields between the exiting thread and a future adopter.
 struct slab_orphan_bin
 {
-    std::atomic_flag lock_flag; // C++20: default-cleared, trivially destructible
-    cc::byte* head = nullptr;   // singly-linked via each slab's next field; nullptr-terminated (not a ring)
+    cc::atomic_flag lock_flag; // C++20: default-cleared, trivially destructible
+    cc::byte* head = nullptr;  // singly-linked via each slab's next field; nullptr-terminated (not a ring)
 
     void lock()
     {
-        while (lock_flag.test_and_set(std::memory_order_acquire))
+        while (lock_flag.test_and_set(cc::memory_order_acquire))
             ; // spin: held only for a handful of pointer ops (plus, on reclaim, a rare backing free)
     }
-    void unlock() { lock_flag.clear(std::memory_order_release); }
+    void unlock() { lock_flag.clear(cc::memory_order_release); }
 };
 
 constinit slab_orphan_bin s_orphans[cc::isize(cc::node_class_index::small_count)] = {};
@@ -193,13 +192,30 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
 }
 #endif // CC_HAS_THREADS
 
+/// The system resource's per-thread allocator, plus self-deregistration.
+/// This is the one allocator that stays installed as the thread default until thread exit, so a
+/// plain ~node_allocator assert would fire on it. Clearing the slot here is sound precisely where
+/// the general case is not: this wrapper is itself thread_local, so its dtor provably runs on the
+/// one thread whose slot it clears. impl::default_node_alloc is trivially destructible, so its
+/// storage outlives this dtor on both the Itanium and MSVC TLS teardown paths.
+struct tls_default_allocator
+{
+    cc::node_allocator alloc{&system_node_memory_resource};
+
+    ~tls_default_allocator()
+    {
+        if (cc::impl::default_node_alloc == &alloc)
+            cc::impl::default_node_alloc = nullptr;
+    }
+};
+
 /// Returns a thread-local node_allocator for the system node memory resource.
 /// The allocator is lazy-initialized with all slabs nullptr.
 cc::node_allocator& system_get_allocator(void* userdata)
 {
     CC_UNUSED(userdata);
-    thread_local cc::node_allocator tls_allocator(&system_node_memory_resource);
-    return tls_allocator;
+    thread_local tls_default_allocator tls_allocator;
+    return tls_allocator.alloc;
 }
 
 // 24-byte large-node header, sitting immediately BEFORE the returned payload: [size][alignment][resource*].
@@ -278,12 +294,11 @@ cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_i
     {
         // take ownership. atomic store because remote-freeing threads read owner_id concurrently on their
         // free path -- they route to remote whichever value they see, but the write must not tear.
-        std::atomic_ref<cc::u32>(*cc::node_slab_owner_for_base(orphan))
-            .store(cc::node_owner_token(), std::memory_order_relaxed);
+        cc::atomic_ref<cc::u32>(*cc::node_slab_owner_for_base(orphan)).store(cc::node_owner_token(), cc::memory_order_relaxed);
         // drain remote frees accumulated while orphaned into local
         cc::u64 local = *cc::node_slab_freemap_for_base(orphan);
         local
-            |= std::atomic_ref<cc::u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, std::memory_order_relaxed);
+            |= cc::atomic_ref<cc::u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, cc::memory_order_relaxed);
         *cc::node_slab_freemap_for_base(orphan) = local;
         // track it in the ring regardless of capacity (future remote frees drain on the cold walk)
         node_splice_slab_as_head(slabs, idx, orphan);
@@ -347,8 +362,8 @@ cc::u32 cc::impl::node_next_owner_id()
 {
     // process-unique, never recycled: an id is never reused, so a free is never miscategorized.
     // ids are not reclaimed on thread exit (that leaks the thread's slabs -- a known, deferred follow-up).
-    static std::atomic<cc::u32> s_next_owner_id{1}; // 0 is reserved for "unassigned"
-    cc::u32 const id = s_next_owner_id.fetch_add(1, std::memory_order_relaxed);
+    static cc::atomic<cc::u32> s_next_owner_id{1}; // 0 is reserved for "unassigned"
+    cc::u32 const id = s_next_owner_id.fetch_add(1, cc::memory_order_relaxed);
     CC_ASSERT(id != 0, "node owner-id space exhausted (>4B threads ever); cross-thread-free after "
                        "thread-exit is unsupported");
     return id;
@@ -426,7 +441,7 @@ cc::byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
 #if CC_HAS_THREADS
         if (freemap == 0) // reclaim cross-thread frees into local
             freemap
-                = std::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, std::memory_order_relaxed);
+                = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_relaxed);
 #endif
 
         if (freemap != 0) [[likely]]
@@ -444,13 +459,33 @@ cc::byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
     return this->refill_slabs_and_allocate_node_bytes(idx);
 }
 
-cc::node_allocator& cc::default_node_allocator()
+cc::node_allocator* cc::impl::node_alloc_hydrate_default()
 {
-    return cc::default_node_memory_resource->get_allocator(cc::default_node_memory_resource->userdata);
+    auto* const a = &cc::default_node_memory_resource->get_allocator(cc::default_node_memory_resource->userdata);
+    cc::impl::default_node_alloc = a;
+    return a;
+}
+
+void cc::set_default_node_allocator(cc::node_allocator* alloc)
+{
+    cc::impl::default_node_alloc = alloc;
+}
+
+cc::node_allocator* cc::get_default_node_allocator()
+{
+    return cc::impl::default_node_alloc;
 }
 
 cc::node_allocator::~node_allocator()
 {
+    // A destroyed allocator that is still installed leaves the slot dangling, and the next alloc on
+    // this thread hands out slots from freed slabs. Best-effort: only this thread's slot is visible,
+    // so a cross-thread install/destroy still slips through. The system's own thread-default is
+    // exempt because tls_default_allocator clears the slot before we get here.
+    CC_ASSERT(cc::impl::default_node_alloc != this,
+              "node allocator destroyed while still installed as this thread's default -- deregister it first "
+              "(set_default_node_allocator / scoped_default_node_allocator)");
+
 #if CC_HAS_THREADS
     // hand our retained slabs back to the resource so later threads adopt them instead of leaking.
     // no-op for resources without the hook (they keep today's leak-on-exit behavior).

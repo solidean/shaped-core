@@ -63,7 +63,7 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     CHECK(p1.get() == p2.get());
 
     // Drive the async build inline (no pool installed) and confirm it resolved to a real pipeline.
-    sg::compute_pipeline_handle pipeline = cc::async_blocking_get(p1);
+    sg::compute_pipeline_handle pipeline = cc::async_blocking_get_singlethreaded(p1);
     REQUIRE(pipeline != nullptr);
     CHECK(pipeline->workgroup_size().x == 64);
 

@@ -77,6 +77,9 @@ cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
 {
     if (timestamp._heap_future == nullptr)
         return {};
+    // Its heap is delivered by the readback actor like any other download, so this blocks on the actor
+    // exactly as wait_for(future) does — and needs the same pump to make progress without threads.
+    drive_transfers_until_ready(*timestamp._heap_future);
     auto const data = timestamp._heap_future->wait_get_data();
     if (!data.has_value())
         return {};

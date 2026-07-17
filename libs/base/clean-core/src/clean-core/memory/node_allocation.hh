@@ -3,8 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/math/bit.hh>
-
-#include <atomic>
+#include <clean-core/thread/atomic.hh>
 
 /// Newtype for size class index (0, 1, 2, ...) to prevent API confusion.
 /// The index i maps to actual size 2^i bytes.
@@ -255,7 +254,7 @@ CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
     }
     else // remote thread: the only path that pays an atomic (double-free assert omitted; the read would race)
     {
-        std::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, std::memory_order_relaxed);
+        cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, cc::memory_order_relaxed);
     }
 #else
     auto const freemap = cc::node_slab_freemap_for_base(base);
@@ -270,6 +269,21 @@ CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
 /// This uses TLS-pooled slabs per size class and a cold-path rebalance strategy
 /// New backing allocations are pulled in from cc::default_memory_resource
 extern cc::node_memory_resource* const default_node_memory_resource;
+
+namespace impl
+{
+/// This thread's default node allocator; null until hydrated by the cold path. Zero-init POD, so the
+/// read is a plain inline TLS load with no guard -- that is what lets the alloc fast path inline.
+/// Authoritative, not a shadow cache: set_default_node_allocator repoints it and every later alloc
+/// sees the new one. Safe to read during another TU's static init (reads null, then hydrates).
+/// Assumes static linkage (local-exec/initial-exec TLS); a PIC shared build would degrade this to a
+/// __tls_get_addr call. impl::owner_token carries the same assumption.
+inline thread_local cc::node_allocator* default_node_alloc = nullptr;
+
+/// Cold first-touch: resolve the default resource's allocator for this thread, install it, return it.
+/// Never returns null.
+[[nodiscard]] CC_COLD_FUNC cc::node_allocator* node_alloc_hydrate_default();
+} // namespace impl
 } // namespace cc
 
 // this is a concrete non-customizable allocator interface for all node classes
@@ -431,11 +445,57 @@ struct cc::node_memory_resource
 
 namespace cc
 {
-/// Returns the default node allocator for the current thread.
-/// This is a convenience wrapper around default_node_memory_resource->get_allocator.
+/// Returns the default node allocator for the current thread, hydrating it on first use.
 /// The returned allocator is thread-local and must not be used across threads.
 /// For most use cases, this is the recommended way to obtain a node allocator (or take an explicit node_allocator&).
-node_allocator& default_node_allocator();
+///
+/// Inline by design: an unconditional out-of-line call here would sit in front of every node
+/// allocation and block the alloc fast path from inlining into the caller. The steady state is a
+/// TLS load plus a predicted-not-taken branch.
+///
+/// The default resource's get_allocator is consulted once per thread, not per call, so repointing
+/// default_node_memory_resource->get_allocator mid-run is not observed by threads that already
+/// allocated. Nothing does that (the resource pointer is constinit *const, and the system
+/// resource is TU-local), and set_default_node_allocator is the supported way to override.
+[[nodiscard]] CC_FORCE_INLINE node_allocator& default_node_allocator()
+{
+    auto* a = cc::impl::default_node_alloc;
+    if (a == nullptr) [[unlikely]]
+        a = cc::impl::node_alloc_hydrate_default();
+    return *a;
+}
+
+/// Repoints this thread's default node allocator. null resets to the default resource's allocator,
+/// re-resolved on the next use.
+/// The allocator must outlive every node allocated from it while it was installed: frees derive
+/// everything from the pointer and never consult an allocator, so nothing can detect a violation.
+/// Deregister before destroying the allocator (~node_allocator asserts it is not still installed).
+void set_default_node_allocator(node_allocator* alloc);
+
+/// This thread's installed default WITHOUT hydrating: null means "not resolved yet".
+/// Distinct from default_node_allocator(), which hydrates and never returns null. Use this to save
+/// and restore the slot around an override (see scoped_default_node_allocator).
+[[nodiscard]] node_allocator* get_default_node_allocator();
+
+/// Scoped override of this thread's default node allocator.
+/// Restores the exact previous slot value -- including null -- so overrides nest. Same lifetime
+/// contract as set_default_node_allocator: nodes allocated inside must not outlive `alloc`.
+struct scoped_default_node_allocator
+{
+    explicit scoped_default_node_allocator(node_allocator* alloc) : _prev(cc::get_default_node_allocator())
+    {
+        cc::set_default_node_allocator(alloc);
+    }
+    ~scoped_default_node_allocator() { cc::set_default_node_allocator(_prev); }
+
+    scoped_default_node_allocator(scoped_default_node_allocator const&) = delete;
+    scoped_default_node_allocator& operator=(scoped_default_node_allocator const&) = delete;
+    scoped_default_node_allocator(scoped_default_node_allocator&&) = delete;
+    scoped_default_node_allocator& operator=(scoped_default_node_allocator&&) = delete;
+
+private:
+    node_allocator* _prev;
+};
 } // namespace cc
 
 /// Move-only owning handle for a single live T stored in node memory.

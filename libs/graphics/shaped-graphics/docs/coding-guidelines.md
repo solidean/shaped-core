@@ -38,12 +38,12 @@ sharing (a buffer may be referenced by several in-flight command lists). Shared 
 the natural model, and a single vocabulary — the `_handle` suffix — makes "this is a
 reference-counted GPU-side thing" legible at every call site.
 
-**`std::shared_ptr` is a deliberate placeholder.** clean-core has `cc::unique_ptr` but **no**
-`cc::shared_ptr` yet. Per the repo's "surface missing pieces" rule, the clean solution is a
-`cc::shared_ptr` in clean-core that these handles would switch to — it keeps sg inside the `cc`
-vocabulary and off `std::`. Until that lands, `std::shared_ptr` is used and this is the one
-sanctioned `std::` ownership type in sg. If you add a new handle, follow the existing pattern;
-don't invent a second ownership mechanism.
+**`std::shared_ptr` is a deliberate placeholder, and its replacement has landed.**
+[`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) now exists — an 8 B
+intrusive-refcount handle — so the remaining work is switching these handles to it, which keeps sg
+inside the `cc` vocabulary and off `std::`. Until that happens `std::shared_ptr` stays the one
+sanctioned `std::` ownership type in sg. If you add a new handle, follow the existing pattern; don't
+invent a second ownership mechanism.
 
 ## `context` / `command_list` are mutable drivers; resources are shared-immutable
 

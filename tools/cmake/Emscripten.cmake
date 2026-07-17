@@ -2,19 +2,27 @@
 # CMakeLists before add_subdirectory; a no-op on native toolchains.
 #
 # Emscripten is treated as a platform with optional features (threads, WebGPU) and
-# a selectable exception mode; the knobs below are the single source of truth that
-# the wasm-emscripten-* presets set. Only the single-threaded, no-WebGPU,
-# -fexceptions combination is implemented today (Tier 2); the remaining combinations
-# are reserved (Tier 3) and fail loudly so a preset can never silently build
-# something untested. See the platform-support table in the README.
+# a selectable exception mode; the knobs here are the single source of truth that
+# the wasm-emscripten-* presets set. Threads are the exception: they are the
+# repo-wide SC_THREADS option (root CMakeLists), since forcing single-threaded is
+# useful on every platform, not just this one. This file only enforces what wasm can
+# honor. Only the single-threaded, no-WebGPU, -fexceptions combination is implemented
+# today (Tier 2); the remaining combinations are reserved (Tier 3) and fail loudly so
+# a preset can never silently build something untested. See the platform-support
+# table in the README.
 
 if(EMSCRIPTEN)
     set(SC_WASM_EXCEPTIONS "fexceptions" CACHE STRING "WASM C++ exception mode: fexceptions | wasm-exceptions")
-    option(SC_WASM_THREADS "Build the multithreaded (pthreads) WASM variant" OFF)
     option(SC_WASM_WEBGPU "Build the WebGPU (emdawnwebgpu) WASM variant" OFF)
 
-    if(SC_WASM_THREADS)
-        message(FATAL_ERROR "SC_WASM_THREADS=ON: multithreaded WASM is planned (Tier 3) but not yet supported")
+    # Threads are the repo-wide SC_THREADS knob (root CMakeLists), not a wasm-local one. Nothing here passes
+    # -pthread, so __EMSCRIPTEN_PTHREADS__ stays undefined and CC_HAS_THREADS would be 0 regardless -- but we
+    # refuse rather than silently demote, so SC_THREADS=ON never describes a build that hasn't got them. The
+    # wasm presets set it OFF explicitly; a hand-rolled configure has to say so too.
+    if(SC_THREADS)
+        message(FATAL_ERROR
+                "SC_THREADS=ON on Emscripten: multithreaded WASM is planned (Tier 3) but not yet supported. "
+                "Configure with -DSC_THREADS=OFF (as the wasm-emscripten-* presets do).")
     endif()
     if(SC_WASM_WEBGPU)
         message(FATAL_ERROR "SC_WASM_WEBGPU=ON: WebGPU (emdawnwebgpu) WASM is planned (Tier 3) but not yet supported")

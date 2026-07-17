@@ -61,19 +61,19 @@ whose padding bytes would be nondeterministic).
 
 `acquire_compute_pipeline` and `shader_cache::compile` return an async handle, not a finished object,
 because the work behind them (driver PSO lowering, DXC compilation) is multi-millisecond. These build on
-[`cc::async`](../../../../base/clean-core/docs/async.md): the returned node is **scheduled onto the
+[`cc::async`](../../../../base/clean-core/docs/systems/async.md): the returned node is **scheduled onto the
 installed default async pool** (`cc::install_default_async_pool`), and if no pool is installed it is driven
 inline the first time you block on it. So the same handle works whether or not a thread pool exists.
 
 The result types are the `sg::async_*` typedefs (`async_compiled_shader`, `async_compute_pipeline`).
 `cc::async<T>` cannot hold a `const T` (its internal `cc::optional<T>` forbids it), so const arrives at the
-**read** side: `try_value()` yields the const `*_handle`, and `cc::async_blocking_get` yields the handle by
+**read** side: `try_value()` yields the const `*_handle`, and `cc::async_blocking_get_singlethreaded` yields the handle by
 value. A build failure surfaces as an **async error** on the node (`has_error()`), carrying the DXC / PSO
 diagnostics — it is not thrown.
 
 > **Threading caveat.** The async pipeline build calls a *backend* create from a pool worker. That is only
 > safe where the backend permits concurrent pipeline creation (dx12 device creates are free-threaded). On a
-> `single_threaded` [thread_model](threading.md), install no pool and let `cc::async_blocking_get` drive the
+> `single_threaded` [thread_model](threading.md), install no pool and let `cc::async_blocking_get_singlethreaded` drive the
 > build inline on the main thread.
 
 Binding-layout acquisition stays **synchronous** — layout creation is cheap (a root signature), so paying
@@ -119,5 +119,5 @@ re-hash the bytecode), disk-backed provider tiers, and richer eviction than clea
 - [pipeline_cache.hh](../../src/shaped-graphics/pipeline_cache.hh) — the layout + compute-pipeline cache.
 - [context.cached.hh](../../src/shaped-graphics/context.cached.hh) / [context.uncached.hh](../../src/shaped-graphics/context.uncached.hh) — the `ctx.cached` / `ctx.uncached` scopes.
 - [key_value_cache.hh](../../../../base/clean-core/src/clean-core/container/key_value_cache.hh) / [byte_stream_builder.hh](../../../../base/clean-core/src/clean-core/container/byte_stream_builder.hh) — the tiered cache + key serializer.
-- [cc::async](../../../../base/clean-core/docs/async.md) — the async/dataflow system the async builds run on.
+- [cc::async](../../../../base/clean-core/docs/systems/async.md) — the async/dataflow system the async builds run on.
 - [bindings](bindings.md) — the schemas being cached and where `binding_group` (not cached) lives.

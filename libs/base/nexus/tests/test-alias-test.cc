@@ -31,10 +31,10 @@ nx::test_schedule_config with_filter(cc::string filter)
 {
     nx::test_schedule_config config;
     config.filters.push_back(cc::move(filter));
-    // A non-wildcard filter searches across buckets (mirrors create_from_args). run_disabled_tests is the bulk
-    // "disabled too" request (create_from_args no longer auto-sets it; an exact name is what enables a disabled
-    // test now) — set here so these alias tests exercise disabled drivers regardless.
-    config.match_any_bucket = true;
+    // No bucket flag was given, so an exactly-named test may cross buckets (mirrors create_from_args).
+    // run_disabled_tests is the bulk "disabled too" request — set here so these alias tests exercise disabled
+    // drivers under a substring filter too, which alone would not enable them.
+    config.allow_cross_bucket_naming = true;
     config.run_disabled_tests = true;
     return config;
 }
@@ -298,6 +298,59 @@ TEST("aliases - a broad filter over drivers and aliases runs each invocable once
 
     auto exec = nx::execute_tests(schedule, with_filter("sg"));
     CHECK(ran == 2); // once under each backend driver, never twice on the same one
+}
+
+TEST("aliases - a substring filter does not reach a manual driver through its alias")
+{
+    // Aliases are filters, not a bucket escape hatch: reaching a manual driver through one of its aliases takes
+    // the alias's exact name, exactly as reaching the driver directly takes the driver's. Otherwise a bare
+    // filter would open every window-opening backend an alias happens to name.
+    int ran = 0;
+
+    nx::test_registry reg;
+    add_invocable(reg, "gpu thing",
+                  [&](int)
+                  {
+                      ++ran;
+                      CHECK(true);
+                  });
+    reg.add_declaration("gpu backend", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
+                        [&] { nx::invoke_tests<int>("g", 0); });
+
+    nx::setup s(reg);
+    s.define_alias("gpu thing",
+                   {nx::alias_fragment{.driver = s.find_test("gpu backend"), .section_path = {"g", "gpu thing"}}});
+
+    // "gpu" substring-matches both the alias and the driver name, but the driver is manual: nothing runs.
+    {
+        auto schedule = nx::test_schedule::create(with_filter("gpu"), reg);
+        CHECK(schedule.instances.empty());
+    }
+
+    // The alias's exact name reaches it, scoped to the fragment.
+    {
+        auto schedule = nx::test_schedule::create(with_filter("gpu thing"), reg);
+        REQUIRE(schedule.instances.size() == 1);
+        CHECK(schedule.instances[0].declaration == s.find_test("gpu backend"));
+        CHECK(schedule.instances[0].section_scopes.size() == 1);
+
+        auto exec = nx::execute_tests(schedule, with_filter("gpu thing"));
+        CHECK(ran == 1);
+    }
+
+    // So does --manual, which sweeps the bucket by substring.
+    ran = 0;
+    {
+        auto config = with_filter("gpu");
+        config.selected_bucket = nx::config::test_bucket::manual;
+        config.allow_cross_bucket_naming = false;
+
+        auto schedule = nx::test_schedule::create(config, reg);
+        REQUIRE(schedule.instances.size() == 1); // the driver, unscoped (its own name matched)
+
+        auto exec = nx::execute_tests(schedule, config);
+        CHECK(ran == 1);
+    }
 }
 
 // --- callback path: NX_TEST_SETUP registers a global callback that run_setup_callbacks drives against a

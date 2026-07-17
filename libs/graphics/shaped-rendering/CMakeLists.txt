@@ -34,16 +34,18 @@ target_compile_options(shaped-rendering
 )
 
 # Test executable
-add_executable(shaped-rendering-test
-    tests/main.cc
-    tests/smoke-test.cc
-)
+if(SC_BUILD_TESTS)
+    add_executable(shaped-rendering-test
+        tests/main.cc
+        tests/smoke-test.cc
+    )
 
-target_link_libraries(shaped-rendering-test
-    PRIVATE
-    shaped-rendering
-    nexus
-)
+    target_link_libraries(shaped-rendering-test
+        PRIVATE
+        shaped-rendering
+        nexus
+    )
 
-# Browser test runner (Emscripten only); a no-op on native toolchains.
-sc_add_nexus_web_runner(shaped-rendering-test)
+    # Browser test runner (Emscripten only); a no-op on native toolchains.
+    sc_add_nexus_web_runner(shaped-rendering-test)
+endif()

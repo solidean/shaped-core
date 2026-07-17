@@ -121,8 +121,8 @@ TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target")
     // Clear to blue, then draw the red triangle over it.
     auto cmd = ctx.create_command_list();
     {
-        auto pass = cmd->raster.render_to(
-            {.color_targets = {typed.as_render_target_view().cleared(tg::vec4f(0, 0, 1, 1))}});
+        auto pass
+            = cmd->raster.render_to({.color_targets = {typed.as_render_target_view().cleared(tg::vec4f(0, 0, 1, 1))}});
         cmd->raster.bind_pipeline(*pipeline);
         cmd->raster.bind_vertex_buffers({vbuf->as_vertex_buffer<vertex>()});
         cmd->raster.draw({.vertex_range = {.offset = 0, .size = 3}});

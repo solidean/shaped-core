@@ -71,6 +71,21 @@
 #error "wasm OS detected but CC_ARCH_WASM32 not defined"
 #endif
 
+// Test: CC_HAS_THREADS is always defined and always 0 or 1 — it is #if-tested, not #ifdef-tested, so an
+// undefined macro would silently read as 0 and quietly disable threading everywhere.
+#ifndef CC_HAS_THREADS
+#error "CC_HAS_THREADS must always be defined"
+#endif
+#if CC_HAS_THREADS != 0 && CC_HAS_THREADS != 1
+#error "CC_HAS_THREADS must be exactly 0 or 1"
+#endif
+
+// Test: the CMake input forces the derived output. CC_SINGLE_THREADED (SC_THREADS=OFF) is one-directional
+// — it can force threads off, never on — so this is the only implication that holds.
+#if defined(CC_SINGLE_THREADED) && CC_HAS_THREADS != 0
+#error "CC_SINGLE_THREADED must force CC_HAS_THREADS to 0"
+#endif
+
 // =========================================================================================================
 // Runtime tests
 // =========================================================================================================
@@ -276,7 +291,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     SECTION("Stringify simple value")
     {
 #define MY_VALUE 42
-        const char* str = CC_STRINGIFY_EXPR(MY_VALUE);
+        char const* str = CC_STRINGIFY_EXPR(MY_VALUE);
         CHECK(std::strcmp(str, "42") == 0);
 #undef MY_VALUE
     }
@@ -284,7 +299,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     SECTION("Stringify identifier")
     {
 #define MY_IDENT foo
-        const char* str = CC_STRINGIFY_EXPR(MY_IDENT);
+        char const* str = CC_STRINGIFY_EXPR(MY_IDENT);
         CHECK(std::strcmp(str, "foo") == 0);
 #undef MY_IDENT
     }
@@ -292,7 +307,7 @@ TEST("macros - CC_STRINGIFY_EXPR")
     SECTION("Stringify expression")
     {
 #define MY_EXPR (1 + 2)
-        const char* str = CC_STRINGIFY_EXPR(MY_EXPR);
+        char const* str = CC_STRINGIFY_EXPR(MY_EXPR);
         CHECK(std::strcmp(str, "(1 + 2)") == 0);
 #undef MY_EXPR
     }

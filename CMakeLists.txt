@@ -7,6 +7,34 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Build gating. Both default ON for a top-level build (the normal dev flow) and OFF when
+# shaped-core is consumed via add_subdirectory, where a dependent wants the libraries but not
+# our test and tool binaries. Must precede add_subdirectory(extern): the tools' externals gate
+# on SC_BUILD_TOOLS.
+option(SC_BUILD_TESTS "Build the per-library *-test executables" ${PROJECT_IS_TOP_LEVEL})
+option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEVEL})
+
+# Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
+# clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
+# it. Forcing single-threaded on a native host is what makes that mode developable without a wasm build.
+#
+# ON is an assertion, not a wish: a platform that cannot honor it fails configure (Emscripten.cmake) rather
+# than quietly building single-threaded. So this is never a lie, whichever way it is set.
+#
+# No API appears or disappears with it — the threaded types fall back to running on the calling thread (see
+# cc::threaded_actor, cc::async_thread_pool). It does change struct layout (node_allocation's slab header),
+# so it is a whole-build switch: never set it per-target. Must precede include(Emscripten) below.
+option(SC_THREADS "Build with OS thread support; OFF forces a single-threaded build" ON)
+
+# Target CPU is x86-64. Only the instruction-tracer tool and its Zydis decoder ask — both are x86-64 by
+# construction, not by omission — so this is a plain variable rather than a cached option: it describes the
+# target, it is not a choice. Must precede add_subdirectory(extern), which gates the zydis build on it.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Mm][Dd]64|[Xx]86_64)$")
+    set(SC_ARCH_X64 ON)
+else()
+    set(SC_ARCH_X64 OFF)
+endif()
+
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
@@ -50,6 +78,17 @@ add_subdirectory(libs/graphics/shaped-viewer)
 # does this automatically) to enable it.
 if(WIN32 AND TARGET dxc)
     add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
+endif()
+
+# Developer tools. instruction-tracer needs the Win32 debug API, dbghelp and the fetched Zydis
+# decoder (extern/zydis); it gates itself on the `zydis` target existing, so a checkout that has
+# not fetched it still configures.
+#
+# x86-64 only, and not incidentally: it single-steps a debuggee through the x86-64 CONTEXT registers
+# (Rip/Rsp/EFlags) and decodes with Zydis, an x86 decoder. Windows on ARM64 has neither, so the tool is
+# absent there rather than ported — see SC_ARCH_X64 above.
+if(SC_BUILD_TOOLS AND WIN32 AND SC_ARCH_X64 AND TARGET zydis)
+    add_subdirectory(tools/instruction-tracer)
 endif()
 
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):

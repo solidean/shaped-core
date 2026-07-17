@@ -55,7 +55,7 @@ cache.add_default_in_memory_provider(max=4096) // or add_provider(shared_ptr<key
 cache.compile(desc, opts={})     // -> sg::async_compiled_shader  (same key => SAME node, never recompiled)
                            //   key = hash128 over source + entry_point + stage + model + all options
 cache.apply_bookkeeping()        // in-memory eviction on all tiers
-// drive: cc::async_blocking_get(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
+// drive: cc::async_blocking_get_singlethreaded(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
 // a compile failure surfaces as an async error (sh->has_error()); DXC diagnostics carried through.
 // runs on the installed default async pool (cc::install_default_async_pool); inline if none installed.
 // each worker uses its own thread-local compiler (compiler is one-per-thread). Cache preprocessed source.

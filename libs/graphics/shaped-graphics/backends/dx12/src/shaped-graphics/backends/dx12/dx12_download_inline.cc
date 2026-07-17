@@ -132,6 +132,12 @@ dx12_download_inline_system::span_reservation dx12_download_inline_system::reser
         if (r.has_value())
             return cc::move(r.value());
 
+        // The ring is full; only the actor draining copies frees space. Where it has no thread of its own,
+        // run it here — the wait below would otherwise be on progress nobody can make. A no-op with
+        // threads, where the actor is already draining and _freed_pos is what we should sleep on.
+        if (pump_unthreaded())
+            continue;
+
         cc::u64 const seen = _freed_pos.load(std::memory_order_acquire);
         _freed_pos.wait(seen, std::memory_order_acquire);
     }
@@ -309,10 +315,12 @@ void dx12_download_inline_system::wait_until_idle()
 {
     // Wait-for-zero on the global counter: std::atomic::wait rechecks the value, so a decrement to zero
     // between load and wait is not lost (unlike polling per-epoch checkpoints, which races the actor).
+    // Only the actor decrements it, so where it has no thread we must run it rather than wait on it.
     cc::isize cur = _outstanding.load(std::memory_order_acquire);
     while (cur != 0)
     {
-        _outstanding.wait(cur, std::memory_order_acquire);
+        if (!pump_unthreaded())
+            _outstanding.wait(cur, std::memory_order_acquire);
         cur = _outstanding.load(std::memory_order_acquire);
     }
 }

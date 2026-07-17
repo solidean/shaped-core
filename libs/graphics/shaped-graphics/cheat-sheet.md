@@ -489,7 +489,7 @@ cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — tra
 ctx.cached.acquire_binding_group_layout(span<binding const>, static_samplers={}) // -> binding_group_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
 ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_layout_handle  SYNC; keyed on the ordered group-layout identities => one shared handle
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
-                                                               //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
+                                                               //   drive: cc::async_blocking_get_singlethreaded(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
 // keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: ordered group-layout

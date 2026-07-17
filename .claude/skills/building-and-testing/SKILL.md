@@ -45,11 +45,12 @@ Full reference: [docs/guides/building-and-testing.md](../../../docs/guides/build
 
 - **`--preset` is a PER-SUBCOMMAND flag — it goes AFTER the subcommand.**
   `uv run dev.py test --preset release-clang`, *not* `dev.py --preset … test`.
-  Only `--verbose` and `--mirror-output` are global (before the subcommand).
+  Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs`,
+  and `--colored` / `--plain` are global (before the subcommand).
   Presets accept comma-lists, repeated flags, and shell wildcards
   (`--preset "release-*"`). `uv run dev.py list-presets` lists them.
 
-- **Touching `CC_ENABLE_ASSERTIONS`-gated code? Build a `release-*` preset too.**
+- **Touching `CC_ASSERT_ENABLED`-gated code? Build a `release-*` preset too.**
   The default `relwithdebinfo-*` preset has assertions **ON**; only a `release-*`
   preset has them **OFF**. A change that compiles under the default can still fail
   the assertions-off branch (e.g. a member referenced only inside a `CC_ASSERT`).
@@ -57,7 +58,9 @@ Full reference: [docs/guides/building-and-testing.md](../../../docs/guides/build
 - **A crash shows up as a non-zero exit / failure XML.** dev.py synthesizes a
   JUnit result from each binary's exit code, so a binary that crashes before
   printing anything is still reported as failed. Re-run the culprit with
-  `uv run dev.py --mirror-output test "<pattern>"` to see the live stream.
+  `uv run dev.py --mirror-test-output test "<pattern>"` to see the live stream.
+  That flag mirrors only the binary; `--mirror-output` also streams configure and
+  build, which you rarely want. Same choice for watching a benchmark print its table.
 
 ## Diagnose tips
 

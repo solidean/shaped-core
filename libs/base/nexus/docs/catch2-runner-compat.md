@@ -19,7 +19,7 @@ That line is the hook. Everything else flows from it.
 
 ## CLI flags
 
-Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc:7](../src/nexus/tests/schedule.cc)).
+Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc:29](../src/nexus/tests/schedule.cc)).
 
 | Flag | Nexus behavior |
 |---|---|
@@ -40,7 +40,7 @@ Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc:7](.
 
 Unrecognized positional args are treated as test name filters. Filters are matched by substring against test names. Multiple filters can be passed as a single comma-separated argument — nexus splits on `,` before storing them, matching the Catch2 convention.
 
-When any filter contains no `*` wildcard (with no explicit bucket flag), nexus sets `match_any_bucket` and `run_disabled_tests` so that an explicitly named test runs regardless of its bucket and disabled state.
+A filter that equals a test name **exactly** additionally reaches past the eligibility gates — that is what runs a test from another bucket, or a disabled one (see below). A substring filter never does.
 
 ### Buckets and disabled tests
 
@@ -53,15 +53,24 @@ Every test lives in exactly one **bucket** — `normal` (default), `manual`, or 
 
 Tests in the `manual` and `guide_benchmark` buckets are exempt from the "no CHECK/REQUIRE is a failure" rule, so a benchmark that only prints (or only records metrics) still passes.
 
-A wildcard filter selects within the selected bucket — e.g. `--manual bench` runs every manual test whose name contains `bench`, while `bench` without `--manual` matches none of them. Naming a test by an exact (non-wildcard) filter runs it regardless of bucket or disabled state.
+Two ways to reach a test outside the swept bucket, and no others:
+
+- **Its bucket's flag**, which sweeps that bucket by substring — `--manual bench` runs every manual test whose name contains `bench`, while a bare `bench` matches none of them.
+- **Its exact name** — `dev.py test "bench-async-grain (sweep)"` runs that manual test on its own. This works only without a bucket flag: a flag pins the sweep to its bucket.
+
+A substring filter **never** crosses a bucket. `dev.py test "async"` runs the normal-bucket `async` tests and leaves the manual ones and the benchmarks alone — the point of the buckets, since those open windows or run for minutes.
+
+The disabled gate works the same way (exact name, or the bulk `run_disabled_tests`), and is checked independently. Both live in `test_schedule_config::is_eligible`, which `would_run` and the alias expansion share — so an alias reaches a manual driver only when the *alias* is named exactly.
 
 In Catch2 XML compat modes (discovery or results), filter strings are also unescaped: `\[` → `[`. Catch2 uses `\[` to escape square brackets in tag-filter syntax; since nexus doesn't have tags, it strips the backslash so the literal `[` can still match test names.
 
-([schedule.cc:70–120](../src/nexus/tests/schedule.cc))
+`*` has no special meaning: filters are plain substrings, so `bench*` matches a literal `*`.
+
+([schedule.cc:161–240](../src/nexus/tests/schedule.cc))
 
 ## Modes
 
-Two compat modes are activated based on which flags are present ([schedule.cc:87–91](../src/nexus/tests/schedule.cc)):
+Two compat modes are activated based on which flags are present ([schedule.cc:146–149](../src/nexus/tests/schedule.cc)):
 
 | Flags present | Mode |
 |---|---|

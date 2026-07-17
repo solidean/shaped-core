@@ -1,4 +1,4 @@
-"""`format` — run clang-format over libs/ sources."""
+"""`format` — run clang-format over our C++ source roots (see format.source_roots)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--check-only", action="store_true",
                    help="Report non-conforming files and exit non-zero; do not rewrite")
     p.add_argument("--dirty-only", action="store_true",
-                   help="Only format git-dirty/untracked libs/ sources (good pre-commit check)")
+                   help="Only format git-dirty/untracked sources (good pre-commit check)")
     p.add_argument("--allow-different-version", action="store_true",
                    help="Downgrade a clang-format version mismatch from error to warning")
     return p
