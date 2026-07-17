@@ -58,7 +58,8 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format) 
     if (library == nullptr)
         return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));
 
-    return _state.lock(
+    bool recorded_dependencies = false;
+    auto shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
             format_entry* entry = nullptr;
@@ -79,10 +80,20 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format) 
                 auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format);
                 entry->current = cc::move(outcome.shader);
                 entry->dependencies = cc::move(outcome.dependencies);
+                recorded_dependencies = true;
             }
 
             return entry->current;
         });
+
+    // A shader only tells anyone what it is built from once a compile has resolved its includes — and this
+    // one just did, on a consumer's thread. The watcher is parked on its mailbox and reads dependencies()
+    // rather than being handed them, so without this nudge it would go on watching nothing at all. Off the
+    // lock, because what it wakes turns straight around and reads us back.
+    if (recorded_dependencies)
+        library->note_dependencies_changed();
+
+    return shader;
 }
 
 sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx) const

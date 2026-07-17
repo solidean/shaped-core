@@ -27,17 +27,28 @@ src/shaped-shader-library/
   shader_library.hh/.cc           [done]        mounts + compilers + read->preprocess->compile; packages;
                                                 start_hot_reload/poll_hot_reload; weak alive-token
   filesystem/
-    filesystem.hh                 [done]        read_text + revision; file_revision (opaque, not a time)
-    mount_table.hh/.cc            [done]        longest prefix first, newest mount first; salted revisions
-    memory_filesystem.hh/.cc      [done]        write() bumps a revision — what the tests reload through
-    embedded_filesystem.hh/.cc    [done]        over generator-baked files; the shipping source
+    filesystem.hh                 [done]        read_text + revision + optional watch; file_revision
+                                                (opaque, not a time)
+    watch.hh                      [done]        watch_sink + watch_subscription; a hint to rescan, never
+                                                a report of what changed
+    mount_table.hh/.cc            [done]        longest prefix first, newest mount first; salted revisions;
+                                                composes the mounts' watches
+    memory_filesystem.hh/.cc      [done]        write() bumps a revision and fires the watch — what the
+                                                tests reload through
+    embedded_filesystem.hh/.cc    [done]        over generator-baked files; the shipping source; a watch
+                                                that never fires
     real_filesystem.hh/.cc        [done]        the one adaptor that touches the disk; mtime+size revision
     impl/path.hh/.cc              [done]        normalize/join/parent/prefix; the traversal guard
+    impl/watch_registry.hh/.cc    [done]        one cancellable sink + a prefix-keyed set of them
+    impl/watch_backend.hh         [done]        the per-OS seam; nullptr where a platform has none
+    impl/watch_backend_windows.cc [done]        ReadDirectoryChangesW over one IOCP + one thread
+    impl/watch_backend_none.cc    [in progress] the fallback everywhere else — Linux/macOS still to come
   compiler/
     shader_compiler.hh            [done]        the seam: one edge, language -> format
     dxc_compiler.hh/.cc           [done]        hlsl -> dxil via ssc::dxc; only when SLIB_HAS_DXC
   impl/
-    reload_watcher.hh/.cc         [done]        cc::threaded_actor; polls revisions, stages + drives recompiles
+    reload_watcher.hh/.cc         [done]        cc::threaded_actor; parks on the mailbox and lets the
+                                                filesystem wake it, else polls; stages + drives recompiles
 cmake/
   ShaderPackage.cmake             [done]        sc_add_shader_package + sc_finalize_shader_packages
   GenerateShaderPackage.cmake     [done]        build-time codegen: symbols, table, embedded include closure
@@ -74,19 +85,41 @@ everything itself.
 
 ## Reload
 
-**[done]:** revision polling over each asset's recorded dependencies (its source plus every resolved
+**[done]:** revision diffing over each asset's recorded dependencies (its source plus every resolved
 include), staged recompiles promoted on the consuming thread, per-asset `generation()`, a broken edit
 kept off the running shader with `last_error()`, and an unthreaded mode for `SC_THREADS=OFF` /
 WebAssembly (and for deterministic tests).
 
+**[done] — OS file watching.** `filesystem::watch(prefix, sink)` is an optional capability that
+`mount_table` composes across mounts, and the reload watcher subscribes to the distinct parent directory
+of each dependency. The notification wakes the actor's mailbox, so a watched watcher has no interval and
+no periodic wakeup at all; `revision()` stays the source of truth and the diff logic never changed, which
+is what makes the notification a mere hint and lets every implementation coalesce and over-fire freely.
+
+`watch()` returning `nullopt` means "I cannot notify — poll me", and everything falls back to the old
+interval scan there. That is the honest answer under `SC_THREADS=OFF` (no thread to wait on), for a
+directory that does not exist, and on every platform without a backend.
+
+**[in progress] — the other two backends.** Windows has `ReadDirectoryChangesW` over one IOCP and one
+thread. **Linux (inotify)** and **macOS (FSEvents)** are next; both currently take `watch_backend_none`
+and poll. Note `APPLE` also covers iOS, which has no FSEvents, and Android is inotify-flavoured Linux.
+
 **[planned] / deferred:**
 
-- **OS file watching** instead of polling. `real_filesystem` would need a change-notification seam
-  (`ReadDirectoryChangesW` / inotify / FSEvents); the watcher's diff logic would not change, since it is
-  already written against `file_revision` rather than against files.
-- **A timed wait on the actor.** The poll interval is a `std::this_thread::sleep_for` in 5 ms slices,
-  because there is no `cc::sleep_for` and `cc::threaded_actor` has no timed wait. A `wait_for` hook on
-  the actor would replace both.
+- **Partial watching.** `mount_table::watch` is all-or-nothing: if any intersecting mount cannot notify,
+  the whole watch reports `nullopt` and the caller polls everything. Watching what it can and polling only
+  the rest is a real refinement. In practice "cannot notify" is a platform property, so today it is
+  all-or-nothing anyway.
+- **Re-watching after a directory disappears.** A watched directory that is deleted fires once and then
+  goes quiet; the reload watcher only re-subscribes when the *dependency set* moves, so hot reload for
+  that directory stops until something else changes. Recreating a deleted source directory mid-session is
+  the only way to hit it.
+- **Mounting while a watch is live.** A mount added afterwards is not picked up. Registration freezes at
+  `start_hot_reload` today, which is what makes that affordable.
+- **A timed wait on the actor.** The polling fallback's interval is still a `std::this_thread::sleep_for`
+  in 5 ms slices, because there is no `cc::sleep_for` and `cc::threaded_actor` has no timed wait. A
+  `wait_for` hook on the actor would replace both. The watched path no longer needs either — it parks on
+  the mailbox, which shutdown already wakes.
 - **Reload for a format nobody acquired.** Deliberate: recompiling a format no one asked for burns the
   compiler on a shader that is never used.
 

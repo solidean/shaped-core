@@ -11,6 +11,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/real_filesystem.cc
     src/shaped-shader-library/filesystem/mount_table.cc
     src/shaped-shader-library/filesystem/impl/path.cc
+    src/shaped-shader-library/filesystem/impl/watch_registry.cc
     src/shaped-shader-library/shader_asset.cc
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
@@ -27,6 +28,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/fwd.hh
     src/shaped-shader-library/all.hh
     src/shaped-shader-library/filesystem/filesystem.hh
+    src/shaped-shader-library/filesystem/watch.hh
     src/shaped-shader-library/filesystem/memory_filesystem.hh
     src/shaped-shader-library/filesystem/embedded_filesystem.hh
     src/shaped-shader-library/filesystem/real_filesystem.hh
@@ -36,6 +38,16 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/shader_asset.hh
     src/shaped-shader-library/shader_library.hh
 )
+
+# The OS file-watch backend behind real_filesystem::watch. real_filesystem and these are the only files in
+# slib that reach the OS. A platform without one gets watch_backend_none: watch() reports that it cannot
+# notify and the reload watcher polls, exactly as it did before any of this existed. No compile definition
+# goes with it -- nothing is gated on the answer, so nothing needs to agree on it.
+if(WIN32)
+    target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/filesystem/impl/watch_backend_windows.cc)
+else()
+    target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/filesystem/impl/watch_backend_none.cc)
+endif()
 
 target_compile_features(shaped-shader-library PUBLIC cxx_std_23)
 
@@ -80,6 +92,7 @@ if(SC_BUILD_TESTS)
         tests/filesystem/filesystem-test.cc
         tests/filesystem/real_filesystem-test.cc
         tests/filesystem/mount_table-test.cc
+        tests/filesystem/watch-test.cc
         tests/shader_library-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc

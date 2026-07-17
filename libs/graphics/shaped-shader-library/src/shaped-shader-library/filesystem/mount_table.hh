@@ -22,6 +22,17 @@ public:
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
 
+    /// Composes the mounts' own watches: every mount intersecting `prefix` is subscribed to, and the
+    /// returned subscription owns all of them.
+    ///
+    /// All-or-nothing — if any intersecting mount cannot notify, this returns nullopt and the caller polls
+    /// everything. Watching what we can and polling only the rest is a real refinement, deferred in
+    /// libs/graphics/shaped-shader-library/docs/structure.md.
+    ///
+    /// A mount added while a watch is live is not picked up. In practice mounts stop moving when hot
+    /// reload starts, which is what makes that affordable.
+    [[nodiscard]] cc::optional<watch_subscription> watch(cc::string_view prefix, watch_sink sink) const override;
+
     /// Mounts `fs` so its own root answers `virtual_dir` (empty = the table's root). `fs` must not be
     /// null, and `virtual_dir` must not escape the root.
     void mount(cc::string_view virtual_dir, filesystem_handle fs);
@@ -50,9 +61,20 @@ private:
         u64 next_salt = 1;
     };
 
+    /// One mount a watch has to reach, with the watched prefix rebased onto that mount's own root. Owned
+    /// where a candidate's path is borrowed: a watch outlives the call that registered it.
+    struct watch_target
+    {
+        cc::string prefix;
+        filesystem_handle fs;
+    };
+
     /// The mounts that could serve `path` (already normalized), in resolution order. Copied out so the
     /// lock is not held across a read — real_filesystem hits the disk.
     [[nodiscard]] cc::vector<candidate> candidates_for(cc::string_view path) const;
+
+    /// The mounts intersecting `prefix` (already normalized), in resolution order.
+    [[nodiscard]] cc::vector<watch_target> watch_targets_for(cc::string_view prefix) const;
 
     // Mutable so const reads can lock.
     mutable cc::mutex<state> _state;

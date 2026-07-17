@@ -26,6 +26,15 @@ public:
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
 
+    /// A subscription that never fires — the whole truth for content that cannot change, and why a
+    /// shipped build's watcher does nothing at all. Deliberately not nullopt: "I will never notify" is a
+    /// different claim from "I cannot notify, poll me".
+    [[nodiscard]] cc::optional<watch_subscription> watch([[maybe_unused]] cc::string_view prefix,
+                                                         [[maybe_unused]] watch_sink sink) const override
+    {
+        return watch_subscription();
+    }
+
 private:
     // Linear scan: a package is tens of files, and lookups happen at compile time, not per frame.
     [[nodiscard]] embedded_file const* find(cc::string_view path) const;

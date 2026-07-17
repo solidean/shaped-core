@@ -1,12 +1,18 @@
+#include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 // real_filesystem is the only part of slib that touches the disk, so it is also the only part whose
 // tests need a real directory. Everything above it is covered through memory_filesystem instead.
+//
+// The same goes double for the watch tests at the bottom: they are the only ones here that wait on an OS
+// notification rather than observe a return value, so they are kept few and given a generous bound.
 
 namespace
 {
@@ -42,6 +48,24 @@ struct temp_dir
 
     [[nodiscard]] cc::string root() const { return cc::string(path.string().c_str()); }
 };
+
+/// Waits for `pred` to hold, up to a generous bound. The watch tests below are the only ones in slib that
+/// depend on the OS getting round to telling us something, so they are also the only ones that can be slow
+/// or flaky — the bound is deliberately far larger than any plausible notification delay.
+template <class PredT>
+bool wait_until(PredT&& pred)
+{
+    constexpr int k_timeout_ms = 5000;
+    constexpr int k_slice_ms = 5;
+
+    for (int waited = 0; waited < k_timeout_ms; waited += k_slice_ms)
+    {
+        if (pred())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(k_slice_ms));
+    }
+    return pred();
+}
 } // namespace
 
 TEST("slib - real_filesystem reads files under its root")
@@ -104,6 +128,74 @@ TEST("slib - real_filesystem over a missing root finds nothing")
     CHECK(!fs.exists("a.hlsl"));
     CHECK(!fs.read_text("a.hlsl").has_value());
     CHECK(fs.revision("a.hlsl") == slib::file_revision::none);
+}
+
+TEST("slib - real_filesystem watches its root for changes")
+{
+    temp_dir dir("slib-real-fs-watch");
+    dir.write("a.hlsl", "v1");
+
+    slib::real_filesystem fs{dir.root()};
+
+    cc::atomic<int> fires{0};
+    auto const sub = fs.watch("", [&fires] { fires.fetch_add(1); });
+
+    dir.write("a.hlsl", "a much longer v2");
+
+    // Both answers are honest, and the contract binds either way: a platform with a watch backend has to
+    // actually fire, and one without has to have said nullopt rather than hand back a watch that stays
+    // silent. Today that reads as "Windows with threads, or not"; it tightens by itself once inotify and
+    // FSEvents land.
+    bool const notified = sub.has_value() && wait_until([&] { return fires.load() > 0; });
+    CHECK(notified == sub.has_value());
+
+    if (!sub.has_value())
+        return;
+
+    // A file appearing counts too — an editor that saves by writing a temp file and renaming it over the
+    // original never produces a plain modify, which is half of why the sink is only ever a hint to rescan.
+    auto const before = fires.load();
+    dir.write("b.hlsl", "new file");
+    CHECK(wait_until([&] { return fires.load() > before; }));
+}
+
+TEST("slib - real_filesystem cannot watch a root that does not exist")
+{
+    temp_dir dir("slib-real-fs-watch-missing");
+    slib::real_filesystem fs{cc::string((dir.path / "nope").string().c_str())};
+
+    // nullopt, not a subscription that never fires: there is nothing to watch, so the only truthful answer
+    // is "poll me". A shipped build with no source tree lands here.
+    CHECK(!fs.watch("", [] {}).has_value());
+}
+
+TEST("slib - dropping a real_filesystem watch stops the sink")
+{
+    temp_dir dir("slib-real-fs-watch-stop");
+    dir.write("a.hlsl", "v1");
+
+    slib::real_filesystem fs{dir.root()};
+
+    cc::atomic<int> fires{0};
+    {
+        auto const sub = fs.watch("", [&fires] { fires.fetch_add(1); });
+
+        dir.write("a.hlsl", "a much longer v2");
+
+        bool const notified = sub.has_value() && wait_until([&] { return fires.load() > 0; });
+        CHECK(notified == sub.has_value()); // no backend here, nothing to tear down: see the test above
+
+        if (!sub.has_value())
+            return;
+    }
+
+    // The subscription is gone, so no notification may follow — the destructor's promise, and the one the
+    // OS makes hardest to keep. There is nothing to wait *for* here, so this waits a short fixed while and
+    // checks that nothing happened; a broken teardown moves the count on its own.
+    auto const after_unsubscribe = fires.load();
+    dir.write("a.hlsl", "v3");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(fires.load() == after_unsubscribe);
 }
 
 TEST("slib - real_filesystem does not read a directory as a file")

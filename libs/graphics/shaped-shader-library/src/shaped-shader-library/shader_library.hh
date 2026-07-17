@@ -20,12 +20,17 @@ namespace slib
 /// How the reload watcher runs. See shader_library::start_hot_reload.
 struct reload_config
 {
-    /// How long between rescans. Threaded mode only.
+    /// How long between rescans while polling. Ignored where the filesystem can notify: there is no
+    /// interval then, the change itself is the trigger.
     double interval_ms = 200;
 
     /// Run no thread; nothing is scanned until you call poll_hot_reload(). Forced on where the platform
     /// has no threads. Tests use it to make a reload deterministic — write a file, pump, acquire, done.
     bool unthreaded = false;
+
+    /// Rescan on interval_ms even where the filesystem could notify. For exercising the fallback path
+    /// deliberately; a real app has no reason to ask for it.
+    bool force_polling = false;
 };
 
 /// Owns the shader packages a program uses: their filesystems, the compilers that build them, and the
@@ -75,15 +80,20 @@ public:
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
     ///
+    /// The filesystem notifies where it can, and the watcher is otherwise asleep — no interval, no periodic
+    /// wakeup. Where it cannot (a platform with no watch backend, SC_THREADS=OFF, force_polling), it falls
+    /// back to rescanning every `interval_ms`.
+    ///
     /// Recompiles run on the watcher, not on whoever acquires — so a reload costs a consumer nothing but
     /// the lock around a pointer swap, and it keeps the last good shader until the new one is ready.
     void start_hot_reload(reload_config config = {});
 
-    /// Runs one scan on the calling thread. A no-op unless hot reload was started unthreaded, so it is
+    /// Drives the watcher on the calling thread. A no-op unless hot reload was started unthreaded, so it is
     /// safe to call unconditionally every frame.
     ///
-    /// Unthreaded, the scan *is* the recompile: this blocks for as long as the changed shaders take to
-    /// build. That is the trade for having no thread, and it is what makes a reload deterministic.
+    /// Unthreaded, this *is* the recompile: it blocks for as long as the changed shaders take to build.
+    /// That is the trade for having no thread, and it is what makes a reload deterministic. Where the
+    /// filesystem notifies, a poll with nothing pending does no work at all.
     void poll_hot_reload();
 
     /// Whether the watcher is running.
@@ -128,6 +138,11 @@ public:
 
     void note_reload();
 
+    /// Tells the watcher an asset's dependency set moved, so it can seed the new paths and re-arm its
+    /// watches. A first acquire records what a shader is built from on a *consumer* thread — which the
+    /// watcher, parked on its mailbox, would otherwise never hear about. Cheap and safe to over-call.
+    void note_dependencies_changed();
+
 private:
     /// One registered package: its mount point and the language its sources are in.
     struct package_entry
@@ -155,9 +170,11 @@ private:
 
     cc::atomic<u64> _generation{0};
 
-    /// The reload watcher's actor, and the flag that tells a sleeping scan loop to give up. The flag is
-    /// shared because the actor owns the impl and only hands it back once it has stopped.
+    /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a
+    /// filesystem notification comes in through. Both are shared because the actor owns the impl and only
+    /// hands it back once it has stopped.
     cc::unique_ptr<cc::threaded_actor<impl::check_now>> _watcher;
     std::shared_ptr<cc::atomic<bool>> _watcher_stopping;
+    std::shared_ptr<impl::reload_wake> _wake;
 };
 } // namespace slib

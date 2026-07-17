@@ -57,7 +57,12 @@ lib.can_compile(language, format);          // -> bool;  lib.supported_formats(l
 lib.assets();                               // -> span<shader_asset_handle const>
 lib.filesystem();                           // -> mount_table const&  (everything mounted)
 
-slib::reload_config                         // { double interval_ms = 200; bool unthreaded = false; }
+slib::reload_config                         // { double interval_ms = 200; bool unthreaded = false;
+                                            //   bool force_polling = false; }
+                                            //   the filesystem NOTIFIES where it can -> no interval, no
+                                            //   periodic wakeup, idle costs nothing. interval_ms only
+                                            //   applies to the polling fallback (no backend / no threads /
+                                            //   force_polling), and force_polling is for testing that path.
                                             //   unthreaded: no thread; poll_hot_reload() IS the scan
                                             //   (and the recompile). Forced where there are no threads.
 ```
@@ -112,22 +117,39 @@ every resolved path is recorded as a dependency -> editing an .hlsli reloads wha
 slib::file_revision                 // enum : u64; `none` = absent. Opaque — NOT a timestamp.
 slib::filesystem                    // read_text(path) -> optional<string>;  revision(path);  exists(path)
                                     //   paths are '/'-separated, normalized, root-relative; '..' cannot escape
+fs.watch(prefix, sink)              // -> optional<watch_subscription>; OPTIONAL capability, default nullopt
+
+#include <shaped-shader-library/filesystem/watch.hh>
+slib::watch_sink                    // cc::unique_function<void()>; fires from ANY thread -> enqueue + return
+slib::watch_subscription            // move-only; ~it unsubscribes AND guarantees the sink is neither
+                                    //   running nor callable again. Must not outlive its filesystem.
+                                    //   A default-constructed one is VALID and never fires.
+// watch() is a HINT TO RESCAN, never a report of what changed: it may coalesce, fire spuriously, and watch
+// a whole directory when you asked for one file. revision() stays the truth. nullopt = "I cannot notify,
+// poll me" -> which is NOT the same as a subscription that never fires ("nothing here can ever change").
 
 #include <shaped-shader-library/filesystem/mount_table.hh>
 slib::mount_table                   // a filesystem built from others: mount(virtual_dir, fs); mount_count()
                                     //   lookup: longest prefix first, then MOST RECENTLY mounted first
                                     //   -> an overlay is just two mounts at one prefix (embedded, then source)
+                                    //   watch: composes every INTERSECTING mount (inside the prefix, or
+                                    //   containing it). ANY of them nullopt -> the whole watch is nullopt.
 
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
 slib::memory_filesystem             // write(path, text) bumps the revision; remove(path). TESTS USE THIS:
-                                    //   a hot reload is a write(), not a sleep.
+                                    //   a hot reload is a write(), not a sleep — and write() fires the
+                                    //   watch synchronously, so the notify path is deterministic too.
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 slib::embedded_file                 // { cc::string_view path; cc::string_view text; }  (generated, static)
 slib::embedded_filesystem           // over a span of those; constant revision (nothing to reload)
+                                    //   watch -> a subscription that NEVER fires (and never nullopt)
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
 slib::real_filesystem               // rooted at a real dir; revision folds mtime+size.
-                                    //   THE ONLY THING IN slib THAT TOUCHES THE DISK. A missing root is
-                                    //   not an error — it just finds nothing, which is how ship-vs-dev works.
+                                    //   THE ONLY THING IN slib THAT TOUCHES THE DISK (with its watch
+                                    //   backends). A missing root is not an error — it just finds nothing,
+                                    //   which is how ship-vs-dev works.
+                                    //   watch -> ReadDirectoryChangesW on Windows; nullopt on Linux/macOS
+                                    //   (not yet written), under SC_THREADS=OFF, and for a missing dir.
 ```
 
 ## package types
@@ -152,4 +174,8 @@ slib::shader_package      // { string_view name; shader_language language; strin
 - a generated package header is PRIVATE to its target. To publish a shader, re-expose it from your own
   public header and own the drift (docs/coding-guidelines.md).
 - a reload only recompiles formats someone has already acquired.
+- watch() is a hint to rescan, NOT a report. If you find yourself plumbing changed *paths* through it,
+  stop — revision() is the source of truth and that is what makes overflow/rename/coalescing all free.
+- a shader is only watched once a compile has recorded what it is built from, i.e. after its first
+  acquire(). Nothing is watching a shader nobody ever asked for.
 ```

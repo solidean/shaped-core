@@ -3,6 +3,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-shader-library/filesystem/watch.hh>
 #include <shaped-shader-library/fwd.hh>
 
 namespace slib
@@ -35,5 +36,22 @@ public:
 
     /// Whether read_text would find something.
     [[nodiscard]] bool exists(cc::string_view path) const { return revision(path) != file_revision::none; }
+
+    /// Registers `sink` for changes under `prefix` — a path prefix, empty meaning this filesystem's whole
+    /// root. The subscription unsubscribes on destruction.
+    ///
+    /// nullopt means "I cannot notify — poll me instead", which is where everything starts and where a
+    /// platform without a watch backend stays.
+    ///
+    /// Relaxed on purpose: a notification is a HINT TO RESCAN, never a description of what changed. An
+    /// implementation may coalesce, may fire spuriously, and may watch a whole directory when a single
+    /// file was asked for — a sibling's change firing the sink is allowed, and filtering is optional.
+    /// revision() remains the source of truth, which is what lets an inotify queue overflow or an editor
+    /// that saves via write-temp-then-rename degrade to "fire the sink" rather than to a missed reload.
+    [[nodiscard]] virtual cc::optional<watch_subscription> watch([[maybe_unused]] cc::string_view prefix,
+                                                                 [[maybe_unused]] watch_sink sink) const
+    {
+        return cc::nullopt;
+    }
 };
 } // namespace slib

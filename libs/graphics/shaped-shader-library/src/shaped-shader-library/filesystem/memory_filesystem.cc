@@ -1,6 +1,13 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
+#include <shaped-shader-library/filesystem/impl/watch_registry.hh>
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
+
+// Out of line: _watches is a unique_ptr to a type the header only forward-declares.
+slib::memory_filesystem::memory_filesystem() : _watches(std::make_unique<impl::watch_registry>())
+{
+}
+slib::memory_filesystem::~memory_filesystem() = default;
 
 cc::optional<cc::string> slib::memory_filesystem::read_text(cc::string_view path) const
 {
@@ -47,6 +54,10 @@ void slib::memory_filesystem::write(cc::string_view path, cc::string_view text)
             f.text = cc::string::create_copy_of(text);
             f.revision = file_revision(s.next_revision++);
         });
+
+    // Off the lock, and after the write: a sink runs arbitrary code, and it must be able to read the
+    // revision it is being told about.
+    _watches->fire_for(resolved);
 }
 
 bool slib::memory_filesystem::remove(cc::string_view path)
@@ -56,5 +67,17 @@ bool slib::memory_filesystem::remove(cc::string_view path)
         return false;
     auto const& resolved = normalized.value();
 
-    return _state.lock([&](state& s) { return s.files.erase(resolved); });
+    auto const existed = _state.lock([&](state& s) { return s.files.erase(resolved); });
+    if (existed)
+        _watches->fire_for(resolved);
+    return existed;
+}
+
+cc::optional<slib::watch_subscription> slib::memory_filesystem::watch(cc::string_view prefix, watch_sink sink) const
+{
+    auto normalized = impl::normalize_path(prefix);
+    if (!normalized.has_value())
+        return watch_subscription(); // nothing is reachable under a prefix that escapes the root
+
+    return _watches->add(cc::move(normalized.value()), cc::move(sink));
 }

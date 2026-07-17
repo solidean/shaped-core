@@ -13,15 +13,20 @@ that nothing in the compiler would have stopped.
 ## Only `real_filesystem` touches the disk
 
 Every shader source slib reads goes through a mounted [`slib::filesystem`](../src/shaped-shader-library/filesystem/filesystem.hh).
-[`real_filesystem.cc`](../src/shaped-shader-library/filesystem/real_filesystem.cc) is the **one** file
-permitted to include `<filesystem>` or otherwise reach real storage. Nothing else in slib may open a
-file, stat a path, or take an absolute path and act on it.
+[`real_filesystem.cc`](../src/shaped-shader-library/filesystem/real_filesystem.cc) and its watch backends
+([`impl/watch_backend_*.cc`](../src/shaped-shader-library/filesystem/impl/)) are the **only** files
+permitted to include `<filesystem>`, reach `<Windows.h>`, or otherwise touch real storage or the OS.
+Nothing else in slib may open a file, stat a path, ask the OS to notify it, or take an absolute path and
+act on it.
 
 **Why** (not obvious): three things fall out of that one seam, and all three break if it leaks.
 
 - **Reload tests need no disk and no sleeps.** They mount a `memory_filesystem`; an edit is a `write()`
   and a scan is a `poll_hot_reload()`. A single direct `std::filesystem` call somewhere in the compile
-  path would drag real files — and real timing — back into them.
+  path would drag real files — and real timing — back into them. This holds for *watching* too:
+  `memory_filesystem` fires its watch straight out of `write()`, so the notify path is exercised end to
+  end with no OS and no timer. The handful of tests that do use a real directory say so loudly and are
+  kept apart.
 - **Shipping works without a mode flag.** A shipped binary has no source tree, so its shaders come from
   the embedded copy. That only works because *reading a shader* never means *reading a file*.
 - **`..` cannot climb out of a mount.** Path normalization is the traversal guard, and it only guards
@@ -29,7 +34,13 @@ file, stat a path, or take an absolute path and act on it.
 
 `<filesystem>` is also not a [blessed clean-core header](../../../base/clean-core/docs/blessed-stdlib-headers.md),
 which is the other reason to keep it in one place. When clean-core grows a virtual filesystem, this
-library's VFS is the trial run for it and `real_filesystem` is the only thing that has to move.
+library's VFS is the trial run for it and `real_filesystem` — with its backends — is the only thing that
+has to move.
+
+The corollary for `watch()`: it is an **optional** capability, and `nullopt` ("I cannot notify — poll me")
+must stay a first-class answer rather than a bug. It is what every platform with no backend returns, and
+the polling fallback it selects is the only reason a missing backend is a performance note instead of a
+broken feature.
 
 ## A generated package header is private; publishing one is the caller's job
 

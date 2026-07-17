@@ -32,9 +32,12 @@ slib::shader_library::~shader_library()
     // Stop the watcher before anything it reads goes away — it holds a back-reference to us.
     if (_watcher != nullptr)
     {
-        _watcher_stopping->store(true); // cuts a sleeping scan loop short instead of waiting it out
-        _watcher->shutdown();
+        _watcher_stopping->store(true); // cuts a sleeping poll loop short instead of waiting it out
+        _watcher->shutdown();           // drops the watches, so no filesystem can wake it after this
+
+        _wake->disarm(); // nothing may reach the actor we are about to destroy
         _watcher = nullptr;
+        _wake = nullptr;
     }
 
     // Drop the token: any asset still reachable through a generated global now reports that its library
@@ -52,7 +55,13 @@ void slib::shader_library::start_hot_reload(reload_config config)
     bool const threaded = CC_HAS_THREADS && !config.unthreaded;
 
     _watcher_stopping = std::make_shared<cc::atomic<bool>>(false);
-    _watcher = cc::make_threaded_actor<impl::reload_watcher>(*this, config.interval_ms, threaded, _watcher_stopping);
+    _wake = std::make_shared<impl::reload_wake>();
+    _watcher = cc::make_threaded_actor<impl::reload_watcher>(*this, config.interval_ms, threaded, config.force_polling,
+                                                             _watcher_stopping, _wake);
+
+    // Between the two: the watcher's constructor scanned with no actor to wake yet, and arming asks for the
+    // one scan that pass could not. Nothing is running until start(), so there is no gap to race.
+    _wake->arm(_watcher.get());
     _watcher->start(threaded ? cc::threaded_actor_mode::threaded_if_possible : cc::threaded_actor_mode::unthreaded);
 }
 
@@ -173,6 +182,12 @@ cc::u64 slib::shader_library::generation() const
 void slib::shader_library::note_reload()
 {
     _generation.fetch_add(1);
+}
+
+void slib::shader_library::note_dependencies_changed()
+{
+    if (_wake != nullptr)
+        _wake->fire();
 }
 
 slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::string_view virtual_path,

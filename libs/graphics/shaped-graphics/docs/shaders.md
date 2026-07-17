@@ -104,6 +104,8 @@ The contract that matters:
   and `asset->last_error()` says why. Fix the file, save again, and it recovers.
 - **You are told when it changed.** `asset->generation()` moves when a shader is replaced — cache it to
   know when to rebuild a pipeline. `lib.generation()` is the coarse "something, somewhere changed".
+- **An idle watcher costs nothing.** The OS says when a file moved, so there is no interval and no
+  periodic wakeup — a save reaches the watcher directly rather than being noticed on the next tick.
 
 ```cpp
 if (auto const g = my::shaders::vignette.compute.main->generation(); g != known_generation)
@@ -115,6 +117,12 @@ if (auto const g = my::shaders::vignette.compute.main->generation(); g != known_
 
 Where there are no threads (`SC_THREADS=OFF`, WebAssembly), pass `{.unthreaded = true}` and call
 `lib.poll_hot_reload()` yourself — it is a no-op otherwise, so it is safe to call every frame either way.
+
+Where the OS cannot be asked to notify — no threads, a platform whose watch backend is not written yet
+(today: everything but Windows), or a source directory that is not there — the watcher quietly falls back
+to rescanning every `reload_config::interval_ms`. Nothing about the contract above changes; only the
+latency and the idle cost do. `{.force_polling = true}` takes that path deliberately, which is only worth
+doing to test it.
 
 ## Dev vs shipping
 
