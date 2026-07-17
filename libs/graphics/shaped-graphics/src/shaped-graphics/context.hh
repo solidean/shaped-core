@@ -144,17 +144,30 @@ public:
     /// to call from any thread.
     virtual void wait_for_next_inflight_epoch() = 0;
 
+    /// Runs one cycle of the transfer work that normally lives on its own thread (the upload/download
+    /// copy actors). Returns true if there may be more work.
+    ///
+    /// Returns false without doing anything where the platform has threads — the actors drive themselves
+    /// there, and this is pure overhead. Where it matters is CC_HAS_THREADS == 0: a cc::threaded_actor
+    /// falls back to running on its caller, so nothing advances a copy unless someone pumps it. Every
+    /// blocking wait therefore has to drain this first, or it waits on work that will never happen —
+    /// including GPU waits, since an async upload's copy-queue fence is signalled by the actor.
+    /// Backends with no actors can leave this alone.
+    virtual bool pump_transfers() { return false; }
+
     /// Blocks until a download future is delivered, then returns its bytes (nullopt if invalid,
     /// unsubmitted, or cancelled). The only completion guarantee for a download — advance_epoch* drain
     /// GPU work but not the readback actor. Waitable once submitted; safe to call from any thread.
     [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_for(bytes_future const& future)
     {
+        drive_transfers_until_ready(future);
         return future.wait_get_bytes();
     }
 
     template <class T>
     [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_for(data_future<T> const& future)
     {
+        drive_transfers_until_ready(future);
         return future.wait_get_data();
     }
 
@@ -178,6 +191,18 @@ public:
 
 protected:
     context(backend_kind backend, thread_model threading);
+
+    /// Pumps transfers until `future` is ready or no transfer work is left. Collapses to a single false
+    /// test where the platform has threads (pump_transfers does nothing there); without them it is what
+    /// makes a blocking wait terminate. Leaving the future unready is fine — the wait below it reports
+    /// the cancelled / not-yet-submitted cases rather than blocking.
+    template <class FutureT>
+    void drive_transfers_until_ready(FutureT const& future)
+    {
+        while (!future.is_ready() && pump_transfers())
+        {
+        }
+    }
 
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     friend class context_persistent_scope;

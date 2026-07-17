@@ -106,6 +106,10 @@ public:
     /// releases the copy queue and unmaps + releases the staging buffer.
     void shutdown();
 
+    /// Runs one cycle of the copy actor on the calling thread; true if there may be more work. A no-op
+    /// returning false wherever the actor has its own thread — see sg::context::pump_transfers.
+    bool pump_unthreaded() { return _actor != nullptr && _actor->process_messages_if_unthreaded(); }
+
     // Set in initialize, then touched only by the copy actor (_staging/_mapped/_window_bytes are also
     // rebuilt by the actor when a set_window_bytes is applied) — the actor reads them lock-free.
     dx12_context& _ctx;
