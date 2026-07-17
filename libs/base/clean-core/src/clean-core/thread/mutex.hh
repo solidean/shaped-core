@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
@@ -9,6 +11,10 @@
 /// Thread-safe wrapper for data T protected by a mutex
 /// Rust-style mutex that encapsulates both the data and the mutex protecting it
 /// Access to the protected data is only possible through scoped lock operations
+///
+/// Without threads (CC_HAS_THREADS == 0) the API is unchanged but there is no mutex member and no locking:
+/// nothing can contend, so lock() just invokes and try_lock() always succeeds. That is 80 bytes per instance
+/// on Windows, and it matters — the async pool holds one per injection queue. wait() is the exception; see it.
 template <class T>
 struct cc::mutex
 {
@@ -22,7 +28,9 @@ struct cc::mutex
     template <class F>
     auto lock(F&& f)
     {
+#if CC_HAS_THREADS
         std::lock_guard lock(_mutex);
+#endif
         return cc::invoke(cc::forward<F>(f), _value);
     }
 
@@ -41,6 +49,19 @@ struct cc::mutex
     auto try_lock(F&& f)
     {
         using result_t = decltype(cc::invoke(cc::forward<F>(f), _value));
+#if !CC_HAS_THREADS
+        // Nobody to lose the race to, so the acquire cannot fail. Callers keep their has_value() branch; it is
+        // simply never taken.
+        if constexpr (std::is_void_v<result_t>)
+        {
+            cc::invoke(cc::forward<F>(f), _value);
+            return true;
+        }
+        else
+        {
+            return optional<result_t>(cc::invoke(cc::forward<F>(f), _value));
+        }
+#else
         std::unique_lock lock(_mutex, std::try_to_lock);
 
         if constexpr (std::is_void_v<result_t>)
@@ -66,6 +87,7 @@ struct cc::mutex
                 return optional<result_t>();
             }
         }
+#endif
     }
 
     /// Wait on condition variable with predicate, then invoke function with protected value
@@ -73,6 +95,11 @@ struct cc::mutex
     /// Once awakened and predicate is satisfied, invokes f with the protected value
     /// The mutex is held during predicate checks and the function call
     /// Returns: The result of invoking f with the protected value
+    ///
+    /// Without threads the predicate must ALREADY hold — only another thread could make it true, so an
+    /// unsatisfied wait is a deadlock, not a slow path, and it asserts instead of hanging. This is the one
+    /// operation with no honest fallback: if you need to wait for work, drive that work yourself rather than
+    /// block on it (see cc::threaded_actor's unthreaded mode).
     /// Usage:
     ///   cc::mutex<int> counter;
     ///   std::condition_variable cv;
@@ -80,8 +107,13 @@ struct cc::mutex
     template <class Pred, class F>
     auto wait(std::condition_variable& cv, Pred&& pred, F&& f)
     {
+#if CC_HAS_THREADS
         std::unique_lock lock(_mutex);
         cv.wait(lock, [&]() { return cc::invoke(pred, _value); });
+#else
+        (void)cv;
+        CC_ASSERT(cc::invoke(pred, _value), "waiting on a predicate no other thread can ever make true");
+#endif
         return cc::invoke(cc::forward<F>(f), _value);
     }
 
@@ -108,5 +140,7 @@ struct cc::mutex
 
 private:
     T _value;
+#if CC_HAS_THREADS
     std::mutex _mutex;
+#endif
 };

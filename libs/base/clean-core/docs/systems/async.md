@@ -342,6 +342,28 @@ continuation bookkeeping, at most one thread polls a node, a completing dependen
 records a re-poll instead of enqueuing a second copy, and continuations are held as `weak_ptr`s so a wake can
 never touch a dependent being torn down concurrently.
 
+### Without threads
+
+On a platform with no OS threads — WebAssembly, or any build configured `-DSC_THREADS=OFF` — the pool does
+**not** disappear. Gating the type on `CC_HAS_THREADS` would push the branch into every caller, so instead it
+keeps its whole API and falls back: no threads are started, `worker_count()` is 0, the constructor's count is
+ignored, and `enqueue`/`submit` push onto a LIFO queue that `blocking_get` pumps on the calling thread.
+
+The single decision that produces all of that is constructing `async_scheduler(false)` — **no steal-capable
+peers**. The poll loop publishes a node's dependencies only for peers to steal, so with none it drives the
+whole graph inline on the caller's stack and the queue stays empty on the common path. Everything else
+follows: nothing to steal means no deques, nobody to wake means no wake protocol, nobody to park behind means
+no condvar. What is left is `singlethreaded_scheduler`'s behavior reached through the pool's API — and the
+node's spinlock compiles away, since the only thread that could hold it is the one asking for it.
+
+The one thing it cannot do is **wait**. A graph parked on work only another thread could deliver never
+completes, and `blocking_get`'s `is_ready()` assert reports that rather than hanging — there is no thread that
+could ever arrive to make it true. That is the same boundary `singlethreaded_scheduler::try_blocking_get`
+draws with its nullopt.
+
+The pool's own tests (`tests/thread/async-pool-test.cc`) run in **both** modes for this reason; only the ones
+that genuinely need a second thread are gated.
+
 ### The hot path costs no shared RMW
 
 The design rule is **no MPMC contention when nobody is actively stealing**, and the thing that matters there is
@@ -445,7 +467,9 @@ original 384 B), and the node is cacheline-aligned to avoid false sharing betwee
   same size class with the same teardowns shares one instance — e.g. `async<int, async_error>` and
   `async<float, async_error>` get the same pointer. The frame ops are per frame type, so a framed descriptor is
   one instance per closure — fine, since each closure already emits its own code.
-  `is_ready()`/`is_cold()` are lock-free acquire loads of the word.
+  `is_ready()`/`is_cold()` are lock-free acquire loads of the word. Both words are `cc::atomic`, so a build
+  with no threads gets plain loads and stores here and the spinlock bit compiles away entirely — nothing can
+  contend it (see [Without threads](#without-threads)).
 * **Payload slot (offset 16), one hand-managed union.** The compute frame, the not-ready dependency set, and
   the continuation head (dependents to wake) are **mutually exclusive with** the resolved value ⊍ error — the
   scratch matters only before completion, the value/error only after — so they share the slot, discriminated by

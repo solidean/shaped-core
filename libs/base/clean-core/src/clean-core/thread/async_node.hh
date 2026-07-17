@@ -859,8 +859,15 @@ private:
     // below are plain load/mask/store — a concurrent spinner's fetch_or only re-sets an already-set lock bit,
     // never changing the value. State stores are release, so a lock-free is_ready() acquire-load that sees a
     // terminal state also sees the value/error published before it.
+    //
+    // Without threads the lock is uncontendable by construction — the only thread that could hold it is the one
+    // asking for it — so both sides compile away. cc::atomic already strips the interlock, but the RMW and its
+    // branch would remain, and the lock bit itself would only ever be written and read back as clear. The
+    // mutators below stay exactly as they are: they are plain load/mask/store either way, and the bit they
+    // preserve simply never gets set.
     void spin_lock()
     {
+#if CC_HAS_THREADS
         for (;;)
         {
             if ((_state_and_ops.fetch_or(lock_bit, cc::memory_order_acquire) & lock_bit) == 0)
@@ -868,8 +875,14 @@ private:
             while (_state_and_ops.load(cc::memory_order_relaxed) & lock_bit)
                 ; // spin-read until the holder releases, then retry the RMW
         }
+#endif
     }
-    void spin_unlock() { _state_and_ops.fetch_and(~lock_bit, cc::memory_order_release); }
+    void spin_unlock()
+    {
+#if CC_HAS_THREADS
+        _state_and_ops.fetch_and(~lock_bit, cc::memory_order_release);
+#endif
+    }
 
     void store_state(async_node_state s) // under lock (or at construction): set state, preserve ops/lock/wake
     {

@@ -1,18 +1,23 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
-
-// The concurrent scheduler and its tests need OS threads. Everything thread-free lives in async-test.cc; this
-// file is the threaded counterpart, so it compiles to nothing where threads are unavailable (e.g. wasm).
-#if CC_HAS_THREADS
-
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <nexus/test.hh>
 
-#include <chrono>
 #include <memory>
+
+#if CC_HAS_THREADS
+#include <chrono>
 #include <thread>
+#endif
+
+// cc::async_thread_pool's own tests. Deliberately NOT gated on CC_HAS_THREADS as a whole: the pool exists on
+// every platform and falls back to driving graphs inline on the caller (see async_thread_pool.hh), so these
+// pin that a pool-shaped API gives pool-shaped ANSWERS with or without threads — which is the only claim the
+// fallback makes. Only what genuinely needs a second thread is gated, and each of those says why.
+//
+// Everything thread-free by construction lives in async-test.cc; this file is about the pool specifically.
 
 using cc::async_context;
 
@@ -74,6 +79,10 @@ TEST("async - many independent asyncs fan out across the pool")
     CHECK(pool.blocking_get(root) == cc::i64(n) * (n - 1) / 2);
 }
 
+// Gated: the whole point is that a SECOND thread supplies the value the first is parked on. With one thread
+// the graph parks on a manual node nobody can ever push, which is exactly what blocking_get's is_ready()
+// assert reports — a different contract, covered by async-test.cc's no-progress tests.
+#if CC_HAS_THREADS
 TEST("async - external push from a foreign thread wakes a pool-parked dependent")
 {
     cc::async_thread_pool pool(2);
@@ -94,6 +103,7 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
 
     CHECK(v == 42);
 }
+#endif
 
 TEST("async - two pools coexist; each drives its own submitted root")
 {
@@ -344,5 +354,3 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
         CHECK(pool.blocking_get(root_st) == expected);
     }
 }
-
-#endif // CC_HAS_THREADS

@@ -480,6 +480,10 @@ int v = pool.blocking_get(root);                         // caller PARTICIPATES 
 //   entirely (~27 ns, no cross-thread round trip). Never call blocking_get from inside a worker of that pool.
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
+// WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.
+// It starts nothing, worker_count() == 0, the ctor's count is ignored, and blocking_get drives the graph
+// inline on the caller (it reports no steal-capable peers, so nothing is published). It cannot WAIT though:
+// a graph parked on another thread's work never completes, and blocking_get's is_ready() assert says so.
 // Not here yet: co_await, plain (non-async) dep args, structured/owned children, error-type conversion across
 // a heterogeneous-E dependency graph (the make_async_* sugar assumes a single E; raw frames can bridge by hand).
 ```

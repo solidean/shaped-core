@@ -1,13 +1,14 @@
 #include <clean-core/thread/async_thread_pool.hh>
 
 #if CC_HAS_THREADS
-
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
+#endif
 
 // Work-stealing pool over the async_scheduler seam. See async_thread_pool.hh for the model; async_node.hh for
-// the node state machine that makes concurrent poll()/schedule() safe.
+// the node state machine that makes concurrent poll()/schedule() safe. Two compile-time frontends: everything
+// down to the #else is the threaded one; the no-threads pool is a short block at the bottom.
 //
 // ============================================================================
 // The wake protocol
@@ -57,6 +58,8 @@
 //
 // _wake_epoch replaces `_pending > 0` as the condvar predicate: it is monotonic, so a wake cannot be missed or
 // mistaken for a stale one, and it is touched ONLY when a sleeper exists -- never on the hot path.
+
+#if CC_HAS_THREADS
 
 thread_local cc::async_thread_pool::worker* cc::async_thread_pool::s_current_worker = nullptr;
 
@@ -447,6 +450,85 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     slot->claimed.store(false, cc::memory_order_release);
 }
 
+#else // CC_HAS_THREADS == 0
+
+// ============================================================================
+// The pool without threads
+// ============================================================================
+// Same class, same public API, no threads: cc::async_thread_pool exists on every platform, because gating the
+// API on the flag would push the branch into every caller (the cc::threaded_actor policy). What it cannot do
+// is run anything concurrently, so it stops pretending to.
+//
+// The one decision that does all the work is async_scheduler(false) -- no steal-capable peers. The poll loop
+// publishes a node's dependencies only for peers to steal (see async.cc), so with none it drives the whole
+// graph inline on the caller's stack and _queue stays empty on the common path. Everything else follows:
+// nothing to steal means no deques, nobody to wake means no wake protocol, and nobody to park behind means no
+// condvar. What is left is a LIFO queue and a pump -- which is cc::singlethreaded_scheduler, reached through
+// the pool's API.
+//
+// The limit is real and worth stating: a graph parked on work only another thread could deliver never
+// completes here. blocking_get's is_ready() assert reports that instead of hanging, which is the honest
+// failure -- there is no thread that could ever arrive to make it true.
+
+cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(false)
+{
+    // The count is accepted and ignored rather than asserted on: callers pass hardware_concurrency-shaped
+    // numbers unconditionally, and refusing them here would be exactly the platform branch this fallback
+    // exists to remove. Note there is no `>= 1` assert either — 0 workers is what this build always has.
+    (void)worker_count;
+}
+
+cc::async_thread_pool::~async_thread_pool()
+{
+    CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
+              "uninstall this pool as the default before destroying it (uninstall_default_async_pool / "
+              "scoped_default_async_pool)");
+
+    // No drain by hand, unlike the threaded destructor: _queue holds real handles, so abandoned work releases
+    // its own counts when the vector dies. Same contract though — outstanding graphs are dropped, not run.
+}
+
+int cc::async_thread_pool::default_worker_count()
+{
+    return 0; // no threads to give: the blocking_get caller is the only worker there is
+}
+
+void cc::async_thread_pool::enqueue(async_node_ptr node)
+{
+    CC_ASSERT(node != nullptr, "cannot enqueue a null node");
+    // No "must be called from a worker of this pool" assert: there are no workers, and the one thread there is
+    // may always queue. LIFO on the back — see the member.
+    _queue.push_back(cc::move(node));
+}
+
+void cc::async_thread_pool::submit(async_node_ptr node)
+{
+    CC_ASSERT(node != nullptr, "cannot submit a null node");
+    // The threaded pool splits submit from enqueue to keep foreign pushes off the workers' deques. With one
+    // thread there is no foreign, and no injection queue to route to.
+    _queue.push_back(cc::move(node));
+}
+
+void cc::async_thread_pool::participate_until_ready(async_node_base& root)
+{
+    async_worker_scope const scope(*this); // bind the pool, so nodes the frames touch route back to _queue
+
+    // Drive the root here rather than schedule() it, for the same reason the threaded path does: it is work we
+    // are about to do anyway. There, publishing races a thief for it; here it would just be a queue round trip.
+    root.poll();
+
+    // Then pump whatever it queued. Anything reachable runs, so falling out with the root not ready means the
+    // graph is parked on something no thread here will ever deliver -- blocking_get's assert names that.
+    while (!root.is_ready() && !_queue.empty())
+    {
+        async_node_ptr n = cc::move(_queue.back());
+        _queue.pop_back();
+        n->poll();
+    }
+}
+
+#endif // CC_HAS_THREADS
+
 void cc::install_default_async_pool(async_thread_pool& pool)
 {
     CC_ASSERT(async_scheduler::default_or_null() == nullptr,
@@ -461,5 +543,3 @@ void cc::uninstall_default_async_pool(async_thread_pool& pool)
               "uninstall_default_async_pool: this pool is not the currently installed default");
     async_scheduler::set_default(nullptr);
 }
-
-#endif // CC_HAS_THREADS
