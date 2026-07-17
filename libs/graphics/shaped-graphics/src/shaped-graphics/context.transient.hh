@@ -3,7 +3,9 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/buffer.hh> // typed buffer<T> wrapper (returned by create_buffer below)
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
 #include <shaped-graphics/types.hh>
 
 namespace sg
@@ -35,6 +37,25 @@ public:
     /// Fallible core of create_raw_buffer — returns an error instead of throwing.
     [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
+    // Typed buffer factory — allocates `element_count` elements of `T` (byte size element_count * sizeof(T))
+    // and returns the wrapped `buffer<T>`, whose view factories are typed by `T`. `element_count` must be
+    // >= 0 (0 is a valid empty buffer). Error behaviour mirrors create_raw_buffer.
+
+    template <class T>
+    [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usage usage)
+    {
+        return buffer<T>::from_raw(create_raw_buffer(element_count * isize(sizeof(T)), usage));
+    }
+
+    template <class T>
+    [[nodiscard]] cc::result<buffer<T>> try_create_buffer(isize element_count, buffer_usage usage)
+    {
+        auto r = try_create_raw_buffer(element_count * isize(sizeof(T)), usage);
+        if (r.has_value())
+            return buffer<T>::from_raw(cc::move(r).value());
+        return cc::error(cc::move(r).error());
+    }
+
     // textures
 public:
     /// Allocates a transient texture, recycled once this epoch retires. Throws sg::allocation_exception
@@ -45,6 +66,113 @@ public:
 
     /// Fallible core of create_raw_texture — returns an error instead of throwing.
     [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc);
+
+    // Typed texture factories — take a shape-specific description (only the free parameters; see
+    // texture_descriptions.hh), expand it to a full texture_description, create the transient raw_texture, and
+    // return the wrapped `texture<Traits>`. `create_texture` / `try_create_texture` are the generic core
+    // (deduce the shape from the description); the named `create_texture_2d` / … wrappers exist so the
+    // description can be brace-initialized at the call site (`create_texture_2d({.width = 256, ...})`), which
+    // the deduced template cannot. Error behaviour mirrors create_raw_texture.
+
+    template <class Desc>
+    [[nodiscard]] typename Desc::texture_type create_texture(Desc const& desc)
+    {
+        return Desc::texture_type::from_raw(create_raw_texture(desc.to_texture_description()));
+    }
+
+    template <class Desc>
+    [[nodiscard]] cc::result<typename Desc::texture_type> try_create_texture(Desc const& desc)
+    {
+        auto r = try_create_raw_texture(desc.to_texture_description());
+        if (r.has_value())
+            return Desc::texture_type::from_raw(cc::move(r).value());
+        return cc::error(cc::move(r).error());
+    }
+
+    [[nodiscard]] texture_1d create_texture_1d(texture_1d_description const& d) { return create_texture(d); }
+    [[nodiscard]] cc::result<texture_1d> try_create_texture_1d(texture_1d_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_2d create_texture_2d(texture_2d_description const& d) { return create_texture(d); }
+    [[nodiscard]] cc::result<texture_2d> try_create_texture_2d(texture_2d_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_3d create_texture_3d(texture_3d_description const& d) { return create_texture(d); }
+    [[nodiscard]] cc::result<texture_3d> try_create_texture_3d(texture_3d_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_cube create_texture_cube(texture_cube_description const& d) { return create_texture(d); }
+    [[nodiscard]] cc::result<texture_cube> try_create_texture_cube(texture_cube_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_1d_array create_texture_1d_array(texture_1d_array_description const& d)
+    {
+        return create_texture(d);
+    }
+    [[nodiscard]] cc::result<texture_1d_array> try_create_texture_1d_array(texture_1d_array_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_2d_array create_texture_2d_array(texture_2d_array_description const& d)
+    {
+        return create_texture(d);
+    }
+    [[nodiscard]] cc::result<texture_2d_array> try_create_texture_2d_array(texture_2d_array_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_cube_array create_texture_cube_array(texture_cube_array_description const& d)
+    {
+        return create_texture(d);
+    }
+    [[nodiscard]] cc::result<texture_cube_array> try_create_texture_cube_array(texture_cube_array_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_2d_ms create_texture_2d_ms(texture_2d_ms_description const& d) { return create_texture(d); }
+    [[nodiscard]] cc::result<texture_2d_ms> try_create_texture_2d_ms(texture_2d_ms_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_2d_array_ms create_texture_2d_array_ms(texture_2d_array_ms_description const& d)
+    {
+        return create_texture(d);
+    }
+    [[nodiscard]] cc::result<texture_2d_array_ms> try_create_texture_2d_array_ms(texture_2d_array_ms_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_cube_ms create_texture_cube_ms(texture_cube_ms_description const& d)
+    {
+        return create_texture(d);
+    }
+    [[nodiscard]] cc::result<texture_cube_ms> try_create_texture_cube_ms(texture_cube_ms_description const& d)
+    {
+        return try_create_texture(d);
+    }
+
+    [[nodiscard]] texture_cube_array_ms create_texture_cube_array_ms(texture_cube_array_ms_description const& d)
+    {
+        return create_texture(d);
+    }
+    [[nodiscard]] cc::result<texture_cube_array_ms> try_create_texture_cube_array_ms(
+        texture_cube_array_ms_description const& d)
+    {
+        return try_create_texture(d);
+    }
 
     // bind path
 public:

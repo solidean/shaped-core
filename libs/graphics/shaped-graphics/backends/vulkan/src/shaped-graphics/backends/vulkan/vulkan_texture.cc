@@ -186,7 +186,7 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
 {
     // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point
     // rather than surfacing as a driver error (mirrors the dx12 path).
-    sg::raw_texture::validate_description(desc);
+    desc.assert_valid();
 
     // TEMPORARY: dedicated allocations only. Placement into a memory_heap (vkBindImageMemory at an offset
     // into a shared VkDeviceMemory) is not wired up yet — same status as vulkan_buffer.

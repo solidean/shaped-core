@@ -9,6 +9,7 @@
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/binding_group_layout.hh>
 #include <shaped-graphics/blend_state.hh>
+#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list.compute.hh>
 #include <shaped-graphics/command_list.copy.hh>

@@ -291,8 +291,8 @@ protected:
                                                                               allocation_info const& alloc) = 0;
 
     /// Allocates a GPU-resident texture from a description. `alloc` selects the backing memory (see
-    /// allocation_info). This is the raw, general create — typed factories (create_texture_2d, …) that
-    /// return `texture<Traits>` wrappers layer on top of it later.
+    /// allocation_info). This is the raw, general create — the typed factories (create_texture_2d, …) that
+    /// return `texture<Traits>` wrappers (context.persistent.hh / context.transient.hh) layer on top of it.
     [[nodiscard]] virtual cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
                                                                                 allocation_info const& alloc) = 0;
 

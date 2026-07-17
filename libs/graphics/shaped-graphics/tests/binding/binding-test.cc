@@ -2,6 +2,7 @@
 #include <shaped-graphics/binding.hh>
 #include <shaped-graphics/binding_group.hh>
 #include <shaped-graphics/binding_group_layout.hh>
+#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/pipeline_layout.hh>
 #include <shaped-graphics/raw_buffer.hh>
@@ -60,7 +61,7 @@ TEST("sg bindings - accepts matches a bound view")
     auto const buf = make_buffer(256, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer);
 
     // A rw-structured view satisfies exactly a readwrite_structured_buffer binding.
-    sg::raw_view const rw_structured = buf->as_readwrite_buffer<particle>();
+    sg::raw_view const rw_structured = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
     CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, rw_structured));
     CHECK(!sg::accepts(sg::binding_type::readonly_structured_buffer, rw_structured)); // access mismatch
     CHECK(!sg::accepts(sg::binding_type::readwrite_raw_buffer, rw_structured));       // shape mismatch
@@ -71,7 +72,7 @@ TEST("sg bindings - accepts matches a bound view")
     CHECK(!sg::accepts(sg::binding_type::readwrite_structured_buffer, rw_raw)); // shape mismatch
 
     // A read-only structured view.
-    sg::raw_view const ro_structured = buf->as_readonly_buffer<particle>();
+    sg::raw_view const ro_structured = sg::buffer<particle>::from_raw(buf).as_readonly_buffer();
     CHECK(sg::accepts(sg::binding_type::readonly_structured_buffer, ro_structured));
     CHECK(!sg::accepts(sg::binding_type::readwrite_structured_buffer, ro_structured)); // access mismatch
 }
@@ -99,7 +100,7 @@ TEST("sg bindings - compiled_shader holds reflection")
     CHECK(!b.block_size.has_value());
 
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
-    CHECK(sg::accepts(b.type, buf->as_readwrite_buffer<particle>()));
+    CHECK(sg::accepts(b.type, sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()));
 }
 
 TEST("sg bindings - named_view pairs a name with a bound view")
@@ -107,9 +108,9 @@ TEST("sg bindings - named_view pairs a name with a bound view")
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
 
     // A typed view converts implicitly to the named_view's raw_view.
-    sg::named_view const nv{.name = "Output", .view = buf->as_readwrite_buffer<particle>()};
+    sg::named_view const nv{.name = "Output", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
     CHECK(nv.name == "Output");
-    CHECK(nv.view.access == sg::view_class::readwrite);
-    CHECK(nv.view.shape == sg::view_shape::structured);
+    CHECK(sg::access_of(nv.view) == sg::view_class::readwrite);
+    CHECK(sg::shape_of(nv.view) == sg::view_shape::structured);
     CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view));
 }

@@ -88,7 +88,7 @@ enum class binding_type
 {
     if (is_sampler(t))
         return false; // samplers are bound as samplers, never as views
-    return v.access == access_of(t) && v.shape == shape_of(t);
+    return access_of(v) == access_of(t) && shape_of(v) == shape_of(t);
 }
 
 /// A single reflected shader resource binding: a named slot the shader reads. Identified by a

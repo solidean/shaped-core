@@ -282,7 +282,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         auto rt = sc->acquire_backbuffer();                        // auto-resizes to the window first
         tg::vec2i const size = tg::vec2i(rt.width(), rt.height()); // the acquired view is the size of record
         ensure_depth(size);
-        sg::texture_2d const depth_typed(depth_tex);
+        auto const depth_typed = sg::texture_2d::from_raw(depth_tex);
 
         // model (spin) -> view (push away from the camera at the origin) -> projection.
         tg::mat3f const rot = tg::mat3f::make_rotation_y(tg::angle_f::make_from_degree(t * 50.0f))
@@ -307,7 +307,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
             });
             cmd->raster.bind_pipeline(*pipeline);
             cmd->raster.set_inline_constants(mvp);
-            cmd->raster.bind_vertex_buffers({vbuf->as_vertex_buffer<vertex>()});
+            cmd->raster.bind_vertex_buffers({sg::buffer<vertex>::from_raw(vbuf).as_vertex_buffer()});
             cmd->raster.draw({.vertex_range = {.offset = 0, .size = cc::isize(cube.size())}});
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
