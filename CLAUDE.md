@@ -36,6 +36,16 @@ One-liner per library:
   `command_list`, GPU resources, over per-backend static libs (dx12/vulkan tier
   1; metal/webgpu tier 2; opengl/webgl legacy). Namespace `sg`. Depends on
   clean-core + typed-geometry. Early stage — see [docs/graphics.md](docs/graphics.md).
+* **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL →
+  `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed
+  cache. Namespace `ssc::dxc`. Depends on shaped-graphics. Windows-only, and
+  built only once `extern/dxc` has fetched DXC.
+* **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
+  any target declares its shaders via `sc_add_shader_package` and gets typed C++
+  symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
+  Namespace `slib`. Depends on shaped-graphics — **sg does not depend on it**.
+  The shader system's front door is
+  [shaped-graphics/docs/shaders.md](libs/graphics/shaped-graphics/docs/shaders.md).
 * **`libs/graphics/shaped-rendering`** — render routines on top of sg (mipmap
   gen, tonemapping, texture compression, …). Namespace `sr`. Depends on
   shaped-graphics. Early-stage skeleton.
@@ -60,6 +70,8 @@ upward or cyclic dependencies.
 
 ```text
 shaped-viewer → shaped-rendering → shaped-graphics (+ backends)
+                                          ↑
+        shaped-shader-library → shaped-shader-compiler-dxc
                                           ↓
 nexus    typed-geometry  ←────────────────┘
    ↓         ↓

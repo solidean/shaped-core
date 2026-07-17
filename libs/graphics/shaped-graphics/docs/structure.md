@@ -35,6 +35,8 @@ src/shaped-graphics/
                                                 + erased raw_view; texture/texel views deferred (resource + format exist; binding is future)
   binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
   compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
+                                                (context::accepted_shader_formats advertises what a backend takes;
+                                                 producing one is shaped-shader-library's job — see docs/shaders.md)
   binding_group_layout.hh/.cc     [in progress] abstract: one group's schema (built from bindings); dx12 = descriptor-table schema (vulkan stub)
   pipeline_layout.hh/.cc          [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
   compute_pipeline.hh/.cc         [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)

@@ -93,6 +93,34 @@ base as protected members. Resources are shared-immutable and handed out as `xyz
 (`= std::shared_ptr<sg::xyz>`); there are no host-visible resources — PCIe transfer is a globally
 shared resource sg manages.
 
+### shaped-shader-compiler-dxc — namespace `ssc::dxc` — depends on shaped-graphics
+
+[readme](../libs/graphics/shaped-shader-compiler-dxc/readme.md) ·
+[cheat-sheet](../libs/graphics/shaped-shader-compiler-dxc/cheat-sheet.md)
+
+A side utility, not part of the sv→sr→sg chain: a lean wrapper over the DirectX Shader Compiler that
+turns HLSL into an `sg::compiled_shader` (bytecode + reflected bindings + compute workgroup size).
+Two-step — `preprocess` (resolve `#include`s through a caller-supplied resolver, no file I/O baked in)
+then `compile` — plus an async, content-keyed `shader_cache`. **Windows-only**, and built only once
+DXC has been fetched (`extern/dxc` downloads a pinned release on demand).
+
+### shaped-shader-library — namespace `slib` — depends on shaped-graphics
+
+[readme](../libs/graphics/shaped-shader-library/readme.md) ·
+[cheat-sheet](../libs/graphics/shaped-shader-library/cheat-sheet.md) ·
+[docs](../libs/graphics/shaped-shader-library/docs/_index.md)
+
+The shader package + hot-reload mechanism, also a side utility. Any target — a library, an app, or a
+test binary — declares its own **shader package** in its own CMakeLists (`sc_add_shader_package`), gets
+typed C++ symbols for its shaders, and gets hot reloading; sg itself does not depend on it. You
+`acquire(ctx)` with the context you will use the shader on, and get bytecode in a format *it* accepts —
+so one authored shader can feed several backends. Compilers are a registered seam (HLSL→DXIL today),
+shader sources are reached only through a mountable virtual filesystem, and the generator embeds every
+source so a shipped binary is self-contained without a mode flag.
+
+**How the shader system fits together —
+[shaped-graphics/docs/shaders.md](../libs/graphics/shaped-graphics/docs/shaders.md).**
+
 ### shaped-rendering — namespace `sr` — depends on shaped-graphics
 
 [readme](../libs/graphics/shaped-rendering/readme.md) · [docs](../libs/graphics/shaped-rendering/docs/_index.md)
@@ -110,17 +138,17 @@ serving Shaped Code's visualization needs. The top of the graphics stack. Early-
 ## Dependency graph
 
 ```text
-shaped-viewer
-     ↓
-shaped-rendering
-     ↓
-shaped-graphics ──→ backends (dx12, vulkan, metal, webgpu, opengl, webgl)
-     ↓
-typed-geometry     nexus
-        ↓            ↓
-        └─ clean-core ┘
-              ↓
-        (no dependencies)
+shaped-viewer              shaped-shader-library      # the shader side utilities: they depend
+     ↓                              ↓                 # on sg, nothing depends on them
+shaped-rendering           shaped-shader-compiler-dxc
+     ↓                              ↓
+     └──────────→ shaped-graphics ←─┘ ──→ backends (dx12, vulkan, metal, webgpu, opengl, webgl)
+                        ↓
+              typed-geometry     nexus
+                     ↓             ↓
+                     └─ clean-core ┘
+                           ↓
+                     (no dependencies)
 ```
 
 For the build & test workflow shared by all libraries, see

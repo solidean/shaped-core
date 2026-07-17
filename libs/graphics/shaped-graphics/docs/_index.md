@@ -22,6 +22,10 @@ backends/         # concrete per-backend static libs (dx12/, vulkan/) that subcl
 
 ## Topics
 
+- [shaders](shaders.md) — how a shader gets from a file you edit to something a context can build a
+  pipeline from: declaring a package, `acquire(ctx)`, hot reload, and dev-vs-shipping. Most of that
+  machinery lives *downstream* of sg (shaped-shader-library, shaped-shader-compiler-dxc) — sg owns only
+  `compiled_shader` and what a context accepts — but this is where to start looking.
 - [structure](structure.md) — the module roadmap with `[done]`/`[in progress]`/`[planned]`
   status. This is the living design document; update it as the API lands.
 - [coding-guidelines](coding-guidelines.md) — sg-specific conventions on top of the repo-wide

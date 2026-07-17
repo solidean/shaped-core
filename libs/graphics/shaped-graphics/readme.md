@@ -61,6 +61,10 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 ## More
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
+- [docs/shaders.md](docs/shaders.md) — how the shader system works end to end: declaring a package,
+  `acquire(ctx)`, hot reload, shipping. Most of it lives *downstream* of sg (shaped-shader-library,
+  shaped-shader-compiler-dxc) — sg owns only `compiled_shader` and what a context accepts — but that is
+  where to start looking.
 - [docs/_index.md](docs/_index.md) — shaped-graphics' documentation hub.
 - [docs/structure.md](docs/structure.md) — the module roadmap and status.
 - [docs/coding-guidelines.md](docs/coding-guidelines.md) — sg-specific conventions (handles,
