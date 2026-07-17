@@ -222,7 +222,7 @@ TEST("node_allocation - cross-thread free then reuse (basic)")
 
 TEST("node_allocation - thread-exit reclaims fully-free slabs to backing")
 {
-    auto const before = cc::detail::node_orphan_slab_count();
+    auto const before = cc::impl::node_orphan_slab_count();
 
     // a thread allocates a multi-slab batch, frees it ALL on itself, then exits. every slab is fully free
     // at the allocator's teardown -> returned to the backing resource, and NOTHING is orphaned.
@@ -237,12 +237,12 @@ TEST("node_allocation - thread-exit reclaims fully-free slabs to backing")
         })
         .join();
 
-    CHECK(cc::detail::node_orphan_slab_count() == before); // orphan bins untouched -> slabs went to backing
+    CHECK(cc::impl::node_orphan_slab_count() == before); // orphan bins untouched -> slabs went to backing
 }
 
 TEST("node_allocation - abandoned slab is adopted by a later thread")
 {
-    auto const before = cc::detail::node_orphan_slab_count();
+    auto const before = cc::impl::node_orphan_slab_count();
     int const usable = usable_slots<T8B>();
 
     // producer thread fills exactly one slab, hands every (live) node to a shared vector, then exits.
@@ -265,7 +265,7 @@ TEST("node_allocation - abandoned slab is adopted by a later thread")
         CHECK(base_of(shared[i]) == producer_base);
         CHECK(shared[i].ptr->value == u64(i));
     }
-    CHECK(cc::detail::node_orphan_slab_count() == before + 1); // exactly one slab orphaned
+    CHECK(cc::impl::node_orphan_slab_count() == before + 1); // exactly one slab orphaned
 
     // free the whole batch on the consumer (main) thread -> routes to the orphaned slab's remote bitmap
     // (the owner token is the dead producer's, never this thread's)
@@ -284,6 +284,6 @@ TEST("node_allocation - abandoned slab is adopted by a later thread")
     for (int i = 0; i < usable; ++i)
         CHECK(consumer_nodes[i].ptr->value == u64(7000 + i));
 
-    CHECK(cc::detail::node_orphan_slab_count() == before); // the orphan was adopted -> bin drained
+    CHECK(cc::impl::node_orphan_slab_count() == before); // the orphan was adopted -> bin drained
 }
 #endif
