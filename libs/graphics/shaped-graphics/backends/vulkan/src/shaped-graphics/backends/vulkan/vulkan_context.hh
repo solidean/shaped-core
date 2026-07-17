@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
+#include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/context.hh>
 
 #include <atomic>
@@ -37,6 +38,9 @@ struct vulkan_config
 /// in vulkan_context*.cc / vulkan_command_list.cc / vulkan_buffer.cc.
 class vulkan_context final : public sg::context
 {
+    // vulkan consumes SPIR-V only.
+    static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::spirv};
+
 public:
     vulkan_context(VkInstance instance,
                    VkPhysicalDevice physical_device,
@@ -46,7 +50,7 @@ public:
                    VkSemaphore epoch_timeline,
                    VkSemaphore submission_timeline,
                    VkDebugUtilsMessengerEXT debug_messenger)
-      : sg::context(sg::backend_kind::vulkan, sg::thread_model::multi_threaded),
+      : sg::context(sg::backend_kind::vulkan, sg::thread_model::multi_threaded, k_accepted_shader_formats),
         _instance(instance),
         _physical_device(physical_device),
         _device(device),

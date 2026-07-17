@@ -20,6 +20,7 @@
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/context.hh>
 
 #include <atomic>
@@ -73,11 +74,14 @@ struct dx12_config
 /// backend-typed create_dx12_* methods — prefer those when you hold a dx12_context. Bodies in dx12.cc.
 class dx12_context final : public sg::context
 {
+    // dx12 consumes DXIL only.
+    static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::dxil};
+
 public:
     // Default-constructs an empty context; create_dx12_context populates the device objects and
     // initializes the inline transfer systems. The COM pointers and fences start null.
     dx12_context()
-      : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded),
+      : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded, k_accepted_shader_formats),
         _cmd_pool(*this),
         _upload_inline(*this),
         _download_inline(*this),

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/small_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
@@ -34,6 +35,13 @@ public:
 
     /// The backend kind driving this context — a coarse tag, not the concrete type.
     [[nodiscard]] backend_kind backend() const { return _backend; }
+
+    /// Bytecode formats this context can build pipelines from, most-preferred first. Never empty.
+    /// A shader must be supplied in one of these; anything else is rejected at pipeline creation.
+    [[nodiscard]] cc::span<shader_format const> accepted_shader_formats() const { return _accepted_shader_formats; }
+
+    /// Whether this context can build pipelines from `format`.
+    [[nodiscard]] bool accepts_shader_format(shader_format format) const;
 
     /// The threading guarantees this backend provides (see the threading concept doc).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
@@ -190,7 +198,8 @@ public:
     [[nodiscard]] bool is_shut_down() const { return _is_shut_down; }
 
 protected:
-    context(backend_kind backend, thread_model threading);
+    /// `accepted_shader_formats` must be non-empty, most-preferred first.
+    context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats);
 
     /// Pumps transfers until `future` is ready or no transfer work is left. Collapses to a single false
     /// test where the platform has threads (pump_transfers does nothing there); without them it is what
@@ -341,6 +350,9 @@ protected:
     backend_kind _backend;
     thread_model _thread_model;
     bool _is_shut_down = false;
+
+    // Fixed at construction. Inline for the realistic one-or-two-format backends, but not capped.
+    cc::small_vector<shader_format, 2> _accepted_shader_formats;
 
     // Sticky device-loss state (see is_device_lost). Set once via mark_device_lost, never cleared.
     bool _device_lost = false;

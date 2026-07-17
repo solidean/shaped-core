@@ -52,7 +52,7 @@ void context::mark_device_lost(cc::string reason)
     _device_loss_reason = cc::move(reason);
 }
 
-context::context(backend_kind backend, thread_model threading)
+context::context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats)
   : persistent(*this),
     transient(*this),
     upload(*this),
@@ -63,9 +63,21 @@ context::context(backend_kind backend, thread_model threading)
     _thread_model(threading),
     _pipeline_cache(std::make_unique<pipeline_cache>())
 {
+    CC_ASSERT(!accepted_shader_formats.empty(), "a context must accept at least one shader format");
+    for (auto format : accepted_shader_formats)
+        _accepted_shader_formats.push_back(format);
+
     // The scope members only store a back-reference; they don't touch any not-yet-constructed member.
     // Give the built-in cache default in-memory tiers so ctx.cached memoizes out of the box.
     _pipeline_cache->add_default_in_memory_providers();
+}
+
+bool context::accepts_shader_format(shader_format format) const
+{
+    for (auto accepted : _accepted_shader_formats)
+        if (accepted == format)
+            return true;
+    return false;
 }
 
 pipeline_cache& context::pipeline_cache_ref()
