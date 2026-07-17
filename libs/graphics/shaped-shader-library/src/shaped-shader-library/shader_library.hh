@@ -7,10 +7,10 @@
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/filesystem/mount_table.hh>
 #include <shaped-shader-library/fwd.hh>
 #include <shaped-shader-library/impl/reload_watcher.hh>
-#include <shaped-shader-library/shader_compiler.hh>
 #include <shaped-shader-library/shader_package.hh>
 
 #include <memory>
@@ -74,10 +74,16 @@ public:
 
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
+    ///
+    /// Recompiles run on the watcher, not on whoever acquires — so a reload costs a consumer nothing but
+    /// the lock around a pointer swap, and it keeps the last good shader until the new one is ready.
     void start_hot_reload(reload_config config = {});
 
     /// Runs one scan on the calling thread. A no-op unless hot reload was started unthreaded, so it is
     /// safe to call unconditionally every frame.
+    ///
+    /// Unthreaded, the scan *is* the recompile: this blocks for as long as the changed shaders take to
+    /// build. That is the trade for having no thread, and it is what makes a reload deterministic.
     void poll_hot_reload();
 
     /// Whether the watcher is running.

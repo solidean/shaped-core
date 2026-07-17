@@ -8,8 +8,8 @@
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/fwd.hh>
-#include <shaped-shader-library/shader_compiler.hh>
 
 namespace slib
 {

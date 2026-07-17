@@ -3,7 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
-#include <shaped-shader-library/shader_compiler.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
 
 /// A compiler that pretends. It resolves `#include "x"` lines itself, then turns the flattened text into
 /// an sg::compiled_shader whose "bytecode" is that text.

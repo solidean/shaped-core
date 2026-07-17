@@ -31,7 +31,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/filesystem/embedded_filesystem.hh
     src/shaped-shader-library/filesystem/real_filesystem.hh
     src/shaped-shader-library/filesystem/mount_table.hh
-    src/shaped-shader-library/shader_compiler.hh
+    src/shaped-shader-library/compiler/shader_compiler.hh
     src/shaped-shader-library/shader_package.hh
     src/shaped-shader-library/shader_asset.hh
     src/shaped-shader-library/shader_library.hh
@@ -53,6 +53,25 @@ target_compile_options(shaped-shader-library
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
+# The HLSL -> DXIL compiler is optional: DXC is Windows-only and fetched on demand, so slib's own
+# surface -- packages, mounts, reload -- builds and is tested everywhere without it. SLIB_HAS_DXC is
+# PUBLIC because dxc_compiler.hh gates its declaration on it, so a consumer must see the same answer.
+# It changes no type's layout, only whether one factory exists.
+if(SC_HAS_DXC_COMPILER)
+    target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/compiler/dxc_compiler.cc)
+    target_sources(shaped-shader-library
+        PUBLIC
+        FILE_SET public_headers
+        TYPE HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        FILES src/shaped-shader-library/compiler/dxc_compiler.hh
+    )
+    target_link_libraries(shaped-shader-library PRIVATE shaped-shader-compiler-dxc)
+    target_compile_definitions(shaped-shader-library PUBLIC SLIB_HAS_DXC=1)
+else()
+    target_compile_definitions(shaped-shader-library PUBLIC SLIB_HAS_DXC=0)
+endif()
+
 # Test binary. Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
     add_executable(shaped-shader-library-test
@@ -64,6 +83,7 @@ if(SC_BUILD_TESTS)
         tests/shader_library-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
+        tests/dxc_compiler-test.cc
     )
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)

@@ -139,19 +139,41 @@ void slib::shader_asset::stage_reload()
     if (library == nullptr)
         return;
 
+    // Only formats someone has actually asked for: staging a compile for a format nobody acquired would
+    // burn the compiler on a shader that is never used.
+    cc::small_vector<sg::shader_format, 2> formats;
     _state.lock(
-        [&](state& s)
+        [&](state const& s)
         {
-            for (auto& entry : s.formats)
-            {
-                // Only formats someone has actually asked for: staging a compile for a format nobody
-                // acquired would burn the compiler on a shader that is never used.
-                if (entry.current == nullptr)
-                    continue;
-
-                auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, entry.format);
-                entry.pending = cc::move(outcome.shader);
-                entry.dependencies = cc::move(outcome.dependencies);
-            }
+            for (auto const& entry : s.formats)
+                if (entry.current != nullptr)
+                    formats.push_back(entry.format);
         });
+
+    for (auto const format : formats)
+    {
+        // Read, preprocess and compile off the lock. A consumer's acquire only ever waits for the swap
+        // below, never for the compiler — which is the point of staging in the first place.
+        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format);
+
+        // Drive the compile here, on the watcher's own thread. cc::async nodes are cold until a
+        // scheduler runs them, and nothing else will ever look at this one: a consumer only sees it once
+        // it is promoted, and promotion needs it ready. Without this, a build with no default async pool
+        // would stage reloads nobody ran and acquire would return the old shader forever. Where a pool
+        // *is* installed this returns nullopt because the pool already owns the node, and the pool
+        // finishes it — either way the next acquire finds it ready.
+        (void)cc::try_async_blocking_get_singlethreaded(outcome.shader);
+
+        _state.lock(
+            [&](state& s)
+            {
+                for (auto& entry : s.formats)
+                {
+                    if (entry.format != format)
+                        continue;
+                    entry.pending = cc::move(outcome.shader);
+                    entry.dependencies = cc::move(outcome.dependencies);
+                }
+            });
+    }
 }
