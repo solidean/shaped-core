@@ -187,7 +187,7 @@ instruction count descending, aggregated over every recorded trace:
    109        2     0        8/0    20/22       9 (0)  clean-core-test.exe!`anonymous namespace'::single_lazy_probe
     84        2     0        3/1    12/10      10 (5)  clean-core-test.exe!cc::async_node_base::poll
     78        0     0        0/1     13/5       7 (3)  clean-core-test.exe!cc::poly_node_allocation::~poly_node_allocation
-     9        0     0        1/0      2/1       0 (0)  clean-core-test.exe!cc::detail::unique_function_invoke
+     9        0     0        1/0      2/1       0 (0)  clean-core-test.exe!cc::impl::unique_function_invoke
   ---------------------------------------------------
    797       10     0       24/5   142/92     77 (34)  total (1 trace)
 ```

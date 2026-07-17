@@ -270,20 +270,20 @@ CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
 /// New backing allocations are pulled in from cc::default_memory_resource
 extern cc::node_memory_resource* const default_node_memory_resource;
 
-namespace detail
+namespace impl
 {
 /// This thread's default node allocator; null until hydrated by the cold path. Zero-init POD, so the
 /// read is a plain inline TLS load with no guard -- that is what lets the alloc fast path inline.
 /// Authoritative, not a shadow cache: set_default_node_allocator repoints it and every later alloc
 /// sees the new one. Safe to read during another TU's static init (reads null, then hydrates).
 /// Assumes static linkage (local-exec/initial-exec TLS); a PIC shared build would degrade this to a
-/// __tls_get_addr call. detail::owner_token carries the same assumption.
+/// __tls_get_addr call. impl::owner_token carries the same assumption.
 inline thread_local cc::node_allocator* default_node_alloc = nullptr;
 
 /// Cold first-touch: resolve the default resource's allocator for this thread, install it, return it.
 /// Never returns null.
 [[nodiscard]] CC_COLD_FUNC cc::node_allocator* node_alloc_hydrate_default();
-} // namespace detail
+} // namespace impl
 } // namespace cc
 
 // this is a concrete non-customizable allocator interface for all node classes
@@ -459,9 +459,9 @@ namespace cc
 /// resource is TU-local), and set_default_node_allocator is the supported way to override.
 [[nodiscard]] CC_FORCE_INLINE node_allocator& default_node_allocator()
 {
-    auto* a = cc::detail::default_node_alloc;
+    auto* a = cc::impl::default_node_alloc;
     if (a == nullptr) [[unlikely]]
-        a = cc::detail::node_alloc_hydrate_default();
+        a = cc::impl::node_alloc_hydrate_default();
     return *a;
 }
 

@@ -196,7 +196,7 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
 /// This is the one allocator that stays installed as the thread default until thread exit, so a
 /// plain ~node_allocator assert would fire on it. Clearing the slot here is sound precisely where
 /// the general case is not: this wrapper is itself thread_local, so its dtor provably runs on the
-/// one thread whose slot it clears. detail::default_node_alloc is trivially destructible, so its
+/// one thread whose slot it clears. impl::default_node_alloc is trivially destructible, so its
 /// storage outlives this dtor on both the Itanium and MSVC TLS teardown paths.
 struct tls_default_allocator
 {
@@ -204,8 +204,8 @@ struct tls_default_allocator
 
     ~tls_default_allocator()
     {
-        if (cc::detail::default_node_alloc == &alloc)
-            cc::detail::default_node_alloc = nullptr;
+        if (cc::impl::default_node_alloc == &alloc)
+            cc::impl::default_node_alloc = nullptr;
     }
 };
 
@@ -459,21 +459,21 @@ cc::byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
     return this->refill_slabs_and_allocate_node_bytes(idx);
 }
 
-cc::node_allocator* cc::detail::node_alloc_hydrate_default()
+cc::node_allocator* cc::impl::node_alloc_hydrate_default()
 {
     auto* const a = &cc::default_node_memory_resource->get_allocator(cc::default_node_memory_resource->userdata);
-    cc::detail::default_node_alloc = a;
+    cc::impl::default_node_alloc = a;
     return a;
 }
 
 void cc::set_default_node_allocator(cc::node_allocator* alloc)
 {
-    cc::detail::default_node_alloc = alloc;
+    cc::impl::default_node_alloc = alloc;
 }
 
 cc::node_allocator* cc::get_default_node_allocator()
 {
-    return cc::detail::default_node_alloc;
+    return cc::impl::default_node_alloc;
 }
 
 cc::node_allocator::~node_allocator()
@@ -482,7 +482,7 @@ cc::node_allocator::~node_allocator()
     // this thread hands out slots from freed slabs. Best-effort: only this thread's slot is visible,
     // so a cross-thread install/destroy still slips through. The system's own thread-default is
     // exempt because tls_default_allocator clears the slot before we get here.
-    CC_ASSERT(cc::detail::default_node_alloc != this,
+    CC_ASSERT(cc::impl::default_node_alloc != this,
               "node allocator destroyed while still installed as this thread's default -- deregister it first "
               "(set_default_node_allocator / scoped_default_node_allocator)");
 

@@ -14,7 +14,7 @@
 /// closure. cc::poly_node_allocation reads that header to destroy + free without knowing the closure type, so
 /// the handle stays one pointer. (Previously an any_node_allocation + a separate thunk = 32 B.)
 
-namespace cc::detail
+namespace cc::impl
 {
 template <class R, class... Args>
 struct unique_function_node;
@@ -79,7 +79,7 @@ struct unique_function_node_traits
         return b.vt->destroy(&b);
     }
 };
-} // namespace cc::detail
+} // namespace cc::impl
 
 template <class R, class... Args>
 struct cc::unique_function<R(Args...)>
@@ -119,10 +119,10 @@ public:
     template <class F, class... FArgs>
     [[nodiscard]] static unique_function create_from(cc::node_allocator& alloc, FArgs&&... args)
     {
-        using node_t = cc::detail::unique_function_impl_node<F, R, Args...>;
+        using node_t = cc::impl::unique_function_impl_node<F, R, Args...>;
         auto* const mem = alloc.allocate_node_bytes(cc::node_class_index_for<node_t>(), sizeof(node_t), alignof(node_t));
         auto* const n = new (cc::placement_new, mem)
-            node_t(&cc::detail::unique_function_vtable_for<F, R, Args...>, cc::forward<FArgs>(args)...);
+            node_t(&cc::impl::unique_function_vtable_for<F, R, Args...>, cc::forward<FArgs>(args)...);
 
         unique_function uf;
         uf._node.ptr = n; // poly_node_allocation adopts the freshly built node
@@ -138,6 +138,5 @@ public:
 
     // member
 private:
-    cc::poly_node_allocation<cc::detail::unique_function_node<R, Args...>, cc::detail::unique_function_node_traits<R, Args...>>
-        _node;
+    cc::poly_node_allocation<cc::impl::unique_function_node<R, Args...>, cc::impl::unique_function_node_traits<R, Args...>> _node;
 };

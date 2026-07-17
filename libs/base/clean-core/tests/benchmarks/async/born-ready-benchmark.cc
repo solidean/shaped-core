@@ -52,7 +52,7 @@ CC_DONT_INLINE u64 make_async_manual_probe()
 // `dev.py assembly show make_async_lazy_probe`. Used to count node allocations — this must show exactly ONE
 // alloc path: the frame is stored inline in the node's payload, so a second one means a closure that no
 // longer fits the 32 B slot (or lost its inline storage). The alloc is an inline TLS load of
-// detail::default_node_alloc + the slab fast path; an out-of-line allocator fetch would be a regression
+// impl::default_node_alloc + the slab fast path; an out-of-line allocator fetch would be a regression
 // (see default_node_allocator).
 CC_DONT_INLINE u64 make_async_lazy_probe()
 {
