@@ -11,6 +11,8 @@ add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/real_filesystem.cc
     src/shaped-shader-library/filesystem/mount_table.cc
     src/shaped-shader-library/filesystem/impl/path.cc
+    src/shaped-shader-library/shader_asset.cc
+    src/shaped-shader-library/shader_library.cc
 )
 
 # Public headers (co-located in src/, grouped by topic). impl/ headers are internal -- reachable via the
@@ -28,6 +30,10 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/filesystem/embedded_filesystem.hh
     src/shaped-shader-library/filesystem/real_filesystem.hh
     src/shaped-shader-library/filesystem/mount_table.hh
+    src/shaped-shader-library/shader_compiler.hh
+    src/shaped-shader-library/shader_package.hh
+    src/shaped-shader-library/shader_asset.hh
+    src/shaped-shader-library/shader_library.hh
 )
 
 target_compile_features(shaped-shader-library PUBLIC cxx_std_23)
@@ -54,6 +60,7 @@ if(SC_BUILD_TESTS)
         tests/filesystem/filesystem-test.cc
         tests/filesystem/real_filesystem-test.cc
         tests/filesystem/mount_table-test.cc
+        tests/shader_library-test.cc
     )
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
