@@ -73,9 +73,14 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` →
 `emcc` on `PATH`. Tests run under Node (`-s NODERAWFS=1` gives the binaries real-filesystem access so
 the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code). Only the
-single-threaded, no-WebGPU, `-fexceptions` combination is wired today; the `SC_WASM_THREADS` /
+single-threaded, no-WebGPU, `-fexceptions` combination is wired today; the `SC_THREADS=ON` /
 `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear
 "not yet supported" message (Tier 3).
+
+Threads are the repo-wide `SC_THREADS` option (not a wasm-local knob): the `wasm-emscripten-*` presets
+set it `OFF`, and a hand-rolled wasm configure must too — leaving the `ON` default fails rather than
+silently building single-threaded. To develop that mode natively, use a `singlethreaded-*` preset
+instead of a wasm build; see [platforms.md](platforms.md#threading-sc_threads).
 
 ### `std::stacktrace`
 

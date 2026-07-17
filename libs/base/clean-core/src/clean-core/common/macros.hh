@@ -49,8 +49,13 @@
 // =========================================================================================================
 // Compilation modes
 // =========================================================================================================
-// Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS, CC_ASSERT_ENABLED
-// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO
+// Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS
+// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS
+// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED
+//
+// CMake only ever defines inputs; this header owns every derivation and defines the outputs
+// unconditionally. So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, and CC_SINGLE_THREADED feeds
+// CC_HAS_THREADS — none of the derived macros is itself overridable.
 
 #ifdef CC_COMPILER_MSVC
 #ifdef _CPPRTTI
@@ -145,8 +150,16 @@
 // (and SharedArrayBuffer-backed std::thread) when built with -pthread, which predefines
 // __EMSCRIPTEN_PTHREADS__. Single-threaded wasm still compiles <mutex>/<thread>/thread_local fine — they
 // degrade to no-ops — so this flag gates behavior, not compilation.
+//
+// CC_SINGLE_THREADED (from CMake: SC_THREADS=OFF) forces 0 on a platform that HAS threads, which is what
+// makes the single-threaded mode developable natively instead of only under wasm. It forces threads OFF
+// only: wasm without -pthread genuinely has none, so there is deliberately no way to force them ON.
+// Absent the define the autodetect below stands, which is also the path when clean-core is consumed via
+// add_subdirectory without our root CMakeLists.
 
-#if defined(CC_PLATFORM_WEB)
+#if defined(CC_SINGLE_THREADED)
+#define CC_HAS_THREADS 0
+#elif defined(CC_PLATFORM_WEB)
 #if defined(__EMSCRIPTEN_PTHREADS__)
 #define CC_HAS_THREADS 1
 #else

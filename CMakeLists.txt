@@ -14,6 +14,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(SC_BUILD_TESTS "Build the per-library *-test executables" ${PROJECT_IS_TOP_LEVEL})
 option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEVEL})
 
+# Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
+# clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
+# it. Forcing single-threaded on a native host is what makes that mode developable without a wasm build.
+#
+# ON is an assertion, not a wish: a platform that cannot honor it fails configure (Emscripten.cmake) rather
+# than quietly building single-threaded. So this is never a lie, whichever way it is set.
+#
+# No API appears or disappears with it — the threaded types fall back to running on the calling thread (see
+# cc::threaded_actor, cc::async_thread_pool). It does change struct layout (node_allocation's slab header),
+# so it is a whole-build switch: never set it per-target. Must precede include(Emscripten) below.
+option(SC_THREADS "Build with OS thread support; OFF forces a single-threaded build" ON)
+
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 

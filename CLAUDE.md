@@ -162,6 +162,13 @@ build, `test_diag` after a test (dev.py prints the exact selector). Full referen
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` gate the `*-test` binaries and `tools/`.
   Both default to ON for a top-level build (the normal flow) and OFF when
   shaped-core is consumed via `add_subdirectory`.
+* `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's
+  `CC_HAS_THREADS`. OFF forces a single-threaded build even where the platform
+  has threads, which is how the WASM/no-threads mode is developed natively — the
+  `singlethreaded-*` presets do exactly that, and `check` runs one. No API is
+  gated on it: threaded types fall back to running on the calling thread. It
+  changes struct layout, so it is a whole-build switch, never per-target. See
+  [docs/platforms.md](docs/platforms.md#threading-sc_threads).
 
 ---
 

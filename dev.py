@@ -138,6 +138,17 @@ DEFAULT_RELEASE_PRESETS: dict[str, str] = {
     "Darwin": "macos-arm-llvm-release",
 }
 
+# Single-threaded sibling of each default preset (SC_THREADS=OFF -> CC_HAS_THREADS 0), run by the `test`
+# check so precommit exercises both threading modes rather than only the threaded one. RelWithDebInfo, so
+# it also carries CC_ASSERT. Without it this mode is only reachable via a wasm build, which is how it came
+# to be under-exercised in the first place. Deliberately one preset, not a matrix: it is a compile-time
+# axis, and the check tail is already the slow part.
+DEFAULT_SINGLETHREADED_PRESETS: dict[str, str] = {
+    "Windows": "singlethreaded-clang",
+    "Linux": "singlethreaded-linux-clang",
+    "Darwin": "singlethreaded-macos-arm-llvm",
+}
+
 # Sanitizer (ASan+UBSan) preset per platform, run by the `test` check as an extra
 # defensive pass. Windows is intentionally absent: clang-cl's ASan is broken with
 # C++ exceptions (any throw/catch faults during EH dispatch — a toolchain bug, not
@@ -186,6 +197,7 @@ def build_policy() -> cmd.Policy:
         default_build=DEFAULT_BUILD_PRESETS,
         default_debug=DEFAULT_DEBUG_PRESETS,
         default_release=DEFAULT_RELEASE_PRESETS,
+        default_singlethreaded=DEFAULT_SINGLETHREADED_PRESETS,
         default_sanitize=DEFAULT_SANITIZE_PRESETS,
         coverage_build=COVERAGE_BUILD_PRESETS,
         pgo_generate=PGO_GENERATE_PRESETS,

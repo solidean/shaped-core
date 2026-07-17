@@ -41,9 +41,27 @@ All targets are **64-bit**; no 32-bit support is planned. (WebAssembly's `wasm32
 | Consoles | — | vendor toolchains | 3 | planned |
 
 The non-WASM Tier-3 WebAssembly variants (`-pthread`, WebGPU, WASI) have configure knobs already —
-`SC_WASM_THREADS` / `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS` — but they fail configure today with a
+`SC_THREADS` / `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS` — but they fail configure today with a
 clear "not yet supported" message rather than building. See
 [requirements.md](requirements.md#emscripten--wasm).
+
+## Threading (`SC_THREADS`)
+
+`SC_THREADS` (default `ON`) is the repo-wide threading knob; it reaches C++ as clean-core's
+`CC_HAS_THREADS` (0 or 1). `OFF` builds without OS threads — what WASM is today, and what the
+`singlethreaded-*` presets reproduce **on a native host**, so that mode is debuggable with the normal
+toolchain instead of only under Node.
+
+`ON` is an assertion rather than a preference: a platform that cannot honor it fails configure (wasm
+today) rather than quietly demoting, so the flag never describes a build it didn't get.
+
+No API appears or disappears with it. Threaded types fall back to running on the calling thread —
+`cc::threaded_actor` runs on whoever pumps it, and sg drains its copy actors before any wait (see
+[shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/threading.md)). It does change
+struct layout (node_allocation's slab header), so it is a whole-build switch, never per-target.
+
+`uv run dev.py check` runs a RelWithDebInfo single-threaded preset alongside the others, so both
+threading modes stay exercised at precommit.
 
 ## Build types
 

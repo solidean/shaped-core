@@ -152,12 +152,23 @@ target_compile_options(clean-core
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# Define build configuration macros
+# SC_THREADS is the root CMakeLists' option. Default it for a standalone add_subdirectory() consumer that
+# has no root of ours: undefined, the generator expression below reads as OFF and would silently force a
+# single-threaded build. option() would also do, but this says "fallback default", not "second declaration".
+if(NOT DEFINED SC_THREADS)
+    set(SC_THREADS ON)
+endif()
+
+# Define build configuration macros. These are the inputs macros.hh derives from; it owns the outputs
+# (CC_ASSERT_ENABLED, CC_HAS_THREADS). PUBLIC because they must agree across the whole build: consumers
+# branch on them, and CC_SINGLE_THREADED additionally changes struct layout (node_allocation's slab header),
+# so a target compiled without it could not share objects with one compiled with it.
 target_compile_definitions(clean-core
     PUBLIC
     $<$<CONFIG:Debug>:CC_DEBUG>
     $<$<CONFIG:Release>:CC_RELEASE>
     $<$<CONFIG:RelWithDebInfo>:CC_RELWITHDEBINFO>
+    $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
 )
 
 # Detect and link the correct library for std::stacktrace support.
@@ -291,6 +302,14 @@ if(CC_PRINT_CONFIG)
         set(_cc_linker_name "${_CC_LINKER}")
     endif()
 
+    # Threading mode: worth printing because SC_THREADS=OFF changes both behavior and struct layout, and a
+    # stale build directory is otherwise indistinguishable from a fresh one.
+    if(SC_THREADS)
+        set(_cc_threads_name "OS threads (SC_THREADS=ON)")
+    else()
+        set(_cc_threads_name "single-threaded (SC_THREADS=OFF -> CC_HAS_THREADS 0)")
+    endif()
+
     message(STATUS "")
     message(STATUS "[clean-core] Configuration:")
     if(CMAKE_C_COMPILER_ID)
@@ -299,5 +318,6 @@ if(CC_PRINT_CONFIG)
     message(STATUS "  C++ compiler : ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
     message(STATUS "  OS           : ${CMAKE_SYSTEM_NAME}")
     message(STATUS "  Linker       : ${_cc_linker_name}")
+    message(STATUS "  Threading    : ${_cc_threads_name}")
     message(STATUS "")
 endif()

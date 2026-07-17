@@ -71,6 +71,21 @@
 #error "wasm OS detected but CC_ARCH_WASM32 not defined"
 #endif
 
+// Test: CC_HAS_THREADS is always defined and always 0 or 1 — it is #if-tested, not #ifdef-tested, so an
+// undefined macro would silently read as 0 and quietly disable threading everywhere.
+#ifndef CC_HAS_THREADS
+#error "CC_HAS_THREADS must always be defined"
+#endif
+#if CC_HAS_THREADS != 0 && CC_HAS_THREADS != 1
+#error "CC_HAS_THREADS must be exactly 0 or 1"
+#endif
+
+// Test: the CMake input forces the derived output. CC_SINGLE_THREADED (SC_THREADS=OFF) is one-directional
+// — it can force threads off, never on — so this is the only implication that holds.
+#if defined(CC_SINGLE_THREADED) && CC_HAS_THREADS != 0
+#error "CC_SINGLE_THREADED must force CC_HAS_THREADS to 0"
+#endif
+
 // =========================================================================================================
 // Runtime tests
 // =========================================================================================================
