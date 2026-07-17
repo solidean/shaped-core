@@ -63,9 +63,24 @@ if(SC_BUILD_TESTS)
         tests/filesystem/mount_table-test.cc
         tests/shader_library-test.cc
         tests/hot_reload-test.cc
+        tests/shader_package-test.cc
     )
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
+
+    # slib declares a package of its own: the codegen has to be exercised by something, and the library
+    # that ships sc_add_shader_package is the honest place for it.
+    sc_add_shader_package(
+        TARGET     shaped-shader-library-test
+        NAME       slib_test_shaders
+        NAMESPACE  slib_test::shaders
+        SOURCE_DIR tests/shaders
+        LANGUAGE   hlsl
+        SHADERS
+            invert.hlsl:compute:main
+            blit.hlsl:vertex:main_vs
+            blit.hlsl:fragment:main_ps
+    )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-shader-library-test)
