@@ -35,6 +35,24 @@ function(sc_add_nexus_web_runner base)
         target_link_libraries(${web} PRIVATE ${_libs})
     endif()
 
+    # The mirror compiles the base target's exact sources, so it must also carry the base's own
+    # (non-transitive) compile usage requirements. LINK_LIBRARIES already brings the transitive PUBLIC ones
+    # from linked libraries; what a target sets directly on itself -- e.g. a shader package's private include
+    # dir for its generated header (sc_add_shader_package) -- would otherwise be lost, and the generated
+    # source that rode along in SOURCES fails to find its header.
+    get_target_property(_incs ${base} INCLUDE_DIRECTORIES)
+    if(_incs)
+        target_include_directories(${web} PRIVATE ${_incs})
+    endif()
+    get_target_property(_defs ${base} COMPILE_DEFINITIONS)
+    if(_defs)
+        target_compile_definitions(${web} PRIVATE ${_defs})
+    endif()
+    get_target_property(_opts ${base} COMPILE_OPTIONS)
+    if(_opts)
+        target_compile_options(${web} PRIVATE ${_opts})
+    endif()
+
     # A unique JS factory name per module so several can coexist on the aggregate page.
     string(MAKE_C_IDENTIFIER "nexus_web_${base}" _export)
 
