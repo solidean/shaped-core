@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh> // cc::optional (the try_as_* view factories)
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/index_buffer_view.hh>
@@ -39,6 +40,13 @@ public:
     //
     // For the ergonomic, element-typed path (as_readonly_buffer(), as_uniform_buffer(), … inferring `T`)
     // wrap the buffer in a `buffer<T>` (buffer.hh) — the friction here is deliberate.
+    //
+    // A view is a *subrange*, so it can fail its placement rules (see storage_buffer_offset_alignment) on an
+    // offset/size a caller computed at runtime. Every shader-facing factory therefore has a `try_` twin
+    // returning nullopt instead of asserting. The split: `try_` tolerates a bad *range* (bounds, alignment,
+    // stride) but still asserts a missing `buffer_usage` flag — you chose the usage at creation, so that is a
+    // contract bug, not a runtime condition. The draw-input factories (vertex / index) have no `try_` twin:
+    // they can only fail bounds.
 
     /// Raw uniform (constant buffer) view over an explicit byte range. The offset must be 256-byte aligned,
     /// the range must fit, and its size must be <= 64 KiB (max CBV). Returns the erased arm (there is no
@@ -46,16 +54,21 @@ public:
     [[nodiscard]] raw_buffer_view as_raw_uniform_buffer(cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
-        CC_ASSERT(byte_range.offset % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte "
-                                                                            "aligned");
-        CC_ASSERT(byte_range.offset >= 0 && byte_range.size >= 0, "view range must be non-negative");
-        CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "uniform range exceeds buffer size");
-        CC_ASSERT(byte_range.size <= max_uniform_buffer_size, "uniform range exceeds the 64 KiB max CBV size");
+        assert_uniform_range(byte_range);
         return raw_buffer_view{.access = view_class::uniform,
                                .shape = view_shape::uniform_block,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .size_in_bytes = byte_range.size};
+    }
+
+    /// Checked as_raw_uniform_buffer — nullopt when the byte range breaks the uniform block rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_uniform_buffer(cc::offset_size byte_range) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        if (!is_valid_uniform_range(byte_range))
+            return {};
+        return as_raw_uniform_buffer(byte_range);
     }
 
     /// A raw, byte-addressed read-only view (SRV, `shape == raw`) of the whole buffer. Requires readonly_buffer usage.
@@ -68,7 +81,7 @@ public:
     [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
-        assert_byte_range(byte_range);
+        assert_storage_range(byte_range);
         return raw_buffer_view{.access = view_class::readonly,
                                .shape = view_shape::raw,
                                .buffer = shared_from_this(),
@@ -81,13 +94,37 @@ public:
     [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range, isize stride_in_bytes) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
-        assert_structured_range(byte_range, stride_in_bytes);
+        assert_strided_range(byte_range, stride_in_bytes);
         return raw_buffer_view{.access = view_class::readonly,
                                .shape = view_shape::structured,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .element_count = byte_range.size / stride_in_bytes,
                                .stride_in_bytes = stride_in_bytes};
+    }
+
+    /// Checked as_raw_readonly (whole buffer) — nullopt when the size breaks the storage rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readonly() const
+    {
+        return try_as_raw_readonly({.offset = 0, .size = _size_in_bytes});
+    }
+
+    /// Checked as_raw_readonly — nullopt when the byte range breaks the storage rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readonly(cc::offset_size byte_range) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        if (!is_valid_storage_range(byte_range))
+            return {};
+        return as_raw_readonly(byte_range);
+    }
+
+    /// Checked structured as_raw_readonly — nullopt when the byte range / stride break the structured rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readonly(cc::offset_size byte_range, isize stride_in_bytes) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        if (!is_valid_strided_range(byte_range, stride_in_bytes))
+            return {};
+        return as_raw_readonly(byte_range, stride_in_bytes);
     }
 
     /// A raw, byte-addressed read-write view (UAV, `shape == raw`) of the whole buffer. Requires readwrite_buffer usage.
@@ -100,7 +137,7 @@ public:
     [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
-        assert_byte_range(byte_range);
+        assert_storage_range(byte_range);
         return raw_buffer_view{.access = view_class::readwrite,
                                .shape = view_shape::raw,
                                .buffer = shared_from_this(),
@@ -113,13 +150,37 @@ public:
     [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range, isize stride_in_bytes) const
     {
         CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
-        assert_structured_range(byte_range, stride_in_bytes);
+        assert_strided_range(byte_range, stride_in_bytes);
         return raw_buffer_view{.access = view_class::readwrite,
                                .shape = view_shape::structured,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .element_count = byte_range.size / stride_in_bytes,
                                .stride_in_bytes = stride_in_bytes};
+    }
+
+    /// Checked as_raw_readwrite (whole buffer) — nullopt when the size breaks the storage rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readwrite() const
+    {
+        return try_as_raw_readwrite({.offset = 0, .size = _size_in_bytes});
+    }
+
+    /// Checked as_raw_readwrite — nullopt when the byte range breaks the storage rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readwrite(cc::offset_size byte_range) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        if (!is_valid_storage_range(byte_range))
+            return {};
+        return as_raw_readwrite(byte_range);
+    }
+
+    /// Checked structured as_raw_readwrite — nullopt when the byte range / stride break the structured rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_readwrite(cc::offset_size byte_range, isize stride_in_bytes) const
+    {
+        CC_ASSERT(has_flag(_usage, buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        if (!is_valid_strided_range(byte_range, stride_in_bytes))
+            return {};
+        return as_raw_readwrite(byte_range, stride_in_bytes);
     }
 
     // Attachment-less draw-input views — a vertex or index buffer bound at draw time (not shader-visible,
@@ -162,6 +223,15 @@ public:
                                  .size_in_bytes = byte_range.size};
     }
 
+    // Re-type this raw buffer as a strongly-typed `buffer<T>` wrapper — the typed, element-inferring path.
+    // `as_buffer` asserts the byte size is a whole number of `T`; `try_as_buffer` is the checked twin
+    // (nullopt on a trailing partial element). The inverse of `buffer<T>::raw()`, reached straight off the
+    // handle; equivalent to `buffer<T>::from_raw(handle)`. Defined in buffer.hh (they need the full wrapper).
+    template <class T>
+    [[nodiscard]] auto as_buffer() const; // -> buffer<T>
+    template <class T>
+    [[nodiscard]] auto try_as_buffer() const; // -> cc::optional<buffer<T>>
+
     /// Registers a callback to run once this buffer's GPU storage is released *and* no longer in
     /// flight (its owning epoch has retired). The feedback point for reclaiming externally-owned
     /// backing memory (e.g. placed resources on a custom allocator). Do not assume which thread runs it.
@@ -194,6 +264,16 @@ protected:
     /// storage (backends defer it until the owning epoch retires). Default: nothing to release.
     virtual void on_expired() const {}
 
+    // Range validation comes in pairs: an `is_valid_*` predicate (what the `try_` factories test) and an
+    // `assert_*` counterpart that reports the same contract one invariant at a time (what the asserting
+    // factories use). Same split as texture_description::is_valid / assert_valid — keep the two in step.
+
+    /// Whether a byte range fits the buffer (non-negative, within bounds). Non-asserting twin of assert_byte_range.
+    [[nodiscard]] bool is_valid_byte_range(cc::offset_size byte_range) const
+    {
+        return byte_range.offset >= 0 && byte_range.size >= 0 && byte_range.offset + byte_range.size <= _size_in_bytes;
+    }
+
     /// Bounds-checks a byte range against the buffer size (non-negative, within bounds).
     void assert_byte_range(cc::offset_size byte_range) const
     {
@@ -201,12 +281,62 @@ protected:
         CC_ASSERT(byte_range.offset + byte_range.size <= _size_in_bytes, "view range exceeds buffer size");
     }
 
-    /// Bounds-checks a structured byte range: positive stride, in bounds, size a whole number of elements.
-    void assert_structured_range(cc::offset_size byte_range, isize stride_in_bytes) const
+    /// Whether a byte range is a legal shader-facing storage view (see assert_storage_range).
+    [[nodiscard]] bool is_valid_storage_range(cc::offset_size byte_range) const
+    {
+        return is_valid_byte_range(byte_range) && byte_range.offset % storage_buffer_offset_alignment == 0
+            && byte_range.size % storage_buffer_size_alignment == 0;
+    }
+
+    /// Whether a byte range + stride is a legal structured storage view (see assert_strided_range).
+    [[nodiscard]] bool is_valid_strided_range(cc::offset_size byte_range, isize stride_in_bytes) const
+    {
+        return stride_in_bytes > 0 && is_valid_storage_range(byte_range) && byte_range.size % stride_in_bytes == 0
+            && byte_range.offset % stride_in_bytes == 0;
+    }
+
+    /// Whether a byte range is a legal uniform block view (see assert_uniform_range).
+    [[nodiscard]] bool is_valid_uniform_range(cc::offset_size byte_range) const
+    {
+        return is_valid_byte_range(byte_range) && byte_range.offset % uniform_buffer_offset_alignment == 0
+            && byte_range.size <= max_uniform_buffer_size;
+    }
+
+    /// Checks the uniform block rules: in bounds, a 256-byte-aligned offset, and at most the 64 KiB max CBV size.
+    void assert_uniform_range(cc::offset_size byte_range) const
+    {
+        CC_ASSERT(byte_range.offset % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte "
+                                                                            "aligned");
+        assert_byte_range(byte_range);
+        CC_ASSERT(byte_range.size <= max_uniform_buffer_size, "uniform range exceeds the 64 KiB max CBV size");
+    }
+
+    /// Bounds-checks a shader-facing storage (readonly / readwrite) view range: in bounds, a 256-byte-aligned
+    /// offset, and a size that is a whole number of 4-byte words — see storage_buffer_offset_alignment for
+    /// why those are the portable floors. A view is a subrange, so it carries the binding rules; per-object
+    /// addressing into a heterogeneous buffer belongs in the shader (`Load<T>(byteOffset)` off a whole-buffer
+    /// raw view), not in the view's offset.
+    void assert_storage_range(cc::offset_size byte_range) const
+    {
+        assert_byte_range(byte_range);
+        CC_ASSERT(byte_range.offset % storage_buffer_offset_alignment == 0, "storage view offset must be 256-byte "
+                                                                            "aligned (WebGPU; some Vulkan hardware)");
+        CC_ASSERT(byte_range.size % storage_buffer_size_alignment == 0, "storage view size must be a multiple of 4 "
+                                                                        "bytes (WebGPU)");
+    }
+
+    /// Bounds-checks a strided storage view range: the storage rules above, a positive stride, and both size
+    /// and offset a whole number of elements. The offset must *also* be stride-aligned because a structured
+    /// SRV/UAV addresses by element index (D3D12 `FirstElement = offset / stride`), so a non-multiple offset
+    /// cannot be expressed — for an arbitrary byte offset into a heterogeneous buffer use a raw view.
+    void assert_strided_range(cc::offset_size byte_range, isize stride_in_bytes) const
     {
         CC_ASSERT(stride_in_bytes > 0, "structured view stride must be positive");
-        assert_byte_range(byte_range);
+        assert_storage_range(byte_range);
         CC_ASSERT(byte_range.size % stride_in_bytes == 0, "structured view size must be a whole number of elements");
+        CC_ASSERT(byte_range.offset % stride_in_bytes == 0, "structured view offset must be stride-aligned (a "
+                                                            "structured SRV/UAV addresses by element index; use a raw "
+                                                            "view for an arbitrary byte offset)");
     }
 
     isize _size_in_bytes = 0;

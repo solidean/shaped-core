@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::start_end
+#include <clean-core/error/optional.hh> // cc::optional (try_from_raw)
 #include <shaped-graphics/raw_texture.hh>
 #include <shaped-graphics/texture_traits.hh> // texture_traits<…> + the view-factory parameter bags
 #include <shaped-graphics/views.hh>
@@ -39,11 +40,25 @@ public:
 
     texture() = default;
 
-    /// Wraps a raw_texture, asserting its runtime shape matches `Traits`. The handle must be non-null.
-    explicit texture(raw_texture_handle raw) : _raw(cc::move(raw))
+    // -- Wrapping a raw_texture over the shape relationship: `from_raw` requires the runtime shape to match
+    //    `Traits` (asserts; `try_from_raw` is the checked twin). Both require a non-null handle (null is a
+    //    contract bug, not a runtime failure).
+
+    /// Wrap a raw_texture whose runtime shape matches `Traits` (see texture_traits::matches).
+    [[nodiscard]] static texture from_raw(raw_texture_handle raw)
     {
-        CC_ASSERT(_raw != nullptr, "texture<Traits> wraps a non-null raw_texture");
-        CC_ASSERT(Traits::matches(_raw->description()), "raw_texture shape does not match texture<Traits>");
+        CC_ASSERT(raw != nullptr, "texture<Traits> wraps a non-null raw_texture");
+        CC_ASSERT(Traits::matches(raw->description()), "raw_texture shape does not match texture<Traits>");
+        return texture(cc::move(raw));
+    }
+
+    /// Checked from_raw — nullopt when the runtime shape does not match `Traits`.
+    [[nodiscard]] static cc::optional<texture> try_from_raw(raw_texture_handle raw)
+    {
+        CC_ASSERT(raw != nullptr, "texture<Traits> wraps a non-null raw_texture");
+        if (!Traits::matches(raw->description()))
+            return {};
+        return texture(cc::move(raw));
     }
 
     /// The underlying raw resource (never null unless default-constructed). Use this to reach the raw
@@ -357,6 +372,9 @@ private:
         return depth_stencil_view{_raw, dim, _raw->format(), r};
     }
 
+    // Non-null / shape match are checked by the from_raw / try_from_raw factories before this runs.
+    explicit texture(raw_texture_handle raw) : _raw(cc::move(raw)) {}
+
     raw_texture_handle _raw = nullptr;
 };
 
@@ -375,4 +393,95 @@ using texture_2d_ms = texture<texture_traits<texture_dimension::d2, false, false
 using texture_2d_array_ms = texture<texture_traits<texture_dimension::d2, true, false, true>>;
 using texture_cube_ms = texture<texture_traits<texture_dimension::d2, false, true, true>>;
 using texture_cube_array_ms = texture<texture_traits<texture_dimension::d2, true, true, true>>;
+
+// raw_texture -> texture<Traits> (declared on raw_texture, defined here where the wrapper + typedefs are
+// complete). Thin wrappers over from_raw / try_from_raw so a handle re-types with `raw->as_texture_2d()`.
+inline auto raw_texture::as_texture_1d() const
+{
+    return texture_1d::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_1d() const
+{
+    return texture_1d::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_2d() const
+{
+    return texture_2d::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_2d() const
+{
+    return texture_2d::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_3d() const
+{
+    return texture_3d::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_3d() const
+{
+    return texture_3d::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_cube() const
+{
+    return texture_cube::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_cube() const
+{
+    return texture_cube::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_1d_array() const
+{
+    return texture_1d_array::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_1d_array() const
+{
+    return texture_1d_array::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_2d_array() const
+{
+    return texture_2d_array::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_2d_array() const
+{
+    return texture_2d_array::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_cube_array() const
+{
+    return texture_cube_array::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_cube_array() const
+{
+    return texture_cube_array::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_2d_ms() const
+{
+    return texture_2d_ms::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_2d_ms() const
+{
+    return texture_2d_ms::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_2d_array_ms() const
+{
+    return texture_2d_array_ms::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_2d_array_ms() const
+{
+    return texture_2d_array_ms::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_cube_ms() const
+{
+    return texture_cube_ms::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_cube_ms() const
+{
+    return texture_cube_ms::try_from_raw(shared_from_this());
+}
+inline auto raw_texture::as_texture_cube_array_ms() const
+{
+    return texture_cube_array_ms::from_raw(shared_from_this());
+}
+inline auto raw_texture::try_as_texture_cube_array_ms() const
+{
+    return texture_cube_array_ms::try_from_raw(shared_from_this());
+}
 } // namespace sg

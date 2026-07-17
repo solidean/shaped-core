@@ -102,7 +102,7 @@ TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target")
     td.usage = sg::texture_usage::render_target | sg::texture_usage::copy_src;
     auto tex = ctx.persistent.create_raw_texture(td);
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     vertex const verts[3] = {
         {{0.0f, 0.8f, 0.0f}, {1, 0, 0, 1}},

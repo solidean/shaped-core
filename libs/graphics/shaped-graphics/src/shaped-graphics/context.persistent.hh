@@ -81,7 +81,7 @@ public:
     template <class Desc>
     [[nodiscard]] typename Desc::texture_type create_texture(Desc const& desc, allocation_info const& alloc = {})
     {
-        return typename Desc::texture_type(create_raw_texture(desc.to_texture_description(), alloc));
+        return Desc::texture_type::from_raw(create_raw_texture(desc.to_texture_description(), alloc));
     }
 
     template <class Desc>
@@ -90,7 +90,7 @@ public:
     {
         auto r = try_create_raw_texture(desc.to_texture_description(), alloc);
         if (r.has_value())
-            return typename Desc::texture_type(cc::move(r).value());
+            return Desc::texture_type::from_raw(cc::move(r).value());
         return cc::error(cc::move(r).error());
     }
 

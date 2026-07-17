@@ -94,8 +94,12 @@ INVOCABLE_TEST("sg - typed create_buffer<T> (persistent)", (sg::context_handle c
     CHECK(raw_ro.stride_in_bytes == sg::isize(sizeof(particle)));
     CHECK(raw_ro.element_count == 1000);
 
-    auto rw = buf.as_readwrite_buffer({.offset = 100, .size = 50});
+    // A storage view's byte offset must be 256-byte aligned, so the element offset must be a multiple of
+    // 256 / sizeof(particle) = 8 (element 96 -> byte 3072).
+    auto rw = buf.as_readwrite_buffer({.offset = 96, .size = 50});
     CHECK(rw.element_count == 50);
+    CHECK(rw.offset_in_bytes == 96 * sg::isize(sizeof(particle)));
+    CHECK_ASSERTS(buf.as_readwrite_buffer({.offset = 100, .size = 50})); // byte 3200 — not 256-aligned
 }
 
 INVOCABLE_TEST("sg - typed create_buffer<T> (transient)", (sg::context_handle const& ctx))

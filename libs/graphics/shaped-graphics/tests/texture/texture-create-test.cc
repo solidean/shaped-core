@@ -30,7 +30,7 @@ INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle ctx
     CHECK(!tex->is_multisampled());
 
     // The typed wrapper accepts the matching raw handle.
-    sg::texture_2d typed(tex);
+    auto typed = sg::texture_2d::from_raw(tex);
     CHECK(typed.width() == 256);
     CHECK(typed.height() == 128);
 }
@@ -52,7 +52,7 @@ INVOCABLE_TEST("sg - a single-slice 2D array is distinct from a 2D texture", (sg
     CHECK(tex->is_array());
     CHECK(tex->array_layers() == 1);
 
-    sg::texture_2d_array typed(tex);
+    auto typed = sg::texture_2d_array::from_raw(tex);
     CHECK(typed.array_layers() == 1);
 }
 
@@ -73,7 +73,7 @@ INVOCABLE_TEST("sg - allocates a persistent 3D texture", (sg::context_handle ctx
     CHECK(tex->dimension() == sg::texture_dimension::d3);
     CHECK(tex->depth() == 16);
 
-    sg::texture_3d typed(tex);
+    auto typed = sg::texture_3d::from_raw(tex);
     CHECK(typed.depth() == 16);
 }
 

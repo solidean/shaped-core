@@ -127,12 +127,18 @@ public:
         return uniform_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .size_in_bytes = isize(sizeof(U))};
     }
 
+    // A storage view is a *subrange* of the buffer, so unlike buffer<T> itself it carries the portable
+    // binding rules: a 256-byte-aligned byte offset and a 4-byte-multiple byte size (see
+    // storage_buffer_offset_alignment). A whole-buffer view starts at 0, so only the ranged overloads can
+    // trip the offset rule — bind the whole buffer and index in the shader if you hit it.
+
     /// A read-only storage view of the whole buffer as an array of `T` (SRV). Requires readonly_buffer usage.
     template <class U = T>
     [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        _assert_storage_placement(0, element_count() * isize(sizeof(T)));
         return readonly_buffer_view<U>{.buffer = _raw, .offset_in_bytes = 0, .element_count = element_count()};
     }
 
@@ -142,9 +148,9 @@ public:
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
-        return readonly_buffer_view<U>{.buffer = _raw,
-                                       .offset_in_bytes = _element_offset(range),
-                                       .element_count = range.size};
+        auto const offset = _element_offset(range);
+        _assert_storage_placement(offset, range.size * isize(sizeof(T)));
+        return readonly_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
     }
 
     /// A read-write storage view of the whole buffer as an array of `T` (UAV). Requires readwrite_buffer usage.
@@ -153,6 +159,7 @@ public:
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        _assert_storage_placement(0, element_count() * isize(sizeof(T)));
         return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = 0, .element_count = element_count()};
     }
 
@@ -162,9 +169,73 @@ public:
         requires(std::is_same_v<U, T> && view_element<U>)
     {
         CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
-        return readwrite_buffer_view<U>{.buffer = _raw,
-                                        .offset_in_bytes = _element_offset(range),
-                                        .element_count = range.size};
+        auto const offset = _element_offset(range);
+        _assert_storage_placement(offset, range.size * isize(sizeof(T)));
+        return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
+    }
+
+    // Checked twins of the storage / uniform view factories: nullopt when the range breaks the placement rules
+    // (bounds, 256-byte offset, 4-byte size, uniform block rules) — the conditions a caller computing an offset
+    // at runtime can genuinely hit. A missing buffer_usage flag still asserts: you chose the usage at creation.
+
+    /// Checked as_readonly_buffer (whole buffer) — nullopt when the size breaks the storage rules.
+    template <class U = T>
+    [[nodiscard]] cc::optional<readonly_buffer_view<U>> try_as_readonly_buffer() const
+        requires(std::is_same_v<U, T> && view_element<U>)
+    {
+        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        if (!_is_valid_storage_placement(0, element_count() * isize(sizeof(T))))
+            return {};
+        return as_readonly_buffer();
+    }
+
+    /// Checked as_readonly_buffer — nullopt when `range` breaks the bounds / storage rules.
+    template <class U = T>
+    [[nodiscard]] cc::optional<readonly_buffer_view<U>> try_as_readonly_buffer(cc::offset_size range) const
+        requires(std::is_same_v<U, T> && view_element<U>)
+    {
+        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
+        if (!_is_valid_element_range(range)
+            || !_is_valid_storage_placement(range.offset * isize(sizeof(T)), range.size * isize(sizeof(T))))
+            return {};
+        return as_readonly_buffer(range);
+    }
+
+    /// Checked as_readwrite_buffer (whole buffer) — nullopt when the size breaks the storage rules.
+    template <class U = T>
+    [[nodiscard]] cc::optional<readwrite_buffer_view<U>> try_as_readwrite_buffer() const
+        requires(std::is_same_v<U, T> && view_element<U>)
+    {
+        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        if (!_is_valid_storage_placement(0, element_count() * isize(sizeof(T))))
+            return {};
+        return as_readwrite_buffer();
+    }
+
+    /// Checked as_readwrite_buffer — nullopt when `range` breaks the bounds / storage rules.
+    template <class U = T>
+    [[nodiscard]] cc::optional<readwrite_buffer_view<U>> try_as_readwrite_buffer(cc::offset_size range) const
+        requires(std::is_same_v<U, T> && view_element<U>)
+    {
+        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
+        if (!_is_valid_element_range(range)
+            || !_is_valid_storage_placement(range.offset * isize(sizeof(T)), range.size * isize(sizeof(T))))
+            return {};
+        return as_readwrite_buffer(range);
+    }
+
+    /// Checked as_uniform_buffer — nullopt when the block's byte offset is not 256-byte aligned or does not fit.
+    template <class U = T>
+    [[nodiscard]] cc::optional<uniform_buffer_view<U>> try_as_uniform_buffer(isize element_index = 0) const
+        requires(std::is_same_v<U, T> && uniform_element<U>)
+    {
+        CC_ASSERT(has_flag(_raw->usage(), buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        auto const offset = element_index * isize(sizeof(U));
+        if (offset % uniform_buffer_offset_alignment != 0)
+            return {};
+        if (offset < 0 || offset + isize(sizeof(U)) > _raw->size_in_bytes())
+            return {};
+        return as_uniform_buffer(element_index);
     }
 
     // Draw-input views (bound at draw time, not shader-visible). Ranges are in elements of `T`.
@@ -224,6 +295,33 @@ private:
     // Non-null / fit are checked by the `from_raw` / `from_raw_clamped` factories before this runs.
     explicit buffer(raw_buffer_handle raw) : _raw(cc::move(raw)) {}
 
+    // Whether an element range fits the buffer. Non-asserting twin of the bounds check in _element_offset.
+    [[nodiscard]] bool _is_valid_element_range(cc::offset_size range) const
+    {
+        return range.offset >= 0 && range.size >= 0
+            && (range.offset + range.size) * isize(sizeof(T)) <= _raw->size_in_bytes();
+    }
+
+    // Whether a byte range obeys the storage placement rules. Non-asserting twin of _assert_storage_placement.
+    [[nodiscard]] static bool _is_valid_storage_placement(isize offset_in_bytes, isize size_in_bytes)
+    {
+        return offset_in_bytes % storage_buffer_offset_alignment == 0
+            && size_in_bytes % storage_buffer_size_alignment == 0;
+    }
+
+    // The portable placement rules for a shader-facing storage view's byte range (see
+    // storage_buffer_offset_alignment). Only the views carry these — buffer<T> itself is a whole buffer and
+    // recasts like a span, so from_raw / reinterpret_as / the draw-input (vertex, index) views are exempt;
+    // that keeps e.g. a buffer<u16> index buffer perfectly legal.
+    void _assert_storage_placement(isize offset_in_bytes, isize size_in_bytes) const
+    {
+        CC_ASSERT(offset_in_bytes % storage_buffer_offset_alignment == 0, "storage view offset must be 256-byte "
+                                                                          "aligned (WebGPU; some Vulkan hardware) — "
+                                                                          "bind the whole buffer and index in-shader");
+        CC_ASSERT(size_in_bytes % storage_buffer_size_alignment == 0, "storage view size must be a multiple of 4 bytes "
+                                                                      "(WebGPU)");
+    }
+
     // The byte offset of element-range `range` (in elements of T), bounds-checked against the buffer size.
     [[nodiscard]] isize _element_offset(cc::offset_size range) const
     {
@@ -241,4 +339,17 @@ private:
 
     raw_buffer_handle _raw = nullptr;
 };
+
+// raw_buffer -> buffer<T> (declared on raw_buffer, defined here where buffer<T> is complete). Thin wrappers
+// over from_raw / try_from_raw, so a handle re-types with `raw->as_buffer<T>()` instead of naming buffer<T>.
+template <class T>
+auto raw_buffer::as_buffer() const
+{
+    return buffer<T>::from_raw(shared_from_this());
+}
+template <class T>
+auto raw_buffer::try_as_buffer() const
+{
+    return buffer<T>::try_from_raw(shared_from_this());
+}
 } // namespace sg

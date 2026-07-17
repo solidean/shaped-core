@@ -429,7 +429,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
             rt_image = ctx.persistent.create_raw_texture(id);
             image_size = size;
         }
-        sg::texture_2d const image(rt_image);
+        auto const image = sg::texture_2d::from_raw(rt_image);
 
         // Fixed camera looking at the origin; only the cube spins (via the TLAS instance transform).
         camera_data const cam = make_camera(tg::vec3f(2.2f, 1.8f, -3.2f), float(size[0]) / float(size[1]),

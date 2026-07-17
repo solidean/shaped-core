@@ -89,6 +89,82 @@ Between the fully-typed leaves and the erased `raw_view` sits an optional **acce
 the access class as a runtime field. Each leaf converts to it implicitly, and it erases on to `raw_view` —
 useful for code that takes "any access" of a given buffer / texture view.
 
+### Recovering a typed view from the erased form
+
+Erasure is not one-way: each layer offers `as_<access>()` / `try_as_<access>()` back up toward the leaves.
+`as_*` asserts, `try_*` returns a `cc::optional` (nullopt on mismatch) — the checked twin for genuinely
+runtime input.
+
+- **Access-erased middle → leaf.** `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and
+  `texture_view<Traits>::as_readonly()` / `as_readwrite()` pin the runtime access class to the matching
+  compile-time leaf. The resource typing is already fixed, so only the access is being committed.
+- **Erased arm → leaf.** `raw_buffer_view::as_readonly<T>()` (you supply the element `T`) and
+  `raw_texture_view::as_readonly<Traits>()` (you supply `Traits`; it also checks the runtime `view_dimension`
+  matches `Traits::dimension`). These delegate to the middle for the access check and field mapping.
+- **`raw_view` → leaf in one call.** The free functions `as_readonly_buffer<T>(rv)` /
+  `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_readonly_texture<Traits>` /
+  `as_readwrite_texture<Traits>` (each with a `try_` twin) `get_if` the matching arm, then re-type it. The
+  `try_` twin fails (nullopt) both when the variant holds a *different* resource arm and when the access
+  class does not match — the two ways a genuinely-erased binding can be the wrong thing.
+
+The re-type is a reinterpret: `T` / `Traits` are caller-asserted (there is no element/dimension tag stored to
+cross-check against), so this is the deliberate, checked counterpart of the free erasure the other direction.
+The one thing it *can* cross-check is the byte layout: a buffer recovery asserts `T` matches the view's shape —
+`byte` ⇔ a raw (byte-addressed) view, any other `T` ⇔ a structured view whose stride is exactly `sizeof(T)` —
+so picking the wrong element size is a loud error, not a silently wrong element count.
+
+For the raw *resource* (not a view), the same inverse exists at the wrapper level: `raw_buffer::as_buffer<T>()`
+and `raw_texture::as_texture_2d()` (one per shape typedef), each with a `try_` twin.
+
+### Placement rules: a view is a subrange, so it carries the binding rules
+
+`buffer<T>` is a *whole buffer* recast like a `span` — it has essentially no placement constraints (which is
+why a `buffer<u16>` index buffer is perfectly legal). A **view**, by contrast, is a *subrange*, so it inherits
+the portable binding rules. Every shader-facing storage view (readonly / readwrite, raw or structured) asserts:
+
+- **`offset % 256 == 0`** — WebGPU's `minStorageBufferOffsetAlignment` is 256, and Vulkan permits an
+  implementation to require up to 256 (its required-limit *maximum*, so real hardware does), making 256 the
+  only portable start. See `storage_buffer_offset_alignment`.
+- **`size % 4 == 0`** — a WebGPU storage binding's size must be a multiple of 4.
+
+A **structured** view (any non-`byte` element type) adds a second, orthogonal rule: it addresses by *element
+index*, not byte offset — D3D12 literally computes `FirstElement = offset / stride`. So its offset must **also**
+be a multiple of the stride, and its size a whole number of elements. A structured view therefore cannot start
+partway into an element. (The two rules together mean `offset % lcm(256, stride) == 0`.)
+
+The 256 rule is deliberately the *portable floor*, hardcoded rather than queried per device — the same approach
+as `uniform_buffer_offset_alignment`. It fails loudly on your dx12 dev box rather than surfacing later on
+WebGPU. Exempt: `buffer<T>` itself, and the draw-input views (`as_vertex_buffer` / `as_index_buffer`), which are
+not storage bindings and have their own rules. **Escape hatch:** build the erased `raw_buffer_view` aggregate
+yourself if you knowingly target only backends with looser rules.
+
+Because a subrange can legitimately fail these rules on an offset a caller computed at runtime (a suballocator,
+say), every storage / uniform factory has a **`try_` twin** returning `cc::optional`: `try_as_raw_readonly`,
+`try_as_raw_readwrite`, `try_as_raw_uniform_buffer` (each overload, including the whole-buffer form) and
+`buffer<T>::try_as_readonly_buffer` / `try_as_readwrite_buffer` / `try_as_uniform_buffer`. The split follows the
+rest of the API (`try_from_raw`, `try_as_readonly`): a bad **range** — bounds, alignment, size, stride — is a
+runtime condition and yields nullopt, while a missing `buffer_usage` flag stays a hard assert, since the usage
+was chosen at creation and getting it wrong is a contract bug. Note even the whole-buffer overloads can fail:
+`as_raw_readonly()` on a 70-byte buffer trips `size % 4`. Draw-input views have no twin — they can only fail
+bounds.
+
+### Use raw + in-shader `Load<T>` for heterogeneous buffers
+
+Because a structured view can't start partway into an element, it's the wrong tool for a **heterogeneous
+buffer** — one packing different objects at hand-chosen byte offsets (a header, then an array, then something
+else). For that, use a **raw** (byte-addressed) view: `as_raw_readonly({.offset, .size})` with no stride yields
+a `readonly_buffer_view<byte>` — a `ByteAddressBuffer` — which you type per access in the shader with
+`buf.Load<T>(byteOffset)`. The per-access `Load` offset only needs 4-byte alignment, so each object sits at its
+own byte offset with no `sizeof(T)` constraint: `byte` at the view, `T` at the load.
+
+Since the *view's* start still obeys the 256-byte rule, the usual shape is **one raw view over the whole
+buffer** (start 0, trivially aligned) with *all* per-object addressing done by `Load` — the view-start
+alignment then never bites. Offsetting the raw view itself is only for coarse 256-aligned sub-regions.
+
+Portability note: `ByteAddressBuffer.Load<T>` is a first-class HLSL feature (and Vulkan/Metal have equivalents
+— `buffer_reference`, pointer casts), but **WGSL has no byte-address buffer and no templated load**. On WebGPU
+you must fall back to a typed storage buffer (i.e. the stride-aligned structured layout) and unpack by hand.
+
 ## Texture views
 
 Textures have views too, but instead of an element type `T` they are typed by `Traits` — a

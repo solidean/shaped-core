@@ -28,8 +28,9 @@ The resource splits in two:
 
 Why both: the raw type keeps the backend interface and the create path monomorphic (one virtual, one
 resource class), while the wrapper gives call sites type safety without the backend ever knowing about
-`Traits`. Wrapping asserts the raw shape matches; `raw()` hands back the `raw_texture_handle` for the
-general API (there is no implicit conversion).
+`Traits`. Wrap with `texture<Traits>::from_raw(handle)` (asserts the raw shape matches) or its checked
+twin `try_from_raw` (nullopt on mismatch); `raw()` hands back the `raw_texture_handle` for the general
+API (there is no implicit conversion).
 
 ### Shape is derived, not flagged
 

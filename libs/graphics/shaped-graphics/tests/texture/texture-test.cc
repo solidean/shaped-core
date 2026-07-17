@@ -139,7 +139,7 @@ TEST("sg - texture<Traits> wraps a matching raw_texture")
     desc.mip_levels = 4;
 
     sg::raw_texture_handle raw = std::make_shared<test_texture>(desc);
-    sg::texture_2d tex(raw);
+    auto tex = sg::texture_2d::from_raw(raw);
 
     CHECK(tex.raw() == raw); // reach the raw handle for the general API
     CHECK(tex.width() == 128);

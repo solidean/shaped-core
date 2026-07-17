@@ -232,10 +232,23 @@ b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed
 b.as_raw_readonly({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED SRV; explicit byte stride; element_count = size/stride)
 b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=raw)
 b.as_raw_readwrite({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED UAV; explicit byte stride)
+// EVERY storage view (raw or structured) is a SUBRANGE, so: offset % 256 == 0 (WebGPU minStorageBufferOffset-
+//   Alignment; some Vulkan hw) and size % 4 == 0 (WebGPU). Structured ALSO needs offset % stride == 0 and
+//   size % stride == 0 (D3D12 addresses by element index: FirstElement = offset/stride).
+// buffer<T> itself is exempt — it's a whole buffer recast like a span (so buffer<u16> index buffers are fine),
+//   as are the draw-input views (as_vertex_buffer / as_index_buffer).
+// Bypass: build the raw_buffer_view aggregate yourself. For a heterogeneous buffer: one WHOLE-buffer raw view
+//   + in-shader Load<T>(byteOffset) does per-object addressing — see docs/concepts/views.md.
+// try_ TWINS: every storage/uniform factory above has one (try_as_raw_readonly/readwrite/uniform_buffer, both
+//   overloads + whole-buffer) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
+//   A missing buffer_usage flag still ASSERTS (you chose usage at creation). Draw-input views have no twin.
 b.as_raw_uniform_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (uniform_block; offset 256-aligned; size <= 64 KiB)
 b.as_raw_vertex_buffer({.offset=,.size=}, stride_in_bytes)  // -> vertex_buffer_view (explicit stride)
 b.as_index_buffer(format)                  // -> index_buffer_view (whole buffer)
 b.as_raw_index_buffer(format, {.offset=,.size=})            // -> index_buffer_view (byte range; width from format)
+// re-type up to the typed wrapper (inverse of buffer<T>::raw()); same shape check as buffer<T>::from_raw:
+b.as_buffer<T>()                           // -> buffer<T>              (asserts byte size is a whole number of T)
+b.try_as_buffer<T>()                       // -> cc::optional<buffer<T>> (nullopt on a trailing partial element)
 ```
 
 ## buffer<T> — typed buffer wrapper  (element type fixed at compile time)
@@ -256,6 +269,9 @@ buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usage
 buf.as_uniform_buffer(element_index=0)     // -> uniform_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
 buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_buffer_view<T>   (only where T is a view_element; range in elements of T)
 buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_buffer_view<T>  (only where T is a view_element)
+//   these are SUBRANGES: byte offset (= range.offset * sizeof(T)) must be 256-aligned, byte size a multiple of 4
+buf.try_as_readonly_buffer(...) / try_as_readwrite_buffer(...) / try_as_uniform_buffer(idx)  // -> cc::optional<view>
+//   nullopt on a bad range (bounds / 256 / %4); missing usage still asserts. Whole-buffer overloads have twins too.
 buf.as_vertex_buffer() / (range)           // -> vertex_buffer_view (stride = sizeof(T); range in vertices of T)
                                            //   stride only for now — not yet tied to the pipeline's vertex_input_layout
 buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer<u16>/buffer<u32>; width follows T; range in indices)
@@ -300,7 +316,8 @@ ctx.transient.create_texture_2d({...})         // -> sg::texture_2d  (transient;
 //   cubes take .size (edge length; width==height); cube arrays take .cube_count; MS take .sample_count (no .mip_levels)
 //   generic core: create_texture(desc) / try_create_texture(desc) deduce the shape from the description type
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
-sg::texture_2d tex(raw_handle);                // wrap a raw handle directly; asserts the raw shape matches; tex.raw() -> raw_texture_handle
+sg::texture_2d::from_raw(raw_handle)           // wrap a raw handle; asserts the raw shape matches (try_from_raw -> optional); .raw() -> raw_texture_handle
+raw->as_texture_2d() / raw->try_as_texture_2d()// same, straight off the handle (one accessor per typedef: as_texture_1d/2d/3d/cube/…/cube_array_ms; try_ -> optional)
 // Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count<0=all}.
 // sampled (SRV) — needs readonly_texture usage. Natural dimension:
 tex.as_readonly_view({.mips={.start=1}})       // -> readonly_texture_view<VT>  (VT deduced; whole; params name only this shape's axes)
@@ -346,6 +363,13 @@ sg::raw_view                 // = std::variant<raw_buffer_view, raw_texture_view
 v.to_raw()  /  (implicit)    // -> raw_view; sg::access_of(rv) / sg::shape_of(rv) read the active arm's access/shape
 // backends std::visit / get_if the arm (raw_buffer_view | raw_texture_view | raw_tlas_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
+// INVERSE (erased -> typed leaf): as_* asserts (access, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
+mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
+mid.as_readonly() / as_readwrite()                  // texture_view<VT> middle -> the leaf (as_readwrite: storage VT only)
+arm.as_readonly<T>() / as_readwrite<T>() / as_uniform<T>()   // raw_buffer_view arm -> leaf (you supply T)
+arm.as_readonly<VT>() / as_readwrite<VT>()                   // raw_texture_view arm -> leaf (you supply VT; checks view dimension)
+sg::as_readonly_buffer<T>(rv) / as_readwrite_buffer<T> / as_uniform_buffer<T>    // raw_view -> buffer leaf in one call (+ try_ twins)
+sg::as_readonly_texture<VT>(rv) / as_readwrite_texture<VT>                       // raw_view -> texture leaf in one call (+ try_ twins)
 // deferred: texel buffers (typed linear buffers). samplers: see sampler.hh
 ```
 

@@ -37,7 +37,7 @@ TEST("sg dx12 - render-target views create valid RTV descriptors")
         auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::render_target, sg::pixel_format::rgba8_unorm),
                                          sg::allocation_info{});
         REQUIRE(tex.has_value());
-        sg::texture_2d const typed(tex.value());
+        auto const typed = sg::texture_2d::from_raw(tex.value());
         auto rtv = c.create_dx12_render_target_view(typed.as_render_target_view());
         REQUIRE(rtv.has_value()); // CreateRenderTargetView succeeded + the debug layer accepted it
         CHECK(rtv.value().slot != dx12::cpu_descriptor_slot::invalid);
@@ -49,7 +49,7 @@ TEST("sg dx12 - render-target views create valid RTV descriptors")
         auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::render_target, sg::pixel_format::rgba8_unorm, 4),
                                          sg::allocation_info{});
         REQUIRE(tex.has_value());
-        sg::texture_2d_array const typed(tex.value());
+        auto const typed = sg::texture_2d_array::from_raw(tex.value());
         auto rtv = c.create_dx12_render_target_view(typed.as_render_target_2d_view({.slice = 2}));
         REQUIRE(rtv.has_value());
         c.free_dx12_render_target_view(rtv.value().slot);
@@ -67,7 +67,7 @@ TEST("sg dx12 - depth-stencil views create valid DSV descriptors")
         auto tex = c.create_dx12_texture(tex_desc(sg::texture_usage::depth_stencil, sg::pixel_format::depth32_float),
                                          sg::allocation_info{});
         REQUIRE(tex.has_value());
-        sg::texture_2d const typed(tex.value());
+        auto const typed = sg::texture_2d::from_raw(tex.value());
         auto dsv = c.create_dx12_depth_stencil_view(typed.as_depth_stencil_view());
         REQUIRE(dsv.has_value()); // CreateDepthStencilView succeeded + the debug layer accepted it
         c.free_dx12_depth_stencil_view(dsv.value().slot);
@@ -78,7 +78,7 @@ TEST("sg dx12 - depth-stencil views create valid DSV descriptors")
         auto tex = c.create_dx12_texture(
             tex_desc(sg::texture_usage::depth_stencil, sg::pixel_format::depth32_float_stencil8), sg::allocation_info{});
         REQUIRE(tex.has_value());
-        sg::texture_2d const typed(tex.value());
+        auto const typed = sg::texture_2d::from_raw(tex.value());
         auto dsv = c.create_dx12_depth_stencil_view(typed.as_depth_stencil_view());
         REQUIRE(dsv.has_value());
         c.free_dx12_depth_stencil_view(dsv.value().slot);

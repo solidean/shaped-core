@@ -176,7 +176,7 @@ TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle")
     td.usage = sg::texture_usage::render_target | sg::texture_usage::copy_src;
     auto tex = ctx.persistent.create_raw_texture(td);
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     // A single point at the target center — the geometry shader expands it into the triangle.
     pos_vertex const verts[1] = {{{0.0f, 0.0f, 0.0f}}};
@@ -270,7 +270,7 @@ TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle")
     td.usage = sg::texture_usage::render_target | sg::texture_usage::copy_src;
     auto tex = ctx.persistent.create_raw_texture(td);
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     // Three control points of one triangular patch; tess factors of 1 pass them straight through.
     pos_vertex const verts[3] = {

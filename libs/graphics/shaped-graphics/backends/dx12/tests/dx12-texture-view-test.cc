@@ -46,7 +46,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
             = c.create_dx12_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
         REQUIRE(layout.has_value());
 
-        sg::texture_2d const typed(tex.value());
+        auto const typed = sg::texture_2d::from_raw(tex.value());
         sg::named_view const nv{.name = "Tex", .view = typed.as_readwrite_view()};
         auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -62,7 +62,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
             = c.create_dx12_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
         REQUIRE(layout.has_value());
 
-        sg::texture_2d const typed(tex.value());
+        auto const typed = sg::texture_2d::from_raw(tex.value());
         sg::named_view const nv{.name = "Tex", .view = typed.as_readonly_view()};
         auto group = c.create_dx12_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -110,7 +110,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
     auto pipeline = c.create_dx12_compute_pipeline(shader, pipeline_layout.value(), {}, sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value());
 
-    sg::texture_2d const typed(tex.value());
+    auto const typed = sg::texture_2d::from_raw(tex.value());
     sg::named_view const views[] = {
         {.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf.value()).as_readwrite_buffer()},
         {.name = "Tex", .view = typed.as_readwrite_view()},

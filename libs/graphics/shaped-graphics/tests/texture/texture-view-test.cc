@@ -150,7 +150,7 @@ TEST("sg - texture as_readonly_view builds a sampled (SRV) view over the whole t
 {
     auto const d = desc_2d(sg::texture_usage::readonly_texture, /*mips*/ 2);
     sg::raw_texture_handle raw = std::make_shared<test_texture>(d);
-    sg::texture_2d tex(raw);
+    auto tex = sg::texture_2d::from_raw(raw);
 
     sg::raw_view const rv = tex.as_readonly_view().to_raw();
     CHECK(sg::access_of(rv) == sg::view_class::readonly);
@@ -165,7 +165,8 @@ TEST("sg - texture as_readonly_view builds a sampled (SRV) view over the whole t
 
 TEST("sg - sampled view mip-range selection")
 {
-    sg::texture_2d tex(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture, /*mips*/ 4)));
+    auto tex = sg::texture_2d::from_raw(
+        std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture, /*mips*/ 4)));
 
     auto const from_start = rtv(tex.as_readonly_view({.mips = {.start = 1}}).to_raw()); // count<0 -> to the end
     CHECK(from_start.range.mip_range.start == 1);
@@ -178,7 +179,8 @@ TEST("sg - sampled view mip-range selection")
 
 TEST("sg - sampled array views: whole / sub-range / single slice")
 {
-    sg::texture_2d_array tex(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 6)));
+    auto tex = sg::texture_2d_array::from_raw(
+        std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 6)));
 
     auto const whole = rtv(tex.as_readonly_view().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::tex_2d_array);
@@ -198,7 +200,7 @@ TEST("sg - sampled array views: whole / sub-range / single slice")
 
 TEST("sg - sampled cube views: whole cube and single face")
 {
-    sg::texture_cube tex(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
+    auto tex = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
 
     auto const whole = rtv(tex.as_readonly_view().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::cube);
@@ -213,7 +215,8 @@ TEST("sg - sampled cube views: whole cube and single face")
 
 TEST("sg - a cube's faces can be sampled as a plain 2D array")
 {
-    sg::texture_cube cube(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
+    auto cube
+        = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
 
     auto const whole = rtv(cube.as_readonly_2d_array_view().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::tex_2d_array); // not TextureCube
@@ -225,7 +228,8 @@ TEST("sg - a cube's faces can be sampled as a plain 2D array")
     CHECK(range.range.array_range.end == 5);
 
     // A cube array's 6*N faces likewise reinterpret as one flat 2D array.
-    sg::texture_cube_array arr(std::make_shared<test_texture>(desc_cube_array(sg::texture_usage::readonly_texture, 3)));
+    auto arr = sg::texture_cube_array::from_raw(
+        std::make_shared<test_texture>(desc_cube_array(sg::texture_usage::readonly_texture, 3)));
     auto const arr_whole = rtv(arr.as_readonly_2d_array_view().to_raw());
     CHECK(arr_whole.view_dimension == sg::texture_view_dimension::tex_2d_array);
     CHECK(arr_whole.range.array_range.end == 18); // 3 cubes * 6 faces
@@ -233,7 +237,8 @@ TEST("sg - a cube's faces can be sampled as a plain 2D array")
 
 TEST("sg - sampled cube-array views: whole / cube-range / single cube / single face")
 {
-    sg::texture_cube_array tex(std::make_shared<test_texture>(desc_cube_array(sg::texture_usage::readonly_texture, 3)));
+    auto tex = sg::texture_cube_array::from_raw(
+        std::make_shared<test_texture>(desc_cube_array(sg::texture_usage::readonly_texture, 3)));
 
     auto const whole = rtv(tex.as_readonly_view().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::cube_array);
@@ -258,7 +263,7 @@ TEST("sg - sampled cube-array views: whole / cube-range / single cube / single f
 TEST("sg - as_readwrite_view builds a storage (UAV) view of one mip")
 {
     auto const d = desc_2d(sg::texture_usage::readwrite_texture, /*mips*/ 3);
-    sg::texture_2d tex(std::make_shared<test_texture>(d));
+    auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(d));
 
     sg::raw_view const rv = tex.as_readwrite_view({.mip = 1}).to_raw();
     CHECK(sg::access_of(rv) == sg::view_class::readwrite);
@@ -271,7 +276,8 @@ TEST("sg - as_readwrite_view builds a storage (UAV) view of one mip")
 
 TEST("sg - storage cube view is a 2D array; single face / slice drop to 2D")
 {
-    sg::texture_cube cube(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readwrite_texture)));
+    auto cube
+        = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readwrite_texture)));
     auto const whole = rtv(cube.as_readwrite_view().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::tex_2d_array); // no cube UAV
     CHECK(whole.range.array_range.end == 6);
@@ -280,7 +286,8 @@ TEST("sg - storage cube view is a 2D array; single face / slice drop to 2D")
     CHECK(face.view_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(face.range.array_range.start == 2);
 
-    sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readwrite_texture, 4)));
+    auto arr = sg::texture_2d_array::from_raw(
+        std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readwrite_texture, 4)));
     auto const slice = rtv(arr.as_readwrite_2d_view({.slice = 3}).to_raw());
     CHECK(slice.view_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(slice.range.array_range.start == 3);
@@ -289,7 +296,8 @@ TEST("sg - storage cube view is a 2D array; single face / slice drop to 2D")
 
 TEST("sg - storage 3D view carries a depth-slice window")
 {
-    sg::texture_3d tex(std::make_shared<test_texture>(desc_3d(sg::texture_usage::readwrite_texture, /*depth*/ 8)));
+    auto tex = sg::texture_3d::from_raw(
+        std::make_shared<test_texture>(desc_3d(sg::texture_usage::readwrite_texture, /*depth*/ 8)));
 
     auto const whole = rtv(tex.as_readwrite_view().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::tex_3d);
@@ -304,28 +312,32 @@ TEST("sg - storage 3D view carries a depth-slice window")
 
 TEST("sg - texture views assert on missing usage")
 {
-    sg::texture_2d storage_only(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readwrite_texture)));
+    auto storage_only
+        = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readwrite_texture)));
     CHECK_ASSERTS(storage_only.as_readonly_view()); // lacks readonly_texture
 
-    sg::texture_2d sampled_only(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture)));
+    auto sampled_only
+        = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture)));
     CHECK_ASSERTS(sampled_only.as_readwrite_view()); // lacks readwrite_texture
 }
 
 TEST("sg - texture views assert on out-of-range selection")
 {
-    sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 4, 2)));
+    auto arr = sg::texture_2d_array::from_raw(
+        std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 4, 2)));
     CHECK_ASSERTS(arr.as_readonly_2d_view({.slice = 4}));                      // slice past the last
     CHECK_ASSERTS(arr.as_readonly_view({.slices = {.start = 0, .count = 5}})); // range past the last
     CHECK_ASSERTS(arr.as_readonly_view({.mips = {.start = 2}}));               // mip past the last
 
-    sg::texture_cube cube(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
+    auto cube
+        = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
     CHECK_ASSERTS(cube.as_readonly_2d_view({.face = 6})); // face index out of range
 }
 
 TEST("sg - texture binding types accept the matching texture view")
 {
     auto const d = desc_2d(sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture);
-    sg::texture_2d tex(std::make_shared<test_texture>(d));
+    auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(d));
 
     CHECK(sg::accepts(sg::binding_type::readonly_texture, tex.as_readonly_view().to_raw()));
     CHECK(sg::accepts(sg::binding_type::readwrite_texture, tex.as_readwrite_view().to_raw()));
@@ -335,17 +347,19 @@ TEST("sg - texture binding types accept the matching texture view")
 
 TEST("sg - typed texture views carry the view dimension at compile time")
 {
-    sg::texture_2d tex(std::make_shared<test_texture>(
+    auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(
         desc_2d(sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture)));
     static_assert(std::is_same_v<decltype(tex.as_readonly_view()), sg::readonly_texture_view<sg::tv_2d>>);
     static_assert(std::is_same_v<decltype(tex.as_readwrite_view()), sg::readwrite_texture_view<sg::tv_2d>>);
 
     // Reinterpreting factories retype to the reinterpreted dimension.
-    sg::texture_cube cube(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
+    auto cube
+        = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::readonly_texture)));
     static_assert(decltype(cube.as_readonly_view())::dimension == sg::texture_view_dimension::cube);
     static_assert(decltype(cube.as_readonly_2d_view({.face = 0}))::dimension == sg::texture_view_dimension::tex_2d);
 
-    sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 4)));
+    auto arr = sg::texture_2d_array::from_raw(
+        std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::readonly_texture, 4)));
     static_assert(decltype(arr.as_readonly_view())::dimension == sg::texture_view_dimension::tex_2d_array);
 
     CHECK(true); // the static_asserts are the test
@@ -353,7 +367,7 @@ TEST("sg - typed texture views carry the view dimension at compile time")
 
 TEST("sg - access-erased texture_view<Traits> middle")
 {
-    sg::texture_2d tex(std::make_shared<test_texture>(
+    auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(
         desc_2d(sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture)));
 
     // The typed leaves convert implicitly to the access-erased middle (dimension stays compile-time).
@@ -372,7 +386,8 @@ TEST("sg - access-erased texture_view<Traits> middle")
 
 TEST("sg - as_render_target_view builds a single-mip color render-target view; getters report size / format")
 {
-    sg::texture_2d tex(std::make_shared<test_texture>(desc_2d(sg::texture_usage::render_target, /*mips*/ 3)));
+    auto tex
+        = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::render_target, /*mips*/ 3)));
 
     auto const rtv = tex.as_render_target_view({.mip = 1});
     CHECK(rtv.dimension() == sg::texture_view_dimension::tex_2d);
@@ -386,7 +401,8 @@ TEST("sg - as_render_target_view builds a single-mip color render-target view; g
 
 TEST("sg - as_render_target_view over an array selects the whole slice range; a slice reinterprets as 2D")
 {
-    sg::texture_2d_array tex(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4)));
+    auto tex = sg::texture_2d_array::from_raw(
+        std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4)));
 
     auto const whole = tex.as_render_target_view();
     CHECK(whole.dimension() == sg::texture_view_dimension::tex_2d_array);
@@ -402,7 +418,7 @@ TEST("sg - as_render_target_view over an array selects the whole slice range; a 
 
 TEST("sg - a multisampled render target binds as Texture2DMS")
 {
-    sg::texture_2d_ms tex(
+    auto tex = sg::texture_2d_ms::from_raw(
         std::make_shared<test_texture>(desc_2d(sg::texture_usage::render_target, /*mips*/ 1, /*samples*/ 4)));
 
     auto const rtv = tex.as_render_target_view();
@@ -412,7 +428,7 @@ TEST("sg - a multisampled render target binds as Texture2DMS")
 
 TEST("sg - as_depth_stencil_view requires a depth format and covers its aspects")
 {
-    sg::texture_2d tex(
+    auto tex = sg::texture_2d::from_raw(
         std::make_shared<test_texture>(desc_2d_fmt(sg::texture_usage::depth_stencil, sg::pixel_format::depth32_float)));
 
     auto const dsv = tex.as_depth_stencil_view();
@@ -422,17 +438,17 @@ TEST("sg - as_depth_stencil_view requires a depth format and covers its aspects"
     CHECK(dsv.range().aspect_range.end == 1); // depth-only: one aspect plane
 
     // A combined depth+stencil format exposes two aspect planes.
-    sg::texture_2d ds(std::make_shared<test_texture>(
+    auto ds = sg::texture_2d::from_raw(std::make_shared<test_texture>(
         desc_2d_fmt(sg::texture_usage::depth_stencil, sg::pixel_format::depth32_float_stencil8)));
     CHECK(ds.as_depth_stencil_view().range().aspect_range.end == 2);
 }
 
 TEST("sg - render-target / depth-stencil views assert on missing usage")
 {
-    sg::texture_2d no_rt(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture)));
+    auto no_rt = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture)));
     CHECK_ASSERTS(no_rt.as_render_target_view()); // lacks render_target usage
 
-    sg::texture_2d no_ds(std::make_shared<test_texture>(
+    auto no_ds = sg::texture_2d::from_raw(std::make_shared<test_texture>(
         desc_2d_fmt(sg::texture_usage::readonly_texture, sg::pixel_format::depth32_float)));
     CHECK_ASSERTS(no_ds.as_depth_stencil_view()); // lacks depth_stencil usage
 }
@@ -440,19 +456,70 @@ TEST("sg - render-target / depth-stencil views assert on missing usage")
 TEST("sg - render-target / depth-stencil views assert on an incompatible format")
 {
     // A render target must be a renderable color format, not a depth format.
-    sg::texture_2d rt_depth(
+    auto rt_depth = sg::texture_2d::from_raw(
         std::make_shared<test_texture>(desc_2d_fmt(sg::texture_usage::render_target, sg::pixel_format::depth32_float)));
     CHECK_ASSERTS(rt_depth.as_render_target_view());
 
     // A depth-stencil target must be a depth format, not a color format.
-    sg::texture_2d ds_color(std::make_shared<test_texture>(desc_2d(sg::texture_usage::depth_stencil)));
+    auto ds_color = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::depth_stencil)));
     CHECK_ASSERTS(ds_color.as_depth_stencil_view());
 }
 
 TEST("sg - render-target / depth-stencil views assert on out-of-range selection")
 {
-    sg::texture_2d_array arr(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4, 2)));
+    auto arr = sg::texture_2d_array::from_raw(
+        std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::render_target, 4, 2)));
     CHECK_ASSERTS(arr.as_render_target_2d_view({.slice = 4}));                      // slice past the last
     CHECK_ASSERTS(arr.as_render_target_view({.slices = {.start = 0, .count = 5}})); // range past the last
     CHECK_ASSERTS(arr.as_render_target_view({.mip = 2}));                           // mip past the last
+}
+
+TEST("sg - raw_texture -> texture<Traits> wrappers (as_texture_* / try_as_texture_*)")
+{
+    sg::raw_texture_handle const raw = std::make_shared<test_texture>(desc_2d(sg::texture_usage::readonly_texture));
+    CHECK(raw->as_texture_2d().width() == 64);
+    CHECK(raw->try_as_texture_2d().has_value());
+
+    // Shape mismatch: a plain 2D texture is not a 2D array / cube / 3D.
+    CHECK(!raw->try_as_texture_2d_array().has_value());
+    CHECK(!raw->try_as_texture_cube().has_value());
+    CHECK_ASSERTS(raw->as_texture_3d()); // as_ asserts on the wrong shape
+
+    // A cube array handle recovers as its exact shape only.
+    sg::raw_texture_handle const cube
+        = std::make_shared<test_texture>(desc_cube_array(sg::texture_usage::readonly_texture, 3));
+    CHECK(cube->try_as_texture_cube_array().has_value());
+    CHECK(!cube->try_as_texture_2d().has_value());
+}
+
+TEST("sg - texture_view<Traits> middle + arm + raw_view -> typed leaf")
+{
+    auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(
+        desc_2d(sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture)));
+    sg::raw_view const rv = tex.as_readonly_view().to_raw();
+
+    // Access-erased middle -> leaf, keyed by access.
+    sg::texture_view<sg::tv_2d> const mid = tex.as_readonly_view();
+    CHECK(mid.as_readonly().range.mip_range.end == 1);
+    CHECK(mid.try_as_readonly().has_value());
+    CHECK(!mid.try_as_readwrite().has_value()); // access is readonly
+    CHECK_ASSERTS(mid.as_readwrite());
+
+    // Erased arm -> leaf (you supply Traits); both view dimension and access are checked.
+    auto const arm = rtv(rv);
+    CHECK(arm.as_readonly<sg::tv_2d>().format == sg::pixel_format::rgba8_unorm);
+    CHECK(arm.try_as_readonly<sg::tv_2d>().has_value());
+    CHECK(!arm.try_as_readonly<sg::tv_2d_array>().has_value()); // wrong view dimension
+    CHECK(!arm.try_as_readwrite<sg::tv_2d>().has_value());      // wrong access
+    CHECK_ASSERTS(arm.as_readonly<sg::tv_2d_array>());          // dimension mismatch asserts
+
+    // raw_view -> leaf in one call.
+    CHECK(sg::as_readonly_texture<sg::tv_2d>(rv).format == sg::pixel_format::rgba8_unorm);
+    CHECK(sg::try_as_readonly_texture<sg::tv_2d>(rv).has_value());
+    CHECK(!sg::try_as_readwrite_texture<sg::tv_2d>(rv).has_value()); // wrong access
+
+    // A storage (UAV) view round-trips through the readwrite recovery.
+    auto const uav = tex.as_readwrite_view().to_raw();
+    CHECK(sg::as_readwrite_texture<sg::tv_2d>(uav).range.mip_range.end == 1);
+    CHECK(!sg::try_as_readonly_texture<sg::tv_2d>(uav).has_value()); // wrong access
 }

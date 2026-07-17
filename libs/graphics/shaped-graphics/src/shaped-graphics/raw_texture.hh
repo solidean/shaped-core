@@ -94,6 +94,34 @@ public:
     /// Whether this texture is multisampled (`sample_count > 1`).
     [[nodiscard]] bool is_multisampled() const { return _desc.sample_count > 1; }
 
+    // Re-type this raw texture as a strongly-typed `texture<Traits>` wrapper — one accessor per shape
+    // typedef (the shape can't be inferred, so it is named rather than a `<Traits>` template). `as_texture_2d`
+    // asserts the runtime shape matches (see texture_traits::matches); `try_as_texture_2d` is the checked
+    // twin (nullopt on mismatch). Equivalent to `texture_2d::from_raw(handle)`, reached straight off the
+    // handle. Defined in texture.hh (they need the full wrapper + the shape typedefs).
+    [[nodiscard]] auto as_texture_1d() const;                // -> texture_1d
+    [[nodiscard]] auto try_as_texture_1d() const;            // -> cc::optional<texture_1d>
+    [[nodiscard]] auto as_texture_2d() const;                // -> texture_2d
+    [[nodiscard]] auto try_as_texture_2d() const;            // -> cc::optional<texture_2d>
+    [[nodiscard]] auto as_texture_3d() const;                // -> texture_3d
+    [[nodiscard]] auto try_as_texture_3d() const;            // -> cc::optional<texture_3d>
+    [[nodiscard]] auto as_texture_cube() const;              // -> texture_cube
+    [[nodiscard]] auto try_as_texture_cube() const;          // -> cc::optional<texture_cube>
+    [[nodiscard]] auto as_texture_1d_array() const;          // -> texture_1d_array
+    [[nodiscard]] auto try_as_texture_1d_array() const;      // -> cc::optional<texture_1d_array>
+    [[nodiscard]] auto as_texture_2d_array() const;          // -> texture_2d_array
+    [[nodiscard]] auto try_as_texture_2d_array() const;      // -> cc::optional<texture_2d_array>
+    [[nodiscard]] auto as_texture_cube_array() const;        // -> texture_cube_array
+    [[nodiscard]] auto try_as_texture_cube_array() const;    // -> cc::optional<texture_cube_array>
+    [[nodiscard]] auto as_texture_2d_ms() const;             // -> texture_2d_ms
+    [[nodiscard]] auto try_as_texture_2d_ms() const;         // -> cc::optional<texture_2d_ms>
+    [[nodiscard]] auto as_texture_2d_array_ms() const;       // -> texture_2d_array_ms
+    [[nodiscard]] auto try_as_texture_2d_array_ms() const;   // -> cc::optional<texture_2d_array_ms>
+    [[nodiscard]] auto as_texture_cube_ms() const;           // -> texture_cube_ms
+    [[nodiscard]] auto try_as_texture_cube_ms() const;       // -> cc::optional<texture_cube_ms>
+    [[nodiscard]] auto as_texture_cube_array_ms() const;     // -> texture_cube_array_ms
+    [[nodiscard]] auto try_as_texture_cube_array_ms() const; // -> cc::optional<texture_cube_array_ms>
+
     /// Registers a callback to run once this texture's GPU storage is released *and* no longer in flight
     /// (its owning epoch has retired). The feedback point for reclaiming externally-owned backing memory.
     /// Do not assume which thread runs it. Const: registering a finalizer is a lifetime hook.
