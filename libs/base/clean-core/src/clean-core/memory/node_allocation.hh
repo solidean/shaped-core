@@ -168,7 +168,7 @@ static_assert(cc::popcount(node_seed_local_freemaps[isize(node_class_index::smal
     return reinterpret_cast<u64*>(base + off); // NOLINT
 }
 
-namespace detail
+namespace impl
 {
 /// Allocates the next process-unique nonzero owner id. Out-of-line so the token fast path stays a TLS load.
 [[nodiscard]] CC_COLD_FUNC u32 node_next_owner_id();
@@ -180,15 +180,15 @@ namespace detail
 /// Per-thread owner token storage (one instance per thread across TUs). 0 == unassigned.
 /// node_owner_token() assigns it lazily on first alloc/hydrate; the hot free path reads it raw.
 inline thread_local u32 owner_token = 0;
-} // namespace detail
+} // namespace impl
 
 /// Process-unique, never-recycled token for the calling thread (threaded frontend only).
 /// Lazily assigned once per thread; used to stamp slabs at hydrate/adoption and on the allocating path.
 [[nodiscard]] CC_FORCE_INLINE u32 node_owner_token()
 {
-    if (detail::owner_token == 0) [[unlikely]]
-        detail::owner_token = cc::detail::node_next_owner_id();
-    return detail::owner_token;
+    if (impl::owner_token == 0) [[unlikely]]
+        impl::owner_token = cc::impl::node_next_owner_id();
+    return impl::owner_token;
 }
 
 /// The calling thread's owner token WITHOUT lazy assignment (0 if never assigned). For the hot free path:
@@ -196,7 +196,7 @@ inline thread_local u32 owner_token = 0;
 /// the free correctly routes to remote. Skipping the assignment drops a branch (the t==0 check) from every free.
 [[nodiscard]] CC_FORCE_INLINE u32 node_owner_token_or_zero()
 {
-    return detail::owner_token;
+    return impl::owner_token;
 }
 #endif
 

@@ -265,6 +265,29 @@ struct hash128;
 
 
 //
+// Streams
+//
+
+enum class seek_dir : u8; // the flush direction (public authoring API; defined in streams/stream_flush.hh)
+
+// The six non-owning stream views (concrete types over the shared engine; defined in streams/stream.hh).
+struct read_stream;
+struct write_stream;
+struct read_write_stream;
+struct seekable_read_stream;
+struct seekable_write_stream;
+struct seekable_read_write_stream;
+
+// Their owning adapters:
+class span_read_stream_adapter;
+class span_write_stream_adapter;
+class span_read_write_stream_adapter;
+class file_read_stream_adapter;
+class file_write_stream_adapter;
+class file_read_write_stream_adapter;
+
+
+//
 // Utilities
 //
 

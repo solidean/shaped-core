@@ -325,7 +325,7 @@ public:
     template <class K2>
     void operator[](K2 const&) const
     {
-        static_assert(cc::detail::dependent_false<K2>, "const cc::map has no operator[]; use .get(key) or .entry(key)");
+        static_assert(cc::impl::dependent_false<K2>, "const cc::map has no operator[]; use .get(key) or .entry(key)");
     }
 
     template <class K2>

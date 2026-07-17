@@ -358,7 +358,7 @@ constinit cc::node_memory_resource system_node_memory_resource = {
 constinit cc::node_memory_resource* const cc::default_node_memory_resource = &system_node_memory_resource;
 
 #if CC_HAS_THREADS
-cc::u32 cc::detail::node_next_owner_id()
+cc::u32 cc::impl::node_next_owner_id()
 {
     // process-unique, never recycled: an id is never reused, so a free is never miscategorized.
     // ids are not reclaimed on thread exit (that leaks the thread's slabs -- a known, deferred follow-up).
@@ -369,7 +369,7 @@ cc::u32 cc::detail::node_next_owner_id()
     return id;
 }
 
-cc::isize cc::detail::node_orphan_slab_count()
+cc::isize cc::impl::node_orphan_slab_count()
 {
     cc::isize count = 0;
     for (cc::isize ci = 0; ci < cc::isize(cc::node_class_index::small_count); ++ci)

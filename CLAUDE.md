@@ -195,7 +195,9 @@ Essentials:
 
 * Namespaces `lower_case` (`cc`, `nx`); types / functions / variables
   `snake_case`; template parameters `UpperCase`; macros `UPPER_CASE`; private
-  members `_snake_case`.
+  members `_snake_case`. The internal-details namespace is **`impl`** (e.g.
+  `cc::impl`), **never** `detail`; internal-only headers live under an `impl/`
+  subfolder.
 * **East const** (`T const`, `span<T const>`); pointers bind left (`T const* p`).
   120-column limit, Allman braces, 4-space indent.
 * `.hh` for headers, `.cc` for implementations; headers compile standalone.

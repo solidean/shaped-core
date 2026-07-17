@@ -35,7 +35,7 @@ struct key_value_provider
     virtual ~key_value_provider() = default;
 };
 
-namespace detail
+namespace impl
 {
 /// std::unordered_map hasher routed through cc's finalized hashing — lets cc::hash128 and any
 /// cc-hashable key be a map key without needing a std::hash specialization.
@@ -44,13 +44,13 @@ struct cc_key_hash
 {
     [[nodiscard]] size_t operator()(K const& k) const { return size_t(cc::make_hash_finalized(k)); }
 };
-} // namespace detail
+} // namespace impl
 
 /// In-memory tier backed by std::unordered_map. Eviction is deliberately crude — apply_bookkeeping
 /// clears the whole map once it exceeds max_entries; subclass for a smarter policy.
 ///
 /// TODO: migrate std::unordered_map -> cc::map once clean-core's own hash map lands.
-template <class K, class V, class Hash = detail::cc_key_hash<K>>
+template <class K, class V, class Hash = impl::cc_key_hash<K>>
 struct in_memory_key_value_provider final : key_value_provider<K, V>
 {
     explicit in_memory_key_value_provider(cc::isize max_entries) : _max_entries(max_entries) {}
