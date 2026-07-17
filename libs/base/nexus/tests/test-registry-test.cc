@@ -1,3 +1,4 @@
+#include <clean-core/container/span.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/config.hh>
 #include <nexus/tests/execute.hh>
@@ -438,13 +439,24 @@ TEST("test registry - manual tests are excluded from automatic and run_disabled 
         CHECK(exec.count_total_tests() == 1);
     }
 
-    // match_any_bucket pulls them in (this is what a non-wildcard filter sets).
+    // An exact name pulls a manual test in across the bucket (what a bare filter allows).
     counter_normal = counter_manual = 0;
     {
-        auto exec = nx::execute_tests(nx::test_schedule::create({.match_any_bucket = true}, reg), {});
-        CHECK(counter_normal == 1);
+        auto exec = nx::execute_tests(
+            nx::test_schedule::create({.filters = {"T_manual"}, .allow_cross_bucket_naming = true}, reg), {});
+        CHECK(counter_normal == 0); // "T_manual" is not a substring of "T_normal"
         CHECK(counter_manual == 1);
-        CHECK(exec.count_total_tests() == 2);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // ...but a SUBSTRING filter must not: "T_" matches both names, yet only the normal-bucket test runs.
+    counter_normal = counter_manual = 0;
+    {
+        auto exec = nx::execute_tests(
+            nx::test_schedule::create({.filters = {"T_"}, .allow_cross_bucket_naming = true}, reg), {});
+        CHECK(counter_normal == 1);
+        CHECK(counter_manual == 0);
+        CHECK(exec.count_total_tests() == 1);
     }
 }
 
@@ -542,22 +554,23 @@ TEST("test registry - manual test without any CHECK is not a failure")
     reg.add_declaration("T_manual_bench", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
                         [] { /* no checks */ });
 
-    auto exec = nx::execute_tests(nx::test_schedule::create({.match_any_bucket = true}, reg), {});
+    auto exec
+        = nx::execute_tests(nx::test_schedule::create({.selected_bucket = nx::config::test_bucket::manual}, reg), {});
 
     CHECK(exec.count_total_tests() == 1);
     CHECK(exec.count_failed_tests() == 0); // empty manual test is allowed, unlike a normal empty test
 }
 
-TEST("test schedule config - bucket flags and non-wildcard filters")
+TEST("test schedule config - a bucket flag selects a bucket and pins the sweep to it")
 {
-    // --manual selects the manual bucket.
+    // --manual selects the manual bucket. An explicit flag pins the sweep: no cross-bucket naming.
     {
         char a0[] = "prog";
         char a1[] = "--manual";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
         CHECK(cfg.selected_bucket == nx::config::test_bucket::manual);
-        CHECK(!cfg.match_any_bucket);
+        CHECK(!cfg.allow_cross_bucket_naming);
         CHECK(!cfg.run_disabled_tests);
         CHECK(cfg.filters.empty());
     }
@@ -569,35 +582,24 @@ TEST("test schedule config - bucket flags and non-wildcard filters")
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
         CHECK(cfg.selected_bucket == nx::config::test_bucket::guide_benchmark);
-        CHECK(!cfg.match_any_bucket);
+        CHECK(!cfg.allow_cross_bucket_naming);
     }
 
-    // A wildcard-only filter stays in the normal bucket and does not pull in disabled tests.
-    {
-        char a0[] = "prog";
-        char a1[] = "bench*";
-        char* argv[] = {a0, a1};
-        auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
-        CHECK(!cfg.run_disabled_tests);
-        CHECK(!cfg.match_any_bucket);
-        CHECK(cfg.selected_bucket == nx::config::test_bucket::normal);
-    }
-
-    // A non-wildcard filter searches across buckets (it may name a manual/benchmark test). It does NOT flip
-    // run_disabled_tests: a disabled test is pulled in per-test by an exact name match (would_run), not a
-    // global flag — so a substring filter can't resurrect an unrelated disabled test.
+    // No bucket flag: the sweep is the normal bucket, but a filter naming a test exactly may cross buckets
+    // (decided per-test in is_eligible, not here). run_disabled_tests is never auto-set — an exact name is
+    // what enables a disabled test, so a substring filter can't resurrect an unrelated one.
     {
         char a0[] = "prog";
         char a1[] = "T_manual_bench";
         char* argv[] = {a0, a1};
         auto const cfg = nx::test_schedule_config::create_from_args(2, argv);
-        CHECK(!cfg.run_disabled_tests);
-        CHECK(cfg.match_any_bucket);
         CHECK(cfg.selected_bucket == nx::config::test_bucket::normal);
+        CHECK(cfg.allow_cross_bucket_naming);
+        CHECK(!cfg.run_disabled_tests);
     }
 
-    // A non-wildcard filter with an explicit bucket flag stays restricted to that bucket, and still does not
-    // flip run_disabled_tests.
+    // A filter with an explicit bucket flag stays restricted to that bucket, and still does not flip
+    // run_disabled_tests.
     {
         char a0[] = "prog";
         char a1[] = "--manual";
@@ -605,7 +607,74 @@ TEST("test schedule config - bucket flags and non-wildcard filters")
         char* argv[] = {a0, a1, a2};
         auto const cfg = nx::test_schedule_config::create_from_args(3, argv);
         CHECK(cfg.selected_bucket == nx::config::test_bucket::manual);
-        CHECK(!cfg.match_any_bucket);
+        CHECK(!cfg.allow_cross_bucket_naming);
         CHECK(!cfg.run_disabled_tests);
+    }
+}
+
+TEST("test schedule config - a substring filter never reaches another bucket")
+{
+    // The reported bug: `dev.py test "async"` ran not just the normal async tests but every manual and
+    // guide-benchmark test whose name merely contained "async" — expensive benchmarks in an unattended run.
+    // Drives the real CLI path (create_from_args), which is where the gate used to open up globally.
+    nx::test_registry reg;
+
+    int counter_normal = 0;
+    int counter_manual = 0;
+    int counter_guide = 0;
+
+    reg.add_declaration("async - queue", {},
+                        [&]
+                        {
+                            ++counter_normal;
+                            SUCCEED();
+                        });
+    reg.add_declaration("async - throughput bench", nx::config::cfg{.bucket = nx::config::test_bucket::manual},
+                        [&] { ++counter_manual; });
+    reg.add_declaration("async - guide bench", nx::config::cfg{.bucket = nx::config::test_bucket::guide_benchmark},
+                        [&] { ++counter_guide; });
+
+    auto const config_from = [](cc::span<char const* const> args)
+    { return nx::test_schedule_config::create_from_args(int(args.size()), const_cast<char**>(args.data())); };
+
+    // A bare substring filter: only the normal-bucket test, though "async" matches all three names.
+    {
+        char const* const args[] = {"prog", "async"};
+        auto exec = nx::execute_tests(nx::test_schedule::create(config_from(args), reg), {});
+        CHECK(counter_normal == 1);
+        CHECK(counter_manual == 0);
+        CHECK(counter_guide == 0);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // An exact name reaches the manual test.
+    counter_normal = counter_manual = counter_guide = 0;
+    {
+        char const* const args[] = {"prog", "async - throughput bench"};
+        auto exec = nx::execute_tests(nx::test_schedule::create(config_from(args), reg), {});
+        CHECK(counter_normal == 0);
+        CHECK(counter_manual == 1);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // So does the enabling flag, and it sweeps by substring within its own bucket.
+    counter_normal = counter_manual = counter_guide = 0;
+    {
+        char const* const args[] = {"prog", "--manual", "async"};
+        auto exec = nx::execute_tests(nx::test_schedule::create(config_from(args), reg), {});
+        CHECK(counter_normal == 0);
+        CHECK(counter_manual == 1);
+        CHECK(counter_guide == 0);
+        CHECK(exec.count_total_tests() == 1);
+    }
+
+    // --guide-benchmarks likewise (the path dev.py pgo drives).
+    counter_normal = counter_manual = counter_guide = 0;
+    {
+        char const* const args[] = {"prog", "--guide-benchmarks", "async"};
+        auto exec = nx::execute_tests(nx::test_schedule::create(config_from(args), reg), {});
+        CHECK(counter_guide == 1);
+        CHECK(counter_manual == 0);
+        CHECK(exec.count_total_tests() == 1);
     }
 }

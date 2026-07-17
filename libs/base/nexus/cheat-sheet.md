@@ -28,7 +28,8 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 // Multiple configs compose: TEST("x", nx::config::disabled, nx::config::seed(7)) { }
 
 // Buckets: every test is in one bucket — normal (default), manual, or guide_benchmark. A sweep selects one
-// bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket.
+// bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
+// substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
 
 ## Guide benchmarks (perf metrics)
@@ -143,8 +144,9 @@ uv run dev.py test                       # build + run the whole suite
 // Bucket / perf CLI: --manual (sweep manual bucket), --guide-benchmarks (sweep guide-benchmark bucket),
 // --perf-json <file> (write recorded-metric sidecar).
 // --list-tests-json <file|-> : print a JSON listing of every test (name, file:line, bucket, enabled, seed,
-//   name_matches, eligible) plus an "aliases" array and eligible_alias_count, under the rest of the args, then
-//   exit 0. Used by `dev.py test` to pre-select binaries with a matching test or alias. "-" means stdout.
+//   name_matches, eligible) plus an "aliases" array, the resolved config (filters, selected_bucket,
+//   allow_cross_bucket_naming, run_disabled_tests) and eligible_count / eligible_alias_count, under the rest of
+//   the args, then exit 0. Used by `dev.py test` to pre-select binaries. "-" means stdout.
 ```
 
 ## Fuzz testing (`nx::fuzz`)

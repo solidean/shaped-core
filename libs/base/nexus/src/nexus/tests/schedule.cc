@@ -158,22 +158,12 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         }
     }
 
-    // A non-wildcard filter may name a test in another bucket (a manual/benchmark test given by name), so
-    // (unless a bucket was selected explicitly) search across buckets. Disabled tests are NOT pulled in here:
-    // a filter enables a disabled test only when it matches the name *exactly*, checked per-test in would_run
-    // — a substring filter like "sg " must not enable an unrelated disabled test. A bulk "run disabled too"
-    // request sets run_disabled_tests directly instead.
-    if (!config.filters.empty() && !explicit_bucket)
-    {
-        for (auto const& filter : config.filters)
-        {
-            if (!filter.contains('*'))
-            {
-                config.match_any_bucket = true;
-                break;
-            }
-        }
-    }
+    // Without an explicit bucket flag, a filter may name a test in another bucket (a manual/benchmark test
+    // given by name). Whether it actually does is decided per-test in is_eligible, on an *exact* name — the
+    // same way a disabled test is enabled. A substring filter like "async" must not drag in a manual test
+    // merely because its name contains it. The bulk escape hatches stay explicit: a bucket flag to sweep a
+    // whole bucket, run_disabled_tests for disabled ones.
+    config.allow_cross_bucket_naming = !explicit_bucket;
 
     return config;
 }
@@ -204,22 +194,29 @@ bool nx::test_schedule_config::name_matches_exact(test_declaration const& decl) 
     return false;
 }
 
-bool nx::test_schedule_config::would_run(test_declaration const& decl) const
+bool nx::test_schedule_config::is_eligible(test_declaration const& decl, bool named_exactly) const
 {
     auto const& tc = decl.test_config;
 
-    // Eligibility by bucket + disabled status (filters are applied afterwards):
-    //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket is excluded unless
-    //    match_any_bucket is set (a non-wildcard filter without an explicit bucket flag names a test directly).
-    //  - disabled is orthogonal: a disabled test runs only when the bulk run_disabled_tests flag is set OR a
-    //    filter names it *exactly* — a substring filter must not resurrect an unrelated disabled test.
-    if (!match_any_bucket && tc.bucket != selected_bucket)
+    // Bucket and disabled are two independent gates, both keyed on the *exact* name — a substring filter
+    // opens neither. `named_exactly` is that key: the test's own name for a direct match, the alias name for
+    // an alias fragment (filters themselves are applied by the caller).
+    //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket runs only when named
+    //    exactly, and only if no bucket flag was given (allow_cross_bucket_naming) — under --manual the
+    //    sweep is the manual bucket, period.
+    //  - disabled is orthogonal: a disabled test runs when named exactly, or under bulk run_disabled_tests.
+    if (tc.bucket != selected_bucket && !(allow_cross_bucket_naming && named_exactly))
         return false;
 
-    if (!tc.enabled && !run_disabled_tests && !name_matches_exact(decl))
+    if (!tc.enabled && !run_disabled_tests && !named_exactly)
         return false;
 
-    return name_matches(decl);
+    return true;
+}
+
+bool nx::test_schedule_config::would_run(test_declaration const& decl) const
+{
+    return is_eligible(decl, name_matches_exact(decl)) && name_matches(decl);
 }
 
 bool nx::test_schedule_config::alias_matches(test_alias const& alias) const
@@ -237,6 +234,14 @@ bool nx::test_schedule_config::alias_matches(test_alias const& alias) const
             return true;
     }
 
+    return false;
+}
+
+bool nx::test_schedule_config::alias_matches_exact(test_alias const& alias) const
+{
+    for (auto const& filter : filters)
+        if (!filter.empty() && cc::string_view(alias.name) == cc::string_view(filter))
+            return true;
     return false;
 }
 
@@ -264,8 +269,9 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
     // Aliases act purely as filters: a matched alias name selects (driver, section-path) leaves to run. Every
     // matched fragment that shares a driver is grouped into that driver's ONE instance, whose scope set is the
     // union of their paths — so a driver's body runs exactly once regardless of how many of its aliases match
-    // (aliases never add schedule entries in an additive sense). Bucket/disabled gates are bypassed for these,
-    // like a directly named test.
+    // (aliases never add schedule entries in an additive sense). The bucket/disabled gates still apply, keyed
+    // on the alias name: reaching a manual driver through one of its aliases takes that alias's exact name,
+    // exactly as reaching the driver directly takes the driver's.
     //
     // A fragment is dropped when its target run is already covered, so nothing executes twice:
     //  - the driver is already scheduled *unscoped* (matched directly by name) — that run drives every
@@ -276,9 +282,16 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         if (!config.alias_matches(alias))
             continue;
 
+        bool const named_exactly = config.alias_matches_exact(alias);
+
         for (auto const& frag : alias.fragments)
         {
             if (frag.driver == nullptr)
+                continue;
+
+            // Each fragment carries its own driver, so the gate is per-driver; only the exact-name key is
+            // shared across the alias.
+            if (!config.is_eligible(*frag.driver, named_exactly))
                 continue;
 
             // Covered by an unscoped run of this driver? then everything under it runs already.
