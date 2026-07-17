@@ -149,17 +149,17 @@ namespace
 // a frame-side guard would not.
 struct counted
 {
-    static inline std::atomic<int> live{0};
+    static inline cc::atomic<int> live{0};
 
     cc::i64 v = 0;
 
-    counted() { live.fetch_add(1, std::memory_order_relaxed); }
-    explicit counted(cc::i64 x) : v(x) { live.fetch_add(1, std::memory_order_relaxed); }
-    counted(counted const& o) : v(o.v) { live.fetch_add(1, std::memory_order_relaxed); }
-    counted(counted&& o) noexcept : v(o.v) { live.fetch_add(1, std::memory_order_relaxed); }
+    counted() { live.fetch_add(1, cc::memory_order_relaxed); }
+    explicit counted(cc::i64 x) : v(x) { live.fetch_add(1, cc::memory_order_relaxed); }
+    counted(counted const& o) : v(o.v) { live.fetch_add(1, cc::memory_order_relaxed); }
+    counted(counted&& o) noexcept : v(o.v) { live.fetch_add(1, cc::memory_order_relaxed); }
     counted& operator=(counted const&) = delete;
     counted& operator=(counted&&) = delete;
-    ~counted() { live.fetch_sub(1, std::memory_order_relaxed); }
+    ~counted() { live.fetch_sub(1, cc::memory_order_relaxed); }
 };
 
 // A fork-join tree that spawns its children dynamically, so the work is published BY the workers into their own
@@ -203,7 +203,7 @@ TEST("async - destroying a pool releases work abandoned in its deques")
     // Two sizing traps, both hit while writing this: schedule_on() routes to the INJECTION queue (whose entries
     // are handles and free themselves), so the tree must be spawned by the workers to reach a deque at all; and
     // a small tree simply completes, leaving the deques empty and the test green for the wrong reason.
-    counted::live.store(0, std::memory_order_relaxed);
+    counted::live.store(0, cc::memory_order_relaxed);
     {
         cc::async_thread_pool pool(4);
 
@@ -215,7 +215,7 @@ TEST("async - destroying a pool releases work abandoned in its deques")
         // depth-first drive means "a running frame" is most of the tree -- so it blocks until that unwinds,
         // then the workers exit with whatever is still queued.
     }
-    CHECK(counted::live.load(std::memory_order_relaxed) == 0);
+    CHECK(counted::live.load(cc::memory_order_relaxed) == 0);
 }
 
 TEST("async - the wake protocol survives workers repeatedly draining to empty")

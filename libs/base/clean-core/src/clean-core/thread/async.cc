@@ -22,7 +22,7 @@ thread_local cc::async_scheduler* s_current_scheduler = nullptr;
 
 // Process-wide default scheduler for compute nodes that cannot run on the current thread. Read-mostly:
 // installed once at startup. Atomic so installation is visible to worker threads without extra synchronization.
-std::atomic<cc::async_scheduler*> s_default_scheduler{nullptr};
+cc::atomic<cc::async_scheduler*> s_default_scheduler{nullptr};
 
 // spilled dependency-list nodes come from the node slab allocator (wait-free free, cross-thread safe): a node
 // parked by one worker may be re-polled/torn down by another, which then frees these on a different thread.
@@ -92,12 +92,12 @@ cc::async_scheduler* cc::async_scheduler::current_or_null()
 
 void cc::async_scheduler::set_default(async_scheduler* sched)
 {
-    s_default_scheduler.store(sched, std::memory_order_release);
+    s_default_scheduler.store(sched, cc::memory_order_release);
 }
 
 cc::async_scheduler* cc::async_scheduler::default_or_null()
 {
-    return s_default_scheduler.load(std::memory_order_acquire);
+    return s_default_scheduler.load(cc::memory_order_acquire);
 }
 
 cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(s_current_scheduler)
@@ -141,7 +141,7 @@ void cc::async_node_base::schedule()
 {
     {
         lock_scope g(this);
-        auto const s = load_state(std::memory_order_relaxed);
+        auto const s = load_state(cc::memory_order_relaxed);
 
         // terminal, already runnable, or a manual node (only external completion makes those ready)
         if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
@@ -167,7 +167,7 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
     bool do_submit = false;
     {
         lock_scope g(this);
-        auto const s = load_state(std::memory_order_relaxed);
+        auto const s = load_state(cc::memory_order_relaxed);
 
         if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
             return; // terminal, already runnable elsewhere, or a manual node
@@ -211,7 +211,7 @@ void cc::async_node_base::route_after_schedule()
 bool cc::async_node_base::try_begin_running()
 {
     lock_scope g(this);
-    auto const s = load_state(std::memory_order_relaxed);
+    auto const s = load_state(cc::memory_order_relaxed);
 
     // another poller owns it, it is terminal, or it awaits external completion -> not runnable here
     if (is_ready_state(s) || s == async_node_state::running || s == async_node_state::external_pending)
@@ -228,7 +228,7 @@ void cc::async_node_base::reschedule_self()
     // worker, so route_after_schedule takes the local hot path.
     {
         lock_scope g(this);
-        CC_ASSERT(load_state(std::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
+        CC_ASSERT(load_state(cc::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
         store_state_clear_wake(async_node_state::scheduled);
     }
     route_after_schedule();
@@ -499,7 +499,7 @@ void cc::async_node_base::schedule_pending_deps(async_node_base* except)
 bool cc::async_node_base::try_subscribe(async_node_base* dependent)
 {
     lock_scope g(this);
-    if (is_ready_state(load_state(std::memory_order_relaxed)))
+    if (is_ready_state(load_state(cc::memory_order_relaxed)))
         return false;       // already ready under the lock: the dependent must not park on us
     conts().add(dependent); // dependent is alive (it is polling us)
     return true;
@@ -538,15 +538,15 @@ void cc::async_node_base::unsubscribe_all_slow()
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     lock_scope g(this);
-    CC_ASSERT(!is_ready_state(load_state(std::memory_order_relaxed)), "add_continuation on a ready node: the "
-                                                                      "continuation head has been stolen");
+    CC_ASSERT(!is_ready_state(load_state(cc::memory_order_relaxed)), "add_continuation on a ready node: the "
+                                                                     "continuation head has been stolen");
     conts().add(dependent);
 }
 
 void cc::async_node_base::remove_continuation(async_node_base* dependent)
 {
     lock_scope g(this);
-    if (is_ready_state(load_state(std::memory_order_relaxed)))
+    if (is_ready_state(load_state(cc::memory_order_relaxed)))
         return;                // completed: the continuation head was stolen and its storage may now hold the error
     conts().remove(dependent); // drops the target and prunes any dependents that have since expired
 }
@@ -568,7 +568,7 @@ cc::async_error cc::impl::async_error_propagate(async_error const& e)
 bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), void* ctx)
 {
     lock_scope g(this);
-    if (is_ready_state(load_state(std::memory_order_relaxed)))
+    if (is_ready_state(load_state(cc::memory_order_relaxed)))
         return true; // already done: caller must not wait
     conts().add_latch(fn, ctx);
     return false;
@@ -580,7 +580,7 @@ void cc::async_node_base::teardown_payload()
     // and the payload holds the resolved value/error — destroy that (typed, via the ops table); else the arm is
     // live, so unsubscribe (the frame still pins the deps) then destroy the whole arm (frame + deps + conts). The
     // intrusive counts and _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
-    auto const s = load_state(std::memory_order_relaxed);
+    auto const s = load_state(cc::memory_order_relaxed);
     if (s == async_node_state::ready_value)
     {
         if (auto const f = ops()->teardown_value) // null for a trivially-destructible value type

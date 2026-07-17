@@ -330,7 +330,6 @@ cc::overloaded{ [](int){}, [](float){} }; // combine callables into one overload
 cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
-cc::atomic_add(v, x);                     // also atomic_sub/and/or/xor (via std::atomic_ref) -> old value
 
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
@@ -379,6 +378,16 @@ cc::sequence{v}.to_vector();  .to_array();  .to_container<C>();  .push_to(existi
 ## Threading
 
 ```cpp
+#include <clean-core/thread/atomic.hh>     // MANDATORY seam: never name std::atomic directly (see docs/blessed-stdlib-headers.md)
+cc::atomic<T> a{0};                        // == std::atomic<T>; a plain T with the same API when CC_HAS_THREADS == 0
+a.load(cc::memory_order_acquire);  a.store(v, cc::memory_order_release);  a.fetch_add(1, cc::memory_order_relaxed);
+a.compare_exchange_weak(expected, desired, cc::memory_order_acq_rel, cc::memory_order_relaxed);
+cc::atomic_ref<T> r(plain_lvalue);         // == std::atomic_ref<T>; atomics over memory you own as a plain value
+cc::atomic_flag f;                         // constinit-able, trivially destructible (survives static teardown)
+cc::atomic_thread_fence(cc::memory_order_seq_cst);   // no-op without threads
+cc::atomic_add(v, x);                      // also atomic_sub/and/or/xor — RMW on a plain lvalue -> OLD value (seq_cst)
+                                           // no wait()/notify(): without threads nobody could ever satisfy the wait
+
 #include <clean-core/thread/mutex.hh>      // cc::mutex<T> — Rust-style: data only reachable under the lock
 cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback

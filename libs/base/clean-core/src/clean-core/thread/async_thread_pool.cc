@@ -94,7 +94,7 @@ cc::async_thread_pool::~async_thread_pool()
               "uninstall this pool as the default before destroying it (uninstall_default_async_pool / "
               "scoped_default_async_pool)");
 
-    _stop.store(true, std::memory_order_release);
+    _stop.store(true, cc::memory_order_release);
     {
         std::lock_guard<std::mutex> lk(_wait_m); // synchronize with any worker between predicate-check and wait
     }
@@ -137,7 +137,7 @@ void cc::async_thread_pool::submit(async_node_ptr node)
     // cold by construction and a lock-free rewrite would buy nothing. Its POP side is not cold — that is what
     // _injection_hint exists for; see the member.
     _injection.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(cc::move(node)); });
-    _injection_hint.fetch_add(1, std::memory_order_relaxed);
+    _injection_hint.fetch_add(1, cc::memory_order_relaxed);
     wake_one();
 }
 
@@ -155,16 +155,16 @@ void cc::async_thread_pool::wake_one()
     // Our half of the Dekker (see the protocol block): the push above ended in a relaxed store, so without this
     // fence the load below could be satisfied from before a sleeper registered -- and that sleeper's own scan
     // could be satisfied from before our push. Both would see nothing and the task would strand.
-    std::atomic_thread_fence(std::memory_order_seq_cst);
+    cc::atomic_thread_fence(cc::memory_order_seq_cst);
 
-    if (_sleepers.load(std::memory_order_relaxed) == 0)
+    if (_sleepers.load(cc::memory_order_relaxed) == 0)
         return; // the steady state: nobody asleep, so no traffic beyond an L1 read of a Shared line
 
     // A sleeper exists (or is committing to sleep). Bump the epoch under _wait_m: taking the lock is what closes
     // the check-then-wait window, and the epoch is what makes the predicate immune to a missed notify.
     {
         std::lock_guard<std::mutex> const lk(_wait_m);
-        _wake_epoch.fetch_add(1, std::memory_order_relaxed);
+        _wake_epoch.fetch_add(1, cc::memory_order_relaxed);
     }
     _wait_cv.notify_one();
 }
@@ -217,18 +217,17 @@ cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w, bool authorita
                 return q.pop_back();
             });
         if (n)
-            _injection_hint.fetch_sub(1, std::memory_order_relaxed);
+            _injection_hint.fetch_sub(1, cc::memory_order_relaxed);
         return n;
     };
 
     if (authoritative)
         return poll_injection();
 
-    if (_injection_hint.load(std::memory_order_relaxed) > 0
-        && _injection_poller.exchange(1, std::memory_order_acquire) == 0)
+    if (_injection_hint.load(cc::memory_order_relaxed) > 0 && _injection_poller.exchange(1, cc::memory_order_acquire) == 0)
     {
         auto n = poll_injection();
-        _injection_poller.store(0, std::memory_order_release);
+        _injection_poller.store(0, cc::memory_order_release);
         if (n)
             return n;
     }
@@ -266,7 +265,7 @@ void cc::async_thread_pool::worker_main(worker& w)
     s_current_worker = &w;
     async_worker_scope const scope(*this);
 
-    while (!_stop.load(std::memory_order_acquire))
+    while (!_stop.load(cc::memory_order_acquire))
     {
         if (auto n = try_get_work(w))
         {
@@ -278,7 +277,7 @@ void cc::async_thread_pool::worker_main(worker& w)
         //    re-scans, so a worker that is about to be handed work costs nobody anything. See the constant for
         //    the two backoff schemes that were tried and lost.
         bool found = false;
-        for (int i = 0; i < async_pool_spin_rounds && !_stop.load(std::memory_order_relaxed); ++i)
+        for (int i = 0; i < async_pool_spin_rounds && !_stop.load(cc::memory_order_relaxed); ++i)
         {
             cc::spin_pause();
             if (auto n = try_get_work(w))
@@ -293,12 +292,12 @@ void cc::async_thread_pool::worker_main(worker& w)
 
         // 2. still nothing: commit to sleeping. Capture the epoch BEFORE registering, so a wake that lands
         //    between here and the wait cannot be mistaken for one we already consumed.
-        cc::i64 const epoch = _wake_epoch.load(std::memory_order_acquire);
+        cc::i64 const epoch = _wake_epoch.load(cc::memory_order_acquire);
 
         // Our half of the Dekker (see the protocol block). The RMW is a full barrier in its own right; the fence
         // spells out what it is for and keeps the pairing legible if the RMW is ever weakened.
-        _sleepers.fetch_add(1, std::memory_order_seq_cst);
-        std::atomic_thread_fence(std::memory_order_seq_cst);
+        _sleepers.fetch_add(1, cc::memory_order_seq_cst);
+        cc::atomic_thread_fence(cc::memory_order_seq_cst);
 
         // 3. the re-scan that closes the race: a producer that pushed before our registration became visible may
         //    have already read _sleepers == 0 and skipped notifying us. Seq_cst says at least one of us sees the
@@ -306,7 +305,7 @@ void cc::async_thread_pool::worker_main(worker& w)
         // authoritative: this scan is what decides we may sleep, so it must not let the poller token filter it
         if (auto n = try_get_work(w, /*authoritative*/ true))
         {
-            _sleepers.fetch_sub(1, std::memory_order_relaxed);
+            _sleepers.fetch_sub(1, cc::memory_order_relaxed);
             n->poll();
             continue;
         }
@@ -315,9 +314,9 @@ void cc::async_thread_pool::worker_main(worker& w)
             std::unique_lock<std::mutex> lk(_wait_m);
             _wait_cv.wait(
                 lk, [&]
-                { return _stop.load(std::memory_order_relaxed) || _wake_epoch.load(std::memory_order_relaxed) != epoch; });
+                { return _stop.load(cc::memory_order_relaxed) || _wake_epoch.load(cc::memory_order_relaxed) != epoch; });
         }
-        _sleepers.fetch_sub(1, std::memory_order_relaxed);
+        _sleepers.fetch_sub(1, cc::memory_order_relaxed);
     }
 
     s_current_worker = nullptr;
@@ -359,8 +358,8 @@ cc::async_thread_pool::worker* cc::async_thread_pool::try_claim_external_slot()
     for (int i = _thread_count; i < int(_workers.size()); ++i)
     {
         bool expected = false;
-        if (_workers[i]->claimed.compare_exchange_strong(expected, true, std::memory_order_acquire,
-                                                         std::memory_order_relaxed))
+        if (_workers[i]->claimed.compare_exchange_strong(expected, true, cc::memory_order_acquire,
+                                                         cc::memory_order_relaxed))
             return _workers[i].get();
     }
     return nullptr; // every slot is busy; the caller falls back to submit-and-park
@@ -382,7 +381,7 @@ void cc::async_thread_pool::drain_slot_to_injection(worker& w)
     while (w.deque.try_take(raw))
     {
         _injection.lock([&](cc::vector<async_node_ptr>& q) { q.push_back(async_node_ptr::adopt(raw)); });
-        _injection_hint.fetch_add(1, std::memory_order_relaxed);
+        _injection_hint.fetch_add(1, cc::memory_order_relaxed);
         any = true;
     }
     if (any)
@@ -445,7 +444,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         drain_slot_to_injection(*slot);
     }
     s_current_worker = previous;
-    slot->claimed.store(false, std::memory_order_release);
+    slot->claimed.store(false, cc::memory_order_release);
 }
 
 void cc::install_default_async_pool(async_thread_pool& pool)

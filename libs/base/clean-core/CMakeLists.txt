@@ -114,6 +114,7 @@ target_sources(clean-core
     src/clean-core/error/optional.hh
     src/clean-core/error/crash_handler.hh
 
+    src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
     src/clean-core/thread/threaded_actor.hh
@@ -258,6 +259,7 @@ if(SC_BUILD_TESTS)
 
         tests/thread/async-test.cc
         tests/thread/async-pool-test.cc
+        tests/thread/atomic-test.cc
         tests/thread/chase_lev_deque-test.cc
         tests/thread/mutex-test.cc
         tests/thread/thread-test.cc

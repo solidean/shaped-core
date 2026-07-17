@@ -4,7 +4,6 @@
 #include <nexus/test.hh>
 
 #if CC_HAS_THREADS
-#include <atomic>
 #include <thread>
 #endif
 
@@ -179,17 +178,17 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
     constexpr int thieves = 3;
 
     deque d(8);
-    std::atomic<int> claims[n];
+    cc::atomic<int> claims[n];
     for (auto& c : claims)
-        c.store(0, std::memory_order_relaxed);
+        c.store(0, cc::memory_order_relaxed);
 
-    std::atomic<bool> done{false};
-    std::atomic<int> claimed_total{0};
+    cc::atomic<bool> done{false};
+    cc::atomic<int> claimed_total{0};
 
     auto const claim = [&](int* p)
     {
-        claims[tag_index(p)].fetch_add(1, std::memory_order_relaxed);
-        claimed_total.fetch_add(1, std::memory_order_relaxed);
+        claims[tag_index(p)].fetch_add(1, cc::memory_order_relaxed);
+        claimed_total.fetch_add(1, cc::memory_order_relaxed);
     };
 
     cc::vector<std::thread> ts;
@@ -198,7 +197,7 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
         ts.push_back(std::thread(
             [&]
             {
-                while (!done.load(std::memory_order_acquire))
+                while (!done.load(cc::memory_order_acquire))
                 {
                     int* out = nullptr;
                     if (d.try_steal(out) == steal_result::success)
@@ -235,7 +234,7 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
         claim(out);
     }
 
-    done.store(true, std::memory_order_release);
+    done.store(true, cc::memory_order_release);
     for (auto& t : ts)
         t.join();
 
@@ -247,7 +246,7 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
     int duplicated = 0;
     for (auto& c : claims)
     {
-        int const v = c.load(std::memory_order_relaxed);
+        int const v = c.load(cc::memory_order_relaxed);
         if (v == 0)
             ++lost;
         else if (v > 1)
@@ -265,9 +264,9 @@ TEST("chase_lev_deque - thieves racing for a single element never double-claim i
     constexpr int thieves = 3;
 
     deque d(8);
-    std::atomic<int> claimed{0};
-    std::atomic<bool> stop{false};
-    std::atomic<int> round_gate{0};
+    cc::atomic<int> claimed{0};
+    cc::atomic<bool> stop{false};
+    cc::atomic<int> round_gate{0};
 
     cc::vector<std::thread> ts;
     ts.reserve(thieves);
@@ -275,11 +274,11 @@ TEST("chase_lev_deque - thieves racing for a single element never double-claim i
         ts.push_back(std::thread(
             [&]
             {
-                while (!stop.load(std::memory_order_acquire))
+                while (!stop.load(cc::memory_order_acquire))
                 {
                     int* out = nullptr;
                     if (d.try_steal(out) == steal_result::success)
-                        claimed.fetch_add(1, std::memory_order_relaxed);
+                        claimed.fetch_add(1, cc::memory_order_relaxed);
                 }
             }));
 
@@ -287,14 +286,14 @@ TEST("chase_lev_deque - thieves racing for a single element never double-claim i
     for (int r = 0; r < rounds; ++r)
     {
         d.push(tag(r % 64));
-        round_gate.fetch_add(1, std::memory_order_relaxed); // keep the loop from being optimized into nothing
+        round_gate.fetch_add(1, cc::memory_order_relaxed); // keep the loop from being optimized into nothing
 
         int* out = nullptr;
         if (d.try_take(out))
             ++owner_took;
     }
 
-    stop.store(true, std::memory_order_release);
+    stop.store(true, cc::memory_order_release);
     for (auto& t : ts)
         t.join();
 

@@ -3,8 +3,8 @@
 #include <clean-core/common/utility.hh> // cc::move, cc::forward, cc::placement_new, cc::align_up
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/thread/atomic.hh> // cc::atomic — plain loads/stores without threads
 
-#include <atomic>
 #include <type_traits> // std::is_convertible_v
 
 // cc::shared_ptr<T, Traits> / cc::weak_ptr<T, Traits> — an 8 B, single-pointer, INTRUSIVE-refcount smart
@@ -81,39 +81,39 @@ struct fused_refcount
     static constexpr cc::u64 weak_unit = 1;
     static constexpr cc::u64 sole_owner = strong_unit | weak_unit; // strong == 1 && weak == 1
 
-    static void init(std::atomic<cc::u64>& c) { c.store(sole_owner, std::memory_order_relaxed); }
-    static void inc_strong(std::atomic<cc::u64>& c) { c.fetch_add(strong_unit, std::memory_order_relaxed); }
-    static void inc_weak(std::atomic<cc::u64>& c) { c.fetch_add(weak_unit, std::memory_order_relaxed); }
+    static void init(cc::atomic<cc::u64>& c) { c.store(sole_owner, cc::memory_order_relaxed); }
+    static void inc_strong(cc::atomic<cc::u64>& c) { c.fetch_add(strong_unit, cc::memory_order_relaxed); }
+    static void inc_weak(cc::atomic<cc::u64>& c) { c.fetch_add(weak_unit, cc::memory_order_relaxed); }
 
-    static shared_release release_strong(std::atomic<cc::u64>& c)
+    static shared_release release_strong(cc::atomic<cc::u64>& c)
     {
         // Reading exactly (1,1) proves we hold the only reference of any kind: no other thread can mint one,
         // because minting requires already holding one. So there is nobody to race and no RMW is needed — this
         // is the whole point of fusing. The ACQUIRE is load-bearing: it pairs with the release of whoever
         // dropped the second-to-last reference, ordering their writes before our teardown. Note this leaves the
         // counts reading (1,1) through destroy_object / free_storage; nothing may read them there.
-        if (c.load(std::memory_order_acquire) == sole_owner)
+        if (c.load(cc::memory_order_acquire) == sole_owner)
             return {true, true};
 
-        cc::u64 const old = c.fetch_sub(strong_unit, std::memory_order_acq_rel);
+        cc::u64 const old = c.fetch_sub(strong_unit, cc::memory_order_acq_rel);
         return {(old >> 32) == 1, false}; // free is never decided here: the collective weak is still held
     }
-    static bool release_weak(std::atomic<cc::u64>& c)
+    static bool release_weak(cc::atomic<cc::u64>& c)
     {
-        return (c.fetch_sub(weak_unit, std::memory_order_acq_rel) & 0xFFFF'FFFF) == 1;
+        return (c.fetch_sub(weak_unit, cc::memory_order_acq_rel) & 0xFFFF'FFFF) == 1;
     }
     /// Strong +1 iff strong != 0. Guards the HIGH half, so concurrent weak traffic cannot end the loop early —
     /// though it can make the CAS spuriously fail, which is the one price fusing charges.
-    static bool try_lock_strong(std::atomic<cc::u64>& c)
+    static bool try_lock_strong(cc::atomic<cc::u64>& c)
     {
-        cc::u64 cur = c.load(std::memory_order_relaxed);
+        cc::u64 cur = c.load(cc::memory_order_relaxed);
         while ((cur >> 32) != 0)
-            if (c.compare_exchange_weak(cur, cur + strong_unit, std::memory_order_acq_rel, std::memory_order_relaxed))
+            if (c.compare_exchange_weak(cur, cur + strong_unit, cc::memory_order_acq_rel, cc::memory_order_relaxed))
                 return true; // strong > 0 held, so the collective weak already exists and is shared
         return false;        // lost the race to the last strong drop -> object is (being) destroyed
     }
 };
-static_assert(std::atomic<cc::u64>::is_always_lock_free, "fused refcounts need a lock-free 64-bit atomic");
+static_assert(cc::atomic<cc::u64>::is_always_lock_free, "fused refcounts need a lock-free 64-bit atomic");
 
 // ============================================================================
 // default_shared_traits — non-intrusive: control trails the payload in the node
@@ -124,7 +124,7 @@ struct default_shared_traits
 {
     struct control
     {
-        std::atomic<cc::u64> counts; // fused strong:weak — see cc::fused_refcount
+        cc::atomic<cc::u64> counts; // fused strong:weak — see cc::fused_refcount
     };
 
     static constexpr bool supports_weak = true;

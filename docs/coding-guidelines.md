@@ -367,6 +367,21 @@ Ideally the only difference is that Release doesn't have `CC_ASSERT` anymore. De
 All functions and types are **single-threaded** ("externally synchronized") by default unless noted.
 Thread-safe types typically include `atomic_` in their name.
 
+**A build may have no threads at all** — WebAssembly, or any build configured `-DSC_THREADS=OFF` (see
+[platforms.md](platforms.md#threading-sc_threads)). `CC_HAS_THREADS` reports which you are in. Two rules
+follow:
+
+- **Use `cc::atomic`, never `std::atomic` directly** ([clean-core/thread/atomic.hh](../libs/base/clean-core/src/clean-core/thread/atomic.hh)).
+  With threads it *is* `std::atomic`; without them it is a plain value with the same API, so a refcount
+  bump is an `add` instead of a `lock xadd`. A hand-written `std::atomic` stays atomic in a build that
+  provably has no concurrency, and no flag can reach it. `<atomic>` is blessed to appear in our headers
+  but not to be called into — see [blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md).
+- **Never gate API on the flag.** Threaded types keep their full surface and fall back to running on the
+  calling thread; document the fallback instead of `#if`-ing the declaration away. `cc::threaded_actor`
+  is the model: same API, and unthreaded the caller drives it. The corollary is that whoever would have
+  blocked must now pump — a wait only the absent thread could satisfy is a deadlock, not a slow path
+  (see [shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/threading.md)).
+
 ---
 
 ## Operators & Overloading

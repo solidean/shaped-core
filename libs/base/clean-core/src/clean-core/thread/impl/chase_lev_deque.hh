@@ -4,8 +4,8 @@
 #include <clean-core/fwd.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/thread/atomic.hh>
 
-#include <atomic>
 #include <type_traits>
 
 // Chase-Lev single-owner / multi-thief lock-free deque — the queue behind cc::async_thread_pool's workers.
@@ -54,13 +54,13 @@ struct chase_lev_deque
     static_assert(std::is_trivially_copyable_v<T>,
                   "a thief reads a slot speculatively and may lose the race for "
                   "it, so a torn or stale read must be harmless");
-    static_assert(std::atomic<T>::is_always_lock_free, "a lock-free deque of lock-ful slots is pointless");
+    static_assert(cc::atomic<T>::is_always_lock_free, "a lock-free deque of lock-ful slots is pointless");
 
     /// `initial_capacity` is rounded up to a power of two (the mask indexing needs one).
     explicit chase_lev_deque(cc::i64 initial_capacity = 256)
     {
         CC_ASSERT(initial_capacity > 0, "capacity must be positive");
-        _ring.store(alloc_ring(cc::bit_ceil(cc::u64(initial_capacity))), std::memory_order_relaxed);
+        _ring.store(alloc_ring(cc::bit_ceil(cc::u64(initial_capacity))), cc::memory_order_relaxed);
     }
 
     /// Frees the live buffer and every buffer a grow retired. Queued VALUES are not touched — see the class note.
@@ -69,7 +69,7 @@ struct chase_lev_deque
         // Safe to free the retired buffers only because no thief can still be reading one. That is not a
         // property of this class: it is the pool's destructor joining every worker before destroying any deque.
         // See ~async_thread_pool.
-        ring* r = _ring.load(std::memory_order_relaxed);
+        ring* r = _ring.load(cc::memory_order_relaxed);
         while (r != nullptr)
         {
             ring* const older = r->older;
@@ -86,36 +86,36 @@ struct chase_lev_deque
     /// Owner only. Grows on demand.
     void push(T v)
     {
-        cc::i64 const b = _bottom.load(std::memory_order_relaxed);
-        cc::i64 const t = _top.load(std::memory_order_acquire);
-        ring* a = _ring.load(std::memory_order_relaxed);
+        cc::i64 const b = _bottom.load(cc::memory_order_relaxed);
+        cc::i64 const t = _top.load(cc::memory_order_acquire);
+        ring* a = _ring.load(cc::memory_order_relaxed);
 
         if (b - t > a->mask) // size would exceed capacity - 1
             a = grow(a, b, t);
 
         a->put(b, v);
-        std::atomic_thread_fence(std::memory_order_release); // the slot store must land before the publish
-        _bottom.store(b + 1, std::memory_order_relaxed);     // the publish. RELAXED -- see the note in the pool's
-                                                             // wake path, which needs its own fence because of it.
+        cc::atomic_thread_fence(cc::memory_order_release); // the slot store must land before the publish
+        _bottom.store(b + 1, cc::memory_order_relaxed);    // the publish. RELAXED -- see the note in the pool's
+                                                           // wake path, which needs its own fence because of it.
     }
 
     /// Owner only. Takes the newest entry (LIFO). False if empty, or if a thief won the last one — `out` is only
     /// meaningful when this returns true, and is clobbered otherwise.
     [[nodiscard]] bool try_take(T& out)
     {
-        cc::i64 const b = _bottom.load(std::memory_order_relaxed) - 1;
-        ring* const a = _ring.load(std::memory_order_relaxed);
-        _bottom.store(b, std::memory_order_relaxed); // claim it speculatively
+        cc::i64 const b = _bottom.load(cc::memory_order_relaxed) - 1;
+        ring* const a = _ring.load(cc::memory_order_relaxed);
+        _bottom.store(b, cc::memory_order_relaxed); // claim it speculatively
 
         // Half of the Dekker against try_steal: we store _bottom then load _top; a thief stores _top then loads
         // _bottom. Sequential consistency over the two fences means at least one side sees the other, which is
         // exactly what stops the last element being taken twice -- or lost by both.
-        std::atomic_thread_fence(std::memory_order_seq_cst);
-        cc::i64 t = _top.load(std::memory_order_relaxed);
+        cc::atomic_thread_fence(cc::memory_order_seq_cst);
+        cc::i64 t = _top.load(cc::memory_order_relaxed);
 
         if (t > b) // empty
         {
-            _bottom.store(b + 1, std::memory_order_relaxed);
+            _bottom.store(b + 1, cc::memory_order_relaxed);
             return false;
         }
 
@@ -124,31 +124,31 @@ struct chase_lev_deque
             return true; // more than one entry: no thief can be after this one
 
         // exactly one entry left, and a thief may want the same one -- settle it on _top
-        bool const won = _top.compare_exchange_strong(t, t + 1, std::memory_order_seq_cst, std::memory_order_relaxed);
-        _bottom.store(b + 1, std::memory_order_relaxed); // empty either way
+        bool const won = _top.compare_exchange_strong(t, t + 1, cc::memory_order_seq_cst, cc::memory_order_relaxed);
+        _bottom.store(b + 1, cc::memory_order_relaxed); // empty either way
         return won;
     }
 
     /// Any thread except the owner. Takes the oldest entry (FIFO). `out` is only meaningful on `success`.
     [[nodiscard]] steal_result try_steal(T& out)
     {
-        cc::i64 t = _top.load(std::memory_order_acquire);
-        std::atomic_thread_fence(std::memory_order_seq_cst); // the other half of try_take's Dekker
-        cc::i64 const b = _bottom.load(std::memory_order_acquire);
+        cc::i64 t = _top.load(cc::memory_order_acquire);
+        cc::atomic_thread_fence(cc::memory_order_seq_cst); // the other half of try_take's Dekker
+        cc::i64 const b = _bottom.load(cc::memory_order_acquire);
 
         if (t >= b)
             return steal_result::empty;
 
         // AFTER _top, never before: a concurrent grow may have swapped the buffer, and the ordering is what
         // guarantees we do not read through a pointer older than the index we validated.
-        ring* const a = _ring.load(std::memory_order_acquire);
+        ring* const a = _ring.load(cc::memory_order_acquire);
 
         // Speculative: this slot may already belong to someone else. Only the CAS below decides. This read is
         // why T must be trivially copyable -- reading a stale value must be harmless, and the caller must not
         // look at `out` unless we return success.
         out = a->get(t);
 
-        if (!_top.compare_exchange_strong(t, t + 1, std::memory_order_seq_cst, std::memory_order_relaxed))
+        if (!_top.compare_exchange_strong(t, t + 1, cc::memory_order_seq_cst, cc::memory_order_relaxed))
             return steal_result::abort;
         return steal_result::success;
     }
@@ -156,13 +156,13 @@ struct chase_lev_deque
     /// Racy by construction — for heuristics and stats, never for control flow that must be correct.
     [[nodiscard]] cc::i64 size_estimate() const
     {
-        cc::i64 const b = _bottom.load(std::memory_order_relaxed);
-        cc::i64 const t = _top.load(std::memory_order_relaxed);
+        cc::i64 const b = _bottom.load(cc::memory_order_relaxed);
+        cc::i64 const t = _top.load(cc::memory_order_relaxed);
         return b - t > 0 ? b - t : 0;
     }
 
     /// Live buffer capacity. Test/diagnostic only; grows behind your back.
-    [[nodiscard]] cc::i64 capacity() const { return _ring.load(std::memory_order_relaxed)->mask + 1; }
+    [[nodiscard]] cc::i64 capacity() const { return _ring.load(cc::memory_order_relaxed)->mask + 1; }
 
 private:
     // One heap block: this header followed by its slots. `older` chains retired buffers for the destructor.
@@ -171,18 +171,18 @@ private:
         cc::i64 mask;
         ring* older;
 
-        [[nodiscard]] std::atomic<T>* slots() { return reinterpret_cast<std::atomic<T>*>(this + 1); }
+        [[nodiscard]] cc::atomic<T>* slots() { return reinterpret_cast<cc::atomic<T>*>(this + 1); }
 
-        [[nodiscard]] T get(cc::i64 i) { return slots()[i & mask].load(std::memory_order_relaxed); }
-        void put(cc::i64 i, T v) { slots()[i & mask].store(v, std::memory_order_relaxed); }
+        [[nodiscard]] T get(cc::i64 i) { return slots()[i & mask].load(cc::memory_order_relaxed); }
+        void put(cc::i64 i, T v) { slots()[i & mask].store(v, cc::memory_order_relaxed); }
     };
-    static_assert(alignof(std::atomic<T>) <= alignof(ring), "the slots trail the header at alignof(ring)");
+    static_assert(alignof(cc::atomic<T>) <= alignof(ring), "the slots trail the header at alignof(ring)");
 
     [[nodiscard]] static ring* alloc_ring(cc::i64 cap)
     {
         CC_ASSERT(cc::has_single_bit(cc::u64(cap)), "capacity must be a power of two");
 
-        cc::isize const bytes = cc::isize(sizeof(ring)) + cap * cc::isize(sizeof(std::atomic<T>));
+        cc::isize const bytes = cc::isize(sizeof(ring)) + cap * cc::isize(sizeof(cc::atomic<T>));
         cc::byte* p = nullptr;
         cc::default_memory_resource->allocate_bytes(&p, bytes, bytes, alignof(ring),
                                                     cc::default_memory_resource->userdata);
@@ -191,13 +191,13 @@ private:
         r->mask = cap - 1;
         r->older = nullptr;
         for (cc::i64 i = 0; i < cap; ++i)
-            new (cc::placement_new, r->slots() + i) std::atomic<T>();
+            new (cc::placement_new, r->slots() + i) cc::atomic<T>();
         return r;
     }
 
     static void free_ring(ring* r)
     {
-        cc::isize const bytes = cc::isize(sizeof(ring)) + (r->mask + 1) * cc::isize(sizeof(std::atomic<T>));
+        cc::isize const bytes = cc::isize(sizeof(ring)) + (r->mask + 1) * cc::isize(sizeof(cc::atomic<T>));
         cc::default_memory_resource->deallocate_bytes(reinterpret_cast<cc::byte*>(r), bytes, alignof(ring),
                                                       cc::default_memory_resource->userdata);
     }
@@ -217,15 +217,15 @@ private:
             fresh->put(i, old->get(i));
 
         fresh->older = old;
-        _ring.store(fresh, std::memory_order_release);
+        _ring.store(fresh, cc::memory_order_release);
         return fresh;
     }
 
     // Each on its own line. The owner writes _bottom on every push; thieves CAS _top on every steal; _ring is
     // read by both and written almost never. Sharing a line between any two of these would turn every push into
     // an invalidation of whatever the thieves are polling -- the exact traffic this deque exists to avoid.
-    alignas(64) std::atomic<cc::i64> _top{0};
-    alignas(64) std::atomic<cc::i64> _bottom{0};
-    alignas(64) std::atomic<ring*> _ring{nullptr};
+    alignas(64) cc::atomic<cc::i64> _top{0};
+    alignas(64) cc::atomic<cc::i64> _bottom{0};
+    alignas(64) cc::atomic<ring*> _ring{nullptr};
 };
 } // namespace cc::impl

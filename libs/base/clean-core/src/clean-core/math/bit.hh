@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <bit>
 
 // =========================================================================================================
@@ -31,12 +30,8 @@
 // Population count:
 //   popcount(value)                         - count number of 1 bits in unsigned integer
 //
-// Atomic operations:
-//   atomic_add(value, rhs)                  - atomically add rhs to value, return old value
-//   atomic_sub(value, rhs)                  - atomically subtract rhs from value, return old value
-//   atomic_and(value, rhs)                  - atomically AND rhs with value, return old value
-//   atomic_or(value, rhs)                   - atomically OR rhs with value, return old value
-//   atomic_xor(value, rhs)                  - atomically XOR rhs with value, return old value
+// Atomic read-modify-write on a plain lvalue (atomic_add / _sub / _and / _or / _xor) lives in
+// clean-core/thread/atomic.hh, next to cc::atomic.
 //
 
 namespace cc
@@ -190,64 +185,5 @@ template <class T>
 ///   auto count = cc::popcount(u8(0));           // 0
 ///   auto count = cc::popcount(u8(0xFF));        // 8
 using std::popcount;
-
-// =========================================================================================================
-// Atomic operations
-// =========================================================================================================
-
-/// Atomically adds a value and returns the old value
-/// Creates a temporary atomic_ref and performs fetch_add
-/// Usage:
-///   int counter = 0;
-///   int old_val = cc::atomic_add(counter, 1);  // counter is now 1, old_val is 0
-template <class T>
-T atomic_add(T& v, T rhs) noexcept
-{
-    return std::atomic_ref<T>(v).fetch_add(rhs);
-}
-
-/// Atomically subtracts a value and returns the old value
-/// Creates a temporary atomic_ref and performs fetch_sub
-/// Usage:
-///   int counter = 10;
-///   int old_val = cc::atomic_sub(counter, 3);  // counter is now 7, old_val is 10
-template <class T>
-T atomic_sub(T& v, T rhs) noexcept
-{
-    return std::atomic_ref<T>(v).fetch_sub(rhs);
-}
-
-/// Atomically performs bitwise AND and returns the old value
-/// Creates a temporary atomic_ref and performs fetch_and
-/// Usage:
-///   int flags = 0b1111;
-///   int old_val = cc::atomic_and(flags, 0b1100);  // flags is now 0b1100, old_val is 0b1111
-template <class T>
-T atomic_and(T& v, T rhs) noexcept
-{
-    return std::atomic_ref<T>(v).fetch_and(rhs);
-}
-
-/// Atomically performs bitwise OR and returns the old value
-/// Creates a temporary atomic_ref and performs fetch_or
-/// Usage:
-///   int flags = 0b0011;
-///   int old_val = cc::atomic_or(flags, 0b1100);  // flags is now 0b1111, old_val is 0b0011
-template <class T>
-T atomic_or(T& v, T rhs) noexcept
-{
-    return std::atomic_ref<T>(v).fetch_or(rhs);
-}
-
-/// Atomically performs bitwise XOR and returns the old value
-/// Creates a temporary atomic_ref and performs fetch_xor
-/// Usage:
-///   int flags = 0b0011;
-///   int old_val = cc::atomic_xor(flags, 0b1100);  // flags is now 0b1111, old_val is 0b0011
-template <class T>
-T atomic_xor(T& v, T rhs) noexcept
-{
-    return std::atomic_ref<T>(v).fetch_xor(rhs);
-}
 
 } // namespace cc

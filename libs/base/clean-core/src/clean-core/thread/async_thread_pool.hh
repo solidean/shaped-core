@@ -8,12 +8,12 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/chase_lev_deque.hh>
 #include <clean-core/thread/mutex.hh>
 
 #if CC_HAS_THREADS
 
-#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -115,7 +115,7 @@ private:
 
         // External slots only (index >= _thread_count). Foreign blocking_get callers claim one for the duration
         // of their drive; worker slots are never claimed.
-        std::atomic<bool> claimed{false};
+        cc::atomic<bool> claimed{false};
     };
 
     void worker_main(worker& w);
@@ -161,15 +161,15 @@ private:
     // argues for _bottom. The POLLER TOKEN IS NOT — it is mutual exclusion, so it can make a scan miss work that
     // is really there. On a spin round that costs nothing (we loop again); on the pre-sleep re-scan it would
     // strand a node with every worker asleep. Hence try_get_work(authoritative=true) skips both filters.
-    alignas(64) std::atomic<int> _injection_hint{0};
-    std::atomic<int> _injection_poller{0};
+    alignas(64) cc::atomic<int> _injection_hint{0};
+    cc::atomic<int> _injection_poller{0};
 
     // The wake state. There is deliberately no counter of claimable tasks here: a worker's scan of the deques
     // already answers "is there work", authoritatively and without shared writes, so a counter would be a
     // hot-path RMW serving a cold-path question. See the protocol block in the .cc.
-    alignas(64) std::atomic<cc::i64> _wake_epoch{0}; // bumped only when a sleeper actually needs waking
-    std::atomic<int> _sleepers{0};                   // workers blocked on (or committing to) _wait_cv
-    std::atomic<bool> _stop{false};
+    alignas(64) cc::atomic<cc::i64> _wake_epoch{0}; // bumped only when a sleeper actually needs waking
+    cc::atomic<int> _sleepers{0};                   // workers blocked on (or committing to) _wait_cv
+    cc::atomic<bool> _stop{false};
     std::mutex _wait_m;
     std::condition_variable _wait_cv;
 };

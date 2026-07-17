@@ -1,7 +1,7 @@
 #include <clean-core/memory/shared_ptr.hh>
+#include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 
-#include <atomic>
 #include <thread>
 
 // Isolated tests for cc::shared_ptr / cc::weak_ptr. Two layouts are exercised: the default trailing-control
@@ -37,8 +37,8 @@ struct node_base
     static inline int freed = 0;
     static void reset() { payload_torn = freed = 0; }
 
-    std::atomic<cc::u32> strong{0};
-    std::atomic<cc::u32> weak{0};
+    cc::atomic<cc::u32> strong{0};
+    cc::atomic<cc::u32> weak{0};
     cc::node_class_index cls{}; // concrete size class, stashed so free frees the right (derived) size
 
     virtual void teardown_payload() = 0; // destroy the payload only; leaves the counts alive for weak refs
@@ -66,21 +66,21 @@ struct node_traits
 
     static void init_control(node_base* p)
     {
-        p->strong.store(1, std::memory_order_relaxed);
-        p->weak.store(1, std::memory_order_relaxed);
+        p->strong.store(1, cc::memory_order_relaxed);
+        p->weak.store(1, cc::memory_order_relaxed);
     }
-    static void inc_strong(node_base* p) { p->strong.fetch_add(1, std::memory_order_relaxed); }
+    static void inc_strong(node_base* p) { p->strong.fetch_add(1, cc::memory_order_relaxed); }
     static cc::shared_release release_strong(node_base* p)
     {
-        return {p->strong.fetch_sub(1, std::memory_order_acq_rel) == 1, false};
+        return {p->strong.fetch_sub(1, cc::memory_order_acq_rel) == 1, false};
     }
-    static void inc_weak(node_base* p) { p->weak.fetch_add(1, std::memory_order_relaxed); }
-    static bool release_weak(node_base* p) { return p->weak.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+    static void inc_weak(node_base* p) { p->weak.fetch_add(1, cc::memory_order_relaxed); }
+    static bool release_weak(node_base* p) { return p->weak.fetch_sub(1, cc::memory_order_acq_rel) == 1; }
     static bool try_lock_strong(node_base* p)
     {
-        cc::u32 cur = p->strong.load(std::memory_order_relaxed);
+        cc::u32 cur = p->strong.load(cc::memory_order_relaxed);
         while (cur != 0)
-            if (p->strong.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel, std::memory_order_relaxed))
+            if (p->strong.compare_exchange_weak(cur, cur + 1, cc::memory_order_acq_rel, cc::memory_order_relaxed))
                 return true;
         return false;
     }
@@ -103,7 +103,7 @@ struct only_strong
     static inline int freed = 0;
     static void reset() { torn = freed = 0; }
 
-    std::atomic<cc::u32> strong{0};
+    cc::atomic<cc::u32> strong{0};
     int value;
     explicit only_strong(int v) : value(v) {}
 };
@@ -113,11 +113,11 @@ struct only_strong_traits
     static constexpr bool supports_weak = false;
     static constexpr cc::isize node_size(cc::isize psize, cc::isize) { return psize; }
     static constexpr cc::isize node_align(cc::isize palign) { return palign; }
-    static void init_control(only_strong* p) { p->strong.store(1, std::memory_order_relaxed); }
-    static void inc_strong(only_strong* p) { p->strong.fetch_add(1, std::memory_order_relaxed); }
+    static void init_control(only_strong* p) { p->strong.store(1, cc::memory_order_relaxed); }
+    static void inc_strong(only_strong* p) { p->strong.fetch_add(1, cc::memory_order_relaxed); }
     static cc::shared_release release_strong(only_strong* p)
     {
-        bool const last = p->strong.fetch_sub(1, std::memory_order_acq_rel) == 1;
+        bool const last = p->strong.fetch_sub(1, cc::memory_order_acq_rel) == 1;
         return {last, last}; // no weak count to wait on: destroy and free together
     }
     static void destroy_object(only_strong* p) { ++only_strong::torn; }
@@ -411,11 +411,11 @@ TEST("shared_ptr - strong-only traits: no weak, destroy + free together")
 // handles that use it. strong lives in the high 32 bits, weak in the low 32.
 namespace
 {
-cc::u64 strong_of(std::atomic<cc::u64> const& c)
+cc::u64 strong_of(cc::atomic<cc::u64> const& c)
 {
     return c.load() >> 32;
 }
-cc::u64 weak_of(std::atomic<cc::u64> const& c)
+cc::u64 weak_of(cc::atomic<cc::u64> const& c)
 {
     return c.load() & 0xFFFF'FFFF;
 }
@@ -426,7 +426,7 @@ TEST("fused_refcount - init, inc, and the half layout")
     using fr = cc::fused_refcount;
     static_assert(fr::sole_owner == ((cc::u64(1) << 32) | 1));
 
-    std::atomic<cc::u64> c{0};
+    cc::atomic<cc::u64> c{0};
     fr::init(c);
     CHECK(c.load() == fr::sole_owner);
     CHECK(strong_of(c) == 1);
@@ -444,7 +444,7 @@ TEST("fused_refcount - init, inc, and the half layout")
 TEST("fused_refcount - release_strong reports destroy/free per the protocol")
 {
     using fr = cc::fused_refcount;
-    std::atomic<cc::u64> c{0};
+    cc::atomic<cc::u64> c{0};
 
     // (2,2): not the last strong -> nothing to do.
     fr::init(c);
@@ -488,10 +488,10 @@ namespace
 {
 struct race_node
 {
-    static inline std::atomic<int> torn{0};
-    static inline std::atomic<int> freed{0};
-    static inline std::atomic<bool> tearing{false};
-    static inline std::atomic<int> freed_during_teardown{0};
+    static inline cc::atomic<int> torn{0};
+    static inline cc::atomic<int> freed{0};
+    static inline cc::atomic<bool> tearing{false};
+    static inline cc::atomic<int> freed_during_teardown{0};
     static void reset()
     {
         torn = 0;
@@ -500,19 +500,19 @@ struct race_node
         freed_during_teardown = 0;
     }
 
-    std::atomic<cc::u64> counts{0};
+    cc::atomic<cc::u64> counts{0};
 
     void teardown_payload()
     {
-        tearing.store(true, std::memory_order_release);
+        tearing.store(true, cc::memory_order_release);
         for (int i = 0; i < 400; ++i) // hold the window open so a racing weak drop can hit it
-            _sink.fetch_add(1, std::memory_order_relaxed);
-        tearing.store(false, std::memory_order_release);
-        torn.fetch_add(1, std::memory_order_relaxed);
+            _sink.fetch_add(1, cc::memory_order_relaxed);
+        tearing.store(false, cc::memory_order_release);
+        torn.fetch_add(1, cc::memory_order_relaxed);
     }
 
 private:
-    static inline std::atomic<int> _sink{0};
+    static inline cc::atomic<int> _sink{0};
 };
 
 struct race_traits
@@ -530,9 +530,9 @@ struct race_traits
     static void destroy_object(race_node* p) { p->teardown_payload(); }
     static void free_storage(race_node* p)
     {
-        if (race_node::tearing.load(std::memory_order_acquire))
-            race_node::freed_during_teardown.fetch_add(1, std::memory_order_relaxed);
-        race_node::freed.fetch_add(1, std::memory_order_relaxed);
+        if (race_node::tearing.load(cc::memory_order_acquire))
+            race_node::freed_during_teardown.fetch_add(1, cc::memory_order_relaxed);
+        race_node::freed.fetch_add(1, cc::memory_order_relaxed);
         cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), cc::node_class_index_for<race_node>());
     }
 };
@@ -549,22 +549,22 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
 
         // Spawning costs far more than the teardown window, so the worker must already be spinning before the
         // strong drop starts — otherwise the two never overlap and the test samples nothing.
-        std::atomic<bool> spinning{false};
-        std::atomic<bool> go{false};
+        cc::atomic<bool> spinning{false};
+        cc::atomic<bool> go{false};
         std::thread t(
             [&]
             {
-                spinning.store(true, std::memory_order_release);
-                while (!go.load(std::memory_order_acquire))
+                spinning.store(true, cc::memory_order_release);
+                while (!go.load(cc::memory_order_acquire))
                 {
                 }
                 w.reset(); // races the last strong drop below
             });
-        while (!spinning.load(std::memory_order_acquire))
+        while (!spinning.load(cc::memory_order_acquire))
         {
         }
 
-        go.store(true, std::memory_order_release);
+        go.store(true, cc::memory_order_release);
         p.reset(); // last strong: destroy_object, THEN the collective weak
         t.join();
 
@@ -577,7 +577,7 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
 TEST("fused_refcount - try_lock_strong follows the high half only")
 {
     using fr = cc::fused_refcount;
-    std::atomic<cc::u64> c{0};
+    cc::atomic<cc::u64> c{0};
     fr::init(c);
 
     CHECK(fr::try_lock_strong(c)); // strong > 0 -> upgrade succeeds

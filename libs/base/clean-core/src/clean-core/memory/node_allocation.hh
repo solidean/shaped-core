@@ -3,8 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/math/bit.hh>
-
-#include <atomic>
+#include <clean-core/thread/atomic.hh>
 
 /// Newtype for size class index (0, 1, 2, ...) to prevent API confusion.
 /// The index i maps to actual size 2^i bytes.
@@ -255,7 +254,7 @@ CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
     }
     else // remote thread: the only path that pays an atomic (double-free assert omitted; the read would race)
     {
-        std::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, std::memory_order_relaxed);
+        cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, cc::memory_order_relaxed);
     }
 #else
     auto const freemap = cc::node_slab_freemap_for_base(base);

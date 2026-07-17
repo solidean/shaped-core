@@ -39,9 +39,9 @@
 #include <clean-core/math/bit.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 
-#include <atomic>
 #include <chrono>
 #include <cstdio>
 
@@ -135,7 +135,7 @@ struct VarAtomic
     CC_FORCE_INLINE cc::byte* alloc()
     {
         cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
-        u64 v = std::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).load(std::memory_order_relaxed);
+        u64 v = cc::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).load(cc::memory_order_relaxed);
         if (v == 0) [[unlikely]] // opaque refill (never hit: batch fits the slab) -- defeats base-hoisting
         {
             b = bench_design::cold_refill(b);
@@ -143,14 +143,14 @@ struct VarAtomic
             v = *reinterpret_cast<u64*>(b);
         }
         int const slot = cc::count_trailing_zeroes(v);
-        std::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_and(~(u64(1) << slot), std::memory_order_relaxed); // lock and
+        cc::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_and(~(u64(1) << slot), cc::memory_order_relaxed); // lock and
         return b + DATA_OFF + (isize(slot) << LOG);
     }
     CC_FORCE_INLINE void free(cc::byte* p)
     {
         auto* b = reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
         int const slot = int((p - b - DATA_OFF) >> LOG);
-        std::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_or(u64(1) << slot, std::memory_order_relaxed); // lock or
+        cc::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_or(u64(1) << slot, cc::memory_order_relaxed); // lock or
     }
 };
 
@@ -221,7 +221,7 @@ struct VarStep1
         u64 v = local(b);   // plain load
         if (v == 0)         // local empty: drain remote (one atomic), else opaque refill (reloads base per alloc)
         {
-            v = std::atomic_ref<u64>(remote(b)).exchange(0, std::memory_order_relaxed);
+            v = cc::atomic_ref<u64>(remote(b)).exchange(0, cc::memory_order_relaxed);
             if (v == 0) [[unlikely]]
             {
                 b = bench_design::cold_refill(b);
@@ -237,7 +237,7 @@ struct VarStep1
     {
         auto* b = reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
         int const slot = int((p - b - DATA_OFF) >> LOG);
-        std::atomic_ref<u64>(remote(b)).fetch_or(u64(1) << slot, std::memory_order_relaxed); // lock or (always)
+        cc::atomic_ref<u64>(remote(b)).fetch_or(u64(1) << slot, cc::memory_order_relaxed); // lock or (always)
     }
 };
 
@@ -274,7 +274,7 @@ struct VarStep2
         u64 v = local(b);
         if (v == 0) // local empty: drain remote, else opaque refill (reloads base per alloc)
         {
-            v = std::atomic_ref<u64>(remote(b)).exchange(0, std::memory_order_relaxed);
+            v = cc::atomic_ref<u64>(remote(b)).exchange(0, cc::memory_order_relaxed);
             if (v == 0) [[unlikely]]
             {
                 b = bench_design::cold_refill(b);
@@ -294,7 +294,7 @@ struct VarStep2
         if (owner(b) == my_token()) // owner: non-atomic local free (predicted-taken single-thread)
             local(b) |= bit;
         else
-            std::atomic_ref<u64>(remote(b)).fetch_or(bit, std::memory_order_relaxed);
+            cc::atomic_ref<u64>(remote(b)).fetch_or(bit, cc::memory_order_relaxed);
     }
 };
 

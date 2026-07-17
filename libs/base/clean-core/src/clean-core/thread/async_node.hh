@@ -8,8 +8,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/shared_ptr.hh> // cc::shared_ptr / cc::weak_ptr (intrusive node handles)
-
-#include <atomic>
+#include <clean-core/thread/atomic.hh>
 
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency /
 // continuation bookkeeping, the scheduler seam, and the failure-channel value type. The templated public
@@ -576,16 +575,16 @@ struct async_node_base
 {
     // queries
 public:
-    [[nodiscard]] bool is_ready() const { return is_ready_state(load_state(std::memory_order_acquire)); }
+    [[nodiscard]] bool is_ready() const { return is_ready_state(load_state(cc::memory_order_acquire)); }
     [[nodiscard]] bool has_value() const
     {
-        return load_state(std::memory_order_acquire) == async_node_state::ready_value;
+        return load_state(cc::memory_order_acquire) == async_node_state::ready_value;
     }
     [[nodiscard]] bool has_error() const
     {
-        return load_state(std::memory_order_acquire) == async_node_state::ready_error;
+        return load_state(cc::memory_order_acquire) == async_node_state::ready_error;
     }
-    [[nodiscard]] bool is_cold() const { return load_state(std::memory_order_acquire) == async_node_state::cold; }
+    [[nodiscard]] bool is_cold() const { return load_state(cc::memory_order_acquire) == async_node_state::cold; }
 
     // The failure-channel value is typed (E), so it is read/propagated through the typed node (async<T, E>),
     // not here — the base only knows a node HAS an error (has_error), not its type. See async<T, E>::try_error /
@@ -799,7 +798,7 @@ protected:
     /// bits never change afterwards (free_storage reads them at weak 0), so teardown_payload never clears them.
     void set_ops(async_type_ops const* ops)
     {
-        _state_and_ops.store(reinterpret_cast<cc::u64>(ops), std::memory_order_relaxed); // state cold, wake/lock clear
+        _state_and_ops.store(reinterpret_cast<cc::u64>(ops), cc::memory_order_relaxed); // state cold, wake/lock clear
     }
 
     /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain
@@ -808,7 +807,7 @@ protected:
     /// 32-aligned (bits 0..4 free); wake/lock start clear.
     void init_control_word(async_type_ops const* ops, async_node_state state)
     {
-        _state_and_ops.store(reinterpret_cast<cc::u64>(ops) | (cc::u64(state) << state_shift), std::memory_order_relaxed);
+        _state_and_ops.store(reinterpret_cast<cc::u64>(ops) | (cc::u64(state) << state_shift), cc::memory_order_relaxed);
     }
 
     /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
@@ -846,13 +845,13 @@ private:
     {
         return s == async_node_state::ready_value || s == async_node_state::ready_error;
     }
-    [[nodiscard]] async_node_state load_state(std::memory_order o) const
+    [[nodiscard]] async_node_state load_state(cc::memory_order o) const
     {
         return async_node_state((_state_and_ops.load(o) & state_mask) >> state_shift);
     }
     [[nodiscard]] async_type_ops const* ops() const
     {
-        return reinterpret_cast<async_type_ops const*>(_state_and_ops.load(std::memory_order_relaxed) & ops_mask);
+        return reinterpret_cast<async_type_ops const*>(_state_and_ops.load(cc::memory_order_relaxed) & ops_mask);
     }
 
     // Lock protocol: acquire the lock bit via a test-and-test-and-set fetch_or, release via fetch_and. While
@@ -864,33 +863,33 @@ private:
     {
         for (;;)
         {
-            if ((_state_and_ops.fetch_or(lock_bit, std::memory_order_acquire) & lock_bit) == 0)
+            if ((_state_and_ops.fetch_or(lock_bit, cc::memory_order_acquire) & lock_bit) == 0)
                 return; // set it from clear -> acquired
-            while (_state_and_ops.load(std::memory_order_relaxed) & lock_bit)
+            while (_state_and_ops.load(cc::memory_order_relaxed) & lock_bit)
                 ; // spin-read until the holder releases, then retry the RMW
         }
     }
-    void spin_unlock() { _state_and_ops.fetch_and(~lock_bit, std::memory_order_release); }
+    void spin_unlock() { _state_and_ops.fetch_and(~lock_bit, cc::memory_order_release); }
 
     void store_state(async_node_state s) // under lock (or at construction): set state, preserve ops/lock/wake
     {
-        cc::u64 const w = _state_and_ops.load(std::memory_order_relaxed);
-        _state_and_ops.store((w & ~state_mask) | (cc::u64(s) << state_shift), std::memory_order_release);
+        cc::u64 const w = _state_and_ops.load(cc::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask) | (cc::u64(s) << state_shift), cc::memory_order_release);
     }
     void store_state_clear_wake(async_node_state s) // under lock: set state and clear the wake bit together
     {
-        cc::u64 const w = _state_and_ops.load(std::memory_order_relaxed);
-        _state_and_ops.store((w & ~state_mask & ~wake_bit) | (cc::u64(s) << state_shift), std::memory_order_release);
+        cc::u64 const w = _state_and_ops.load(cc::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask & ~wake_bit) | (cc::u64(s) << state_shift), cc::memory_order_release);
     }
     void set_wake()
     {
-        _state_and_ops.store(_state_and_ops.load(std::memory_order_relaxed) | wake_bit, std::memory_order_release);
+        _state_and_ops.store(_state_and_ops.load(cc::memory_order_relaxed) | wake_bit, cc::memory_order_release);
     }
     void clear_wake()
     {
-        _state_and_ops.store(_state_and_ops.load(std::memory_order_relaxed) & ~wake_bit, std::memory_order_release);
+        _state_and_ops.store(_state_and_ops.load(cc::memory_order_relaxed) & ~wake_bit, cc::memory_order_release);
     }
-    [[nodiscard]] bool wake_pending() const { return (_state_and_ops.load(std::memory_order_relaxed) & wake_bit) != 0; }
+    [[nodiscard]] bool wake_pending() const { return (_state_and_ops.load(cc::memory_order_relaxed) & wake_bit) != 0; }
 
     struct lock_scope
     {
@@ -914,7 +913,7 @@ private:
     /// strong owners' collective one) in the low half. Born 1/1 by init_control. Fused into one word (offset 0)
     /// so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the
     /// sole owner — see cc::fused_refcount. The state/lock live in a separate word.
-    std::atomic<cc::u64> _counts{0};
+    cc::atomic<cc::u64> _counts{0};
 
     /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits
     /// 2..4, the wake-pending flag in bit 1, and the spinlock in bit 0. Folding lock + state + wake in with the
@@ -925,7 +924,7 @@ private:
     /// lock RMWs. Deliberate: nearly all is_ready() calls target already-resolved nodes, which take no lock
     /// (completion is done) — no contention there. If a hot pre-completion is_ready() path ever contends,
     /// steal the MSB of _counts' weak half for a dedicated ready bit instead.
-    std::atomic<cc::u64> _state_and_ops{0};
+    cc::atomic<cc::u64> _state_and_ops{0};
 
     // No further members: this is a 16 B header. The payload (unresolved scratch ⊍ resolved value/error, incl.
     // the compute frame) is raw storage declared by the derived async_typed_node<T> at offset 16, via payload().
