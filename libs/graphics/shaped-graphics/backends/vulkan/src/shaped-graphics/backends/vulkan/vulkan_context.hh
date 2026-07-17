@@ -104,6 +104,11 @@ public:
         return cc::error("vulkan memory_heap creation is not implemented yet");
     }
 
+    [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const&) override
+    {
+        return cc::error("vulkan swapchain creation is not implemented yet");
+    }
+
     // Bind path (binding_group_layout / pipeline_layout / compute_pipeline / binding_group) — not implemented yet.
     [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<sg::binding const>,
@@ -121,6 +126,11 @@ public:
                                                                                       sg::lifetime_scope) override
     {
         return cc::error("vulkan compute_pipeline creation is not implemented yet");
+    }
+    [[nodiscard]] cc::result<sg::raster_pipeline_handle> try_create_raster_pipeline(sg::raster_pipeline_description const&,
+                                                                                    sg::lifetime_scope) override
+    {
+        return cc::error("vulkan raster_pipeline creation is not implemented yet");
     }
     [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
         sg::raytracing_pipeline_description const&,

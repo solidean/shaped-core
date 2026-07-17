@@ -35,6 +35,8 @@ class dx12_texture;
 using dx12_texture_handle = std::shared_ptr<dx12_texture const>;
 class dx12_memory_heap;
 using dx12_memory_heap_handle = std::shared_ptr<dx12_memory_heap const>;
+class dx12_swapchain;
+using dx12_swapchain_handle = std::shared_ptr<dx12_swapchain>; // mutable: a per-frame present driver
 
 // Ray-tracing acceleration structures (see dx12_acceleration_structure.hh).
 class dx12_blas;
@@ -48,10 +50,12 @@ struct dx12_descriptor_heap;
 class dx12_binding_group_layout;
 class dx12_pipeline_layout;
 class dx12_compute_pipeline;
+class dx12_raster_pipeline;
 class dx12_binding_group;
 using dx12_binding_group_layout_handle = std::shared_ptr<dx12_binding_group_layout const>;
 using dx12_pipeline_layout_handle = std::shared_ptr<dx12_pipeline_layout const>;
 using dx12_compute_pipeline_handle = std::shared_ptr<dx12_compute_pipeline const>;
+using dx12_raster_pipeline_handle = std::shared_ptr<dx12_raster_pipeline const>;
 using dx12_binding_group_handle = std::shared_ptr<dx12_binding_group const>;
 
 // Ray-tracing pipeline + shader table (see dx12_raytracing_pipeline.hh / dx12_raytracing_shader_table.hh).

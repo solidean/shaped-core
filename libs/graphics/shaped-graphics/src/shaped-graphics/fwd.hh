@@ -27,6 +27,9 @@ class command_list_copy_scope;
 class command_list_compute_scope;
 class command_list_raytracing_scope;
 class command_list_query_scope;
+class command_list_raster_scope;
+class command_list_raster_manual_scope;
+class rendering_scope;
 class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
@@ -35,12 +38,19 @@ struct blas_triangles;              // value type — one triangle geometry inpu
 struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
 struct tlas_instance;               // value type — one instance input to build_tlas
 enum class accel_build_flags : u32; // build-time trade-offs (see acceleration_structure.hh)
-enum class accel_index_format : u8; // index element width for indexed triangles
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
-struct texture_description;         // value type (see raw_texture.hh) — input to create_raw_texture
-enum class pixel_format : u16;      // texel format (see pixel_format.hh)
-enum class texture_usage : u32;     // texture usage flags (see types.hh)
-enum class texture_dimension : u8;  // 1D / 2D / 3D (see raw_texture.hh)
+
+/// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS
+/// triangle indices (blas_triangles). Defined here (not just forward-declared) as a general vocabulary type.
+enum class index_format : u8
+{
+    uint16, // DX12 R16_UINT / Vk INDEX_TYPE_UINT16
+    uint32, // DX12 R32_UINT / Vk INDEX_TYPE_UINT32
+};
+struct texture_description;        // value type (see raw_texture.hh) — input to create_raw_texture
+enum class pixel_format : u16;     // texel format (see pixel_format.hh)
+enum class texture_usage : u32;    // texture usage flags (see types.hh)
+enum class texture_dimension : u8; // 1D / 2D / 3D (see raw_texture.hh)
 class bytes_waiter;
 class bytes_future;
 template <class T>
@@ -76,10 +86,21 @@ enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
 struct raw_view;
 
-// Attachment views (see attachment_views.hh) — a texture bound as a color / depth-stencil target.
+// Render-target / depth-stencil views (see views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.
 class render_target_view;
 class depth_stencil_view;
+
+// Window presentation (see swapchain.hh) — a chain of back buffers presented to an OS window.
+struct swapchain_description; // value type — input to create_swapchain
+class swapchain;
+enum class present_mode : u8; // frame pacing (vsync / immediate)
+
+// Rendering-scope targets (see command_list.raster.hh) — a view plus its begin-op (clear / preserve /
+// discard). Built via the view's .cleared() / .preserved() / .discarded() members.
+enum class target_op : u8;
+struct color_target;
+struct depth_stencil_target;
 
 // Texture samplers (see sampler.hh) — value types, no handle.
 enum class sampler_filter;
@@ -110,6 +131,39 @@ class binding_group;
 struct named_view;    // {name, raw_view} — input to create_binding_group
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
 
+// Raster (graphics) pipeline + its fixed-function state vocabulary (see raster_pipeline.hh and the
+// primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh /
+// vertex_input.hh state headers). All value types unless noted.
+enum class primitive_topology;
+enum class primitive_topology_type;
+enum class fill_mode;
+enum class cull_mode;
+enum class front_face;
+struct rasterization_state;
+enum class blend_factor;
+enum class blend_op;
+enum class color_write_mask : u8;
+struct blend_component;
+struct blend_state;
+enum class stencil_op;
+struct stencil_face;
+struct depth_stencil_state;
+enum class vertex_attribute_format;
+struct vertex_attribute;
+struct vertex_input_slot;
+struct vertex_input_layout;
+struct vertex_type_layout;
+class raster_pipeline;
+struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
+struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
+
+// Draw recording (see command_list.raster.hh) — vertex/index buffer views + draw parameters.
+// (index_format is defined above — shared with raytracing.)
+struct vertex_buffer_view;
+struct index_buffer_view;
+struct draw_config;
+struct draw_indexed_config;
+
 // Ray-tracing pipeline + shader table (see raytracing_pipeline.hh / raytracing_shader_table.hh). A
 // DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.
 class raytracing_pipeline;
@@ -132,6 +186,22 @@ enum class callable_index : u32;
 /// Hard cap on the number of group slots a pipeline_layout can hold (dx12 root-parameter / vulkan set
 /// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `set`.
 inline constexpr int max_binding_groups = 4;
+
+// The next two caps are small because they are real GPU pipeline limits, not arbitrary array sizes: a
+// GPU's output-merger has a fixed handful of color-output slots and its input assembler a fixed handful
+// of vertex-buffer slots. They bound the (fixed_vector) containers holding those bindings, so an overflow
+// is a hard error rather than a silent heap allocation. Chosen as the portable value across tier-1/2
+// backends (the minimum any of them guarantees), so a layout stays portable.
+
+/// Hard cap on simultaneous color render targets in a rendering scope / raster pipeline. 8 is the DX12
+/// (`D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT`) and WebGPU (`maxColorAttachments`) limit; Vulkan guarantees
+/// at least 4 and is 8 on essentially all desktop adapters.
+inline constexpr int max_color_targets = 8;
+
+/// Hard cap on vertex-buffer input slots bound for a draw. 8 is WebGPU's `maxVertexBuffers` — the portable
+/// floor; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16, but capping
+/// at the common denominator keeps a vertex layout portable across every backend.
+inline constexpr int max_vertex_buffers = 8;
 
 /// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
 /// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
@@ -164,9 +234,11 @@ using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immuta
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema
 using pipeline_layout_handle = std::shared_ptr<pipeline_layout const>;           // immutable ordered group layouts
 using compute_pipeline_handle = std::shared_ptr<compute_pipeline const>;
+using raster_pipeline_handle = std::shared_ptr<raster_pipeline const>; // immutable graphics PSO + root signature
 using raytracing_pipeline_handle = std::shared_ptr<raytracing_pipeline const>; // immutable DXR state object + shader ids
 using raytracing_shader_table_handle = std::shared_ptr<raytracing_shader_table const>; // immutable table over a pipeline
 using binding_group_handle = std::shared_ptr<binding_group const>; // immutable once bound (recreate to rebind)
+using swapchain_handle = std::shared_ptr<swapchain>; // mutable: a swapchain is a per-frame driver (acquire/present)
 
 // Async result handles for cached shader compilation / async pipeline build (see context_cached_scope,
 // pipeline_cache, and the shaped-shader-compiler-dxc shader_cache). cc::async<T> cannot hold a const T

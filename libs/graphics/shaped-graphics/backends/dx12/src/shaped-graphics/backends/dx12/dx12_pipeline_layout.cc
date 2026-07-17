@@ -85,7 +85,9 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     desc.pParameters = params.empty() ? nullptr : params.data();
     desc.NumStaticSamplers = UINT(static_sampler_descs.size());
     desc.pStaticSamplers = static_sampler_descs.empty() ? nullptr : static_sampler_descs.data();
-    desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+    // Allow the input assembler so a graphics PSO with a vertex-input layout can use this root signature
+    // (required by CreateGraphicsPipelineState); the flag is inert for compute / ray-tracing pipelines.
+    desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> blob;
     ComPtr<ID3DBlob> error;

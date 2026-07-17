@@ -10,10 +10,12 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.queries.cc
+    src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc
     src/shaped-graphics/backends/dx12/dx12_barrier.cc
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.cc
     src/shaped-graphics/backends/dx12/dx12_buffer.cc
     src/shaped-graphics/backends/dx12/dx12_texture.cc
+    src/shaped-graphics/backends/dx12/dx12_swapchain.cc
     src/shaped-graphics/backends/dx12/dx12_format.cc
     src/shaped-graphics/backends/dx12/dx12_memory_heap.cc
     src/shaped-graphics/backends/dx12/dx12_upload_inline.cc
@@ -23,6 +25,8 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_group_layout.cc
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.cc
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.cc
+    src/shaped-graphics/backends/dx12/dx12_raster_pipeline.cc
+    src/shaped-graphics/backends/dx12/dx12_raster_state.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.cc
     src/shaped-graphics/backends/dx12/dx12_binding_group.cc
@@ -51,6 +55,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh
     src/shaped-graphics/backends/dx12/dx12_buffer.hh
     src/shaped-graphics/backends/dx12/dx12_texture.hh
+    src/shaped-graphics/backends/dx12/dx12_swapchain.hh
     src/shaped-graphics/backends/dx12/dx12_format.hh
     src/shaped-graphics/backends/dx12/dx12_memory_heap.hh
     src/shaped-graphics/backends/dx12/dx12_resource_upload.hh
@@ -67,6 +72,8 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_binding_group_layout.hh
     src/shaped-graphics/backends/dx12/dx12_pipeline_layout.hh
     src/shaped-graphics/backends/dx12/dx12_compute_pipeline.hh
+    src/shaped-graphics/backends/dx12/dx12_raster_pipeline.hh
+    src/shaped-graphics/backends/dx12/dx12_raster_state.hh
     src/shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh
     src/shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh
     src/shaped-graphics/backends/dx12/dx12_binding_group.hh
@@ -116,6 +123,8 @@ if(SC_BUILD_TESTS)
         tests/dx12-texture-barrier-test.cc
         tests/dx12-texture-view-test.cc
         tests/dx12-rtv-dsv-test.cc
+        tests/dx12-clear-test.cc
+        tests/dx12-swapchain-test.cc
         tests/dx12-sampler-test.cc
         tests/dx12-texture-copy-test.cc
         tests/dx12-raytracing-test.cc

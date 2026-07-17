@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backend/subresource.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
@@ -45,6 +47,12 @@ public:
     /// bound/touched resources implied), in one `Barrier` call, then clear the pending set. Called just
     /// before every GPU op that consumes them, and by the context at submit for the finalize reverts.
     void flush_barriers();
+
+    /// Transition the whole of `texture` to `layout` and record the barrier immediately (declare + flush).
+    /// The new layout becomes the texture's canonical state when this list submits. Used by the swapchain
+    /// to hand a back buffer to Present (sg::texture_layout::present); the transition is computed from the
+    /// texture's tracked layout, so it composes with whatever the frame's render pass left it in.
+    void transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout);
 
     /// Resolve every leased query heap into one transient buffer and start one inline readback per heap,
     /// filling each heap's shared future in place. Records GPU work, so it must run before Close and is
@@ -99,6 +107,26 @@ public:
     // submit) that are emitted before Close — unlike buffers, which are teeth-free.
     cc::vector<dx12_texture_handle> _touched_textures;
 
+    // Raster rendering-scope state. begin_rendering sets _in_render_pass and records the RTV/DSV descriptor
+    // slots it created for the pass; end_rendering schedules their epoch-deferred free (they must outlive the
+    // list's GPU execution) and clears these. At most one scope is open at a time (begin/end are balanced).
+    bool _in_render_pass = false;
+    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rendering_rtv_slots;
+    cpu_descriptor_slot _rendering_dsv_slot = cpu_descriptor_slot::invalid;
+
+    // Raster (graphics) bind state — separate from the compute/RT bind state above because graphics uses a
+    // distinct root-signature bind point (SetGraphicsRootSignature / SetGraphicsRootDescriptorTable). The
+    // bound layout supplies each slot's root-parameter indices; one bound group per slot, declared at draw.
+    // Both reset on raster_bind_pipeline.
+    dx12_pipeline_layout const* _bound_raster_layout = nullptr;
+    cc::vector<dx12_binding_group const*> _bound_raster_groups;
+
+    // Vertex / index buffers currently bound to the IA (slot-indexed; null entries are unbound slots). Kept
+    // so their vertex_read / index_read accesses can be declared for hazard barriers at draw time (the
+    // point the GPU reads them), the same rhythm compute uses for its bound groups.
+    cc::fixed_vector<dx12_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
+    dx12_buffer_handle _bound_index_buffer;
+
     // Highest async-upload completion value any buffer this list touches is waiting on. At submit the
     // direct queue waits on the copy fence for this value, so the list sees the async writes. `none`
     // means no touched buffer had a pending async upload. Maintained by track_buffer_access; the reverse
@@ -146,6 +174,25 @@ protected:
                                               cc::span<sg::array_texture_access const> elements) override;
     void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
 
+    // Raster rendering scope (reached through cmd.raster). Bodies in dx12_command_list.raster.cc.
+    void raster_begin_rendering(sg::rendering_info const& info) override;
+    void raster_end_rendering() override;
+
+    // Raster draw recording (reached through cmd.raster / cmd.raster.manual). Bodies in dx12_command_list.raster.cc.
+    // bind_pipeline binds the graphics root signature + PSO + IA topology; the rest configure IA / dynamic
+    // state and record draws through the graphics bind point. Valid only inside an open rendering scope.
+    void raster_bind_pipeline(sg::raster_pipeline const& pipeline) override;
+    void raster_bind_group(int set, sg::binding_group const& group) override;
+    void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
+    void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_set_viewport(sg::viewport const& vp) override;
+    void raster_set_scissor(tg::aabb2i const& rect) override;
+    void raster_set_stencil_reference(sg::u32 reference) override;
+    void raster_set_blend_constants(tg::vec4f constants) override;
+    void raster_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
+    void raster_draw(sg::draw_config const& config) override;
+    void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
@@ -187,12 +234,17 @@ private:
 
     // Declare `stages`/`access`/`layout` over `range` on `texture` for this list's slot, emit the per-box
     // layout-transition barriers the tracker asks for, and record the texture so its slot is finalized at
-    // submit/drop. No public op calls this yet — it is the wired, tested bridge a future texture copy /
-    // upload / dispatch op will use.
+    // submit/drop. Driven by download_bytes_from_texture and the raster rendering scope (render-target /
+    // depth-stencil transitions); future texture copy / upload / dispatch ops will use it too.
     void track_texture_access(dx12_texture_handle const& texture,
                               sg::subresource_range range,
                               sg::pipeline_stage_flags stages,
                               sg::access_flags access,
                               sg::texture_layout layout);
+
+    // Declare the hazard accesses a draw consumes before flushing: each bound group's buffer/texture views
+    // (like compute_dispatch) plus the bound vertex buffers and, when `indexed`, the index buffer. Called
+    // by raster_draw / raster_draw_indexed just before flush_barriers + the draw.
+    void declare_raster_draw_barriers(bool indexed);
 };
 } // namespace sg::backend::dx12

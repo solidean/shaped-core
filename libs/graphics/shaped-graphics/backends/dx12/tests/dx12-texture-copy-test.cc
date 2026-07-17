@@ -91,22 +91,22 @@ TEST("sg dx12 - texture upload/download round-trip pads + un-pads rows")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     constexpr int W = 8, H = 8, N = W * H;
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
+    REQUIRE(tex != nullptr);
 
     // 8×8 R32_FLOAT: a tight row is 32 bytes, staged at a 256-byte pitch — so this exercises the padding.
     float src[N];
     for (int i = 0; i < N; ++i)
         src[i] = float(i) + 0.5f;
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(src, N)));
-    auto future = cmd.value()->download.bytes_from_texture(tex.value());
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(tex, cc::as_bytes(cc::span<float const>(src, N)));
+    auto future = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
@@ -123,11 +123,11 @@ TEST("sg dx12 - texture upload into a sub-region leaves the rest untouched")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     constexpr int W = 8, H = 8, N = W * H;
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
+    REQUIRE(tex != nullptr);
 
     float zeros[N] = {};
     // A 4×3 patch of 1..12, uploaded at offset (2, 1).
@@ -136,13 +136,13 @@ TEST("sg dx12 - texture upload into a sub-region leaves the rest untouched")
     for (int i = 0; i < RW * RH; ++i)
         patch[i] = float(i + 1);
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(zeros, N)));
-    cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(patch, RW * RH)), {},
-                                         sg::texture_region{.offset = tg::pos3i(2, 1, 0), .size = tg::vec3i(RW, RH, 1)});
-    auto future = cmd.value()->download.bytes_from_texture(tex.value());
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(tex, cc::as_bytes(cc::span<float const>(zeros, N)));
+    cmd->upload.bytes_to_texture(tex, cc::as_bytes(cc::span<float const>(patch, RW * RH)), {},
+                                 sg::texture_region{.offset = tg::pos3i(2, 1, 0), .size = tg::vec3i(RW, RH, 1)});
+    auto future = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
@@ -163,11 +163,11 @@ TEST("sg dx12 - async texture upload/download round-trip on the copy queue")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     constexpr int W = 8, H = 8, N = W * H;
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
+    REQUIRE(tex != nullptr);
 
     float src[N];
     for (int i = 0; i < N; ++i)
@@ -175,8 +175,8 @@ TEST("sg dx12 - async texture upload/download round-trip on the copy queue")
 
     // ctx.upload / ctx.download run on dedicated copy queues; the readback waits on the upload's completion
     // fence automatically (both cross-queue syncs go through the texture's pending stamps).
-    handle->upload.bytes_to_texture(tex.value(), cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
-    auto future = handle->download.bytes_from_texture(tex.value());
+    handle->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
+    auto future = handle->download.bytes_from_texture(tex);
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
@@ -193,11 +193,11 @@ TEST("sg dx12 - an inline readback waits on a pending async texture upload")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     constexpr int W = 8, H = 8, N = W * H;
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
+    REQUIRE(tex != nullptr);
 
     float src[N];
     for (int i = 0; i < N; ++i)
@@ -205,12 +205,12 @@ TEST("sg dx12 - an inline readback waits on a pending async texture upload")
 
     // Async upload on the copy queue, then an inline readback in a direct-queue list. The inline list must
     // wait on the async upload's completion fence (folded in via track_texture_access) to observe the write.
-    handle->upload.bytes_to_texture(tex.value(), cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
+    handle->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    auto future = cmd.value()->download.bytes_from_texture(tex.value());
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto future = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
@@ -368,18 +368,17 @@ TEST("sg dx12 - async texture copy splits across staging windows")
         {.use_warp = true, .async_upload_window_bytes = 512, .async_download_window_bytes = 512});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
-    auto& c = static_cast<dx12::dx12_context&>(*ctx);
 
     constexpr int W = 8, H = 8, N = W * H;
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = ctx->persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
+    REQUIRE(tex != nullptr);
 
     float src[N];
     for (int i = 0; i < N; ++i)
         src[i] = float(i) - 0.5f;
 
-    ctx->upload.bytes_to_texture(tex.value(), cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
-    auto fut = ctx->download.bytes_from_texture(tex.value());
+    ctx->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
+    auto fut = ctx->download.bytes_from_texture(tex);
 
     auto const bytes = ctx->wait_for(fut);
     REQUIRE(bytes.has_value());
@@ -396,28 +395,28 @@ TEST("sg dx12 - an empty texture region is a no-op")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     constexpr int W = 4, H = 4, N = W * H;
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
+    REQUIRE(tex != nullptr);
 
     float src[N];
     for (int i = 0; i < N; ++i)
         src[i] = float(i) + 0.5f;
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
     // Seed the whole subresource (no region), then an empty-region upload (zero size) — a no-op that needs
     // no pixels and must not disturb the data.
-    cmd.value()->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(src, N)));
-    cmd.value()->upload.bytes_to_texture(tex.value(), {}, {},
-                                         sg::texture_region{.offset = tg::pos3i(1, 1, 0), .size = tg::vec3i(0, 0, 0)});
+    cmd->upload.bytes_to_texture(tex, cc::as_bytes(cc::span<float const>(src, N)));
+    cmd->upload.bytes_to_texture(tex, {}, {},
+                                 sg::texture_region{.offset = tg::pos3i(1, 1, 0), .size = tg::vec3i(0, 0, 0)});
     // An empty-region readback returns a ready, empty future; a no-region readback returns the whole subresource.
-    auto empty_fut = cmd.value()->download.bytes_from_texture(
-        tex.value(), {}, sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(0, 2, 1)});
-    auto full_fut = cmd.value()->download.bytes_from_texture(tex.value());
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    auto empty_fut = cmd->download.bytes_from_texture(
+        tex, {}, sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(0, 2, 1)});
+    auto full_fut = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
 
     auto const empty_bytes = c.wait_for(empty_fut);
     REQUIRE(empty_bytes.has_value());
@@ -437,21 +436,21 @@ TEST("sg dx12 - block-compressed texture round-trips whole blocks")
 {
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
-    auto& c = static_cast<dx12::dx12_context&>(*handle);
+    auto& c = *handle;
 
     // 8×8 BC1 = 2×2 blocks of 8 bytes each = 32 bytes; a tight block-row is 16 bytes, staged at 256.
-    auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::bc1_rgba_unorm, 8, 8), sg::allocation_info{});
-    REQUIRE(tex.has_value());
+    auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::bc1_rgba_unorm, 8, 8));
+    REQUIRE(tex != nullptr);
 
     cc::byte src[32];
     for (int i = 0; i < 32; ++i)
         src[i] = cc::byte(i * 7 + 1);
 
-    auto cmd = c.create_dx12_command_list();
-    REQUIRE(cmd.has_value());
-    cmd.value()->upload.bytes_to_texture(tex.value(), cc::span<cc::byte const>(src, 32));
-    auto future = cmd.value()->download.bytes_from_texture(tex.value());
-    c.submit_dx12_command_list(cc::move(cmd.value()));
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(tex, cc::span<cc::byte const>(src, 32));
+    auto future = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());

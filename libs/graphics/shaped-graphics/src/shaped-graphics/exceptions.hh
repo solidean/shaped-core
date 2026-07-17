@@ -67,8 +67,8 @@ private:
     isize _size_in_bytes = 0;
 };
 
-/// Building a binding_group_layout, pipeline_layout, or compute_pipeline failed — a shader/root-signature/PSO compile or
-/// create error the driver reported. Carries the pipeline's entry point for context.
+/// Building a binding_group_layout, pipeline_layout, or compute / raster / raytracing pipeline failed — a
+/// shader/root-signature/PSO compile or create error the driver reported. Carries the pipeline's entry point for context.
 class pipeline_creation_exception final : public exception
 {
 public:
@@ -83,6 +83,18 @@ public:
 
 private:
     cc::string _entry_point;
+};
+
+/// Creating a swapchain failed — a bad window handle, an unsupported surface format, or a DXGI/driver
+/// error creating the flip chain. Recoverable in principle (fix the window / format and retry). Carries
+/// the underlying backend error.
+class swapchain_creation_exception final : public exception
+{
+public:
+    explicit swapchain_creation_exception(cc::any_error const& error)
+      : exception(cc::format("swapchain creation failed: {}", error.to_string()))
+    {
+    }
 };
 
 /// Instantiating a binding_group against its layout failed: a bound view names no binding, a view's

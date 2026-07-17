@@ -133,7 +133,7 @@ enum class pixel_format : u16
     }
 }
 
-/// True for a color format usable as a render target (color attachment): any non-depth, non-compressed
+/// True for a color format usable as a render target: any non-depth, non-compressed
 /// format. A coarse capability check — a given adapter may still restrict blending on some of these.
 [[nodiscard]] constexpr bool is_render_target_format(pixel_format f)
 {

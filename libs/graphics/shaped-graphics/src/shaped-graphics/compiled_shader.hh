@@ -18,6 +18,9 @@ namespace sg
 enum class shader_stage
 {
     vertex,
+    tessellation_control,    ///< dx12 hull (hs): the patch-constant + per-control-point stage
+    tessellation_evaluation, ///< dx12 domain (ds): evaluates the tessellated surface
+    geometry,                ///< dx12 geometry (gs): per-primitive stage that may amplify/emit primitives
     fragment,
     compute,
     // Ray-tracing stages — each compiles to a single-entry `lib_6_x` blob (no dedicated shader-library type).
@@ -27,7 +30,7 @@ enum class shader_stage
     miss,
     intersection,
     callable,
-    // Future: geometry, tessellation_control, tessellation_evaluation, mesh, task, ...
+    // Future: mesh, task, ...
 };
 
 /// True for the six ray-tracing stages (raygen / closest_hit / any_hit / miss / intersection / callable).

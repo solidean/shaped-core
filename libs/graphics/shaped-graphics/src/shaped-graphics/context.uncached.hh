@@ -48,6 +48,13 @@ public:
     /// Fallible core of create_compute_pipeline — returns an error instead of throwing.
     [[nodiscard]] cc::result<compute_pipeline_handle> try_create_compute_pipeline(compute_pipeline_description const& desc);
 
+    /// Builds a raster_pipeline from a description (vertex/fragment shaders + pipeline layout + fixed-
+    /// function state). Blocking backend PSO creation. Throws sg::pipeline_creation_exception on failure.
+    [[nodiscard]] raster_pipeline_handle create_raster_pipeline(raster_pipeline_description const& desc);
+
+    /// Fallible core of create_raster_pipeline — returns an error instead of throwing.
+    [[nodiscard]] cc::result<raster_pipeline_handle> try_create_raster_pipeline(raster_pipeline_description const& desc);
+
     /// Builds a raytracing_pipeline (a DXR state object) from a description. Blocking backend state-object
     /// creation — prefer ctx.cached.acquire_raytracing_pipeline for an async, deduplicated build. Throws
     /// sg::pipeline_creation_exception on failure.

@@ -13,6 +13,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list.download.cc
     src/shaped-graphics/command_list.copy.cc
     src/shaped-graphics/command_list.compute.cc
+    src/shaped-graphics/command_list.raster.cc
     src/shaped-graphics/command_list.raytracing.cc
     src/shaped-graphics/command_list.query.cc
     src/shaped-graphics/gpu_timestamp.cc
@@ -21,10 +22,12 @@ add_library(shaped-graphics
     src/shaped-graphics/binding_group_layout.cc
     src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc
+    src/shaped-graphics/raster_pipeline.cc
     src/shaped-graphics/raytracing_pipeline.cc
     src/shaped-graphics/raytracing_shader_table.cc
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
+    src/shaped-graphics/swapchain.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/context.transient.cc
@@ -59,10 +62,19 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.download.hh
     src/shaped-graphics/command_list.copy.hh
     src/shaped-graphics/command_list.compute.hh
+    src/shaped-graphics/command_list.raster.hh
     src/shaped-graphics/command_list.raytracing.hh
     src/shaped-graphics/acceleration_structure.hh
     src/shaped-graphics/raw_buffer.hh
     src/shaped-graphics/pixel_format.hh
+    src/shaped-graphics/primitive_topology.hh
+    src/shaped-graphics/rasterization_state.hh
+    src/shaped-graphics/blend_state.hh
+    src/shaped-graphics/depth_stencil_state.hh
+    src/shaped-graphics/vertex_input.hh
+    src/shaped-graphics/vertex_buffer_view.hh
+    src/shaped-graphics/index_buffer_view.hh
+    src/shaped-graphics/raster_pipeline.hh
     src/shaped-graphics/raw_texture.hh
     src/shaped-graphics/texture.hh
     src/shaped-graphics/texture_traits.hh
@@ -74,7 +86,6 @@ target_sources(shaped-graphics
     src/shaped-graphics/backend/access_inference.hh
     src/shaped-graphics/backend/subresource.hh
     src/shaped-graphics/views.hh
-    src/shaped-graphics/attachment_views.hh
     src/shaped-graphics/binding.hh
     src/shaped-graphics/binding_group_layout.hh
     src/shaped-graphics/pipeline_layout.hh
@@ -83,6 +94,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/raytracing_pipeline.hh
     src/shaped-graphics/raytracing_shader_table.hh
     src/shaped-graphics/binding_group.hh
+    src/shaped-graphics/swapchain.hh
     src/shaped-graphics/bytes_future.hh
     src/shaped-graphics/allocation_info.hh
     src/shaped-graphics/memory_heap.hh
@@ -140,6 +152,7 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
         tests/binding/binding-test.cc
+        tests/pipeline/raster_pipeline-test.cc
         tests/sampler/sampler-test.cc
         tests/barrier/access_state-test.cc
         tests/barrier/subresource-test.cc

@@ -1,8 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/utility.hh>        // cc::move, cc::start_end
-#include <shaped-graphics/attachment_views.hh> // render_target_view / depth_stencil_view
+#include <clean-core/common/utility.hh> // cc::move, cc::start_end
 #include <shaped-graphics/raw_texture.hh>
 #include <shaped-graphics/texture_traits.hh> // texture_traits<…> + the view-factory parameter bags
 #include <shaped-graphics/views.hh>
@@ -146,15 +145,15 @@ public:
                                _whole_depth_slice_range());
     }
 
-    // Attachment views — bind the texture as a graphics-pipeline color / depth-stencil target. These are
-    // *not* shader-facing (they don't erase to raw_view); they target a single mip level and slice range.
-    // 2D-shaped only; MSAA is allowed. The format must be renderable (RTV) / a depth format (DSV).
+    // Render-target / depth-stencil views — bind the texture as a graphics-pipeline color / depth-stencil
+    // target. These are *not* shader-facing (they don't erase to raw_view); they target a single mip level
+    // and slice range. 2D-shaped only; MSAA is allowed. The format must be renderable (RTV) / a depth format (DSV).
 
-    /// Render-target (color attachment) view over the whole texture at one mip. Only on 2D-shaped textures.
+    /// Render-target view over the whole texture at one mip. Only on 2D-shaped textures.
     [[nodiscard]] render_target_view as_render_target_view(render_target_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2)
     {
-        return _make_render_target(_attachment_whole_dim(), _natural_array_range(params), params.mip);
+        return _make_render_target(_target_view_whole_dim(), _natural_array_range(params), params.mip);
     }
 
     /// Render-target view of one array slice / cube face, bound as a Texture2D. Only on 2D array/cube shapes.
@@ -165,11 +164,11 @@ public:
         return _make_render_target(dim, _single(_pick_slice(params)), params.mip);
     }
 
-    /// Depth-stencil (depth/stencil attachment) view over the whole texture at one mip. Only on 2D-shaped textures.
+    /// Depth-stencil view over the whole texture at one mip. Only on 2D-shaped textures.
     [[nodiscard]] depth_stencil_view as_depth_stencil_view(depth_stencil_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2)
     {
-        return _make_depth_stencil(_attachment_whole_dim(), _natural_array_range(params), params.mip);
+        return _make_depth_stencil(_target_view_whole_dim(), _natural_array_range(params), params.mip);
     }
 
     /// Depth-stencil view of one array slice / cube face, bound as a Texture2D. Only on 2D array/cube shapes.
@@ -211,9 +210,9 @@ private:
             return (Traits::is_array || Traits::is_cube) ? d::tex_2d_array : d::tex_2d;
     }
 
-    // The dimension a whole-texture attachment (RTV/DSV) binds as: 2D only, a cube renders as a 2D array;
+    // The dimension a whole-texture render-target / depth-stencil view binds as: 2D only, a cube renders as a 2D array;
     // MSAA is allowed (unlike UAV). Only instantiated on d2 shapes (the factories are d2-gated).
-    [[nodiscard]] static constexpr texture_view_dimension _attachment_whole_dim()
+    [[nodiscard]] static constexpr texture_view_dimension _target_view_whole_dim()
     {
         using d = texture_view_dimension;
         if constexpr (Traits::is_multisampled)
@@ -339,7 +338,7 @@ private:
         CC_ASSERT(is_render_target_format(_raw->format()), "texture format is not a renderable color format");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "render-target view mip level out of range");
         subresource_range r;
-        r.mip_range = {.start = mip, .end = mip + 1}; // an attachment targets a single mip level
+        r.mip_range = {.start = mip, .end = mip + 1}; // a render-target view targets a single mip level
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
         return render_target_view{_raw, dim, _raw->format(), r};
@@ -351,7 +350,7 @@ private:
         CC_ASSERT(is_depth_format(_raw->format()), "texture format is not a depth / depth-stencil format");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "depth-stencil view mip level out of range");
         subresource_range r;
-        r.mip_range = {.start = mip, .end = mip + 1}; // an attachment targets a single mip level
+        r.mip_range = {.start = mip, .end = mip + 1}; // a depth-stencil view targets a single mip level
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
         return depth_stencil_view{_raw, dim, _raw->format(), r};

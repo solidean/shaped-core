@@ -2,17 +2,18 @@
 // heavy bodies live in the respective dx12_*.cc; these are the context create_dx12_* entry points plus the
 // sg::context override forwarders (which unpack the description / downcast the abstract layout handles).
 
-#include <shaped-graphics/attachment_views.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
+#include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/pipeline_layout.hh>
+#include <shaped-graphics/raster_pipeline.hh>
 #include <shaped-graphics/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing_shader_table.hh>
 
@@ -54,6 +55,14 @@ cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipel
 {
     require_persistent(scope);
     return dx12_compute_pipeline::create(_device.Get(), cc::move(layout), shader, cached_pipeline);
+}
+
+cc::result<dx12_raster_pipeline_handle> dx12_context::create_dx12_raster_pipeline(sg::raster_pipeline_description const& desc,
+                                                                                  dx12_pipeline_layout_handle layout,
+                                                                                  sg::lifetime_scope scope)
+{
+    require_persistent(scope);
+    return dx12_raster_pipeline::create(_device.Get(), cc::move(layout), desc);
 }
 
 cc::result<dx12_raytracing_pipeline_handle> dx12_context::create_dx12_raytracing_pipeline(
@@ -128,6 +137,16 @@ cc::result<sg::compute_pipeline_handle> dx12_context::try_create_compute_pipelin
     return note_device_loss_on_error(cc::result<sg::compute_pipeline_handle>(create_dx12_compute_pipeline(
                                          desc.shader, cc::move(dx), desc.cached_pipeline.span(), scope)),
                                      "create_compute_pipeline");
+}
+
+cc::result<sg::raster_pipeline_handle> dx12_context::try_create_raster_pipeline(sg::raster_pipeline_description const& desc,
+                                                                                sg::lifetime_scope scope)
+{
+    auto dx = std::dynamic_pointer_cast<dx12_pipeline_layout const>(desc.layout);
+    CC_ASSERT(dx != nullptr, "pipeline_layout is not a dx12 pipeline_layout");
+    return note_device_loss_on_error(
+        cc::result<sg::raster_pipeline_handle>(create_dx12_raster_pipeline(desc, cc::move(dx), scope)), "create_raster_"
+                                                                                                        "pipeline");
 }
 
 cc::result<sg::raytracing_pipeline_handle> dx12_context::try_create_raytracing_pipeline(

@@ -27,6 +27,22 @@ Running list of known follow-ups. Bigger design intent lives in
   `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables
   automatic transitions for callers that know their resources are already in the right layout; and folding
   the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
+- **Raster pipeline + draws — deferred layers:** the graphics path is in (`sg::raster_pipeline` +
+  `raster_pipeline_description` with its fixed-function state vocabulary — `primitive_topology`,
+  `rasterization_state`, `blend_state`, `depth_stencil_state` reusing `compare_op`, `vertex_input_layout`
+  with a type-driven `create<Vs...>()`; `ctx.uncached.create_raster_pipeline`; and draw recording on
+  `cmd.raster` / `cmd.raster.manual` — `bind_pipeline` / `bind_group` / `bind_vertex_buffers` /
+  `bind_index_buffer` / `set_viewport` / `set_scissor` / `set_stencil_reference` / `set_blend_constants` /
+  `set_inline_constants` / `draw` / `draw_indexed`; dx12 real on WARP, vulkan stubbed). See
+  [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open: **PSO caching**
+  (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing + `async_raster_pipeline` —
+  the compute/RT parity piece); **indirect draws** (`draw_indirect` / count buffers); **dynamic primitive
+  topology** and **dynamic depth bias** (both baked into the PSO for now); **mesh / task** stages; and the
+  **vulkan** implementation (`VkPipeline` + dynamic-rendering formats + the `vkCmdDraw*` seams — currently
+  `CC_UNREACHABLE`). **Geometry** and **tessellation** (hull/domain) stages are now in for dx12:
+  `raster_pipeline_description::geometry_shader` / `tessellation_control_shader` /
+  `tessellation_evaluation_shader`, the `patch_list` topology + `patch_control_points`, and the DXC gs/hs/ds
+  profiles.
 - **Acceleration structures — deferred layers:** the single-shot build path is in (`sg::blas`/`sg::tlas`,
   the `cmd.raytracing` scope with `build_blas` for triangles + procedural AABBs, `build_tlas`, and
   `is_supported()`; dx12 real on WARP, vulkan stubbed). The abstract types already carry the stats a refit
@@ -50,7 +66,7 @@ Running list of known follow-ups. Bigger design intent lives in
 - **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
   `cc::flags` once that clean-core type is implemented.
 - **Views — deferred layers:** buffer views (`uniform`/`readonly`/`readwrite`, `byte` = raw) + the
-  erased `raw_view` are in, as are texture SRV/UAV views and `render_target`/`depth_stencil` attachment
+  erased `raw_view` are in, as are texture SRV/UAV views and `render_target` / `depth_stencil` target
   views (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array); see [concepts/views.md](concepts/views.md).
   Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
@@ -61,6 +77,29 @@ Running list of known follow-ups. Bigger design intent lives in
   - the **backend `raw_view` translation** (`switch` on `(access, shape)` → native descriptor) — no
     backend code exists for views yet;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
+- **Typed buffer wrapper:** `raw_buffer` is untyped — every view factory re-specifies the element type
+  (`as_readwrite_buffer<T>()`, `as_vertex_buffer<T>()`, `as_index_buffer(format)`, …). Add a strongly-typed,
+  templated `buffer<T>` (the analogue of `texture<Traits>` over `raw_texture`) that carries its element
+  type / shape so the type is inferred once at creation and checked at compile time, rather than re-passed at
+  each call site. It would wrap a `raw_buffer_handle` like `texture<Traits>` wraps `raw_texture_handle`.
+- **Vertex attributes: go location-based, drop the HLSL semantic from the public API.** `vertex_attribute`
+  currently identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that
+  doesn't survive a change of shader language. Every other target matches vertex inputs by a **numeric
+  location**: SPIR-V/Vulkan `layout(location=N)`, WGSL/WebGPU `@location(N)`, Metal `[[attribute(N)]]`;
+  Vulkan's `VkVertexInputAttributeDescription` is literally `{location, binding, format, offset}` with no
+  name. So the backend-neutral identity is a `u32 location`, and `{location, format, offset, slot}` is the
+  union of the Vulkan / WebGPU / Metal models. Plan:
+  - make `location` the attribute identity (replace `semantic` / `semantic_index` in `vertex_attribute`);
+  - move the HLSL **semantic into `compiled_shader`'s reflected vertex-input signature** (already a deferred
+    field there — the `// Deferred: … I/O signatures` note in `compiled_shader.hh`), as per-input
+    `{location, semantic, semantic_index, format}`;
+  - the **dx12 backend** then resolves `location → semantic` from that signature to fill
+    `D3D12_INPUT_ELEMENT_DESC` (DX12 is the only backend that needs the string); SPIR-V / WGSL / Metal use
+    `location` verbatim and ignore the semantic entirely;
+  - optionally keep a semantic **hint** on the layout that is resolved to a location at pipeline-build time
+    against the reflected VS input signature (ergonomic sugar for HLSL authors) — but the string is erased
+    before it reaches any backend, so it never appears in the portable path.
+  This is the direction; the current semantic-string form is an HLSL-only interim.
 - **Blessed escape hatch:** add an sg API that returns raw underlying GPU handles without exposing
   the concrete backend types, so callers don't reach for `dynamic_cast` to a `sg::backend::*` type.
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
@@ -86,4 +125,19 @@ Running list of known follow-ups. Bigger design intent lives in
 - **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
+- **Swapchain / presentation — deferred layers:** the windowed-presentation path is in
+  (`ctx.create_swapchain` -> `sg::swapchain` with `acquire_backbuffer` / `present` / `get_size` +
+  description getters; auto-resize on acquire; `present_mode` vsync/immediate; an `enable_hdr` flag). dx12
+  is real (an `IDXGISwapChain3` flip-discard chain; back buffers wrapped as `dx12_texture` so they ride the
+  normal render-pass + barrier path; a dedicated present fence gates buffer reuse; `present()` transitions
+  the buffer to `texture_layout::present` via `dx12_command_list::transition_texture_to`). The native
+  window handle is an opaque `void*` (HWND on Windows) in the agnostic description. Still open: the
+  **vulkan** implementation (`VkSurfaceKHR` + `VkSwapchainKHR` + acquire/present semaphores — currently a
+  not-implemented `cc::error` stub); a **proper `native_window_handle` type** to replace the opaque `void*`
+  in `swapchain_description` (a small platform-tagged struct — HWND / xcb+window / wl_surface / NSWindow —
+  once a second windowing backend actually needs one, so it isn't speculative); **deeper HDR** (metadata /
+  tone-mapping beyond the colorspace set); **exclusive fullscreen** and **multi-window**; letting a windowed
+  renderer thread the swapchain's back-buffer count into `advance_epoch`; and a headless/offscreen present
+  target so the present path can be pixel-verified on CI (today the WARP swapchain test needs a real hidden
+  window and SKIPs without one).
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

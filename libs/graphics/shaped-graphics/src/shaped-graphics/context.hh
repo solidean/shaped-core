@@ -14,6 +14,7 @@
 #include <shaped-graphics/context.uncached.hh>
 #include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/swapchain.hh>
 #include <shaped-graphics/texture_region.hh>
 #include <shaped-graphics/types.hh>
 
@@ -81,9 +82,26 @@ public:
     /// bug and aborts.
     [[nodiscard]] std::unique_ptr<command_list> create_command_list();
 
+    /// Creates a swapchain that presents into the window named by `desc` (see swapchain_description).
+    /// Throwing façade over try_create_swapchain: returns the swapchain, or throws
+    /// sg::device_lost_exception (device lost) / sg::swapchain_creation_exception (bad handle / format /
+    /// DXGI error). Only backends that support windowed presentation implement it.
+    [[nodiscard]] swapchain_handle create_swapchain(swapchain_description const& desc = {});
+
+    /// The fallible core behind create_swapchain: returns a swapchain or a cc::error, never throws. A
+    /// backend that cannot present (no windowing) returns an error. Device loss is marked but still
+    /// surfaces here as an error (the throwing façade classifies it).
+    [[nodiscard]] virtual cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc = {}) = 0;
+
     /// Submits a command list for execution and consumes it, returning a token for its completion.
     /// A command list must be submitted (or dropped) in the same epoch it was opened in.
     virtual submission_token submit_command_list(std::unique_ptr<command_list> cmd) = 0;
+
+    /// Submits `cmd` and presents `sc`'s acquired back buffer — the way to present. Records the back
+    /// buffer's final transition to the present layout onto `cmd` (folding it into work already recorded,
+    /// rather than a separate list), submits `cmd`, then hands the buffer to the display. `cmd` must contain
+    /// this frame's rendering into the back buffer acquired from `sc`. Returns the submission's completion token.
+    submission_token submit_command_list_and_present(swapchain& sc, std::unique_ptr<command_list> cmd);
 
     /// Discards a command list unsubmitted and consumes it — same as letting it go out of scope.
     /// Must happen in the epoch the list was opened in.
@@ -271,6 +289,11 @@ protected:
     /// Builds a compute_pipeline from a description (compute shader + pipeline layout).
     [[nodiscard]] virtual cc::result<compute_pipeline_handle> try_create_compute_pipeline(
         compute_pipeline_description const& desc,
+        lifetime_scope scope) = 0;
+
+    /// Builds a raster_pipeline from a description (vertex/fragment shaders + pipeline layout + state).
+    [[nodiscard]] virtual cc::result<raster_pipeline_handle> try_create_raster_pipeline(
+        raster_pipeline_description const& desc,
         lifetime_scope scope) = 0;
 
     /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).

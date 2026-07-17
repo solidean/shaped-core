@@ -52,6 +52,7 @@ target_sources(clean-core
     src/clean-core/common/hash.hh
     src/clean-core/common/hash128.hh
     src/clean-core/common/assert.hh
+    src/clean-core/common/impl/small_size_type.hh
     src/clean-core/common/assert-handler.hh
     src/clean-core/common/assertf.hh
     src/clean-core/common/asserts.hh
@@ -221,6 +222,7 @@ if(SC_BUILD_TESTS)
         tests/container/array-test.cc
         tests/container/fixed-array-test.cc
         tests/container/small_vector-test.cc
+        tests/container/fixed_vector-test.cc
         tests/container/span-test.cc
         tests/container/strided_span-test.cc
         tests/container/pinned_data-test.cc

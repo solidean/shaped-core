@@ -112,6 +112,17 @@ void dx12_command_list::flush_barriers()
     _pending_texture_barriers.clear();
 }
 
+void dx12_command_list::transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout)
+{
+    CC_ASSERT(texture != nullptr, "transition_texture_to: texture is null");
+    // A pure layout transition: no destination stage/access (the consumer is outside this queue's timeline,
+    // e.g. Present). track_texture_access reads the tracked source state to build the barrier, so this
+    // composes with whatever layout the frame's render pass left the texture in.
+    auto const whole = sg::subresource_range::whole(subresource_extent_of(texture->description()));
+    track_texture_access(texture, whole, sg::pipeline_stage_flags::none, sg::access_flags::none, layout);
+    flush_barriers();
+}
+
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
 {
     auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
