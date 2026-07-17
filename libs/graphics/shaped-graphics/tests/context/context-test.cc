@@ -1,5 +1,6 @@
 #include <clean-core/fwd.hh> // cc::u64: epoch is an enum over u64
 #include <nexus/test.hh>
+#include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/types.hh>
 
@@ -13,6 +14,34 @@ INVOCABLE_TEST("sg - context is live", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     CHECK(!ctx->is_shut_down());
+}
+
+INVOCABLE_TEST("sg - accepts at least one shader format", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const formats = ctx->accepted_shader_formats();
+    REQUIRE(!formats.empty());
+
+    // accepts_shader_format is the list, queried one at a time.
+    for (auto format : formats)
+        CHECK(ctx->accepts_shader_format(format));
+
+    // Each backend takes its own bytecode and nothing else. backend_kind is non-exhaustive, so a
+    // backend we don't name here only has to satisfy the checks above.
+    switch (ctx->backend())
+    {
+    case sg::backend_kind::dx12:
+        CHECK(ctx->accepts_shader_format(sg::shader_format::dxil));
+        CHECK(!ctx->accepts_shader_format(sg::shader_format::spirv));
+        break;
+    case sg::backend_kind::vulkan:
+        CHECK(ctx->accepts_shader_format(sg::shader_format::spirv));
+        CHECK(!ctx->accepts_shader_format(sg::shader_format::dxil));
+        break;
+    default:
+        break;
+    }
 }
 
 INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))

@@ -55,7 +55,13 @@ See [guides/_index.md](guides/_index.md) for the full list. Most useful:
   ([readme](../libs/graphics/shaped-rendering/readme.md) ·
   [docs](../libs/graphics/shaped-rendering/docs/_index.md)), shaped-viewer
   ([readme](../libs/graphics/shaped-viewer/readme.md) ·
-  [docs](../libs/graphics/shaped-viewer/docs/_index.md)).
+  [docs](../libs/graphics/shaped-viewer/docs/_index.md)), plus the shader side utilities
+  shaped-shader-library ([readme](../libs/graphics/shaped-shader-library/readme.md) ·
+  [docs](../libs/graphics/shaped-shader-library/docs/_index.md)) and shaped-shader-compiler-dxc
+  ([readme](../libs/graphics/shaped-shader-compiler-dxc/readme.md)).
+- **[shaders](../libs/graphics/shaped-graphics/docs/shaders.md)** — how the shader system works end to
+  end (packages, `acquire(ctx)`, hot reload, shipping). Lives under shaped-graphics because that is
+  where you look first, though most of the machinery is downstream of it.
 
 > Place new repo-wide docs here (kebab-case names), in the matching subfolder. See
 > [CLAUDE.md](../CLAUDE.md) for the repo's working conventions.

@@ -70,6 +70,8 @@ sg::present_mode          // vsync | immediate  (swapchain frame pacing — see 
 ```cpp
 #include <shaped-graphics/context.hh>
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
+ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
+ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
@@ -433,7 +435,9 @@ sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, n
 #include <shaped-graphics/compiled_shader.hh>
 sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
 sg::is_raytracing_stage(s)  // bool — one of the six RT stages;  sg::is_compute_stage(s) — the compute stage
-sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob
+sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob (ctx.accepts_shader_format(f))
+// sg only CONSUMES compiled shaders. Producing one — packages, compilation, hot reload — is
+// shaped-shader-library's job; docs/shaders.md is the front door for the whole shader system.
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
                             //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler }  — value type
 sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>

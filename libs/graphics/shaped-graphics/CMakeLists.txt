@@ -201,6 +201,25 @@ if(SC_BUILD_TESTS)
         nexus
     )
 
+    # A shader package declared by a *consumer* of sg. shaped-graphics itself does not depend on the
+    # shader library -- the arrow points slib -> sg -- but a target built on sg may declare its own
+    # shaders, and this test binary is the proof. slib is defined after us in the root CMakeLists, which
+    # is fine: target_link_libraries resolves item names at generate time. Gated on a compiler existing,
+    # so the package is worth compiling (slib's own tests cover the mechanism with a fake compiler
+    # everywhere); the gate is a variable rather than if(TARGET ...) because slib does not exist yet here.
+    if(SC_HAS_DXC_COMPILER AND _sg_backends)
+        target_sources(shaped-graphics-test PRIVATE tests/shader_package/shader_package-test.cc)
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_shaders
+            NAMESPACE  sg::test::shaders
+            SOURCE_DIR tests/shaders
+            LANGUAGE   hlsl
+            SHADERS
+                double_values.hlsl:compute:main
+        )
+    endif()
+
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-graphics-test)
 endif()

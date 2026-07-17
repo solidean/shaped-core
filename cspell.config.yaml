@@ -6,10 +6,12 @@ words:
   - aabbs
   - Allman
   - blas
+  - blit
   - CPPRTTI
   - CPPUNWIND
   - crossrefs
   - DXGI
+  - dxil
   - emcc
   - emrun
   - emscripten
@@ -17,6 +19,7 @@ words:
   - emsdk
   - fprofile
   - GLFW
+  - hlsli
   - HRESULT
   - IDXGI
   - imgui
@@ -27,6 +30,7 @@ words:
   - msvc
   - MSVC
   - noprofile
+  - numthreads
   - ORBIS
   - pessimized
   - precommit
@@ -36,16 +40,22 @@ words:
   - raytracing
   - relwithdebinfo
   - rtti
+  - singlethreaded
+  - slib
+  - slib's
   - smod
   - Solidean
   - SOLIDEAN
   - stdlib
+  - subresource
+  - swapchain
   - tlas
   - toolsets
   - tweakable
   - uncompiled
   - vcvars
   - venv
+  - vulkan
   - wasi
   - WASI
   - workdir

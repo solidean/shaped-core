@@ -58,9 +58,24 @@ endif()
 # libs so their targets exist when clean-core links them.
 add_subdirectory(extern)
 
+# Whether a shader compiler is available: shaped-shader-compiler-dxc links DXC, which is Windows-only and
+# present only once extern/dxc has fetched it (adding the `dxc` target). Computed once, here, because
+# libraries added *before* the compiler need it too — shaped-graphics' test declares a shader package, and
+# an `if(TARGET ...)` there would be false no matter the real answer. A plain variable, not a cached
+# option: like SC_ARCH_X64 it describes the environment, it is not a choice.
+if(WIN32 AND TARGET dxc)
+    set(SC_HAS_DXC_COMPILER ON)
+else()
+    set(SC_HAS_DXC_COMPILER OFF)
+endif()
+
 # Browser test-runner helper (sc_add_nexus_web_runner). Included before the libs so both clean-core and
 # nexus can build an Emscripten `*-web.html` runner; a no-op on native toolchains.
 include(libs/base/nexus/cmake/NexusWebRunner.cmake)
+
+# Shader-package helper (sc_add_shader_package). Included before the libs so any of them — including a
+# library whose *test* declares a package, like shaped-graphics — can call it.
+include(libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake)
 
 # clean-core must come first: nexus depends on it.
 add_subdirectory(libs/base/clean-core)
@@ -76,9 +91,13 @@ add_subdirectory(libs/graphics/shaped-viewer)
 # shaped-shader-compiler-dxc (ssc): HLSL -> sg::compiled_shader via DXC. Windows-only, and only when
 # DXC has been built (extern/dxc adds the `dxc` target). Run `uv run extern/dxc/build-dxc.py` (dev.py
 # does this automatically) to enable it.
-if(WIN32 AND TARGET dxc)
+if(SC_HAS_DXC_COMPILER)
     add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
 endif()
+
+# shaped-shader-library (slib): shader packages + hot reload, over sg. Added after ssc so its optional
+# dxc compiler adapter can see that target; the packages themselves work without any compiler.
+add_subdirectory(libs/graphics/shaped-shader-library)
 
 # Developer tools. instruction-tracer needs the Win32 debug API, dbghelp and the fetched Zydis
 # decoder (extern/zydis); it gates itself on the `zydis` target existing, so a checkout that has
@@ -94,3 +113,7 @@ endif()
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
 # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
 sc_finalize_web_runners()
+
+# Check that every declared shader package found the shaped-shader-library target. See
+# libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
+sc_finalize_shader_packages()
