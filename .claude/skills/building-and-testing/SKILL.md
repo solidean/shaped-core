@@ -50,7 +50,7 @@ Full reference: [docs/guides/building-and-testing.md](../../../docs/guides/build
   Presets accept comma-lists, repeated flags, and shell wildcards
   (`--preset "release-*"`). `uv run dev.py list-presets` lists them.
 
-- **Touching `CC_ENABLE_ASSERTIONS`-gated code? Build a `release-*` preset too.**
+- **Touching `CC_ASSERT_ENABLED`-gated code? Build a `release-*` preset too.**
   The default `relwithdebinfo-*` preset has assertions **ON**; only a `release-*`
   preset has them **OFF**. A change that compiles under the default can still fail
   the assertions-off branch (e.g. a member referenced only inside a `CC_ASSERT`).
