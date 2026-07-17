@@ -36,6 +36,15 @@ struct swapchain_description
 
     /// Request an HDR colorspace on the surface — best-effort, pair with a wide `format`.
     bool enable_hdr = false;
+
+    /// Whether the contract holds: non-null handle, buffer_count >= 2, renderable format. The
+    /// non-asserting counterpart of assert_valid().
+    [[nodiscard]] bool is_valid() const;
+
+    /// Asserts the contract (see is_valid) with a per-invariant message. Runs from swapchain's
+    /// constructor; a backend also calls it at the top of its create path so a bad desc asserts before
+    /// any fallible GPU work.
+    void assert_valid() const;
 };
 
 /// A window presentation surface: a chain of back buffers you render into and hand to the display.
@@ -64,11 +73,6 @@ public:
     [[nodiscard]] sg::present_mode present_mode() const { return _desc.present_mode; }
     [[nodiscard]] bool is_hdr_enabled() const { return _desc.enable_hdr; }
     [[nodiscard]] swapchain_description const& description() const { return _desc; }
-
-    /// Asserts `desc` satisfies the contract: non-null handle, buffer_count >= 2, renderable format. Runs
-    /// from the constructor; a backend also calls it at the top of its create path so a bad desc asserts
-    /// before any fallible GPU work.
-    static void validate_description(swapchain_description const& desc);
 
 protected:
     explicit swapchain(swapchain_description const& desc);

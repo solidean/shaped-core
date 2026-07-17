@@ -103,32 +103,33 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         view_filled[slot_index] = char(1);
 
         auto const dst = ctx._descriptor_heap.cpu_at(view_base + s.table_offset);
-        if (nv.view.access == sg::view_class::acceleration_structure)
+        if (auto const* av = std::get_if<sg::raw_tlas_view>(&nv.view))
         {
-            auto dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(nv.view.tlas);
+            auto dx_tlas = std::dynamic_pointer_cast<dx12_tlas const>(av->tlas);
             CC_ASSERT(dx_tlas != nullptr, "bound acceleration structure is not a dx12 tlas");
             create_accel_view(ctx._device.Get(), *dx_tlas, dst);
             // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
             group->referenced.push_back(dx_tlas->_dx12_storage);
-            group->hazard_views.push_back({dx_tlas->_dx12_storage, nv.view.access});
+            group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
         }
-        else if (nv.view.shape == sg::view_shape::texture)
+        else if (auto const* tv = std::get_if<sg::raw_texture_view>(&nv.view))
         {
-            create_texture_view(ctx._device.Get(), nv.view, dst);
-            auto dx = std::dynamic_pointer_cast<dx12_texture const>(nv.view.texture);
+            create_texture_view(ctx._device.Get(), *tv, dst);
+            auto dx = std::dynamic_pointer_cast<dx12_texture const>(tv->texture);
             CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
             group->referenced_textures.push_back(dx);
-            group->texture_hazard_views.push_back({dx, nv.view.range, nv.view.access}); // → dispatch hazard declare
+            group->texture_hazard_views.push_back({dx, tv->range, tv->access}); // → dispatch hazard declare
         }
         else
         {
-            create_buffer_view(ctx._device.Get(), nv.view, dst);
-            if (nv.view.buffer)
+            auto const& bv = std::get<sg::raw_buffer_view>(nv.view);
+            create_buffer_view(ctx._device.Get(), bv, dst);
+            if (bv.buffer)
             {
-                auto dx = std::dynamic_pointer_cast<dx12_buffer const>(nv.view.buffer);
+                auto dx = std::dynamic_pointer_cast<dx12_buffer const>(bv.buffer);
                 CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
                 group->referenced.push_back(dx);
-                group->hazard_views.push_back({dx, nv.view.access}); // (buffer, access class) → dispatch hazard declare
+                group->hazard_views.push_back({dx, bv.access}); // (buffer, access class) → dispatch hazard declare
             }
         }
     }

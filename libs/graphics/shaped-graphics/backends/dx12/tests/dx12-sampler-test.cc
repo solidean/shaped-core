@@ -92,7 +92,7 @@ TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WAR
 
     auto tex = c.create_dx12_texture(sampled_tex(), sg::allocation_info{});
     REQUIRE(tex.has_value());
-    sg::texture_2d const typed(tex.value());
+    auto const typed = sg::texture_2d::from_raw(tex.value());
 
     sg::named_view const views[] = {{.name = "Tex", .view = typed.as_readonly_view()}};
     sg::named_sampler const dyn[] = {{.name = "Dyn", .sampler = {.mag_filter = sg::sampler_filter::nearest}}};

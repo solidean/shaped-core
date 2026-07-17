@@ -120,7 +120,7 @@ TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispa
 
     sg::named_view const views[] = {
         {.name = "scene", .view = tlas->as_view()},
-        {.name = "Out", .view = out_buf->as_readwrite_buffer<sg::u32>()},
+        {.name = "Out", .view = sg::buffer<sg::u32>::from_raw(out_buf).as_readwrite_buffer()},
     };
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
     REQUIRE(group != nullptr);

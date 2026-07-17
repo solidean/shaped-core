@@ -12,7 +12,7 @@ namespace
 {
 // The underlying ID3D12Resource of a view's buffer (null for an empty buffer). Raw-word views address
 // in units of 4 bytes; structured views in units of the element stride.
-[[nodiscard]] ID3D12Resource* resource_of(sg::raw_view const& view)
+[[nodiscard]] ID3D12Resource* resource_of(sg::raw_buffer_view const& view)
 {
     auto const* buf = dynamic_cast<dx12_buffer const*>(view.buffer.get());
     CC_ASSERT(buf != nullptr, "bound resource is not a dx12 buffer");
@@ -24,7 +24,7 @@ namespace
 // …) have no base-slice field in D3D12, so a non-zero first slice promotes to the size-1 array form —
 // same texels, still declared as the requested dimension in the shader. depth-as-SRV (a typeless
 // resource) is not supported yet.
-[[nodiscard]] D3D12_SHADER_RESOURCE_VIEW_DESC texture_srv_desc(sg::raw_view const& v, DXGI_FORMAT format)
+[[nodiscard]] D3D12_SHADER_RESOURCE_VIEW_DESC texture_srv_desc(sg::raw_texture_view const& v, DXGI_FORMAT format)
 {
     D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
     desc.Format = format;
@@ -115,7 +115,7 @@ namespace
 // The D3D12 UAV desc for a texture view (a single mip level; no MSAA, no cube — a cube is a 2D array). A
 // non-zero first slice on a non-array dimension promotes to the size-1 array form. 3D uses the view's
 // W-slice window.
-[[nodiscard]] D3D12_UNORDERED_ACCESS_VIEW_DESC texture_uav_desc(sg::raw_view const& v, DXGI_FORMAT format)
+[[nodiscard]] D3D12_UNORDERED_ACCESS_VIEW_DESC texture_uav_desc(sg::raw_texture_view const& v, DXGI_FORMAT format)
 {
     D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
     desc.Format = format;
@@ -287,7 +287,7 @@ namespace
 }
 } // namespace
 
-void create_texture_view(ID3D12Device* device, sg::raw_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst)
+void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst)
 {
     auto const* tex = dynamic_cast<dx12_texture const*>(view.texture.get());
     CC_ASSERT(tex != nullptr, "bound resource is not a dx12 texture");
@@ -329,7 +329,7 @@ void create_depth_stencil_view(ID3D12Device* device, sg::depth_stencil_view cons
     device->CreateDepthStencilView(tex->_resource.Get(), &desc, dst);
 }
 
-void create_buffer_view(ID3D12Device* device, sg::raw_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst)
+void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst)
 {
     ID3D12Resource* const resource = resource_of(view);
 

@@ -40,7 +40,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
         auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
-        sg::texture_2d const typed(tex);
+        auto const typed = sg::texture_2d::from_raw(tex);
         sg::named_view const nv{.name = "Tex", .view = typed.as_readwrite_view()};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr); // create_texture_view UAV succeeded + the debug layer accepted it
@@ -54,7 +54,7 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
         auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
-        sg::texture_2d const typed(tex);
+        auto const typed = sg::texture_2d::from_raw(tex);
         sg::named_view const nv{.name = "Tex", .view = typed.as_readonly_view()};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr);
@@ -100,9 +100,9 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
         sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
     sg::named_view const views[] = {
-        {.name = "Output", .view = buf->as_readwrite_buffer<sg::u32>()},
+        {.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()},
         {.name = "Tex", .view = typed.as_readwrite_view()},
     };
     auto group = c.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));

@@ -79,12 +79,15 @@ struct access_barrier;
 struct resource_access_state;
 
 // Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
-// (uniform_view/readonly_view/readwrite_view) are constrained, so only the enums and raw_view are
-// forward-declared here; include views.hh for the views themselves.
+// (uniform_buffer_view/readonly_buffer_view/readwrite_buffer_view) are constrained, and `raw_view` is a
+// `std::variant` alias (not forward-declarable), so only the enums are declared here; include views.hh for
+// the views themselves.
 enum class view_class;
 enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
-struct raw_view;
+struct raw_buffer_view;                 // erased buffer-view payload — one arm of raw_view (see views.hh)
+struct raw_texture_view;                // erased texture-view payload — one arm of raw_view
+struct raw_tlas_view;                   // erased acceleration-structure-view payload — one arm of raw_view
 
 // Render-target / depth-stencil views (see views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.

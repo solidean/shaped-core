@@ -91,7 +91,7 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
     td.usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture;
     auto tex_h = ctx.persistent.create_raw_texture(td);
     REQUIRE(tex_h != nullptr);
-    sg::texture_2d const tex(tex_h);
+    auto const tex = sg::texture_2d::from_raw(tex_h);
 
     auto buf = ctx.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(float)),
                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
@@ -119,7 +119,7 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
 
     sg::named_view const sample_views[] = {
         {.name = "Src", .view = tex.as_readonly_view()},
-        {.name = "Out", .view = buf->as_readwrite_buffer<float>()},
+        {.name = "Out", .view = sg::buffer<float>::from_raw(buf).as_readwrite_buffer()},
     };
     sg::named_sampler const sample_samplers[] = {{.name = "Samp",
                                                   .sampler = {.min_filter = sg::sampler_filter::nearest,

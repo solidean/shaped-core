@@ -36,7 +36,7 @@ TEST("sg dx12 - clear render target fills every texel (render_to)")
     auto tex = ctx->persistent.create_raw_texture(target_desc(
         sg::texture_usage::render_target | sg::texture_usage::copy_src, sg::pixel_format::rgba8_unorm, W, H));
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     auto cmd = ctx->create_command_list();
     {
@@ -69,7 +69,7 @@ TEST("sg dx12 - clear depth target fills every texel")
     auto tex = ctx->persistent.create_raw_texture(target_desc(
         sg::texture_usage::depth_stencil | sg::texture_usage::copy_src, sg::pixel_format::depth32_float, W, H));
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     auto cmd = ctx->create_command_list();
     {
@@ -100,7 +100,7 @@ TEST("sg dx12 - clear render target via the explicit manual scope")
     auto tex = ctx->persistent.create_raw_texture(target_desc(
         sg::texture_usage::render_target | sg::texture_usage::copy_src, sg::pixel_format::rgba8_unorm, W, H));
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     sg::rendering_info info;
     info.color_targets.push_back(typed.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1)));
@@ -131,7 +131,7 @@ TEST("sg dx12 - discard render target records and executes")
     auto tex = ctx->persistent.create_raw_texture(target_desc(
         sg::texture_usage::render_target | sg::texture_usage::copy_src, sg::pixel_format::rgba8_unorm, W, H));
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     auto cmd = ctx->create_command_list();
     {
@@ -157,7 +157,7 @@ TEST("sg dx12 - clear with an explicit viewport and scissor")
     auto tex = ctx->persistent.create_raw_texture(target_desc(
         sg::texture_usage::render_target | sg::texture_usage::copy_src, sg::pixel_format::rgba8_unorm, W, H));
     REQUIRE(tex != nullptr);
-    sg::texture_2d const typed(tex);
+    auto const typed = sg::texture_2d::from_raw(tex);
 
     // ClearRenderTargetView ignores the viewport/scissor (it clears the whole RTV), so the whole texture is
     // still filled — this exercises the explicit-viewport / explicit-scissor code paths, not per-pixel masking.
