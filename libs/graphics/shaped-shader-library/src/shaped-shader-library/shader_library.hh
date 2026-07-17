@@ -4,10 +4,12 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/filesystem/mount_table.hh>
 #include <shaped-shader-library/fwd.hh>
+#include <shaped-shader-library/impl/reload_watcher.hh>
 #include <shaped-shader-library/shader_compiler.hh>
 #include <shaped-shader-library/shader_package.hh>
 
@@ -15,6 +17,17 @@
 
 namespace slib
 {
+/// How the reload watcher runs. See shader_library::start_hot_reload.
+struct reload_config
+{
+    /// How long between rescans. Threaded mode only.
+    double interval_ms = 200;
+
+    /// Run no thread; nothing is scanned until you call poll_hot_reload(). Forced on where the platform
+    /// has no threads. Tests use it to make a reload deterministic — write a file, pump, acquire, done.
+    bool unthreaded = false;
+};
+
 /// Owns the shader packages a program uses: their filesystems, the compilers that build them, and the
 /// assets the generated symbols point at.
 ///
@@ -59,14 +72,29 @@ public:
     /// like a shared include library.
     void mount(cc::string_view virtual_dir, filesystem_handle fs);
 
+    /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
+    /// Call after every add_package: the watcher walks the asset list, which registration grows.
+    void start_hot_reload(reload_config config = {});
+
+    /// Runs one scan on the calling thread. A no-op unless hot reload was started unthreaded, so it is
+    /// safe to call unconditionally every frame.
+    void poll_hot_reload();
+
+    /// Whether the watcher is running.
+    [[nodiscard]] bool is_hot_reloading() const { return _watcher != nullptr; }
+
     /// Whether a registered compiler connects `language` to `format`.
     [[nodiscard]] bool can_compile(shader_language language, sg::shader_format format) const;
 
     /// Every format some registered compiler can produce from `language`.
     [[nodiscard]] cc::vector<sg::shader_format> supported_formats(shader_language language) const;
 
-    /// The assets registered so far, in package-declaration order.
+    /// The assets registered so far, in package-declaration order. Fixed once hot reload has started —
+    /// add_package asserts after that, so the watcher may hold on to this.
     [[nodiscard]] cc::span<shader_asset_handle const> assets() const { return _assets; }
+
+    /// Everything mounted: the packages' sources plus any shared mounts. What shader paths resolve against.
+    [[nodiscard]] mount_table const& filesystem() const { return _mounts; }
 
     /// Bumped whenever any asset's shader is replaced by a reload — the coarse "something changed"
     /// check, for a consumer that would rebuild everything anyway. Prefer an asset's own generation()
@@ -120,5 +148,10 @@ private:
     cc::vector<package_entry> _packages;
 
     cc::atomic<u64> _generation{0};
+
+    /// The reload watcher's actor, and the flag that tells a sleeping scan loop to give up. The flag is
+    /// shared because the actor owns the impl and only hands it back once it has stopped.
+    cc::unique_ptr<cc::threaded_actor<impl::check_now>> _watcher;
+    std::shared_ptr<cc::atomic<bool>> _watcher_stopping;
 };
 } // namespace slib

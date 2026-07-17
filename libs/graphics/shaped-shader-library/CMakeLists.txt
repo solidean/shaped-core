@@ -13,6 +13,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/impl/path.cc
     src/shaped-shader-library/shader_asset.cc
     src/shaped-shader-library/shader_library.cc
+    src/shaped-shader-library/impl/reload_watcher.cc
 )
 
 # Public headers (co-located in src/, grouped by topic). impl/ headers are internal -- reachable via the
@@ -61,6 +62,7 @@ if(SC_BUILD_TESTS)
         tests/filesystem/real_filesystem-test.cc
         tests/filesystem/mount_table-test.cc
         tests/shader_library-test.cc
+        tests/hot_reload-test.cc
     )
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)

@@ -29,10 +29,37 @@ slib::shader_library::shader_library() : _alive(this, [](shader_library*) {}) //
 
 slib::shader_library::~shader_library()
 {
-    // Drop the token first: any asset still reachable through a generated global now reports that its
-    // library is gone, rather than dereferencing one that is half torn down.
+    // Stop the watcher before anything it reads goes away — it holds a back-reference to us.
+    if (_watcher != nullptr)
+    {
+        _watcher_stopping->store(true); // cuts a sleeping scan loop short instead of waiting it out
+        _watcher->shutdown();
+        _watcher = nullptr;
+    }
+
+    // Drop the token: any asset still reachable through a generated global now reports that its library
+    // is gone, rather than dereferencing one that is half torn down.
     _alive.reset();
     g_library_alive = false;
+}
+
+void slib::shader_library::start_hot_reload(reload_config config)
+{
+    CC_ASSERT(_watcher == nullptr, "hot reload is already running");
+
+    // start() forces unthreaded where the platform has no threads, so decide it here rather than let the
+    // watcher believe it has a thread and sleep on whoever pumps it.
+    bool const threaded = CC_HAS_THREADS && !config.unthreaded;
+
+    _watcher_stopping = std::make_shared<cc::atomic<bool>>(false);
+    _watcher = cc::make_threaded_actor<impl::reload_watcher>(*this, config.interval_ms, threaded, _watcher_stopping);
+    _watcher->start(threaded ? cc::threaded_actor_mode::threaded_if_possible : cc::threaded_actor_mode::unthreaded);
+}
+
+void slib::shader_library::poll_hot_reload()
+{
+    if (_watcher != nullptr)
+        (void)_watcher->process_messages_if_unthreaded(); // no-op when the watcher has its own thread
 }
 
 void slib::shader_library::add_compiler(std::unique_ptr<shader_compiler> compiler)
@@ -90,6 +117,8 @@ void slib::shader_library::add_package(shader_package const& package)
 void slib::shader_library::add_package(shader_package const& package, filesystem_handle fs)
 {
     CC_ASSERT(!package.name.empty(), "a shader package must be named");
+    CC_ASSERT(_watcher == nullptr, "add every package before start_hot_reload — the watcher walks the asset "
+                                   "list from its own thread, so it must not grow underneath it");
 
     for (auto const& existing : _packages)
         CC_ASSERT(existing.name != package.name, "this shader package was already added");
