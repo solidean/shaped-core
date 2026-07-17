@@ -1,8 +1,11 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 
+#if CC_HAS_THREADS
 #include <thread>
+#endif
 
 // Isolated tests for cc::shared_ptr / cc::weak_ptr. Two layouts are exercised: the default trailing-control
 // traits (cc::default_shared_traits, used by shared_ptr<T> with no Traits) and a custom INTRUSIVE traits whose
@@ -484,6 +487,11 @@ TEST("fused_refcount - release_strong reports destroy/free per the protocol")
 //
 // The deterministic guard against the rejected "each strong owns its own weak" design is the white-box
 // weak_of(c) == 2 check above, not this test — a thread race only samples the window.
+//
+// Gated, helpers and all: two threads ARE the subject here, so there is no single-threaded version of this
+// claim to fall back to. Without threads the drops cannot overlap and the window being pinned does not exist.
+// The white-box checks above carry the ordering on those platforms.
+#if CC_HAS_THREADS
 namespace
 {
 struct race_node
@@ -573,6 +581,7 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
         REQUIRE(race_node::freed_during_teardown.load() == 0);
     }
 }
+#endif
 
 TEST("fused_refcount - try_lock_strong follows the high half only")
 {
