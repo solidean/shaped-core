@@ -56,9 +56,14 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        parts.append(f'inline constexpr char const* {name} = R"{delim}(')
-        parts.append(text)
-        parts.append(f'){delim}";')
+        # MSVC caps a single string literal at ~16 KB (C2026), so split the asset into adjacent
+        # raw-string literals the compiler concatenates. 4000 chars stays well under the limit even
+        # if every char were a 4-byte UTF-8 sequence. The chunk boundary can fall anywhere — the
+        # delimiter token is asserted absent above, so no chunk can close the literal early.
+        parts.append(f"inline constexpr char const* {name} =")
+        for start in range(0, len(text), 4000):
+            parts.append(f'R"{delim}({text[start : start + 4000]}){delim}"')
+        parts.append(";" if text else '""; // (empty asset)')
         parts.append("")
 
     parts.append("} // namespace itrace::html")
