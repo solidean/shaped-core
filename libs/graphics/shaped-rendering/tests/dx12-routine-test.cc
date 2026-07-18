@@ -35,13 +35,15 @@ public:
         auto const& self = handle.acquire(cmd);
         CC_ASSERT(self._pipeline != nullptr, "pattern_fill routine failed to initialize");
 
-        sg::named_view const view{.name = "gValues", .view = out.as_readwrite_buffer()};
-        auto const group
-            = cmd.context().transient.create_binding_group(self._group_layout, cc::span<sg::named_view const>(&view, 1));
+        // Force the compute pipeline only now — init_declare merely kicked off the background compile.
+        auto const pipeline = cc::async_blocking_get_singlethreaded(self._pipeline);
 
-        cmd.compute.bind_pipeline(*self._pipeline);
+        auto const group = cmd.context().transient.create_binding_group(
+            self._group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
+
+        cmd.compute.bind_pipeline(*pipeline);
         cmd.compute.bind_group(0, *group);
-        cmd.compute.dispatch_threads(static_cast<int>(out.element_count()));
+        cmd.compute.dispatch_threads(out.element_count());
     }
 
 protected:
@@ -56,14 +58,14 @@ protected:
         _group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
         auto const layout
             = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {_group_layout}});
-        auto const pso = ctx.cached.acquire_compute_pipeline(
+        // Only kick off the background compile here — execute() forces it when it actually needs the pipeline.
+        _pipeline = ctx.cached.acquire_compute_pipeline(
             sg::compute_pipeline_description{.shader = *compiled, .layout = layout});
-        _pipeline = cc::async_blocking_get_singlethreaded(pso);
     }
 
 private:
     sg::binding_group_layout_handle _group_layout;
-    sg::compute_pipeline_handle _pipeline;
+    sg::async_compute_pipeline _pipeline;
 };
 
 struct pattern_ops_package : sr::render_routine_package
