@@ -85,6 +85,14 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     t.add_argument("--instructions", type=int, metavar="N",
                    help="Max retired instructions per trace (default: 100)")
 
+    t.add_argument("--sections", metavar="LIST",
+                   help="Comma-separated output sections, all from one capture: trace, stats, memory, "
+                        "cachelines, memory-stats (default: trace). Any non-trace section raises the "
+                        "--instructions default to 100000")
+    t.add_argument("--memory-regions", metavar="LIST",
+                   help="Comma-separated address regions the memory sections show: heap, frame, stack, "
+                        "instructions (default: heap,stack)")
+
     # BooleanOptionalAction gives each its --no- form; default None means "don't pass it, let the
     # tracer's own default stand" — so the defaults live in one place, not two.
     for flag, help_text in (
@@ -94,8 +102,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
         ("source", "Annotate with source file/line and text (default: on)"),
         ("register-diffs", "Show the registers each instruction changed (default: off)"),
         ("terminate-after-traces", "Kill the debuggee once done (default: on)"),
-        ("stats", "Print a per-symbol table instead of the trace; raises the --instructions "
-                  "default to 100000 (default: off)"),
+        ("stats", "Shortcut for --sections stats (default: off)"),
+        ("memory-instruction-addresses",
+         "Annotate the memory and cacheline views with the accessing instruction (default: off)"),
     ):
         t.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None, help=help_text)
 
@@ -395,7 +404,8 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]
         argv += ["--target", args.spec]
 
     for flag, value in (("--skip", args.skip), ("--traces", args.traces),
-                        ("--instructions", args.instructions)):
+                        ("--instructions", args.instructions),
+                        ("--sections", args.sections), ("--memory-regions", args.memory_regions)):
         if value is not None:
             argv += [flag, str(value)]
 
@@ -407,6 +417,7 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]
         ("register-diffs", args.register_diffs),
         ("terminate-after-traces", args.terminate_after_traces),
         ("stats", args.stats),
+        ("memory-instruction-addresses", args.memory_instruction_addresses),
     ):
         if value is not None:
             argv.append(f"--{flag}" if value else f"--no-{flag}")

@@ -13,7 +13,7 @@ uv run dev.py assembly trace --target T --symbol S -- <args>   # what one invoca
 
 `search`/`show` answer the **static** question — what the code might do. [`trace`](#trace)
 answers the **dynamic** one: which branch a real invocation took, where an indirect call landed,
-how many instructions it retired.
+how many instructions it retired, and which memory it actually touched.
 
 ## Why object files (and why that's fine)
 
@@ -114,15 +114,51 @@ of an invocation. **Windows x64 only**, and it needs a `relwithdebinfo-*` preset
 release has no PDB, so the trace degrades to raw addresses. Full reference and
 limits: [tools/instruction-tracer/readme.md](../../tools/instruction-tracer/readme.md).
 
-`--stats` answers "where did the instructions go" without reading an 800-line
-trace: a table of one row per symbol — self instructions, atomics, direct/indirect
-calls, memory reads/writes, branches taken — sorted by cost. Usually the first move
-on a new probe; read the trace afterwards for the rows that look wrong.
+### Output sections
+
+`trace` prints a set of sections you combine with `--sections <list>`, all from **one** capture (the
+memory data can't be reliably reproduced across runs); the default is `trace` alone. The names:
+`trace`, `stats`, `memory`, `cachelines`, `memory-stats`. `--stats` is a shortcut for
+`--sections stats`. Any non-trace section raises the `--instructions` default to `100000`, since a
+truncated trace makes every aggregate silently wrong.
+
+`stats` answers "where did the instructions go" without reading an 800-line trace: a table of one
+row per symbol — self instructions, atomics, direct/indirect calls, memory reads/writes, branches
+taken — sorted by cost. Usually the first move on a new probe; read the trace afterwards for the rows
+that look wrong.
 
 ```bash
 uv run dev.py assembly trace --target clean-core-test \
     --symbol single_lazy_probe --skip 2 --stats -- "bench-async (single-thread drive)"
 ```
+
+### Memory: what data an invocation touched
+
+The `memory`, `cachelines`, and `memory-stats` sections resolve each memory operand's **effective
+address** at run time (from the register snapshot before each instruction) and show what the run
+actually touched — the one cost the instruction stream hides, since a `mov` that misses to DRAM
+reads identically to an L1 hit. `memory` is the raw chronological list; `cachelines` buckets accesses
+into 64-byte lines and reports how many of each line's bytes were touched (the footprint — the "am I
+using the whole line" check); `memory-stats` is a per-symbol table.
+
+Every address is classified into a region, and `--memory-regions <list>` picks which the sections
+show (default `heap,stack`):
+
+- `heap` — allocations and globals (a global keeps its name),
+- `stack` — *another* function's stack, where a stack array passed as a `span` lands,
+- `frame` — the current function's own stack (locals, spills, return machinery); off by default,
+- `instructions` — code memory, i.e. the instruction fetch, an I-cache footprint; off by default.
+
+```bash
+uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 \
+    --sections stats,cachelines,memory-stats -- "bench-async (single-thread drive)"
+```
+
+This is as close as the tracer gets to the cache miss `stats` can't see: it names *which* data you
+touch and how densely, so a scattered-access or half-used-line pattern shows up even though the miss
+latency itself does not. Region classification recovers frame boundaries from `call`/`ret` and skips
+segment-relative (TLS) addresses — see the tracer's
+[readme](../../tools/instruction-tracer/readme.md#limits) for the exact limits.
 
 ## Limitations
 

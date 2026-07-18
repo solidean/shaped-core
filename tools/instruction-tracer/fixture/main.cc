@@ -24,6 +24,22 @@ extern "C" __declspec(noinline) int itrace_fixture_mul(int a, int b)
     return x * y;
 }
 
+// A named global with a known extent, so the memory views have a heap-region symbol to resolve.
+// volatile so every touch is a real load/store rather than a cached register.
+extern "C" int volatile itrace_global_counter = 0;
+
+// Touches a stack array (frame region) and the global (heap region), so --sections memory has both
+// to classify and name. noinline keeps the frame; volatile keeps the accesses.
+extern "C" __declspec(noinline) int itrace_fixture_touch(int n)
+{
+    int volatile buffer[8];
+    for (int i = 0; i < 8; ++i)
+        buffer[i] = n + i;
+
+    itrace_global_counter += buffer[n & 7];
+    return itrace_global_counter;
+}
+
 /// Calls one level deeper than main, so the entry stack has a frame worth asserting on.
 __declspec(noinline) static int drive(int iterations)
 {
@@ -32,6 +48,7 @@ __declspec(noinline) static int drive(int iterations)
     {
         accumulator += itrace_fixture_add(i, 1);
         accumulator += itrace_fixture_mul(i, 2);
+        accumulator += itrace_fixture_touch(i);
     }
     return accumulator;
 }
