@@ -118,7 +118,7 @@ limits: [tools/instruction-tracer/readme.md](../../tools/instruction-tracer/read
 
 `trace` prints a set of sections you combine with `--sections <list>`, all from **one** capture (the
 memory data can't be reliably reproduced across runs); the default is `trace` alone. The names:
-`trace`, `stats`, `memory`, `cachelines`, `memory-stats`. `--stats` is a shortcut for
+`trace`, `stats`, `memory`, `cachelines`, `memory-stats`, `timing`. `--stats` is a shortcut for
 `--sections stats`. Any non-trace section raises the `--instructions` default to `100000`, since a
 truncated trace makes every aggregate silently wrong.
 
@@ -159,6 +159,24 @@ touch and how densely, so a scattered-access or half-used-line pattern shows up 
 latency itself does not. Region classification recovers frame boundaries from `call`/`ret` and skips
 segment-relative (TLS) addresses — see the tracer's
 [readme](../../tools/instruction-tracer/readme.md#limits) for the exact limits.
+
+### Timing: a static cost model (llvm-mca)
+
+`timing` feeds the retired stream to `llvm-mca` and reports µops / latency / throughput per
+instruction, a block summary (IPC, cycles), per-port pressure, and a bottleneck breakdown — the
+number behind `stats`' `slow` flag. `dev.py` resolves `llvm-mca` automatically; `--mca-cpu <name>`
+picks the modeled micro-arch (default: the host).
+
+```bash
+uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 \
+    --sections timing -- "bench-async (single-thread drive)"
+```
+
+It is a **static** model — whole-stream (assumes the block loops, near steady state) and blind to
+cache misses, the same landmine `stats` can't see. It tells you what the scheduler would do with this
+instruction mix, not where the wall-clock went. The HTML export renders it best (a `timing` toggle,
+side boxes, and a pipeline waterfall). See the tracer's
+[readme](../../tools/instruction-tracer/readme.md#timing-llvm-mca) for the caveats in full.
 
 ### HTML export: a shareable, explorable page
 

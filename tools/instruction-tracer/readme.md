@@ -90,6 +90,8 @@ narrow the spec, or use --target module!symbol / --address.
 | `--stop-at-syscall` | on | Stop before executing a syscall, rather than stepping into the kernel. |
 | `--sections <list>` | `trace` | Comma-separated output sections, all from one capture. See [Sections](#sections). |
 | `--html <path>` | off | Write a self-contained HTML report. See [HTML export](#html-export). |
+| `--mca <path>` | off | Path to `llvm-mca`; enables the [`timing`](#timing-llvm-mca) cost model. `dev.py` resolves it automatically. |
+| `--mca-cpu <name>` | host | The micro-arch `llvm-mca` models (`-mcpu`). Empty means the host CPU (`-mcpu=native`). |
 | `--stack` | on | Print the stack at entry (trace section). |
 | `--source` | on | Annotate with source file/line and the source text (trace section). |
 | `--register-diffs` | off | Dump the registers at entry, then show what each instruction changed. See below. |
@@ -123,6 +125,7 @@ asked for. The names:
 | `memory` | the raw chronological memory-access list — see [Memory](#memory) |
 | `cachelines` | memory accesses bucketed by cacheline |
 | `memory-stats` | the per-symbol memory table |
+| `timing` | the `llvm-mca` cost model (needs `--mca`) — see [Timing](#timing-llvm-mca) |
 
 `--sections trace,memory,memory-stats` prints three blocks in that fixed order. Any non-trace
 section raises the `--instructions` default to `100000`, since a trace cut short by the budget makes
@@ -263,6 +266,47 @@ silently wrong table, and 100 truncates anything worth tabling. An explicit `--i
 wins, and a table built from a truncated trace says so loudly. Note that single-stepping costs a
 debug-event round trip per instruction, so a genuinely 100k-instruction trace is slow.
 
+### Timing (llvm-mca)
+
+Where `slow` (above) only flags that the instruction count *will* mislead, `timing` puts a number on
+it. It feeds the retired instruction stream to [`llvm-mca`](https://llvm.org/docs/CommandGuide/llvm-mca.html)
+— a static issue/execute/retire model — and reports µops, latency and throughput per instruction,
+plus a block summary, per-port pressure and a bottleneck breakdown. It needs `--mca <path>`; through
+`dev.py assembly trace` the tool is resolved automatically (and passed for `--html` too).
+
+```
+timing  trace 1/1   model znver4
+  IPC 2.36   block RThroughput 3.33   cycles 339   uops 800   dispatch 6   iters 100
+  bottleneck: register-dep 292c  data-dep 292c  memory-dep 0c  resource 293c  limited by Zn4LSU (293c)
+  addr              uops  lat   @ret  text
+  00007ff7`677e1000     1    1     @3  push rax
+  00007ff7`677e1008     1    5     @7  mov ecx, [rsp+0x04]
+  00007ff7`677e100f     1    1     @9  add eax, ecx
+  00007ff7`677e1012     1    5     @9  ret
+```
+
+`@N` is the cycle the instruction retired in. The model is the **host CPU** by default
+(`-mcpu=native`), with a graceful fallback to a baseline if native is unavailable; `--mca-cpu <name>`
+overrides it. The HTML export ([below](#html-export)) is where this shines: a `timing` toggle, the
+per-instruction `@retire` cycle, block-summary and port-pressure/bottleneck side boxes, and a
+full-width **waterfall** (the classic mca pipeline diagram).
+
+**Read it honestly — it is a static model.** Two caveats worth internalizing:
+
+- **Whole-stream, not loop-detected.** We feed the whole retired stream and let mca aggregate it over
+  its default 100 iterations, which models a *frequently invoked* function near steady state — the
+  intended use. The summary therefore assumes the block loops; it is not a one-shot cost.
+- **Steady-state summary vs single-pass waterfall.** The block summary is the 100-iteration aggregate;
+  the `@retire` cycles and the waterfall come from iteration 0 (a single pass). Don't cross-read them.
+- **Blind to caches — the same landmine as `slow`.** It models the pipeline, not the memory system: a
+  `mov` that misses to DRAM costs 1 cycle here too. `timing` tells you what the *scheduler* would do
+  with this instruction mix; it cannot tell you where the wall-clock time went.
+
+Instructions `llvm-mca` cannot parse (it walks into ntdll, or hits an encoding its model lacks) are
+dropped and render with blank timing; if the survivors cannot be reconciled to the trace, the
+per-instruction column and waterfall are suppressed for that trace rather than mis-attached, and the
+block summary and port pressure still show.
+
 ## Memory
 
 The one cost the instruction stream hides is where the data went — a `mov` that misses to DRAM is
@@ -322,12 +366,19 @@ source, owner and memory enrichment plus register capture, and the `100000` inst
 explicit `--instructions` still wins).
 
 The page is tabbed per trace, with a two-column layout: the trace on the left (with toggles for
-inline source, register diffs and memory accesses, and mnemonics linked to
+inline source, register diffs, memory accesses and `timing`, and mnemonics linked to
 [felixcloutier.com](https://www.felixcloutier.com/x86/)), and collapsible aggregate views on the
-right (instruction stats, the three memory views — driven by live region checkboxes — and a
-**source view**). The source view collects every line the trace touched, grows each by context,
-merges them into ranges, and renders them with syntax highlighting and an executed-line marker;
-hovering an executed line highlights the instructions that ran it, and vice versa.
+right (instruction stats, the three memory views — driven by live region checkboxes — a
+**source view**, and, when `--mca` is available, a **block summary** and a **port-pressure /
+bottleneck** box, with a collapse-all control). The source view collects every line the trace
+touched, grows each by context, merges them into ranges, and renders them with syntax highlighting
+and an executed-line marker; hovering an executed line highlights the instructions that ran it, and
+vice versa.
+
+When timing data is present a second tab level appears below the per-trace tabs: **trace view** (the
+two-column layout) and **waterfall view** (a full-width pipeline diagram — rows are instructions,
+columns are cycles, each bar segmented dispatch → execute → retire). See [Timing](#timing-llvm-mca)
+for the model's caveats, which apply to the HTML views too.
 
 ```bash
 uv run dev.py assembly trace --target clean-core-test \
@@ -416,10 +467,15 @@ stale breakpoint or a botched re-arm all break it.
 ```
 src/instruction-tracer/
   cli/        options + target-spec parsing
-  debug/      the Win32 half: event loop, breakpoint, stepping, dbghelp, enrichment
+  debug/      the Win32 half: event loop, breakpoint, stepping, dbghelp, enrichment, llvm-mca launch
   decode/     Zydis wrapper: instruction text, and memory effective-address + region classification
-  report/     source lookup + formatting (trace, stats, and the memory views)
+  report/     source lookup + formatting (trace, stats, memory views, and the llvm-mca timing model)
 ```
+
+`report/mca.{hh,cc}` is pure (asm builder + `-json` parse + alignment), unit-tested against a
+checked-in fixture; `debug/mca_runner.cc` is the Win32 subprocess that feeds `llvm-mca`. The JSON is
+read by a minimal in-tree reader (`report/json_reader.hh`) — a stopgap until clean-core grows a JSON
+reader, at which point it should be dropped for the shared one.
 
 `debug/trace_record.hh` is the seam: plain data, no `<Windows.h>`. `decode/` and `report/` consume
 it and never see the debug API, which is what lets them be unit-tested without a debuggee.

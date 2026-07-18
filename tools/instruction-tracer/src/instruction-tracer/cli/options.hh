@@ -23,10 +23,11 @@ struct output_sections
     bool memory = false;       // the raw chronological memory-access list
     bool cachelines = false;   // memory accesses bucketed by cacheline
     bool memory_stats = false; // the per-symbol memory table
+    bool timing = false;       // the llvm-mca cost model (needs --mca)
 
     bool any_memory() const { return memory || cachelines || memory_stats; }
-    bool any_non_trace() const { return stats || memory || cachelines || memory_stats; }
-    bool none() const { return !trace && !stats && !memory && !cachelines && !memory_stats; }
+    bool any_non_trace() const { return stats || memory || cachelines || memory_stats || timing; }
+    bool none() const { return !trace && !stats && !memory && !cachelines && !memory_stats && !timing; }
 };
 
 /// Which address regions the memory sections include. Default heap + stack: the data accesses that
@@ -64,6 +65,12 @@ struct options
     /// owner, memory and register data) and the stats instruction budget, since a truncated or
     /// under-enriched export is misleading. Orthogonal to --sections: an output format, not a section.
     cc::string html_path;
+
+    /// Path to the llvm-mca binary (usually supplied by dev.py). Empty disables timing analysis: the
+    /// `timing` section and the HTML timing views degrade to absent rather than failing.
+    cc::string mca_tool;
+    /// The µarch model for llvm-mca. Empty means host (`-mcpu=native`) with a baseline fallback.
+    cc::string mca_cpu;
 
     /// Which output sections to print. Empty after parsing means "trace only" (the default).
     output_sections sections;

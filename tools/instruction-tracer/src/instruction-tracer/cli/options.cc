@@ -63,9 +63,11 @@ cc::result<cc::unit> parse_sections(cc::string_view value, output_sections& out)
                                   out.cachelines = true;
                               else if (token == "memory-stats")
                                   out.memory_stats = true;
+                              else if (token == "timing")
+                                  out.timing = true;
                               else
                                   return cc::error(cc::format("unknown section '{}' (valid: trace, stats, memory, "
-                                                              "cachelines, memory-stats)",
+                                                              "cachelines, memory-stats, timing)",
                                                               token));
                               return cc::unit{};
                           });
@@ -141,12 +143,18 @@ output sections (combine freely; all come from one capture):
                            memory        raw chronological memory accesses
                            cachelines    memory accesses bucketed by cacheline
                            memory-stats  per-symbol memory table
+                           timing        the llvm-mca cost model (needs --mca)
                          any non-trace section raises the --instructions default to
                          100000, since a truncated trace corrupts the aggregates
   --stats                shortcut for --sections stats             (default off)
   --html <path>          write a self-contained HTML report to <path>; forces a full
                          capture (source, memory, registers) and the 100000 budget.
                          Without --sections it replaces stdout with a one-line summary
+
+timing (llvm-mca cost model):
+  --mca <path>           path to llvm-mca; enables the timing section and the HTML
+                         timing views. Absent, timing degrades to nothing (no error)
+  --mca-cpu <name>       micro-arch to model (default: host via -mcpu=native)
 
 trace section:
   --stack                print the stack at entry                 (default on)
@@ -229,6 +237,20 @@ cc::result<options> parse_options(cc::span<char const* const> args)
         {
             CC_RETURN_IF_ERROR(need_value(value));
             opts.html_path = value;
+            continue;
+        }
+
+        if (arg == "--mca")
+        {
+            CC_RETURN_IF_ERROR(need_value(value));
+            opts.mca_tool = value;
+            continue;
+        }
+
+        if (arg == "--mca-cpu")
+        {
+            CC_RETURN_IF_ERROR(need_value(value));
+            opts.mca_cpu = value;
             continue;
         }
 

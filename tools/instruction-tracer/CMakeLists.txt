@@ -26,6 +26,7 @@ add_library(instruction-tracer-core STATIC
 
     src/instruction-tracer/debug/debug_session.cc
     src/instruction-tracer/debug/entry_breakpoint.cc
+    src/instruction-tracer/debug/mca_runner.cc
     src/instruction-tracer/debug/module_registry.cc
     src/instruction-tracer/debug/symbol_session.cc
     src/instruction-tracer/debug/trace_enrich.cc
@@ -36,6 +37,8 @@ add_library(instruction-tracer-core STATIC
 
     src/instruction-tracer/report/console.cc
     src/instruction-tracer/report/html_export.cc
+    src/instruction-tracer/report/mca.cc
+    src/instruction-tracer/report/mca_timing_formatter.cc
     src/instruction-tracer/report/memory_formatter.cc
     src/instruction-tracer/report/memory_stats.cc
     src/instruction-tracer/report/source_cache.cc
@@ -77,6 +80,8 @@ if(SC_BUILD_TESTS)
         tests/decode/memory_access-test.cc
         tests/report/console-test.cc
         tests/report/html_export-test.cc
+        tests/report/json_reader-test.cc
+        tests/report/mca-test.cc
         tests/report/memory-test.cc
         tests/report/source_view-test.cc
         tests/report/trace_formatter-test.cc

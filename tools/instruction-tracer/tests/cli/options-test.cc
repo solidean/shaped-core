@@ -104,6 +104,30 @@ TEST("options - --sections trace keeps the default cap")
     CHECK(r.value().instructions == 100);
 }
 
+TEST("options - --sections timing plus --mca / --mca-cpu")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", //
+                    "--sections", "timing", "--mca", "llvm-mca.exe", "--mca-cpu", "skylake"});
+    REQUIRE(r.has_value());
+
+    auto const& o = r.value();
+    CHECK(o.sections.timing);
+    CHECK(o.mca_tool == "llvm-mca.exe");
+    CHECK(o.mca_cpu == "skylake");
+    // timing is a non-trace section, so it raises the instruction cap like the others.
+    CHECK(o.sections.any_non_trace());
+    CHECK(o.instructions == stats_instruction_default);
+}
+
+TEST("options - timing defaults: no --mca, host micro-arch")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo"});
+    REQUIRE(r.has_value());
+    CHECK(!r.value().sections.timing);
+    CHECK(r.value().mca_tool.empty()); // absent by default -> timing soft-degrades
+    CHECK(r.value().mca_cpu.empty());  // empty -> host (-mcpu=native)
+}
+
 TEST("options - --sections and --stats union")
 {
     auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--sections", "trace", "--stats"});

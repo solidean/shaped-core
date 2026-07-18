@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -356,6 +357,43 @@ def check_html_export_writes_a_self_contained_file(t: Tracer) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def find_llvm_mca() -> str | None:
+    """Locate llvm-mca for the timing checks — on PATH, or the default Windows LLVM install."""
+    found = shutil.which("llvm-mca")
+    if found:
+        return found
+    default = Path("C:/Program Files/LLVM/bin/llvm-mca.exe")
+    return str(default) if default.is_file() else None
+
+
+MCA_TOOL: str | None = None
+
+
+def check_timing_section_has_real_numbers(t: Tracer) -> None:
+    """--sections timing --mca must produce llvm-mca's block summary and per-instruction cycles."""
+    code, out, err = t("--symbol", SYMBOL, "--skip", "100", "--sections", "timing", "--mca", MCA_TOOL)
+    if code != 0:
+        raise Failure(f"tracer exited {code} for --sections timing\n{out}\n{err}")
+    for needle in ("IPC", "cycles", "uops", "@"):
+        if needle not in out:
+            raise Failure(f"the timing section is missing {needle!r}:\n{out}")
+
+
+def check_html_embeds_the_mca_object(t: Tracer) -> None:
+    """--html with --mca must embed the timing model in TRACE_DATA."""
+    tmp = Path(tempfile.gettempdir()) / "itrace_self_test_mca.html"
+    tmp.unlink(missing_ok=True)
+    try:
+        code, out, err = t("--symbol", SYMBOL, "--skip", "100", "--html", str(tmp), "--mca", MCA_TOOL)
+        if code != 0:
+            raise Failure(f"tracer exited {code} for --html --mca\n{out}\n{err}")
+        page = tmp.read_text(encoding="utf-8")
+        if '"mca":{"available":true' not in page:
+            raise Failure("the exported page does not embed an available mca object")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def check_sections_combine_in_one_run(t: Tracer) -> None:
     """The point of --sections: several views, one capture. All must appear together."""
     code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100",
@@ -388,7 +426,7 @@ CHECKS = [
 
 
 def main() -> int:
-    global verbose
+    global verbose, MCA_TOOL
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--preset", default=DEFAULT_PRESET, help=f"build preset (default: {DEFAULT_PRESET})")
@@ -403,10 +441,21 @@ def main() -> int:
     paths = build(args.preset)
     tracer = Tracer(paths[TRACER_TARGET], paths[FIXTURE_TARGET])
 
-    print(f"\nrunning {len(CHECKS)} checks against {paths[FIXTURE_TARGET].name} ...\n", flush=True)
+    # The timing checks need llvm-mca; skip them (not fail) when the toolchain lacks it.
+    checks = list(CHECKS)
+    MCA_TOOL = find_llvm_mca()
+    if MCA_TOOL:
+        checks += [
+            ("--sections timing reports real llvm-mca numbers", check_timing_section_has_real_numbers),
+            ("--html embeds the llvm-mca timing model", check_html_embeds_the_mca_object),
+        ]
+    else:
+        print("note: llvm-mca not found; skipping the timing checks", flush=True)
+
+    print(f"\nrunning {len(checks)} checks against {paths[FIXTURE_TARGET].name} ...\n", flush=True)
 
     failures = 0
-    for description, check in CHECKS:
+    for description, check in checks:
         try:
             check(tracer)
             print(f"  ok    {description}", flush=True)
@@ -416,10 +465,10 @@ def main() -> int:
 
     print()
     if failures:
-        print(f"{failures} of {len(CHECKS)} checks failed")
+        print(f"{failures} of {len(checks)} checks failed")
         return 1
 
-    print(f"all {len(CHECKS)} checks passed")
+    print(f"all {len(checks)} checks passed")
     return 0
 
 

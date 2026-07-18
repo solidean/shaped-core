@@ -53,6 +53,36 @@
     }
   }
 
+  // Instruction prefixes that lead the disassembly text: colored distinctly (like a keyword), with
+  // the real mnemonic — the token after the prefix — linked and highlighted like any other.
+  const ASM_PREFIXES = new Set(["lock", "rep", "repe", "repz", "repne", "repnz", "bnd", "notrack"]);
+
+  // Render one instruction's disassembly (mnemonic link + colored operands) into a `.code` span.
+  // Shared by the trace column and the waterfall so both read identically.
+  function renderCode(insn) {
+    const code = span("code");
+    if (!insn.mnemonic) {
+      code.appendChild(span("operands", insn.text));
+      return code;
+    }
+    let text = insn.text;
+    let mnem = insn.mnemonic;
+    if (ASM_PREFIXES.has(mnem.toLowerCase())) {
+      code.appendChild(span("asm-prefix", mnem));
+      code.appendChild(span(null, " "));
+      text = text.slice(mnem.length).replace(/^\s+/, "");
+      const sp = text.indexOf(" ");
+      mnem = sp < 0 ? text : text.slice(0, sp);
+    }
+    const a = el("a", "mnemonic", mnem);
+    a.href = felixUrl(mnem);
+    a.target = "_blank";
+    a.rel = "noopener";
+    code.appendChild(a);
+    highlightAsm(code, text.slice(mnem.length));
+    return code;
+  }
+
   // ---- region filter state (drives inline memory + the 3 aggregate views) ----
 
   const regionState = {
@@ -62,10 +92,94 @@
     instructions: D.meta.regions.instructions,
   };
   const memoryRebuilders = []; // () => void, one per trace panel; called on a region change
+  const allViews = []; // every <details class="view">, so collapse-all can reach them (the DOM shim
+                       // stubs querySelectorAll, so we keep an explicit list rather than query)
 
   function applyRegionClasses() {
     for (const r of ["heap", "stack", "frame", "instructions"])
       body.classList.toggle("rgn-" + r, regionState[r]);
+  }
+
+  // ---- cross-highlight registry (source <-> instructions <-> memory views) ----
+  //
+  // The relationships are many-to-many — one instruction touches several addresses, one address is
+  // touched by several instructions, a cacheline aggregates many accesses. So instead of a single
+  // data-* key we tag each element with a set of *links* {key, rw} and, on hover, light every element
+  // that shares any key. Keys: "loc:<fileId>:<line>", "addr:<hi`lo>", "cl:<cacheline index>". The
+  // read/write direction rides on each link so a matched element can tint by its own access.
+  const linkKeyMap = new Map(); // key -> Set<element>
+  const linkedEls = [];         // elements carrying `_links`, for teardown/debug
+
+  function registerLinks(elm, links) {
+    if (!links || !links.length) return;
+    elm._links = links;
+    elm.dataset.linked = "1";
+    linkedEls.push(elm);
+    for (const l of links) {
+      let set = linkKeyMap.get(l.key);
+      if (!set) { set = new Set(); linkKeyMap.set(l.key, set); }
+      set.add(elm);
+    }
+  }
+
+  function rwOf(acc) { return acc.isRead && acc.isWrite ? "rw" : acc.isWrite ? "w" : "r"; }
+  function cachelineKey(addrStr) { return (parseAddr(addrStr) >> 6n).toString(); }
+
+  // The links one memory access contributes: its address, its cacheline, and (so the source lights up
+  // too) the source location of the instruction that made it.
+  function accessLinks(acc, loc) {
+    const rw = rwOf(acc);
+    const links = [{ key: "addr:" + acc.addr, rw }, { key: "cl:" + cachelineKey(acc.addr), rw }];
+    if (loc) links.push({ key: "loc:" + loc, rw: null });
+    return links;
+  }
+
+  function mergeRw(a, b) {
+    if (a === "w" || b === "w" || a === "rw" || b === "rw") return "w";
+    if (a === "r" || b === "r") return "r";
+    return null;
+  }
+  function dedupLinks(links) {
+    const map = new Map(); // key -> merged rw
+    for (const l of links) map.set(l.key, map.has(l.key) ? mergeRw(map.get(l.key), l.rw) : l.rw);
+    return [...map].map(([key, rw]) => ({ key, rw }));
+  }
+
+  let activeHi = [];
+  function clearHighlight() {
+    for (const e of activeHi) e.classList.remove("link-hi", "link-hi-r", "link-hi-w");
+    activeHi = [];
+  }
+  function highlightFrom(elm) {
+    clearHighlight();
+    if (!elm || !elm._links) return;
+    const keys = new Set(elm._links.map((l) => l.key));
+    const matched = new Set();
+    for (const k of keys) {
+      const set = linkKeyMap.get(k);
+      if (set) for (const m of set) matched.add(m);
+    }
+    for (const m of matched) {
+      let rw = null; // strongest read/write among m's links that matched (write wins, then read)
+      for (const l of m._links) {
+        if (!keys.has(l.key)) continue;
+        if (l.rw === "w" || l.rw === "rw") { rw = "w"; break; }
+        if (l.rw === "r") rw = rw || "r";
+      }
+      m.classList.add(rw === "w" ? "link-hi-w" : rw === "r" ? "link-hi-r" : "link-hi");
+      activeHi.push(m);
+    }
+  }
+
+  function installCrossHighlighting(root) {
+    root.addEventListener("mouseover", (ev) => {
+      const t = ev.target.closest ? ev.target.closest("[data-linked]") : null;
+      if (t) highlightFrom(t);
+    });
+    root.addEventListener("mouseout", (ev) => {
+      const t = ev.target.closest ? ev.target.closest("[data-linked]") : null;
+      if (t) clearHighlight();
+    });
   }
 
   // ---- felixcloutier.com mnemonic links ----------------------------------
@@ -137,6 +251,7 @@
     toggle("source", "show-source", true);
     toggle("registers", "show-registers", false);
     toggle("memory", "show-memory", false);
+    if (D.traces.some((t) => t.mca && t.mca.available)) toggle("timing", "show-timing", false);
 
     bar.appendChild(span("controls-sep", "regions"));
     for (const r of ["heap", "stack", "frame", "instructions"]) {
@@ -154,6 +269,17 @@
       lbl.appendChild(span(null, r));
       bar.appendChild(lbl);
     }
+
+    // Collapse / expand every right-column view at once (the column grew ~6 collapsibles).
+    bar.appendChild(span("controls-sep", "views"));
+    let allOpen = true;
+    const collapseBtn = el("button", "ctl-btn", "collapse all");
+    collapseBtn.addEventListener("click", () => {
+      allOpen = !allOpen;
+      for (const d of allViews) d.open = allOpen;
+      collapseBtn.textContent = allOpen ? "collapse all" : "expand all";
+    });
+    bar.appendChild(collapseBtn);
     return bar;
   }
 
@@ -190,29 +316,29 @@
     return idx;
   }
 
-  function renderInstruction(insn) {
+  function fmtNum(x) { return (Math.round(x * 100) / 100).toString(); }
+
+  function renderInstruction(insn, mi) {
     const row = el("div", "insn");
-    if (insn.fileId >= 0 && insn.line > 0) row.dataset.loc = insn.fileId + ":" + insn.line;
+    const loc = insn.fileId >= 0 && insn.line > 0 ? insn.fileId + ":" + insn.line : null;
     if (insn.isAtomic) row.classList.add("atomic");
 
     row.appendChild(span("addr", insn.addr));
-
-    const code = span("code");
-    if (insn.mnemonic) {
-      const a = el("a", "mnemonic", insn.mnemonic);
-      a.href = felixUrl(insn.mnemonic);
-      a.target = "_blank";
-      a.rel = "noopener";
-      code.appendChild(a);
-      highlightAsm(code, insn.text.slice(insn.mnemonic.length));
-    } else {
-      code.appendChild(span("operands", insn.text));
-    }
-    row.appendChild(code);
+    row.appendChild(renderCode(insn));
 
     // Branch annotation, mirroring the terminal's semantics.
     const note = branchNote(insn);
     if (note) row.appendChild(note);
+
+    // llvm-mca timing: the @retire cycle is shown by default (dim, like the address); the µops /
+    // latency / throughput detail is gated behind the `timing` toggle.
+    if (mi && mi.valid) {
+      if (mi.hasTimeline) row.appendChild(span("retire", " @" + mi.cRetired));
+      let detail = " " + mi.uops + "µ " + mi.latency + "c rthr" + fmtNum(mi.rthroughput);
+      if (mi.mayLoad) detail += " ld";
+      if (mi.mayStore) detail += " st";
+      row.appendChild(span("timing", detail));
+    }
 
     // Inline register diff (shown under the registers toggle).
     if (insn.regdiff && insn.regdiff.length) {
@@ -231,8 +357,20 @@
       mr.appendChild(span("mem-rw", (acc.isRead ? "R" : "") + (acc.isWrite ? "W" : "")));
       mr.appendChild(span("mem-region rgn-fg-" + acc.region, regionLabel(acc.region)));
       if (acc.symbol) mr.appendChild(span("mem-sym", acc.symbol));
+      registerLinks(mr, accessLinks(acc, loc));
       row.appendChild(mr);
     }
+
+    // The row itself links to its source line and every address it touches, so hovering the
+    // instruction lights up the matching rows in the memory views (and vice versa).
+    const rowLinks = [];
+    if (loc) rowLinks.push({ key: "loc:" + loc, rw: null });
+    for (const acc of insn.mem) {
+      const rw = rwOf(acc);
+      rowLinks.push({ key: "addr:" + acc.addr, rw });
+      rowLinks.push({ key: "cl:" + cachelineKey(acc.addr), rw });
+    }
+    registerLinks(row, rowLinks);
     return row;
   }
 
@@ -259,6 +397,7 @@
 
   function renderTraceColumn(trace) {
     const col = el("div", "trace-col");
+    const mca = trace.mca && trace.mca.available && trace.mca.perInstructionValid ? trace.mca : null;
 
     const head = el("div", "col-head");
     head.appendChild(span("col-title", "trace"));
@@ -301,13 +440,14 @@
     // instructions, grouped under source headings
     const srcIdx = sourceIndex(trace);
     let curKey = null;
-    for (const insn of trace.instructions) {
+    for (let i = 0; i < trace.instructions.length; i++) {
+      const insn = trace.instructions[i];
       if (insn.line > 0) {
         const key = insn.fileId + ":" + insn.line;
         if (key !== curKey) {
           curKey = key;
           const heading = el("div", "src-heading");
-          if (insn.fileId >= 0 && insn.line > 0) heading.dataset.loc = key;
+          if (insn.fileId >= 0 && insn.line > 0) registerLinks(heading, [{ key: "loc:" + key, rw: null }]);
           const loc = span("src-loc", baseName(insn.file) + ":" + insn.line);
           loc.title = insn.file + ":" + insn.line;
           heading.appendChild(loc);
@@ -316,7 +456,7 @@
           bodyEl.appendChild(heading);
         }
       }
-      bodyEl.appendChild(renderInstruction(insn));
+      bodyEl.appendChild(renderInstruction(insn, mca ? mca.instructions[i] : null));
     }
 
     const footer = el("div", "trace-footer");
@@ -347,15 +487,26 @@
 
   // ---- right column: collapsible views -----------------------------------
 
-  function collapsible(title, open) {
+  function collapsible(title, open, info) {
     const d = el("details", "view");
     if (open) d.open = true;
-    const s = el("summary", null, title);
+    const s = el("summary");
+    s.appendChild(span("view-title", title));
+    if (info) {
+      const icon = span("info-icon", "ⓘ");
+      icon.dataset.tip = info;
+      s.appendChild(icon);
+    }
     d.appendChild(s);
     const bodyEl = el("div", "view-body");
     d.appendChild(bodyEl);
+    allViews.push(d);
     return { details: d, body: bodyEl };
   }
+
+  // A stable color per resource index, so a port keeps its hue across the heatmap and the waterfall.
+  const PORT_HUES = [200, 30, 145, 280, 0, 55, 320, 95, 255, 175, 15, 220];
+  function portColor(idx) { return "hsl(" + PORT_HUES[idx % PORT_HUES.length] + " 60% 55%)"; }
 
   function renderStatsTable(stats) {
     const table = el("table", "stats");
@@ -410,15 +561,18 @@
 
   function computeRaw(insns) {
     const out = [];
-    for (const insn of insns)
+    for (const insn of insns) {
+      const loc = insn.fileId >= 0 && insn.line > 0 ? insn.fileId + ":" + insn.line : null;
       for (const acc of insn.mem)
-        if (regionState[acc.region]) out.push(acc);
+        if (regionState[acc.region]) out.push({ acc, loc });
+    }
     return out;
   }
 
   function computeCachelines(insns) {
     const buckets = new Map();
-    for (const insn of insns)
+    for (const insn of insns) {
+      const loc = insn.fileId >= 0 && insn.line > 0 ? insn.fileId + ":" + insn.line : null;
       for (const acc of insn.mem) {
         if (!regionState[acc.region] || acc.size === 0) continue;
         const addr = parseAddr(acc.addr);
@@ -428,7 +582,8 @@
         for (let line = first; line <= last; line++) {
           const key = line.toString();
           let b = buckets.get(key);
-          if (!b) { b = { line, accesses: 0, mask: 0n, reads: false, writes: false, regions: [], symbols: [] }; buckets.set(key, b); }
+          if (!b) { b = { line, accesses: 0, mask: 0n, reads: false, writes: false, regions: [], symbols: [], members: [] }; buckets.set(key, b); }
+          b.members.push({ acc, loc });
           const base = line * 64n;
           const lo = (addr > base ? addr : base) - base;
           const end = addr + size;
@@ -442,6 +597,7 @@
           if (acc.symbol && !b.symbols.includes(acc.symbol)) b.symbols.push(acc.symbol);
         }
       }
+    }
     return [...buckets.values()].sort((a, b) => (a.line < b.line ? -1 : a.line > b.line ? 1 : 0));
   }
 
@@ -483,13 +639,14 @@
     const accs = computeRaw(insns);
     if (!accs.length) return el("div", "empty", "(no accesses in the selected regions)");
     const box = el("div", "mono-list");
-    for (const acc of accs) {
+    for (const { acc, loc } of accs) {
       const r = el("div", "mem-row");
       r.appendChild(span("mem-addr", acc.addr));
       r.appendChild(span("mem-size", String(acc.size)));
       r.appendChild(span("mem-rw", (acc.isRead ? "R" : "") + (acc.isWrite ? "W" : "")));
       r.appendChild(span("mem-region rgn-fg-" + acc.region, regionLabel(acc.region)));
       if (acc.symbol) r.appendChild(span("mem-sym", acc.symbol));
+      registerLinks(r, accessLinks(acc, loc));
       box.appendChild(r);
     }
     return box;
@@ -511,6 +668,10 @@
       r.appendChild(span("mem-region rgn-fg-" + b.regions[0], b.regions.map(regionLabel).join("/")));
       const names = joinSyms(b.symbols);
       if (names) r.appendChild(span("mem-sym", names));
+      // Hovering a cacheline lights every access, instruction and source line that landed on it.
+      const links = b.members.flatMap((m) => accessLinks(m.acc, m.loc));
+      links.push({ key: "cl:" + b.line.toString(), rw: null });
+      registerLinks(r, dedupLinks(links));
       box.appendChild(r);
     }
     return box;
@@ -537,16 +698,247 @@
     return wrap;
   }
 
+  // ---- llvm-mca timing views ---------------------------------------------
+
+  // Rate a value in [0,1] of its ideal into a good/mid/low class for the color-coded cells.
+  function rateFraction(frac) { return frac >= 0.66 ? "good" : frac >= 0.33 ? "mid" : "low"; }
+
+  function renderBlockSummary(mca) {
+    const s = mca.summary;
+    const table = el("table", "stats mca-summary");
+    const row = (k, v, tip, cls) => {
+      const tr = el("tr");
+      const kc = el("td", "mca-k", k);
+      if (tip) kc.dataset.tip = tip;
+      tr.appendChild(kc);
+      tr.appendChild(el("td", "mca-v" + (cls ? " " + cls : ""), v));
+      table.appendChild(tr);
+    };
+    // IPC and µops/cycle are rated against the dispatch width — the hardware ceiling for both.
+    const width = s.dispatchWidth || 6;
+    row("micro-arch", mca.cpu || "?", "The CPU model llvm-mca simulated (host by default, via -mcpu=native).");
+    row("IPC", fmtNum(s.ipc),
+      "Instructions retired per cycle. Higher is better; the ceiling is the dispatch width (" + width + "). Low IPC means the block is latency- or resource-bound, not that it is slow in wall-clock.",
+      rateFraction(s.ipc / width));
+    row("block RThroughput", fmtNum(s.blockRThroughput),
+      "Reciprocal throughput: the cycles one iteration of the block needs at peak, ignoring latency. A lower bound on cost — lower is better.");
+    row("total cycles", String(s.totalCycles),
+      "Modeled cycles to run all " + s.iterations + " iterations of the block back to back.");
+    row("total µops", String(s.totalUops),
+      "Total micro-ops issued. Instructions decode into one or more µops; this is the real work the scheduler sees.");
+    row("µops / cycle", fmtNum(s.uopsPerCycle),
+      "Micro-ops retired per cycle. Higher is better; the ceiling is the dispatch width (" + width + ").",
+      rateFraction(s.uopsPerCycle / width));
+    row("dispatch width", String(s.dispatchWidth),
+      "How many µops the front-end can dispatch per cycle — the hardware ceiling for IPC and µops/cycle.");
+    row("iterations", String(s.iterations),
+      "How many times llvm-mca ran the block to reach steady state (its default aggregate). The waterfall and @retire come from iteration 0 only.");
+    const wrap = el("div", "table-wrap");
+    wrap.appendChild(table);
+    wrap.appendChild(el("div", "mca-note",
+      "Static model over " + s.iterations + " steady-state iterations; assumes the block loops and is blind to cache misses."));
+    return wrap;
+  }
+
+  function renderPortPressure(mca) {
+    const wrap = el("div", "mca-ports");
+
+    wrap.appendChild(el("div", "mca-subhead", "port pressure"));
+    wrap.appendChild(el("div", "mca-note",
+      "How the µops spread across execution ports. A tall, lopsided bar is a port the code leans on — a throughput ceiling. Evenly spread and short is healthier than one saturated port."));
+
+    // Aggregate pressure per resource across every timed instruction — the "where do the µops go" heatmap.
+    const totals = new Array(mca.resources.length).fill(0);
+    for (const mi of mca.instructions)
+      if (mi.valid && mi.portPressure)
+        mi.portPressure.forEach((u, idx) => { totals[idx] += u; });
+    let maxT = 0;
+    for (const t of totals) maxT = Math.max(maxT, t);
+
+    const heat = el("div", "port-heat");
+    mca.resources.forEach((name, idx) => {
+      if (totals[idx] <= 0) return;
+      const r = el("div", "port-row");
+      r.dataset.tip = name + ": " + fmtNum(totals[idx]) + " cycles of pressure across the block (sum over all instructions).";
+      r.appendChild(span("port-name", name));
+      const track = el("div", "port-track");
+      const fill = el("div", "port-fill");
+      fill.style.width = (maxT > 0 ? 100 * totals[idx] / maxT : 0) + "%";
+      fill.style.background = portColor(idx);
+      track.appendChild(fill);
+      r.appendChild(track);
+      r.appendChild(span("port-val", fmtNum(totals[idx])));
+      heat.appendChild(r);
+    });
+    if (!heat.children.length) heat.appendChild(el("div", "empty", "(no port pressure reported)"));
+    wrap.appendChild(heat);
+
+    const b = mca.bottleneck;
+    if (b && b.available && b.totalCycles > 0) {
+      const sub = el("div", "mca-subhead", "bottleneck — of " + b.totalCycles + " cycles");
+      sub.dataset.tip = "Where the cycles went. Dependency bars = the block waited on results (latency-bound). Resource pressure = it waited on a busy port (throughput-bound). The bars can overlap and need not sum to the total.";
+      wrap.appendChild(sub);
+      const bars = el("div", "btl-bars");
+      const bar = (label, val, cls, tip) => {
+        const r = el("div", "btl-row");
+        if (tip) r.dataset.tip = tip;
+        r.appendChild(span("btl-label", label));
+        const track = el("div", "btl-track");
+        const fill = el("div", "btl-fill " + cls);
+        fill.style.width = (100 * val / b.totalCycles) + "%";
+        track.appendChild(fill);
+        r.appendChild(track);
+        r.appendChild(span("btl-val", val + "c"));
+        bars.appendChild(r);
+      };
+      bar("register deps", b.registerDependency, "btl-reg", "Cycles stalled waiting for a register result — a dependency chain. Shorten the chain or break the dependency to speed it up.");
+      bar("data deps", b.dataDependency, "btl-data", "Cycles stalled on a data dependency (register or memory result feeding the next op).");
+      bar("memory deps", b.memoryDependency, "btl-mem", "Cycles stalled on a memory dependency — a load waiting on an earlier store to the same address (store-to-load forwarding).");
+      bar("resource pressure", b.resourcePressure, "btl-res", "Cycles lost because a needed execution port was busy — throughput-bound, not latency-bound. See the port pressure above.");
+      wrap.appendChild(bars);
+      if (b.topPorts && b.topPorts.length) {
+        const lim = el("div", "btl-limit");
+        lim.appendChild(span("btl-limit-label", "limited by "));
+        lim.appendChild(span(null, b.topPorts.map((p) => p.resource + " (" + fmtNum(p.cycles) + "c)").join(", ")));
+        wrap.appendChild(lim);
+      }
+    }
+    return wrap;
+  }
+
+  // Full-width pipeline waterfall: rows = instructions, columns = cycles; each row a bar from the
+  // dispatch cycle to the retire cycle, segmented by phase (wait -> execute -> retire).
+  const WF_CELL = 13;      // px per cycle
+  const WF_ROW_CAP = 512;  // long traces: cap rows and say so, rather than freeze the browser
+
+  function renderWaterfall(trace) {
+    const mca = trace.mca && trace.mca.available && trace.mca.perInstructionValid ? trace.mca : null;
+    if (!mca) return el("div", "empty", "(no per-instruction timeline for this trace)");
+
+    const rows = [];
+    for (let i = 0; i < trace.instructions.length; i++) {
+      const mi = mca.instructions[i];
+      if (mi && mi.valid && mi.hasTimeline) rows.push({ insn: trace.instructions[i], mi });
+    }
+    if (!rows.length) return el("div", "empty", "(llvm-mca produced no timeline cycles)");
+
+    let truncated = false;
+    let shown = rows;
+    if (rows.length > WF_ROW_CAP) { shown = rows.slice(0, WF_ROW_CAP); truncated = true; }
+
+    let maxCycle = 0;
+    for (const r of shown) maxCycle = Math.max(maxCycle, r.mi.cRetired);
+    const numCols = maxCycle + 1;
+    const trackW = numCols * WF_CELL;
+
+    const wrap = el("div", "waterfall");
+
+    // legend (each phase carries a tooltip explaining what it means)
+    const legend = el("div", "wf-legend");
+    const chip = (cls, label, tip) => {
+      const c = span("wf-chip", "");
+      if (tip) c.dataset.tip = tip;
+      c.appendChild(span("wf-swatch " + cls, ""));
+      c.appendChild(span(null, label));
+      legend.appendChild(c);
+    };
+    chip("wf-wait", "wait (dispatch → issue)",
+      "Cycles between being dispatched into the scheduler and issuing to a port — waiting for its input operands and a free execution port.");
+    chip("wf-exec", "execute",
+      "Cycles spent executing in a functional unit — the instruction's latency.");
+    chip("wf-retire", "retire wait",
+      "Finished executing but not yet retired. Instructions retire in program order, so a fast one waits for older ones ahead of it.");
+    wrap.appendChild(legend);
+
+    const scroll = el("div", "wf-scroll");
+    const table = el("div", "wf-table");
+
+    // cycle ruler
+    const ruler = el("div", "wf-ruler");
+    ruler.appendChild(span("wf-label", "cycle"));
+    const rtrack = el("div", "wf-track");
+    rtrack.style.width = trackW + "px";
+    for (let cyc = 0; cyc < numCols; cyc += 5) {
+      const tick = span("wf-tick", String(cyc));
+      tick.style.left = (cyc * WF_CELL) + "px";
+      rtrack.appendChild(tick);
+    }
+    ruler.appendChild(rtrack);
+    table.appendChild(ruler);
+
+    const seg = (a, b, cls, tip) => {
+      const d = el("div", "wf-seg " + cls);
+      d.style.left = (a * WF_CELL) + "px";
+      d.style.width = (Math.max(1, b - a) * WF_CELL) + "px";
+      if (tip) d.dataset.tip = tip;
+      return d;
+    };
+
+    for (const { insn, mi } of shown) {
+      const r = el("div", "wf-row");
+      const loc = insn.fileId >= 0 && insn.line > 0 ? insn.fileId + ":" + insn.line : null;
+      const label = span("wf-label");
+      label.dataset.tip = "dispatched @" + mi.cDispatched + " · issued @" + mi.cIssued + " · executed @" + mi.cExecuted + " · retired @" + mi.cRetired;
+      label.appendChild(span("wf-addr", insn.addr.slice(9))); // low half only, to save width
+      label.appendChild(renderCode(insn));                    // same highlighting as the trace column
+      r.appendChild(label);
+
+      const track = el("div", "wf-track");
+      track.style.width = trackW + "px";
+      const issue = Math.max(mi.cIssued, mi.cDispatched);
+      const exec = Math.max(mi.cExecuted, issue);
+      if (issue > mi.cDispatched) track.appendChild(seg(mi.cDispatched, issue, "wf-wait", "waiting for operands / a free port (" + (issue - mi.cDispatched) + "c)"));
+      if (exec > issue) track.appendChild(seg(issue, exec, "wf-exec", "executing (" + (exec - issue) + "c latency)"));
+      if (mi.cRetired > exec) track.appendChild(seg(exec, mi.cRetired, "wf-retire", "waiting to retire in order (" + (mi.cRetired - exec) + "c)"));
+      track.appendChild(seg(mi.cRetired, mi.cRetired + 1, "wf-tickmark", "retired at cycle " + mi.cRetired));
+      r.appendChild(track);
+
+      // Waterfall rows join the same cross-highlighting as the trace column.
+      const links = [];
+      if (loc) links.push({ key: "loc:" + loc, rw: null });
+      for (const acc of insn.mem) {
+        const rw = rwOf(acc);
+        links.push({ key: "addr:" + acc.addr, rw });
+        links.push({ key: "cl:" + cachelineKey(acc.addr), rw });
+      }
+      registerLinks(r, links);
+      table.appendChild(r);
+    }
+
+    scroll.appendChild(table);
+    wrap.appendChild(scroll);
+    if (truncated)
+      wrap.appendChild(el("div", "warn", "waterfall capped at " + WF_ROW_CAP + " of " + rows.length + " instructions"));
+    return wrap;
+  }
+
   function renderViewsColumn(trace) {
     const col = el("div", "views-col");
 
-    const stats = collapsible("instruction stats", true);
+    const stats = collapsible("instruction stats", true,
+      "Per-symbol tally of what ran: self instructions, atomics, slow ops, direct/indirect calls, memory reads/writes, and branches taken. A count, not a cost model — see block summary for timing.");
     stats.body.appendChild(renderStatsTable(trace.stats));
     col.appendChild(stats.details);
 
-    const raw = collapsible("memory accesses", true);
-    const cl = collapsible("cacheline accesses", true);
-    const ms = collapsible("memory stats", true);
+    const mca = trace.mca && trace.mca.available ? trace.mca : null;
+    if (mca) {
+      const bs = collapsible("block summary (llvm-mca)", true,
+        "llvm-mca's static timing model of this exact instruction stream, aggregated over " + mca.summary.iterations + " steady-state iterations. IPC and cycles assume the block loops; it models the pipeline, not the memory system (blind to cache misses).");
+      bs.body.appendChild(renderBlockSummary(mca));
+      col.appendChild(bs.details);
+
+      const pp = collapsible("port pressure & bottleneck", true,
+        "Which execution ports the µops use, and where the cycles were lost: dependency stalls (latency-bound) versus resource pressure (throughput-bound). The limiting ports cap the block's throughput.");
+      pp.body.appendChild(renderPortPressure(mca));
+      col.appendChild(pp.details);
+    }
+
+    const raw = collapsible("memory accesses", true,
+      "Every memory operand's runtime effective address, in execution order: address, size, read/write, region, and the symbol it hit. Hover a row to light the instructions and source that touch it.");
+    const cl = collapsible("cacheline accesses", true,
+      "The same accesses bucketed into 64-byte cachelines: how many accesses hit each line and how many of its bytes — the footprint (\"am I using the whole line or 8 bytes of it\"). Hover to light everything on the line.");
+    const ms = collapsible("memory stats", true,
+      "Per-symbol memory table, grouped by the function making the accesses: access count, reads/writes, distinct cachelines, and bytes moved.");
     col.appendChild(raw.details);
     col.appendChild(cl.details);
     col.appendChild(ms.details);
@@ -559,7 +951,8 @@
     rebuild();
     memoryRebuilders.push(rebuild);
 
-    const src = collapsible("source", true);
+    const src = collapsible("source", true,
+      "Every source line the trace touched, grown by context and syntax-highlighted, with an executed-line marker. Hover a line to light the instructions that came from it.");
     src.body.appendChild(renderSourceView(trace));
     col.appendChild(src.details);
 
@@ -572,36 +965,72 @@
   function renderTrace(trace) {
     const panel = el("div", "trace-panel");
     panel.setAttribute("role", "tabpanel");
+
     const grid = el("div", "trace-grid");
     grid.appendChild(renderTraceColumn(trace));
     grid.appendChild(renderViewsColumn(trace));
-    panel.appendChild(grid);
+
+    // Without a per-instruction timeline there is nothing to put in a waterfall, so keep the plain
+    // single-view layout. With one, add a second tab level: trace view vs full-width waterfall.
+    const hasWaterfall = trace.mca && trace.mca.available && trace.mca.perInstructionValid;
+    if (!hasWaterfall) {
+      panel.appendChild(grid);
+      return panel;
+    }
+
+    const traceView = el("div", "subpanel");
+    traceView.appendChild(grid);
+    const waterfallView = el("div", "subpanel");
+    waterfallView.appendChild(renderWaterfall(trace));
+    const subpanels = [traceView, waterfallView];
+
+    const subbar = el("div", "subtabbar");
+    const buttons = [];
+    const select = (i) => {
+      subpanels.forEach((p, j) => p.classList.toggle("active", i === j));
+      buttons.forEach((b, j) => b.setAttribute("aria-selected", String(i === j)));
+    };
+    ["trace view", "waterfall view"].forEach((name, i) => {
+      const b = el("button", "subtab", name);
+      b.setAttribute("role", "tab");
+      b.addEventListener("click", () => select(i));
+      buttons.push(b);
+      subbar.appendChild(b);
+    });
+    select(0);
+
+    panel.appendChild(subbar);
+    const host = el("div", "subpanels");
+    subpanels.forEach((p) => host.appendChild(p));
+    panel.appendChild(host);
     return panel;
   }
 
-  // ---- hover-linking: source line <-> the instructions that ran it -------
+  // ---- tooltips: explain metrics and phases for readers new to the model ----
 
-  function installHoverLinking(root) {
-    let active = null;
-    const clear = () => {
-      if (!active) return;
-      root.querySelectorAll(".loc-hi").forEach((e) => e.classList.remove("loc-hi"));
-      active = null;
+  function installTooltips(root) {
+    const tip = el("div", "tooltip");
+    tip.style.display = "none";
+    document.body.appendChild(tip);
+    let current = null;
+    const place = (t) => {
+      const r = t.getBoundingClientRect();
+      tip.style.left = Math.max(8, r.left) + "px";
+      tip.style.top = (r.bottom + 6) + "px";
     };
     root.addEventListener("mouseover", (ev) => {
-      const t = ev.target.closest("[data-loc]");
-      if (!t) return;
-      if (t.dataset.loc === active) return;
-      clear();
-      active = t.dataset.loc;
-      root.querySelectorAll('[data-loc="' + cssEscape(active) + '"]').forEach((e) => e.classList.add("loc-hi"));
+      const t = ev.target.closest ? ev.target.closest("[data-tip]") : null;
+      if (!t || t === current) return;
+      current = t;
+      tip.textContent = t.dataset.tip;
+      tip.style.display = "block";
+      place(t);
     });
     root.addEventListener("mouseout", (ev) => {
-      const t = ev.target.closest("[data-loc]");
-      if (t && !ev.relatedTarget?.closest?.('[data-loc="' + cssEscape(active) + '"]')) clear();
+      const t = ev.target.closest ? ev.target.closest("[data-tip]") : null;
+      if (t && t === current) { tip.style.display = "none"; current = null; }
     });
   }
-  function cssEscape(s) { return s.replace(/["\\]/g, "\\$&"); }
 
   // ==== source view + highlighter =========================================
 
@@ -622,7 +1051,7 @@
           const line = el("div", "src-line");
           if (ln.executed) {
             line.classList.add("executed");
-            line.dataset.loc = f.fileId + ":" + ln.number;
+            registerLinks(line, [{ key: "loc:" + f.fileId + ":" + ln.number, rw: null }]);
           }
           line.appendChild(span("src-gutter", String(ln.number)));
           const bar = span("src-bar", "");
@@ -741,5 +1170,6 @@
   app.appendChild(panelHost);
 
   applyRegionClasses();
-  installHoverLinking(app);
+  installCrossHighlighting(app);
+  installTooltips(app);
 })();

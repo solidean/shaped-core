@@ -87,14 +87,16 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     t.add_argument("--sections", metavar="LIST",
                    help="Comma-separated output sections, all from one capture: trace, stats, memory, "
-                        "cachelines, memory-stats (default: trace). Any non-trace section raises the "
-                        "--instructions default to 100000")
+                        "cachelines, memory-stats, timing (default: trace). Any non-trace section raises "
+                        "the --instructions default to 100000. timing needs llvm-mca (resolved automatically)")
     t.add_argument("--memory-regions", metavar="LIST",
                    help="Comma-separated address regions the memory sections show: heap, frame, stack, "
                         "instructions (default: heap,stack)")
     t.add_argument("--html", metavar="PATH",
                    help="Write a self-contained HTML report to PATH (forces a full capture). Without "
                         "--sections it replaces stdout with a one-line summary")
+    t.add_argument("--mca-cpu", metavar="NAME",
+                   help="micro-arch llvm-mca models for the timing views (default: host via -mcpu=native)")
 
     # BooleanOptionalAction gives each its --no- form; default None means "don't pass it, let the
     # tracer's own default stand" — so the defaults live in one place, not two.
@@ -394,7 +396,7 @@ def _artifact_of(ctx: Context, preset, name: str) -> Path | None:
     return None
 
 
-def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]:
+def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path, mca_tool: str | None) -> list[str]:
     """Translate our flags into the tracer's CLI. Flags left at None are simply not passed, so the
     tracer's own defaults apply and we never restate them."""
     argv = [str(tracer), "--exe", str(exe)]
@@ -416,6 +418,13 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]
     # they typed the command) rather than the repo root, and pass an absolute path.
     if args.html is not None:
         argv += ["--html", str(Path(args.html).resolve())]
+
+    # Pass llvm-mca whenever it resolved; the tracer only invokes it for a timing section or --html,
+    # so this gives HTML exports timing out of the box without changing a plain trace.
+    if mca_tool is not None:
+        argv += ["--mca", str(mca_tool)]
+    if args.mca_cpu is not None:
+        argv += ["--mca-cpu", str(args.mca_cpu)]
 
     for flag, value in (
         ("until-return", args.until_return),
@@ -467,7 +476,17 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
         print(console.yellow(f"note: {preset.name} has no PDB; the trace will show raw addresses "
                              f"without symbols or source. Use a relwithdebinfo preset."), file=sys.stderr)
 
-    argv = _tracer_argv(args, tracer, exe)
+    # llvm-mca powers the timing views. Resolve it best-effort; the tracer soft-degrades without it.
+    wants_timing = args.html is not None or (args.sections is not None and "timing" in args.sections)
+    try:
+        mca_tool: str | None = disasm.find_tool("llvm-mca", preset.build_dir)
+    except disasm.DisasmError:
+        mca_tool = None
+        if wants_timing:
+            print(console.yellow("note: llvm-mca not found; timing analysis will be unavailable "
+                                 "(it ships with LLVM, beside clang)"), file=sys.stderr)
+
+    argv = _tracer_argv(args, tracer, exe, mca_tool)
     if args.verbose:
         print(console.dim(f"  $ {' '.join(argv)}"), file=sys.stderr)
 

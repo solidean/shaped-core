@@ -79,6 +79,12 @@ public:
         sep();
         _out += cc::format("{}", n);
     }
+    /// Shortest round-tripping form via cc::format; JSON accepts the decimal/scientific it emits.
+    void value_double(double d)
+    {
+        sep();
+        _out += cc::format("{}", d);
+    }
 
     // key + value convenience.
     void field(cc::string_view k, cc::string_view s)
@@ -100,6 +106,11 @@ public:
     {
         key(k);
         value_uint(n);
+    }
+    void field_double(cc::string_view k, double d)
+    {
+        key(k);
+        value_double(d);
     }
 
     [[nodiscard]] cc::string const& str() const { return _out; }

@@ -19,6 +19,8 @@
   --warn: #cca700;
   --exec: #4ec9b0;     /* executed-line bar */
   --hi: rgba(78, 201, 176, 0.16);
+  --hi-read: rgba(86, 156, 214, 0.22);   /* reads tint blue */
+  --hi-write: rgba(229, 192, 123, 0.24); /* writes tint amber */
 
   /* syntax highlighting (VSCode Dark Modern) */
   --tok-comment: #6a9955;
@@ -137,6 +139,7 @@ header h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; color: #fff; }
 .insn .addr { color: var(--dimmer); margin-right: 14px; }
 .mnemonic { color: var(--accent); text-decoration: none; }
 .mnemonic:hover { text-decoration: underline; }
+.asm-prefix { color: var(--tok-keyword); font-weight: 600; }
 .operands { color: var(--fg); }
 .insn.atomic .mnemonic { color: var(--atomic); }
 .branch .taken { color: var(--taken); }
@@ -256,10 +259,136 @@ table.stats tr.total td.sym { color: var(--dim); }
 .brk1 { color: var(--brk1); }
 .brk2 { color: var(--brk2); }
 
-/* ---- hover-linking highlight ---- */
-.loc-hi { background: var(--hi); }
-.insn.loc-hi, .src-heading.loc-hi { box-shadow: inset 2px 0 0 var(--sym); }
-.src-line.executed.loc-hi { background: var(--hi); }
+/* ---- collapse-all control ---- */
+.ctl-btn {
+  background: var(--bg-panel);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+.ctl-btn:hover { color: #fff; border-color: var(--sym); }
+
+/* ---- inline timing (llvm-mca) ---- */
+.retire { color: var(--dimmer); }               /* the @N retire cycle — always shown, like the address */
+.timing { display: none; color: var(--dim); }   /* µops / latency / throughput — gated by the toggle */
+body.show-timing .timing { display: inline; }
+
+/* ---- block summary + port pressure views ---- */
+table.stats.mca-summary td.mca-k { color: var(--dim); text-align: left; padding-right: 14px; }
+table.stats.mca-summary td.mca-v { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
+.mca-note { color: var(--dimmer); font-size: 12px; margin-top: 8px; max-width: 520px; }
+.mca-subhead { color: var(--dim); margin: 12px 0 5px; }
+
+.port-heat { display: flex; flex-direction: column; gap: 3px; }
+.port-row { display: grid; grid-template-columns: 92px 1fr 46px; gap: 8px; align-items: center; }
+.port-name { color: var(--fg); white-space: nowrap; }
+.port-track { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; height: 12px; overflow: hidden; }
+.port-fill { height: 100%; }
+.port-val { color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+
+.btl-bars { display: flex; flex-direction: column; gap: 3px; }
+.btl-row { display: grid; grid-template-columns: 116px 1fr 46px; gap: 8px; align-items: center; }
+.btl-label { color: var(--dim); white-space: nowrap; }
+.btl-track { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; height: 12px; overflow: hidden; }
+.btl-fill { height: 100%; }
+.btl-reg { background: var(--rgn-frame); }
+.btl-data { background: var(--rgn-stack); }
+.btl-mem { background: var(--rgn-heap); }
+.btl-res { background: var(--taken); }
+.btl-val { color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+.btl-limit { margin-top: 8px; }
+.btl-limit-label { color: var(--dim); }
+
+/* ---- second tab level (trace view / waterfall view) ---- */
+.subtabbar { display: flex; gap: 4px; padding: 6px 0 10px; }
+.subtab {
+  background: var(--bg-panel);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.subtab[aria-selected="true"] { color: #fff; background: var(--bg-raise); border-color: var(--sym); }
+.subpanel { display: none; }
+.subpanel.active { display: block; }
+
+/* ---- waterfall (pipeline diagram) ---- */
+.waterfall { }
+.wf-legend { display: flex; gap: 16px; margin-bottom: 8px; color: var(--dim); }
+.wf-chip { display: inline-flex; gap: 5px; align-items: center; }
+.wf-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.wf-swatch.wf-wait { background: var(--dimmer); }
+.wf-swatch.wf-exec { background: var(--exec); }
+.wf-swatch.wf-retire { background: var(--taken); }
+.wf-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel); }
+.wf-table { display: inline-block; min-width: 100%; padding: 4px 0; }
+.wf-row, .wf-ruler { display: flex; align-items: center; height: 18px; }
+.wf-row:hover { background: var(--hi); }
+.wf-ruler { height: 16px; color: var(--dimmer); border-bottom: 1px solid var(--border); margin-bottom: 3px; }
+.wf-label {
+  flex: none;
+  width: 260px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wf-addr { color: var(--dimmer); margin-right: 8px; }
+.wf-label .code { white-space: nowrap; }
+.wf-track { position: relative; height: 12px; flex: none; }
+.wf-seg { position: absolute; top: 0; height: 12px; border-radius: 2px; }
+.wf-wait { background: var(--dimmer); opacity: 0.5; }
+.wf-exec { background: var(--exec); }
+.wf-retire { background: var(--taken); opacity: 0.55; }
+.wf-tickmark { background: #fff; width: 2px !important; border-radius: 0; }
+.wf-tick { position: absolute; top: 0; font-size: 11px; }
+
+/* ---- cross-highlight (source <-> instructions <-> memory), read/write tinted ---- */
+.link-hi { background: var(--hi); }
+.link-hi-r { background: var(--hi-read); }
+.link-hi-w { background: var(--hi-write); }
+.insn.link-hi, .insn.link-hi-r, .insn.link-hi-w,
+.src-heading.link-hi, .wf-row.link-hi, .wf-row.link-hi-r, .wf-row.link-hi-w { box-shadow: inset 2px 0 0 var(--sym); }
+.mem-row.link-hi-r, .mem-row.link-hi-w, .cl-row.link-hi-r, .cl-row.link-hi-w { box-shadow: inset 2px 0 0 currentColor; }
+[data-linked] { cursor: default; }
+
+/* ---- tooltip ---- */
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  max-width: 360px;
+  padding: 7px 10px;
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* ---- info icon in a view header ---- */
+.view > summary .view-title { margin-right: 6px; }
+.info-icon { color: var(--dim); font-weight: normal; cursor: help; }
+.info-icon:hover { color: var(--sym); }
+
+/* ---- color-coded block-summary values ---- */
+.mca-v.good { color: var(--exec); }
+.mca-v.mid { color: var(--warn); }
+.mca-v.low { color: var(--atomic); }
+.mca-k[data-tip] { cursor: help; text-decoration: underline dotted var(--dimmer); text-underline-offset: 3px; }
+
+/* ---- responsive: stack columns on narrow screens ---- */
+@media (max-width: 1100px) {
+  .trace-grid { grid-template-columns: 1fr; }
+  .col-head { position: static; }
+}
 
 /* ---- responsive: stack columns on narrow screens ---- */
 @media (max-width: 1100px) {
