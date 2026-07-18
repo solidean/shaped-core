@@ -92,6 +92,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     t.add_argument("--memory-regions", metavar="LIST",
                    help="Comma-separated address regions the memory sections show: heap, frame, stack, "
                         "instructions (default: heap,stack)")
+    t.add_argument("--html", metavar="PATH",
+                   help="Write a self-contained HTML report to PATH (forces a full capture). Without "
+                        "--sections it replaces stdout with a one-line summary")
 
     # BooleanOptionalAction gives each its --no- form; default None means "don't pass it, let the
     # tracer's own default stand" — so the defaults live in one place, not two.
@@ -408,6 +411,11 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path) -> list[str]
                         ("--sections", args.sections), ("--memory-regions", args.memory_regions)):
         if value is not None:
             argv += [flag, str(value)]
+
+    # The tracer runs with cwd=ctx.root, so resolve a relative --html against the user's CWD (where
+    # they typed the command) rather than the repo root, and pass an absolute path.
+    if args.html is not None:
+        argv += ["--html", str(Path(args.html).resolve())]
 
     for flag, value in (
         ("until-return", args.until_return),

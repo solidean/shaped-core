@@ -60,8 +60,16 @@ struct options
     bool terminate_after_traces = true;
     bool register_diffs = false;
 
+    /// When set, write a self-contained HTML report to this path. Forces a full capture (source,
+    /// owner, memory and register data) and the stats instruction budget, since a truncated or
+    /// under-enriched export is misleading. Orthogonal to --sections: an output format, not a section.
+    cc::string html_path;
+
     /// Which output sections to print. Empty after parsing means "trace only" (the default).
     output_sections sections;
+    /// Whether --sections / --stats explicitly named a section. Lets --html decide between replacing
+    /// stdout with a summary (no explicit sections) and also printing the requested sections.
+    bool sections_explicit = false;
     /// Which address regions the memory sections show.
     memory_regions regions;
     /// Annotate the raw and cacheline memory views with the accessing instruction's address.

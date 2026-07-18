@@ -4,6 +4,21 @@ cmake_minimum_required(VERSION 3.28)
 # Windows-only (Win32 debug API + dbghelp); the root gates this directory on
 # SC_BUILD_TOOLS AND WIN32 AND TARGET zydis.
 
+# The HTML export embeds its front-end (report/html/app.css, app.js) into a generated header, so the
+# shipped .exe needs no external files. Regenerated at build time whenever a source asset changes.
+set(ITRACE_HTML_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/instruction-tracer/report/html")
+set(ITRACE_HTML_ASSETS "${CMAKE_CURRENT_BINARY_DIR}/generated/html_assets.hh")
+add_custom_command(
+    OUTPUT "${ITRACE_HTML_ASSETS}"
+    COMMAND uv run "${CMAKE_CURRENT_SOURCE_DIR}/embed-html-assets.py" "${ITRACE_HTML_ASSETS}"
+    DEPENDS
+        "${ITRACE_HTML_DIR}/app.css"
+        "${ITRACE_HTML_DIR}/app.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/embed-html-assets.py"
+    COMMENT "instruction-tracer: embedding HTML export assets"
+    VERBATIM
+)
+
 # Split from the exe so instruction-tracer-test can link the parsing/decode/formatting code.
 add_library(instruction-tracer-core STATIC
     src/instruction-tracer/cli/options.cc
@@ -20,15 +35,22 @@ add_library(instruction-tracer-core STATIC
     src/instruction-tracer/decode/memory_access.cc
 
     src/instruction-tracer/report/console.cc
+    src/instruction-tracer/report/html_export.cc
     src/instruction-tracer/report/memory_formatter.cc
     src/instruction-tracer/report/memory_stats.cc
     src/instruction-tracer/report/source_cache.cc
+    src/instruction-tracer/report/source_view.cc
     src/instruction-tracer/report/trace_formatter.cc
     src/instruction-tracer/report/trace_stats.cc
+
+    # Generated; the custom command above makes the target depend on it.
+    "${ITRACE_HTML_ASSETS}"
 )
 
 target_compile_features(instruction-tracer-core PUBLIC cxx_std_23)
 target_include_directories(instruction-tracer-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# The generated html_assets.hh lives in the build tree; only html_export.cc consumes it.
+target_include_directories(instruction-tracer-core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(instruction-tracer-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
 # dbghelp and zydis stay PRIVATE: neither appears in our headers (symbol_session hides dbghelp behind
@@ -54,7 +76,9 @@ if(SC_BUILD_TESTS)
         tests/decode/instruction_decoder-test.cc
         tests/decode/memory_access-test.cc
         tests/report/console-test.cc
+        tests/report/html_export-test.cc
         tests/report/memory-test.cc
+        tests/report/source_view-test.cc
         tests/report/trace_formatter-test.cc
         tests/report/trace_stats-test.cc
     )

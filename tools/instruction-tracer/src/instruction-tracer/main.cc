@@ -1,15 +1,21 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/platform/win32_sanitized.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <instruction-tracer/cli/options.hh>
 #include <instruction-tracer/debug/debug_session.hh>
 #include <instruction-tracer/debug/trace_enrich.hh>
 #include <instruction-tracer/decode/instruction_decoder.hh>
 #include <instruction-tracer/report/console.hh>
+#include <instruction-tracer/report/html_export.hh>
 #include <instruction-tracer/report/memory_formatter.hh>
 #include <instruction-tracer/report/memory_stats.hh>
 #include <instruction-tracer/report/source_cache.hh>
 #include <instruction-tracer/report/trace_formatter.hh>
 #include <instruction-tracer/report/trace_stats.hh>
+
+#include <filesystem>
+#include <fstream>
 
 namespace
 {
@@ -17,6 +23,59 @@ namespace
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_unresolved = 2;
+
+// --- HTML export metadata: gathered post-run from the environment, all best-effort. ---
+
+/// Current wall clock in UTC, ISO 8601 (e.g. "2026-07-18T14:03:21Z").
+cc::string current_iso_utc()
+{
+    SYSTEMTIME st;
+    GetSystemTime(&st); // UTC
+    return cc::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+                      st.wSecond);
+}
+
+/// The OS name and version, e.g. "Windows 11 Pro 10.0.26200". RtlGetVersion is accurate where
+/// GetVersionEx lies under a manifest; the friendly name comes from the registry (may lag on Win11).
+cc::string os_version_string()
+{
+    OSVERSIONINFOW vi = {};
+    vi.dwOSVersionInfoSize = sizeof(vi);
+    if (auto* h = GetModuleHandleW(L"ntdll.dll"))
+    {
+        using rtl_get_version_fn = LONG(WINAPI*)(OSVERSIONINFOW*);
+        if (auto fn = reinterpret_cast<rtl_get_version_fn>(GetProcAddress(h, "RtlGetVersion")))
+            fn(&vi);
+    }
+
+    char product[256] = {};
+    DWORD size = sizeof(product);
+    cc::string name;
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
+                     RRF_RT_REG_SZ, nullptr, product, &size)
+        == ERROR_SUCCESS)
+        name = product;
+    if (name.empty())
+        name = "Windows";
+
+    return cc::format("{} {}.{}.{}", name, vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber);
+}
+
+cc::u64 file_size_of(cc::string_view path)
+{
+    std::error_code ec;
+    auto const n = std::filesystem::file_size(std::filesystem::path(std::string(path.data(), size_t(path.size()))), ec);
+    return ec ? 0 : cc::u64(n);
+}
+
+bool write_text_file(cc::string_view path, cc::string_view content)
+{
+    std::ofstream f(std::string(path.data(), size_t(path.size())), std::ios::binary);
+    if (!f.is_open())
+        return false;
+    f.write(content.data(), std::streamsize(content.size()));
+    return bool(f);
+}
 
 int run(itrace::options const& opts)
 {
@@ -33,14 +92,16 @@ int run(itrace::options const& opts)
     config.trace.capture_stack = opts.stack;
 
     auto const& sections = opts.sections;
+    bool const html = !opts.html_path.empty();
 
     // Source lines only feed the trace section, and each is a PDB lookup per instruction; the owner
     // feeds the tables and the memory attribution; the memory pass needs the register snapshots, so
-    // it forces register capture even without --register-diffs.
-    bool const want_source = sections.trace && opts.source;
-    bool const want_owner = sections.stats || sections.memory_stats;
-    bool const want_memory = sections.any_memory();
-    config.trace.capture_registers = opts.register_diffs || want_memory;
+    // it forces register capture even without --register-diffs. The HTML export bundles every view,
+    // so it forces all of them on.
+    bool const want_source = html || (sections.trace && opts.source);
+    bool const want_owner = html || sections.stats || sections.memory_stats;
+    bool const want_memory = html || sections.any_memory();
+    config.trace.capture_registers = html || opts.register_diffs || want_memory;
 
     itrace::debug_session session(cc::move(config));
 
@@ -72,6 +133,40 @@ int run(itrace::options const& opts)
     mem.stack = opts.regions.stack;
     mem.instructions = opts.regions.instructions;
     mem.instruction_addresses = opts.memory_instruction_addresses;
+
+    // The HTML export bundles every view into one self-contained file. It is an output *format*,
+    // orthogonal to --sections: without an explicit --sections it replaces the stdout rendering with
+    // a one-line summary; with one, it writes the file and still prints the requested sections.
+    if (html)
+    {
+        itrace::html_export_meta meta;
+        meta.generated_at_iso = current_iso_utc();
+        meta.os_version = os_version_string();
+        meta.exe_path = opts.exe;
+        meta.exe_size_bytes = file_size_of(opts.exe);
+        meta.command_line = cc::string(GetCommandLineA());
+        meta.target = opts.target.to_string();
+        meta.skip = opts.skip;
+        meta.traces = opts.traces;
+        meta.instructions = opts.instructions;
+        meta.until_return = opts.until_return;
+        meta.stop_at_syscall = opts.stop_at_syscall;
+        meta.regions = mem;
+
+        itrace::source_cache sources;
+        auto const page = itrace::export_html(traces.value(), meta, sources);
+        if (!write_text_file(opts.html_path, page))
+        {
+            cc::eprintln("error: could not write HTML report to '{}'", opts.html_path);
+            return exit_usage;
+        }
+
+        if (!opts.sections_explicit)
+        {
+            cc::println("wrote {} ({} traces)", opts.html_path, traces.value().size());
+            return exit_ok;
+        }
+    }
 
     // Print each selected section in a fixed order, all from this one capture. A blank line
     // separates them.

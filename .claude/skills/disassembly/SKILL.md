@@ -22,7 +22,7 @@ diff its disassembly against the mock's; the mock is usually the optimistic one
 ```bash
 uv run dev.py assembly search <pattern> [--preset P] [--target T] [--regex] [--all] [--limit N]
 uv run dev.py assembly show   <symbol>  [--preset P] [--target T] [--source] [--att] [--bytes]
-uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] -- <args>
+uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--html P] -- <args>
 ```
 
 **`search`/`show` are static — `trace` is dynamic.** When the question is "what *did* it do" rather
@@ -61,6 +61,10 @@ visible even though the miss latency itself is not.
 uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 \
     --sections stats,cachelines -- "<test name>"
 ```
+
+**A shareable page.** `--html <path>` writes the whole capture — every section plus a godbolt-style
+source view with executed-line highlighting — to one self-contained `.html` file for a browser. It
+forces a full capture and replaces stdout with a one-line summary.
 
 ## The loop
 

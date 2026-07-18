@@ -89,6 +89,7 @@ narrow the spec, or use --target module!symbol / --address.
 | `--until-return` | on | Stop once the entry frame returns. |
 | `--stop-at-syscall` | on | Stop before executing a syscall, rather than stepping into the kernel. |
 | `--sections <list>` | `trace` | Comma-separated output sections, all from one capture. See [Sections](#sections). |
+| `--html <path>` | off | Write a self-contained HTML report. See [HTML export](#html-export). |
 | `--stack` | on | Print the stack at entry (trace section). |
 | `--source` | on | Annotate with source file/line and the source text (trace section). |
 | `--register-diffs` | off | Dump the registers at entry, then show what each instruction changed. See below. |
@@ -308,6 +309,34 @@ boundaries are recovered by watching `call`/`ret` as the trace steps.
 
 Requesting any memory section forces register capture on (the addresses need it), so a memory run is
 a per-instruction snapshot heavier than a plain trace.
+
+## HTML export
+
+`--html <path>` writes the whole capture to a single self-contained `.html` file — CSS and JS
+inlined, no external requests — meant to be opened in a browser and shared as one artifact. It is an
+output *format*, orthogonal to `--sections`: on its own it replaces the stdout rendering with a
+one-line `wrote <path> (<n> traces)`; combine it with `--sections` to get both.
+
+Because a truncated or under-enriched export is misleading, `--html` **forces a full capture**:
+source, owner and memory enrichment plus register capture, and the `100000` instruction budget (an
+explicit `--instructions` still wins).
+
+The page is tabbed per trace, with a two-column layout: the trace on the left (with toggles for
+inline source, register diffs and memory accesses, and mnemonics linked to
+[felixcloutier.com](https://www.felixcloutier.com/x86/)), and collapsible aggregate views on the
+right (instruction stats, the three memory views — driven by live region checkboxes — and a
+**source view**). The source view collects every line the trace touched, grows each by context,
+merges them into ranges, and renders them with syntax highlighting and an executed-line marker;
+hovering an executed line highlights the instructions that ran it, and vice versa.
+
+```bash
+uv run dev.py assembly trace --target clean-core-test \
+    --symbol "cc::async_node_base::schedule" --html trace.html \
+    -- "async - basic"
+```
+
+Source text is read from the build machine and embedded, so the file is self-contained but carries
+whatever source those paths resolved to. Windows-only, and it needs PDBs like every other section.
 
 ## How it works
 

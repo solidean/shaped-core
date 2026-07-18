@@ -160,6 +160,18 @@ latency itself does not. Region classification recovers frame boundaries from `c
 segment-relative (TLS) addresses — see the tracer's
 [readme](../../tools/instruction-tracer/readme.md#limits) for the exact limits.
 
+### HTML export: a shareable, explorable page
+
+`--html <path>` writes the whole capture — every section plus a godbolt-style source view — to a
+single self-contained `.html` file to open in a browser. It forces a full capture and, on its own,
+replaces stdout with a one-line summary. See the tracer's
+[readme](../../tools/instruction-tracer/readme.md#html-export) for the layout.
+
+```bash
+uv run dev.py assembly trace --target clean-core-test \
+    --symbol single_lazy_probe --skip 2 --html probe.html -- "bench-async (single-thread drive)"
+```
+
 ## Limitations
 
 These apply to `search`/`show`; `trace` has its own list in its
