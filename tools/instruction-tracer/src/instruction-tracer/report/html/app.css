@@ -1,0 +1,268 @@
+/* instruction-tracer HTML export — styles. Dark, VSCode Dark Modern inspired. Tuned for a
+   1440px-wide portrait monitor: two columns side by side, each scrolling horizontally on its own. */
+
+:root {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-raise: #2d2d30;
+  --border: #3c3c3c;
+  --fg: #d4d4d4;
+  --dim: #858585;
+  --dimmer: #6a6a6a;
+
+  --accent: #dcdcaa;   /* mnemonics */
+  --sym: #4ec9b0;      /* symbols / branch targets */
+  --taken: #e5c07b;    /* a taken conditional branch */
+  --atomic: #f14c4c;   /* locked read-modify-writes */
+  --source: #6a9955;   /* inline source text */
+  --warn: #cca700;
+  --exec: #4ec9b0;     /* executed-line bar */
+  --hi: rgba(78, 201, 176, 0.16);
+
+  /* syntax highlighting (VSCode Dark Modern) */
+  --tok-comment: #6a9955;
+  --tok-keyword: #569cd6;
+  --tok-number: #b5cea8;
+  --tok-string: #ce9178;
+  --tok-ident: #9cdcfe;
+  --tok-punct: #d4d4d4;
+  --brk0: #ffd700;
+  --brk1: #da70d6;
+  --brk2: #179fff;
+
+  /* region accents */
+  --rgn-heap: #4ec9b0;
+  --rgn-stack: #569cd6;
+  --rgn-frame: #c586c0;
+  --rgn-instructions: #d7ba7d;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+#app { padding: 12px 16px 40px; }
+a { color: inherit; }
+
+/* ---- header ---- */
+header { border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; }
+header h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; color: #fff; }
+.meta-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 14px;
+  align-items: baseline;
+  max-width: 1000px;
+}
+.meta-k { color: var(--dim); }
+.meta-v { color: var(--fg); overflow-wrap: anywhere; }
+.cmdline { margin-top: 8px; display: flex; gap: 10px; align-items: baseline; }
+.cmdline-label { color: var(--dim); }
+.cmdline code { background: var(--bg-panel); padding: 2px 8px; border-radius: 4px; user-select: all; overflow-wrap: anywhere; }
+
+/* ---- controls ---- */
+.controls {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.toggle { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; user-select: none; }
+.toggle input { accent-color: var(--sym); margin: 0; }
+.controls-sep { color: var(--dim); margin-left: 8px; }
+.rgn-dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.rgn-dot-heap { background: var(--rgn-heap); }
+.rgn-dot-stack { background: var(--rgn-stack); }
+.rgn-dot-frame { background: var(--rgn-frame); }
+.rgn-dot-instructions { background: var(--rgn-instructions); }
+
+/* ---- tabs ---- */
+.tabbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 0 8px; position: sticky; top: 41px; background: var(--bg); z-index: 4; }
+.tab {
+  background: var(--bg-panel);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 5px 5px 0 0;
+  padding: 5px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.tab[aria-selected="true"] { color: #fff; background: var(--bg-raise); border-bottom-color: var(--sym); }
+
+/* ---- trace panel + two-column grid ---- */
+.trace-panel { display: none; }
+.trace-panel.active { display: block; }
+.trace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 560px);
+  gap: 16px;
+  align-items: start;
+}
+.trace-col, .views-col { min-width: 0; }
+.col-head {
+  position: sticky;
+  top: 78px;
+  background: var(--bg);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  z-index: 3;
+}
+.col-title { font-weight: 600; color: #fff; }
+.col-sub { color: var(--dim); }
+
+/* ---- the trace ---- */
+.trace-body { overflow-x: auto; padding-top: 6px; }
+.entryinfo, .stack { margin-bottom: 8px; white-space: nowrap; }
+.entryinfo .k, .stack .k { color: var(--dim); margin-right: 8px; }
+.entryinfo .sym, .stack .sym { color: var(--sym); margin-right: 14px; }
+.stack-frame { padding-left: 18px; display: flex; gap: 12px; }
+.stack-frame .loc { color: var(--dim); }
+
+.insn { white-space: nowrap; padding: 0 2px; border-radius: 3px; }
+.insn .addr { color: var(--dimmer); margin-right: 14px; }
+.mnemonic { color: var(--accent); text-decoration: none; }
+.mnemonic:hover { text-decoration: underline; }
+.operands { color: var(--fg); }
+.insn.atomic .mnemonic { color: var(--atomic); }
+.branch .taken { color: var(--taken); }
+.branch .nottaken { color: var(--dim); }
+.branch .target { color: var(--sym); }
+.branch .dim, .dim { color: var(--dim); }
+.trace-footer { margin-top: 10px; white-space: nowrap; }
+.warn { color: var(--warn); }
+
+/* inline register diff */
+.regdiff { display: none; }
+body.show-registers .regdiff { display: inline; }
+.regdiff-body { color: var(--source); }
+
+/* entry register dump */
+.entry-registers { display: none; margin: 6px 0 10px; }
+body.show-registers .entry-registers { display: block; }
+.entry-registers .k { color: var(--dim); }
+.reg-grid { display: grid; grid-template-columns: repeat(4, max-content max-content); gap: 2px 6px; margin: 4px 0; }
+.reg-name { color: var(--dim); }
+.reg-val { color: var(--fg); margin-right: 12px; }
+.reg-flags { display: flex; gap: 8px; }
+
+/* inline source heading */
+.src-heading { display: none; margin: 8px 0 2px; }
+body.show-source .src-heading { display: block; }
+.src-heading .src-loc { color: var(--dim); }
+.src-heading .src-text { color: var(--source); margin-left: 16px; white-space: pre; }
+
+/* inline memory rows — indented under their instruction, hidden unless show-memory AND the region
+   is enabled. The aggregate memory view reuses .mem-row without the indent. */
+.insn .mem-row { display: none; padding-left: 34px; }
+body.show-memory.rgn-heap .insn .mem-row[data-region="heap"],
+body.show-memory.rgn-stack .insn .mem-row[data-region="stack"],
+body.show-memory.rgn-frame .insn .mem-row[data-region="frame"],
+body.show-memory.rgn-instructions .insn .mem-row[data-region="instructions"] { display: flex; }
+
+.mem-row { display: flex; gap: 10px; white-space: nowrap; }
+.mem-addr { color: var(--dimmer); }
+.mem-size { color: var(--dim); }
+.mem-size::after { content: "B"; color: var(--dimmer); margin-left: 2px; }
+.mem-rw { color: var(--fg); width: 2ch; }
+.mem-region { color: var(--dim); }
+.mem-sym { color: var(--sym); }
+.rgn-fg-heap { color: var(--rgn-heap); }
+.rgn-fg-stack { color: var(--rgn-stack); }
+.rgn-fg-frame { color: var(--rgn-frame); }
+.rgn-fg-instructions { color: var(--rgn-instructions); }
+
+/* ---- right column collapsibles ---- */
+.view { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; background: var(--bg-panel); }
+.view > summary {
+  cursor: pointer;
+  padding: 7px 10px;
+  font-weight: 600;
+  color: #fff;
+  list-style: none;
+  user-select: none;
+}
+.view > summary::-webkit-details-marker { display: none; }
+.view > summary::before { content: "▸ "; color: var(--dim); }
+.view[open] > summary::before { content: "▾ "; }
+.view-body { padding: 6px 10px 10px; overflow-x: auto; }
+.empty { color: var(--dim); padding: 4px 0; }
+
+/* tables (instruction stats + memory stats) */
+.table-wrap { overflow-x: auto; }
+table.stats { border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.stats td, table.stats th { padding: 1px 10px 1px 0; }
+table.stats th { color: var(--dim); font-weight: normal; text-align: right; border-bottom: 1px solid var(--border); }
+table.stats th.sym, table.stats td.sym { text-align: left; color: var(--sym); }
+table.stats td.num { text-align: right; color: var(--fg); }
+table.stats tr.total td { border-top: 1px solid var(--border); color: var(--dim); padding-top: 3px; }
+table.stats tr.total td.sym { color: var(--dim); }
+.slow-ops { margin-top: 10px; }
+.slow-head { color: var(--warn); display: block; margin-bottom: 3px; }
+.slow-row { display: flex; gap: 10px; }
+.slow-mn { color: var(--accent); } .slow-count { color: var(--dim); } .slow-sym { color: var(--sym); }
+
+.mono-list { white-space: nowrap; }
+.cl-row { display: flex; gap: 12px; }
+.cl-acc, .cl-fp { color: var(--fg); }
+.cl-fp::after { content: "B"; color: var(--dimmer); margin-left: 2px; }
+.gap { height: 8px; }
+
+/* ---- source view (godbolt-style) ---- */
+.source-view { }
+.src-file { margin-bottom: 8px; }
+.src-file-head { cursor: pointer; color: var(--sym); padding: 3px 0; user-select: none; }
+.src-file-head::-webkit-details-marker { display: none; }
+.src-range { margin: 3px 0 6px; }
+.src-range-head { cursor: pointer; color: var(--dim); padding: 2px 0 2px 12px; user-select: none; font-size: 12px; }
+.src-range-head::-webkit-details-marker { display: none; }
+.src-code { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; overflow-x: auto; padding: 4px 0; }
+.src-line { display: flex; white-space: pre; tab-size: 4; -moz-tab-size: 4; }
+.src-gutter {
+  color: var(--dimmer);
+  text-align: right;
+  min-width: 44px;
+  padding-right: 8px;
+  user-select: none;
+  flex: none;
+}
+.src-bar { width: 3px; flex: none; margin-right: 8px; background: transparent; }
+.src-line.executed .src-bar { background: var(--exec); }
+.src-line.executed .src-gutter { color: var(--fg); }
+.src-content { flex: 1; }
+
+/* syntax tokens */
+.tok-comment { color: var(--tok-comment); font-style: italic; }
+.tok-keyword { color: var(--tok-keyword); }
+.tok-number { color: var(--tok-number); }
+.tok-string { color: var(--tok-string); }
+.tok-ident { color: var(--tok-ident); }
+.tok-punct { color: var(--tok-punct); }
+.brk0 { color: var(--brk0); }
+.brk1 { color: var(--brk1); }
+.brk2 { color: var(--brk2); }
+
+/* ---- hover-linking highlight ---- */
+.loc-hi { background: var(--hi); }
+.insn.loc-hi, .src-heading.loc-hi { box-shadow: inset 2px 0 0 var(--sym); }
+.src-line.executed.loc-hi { background: var(--hi); }
+
+/* ---- responsive: stack columns on narrow screens ---- */
+@media (max-width: 1100px) {
+  .trace-grid { grid-template-columns: 1fr; }
+  .col-head { position: static; }
+}

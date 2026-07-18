@@ -51,4 +51,26 @@ cc::string_view source_cache::line(cc::string_view path, u32 line_number)
 
     return trim(lines[isize(line_number) - 1]);
 }
+
+cc::string_view source_cache::raw_line(cc::string_view path, u32 line_number)
+{
+    if (path.empty() || line_number == 0)
+        return {};
+
+    auto const& lines = lines_of(path);
+    if (isize(line_number) > lines.size())
+        return {};
+
+    cc::string_view l = lines[isize(line_number) - 1];
+    if (!l.empty() && l.back() == '\r') // std::getline keeps the CR of a CRLF line ending
+        l.remove_suffix(1);
+    return l;
+}
+
+u32 source_cache::line_count(cc::string_view path)
+{
+    if (path.empty())
+        return 0;
+    return u32(lines_of(path).size());
+}
 } // namespace itrace

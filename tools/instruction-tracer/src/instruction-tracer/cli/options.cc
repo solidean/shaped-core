@@ -144,6 +144,9 @@ output sections (combine freely; all come from one capture):
                          any non-trace section raises the --instructions default to
                          100000, since a truncated trace corrupts the aggregates
   --stats                shortcut for --sections stats             (default off)
+  --html <path>          write a self-contained HTML report to <path>; forces a full
+                         capture (source, memory, registers) and the 100000 budget.
+                         Without --sections it replaces stdout with a one-line summary
 
 trace section:
   --stack                print the stack at entry                 (default on)
@@ -222,6 +225,13 @@ cc::result<options> parse_options(cc::span<char const* const> args)
             continue;
         }
 
+        if (arg == "--html")
+        {
+            CC_RETURN_IF_ERROR(need_value(value));
+            opts.html_path = value;
+            continue;
+        }
+
         if (arg == "--symbol" || arg == "--address" || arg == "--target")
         {
             CC_RETURN_IF_ERROR(need_value(value));
@@ -285,6 +295,7 @@ cc::result<options> parse_options(cc::span<char const* const> args)
         {
             CC_RETURN_IF_ERROR(need_value(value));
             CC_RETURN_IF_ERROR(parse_sections(value, opts.sections));
+            opts.sections_explicit = true;
             continue;
         }
 
@@ -301,6 +312,7 @@ cc::result<options> parse_options(cc::span<char const* const> args)
             if (match_bool(arg, "stats", stats))
             {
                 opts.sections.stats = stats;
+                opts.sections_explicit = true;
                 continue;
             }
         }
@@ -334,7 +346,8 @@ cc::result<options> parse_options(cc::span<char const* const> args)
 
     // Order-independent: a table/memory section only raises the cap where the user set none,
     // whichever came first on the command line. A short trace silently corrupts every aggregate.
-    if (opts.sections.any_non_trace() && !explicit_instructions)
+    // The HTML export bundles every aggregate, so it wants the same full budget.
+    if ((opts.sections.any_non_trace() || !opts.html_path.empty()) && !explicit_instructions)
         opts.instructions = stats_instruction_default;
 
     return opts;

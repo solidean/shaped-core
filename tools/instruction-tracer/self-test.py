@@ -27,6 +27,7 @@ import argparse
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -329,6 +330,32 @@ def check_memory_frame_region_is_opt_in(t: Tracer) -> None:
         raise Failure(f"the frame array was not shown even with --memory-regions frame:\n{framed_out}")
 
 
+def check_html_export_writes_a_self_contained_file(t: Tracer) -> None:
+    """--html writes one self-contained page. It forces a full capture, so the memory data (the
+    touched global) must be embedded, and without --sections it replaces stdout with a summary."""
+    tmp = Path(tempfile.gettempdir()) / "itrace_self_test_export.html"
+    tmp.unlink(missing_ok=True)
+    try:
+        code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--html", str(tmp))
+        if code != 0:
+            raise Failure(f"tracer exited {code} for --html\n{out}\n{err}")
+        if "wrote" not in out:
+            raise Failure(f"--html without --sections should print a one-line summary, got:\n{out}")
+        if "=== trace " in out:
+            raise Failure(f"--html without --sections must not also render the trace to stdout:\n{out}")
+        if not tmp.is_file() or tmp.stat().st_size == 0:
+            raise Failure(f"--html did not write a non-empty file at {tmp}")
+
+        page = tmp.read_text(encoding="utf-8")
+        if not page.startswith("<!doctype html"):
+            raise Failure("the exported file is not an HTML document")
+        for needle in ("const TRACE_DATA", MEMORY_SYMBOL, "itrace_global_counter"):
+            if needle not in page:
+                raise Failure(f"the exported page is missing {needle!r}")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def check_sections_combine_in_one_run(t: Tracer) -> None:
     """The point of --sections: several views, one capture. All must appear together."""
     code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100",
@@ -356,6 +383,7 @@ CHECKS = [
     ("the memory view resolves a touched global", check_memory_names_the_global),
     ("frame accesses are opt-in", check_memory_frame_region_is_opt_in),
     ("--sections combine several views in one capture", check_sections_combine_in_one_run),
+    ("--html writes a self-contained report", check_html_export_writes_a_self_contained_file),
 ]
 
 
