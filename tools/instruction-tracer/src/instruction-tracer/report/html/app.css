@@ -19,6 +19,8 @@
   --warn: #cca700;
   --exec: #4ec9b0;     /* executed-line bar */
   --hi: rgba(78, 201, 176, 0.16);
+  --hi-read: rgba(86, 156, 214, 0.22);   /* reads tint blue */
+  --hi-write: rgba(229, 192, 123, 0.24); /* writes tint amber */
 
   /* syntax highlighting (VSCode Dark Modern) */
   --tok-comment: #6a9955;
@@ -137,6 +139,7 @@ header h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; color: #fff; }
 .insn .addr { color: var(--dimmer); margin-right: 14px; }
 .mnemonic { color: var(--accent); text-decoration: none; }
 .mnemonic:hover { text-decoration: underline; }
+.asm-prefix { color: var(--tok-keyword); font-weight: 600; }
 .operands { color: var(--fg); }
 .insn.atomic .mnemonic { color: var(--atomic); }
 .branch .taken { color: var(--taken); }
@@ -336,7 +339,7 @@ table.stats.mca-summary td.mca-v { color: var(--fg); text-align: right; font-var
   text-overflow: ellipsis;
 }
 .wf-addr { color: var(--dimmer); margin-right: 8px; }
-.wf-text { color: var(--fg); }
+.wf-label .code { white-space: nowrap; }
 .wf-track { position: relative; height: 12px; flex: none; }
 .wf-seg { position: absolute; top: 0; height: 12px; border-radius: 2px; }
 .wf-wait { background: var(--dimmer); opacity: 0.5; }
@@ -345,11 +348,47 @@ table.stats.mca-summary td.mca-v { color: var(--fg); text-align: right; font-var
 .wf-tickmark { background: #fff; width: 2px !important; border-radius: 0; }
 .wf-tick { position: absolute; top: 0; font-size: 11px; }
 
-/* ---- hover-linking highlight ---- */
-.loc-hi { background: var(--hi); }
-.insn.loc-hi, .src-heading.loc-hi { box-shadow: inset 2px 0 0 var(--sym); }
-.src-line.executed.loc-hi { background: var(--hi); }
-.wf-row.loc-hi { box-shadow: inset 2px 0 0 var(--sym); }
+/* ---- cross-highlight (source <-> instructions <-> memory), read/write tinted ---- */
+.link-hi { background: var(--hi); }
+.link-hi-r { background: var(--hi-read); }
+.link-hi-w { background: var(--hi-write); }
+.insn.link-hi, .insn.link-hi-r, .insn.link-hi-w,
+.src-heading.link-hi, .wf-row.link-hi, .wf-row.link-hi-r, .wf-row.link-hi-w { box-shadow: inset 2px 0 0 var(--sym); }
+.mem-row.link-hi-r, .mem-row.link-hi-w, .cl-row.link-hi-r, .cl-row.link-hi-w { box-shadow: inset 2px 0 0 currentColor; }
+[data-linked] { cursor: default; }
+
+/* ---- tooltip ---- */
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  max-width: 360px;
+  padding: 7px 10px;
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* ---- info icon in a view header ---- */
+.view > summary .view-title { margin-right: 6px; }
+.info-icon { color: var(--dim); font-weight: normal; cursor: help; }
+.info-icon:hover { color: var(--sym); }
+
+/* ---- color-coded block-summary values ---- */
+.mca-v.good { color: var(--exec); }
+.mca-v.mid { color: var(--warn); }
+.mca-v.low { color: var(--atomic); }
+.mca-k[data-tip] { cursor: help; text-decoration: underline dotted var(--dimmer); text-underline-offset: 3px; }
+
+/* ---- responsive: stack columns on narrow screens ---- */
+@media (max-width: 1100px) {
+  .trace-grid { grid-template-columns: 1fr; }
+  .col-head { position: static; }
+}
 
 /* ---- responsive: stack columns on narrow screens ---- */
 @media (max-width: 1100px) {
