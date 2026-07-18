@@ -85,13 +85,16 @@ narrow the spec, or use --target module!symbol / --address.
 |---|---|---|
 | `--skip <n>` | `0` | Ignore the first n entry hits. The first recorded trace is hit n+1. |
 | `--traces <n>` | `1` | Record n invocations, counted across all threads. |
-| `--instructions <n>` | `100` (`100000` under `--stats`) | Max retired instructions per trace. |
+| `--instructions <n>` | `100` (`100000` when a non-trace section is on) | Max retired instructions per trace. |
 | `--until-return` | on | Stop once the entry frame returns. |
 | `--stop-at-syscall` | on | Stop before executing a syscall, rather than stepping into the kernel. |
-| `--stack` | on | Print the stack at entry. |
-| `--source` | on | Annotate with source file/line and the source text. |
+| `--sections <list>` | `trace` | Comma-separated output sections, all from one capture. See [Sections](#sections). |
+| `--stack` | on | Print the stack at entry (trace section). |
+| `--source` | on | Annotate with source file/line and the source text (trace section). |
 | `--register-diffs` | off | Dump the registers at entry, then show what each instruction changed. See below. |
-| `--stats` | off | Print a per-symbol table instead of the trace. See below. |
+| `--stats` | off | Shortcut for `--sections stats`. |
+| `--memory-regions <list>` | `heap,stack` | Which address regions the memory sections show. See [Memory](#memory). |
+| `--memory-instruction-addresses` | off | Annotate the memory and cacheline views with the accessing instruction. |
 | `--terminate-after-traces` | on | Kill the debuggee once the last trace lands. |
 
 Every boolean has a `--no-` form (`--no-source`). `-h` / `--help` prints all of this.
@@ -104,6 +107,26 @@ Exit codes: `0` traced something, `1` bad usage or launch failure, `2` the targe
 (unknown, ambiguous, or never entered).
 
 ## Output
+
+### Sections
+
+The output is a set of sections you combine with `--sections <list>`; the default is `trace` alone.
+Every selected section is rendered from **one** capture — the memory data cannot be reliably
+reproduced across separate runs, so there is no way to get it except together with whatever else you
+asked for. The names:
+
+| section | what it prints |
+|---|---|
+| `trace` | the retired-instruction trace (below); honors `--source` / `--register-diffs` |
+| `stats` | the per-symbol instruction table (`--stats` is a shortcut for this) |
+| `memory` | the raw chronological memory-access list — see [Memory](#memory) |
+| `cachelines` | memory accesses bucketed by cacheline |
+| `memory-stats` | the per-symbol memory table |
+
+`--sections trace,memory,memory-stats` prints three blocks in that fixed order. Any non-trace
+section raises the `--instructions` default to `100000`, since a trace cut short by the budget makes
+every aggregate silently wrong. Naming a section replaces the default trace, so `--stats` alone
+prints only the table — pass `--sections trace,stats` for both.
 
 ```
 === trace 1/1: instruction-tracer-fixture.exe!itrace_fixture_add ===
@@ -239,6 +262,53 @@ silently wrong table, and 100 truncates anything worth tabling. An explicit `--i
 wins, and a table built from a truncated trace says so loudly. Note that single-stepping costs a
 debug-event round trip per instruction, so a genuinely 100k-instruction trace is slow.
 
+## Memory
+
+The one cost the instruction stream hides is where the data went — a `mov` that misses to DRAM is
+200+ cycles and reads identically to an L1 hit. The memory sections resolve every memory operand to
+its **effective address** at run time (from the register snapshot taken before each instruction) and
+show what the invocation actually touched. Three views, all from the same capture:
+
+- **`memory`** — the raw list, one line per access in execution order: address, size, read/write, the
+  region, and the symbol it hit. With `--memory-instruction-addresses`, the accessing rip is prefixed.
+- **`cachelines`** — accesses bucketed into 64-byte lines, one line per touched cacheline in ascending
+  order with a blank line across a gap. It shows how many accesses hit the line and **how many of its
+  64 bytes** — the footprint, the "am I using the whole line or 8 bytes of it" signal — plus the
+  distinct symbols on it. This is the view for checking you access your data well.
+- **`memory-stats`** — a per-symbol table (`acc`, `r/w`, distinct `lines`, `bytes` moved), grouped by
+  the function *making* the accesses, like the instruction table.
+
+```
+=== cachelines ===
+  000000ab`c17cfa00     9 acc  32/64 B  RW  ; …!itrace_fixture_touch   <- the frame's stack array
+  000000ab`c17cfa40     3 acc  16/64 B  RW  ; …!itrace_fixture_touch
+
+  00007ff6`5f531a40     2 acc   4/64 B  RW  ; …!itrace_global_counter  <- a global, named from the PDB
+```
+
+### Regions
+
+Every address is classified into one of four regions, and `--memory-regions <list>` selects which the
+sections show (default `heap,stack`):
+
+| region | what it is | default |
+|---|---|---|
+| `heap` | dynamic allocations and globals (a global keeps its name) | shown |
+| `stack` | *another* function's stack — where a stack array passed around as a `span` lands, named with the frame's function | shown |
+| `frame` | the current function's own stack: its locals, spills, and the return-address / saved-register machinery | hidden |
+| `instructions` | code memory — the instruction fetch itself, so an I-cache footprint | hidden |
+
+`frame` and `instructions` are off by default: they are the current function's own overhead and the
+code stream, which drown out the data accesses you are usually asking about. Turn them on to see the
+whole picture (`--memory-regions heap,stack,frame,instructions`).
+
+Region is what separates a genuine cross-function `stack` access — a stack buffer reached through a
+pointer, the case that is easy to get wrong — from a `frame` access that is just a local. The frame
+boundaries are recovered by watching `call`/`ret` as the trace steps.
+
+Requesting any memory section forces register capture on (the addresses need it), so a memory run is
+a per-instruction snapshot heavier than a plain trace.
+
 ## How it works
 
 At each entry-breakpoint hit:
@@ -276,6 +346,12 @@ than committed: the amalgamated source is ~12 MB of generated instruction tables
   from `CONTEXT` (they are already in the struct we read) and diff them like the GPRs; the open
   question is rendering 128 bits per register without swamping the line, which probably means
   printing only the changed lanes and only on request.
+- **Memory addresses skip the segment base.** A `gs`/`fs`-relative operand (TLS, the stack cookie's
+  base) resolves to its offset alone, since the tracer does not read the segment base — so a TLS
+  access lands at a small address rather than its real one. The common GPR-relative forms are exact.
+- **Frame tracking misses tail calls.** Region classification recovers frame boundaries from
+  `call`/`ret`; a tail-call `jmp` into another function is not a call, so its accesses are charged to
+  the caller's frame. Rare in the code this is aimed at.
 - **The syscall stop has no trailing register snapshot.** Every other stop records the state the last
   instruction left behind; the syscall gate is recorded but deliberately never stepped, so its effect
   is unknown rather than missing.
@@ -312,8 +388,8 @@ stale breakpoint or a botched re-arm all break it.
 src/instruction-tracer/
   cli/        options + target-spec parsing
   debug/      the Win32 half: event loop, breakpoint, stepping, dbghelp, enrichment
-  decode/     Zydis wrapper
-  report/     source lookup + formatting
+  decode/     Zydis wrapper: instruction text, and memory effective-address + region classification
+  report/     source lookup + formatting (trace, stats, and the memory views)
 ```
 
 `debug/trace_record.hh` is the seam: plain data, no `<Windows.h>`. `decode/` and `report/` consume

@@ -17,8 +17,11 @@ add_library(instruction-tracer-core STATIC
     src/instruction-tracer/debug/trace_session.cc
 
     src/instruction-tracer/decode/instruction_decoder.cc
+    src/instruction-tracer/decode/memory_access.cc
 
     src/instruction-tracer/report/console.cc
+    src/instruction-tracer/report/memory_formatter.cc
+    src/instruction-tracer/report/memory_stats.cc
     src/instruction-tracer/report/source_cache.cc
     src/instruction-tracer/report/trace_formatter.cc
     src/instruction-tracer/report/trace_stats.cc
@@ -49,7 +52,9 @@ if(SC_BUILD_TESTS)
         tests/cli/target_spec-test.cc
         tests/debug/module_registry-test.cc
         tests/decode/instruction_decoder-test.cc
+        tests/decode/memory_access-test.cc
         tests/report/console-test.cc
+        tests/report/memory-test.cc
         tests/report/trace_formatter-test.cc
         tests/report/trace_stats-test.cc
     )

@@ -28,8 +28,17 @@ TEST("options - defaults")
     CHECK(o.source);
     CHECK(o.terminate_after_traces);
     CHECK(!o.register_diffs);
-    CHECK(!o.stats);
     CHECK(o.target_args.empty());
+
+    // No section flag means the trace alone; memory regions default to heap + stack.
+    CHECK(o.sections.trace);
+    CHECK(!o.sections.stats);
+    CHECK(!o.sections.any_memory());
+    CHECK(o.regions.heap);
+    CHECK(o.regions.stack);
+    CHECK(!o.regions.frame);
+    CHECK(!o.regions.instructions);
+    CHECK(!o.memory_instruction_addresses);
 }
 
 TEST("options - collection flags")
@@ -59,15 +68,73 @@ TEST("options - every bool flag has a --no- form")
     CHECK(!o.source);
     CHECK(!o.terminate_after_traces);
     CHECK(o.register_diffs);
-    CHECK(!o.stats);
+    CHECK(!o.sections.stats);
 }
 
-TEST("options - --stats raises the instruction cap, since a truncated trace tables wrong")
+TEST("options - --stats is a shortcut for --sections stats and raises the instruction cap")
 {
     auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--stats"});
     REQUIRE(r.has_value());
-    CHECK(r.value().stats);
+    CHECK(r.value().sections.stats);
+    CHECK(!r.value().sections.trace); // a named section replaces the default trace
     CHECK(r.value().instructions == stats_instruction_default);
+}
+
+TEST("options - --sections selects an arbitrary subset, all from one capture")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", //
+                    "--sections", "trace,memory,memory-stats"});
+    REQUIRE(r.has_value());
+
+    auto const& s = r.value().sections;
+    CHECK(s.trace);
+    CHECK(s.memory);
+    CHECK(s.memory_stats);
+    CHECK(!s.stats);
+    CHECK(!s.cachelines);
+    // A memory section raises the cap just like --stats.
+    CHECK(r.value().instructions == stats_instruction_default);
+}
+
+TEST("options - --sections trace keeps the default cap")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--sections", "trace"});
+    REQUIRE(r.has_value());
+    CHECK(r.value().sections.trace);
+    CHECK(r.value().instructions == 100);
+}
+
+TEST("options - --sections and --stats union")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--sections", "trace", "--stats"});
+    REQUIRE(r.has_value());
+    CHECK(r.value().sections.trace);
+    CHECK(r.value().sections.stats);
+}
+
+TEST("options - an unknown section is rejected")
+{
+    CHECK(parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--sections", "bogus"}).has_error());
+    CHECK(parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--sections", "trace,bogus"}).has_error());
+}
+
+TEST("options - --memory-regions replaces the default set")
+{
+    auto r = parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", //
+                    "--memory-regions", "frame,instructions", "--memory-instruction-addresses"});
+    REQUIRE(r.has_value());
+
+    auto const& o = r.value();
+    CHECK(!o.regions.heap);
+    CHECK(!o.regions.stack);
+    CHECK(o.regions.frame);
+    CHECK(o.regions.instructions);
+    CHECK(o.memory_instruction_addresses);
+}
+
+TEST("options - an unknown memory region is rejected")
+{
+    CHECK(parse({"instruction-tracer", "--exe", "t.exe", "--symbol", "foo", "--memory-regions", "cache"}).has_error());
 }
 
 TEST("options - an explicit --instructions beats --stats, whichever comes first")

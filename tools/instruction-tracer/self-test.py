@@ -300,6 +300,47 @@ def check_missing_symbol_fails(t: Tracer) -> None:
         raise Failure(f"a missing symbol must not succeed:\n{out}\n{err}")
 
 
+# itrace_fixture_touch writes a stack array and read-modify-writes the global itrace_global_counter,
+# so its memory views must show a frame region and name the global.
+MEMORY_SYMBOL = "itrace_fixture_touch"
+
+
+def check_memory_names_the_global(t: Tracer) -> None:
+    """The global is touched with a known extent, so the heap region must resolve its name."""
+    code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--sections", "memory")
+    if code != 0:
+        raise Failure(f"tracer exited {code} for --sections memory\n{out}\n{err}")
+
+    if "=== memory accesses ===" not in out:
+        raise Failure(f"--sections memory printed no memory header:\n{out}")
+    if "itrace_global_counter" not in out:
+        raise Failure(f"the memory view did not name the touched global:\n{out}")
+
+
+def check_memory_frame_region_is_opt_in(t: Tracer) -> None:
+    """The stack array lives in the current frame, excluded by default and shown with the flag."""
+    _, default_out, _ = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--sections", "memory")
+    _, framed_out, _ = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--sections", "memory",
+                         "--memory-regions", "heap,stack,frame")
+
+    if "; frame" in default_out:
+        raise Failure(f"frame accesses must be excluded by default:\n{default_out}")
+    if "; frame" not in framed_out:
+        raise Failure(f"the frame array was not shown even with --memory-regions frame:\n{framed_out}")
+
+
+def check_sections_combine_in_one_run(t: Tracer) -> None:
+    """The point of --sections: several views, one capture. All must appear together."""
+    code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100",
+                       "--sections", "trace,memory,cachelines,memory-stats")
+    if code != 0:
+        raise Failure(f"tracer exited {code} for a multi-section run\n{out}\n{err}")
+
+    for header in ("=== trace ", "=== memory accesses ===", "=== cachelines ===", "=== memory stats ==="):
+        if header not in out:
+            raise Failure(f"the combined run is missing the {header!r} section:\n{out}")
+
+
 CHECKS = [
     ("records exactly one invocation, at the skipped-to hit", check_traces_one_invocation),
     ("breaks exactly on the function entry", check_entry_is_the_function_start),
@@ -312,6 +353,9 @@ CHECKS = [
     ("--stats tables the run instead of tracing it", check_stats_replaces_the_trace),
     ("--stats totals agree with the trace", check_stats_counts_match_the_trace),
     ("a missing symbol fails loudly", check_missing_symbol_fails),
+    ("the memory view resolves a touched global", check_memory_names_the_global),
+    ("frame accesses are opt-in", check_memory_frame_region_is_opt_in),
+    ("--sections combine several views in one capture", check_sections_combine_in_one_run),
 ]
 
 
