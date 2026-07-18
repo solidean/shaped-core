@@ -22,7 +22,7 @@ diff its disassembly against the mock's; the mock is usually the optimistic one
 ```bash
 uv run dev.py assembly search <pattern> [--preset P] [--target T] [--regex] [--all] [--limit N]
 uv run dev.py assembly show   <symbol>  [--preset P] [--target T] [--source] [--att] [--bytes]
-uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--html P] -- <args>
+uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--mca-cpu C] [--html P] -- <args>
 ```
 
 **`search`/`show` are static — `trace` is dynamic.** When the question is "what *did* it do" rather
@@ -62,9 +62,17 @@ uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe
     --sections stats,cachelines -- "<test name>"
 ```
 
+**Put a number on `slow`.** The `timing` section feeds the retired stream to `llvm-mca` (resolved
+automatically) for a static cost model: µops / latency / throughput per instruction, IPC, per-port
+pressure, and a bottleneck breakdown. It is whole-stream (assumes the block loops) and blind to cache
+misses — the same landmine `--stats` can't see — so it tells you what the scheduler would do with the
+instruction mix, not where wall-clock went. `--mca-cpu` overrides the modeled micro-arch (default:
+host). Best viewed in `--html` (timing toggle, side boxes, a pipeline waterfall).
+
 **A shareable page.** `--html <path>` writes the whole capture — every section plus a godbolt-style
-source view with executed-line highlighting — to one self-contained `.html` file for a browser. It
-forces a full capture and replaces stdout with a one-line summary.
+source view with executed-line highlighting, and the `llvm-mca` timing views when available — to one
+self-contained `.html` file for a browser. It forces a full capture and replaces stdout with a
+one-line summary.
 
 ## The loop
 

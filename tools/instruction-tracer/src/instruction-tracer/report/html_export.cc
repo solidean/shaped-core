@@ -270,7 +270,86 @@ void write_source(json_writer& j, source_view_model const& sv, cc::map<cc::strin
     j.end_object();
 }
 
-void write_trace(json_writer& j, trace const& t, u32 total, source_cache& sources)
+void write_mca(json_writer& j, mca_result const& m)
+{
+    j.key("mca");
+    j.begin_object();
+    j.field_bool("available", m.available);
+    j.field_bool("perInstructionValid", m.per_instruction_valid);
+    j.field("cpu", m.cpu);
+
+    j.key("resources");
+    j.begin_array();
+    for (auto const& r : m.resources)
+        j.value_string(r);
+    j.end_array();
+
+    j.key("summary");
+    j.begin_object();
+    j.field_double("ipc", m.summary.ipc);
+    j.field_double("blockRThroughput", m.summary.block_rthroughput);
+    j.field_double("uopsPerCycle", m.summary.uops_per_cycle);
+    j.field_uint("totalCycles", m.summary.total_cycles);
+    j.field_uint("totalUops", m.summary.total_uops);
+    j.field_uint("dispatchWidth", m.summary.dispatch_width);
+    j.field_uint("iterations", m.summary.iterations);
+    j.end_object();
+
+    j.key("bottleneck");
+    j.begin_object();
+    j.field_bool("available", m.bottleneck.available);
+    j.field_uint("totalCycles", m.bottleneck.total_cycles);
+    j.field_uint("dataDependency", m.bottleneck.data_dependency);
+    j.field_uint("registerDependency", m.bottleneck.register_dependency);
+    j.field_uint("memoryDependency", m.bottleneck.memory_dependency);
+    j.field_uint("resourcePressure", m.bottleneck.resource_pressure);
+    j.field_uint("pressureIncrease", m.bottleneck.pressure_increase);
+    j.key("topPorts");
+    j.begin_array();
+    for (auto const& p : m.bottleneck.top_ports)
+    {
+        j.begin_object();
+        j.field("resource", p.resource);
+        j.field_double("cycles", p.cycles);
+        j.end_object();
+    }
+    j.end_array();
+    j.end_object();
+
+    // Aligned 1:1 to the trace instructions; a blank {valid:false} keeps the index mapping.
+    j.key("instructions");
+    j.begin_array();
+    for (auto const& mi : m.instructions)
+    {
+        j.begin_object();
+        j.field_bool("valid", mi.valid);
+        if (mi.valid)
+        {
+            j.field_uint("uops", mi.uops);
+            j.field_uint("latency", mi.latency);
+            j.field_double("rthroughput", mi.rthroughput);
+            j.field_bool("mayLoad", mi.may_load);
+            j.field_bool("mayStore", mi.may_store);
+            j.field_bool("hasTimeline", mi.has_timeline);
+            j.field_uint("cDispatched", mi.c_dispatched);
+            j.field_uint("cReady", mi.c_ready);
+            j.field_uint("cIssued", mi.c_issued);
+            j.field_uint("cExecuted", mi.c_executed);
+            j.field_uint("cRetired", mi.c_retired);
+            j.key("portPressure");
+            j.begin_array();
+            for (double const usage : mi.port_pressure)
+                j.value_double(usage);
+            j.end_array();
+        }
+        j.end_object();
+    }
+    j.end_array();
+
+    j.end_object();
+}
+
+void write_trace(json_writer& j, trace const& t, u32 total, source_cache& sources, mca_result const* mca)
 {
     // A per-trace file-path → id map, shared between instructions and the source view so the
     // front-end can cross-highlight a source line and the instructions that ran it.
@@ -388,10 +467,16 @@ void write_trace(json_writer& j, trace const& t, u32 total, source_cache& source
     write_stats(j, t);
     write_source(j, collect_source_view(t, sources), file_ids);
 
+    if (mca != nullptr && mca->available)
+        write_mca(j, *mca);
+
     j.end_object();
 }
 
-cc::string serialize(cc::span<trace const> traces, html_export_meta const& meta, source_cache& sources)
+cc::string serialize(cc::span<trace const> traces,
+                     html_export_meta const& meta,
+                     source_cache& sources,
+                     cc::span<mca_result const> mca)
 {
     json_writer j;
     j.begin_object();
@@ -399,15 +484,18 @@ cc::string serialize(cc::span<trace const> traces, html_export_meta const& meta,
     j.key("traces");
     j.begin_array();
     auto const total = u32(traces.size());
-    for (auto const& t : traces)
-        write_trace(j, t, total, sources);
+    for (isize i = 0; i < traces.size(); ++i)
+        write_trace(j, traces[i], total, sources, i < mca.size() ? &mca[i] : nullptr);
     j.end_array();
     j.end_object();
     return j.str();
 }
 } // namespace
 
-cc::string export_html(cc::span<trace const> traces, html_export_meta const& meta, source_cache& sources)
+cc::string export_html(cc::span<trace const> traces,
+                       html_export_meta const& meta,
+                       source_cache& sources,
+                       cc::span<mca_result const> mca)
 {
     cc::string title = meta.target.empty() ? cc::string("instruction trace") : meta.target;
 
@@ -420,7 +508,7 @@ cc::string export_html(cc::span<trace const> traces, html_export_meta const& met
     out += "\n</style>\n</head>\n<body>\n";
     out += "<div id=\"app\"></div>\n";
     out += "<script>\nconst TRACE_DATA = ";
-    out += serialize(traces, meta, sources);
+    out += serialize(traces, meta, sources, mca);
     out += ";\n</script>\n";
     out += "<script>\n";
     out += html::app_js;

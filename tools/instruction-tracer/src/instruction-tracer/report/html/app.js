@@ -62,6 +62,8 @@
     instructions: D.meta.regions.instructions,
   };
   const memoryRebuilders = []; // () => void, one per trace panel; called on a region change
+  const allViews = []; // every <details class="view">, so collapse-all can reach them (the DOM shim
+                       // stubs querySelectorAll, so we keep an explicit list rather than query)
 
   function applyRegionClasses() {
     for (const r of ["heap", "stack", "frame", "instructions"])
@@ -137,6 +139,7 @@
     toggle("source", "show-source", true);
     toggle("registers", "show-registers", false);
     toggle("memory", "show-memory", false);
+    if (D.traces.some((t) => t.mca && t.mca.available)) toggle("timing", "show-timing", false);
 
     bar.appendChild(span("controls-sep", "regions"));
     for (const r of ["heap", "stack", "frame", "instructions"]) {
@@ -154,6 +157,17 @@
       lbl.appendChild(span(null, r));
       bar.appendChild(lbl);
     }
+
+    // Collapse / expand every right-column view at once (the column grew ~6 collapsibles).
+    bar.appendChild(span("controls-sep", "views"));
+    let allOpen = true;
+    const collapseBtn = el("button", "ctl-btn", "collapse all");
+    collapseBtn.addEventListener("click", () => {
+      allOpen = !allOpen;
+      for (const d of allViews) d.open = allOpen;
+      collapseBtn.textContent = allOpen ? "collapse all" : "expand all";
+    });
+    bar.appendChild(collapseBtn);
     return bar;
   }
 
@@ -190,7 +204,9 @@
     return idx;
   }
 
-  function renderInstruction(insn) {
+  function fmtNum(x) { return (Math.round(x * 100) / 100).toString(); }
+
+  function renderInstruction(insn, mi) {
     const row = el("div", "insn");
     if (insn.fileId >= 0 && insn.line > 0) row.dataset.loc = insn.fileId + ":" + insn.line;
     if (insn.isAtomic) row.classList.add("atomic");
@@ -213,6 +229,16 @@
     // Branch annotation, mirroring the terminal's semantics.
     const note = branchNote(insn);
     if (note) row.appendChild(note);
+
+    // llvm-mca timing: the @retire cycle is shown by default (dim, like the address); the µops /
+    // latency / throughput detail is gated behind the `timing` toggle.
+    if (mi && mi.valid) {
+      if (mi.hasTimeline) row.appendChild(span("retire", " @" + mi.cRetired));
+      let detail = " " + mi.uops + "µ " + mi.latency + "c rthr" + fmtNum(mi.rthroughput);
+      if (mi.mayLoad) detail += " ld";
+      if (mi.mayStore) detail += " st";
+      row.appendChild(span("timing", detail));
+    }
 
     // Inline register diff (shown under the registers toggle).
     if (insn.regdiff && insn.regdiff.length) {
@@ -259,6 +285,7 @@
 
   function renderTraceColumn(trace) {
     const col = el("div", "trace-col");
+    const mca = trace.mca && trace.mca.available && trace.mca.perInstructionValid ? trace.mca : null;
 
     const head = el("div", "col-head");
     head.appendChild(span("col-title", "trace"));
@@ -301,7 +328,8 @@
     // instructions, grouped under source headings
     const srcIdx = sourceIndex(trace);
     let curKey = null;
-    for (const insn of trace.instructions) {
+    for (let i = 0; i < trace.instructions.length; i++) {
+      const insn = trace.instructions[i];
       if (insn.line > 0) {
         const key = insn.fileId + ":" + insn.line;
         if (key !== curKey) {
@@ -316,7 +344,7 @@
           bodyEl.appendChild(heading);
         }
       }
-      bodyEl.appendChild(renderInstruction(insn));
+      bodyEl.appendChild(renderInstruction(insn, mca ? mca.instructions[i] : null));
     }
 
     const footer = el("div", "trace-footer");
@@ -354,8 +382,13 @@
     d.appendChild(s);
     const bodyEl = el("div", "view-body");
     d.appendChild(bodyEl);
+    allViews.push(d);
     return { details: d, body: bodyEl };
   }
+
+  // A stable color per resource index, so a port keeps its hue across the heatmap and the waterfall.
+  const PORT_HUES = [200, 30, 145, 280, 0, 55, 320, 95, 255, 175, 15, 220];
+  function portColor(idx) { return "hsl(" + PORT_HUES[idx % PORT_HUES.length] + " 60% 55%)"; }
 
   function renderStatsTable(stats) {
     const table = el("table", "stats");
@@ -537,12 +570,192 @@
     return wrap;
   }
 
+  // ---- llvm-mca timing views ---------------------------------------------
+
+  function renderBlockSummary(mca) {
+    const s = mca.summary;
+    const table = el("table", "stats mca-summary");
+    const row = (k, v) => {
+      const tr = el("tr");
+      tr.appendChild(el("td", "mca-k", k));
+      tr.appendChild(el("td", "mca-v", v));
+      table.appendChild(tr);
+    };
+    row("micro-arch", mca.cpu || "?");
+    row("IPC", fmtNum(s.ipc));
+    row("block RThroughput", fmtNum(s.blockRThroughput));
+    row("total cycles", String(s.totalCycles));
+    row("total µops", String(s.totalUops));
+    row("µops / cycle", fmtNum(s.uopsPerCycle));
+    row("dispatch width", String(s.dispatchWidth));
+    row("iterations", String(s.iterations));
+    const wrap = el("div", "table-wrap");
+    wrap.appendChild(table);
+    wrap.appendChild(el("div", "mca-note",
+      "Static model over " + s.iterations + " steady-state iterations; assumes the block loops and is blind to cache misses."));
+    return wrap;
+  }
+
+  function renderPortPressure(mca) {
+    const wrap = el("div", "mca-ports");
+
+    // Aggregate pressure per resource across every timed instruction — the "where do the µops go" heatmap.
+    const totals = new Array(mca.resources.length).fill(0);
+    for (const mi of mca.instructions)
+      if (mi.valid && mi.portPressure)
+        mi.portPressure.forEach((u, idx) => { totals[idx] += u; });
+    let maxT = 0;
+    for (const t of totals) maxT = Math.max(maxT, t);
+
+    const heat = el("div", "port-heat");
+    mca.resources.forEach((name, idx) => {
+      if (totals[idx] <= 0) return;
+      const r = el("div", "port-row");
+      r.appendChild(span("port-name", name));
+      const track = el("div", "port-track");
+      const fill = el("div", "port-fill");
+      fill.style.width = (maxT > 0 ? 100 * totals[idx] / maxT : 0) + "%";
+      fill.style.background = portColor(idx);
+      track.appendChild(fill);
+      r.appendChild(track);
+      r.appendChild(span("port-val", fmtNum(totals[idx])));
+      heat.appendChild(r);
+    });
+    if (!heat.children.length) heat.appendChild(el("div", "empty", "(no port pressure reported)"));
+    wrap.appendChild(heat);
+
+    const b = mca.bottleneck;
+    if (b && b.available && b.totalCycles > 0) {
+      wrap.appendChild(el("div", "mca-subhead", "bottleneck — of " + b.totalCycles + " cycles"));
+      const bars = el("div", "btl-bars");
+      const bar = (label, val, cls) => {
+        const r = el("div", "btl-row");
+        r.appendChild(span("btl-label", label));
+        const track = el("div", "btl-track");
+        const fill = el("div", "btl-fill " + cls);
+        fill.style.width = (100 * val / b.totalCycles) + "%";
+        track.appendChild(fill);
+        r.appendChild(track);
+        r.appendChild(span("btl-val", val + "c"));
+        bars.appendChild(r);
+      };
+      bar("register deps", b.registerDependency, "btl-reg");
+      bar("data deps", b.dataDependency, "btl-data");
+      bar("memory deps", b.memoryDependency, "btl-mem");
+      bar("resource pressure", b.resourcePressure, "btl-res");
+      wrap.appendChild(bars);
+      if (b.topPorts && b.topPorts.length) {
+        const lim = el("div", "btl-limit");
+        lim.appendChild(span("btl-limit-label", "limited by "));
+        lim.appendChild(span(null, b.topPorts.map((p) => p.resource + " (" + fmtNum(p.cycles) + "c)").join(", ")));
+        wrap.appendChild(lim);
+      }
+    }
+    return wrap;
+  }
+
+  // Full-width pipeline waterfall: rows = instructions, columns = cycles; each row a bar from the
+  // dispatch cycle to the retire cycle, segmented by phase (wait -> execute -> retire).
+  const WF_CELL = 13;      // px per cycle
+  const WF_ROW_CAP = 512;  // long traces: cap rows and say so, rather than freeze the browser
+
+  function renderWaterfall(trace) {
+    const mca = trace.mca && trace.mca.available && trace.mca.perInstructionValid ? trace.mca : null;
+    if (!mca) return el("div", "empty", "(no per-instruction timeline for this trace)");
+
+    const rows = [];
+    for (let i = 0; i < trace.instructions.length; i++) {
+      const mi = mca.instructions[i];
+      if (mi && mi.valid && mi.hasTimeline) rows.push({ insn: trace.instructions[i], mi });
+    }
+    if (!rows.length) return el("div", "empty", "(llvm-mca produced no timeline cycles)");
+
+    let truncated = false;
+    let shown = rows;
+    if (rows.length > WF_ROW_CAP) { shown = rows.slice(0, WF_ROW_CAP); truncated = true; }
+
+    let maxCycle = 0;
+    for (const r of shown) maxCycle = Math.max(maxCycle, r.mi.cRetired);
+    const numCols = maxCycle + 1;
+    const trackW = numCols * WF_CELL;
+
+    const wrap = el("div", "waterfall");
+
+    // legend
+    const legend = el("div", "wf-legend");
+    const chip = (cls, label) => { const c = span("wf-chip", ""); c.appendChild(span("wf-swatch " + cls, "")); c.appendChild(span(null, label)); legend.appendChild(c); };
+    chip("wf-wait", "wait (dispatch → issue)");
+    chip("wf-exec", "execute");
+    chip("wf-retire", "retire wait");
+    wrap.appendChild(legend);
+
+    const scroll = el("div", "wf-scroll");
+    const table = el("div", "wf-table");
+
+    // cycle ruler
+    const ruler = el("div", "wf-ruler");
+    ruler.appendChild(span("wf-label", "cycle"));
+    const rtrack = el("div", "wf-track");
+    rtrack.style.width = trackW + "px";
+    for (let cyc = 0; cyc < numCols; cyc += 5) {
+      const tick = span("wf-tick", String(cyc));
+      tick.style.left = (cyc * WF_CELL) + "px";
+      rtrack.appendChild(tick);
+    }
+    ruler.appendChild(rtrack);
+    table.appendChild(ruler);
+
+    const seg = (a, b, cls) => {
+      const d = el("div", "wf-seg " + cls);
+      d.style.left = (a * WF_CELL) + "px";
+      d.style.width = (Math.max(1, b - a) * WF_CELL) + "px";
+      return d;
+    };
+
+    for (const { insn, mi } of shown) {
+      const r = el("div", "wf-row");
+      if (insn.fileId >= 0 && insn.line > 0) r.dataset.loc = insn.fileId + ":" + insn.line;
+      const label = span("wf-label");
+      label.appendChild(span("wf-addr", insn.addr.slice(9))); // low half only, to save width
+      label.appendChild(span("wf-text", insn.text));
+      r.appendChild(label);
+
+      const track = el("div", "wf-track");
+      track.style.width = trackW + "px";
+      const issue = Math.max(mi.cIssued, mi.cDispatched);
+      const exec = Math.max(mi.cExecuted, issue);
+      if (issue > mi.cDispatched) track.appendChild(seg(mi.cDispatched, issue, "wf-wait"));
+      if (exec > issue) track.appendChild(seg(issue, exec, "wf-exec"));
+      if (mi.cRetired > exec) track.appendChild(seg(exec, mi.cRetired, "wf-retire"));
+      track.appendChild(seg(mi.cRetired, mi.cRetired + 1, "wf-tickmark"));
+      r.appendChild(track);
+      table.appendChild(r);
+    }
+
+    scroll.appendChild(table);
+    wrap.appendChild(scroll);
+    if (truncated)
+      wrap.appendChild(el("div", "warn", "waterfall capped at " + WF_ROW_CAP + " of " + rows.length + " instructions"));
+    return wrap;
+  }
+
   function renderViewsColumn(trace) {
     const col = el("div", "views-col");
 
     const stats = collapsible("instruction stats", true);
     stats.body.appendChild(renderStatsTable(trace.stats));
     col.appendChild(stats.details);
+
+    const mca = trace.mca && trace.mca.available ? trace.mca : null;
+    if (mca) {
+      const bs = collapsible("block summary (llvm-mca)", true);
+      bs.body.appendChild(renderBlockSummary(mca));
+      col.appendChild(bs.details);
+
+      const pp = collapsible("port pressure & bottleneck", true);
+      pp.body.appendChild(renderPortPressure(mca));
+      col.appendChild(pp.details);
+    }
 
     const raw = collapsible("memory accesses", true);
     const cl = collapsible("cacheline accesses", true);
@@ -572,10 +785,44 @@
   function renderTrace(trace) {
     const panel = el("div", "trace-panel");
     panel.setAttribute("role", "tabpanel");
+
     const grid = el("div", "trace-grid");
     grid.appendChild(renderTraceColumn(trace));
     grid.appendChild(renderViewsColumn(trace));
-    panel.appendChild(grid);
+
+    // Without a per-instruction timeline there is nothing to put in a waterfall, so keep the plain
+    // single-view layout. With one, add a second tab level: trace view vs full-width waterfall.
+    const hasWaterfall = trace.mca && trace.mca.available && trace.mca.perInstructionValid;
+    if (!hasWaterfall) {
+      panel.appendChild(grid);
+      return panel;
+    }
+
+    const traceView = el("div", "subpanel");
+    traceView.appendChild(grid);
+    const waterfallView = el("div", "subpanel");
+    waterfallView.appendChild(renderWaterfall(trace));
+    const subpanels = [traceView, waterfallView];
+
+    const subbar = el("div", "subtabbar");
+    const buttons = [];
+    const select = (i) => {
+      subpanels.forEach((p, j) => p.classList.toggle("active", i === j));
+      buttons.forEach((b, j) => b.setAttribute("aria-selected", String(i === j)));
+    };
+    ["trace view", "waterfall view"].forEach((name, i) => {
+      const b = el("button", "subtab", name);
+      b.setAttribute("role", "tab");
+      b.addEventListener("click", () => select(i));
+      buttons.push(b);
+      subbar.appendChild(b);
+    });
+    select(0);
+
+    panel.appendChild(subbar);
+    const host = el("div", "subpanels");
+    subpanels.forEach((p) => host.appendChild(p));
+    panel.appendChild(host);
     return panel;
   }
 

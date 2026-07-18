@@ -4,10 +4,13 @@
 #include <clean-core/string/print.hh>
 #include <instruction-tracer/cli/options.hh>
 #include <instruction-tracer/debug/debug_session.hh>
+#include <instruction-tracer/debug/mca_runner.hh>
 #include <instruction-tracer/debug/trace_enrich.hh>
 #include <instruction-tracer/decode/instruction_decoder.hh>
 #include <instruction-tracer/report/console.hh>
 #include <instruction-tracer/report/html_export.hh>
+#include <instruction-tracer/report/mca.hh>
+#include <instruction-tracer/report/mca_timing_formatter.hh>
 #include <instruction-tracer/report/memory_formatter.hh>
 #include <instruction-tracer/report/memory_stats.hh>
 #include <instruction-tracer/report/source_cache.hh>
@@ -77,6 +80,40 @@ bool write_text_file(cc::string_view path, cc::string_view content)
     return bool(f);
 }
 
+/// Run llvm-mca over every trace and align its analysis back onto the full instruction stream. One
+/// mca_result per trace (parallel to `traces`); a launch/parse failure yields an unavailable result
+/// rather than aborting. `tool` must be non-empty (the caller gates on --mca).
+cc::vector<itrace::mca_result> gather_mca(cc::span<itrace::trace const> traces, cc::string_view tool, cc::string_view cpu)
+{
+    cc::vector<itrace::mca_result> results;
+    for (auto const& t : traces)
+    {
+        itrace::mca_result r;
+        auto const in = itrace::build_mca_input(t);
+        if (!in.fed_trace_indices.empty())
+        {
+            auto const run = itrace::run_llvm_mca(tool, cpu, in.asm_text);
+            if (run.ran && !run.json.empty())
+            {
+                auto const dropped = itrace::parse_mca_dropped_lines(run.stderr_text);
+                cc::vector<cc::u32> surviving;
+                for (cc::u32 k = 0; k < in.fed_trace_indices.size(); ++k)
+                {
+                    bool is_dropped = false;
+                    for (cc::u32 const d : dropped)
+                        if (d == k)
+                            is_dropped = true;
+                    if (!is_dropped)
+                        surviving.push_back(in.fed_trace_indices[k]);
+                }
+                r = itrace::parse_mca_json(run.json, surviving, cc::u32(t.instructions.size()));
+            }
+        }
+        results.push_back(cc::move(r));
+    }
+    return results;
+}
+
 int run(itrace::options const& opts)
 {
     itrace::debug_config config;
@@ -134,6 +171,12 @@ int run(itrace::options const& opts)
     mem.instructions = opts.regions.instructions;
     mem.instruction_addresses = opts.memory_instruction_addresses;
 
+    // llvm-mca is the headline of both the timing section and the HTML report. It needs only the
+    // decoded instruction text (no extra capture), and soft-degrades when --mca is absent or fails.
+    cc::vector<itrace::mca_result> mca_results;
+    if ((sections.timing || html) && !opts.mca_tool.empty())
+        mca_results = gather_mca(traces.value(), opts.mca_tool, opts.mca_cpu);
+
     // The HTML export bundles every view into one self-contained file. It is an output *format*,
     // orthogonal to --sections: without an explicit --sections it replaces the stdout rendering with
     // a one-line summary; with one, it writes the file and still prints the requested sections.
@@ -154,7 +197,7 @@ int run(itrace::options const& opts)
         meta.regions = mem;
 
         itrace::source_cache sources;
-        auto const page = itrace::export_html(traces.value(), meta, sources);
+        auto const page = itrace::export_html(traces.value(), meta, sources, mca_results);
         if (!write_text_file(opts.html_path, page))
         {
             cc::eprintln("error: could not write HTML report to '{}'", opts.html_path);
@@ -217,6 +260,12 @@ int run(itrace::options const& opts)
     {
         separate();
         cc::print(itrace::format_memory_stats(itrace::collect_memory_stats(traces.value(), mem)));
+    }
+
+    if (sections.timing)
+    {
+        separate();
+        cc::print(itrace::format_mca_timing(traces.value(), mca_results));
     }
 
     return exit_ok;

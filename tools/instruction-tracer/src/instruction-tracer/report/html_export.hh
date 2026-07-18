@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string.hh>
 #include <instruction-tracer/debug/trace_record.hh>
+#include <instruction-tracer/report/mca.hh>
 #include <instruction-tracer/report/memory_formatter.hh>
 #include <instruction-tracer/report/source_cache.hh>
 
@@ -32,5 +33,11 @@ struct html_export_meta
 /// Build the whole self-contained HTML page: the shell, the inlined CSS/JS assets, and one big
 /// `TRACE_DATA` JSON object serialized from the traces + meta + per-trace source views. Pure over
 /// already-enriched traces; `sources` is used to read the context lines for the source view.
-cc::string export_html(cc::span<trace const> traces, html_export_meta const& meta, source_cache& sources);
+///
+/// `mca[i]` is the optional llvm-mca analysis for `traces[i]` (empty span, or an unavailable entry,
+/// simply omits the timing views for that trace).
+cc::string export_html(cc::span<trace const> traces,
+                       html_export_meta const& meta,
+                       source_cache& sources,
+                       cc::span<mca_result const> mca = {});
 } // namespace itrace
