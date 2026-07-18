@@ -1,14 +1,18 @@
 # shaped-rendering
 
 Render routines and helpers on top of [shaped-graphics](../shaped-graphics/readme.md).
-Namespace `sr`. Depends on **shaped-graphics** (and transitively typed-geometry + clean-core).
+Namespace `sr`. Depends on **shaped-graphics** and **shaped-shader-library** (routines acquire shaders
+and track their hot-reload generation), plus transitively typed-geometry + clean-core.
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sr is the home for the common building blocks of a renderer built on sg — mipmap generation,
 texture compression, tonemapping, and similar reusable render routines.
 
-This library is an **early-stage skeleton**: it builds and links but has no routines yet. See
-[docs/structure.md](docs/structure.md) for the intended scope.
+Its first feature is the **render-routine framework**: a `render_routine` base with 3-phase,
+hot-reload-aware init, grouped into `render_routine_package`s you reach by name and coordinated by a
+single `render_routine_library` (fan-out loading + hot reload). Concrete routines land on top of it.
+The front door is **[docs/render-routines.md](docs/render-routines.md)**; see
+[docs/structure.md](docs/structure.md) for the wider roadmap.
 
 ## Building & testing
 
@@ -22,7 +26,8 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 
 ## More
 
-- [cheat-sheet.md](cheat-sheet.md) — the public API at a glance (empty for now).
+- [docs/render-routines.md](docs/render-routines.md) — the render-routine framework, end to end.
+- [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
 - [docs/_index.md](docs/_index.md) — shaped-rendering's documentation hub.
 - [docs/structure.md](docs/structure.md) — the intended module roadmap.
 - [docs/coding-guidelines.md](docs/coding-guidelines.md) — sr-specific conventions (thin for

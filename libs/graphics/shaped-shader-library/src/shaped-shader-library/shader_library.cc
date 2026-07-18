@@ -14,6 +14,10 @@ namespace
 // the assets they point at. One at a time, enforced rather than documented.
 bool g_library_alive = false;
 
+// The coarse shader-reload counter is process-global, not per library: there is only ever one library
+// alive, and consumers (e.g. render routines) track reloads without holding a library reference.
+cc::atomic<cc::u64> g_reload_generation{0};
+
 sg::async_compiled_shader make_failed_shader(cc::string message)
 {
     return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::move(message))));
@@ -176,12 +180,17 @@ slib::shader_library::package_entry const& slib::shader_library::package_of(cc::
 
 cc::u64 slib::shader_library::generation() const
 {
-    return _generation.load();
+    return g_reload_generation.load();
+}
+
+cc::u64 slib::current_reload_generation()
+{
+    return g_reload_generation.load();
 }
 
 void slib::shader_library::note_reload()
 {
-    _generation.fetch_add(1);
+    g_reload_generation.fetch_add(1);
 }
 
 void slib::shader_library::note_dependencies_changed()

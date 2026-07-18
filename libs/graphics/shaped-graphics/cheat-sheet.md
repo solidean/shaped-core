@@ -150,6 +150,7 @@ ctx.is_submission_complete(token)       // bool — has that one command list fi
 // on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
 //   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
+cmd.context()                           // sg::context& — the context that created the list (outlives it); reach it without threading ctx separately
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
 ```
 

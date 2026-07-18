@@ -52,7 +52,8 @@ lib.mount(virtual_dir, fs);                 // shared includes that belong to no
 lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
-lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's)
+lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's). Reads the global below
+slib::current_reload_generation();          // -> u64; process-global reload counter — track reloads without holding a library (e.g. sr routines)
 lib.can_compile(language, format);          // -> bool;  lib.supported_formats(language) -> vector
 lib.assets();                               // -> span<shader_asset_handle const>
 lib.filesystem();                           // -> mount_table const&  (everything mounted)

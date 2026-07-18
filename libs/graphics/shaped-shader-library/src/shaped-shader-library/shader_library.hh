@@ -112,9 +112,10 @@ public:
     /// Everything mounted: the packages' sources plus any shared mounts. What shader paths resolve against.
     [[nodiscard]] mount_table const& filesystem() const { return _mounts; }
 
-    /// Bumped whenever any asset's shader is replaced by a reload — the coarse "something changed"
-    /// check, for a consumer that would rebuild everything anyway. Prefer an asset's own generation()
-    /// when you can: this one moves for shaders you never use.
+    /// The process-global reload counter (see slib::current_reload_generation) — a reader for consumers
+    /// that hold a library. Bumped whenever any asset's shader is replaced by a reload; the coarse
+    /// "something changed" check. Prefer an asset's own generation() when you can: this moves for shaders
+    /// you never use.
     [[nodiscard]] u64 generation() const;
 
     // internal — the compile path an asset drives
@@ -168,8 +169,6 @@ private:
 
     cc::vector<package_entry> _packages;
 
-    cc::atomic<u64> _generation{0};
-
     /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a
     /// filesystem notification comes in through. Both are shared because the actor owns the impl and only
     /// hands it back once it has stopped.
@@ -177,4 +176,10 @@ private:
     std::shared_ptr<cc::atomic<bool>> _watcher_stopping;
     std::shared_ptr<impl::reload_wake> _wake;
 };
+
+/// The process-global shader-reload counter: it moves whenever any shader is reloaded, anywhere. There
+/// is only ever one live shader_library, so a single global counter is enough — and it lets a consumer
+/// (e.g. an sr::render_routine) track reloads without holding a library reference. Monotonic; only the
+/// fact that it changed is meaningful.
+[[nodiscard]] u64 current_reload_generation();
 } // namespace slib

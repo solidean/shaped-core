@@ -14,14 +14,12 @@ namespace sg::backend::vulkan
 class vulkan_command_list final : public sg::command_list
 {
 public:
+    // Defined in the .cc: the sg::command_list base needs vulkan_context complete to upcast it to sg::context.
     vulkan_command_list(vulkan_context& ctx,
                         sg::epoch created_in,
                         sg::command_list_slot slot,
                         VkCommandPool pool,
-                        VkCommandBuffer buffer)
-      : sg::command_list(created_in), _ctx(ctx), _slot(slot), _pool(pool), _buffer(buffer)
-    {
-    }
+                        VkCommandBuffer buffer);
 
     // Auto-drops (with a warning) a list left neither submitted nor dropped; no-op once either has run
     // (they mark it consumed). Body in vulkan_command_list.cc.
