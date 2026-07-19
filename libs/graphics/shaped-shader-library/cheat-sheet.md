@@ -53,7 +53,8 @@ lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding l
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
 lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's). Reads the global below
-slib::current_reload_generation();          // -> u64; process-global reload counter — track reloads without holding a library (e.g. sr routines)
+slib::current_reload_generation();          // -> u64; forwards to sg::reload_generation() (the counter now lives in sg). note_reload() bumps it via sg::signal_reload()
+// The counter itself is sg's (sg::reload_generation / sg::signal_reload): consumers like sg render routines read sg directly, no slib dependency.
 lib.can_compile(language, format);          // -> bool;  lib.supported_formats(language) -> vector
 lib.assets();                               // -> span<shader_asset_handle const>
 lib.filesystem();                           // -> mount_table const&  (everything mounted)

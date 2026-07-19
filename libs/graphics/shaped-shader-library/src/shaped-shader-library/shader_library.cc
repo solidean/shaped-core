@@ -2,6 +2,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-graphics/reload_generation.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -13,10 +14,6 @@ namespace
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns
 // the assets they point at. One at a time, enforced rather than documented.
 bool g_library_alive = false;
-
-// The coarse shader-reload counter is process-global, not per library: there is only ever one library
-// alive, and consumers (e.g. render routines) track reloads without holding a library reference.
-cc::atomic<cc::u64> g_reload_generation{0};
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
 {
@@ -180,17 +177,17 @@ slib::shader_library::package_entry const& slib::shader_library::package_of(cc::
 
 cc::u64 slib::shader_library::generation() const
 {
-    return g_reload_generation.load();
+    return sg::reload_generation();
 }
 
 cc::u64 slib::current_reload_generation()
 {
-    return g_reload_generation.load();
+    return sg::reload_generation();
 }
 
 void slib::shader_library::note_reload()
 {
-    g_reload_generation.fetch_add(1);
+    sg::signal_reload();
 }
 
 void slib::shader_library::note_dependencies_changed()

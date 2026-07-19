@@ -25,7 +25,7 @@ TEST("sg - a consumer's shader package registers")
     REQUIRE(sg::test::shaders::double_values.compute.main != nullptr);
     CHECK(sg::test::shaders::double_values.compute.main->stage() == sg::shader_stage::compute);
     CHECK(sg::test::shaders::double_values.compute.main->entry_point() == "main");
-    CHECK(sg::test::shaders::package().definitions.size() == 1);
+    CHECK(sg::test::shaders::package().definitions.size() == 2); // double_values + pattern_fill (routine-test)
 }
 
 INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired with", (sg::context_handle const& ctx))

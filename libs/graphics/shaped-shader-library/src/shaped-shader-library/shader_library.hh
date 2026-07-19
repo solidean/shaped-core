@@ -178,8 +178,9 @@ private:
 };
 
 /// The process-global shader-reload counter: it moves whenever any shader is reloaded, anywhere. There
-/// is only ever one live shader_library, so a single global counter is enough — and it lets a consumer
-/// (e.g. an sr::render_routine) track reloads without holding a library reference. Monotonic; only the
-/// fact that it changed is meaningful.
+/// is only ever one live shader_library, so a single global counter is enough. The counter itself now
+/// lives in shaped-graphics (this forwards to sg::reload_generation(), and note_reload() bumps it via
+/// sg::signal_reload()) — a consumer like a render routine reads sg directly, without any slib
+/// dependency. Monotonic; only the fact that it changed is meaningful.
 [[nodiscard]] u64 current_reload_generation();
 } // namespace slib

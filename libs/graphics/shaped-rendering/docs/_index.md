@@ -6,13 +6,14 @@ Documentation hub for shaped-rendering. For the library overview start at the
 [docs/_index.md](../../../../docs/_index.md).
 
 shaped-rendering is built on [shaped-graphics](../../shaped-graphics/readme.md) and
-[shaped-shader-library](../../shaped-shader-library/readme.md); its first feature is the render-routine
-framework.
+[shaped-shader-library](../../shaped-shader-library/readme.md); it hosts the concrete render routines.
+The render-routine *framework* lives in shaped-graphics (see
+[its render-routines doc](../../shaped-graphics/docs/render-routines.md)).
 
 ## Topics
 
-- [render-routines](render-routines.md) — the render-routine framework (routine / package / library),
-  end to end.
+- [render-routines](render-routines.md) — sr-side overview: writing a concrete routine, with a link to
+  the framework doc in shaped-graphics.
 - [structure](structure.md) — the intended module roadmap with status tags.
 - [coding-guidelines](coding-guidelines.md) — sr-specific conventions (thin for now) on top of
   the repo-wide ones.

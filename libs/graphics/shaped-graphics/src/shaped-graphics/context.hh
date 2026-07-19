@@ -15,6 +15,7 @@
 #include <shaped-graphics/context.uncached.hh>
 #include <shaped-graphics/context.upload.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/routine_registry.hh>
 #include <shaped-graphics/swapchain.hh>
 #include <shaped-graphics/texture_region.hh>
 #include <shaped-graphics/types.hh>
@@ -83,6 +84,11 @@ public:
     /// `acquire_pipeline_layout(...)`, and `acquire_compute_pipeline(...)`. Get-or-create over the context's pipeline_cache
     /// (default in-memory tiers installed); reach the cache via `ctx.cached.cache()` to add tiers.
     context_cached_scope cached;
+
+    /// Per-context render-routine registry (see routine_registry / render_routine). Routines are reached
+    /// by type through `sg::render_routine::acquire(cmd)`; touch this to `prewarm<...>()` before opening a
+    /// list, or `evict<R>()` / `clear()` to release cached routine GPU state early. Cleared on shutdown.
+    routine_registry routines;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once. Infallible in
     /// the ordinary sense — a correct program on a healthy device always gets a list. Throws

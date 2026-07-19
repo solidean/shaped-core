@@ -26,6 +26,10 @@ backends/         # concrete per-backend static libs (dx12/, vulkan/) that subcl
   pipeline from: declaring a package, `acquire(ctx)`, hot reload, and dev-vs-shipping. Most of that
   machinery lives *downstream* of sg (shaped-shader-library, shaped-shader-compiler-dxc) — sg owns only
   `compiled_shader` and what a context accepts — but this is where to start looking.
+- [render-routines](render-routines.md) — the render-routine framework: `sg::render_routine<Derived>`
+  (3-phase, hot-reload-aware init, reached by type via `acquire(cmd)`), the per-context `ctx.routines`
+  registry (lazy self-registration, `prewarm`/`evict`/`clear`), and the `sg::reload_generation` counter.
+  Concrete routines live in shaped-rendering.
 - [structure](structure.md) — the module roadmap with `[done]`/`[in progress]`/`[planned]`
   status. This is the living design document; update it as the API lands.
 - [coding-guidelines](coding-guidelines.md) — sg-specific conventions on top of the repo-wide

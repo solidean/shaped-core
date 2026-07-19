@@ -1,10 +1,10 @@
 #include <shaped-graphics/command_list.hh> // cmd.context()
-#include <shaped-rendering/render_routine.hh>
-#include <shaped-shader-library/shader_library.hh> // slib::current_reload_generation
+#include <shaped-graphics/reload_generation.hh>
+#include <shaped-graphics/render_routine_base.hh>
 
-namespace sr
+namespace sg
 {
-void render_routine::ensure_initialized_no_materialize(sg::context& ctx)
+void render_routine_base::ensure_initialized_no_materialize(context& ctx)
 {
     if (!_init_once_done)
     {
@@ -20,7 +20,7 @@ void render_routine::ensure_initialized_no_materialize(sg::context& ctx)
     }
 }
 
-void render_routine::ensure_initialized(sg::command_list& cmd)
+void render_routine_base::ensure_initialized(command_list& cmd)
 {
     ensure_initialized_no_materialize(cmd.context());
 
@@ -32,8 +32,8 @@ void render_routine::ensure_initialized(sg::command_list& cmd)
     }
 }
 
-u64 render_routine::current_generation()
+u64 render_routine_base::current_generation()
 {
-    return slib::current_reload_generation();
+    return sg::reload_generation();
 }
-} // namespace sr
+} // namespace sg

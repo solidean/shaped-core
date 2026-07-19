@@ -10,11 +10,6 @@ namespace sr
 // Vocabulary types (i32/u32/f32/isize/...) available bare inside sr, not leaked globally.
 using namespace cc::primitive_defines;
 
-// render routines
-class render_routine;
-class render_routine_package;
-class render_routine_library;
-
-template <class RoutineT>
-class routine_handle;
+// Concrete render routines land here as they are implemented; the routine framework itself lives in
+// shaped-graphics (sg::render_routine / ctx.routines).
 } // namespace sr
