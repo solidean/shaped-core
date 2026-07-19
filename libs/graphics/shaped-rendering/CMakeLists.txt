@@ -38,6 +38,21 @@ target_compile_options(shaped-rendering
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# No test target yet: sr currently hosts no concrete routines, and the render-routine *framework* is
-# tested in shaped-graphics (tests/routine/), where it lives. A shaped-rendering-test returns as the
-# first concrete routine lands, with its own tests.
+# Test executable. sr hosts no concrete routines yet (the render-routine *framework* is tested in
+# shaped-graphics, tests/routine/, where it lives), so this is just a smoke test that the library
+# builds and links. Real tests land alongside the first concrete routines.
+if(SC_BUILD_TESTS)
+    add_executable(shaped-rendering-test
+        tests/main.cc
+        tests/smoke-test.cc
+    )
+
+    target_link_libraries(shaped-rendering-test
+        PRIVATE
+        shaped-rendering
+        nexus
+    )
+
+    # Browser test runner (Emscripten only); a no-op on native toolchains.
+    sc_add_nexus_web_runner(shaped-rendering-test)
+endif()

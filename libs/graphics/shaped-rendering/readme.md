@@ -17,12 +17,13 @@ routines built on top of it; they land as they are implemented. See
 
 ## Building & testing
 
-Build and test through the repo driver. `sr` has no test binary yet (the framework is tested in
-shaped-graphics, where it lives; concrete routines bring their own tests as they land):
+Build and test through the repo driver — never run the `shaped-rendering-test` binary directly. Its
+suite is a smoke test for now (the render-routine framework is tested in shaped-graphics, where it
+lives; concrete routines bring their own tests as they land):
 
 ```bash
-uv run dev.py build -t shaped-rendering      # build the library while iterating
-uv run dev.py test "sg - routine"            # the render-routine framework tests (in shaped-graphics)
+uv run dev.py test "sr "         # the shaped-rendering smoke test
+uv run dev.py test "sg - routine" # the render-routine framework tests (in shaped-graphics)
 ```
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
