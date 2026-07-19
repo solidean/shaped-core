@@ -9,8 +9,36 @@
 
 namespace itrace
 {
-/// What --instructions defaults to under --stats, absent an explicit value.
+/// What --instructions defaults to when a table/memory section is requested, absent an explicit
+/// value: a truncated trace makes for silently wrong aggregates, and 100 would truncate anything
+/// worth tabling.
 inline constexpr u32 stats_instruction_default = 100000;
+
+/// Which output sections to print, in any combination — all from one capture, since the memory
+/// data cannot be reliably reproduced across runs. Empty (nothing selected) means the trace alone.
+struct output_sections
+{
+    bool trace = false;        // the raw retired-instruction trace
+    bool stats = false;        // the per-symbol instruction table
+    bool memory = false;       // the raw chronological memory-access list
+    bool cachelines = false;   // memory accesses bucketed by cacheline
+    bool memory_stats = false; // the per-symbol memory table
+    bool timing = false;       // the llvm-mca cost model (needs --mca)
+
+    bool any_memory() const { return memory || cachelines || memory_stats; }
+    bool any_non_trace() const { return stats || memory || cachelines || memory_stats || timing; }
+    bool none() const { return !trace && !stats && !memory && !cachelines && !memory_stats && !timing; }
+};
+
+/// Which address regions the memory sections include. Default heap + stack: the data accesses that
+/// answer "am I touching my data well", without the current frame's own spills or the code stream.
+struct memory_regions
+{
+    bool heap = true;
+    bool frame = false;
+    bool stack = true;
+    bool instructions = false;
+};
 
 /// Parsed command line. See usage_text() for the flags and readme.md for what they mean.
 struct options
@@ -32,8 +60,27 @@ struct options
     bool source = true;
     bool terminate_after_traces = true;
     bool register_diffs = false;
-    /// Print a per-symbol table instead of the trace.
-    bool stats = false;
+
+    /// When set, write a self-contained HTML report to this path. Forces a full capture (source,
+    /// owner, memory and register data) and the stats instruction budget, since a truncated or
+    /// under-enriched export is misleading. Orthogonal to --sections: an output format, not a section.
+    cc::string html_path;
+
+    /// Path to the llvm-mca binary (usually supplied by dev.py). Empty disables timing analysis: the
+    /// `timing` section and the HTML timing views degrade to absent rather than failing.
+    cc::string mca_tool;
+    /// The µarch model for llvm-mca. Empty means host (`-mcpu=native`) with a baseline fallback.
+    cc::string mca_cpu;
+
+    /// Which output sections to print. Empty after parsing means "trace only" (the default).
+    output_sections sections;
+    /// Whether --sections / --stats explicitly named a section. Lets --html decide between replacing
+    /// stdout with a summary (no explicit sections) and also printing the requested sections.
+    bool sections_explicit = false;
+    /// Which address regions the memory sections show.
+    memory_regions regions;
+    /// Annotate the raw and cacheline memory views with the accessing instruction's address.
+    bool memory_instruction_addresses = false;
 
     /// --colored / --plain; auto-detects otherwise.
     color_mode color = color_mode::automatic;

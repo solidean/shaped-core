@@ -33,11 +33,46 @@ enum class insn_category
     syscall,
 };
 
-/// The 16 GPRs plus rflags, sampled before an instruction. Only captured with --register-diffs.
+/// The 16 GPRs plus rflags, sampled before an instruction. Captured with --register-diffs or any
+/// memory section (the effective-address computation reads base/index registers from here).
 struct register_snapshot
 {
     cc::fixed_array<u64, gpr_count> gpr = {};
     u64 rflags = 0;
+};
+
+/// Where a touched address lives.
+///
+/// frame is the executing function's own stack frame (its locals, spills, and the return-address /
+/// saved-register machinery); stack is another function's stack — the case that matters when a
+/// stack array is passed around as a span and reached through a pointer; instructions is code
+/// memory (the instruction fetch itself, giving an I-cache footprint when opted in). heap is
+/// everything else: dynamic allocations and globals (globals keep their name in the access).
+enum class access_region
+{
+    heap,
+    frame,
+    stack,
+    instructions,
+};
+
+/// One memory location an instruction touched, with the effective address resolved from the
+/// register snapshot taken before the instruction ran.
+///
+/// Every memory operand is recorded — explicit data operands, the implicit stack traffic of
+/// push/pop/call/ret (which lands in `frame`), and the instruction fetch. Noise is dropped by
+/// region *filtering* at print time, never by omission here, so one capture serves every region
+/// selection.
+struct memory_access
+{
+    u64 address = 0;
+    u16 size = 0; // bytes
+    bool is_read = false;
+    bool is_write = false;
+    access_region region = access_region::heap;
+    /// A global's name for a heap-region hit, or the function owning the frame for a stack/frame
+    /// hit, or the containing function for an instruction fetch. Empty when nothing is known.
+    cc::string symbol;
 };
 
 /// One retired instruction.
@@ -81,6 +116,10 @@ struct recorded_instruction
     cc::string target_symbol;
     /// The function containing `rip`, without an offset. Only filled when stats are requested.
     cc::string owner_symbol;
+
+    /// Every memory location this instruction touched, resolved from the before-instruction
+    /// register snapshot. Filled only when a memory section is requested; empty otherwise.
+    cc::vector<memory_access> memory_accesses;
 };
 
 /// True when control did not simply fall through to the next instruction — the authority for whether
@@ -125,6 +164,11 @@ struct trace
     u64 return_rip = 0;
     cc::string entry_symbol;
     cc::string return_symbol;
+
+    /// The traced thread's stack reservation [low, high), captured at entry. Lets memory
+    /// enrichment tell a stack address from a heap/global one. Both 0 when not captured.
+    u64 stack_low = 0;
+    u64 stack_high = 0;
 
     cc::vector<stack_frame> entry_stack;
     cc::vector<recorded_instruction> instructions;

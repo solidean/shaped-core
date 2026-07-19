@@ -85,13 +85,19 @@ narrow the spec, or use --target module!symbol / --address.
 |---|---|---|
 | `--skip <n>` | `0` | Ignore the first n entry hits. The first recorded trace is hit n+1. |
 | `--traces <n>` | `1` | Record n invocations, counted across all threads. |
-| `--instructions <n>` | `100` (`100000` under `--stats`) | Max retired instructions per trace. |
+| `--instructions <n>` | `100` (`100000` when a non-trace section is on) | Max retired instructions per trace. |
 | `--until-return` | on | Stop once the entry frame returns. |
 | `--stop-at-syscall` | on | Stop before executing a syscall, rather than stepping into the kernel. |
-| `--stack` | on | Print the stack at entry. |
-| `--source` | on | Annotate with source file/line and the source text. |
+| `--sections <list>` | `trace` | Comma-separated output sections, all from one capture. See [Sections](#sections). |
+| `--html <path>` | off | Write a self-contained HTML report. See [HTML export](#html-export). |
+| `--mca <path>` | off | Path to `llvm-mca`; enables the [`timing`](#timing-llvm-mca) cost model. `dev.py` resolves it automatically. |
+| `--mca-cpu <name>` | host | The micro-arch `llvm-mca` models (`-mcpu`). Empty means the host CPU (`-mcpu=native`). |
+| `--stack` | on | Print the stack at entry (trace section). |
+| `--source` | on | Annotate with source file/line and the source text (trace section). |
 | `--register-diffs` | off | Dump the registers at entry, then show what each instruction changed. See below. |
-| `--stats` | off | Print a per-symbol table instead of the trace. See below. |
+| `--stats` | off | Shortcut for `--sections stats`. |
+| `--memory-regions <list>` | `heap,stack` | Which address regions the memory sections show. See [Memory](#memory). |
+| `--memory-instruction-addresses` | off | Annotate the memory and cacheline views with the accessing instruction. |
 | `--terminate-after-traces` | on | Kill the debuggee once the last trace lands. |
 
 Every boolean has a `--no-` form (`--no-source`). `-h` / `--help` prints all of this.
@@ -104,6 +110,27 @@ Exit codes: `0` traced something, `1` bad usage or launch failure, `2` the targe
 (unknown, ambiguous, or never entered).
 
 ## Output
+
+### Sections
+
+The output is a set of sections you combine with `--sections <list>`; the default is `trace` alone.
+Every selected section is rendered from **one** capture — the memory data cannot be reliably
+reproduced across separate runs, so there is no way to get it except together with whatever else you
+asked for. The names:
+
+| section | what it prints |
+|---|---|
+| `trace` | the retired-instruction trace (below); honors `--source` / `--register-diffs` |
+| `stats` | the per-symbol instruction table (`--stats` is a shortcut for this) |
+| `memory` | the raw chronological memory-access list — see [Memory](#memory) |
+| `cachelines` | memory accesses bucketed by cacheline |
+| `memory-stats` | the per-symbol memory table |
+| `timing` | the `llvm-mca` cost model (needs `--mca`) — see [Timing](#timing-llvm-mca) |
+
+`--sections trace,memory,memory-stats` prints three blocks in that fixed order. Any non-trace
+section raises the `--instructions` default to `100000`, since a trace cut short by the budget makes
+every aggregate silently wrong. Naming a section replaces the default trace, so `--stats` alone
+prints only the table — pass `--sections trace,stats` for both.
 
 ```
 === trace 1/1: instruction-tracer-fixture.exe!itrace_fixture_add ===
@@ -239,6 +266,129 @@ silently wrong table, and 100 truncates anything worth tabling. An explicit `--i
 wins, and a table built from a truncated trace says so loudly. Note that single-stepping costs a
 debug-event round trip per instruction, so a genuinely 100k-instruction trace is slow.
 
+### Timing (llvm-mca)
+
+Where `slow` (above) only flags that the instruction count *will* mislead, `timing` puts a number on
+it. It feeds the retired instruction stream to [`llvm-mca`](https://llvm.org/docs/CommandGuide/llvm-mca.html)
+— a static issue/execute/retire model — and reports µops, latency and throughput per instruction,
+plus a block summary, per-port pressure and a bottleneck breakdown. It needs `--mca <path>`; through
+`dev.py assembly trace` the tool is resolved automatically (and passed for `--html` too).
+
+```
+timing  trace 1/1   model znver4
+  IPC 2.36   block RThroughput 3.33   cycles 339   uops 800   dispatch 6   iters 100
+  bottleneck: register-dep 292c  data-dep 292c  memory-dep 0c  resource 293c  limited by Zn4LSU (293c)
+  addr              uops  lat   @ret  text
+  00007ff7`677e1000     1    1     @3  push rax
+  00007ff7`677e1008     1    5     @7  mov ecx, [rsp+0x04]
+  00007ff7`677e100f     1    1     @9  add eax, ecx
+  00007ff7`677e1012     1    5     @9  ret
+```
+
+`@N` is the cycle the instruction retired in. The model is the **host CPU** by default
+(`-mcpu=native`), with a graceful fallback to a baseline if native is unavailable; `--mca-cpu <name>`
+overrides it. The HTML export ([below](#html-export)) is where this shines: a `timing` toggle, the
+per-instruction `@retire` cycle, block-summary and port-pressure/bottleneck side boxes, and a
+full-width **waterfall** (the classic mca pipeline diagram).
+
+**Read it honestly — it is a static model.** Two caveats worth internalizing:
+
+- **Whole-stream, not loop-detected.** We feed the whole retired stream and let mca aggregate it over
+  its default 100 iterations, which models a *frequently invoked* function near steady state — the
+  intended use. The summary therefore assumes the block loops; it is not a one-shot cost.
+- **Steady-state summary vs single-pass waterfall.** The block summary is the 100-iteration aggregate;
+  the `@retire` cycles and the waterfall come from iteration 0 (a single pass). Don't cross-read them.
+- **Blind to caches — the same landmine as `slow`.** It models the pipeline, not the memory system: a
+  `mov` that misses to DRAM costs 1 cycle here too. `timing` tells you what the *scheduler* would do
+  with this instruction mix; it cannot tell you where the wall-clock time went.
+
+Instructions `llvm-mca` cannot parse (it walks into ntdll, or hits an encoding its model lacks) are
+dropped and render with blank timing; if the survivors cannot be reconciled to the trace, the
+per-instruction column and waterfall are suppressed for that trace rather than mis-attached, and the
+block summary and port pressure still show.
+
+## Memory
+
+The one cost the instruction stream hides is where the data went — a `mov` that misses to DRAM is
+200+ cycles and reads identically to an L1 hit. The memory sections resolve every memory operand to
+its **effective address** at run time (from the register snapshot taken before each instruction) and
+show what the invocation actually touched. Three views, all from the same capture:
+
+- **`memory`** — the raw list, one line per access in execution order: address, size, read/write, the
+  region, and the symbol it hit. With `--memory-instruction-addresses`, the accessing rip is prefixed.
+- **`cachelines`** — accesses bucketed into 64-byte lines, one line per touched cacheline in ascending
+  order with a blank line across a gap. It shows how many accesses hit the line and **how many of its
+  64 bytes** — the footprint, the "am I using the whole line or 8 bytes of it" signal — plus the
+  distinct symbols on it. This is the view for checking you access your data well.
+- **`memory-stats`** — a per-symbol table (`acc`, `r/w`, distinct `lines`, `bytes` moved), grouped by
+  the function *making* the accesses, like the instruction table.
+
+```
+=== cachelines ===
+  000000ab`c17cfa00     9 acc  32/64 B  RW  ; …!itrace_fixture_touch   <- the frame's stack array
+  000000ab`c17cfa40     3 acc  16/64 B  RW  ; …!itrace_fixture_touch
+
+  00007ff6`5f531a40     2 acc   4/64 B  RW  ; …!itrace_global_counter  <- a global, named from the PDB
+```
+
+### Regions
+
+Every address is classified into one of four regions, and `--memory-regions <list>` selects which the
+sections show (default `heap,stack`):
+
+| region | what it is | default |
+|---|---|---|
+| `heap` | dynamic allocations and globals (a global keeps its name) | shown |
+| `stack` | *another* function's stack — where a stack array passed around as a `span` lands, named with the frame's function | shown |
+| `frame` | the current function's own stack: its locals, spills, and the return-address / saved-register machinery | hidden |
+| `instructions` | code memory — the instruction fetch itself, so an I-cache footprint | hidden |
+
+`frame` and `instructions` are off by default: they are the current function's own overhead and the
+code stream, which drown out the data accesses you are usually asking about. Turn them on to see the
+whole picture (`--memory-regions heap,stack,frame,instructions`).
+
+Region is what separates a genuine cross-function `stack` access — a stack buffer reached through a
+pointer, the case that is easy to get wrong — from a `frame` access that is just a local. The frame
+boundaries are recovered by watching `call`/`ret` as the trace steps.
+
+Requesting any memory section forces register capture on (the addresses need it), so a memory run is
+a per-instruction snapshot heavier than a plain trace.
+
+## HTML export
+
+`--html <path>` writes the whole capture to a single self-contained `.html` file — CSS and JS
+inlined, no external requests — meant to be opened in a browser and shared as one artifact. It is an
+output *format*, orthogonal to `--sections`: on its own it replaces the stdout rendering with a
+one-line `wrote <path> (<n> traces)`; combine it with `--sections` to get both.
+
+Because a truncated or under-enriched export is misleading, `--html` **forces a full capture**:
+source, owner and memory enrichment plus register capture, and the `100000` instruction budget (an
+explicit `--instructions` still wins).
+
+The page is tabbed per trace, with a two-column layout: the trace on the left (with toggles for
+inline source, register diffs, memory accesses and `timing`, and mnemonics linked to
+[felixcloutier.com](https://www.felixcloutier.com/x86/)), and collapsible aggregate views on the
+right (instruction stats, the three memory views — driven by live region checkboxes — a
+**source view**, and, when `--mca` is available, a **block summary** and a **port-pressure /
+bottleneck** box, with a collapse-all control). The source view collects every line the trace
+touched, grows each by context, merges them into ranges, and renders them with syntax highlighting
+and an executed-line marker; hovering an executed line highlights the instructions that ran it, and
+vice versa.
+
+When timing data is present a second tab level appears below the per-trace tabs: **trace view** (the
+two-column layout) and **waterfall view** (a full-width pipeline diagram — rows are instructions,
+columns are cycles, each bar segmented dispatch → execute → retire). See [Timing](#timing-llvm-mca)
+for the model's caveats, which apply to the HTML views too.
+
+```bash
+uv run dev.py assembly trace --target clean-core-test \
+    --symbol "cc::async_node_base::schedule" --html trace.html \
+    -- "async - basic"
+```
+
+Source text is read from the build machine and embedded, so the file is self-contained but carries
+whatever source those paths resolved to. Windows-only, and it needs PDBs like every other section.
+
 ## How it works
 
 At each entry-breakpoint hit:
@@ -276,6 +426,12 @@ than committed: the amalgamated source is ~12 MB of generated instruction tables
   from `CONTEXT` (they are already in the struct we read) and diff them like the GPRs; the open
   question is rendering 128 bits per register without swamping the line, which probably means
   printing only the changed lanes and only on request.
+- **Memory addresses skip the segment base.** A `gs`/`fs`-relative operand (TLS, the stack cookie's
+  base) resolves to its offset alone, since the tracer does not read the segment base — so a TLS
+  access lands at a small address rather than its real one. The common GPR-relative forms are exact.
+- **Frame tracking misses tail calls.** Region classification recovers frame boundaries from
+  `call`/`ret`; a tail-call `jmp` into another function is not a call, so its accesses are charged to
+  the caller's frame. Rare in the code this is aimed at.
 - **The syscall stop has no trailing register snapshot.** Every other stop records the state the last
   instruction left behind; the syscall gate is recorded but deliberately never stepped, so its effect
   is unknown rather than missing.
@@ -311,10 +467,15 @@ stale breakpoint or a botched re-arm all break it.
 ```
 src/instruction-tracer/
   cli/        options + target-spec parsing
-  debug/      the Win32 half: event loop, breakpoint, stepping, dbghelp, enrichment
-  decode/     Zydis wrapper
-  report/     source lookup + formatting
+  debug/      the Win32 half: event loop, breakpoint, stepping, dbghelp, enrichment, llvm-mca launch
+  decode/     Zydis wrapper: instruction text, and memory effective-address + region classification
+  report/     source lookup + formatting (trace, stats, memory views, and the llvm-mca timing model)
 ```
+
+`report/mca.{hh,cc}` is pure (asm builder + `-json` parse + alignment), unit-tested against a
+checked-in fixture; `debug/mca_runner.cc` is the Win32 subprocess that feeds `llvm-mca`. The JSON is
+read by a minimal in-tree reader (`report/json_reader.hh`) — a stopgap until clean-core grows a JSON
+reader, at which point it should be dropped for the shared one.
 
 `debug/trace_record.hh` is the seam: plain data, no `<Windows.h>`. `decode/` and `report/` consume
 it and never see the debug API, which is what lets them be unit-tested without a debuggee.

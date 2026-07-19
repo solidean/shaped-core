@@ -1,13 +1,24 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/platform/win32_sanitized.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <instruction-tracer/cli/options.hh>
 #include <instruction-tracer/debug/debug_session.hh>
+#include <instruction-tracer/debug/mca_runner.hh>
 #include <instruction-tracer/debug/trace_enrich.hh>
 #include <instruction-tracer/decode/instruction_decoder.hh>
 #include <instruction-tracer/report/console.hh>
+#include <instruction-tracer/report/html_export.hh>
+#include <instruction-tracer/report/mca.hh>
+#include <instruction-tracer/report/mca_timing_formatter.hh>
+#include <instruction-tracer/report/memory_formatter.hh>
+#include <instruction-tracer/report/memory_stats.hh>
 #include <instruction-tracer/report/source_cache.hh>
 #include <instruction-tracer/report/trace_formatter.hh>
 #include <instruction-tracer/report/trace_stats.hh>
+
+#include <filesystem>
+#include <fstream>
 
 namespace
 {
@@ -15,6 +26,93 @@ namespace
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_unresolved = 2;
+
+// --- HTML export metadata: gathered post-run from the environment, all best-effort. ---
+
+/// Current wall clock in UTC, ISO 8601 (e.g. "2026-07-18T14:03:21Z").
+cc::string current_iso_utc()
+{
+    SYSTEMTIME st;
+    GetSystemTime(&st); // UTC
+    return cc::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+                      st.wSecond);
+}
+
+/// The OS name and version, e.g. "Windows 11 Pro 10.0.26200". RtlGetVersion is accurate where
+/// GetVersionEx lies under a manifest; the friendly name comes from the registry (may lag on Win11).
+cc::string os_version_string()
+{
+    OSVERSIONINFOW vi = {};
+    vi.dwOSVersionInfoSize = sizeof(vi);
+    if (auto* h = GetModuleHandleW(L"ntdll.dll"))
+    {
+        using rtl_get_version_fn = LONG(WINAPI*)(OSVERSIONINFOW*);
+        if (auto fn = reinterpret_cast<rtl_get_version_fn>(GetProcAddress(h, "RtlGetVersion")))
+            fn(&vi);
+    }
+
+    char product[256] = {};
+    DWORD size = sizeof(product);
+    cc::string name;
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
+                     RRF_RT_REG_SZ, nullptr, product, &size)
+        == ERROR_SUCCESS)
+        name = product;
+    if (name.empty())
+        name = "Windows";
+
+    return cc::format("{} {}.{}.{}", name, vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber);
+}
+
+cc::u64 file_size_of(cc::string_view path)
+{
+    std::error_code ec;
+    auto const n = std::filesystem::file_size(std::filesystem::path(std::string(path.data(), size_t(path.size()))), ec);
+    return ec ? 0 : cc::u64(n);
+}
+
+bool write_text_file(cc::string_view path, cc::string_view content)
+{
+    std::ofstream f(std::string(path.data(), size_t(path.size())), std::ios::binary);
+    if (!f.is_open())
+        return false;
+    f.write(content.data(), std::streamsize(content.size()));
+    return bool(f);
+}
+
+/// Run llvm-mca over every trace and align its analysis back onto the full instruction stream. One
+/// mca_result per trace (parallel to `traces`); a launch/parse failure yields an unavailable result
+/// rather than aborting. `tool` must be non-empty (the caller gates on --mca).
+cc::vector<itrace::mca_result> gather_mca(cc::span<itrace::trace const> traces, cc::string_view tool, cc::string_view cpu)
+{
+    cc::vector<itrace::mca_result> results;
+    for (auto const& t : traces)
+    {
+        itrace::mca_result r;
+        auto const in = itrace::build_mca_input(t);
+        if (!in.fed_trace_indices.empty())
+        {
+            auto const run = itrace::run_llvm_mca(tool, cpu, in.asm_text);
+            if (run.ran && !run.json.empty())
+            {
+                auto const dropped = itrace::parse_mca_dropped_lines(run.stderr_text);
+                cc::vector<cc::u32> surviving;
+                for (cc::u32 k = 0; k < in.fed_trace_indices.size(); ++k)
+                {
+                    bool is_dropped = false;
+                    for (cc::u32 const d : dropped)
+                        if (d == k)
+                            is_dropped = true;
+                    if (!is_dropped)
+                        surviving.push_back(in.fed_trace_indices[k]);
+                }
+                r = itrace::parse_mca_json(run.json, surviving, cc::u32(t.instructions.size()));
+            }
+        }
+        results.push_back(cc::move(r));
+    }
+    return results;
+}
 
 int run(itrace::options const& opts)
 {
@@ -28,14 +126,21 @@ int run(itrace::options const& opts)
     config.trace.max_instructions = opts.instructions;
     config.trace.until_return = opts.until_return;
     config.trace.stop_at_syscall = opts.stop_at_syscall;
-    config.trace.capture_registers = opts.register_diffs;
     config.trace.capture_stack = opts.stack;
 
-    itrace::debug_session session(cc::move(config));
+    auto const& sections = opts.sections;
+    bool const html = !opts.html_path.empty();
 
-    // The stats table prints no source lines, so resolving them would be a PDB lookup per instruction
-    // for output nobody sees — and --stats raises the instruction cap a thousandfold.
-    bool const want_source = opts.source && !opts.stats;
+    // Source lines only feed the trace section, and each is a PDB lookup per instruction; the owner
+    // feeds the tables and the memory attribution; the memory pass needs the register snapshots, so
+    // it forces register capture even without --register-diffs. The HTML export bundles every view,
+    // so it forces all of them on.
+    bool const want_source = html || (sections.trace && opts.source);
+    bool const want_owner = html || sections.stats || sections.memory_stats;
+    bool const want_memory = html || sections.any_memory();
+    config.trace.capture_registers = html || opts.register_diffs || want_memory;
+
+    itrace::debug_session session(cc::move(config));
 
     // Enrichment needs the debuggee's symbols, so it happens inside run()'s lifetime via the
     // callback below rather than after the session tears down.
@@ -43,7 +148,7 @@ int run(itrace::options const& opts)
         [&](itrace::trace& t, itrace::symbol_session const& symbols)
         {
             itrace::instruction_decoder const decoder;
-            itrace::enrich_trace(t, symbols, decoder, want_source, opts.stats);
+            itrace::enrich_trace(t, symbols, decoder, want_source, want_owner, want_memory);
         });
 
     if (traces.has_error())
@@ -59,23 +164,108 @@ int run(itrace::options const& opts)
         return exit_unresolved;
     }
 
-    if (opts.stats)
+    itrace::memory_view_options mem;
+    mem.heap = opts.regions.heap;
+    mem.frame = opts.regions.frame;
+    mem.stack = opts.regions.stack;
+    mem.instructions = opts.regions.instructions;
+    mem.instruction_addresses = opts.memory_instruction_addresses;
+
+    // llvm-mca is the headline of both the timing section and the HTML report. It needs only the
+    // decoded instruction text (no extra capture), and soft-degrades when --mca is absent or fails.
+    cc::vector<itrace::mca_result> mca_results;
+    if ((sections.timing || html) && !opts.mca_tool.empty())
+        mca_results = gather_mca(traces.value(), opts.mca_tool, opts.mca_cpu);
+
+    // The HTML export bundles every view into one self-contained file. It is an output *format*,
+    // orthogonal to --sections: without an explicit --sections it replaces the stdout rendering with
+    // a one-line summary; with one, it writes the file and still prints the requested sections.
+    if (html)
     {
-        cc::print(itrace::format_stats(itrace::collect_stats(traces.value())));
-        return exit_ok;
+        itrace::html_export_meta meta;
+        meta.generated_at_iso = current_iso_utc();
+        meta.os_version = os_version_string();
+        meta.exe_path = opts.exe;
+        meta.exe_size_bytes = file_size_of(opts.exe);
+        meta.command_line = cc::string(GetCommandLineA());
+        meta.target = opts.target.to_string();
+        meta.skip = opts.skip;
+        meta.traces = opts.traces;
+        meta.instructions = opts.instructions;
+        meta.until_return = opts.until_return;
+        meta.stop_at_syscall = opts.stop_at_syscall;
+        meta.regions = mem;
+
+        itrace::source_cache sources;
+        auto const page = itrace::export_html(traces.value(), meta, sources, mca_results);
+        if (!write_text_file(opts.html_path, page))
+        {
+            cc::eprintln("error: could not write HTML report to '{}'", opts.html_path);
+            return exit_usage;
+        }
+
+        if (!opts.sections_explicit)
+        {
+            cc::println("wrote {} ({} traces)", opts.html_path, traces.value().size());
+            return exit_ok;
+        }
     }
 
-    itrace::format_options fmt;
-    fmt.stack = opts.stack;
-    fmt.source = opts.source;
-    fmt.register_diffs = opts.register_diffs;
-
-    itrace::source_cache sources;
-    auto const total = cc::u32(traces.value().size());
-    for (auto const& t : traces.value())
+    // Print each selected section in a fixed order, all from this one capture. A blank line
+    // separates them.
+    bool need_separator = false;
+    auto const separate = [&]
     {
-        cc::print(itrace::format_trace(t, total, fmt, sources));
-        cc::println();
+        if (need_separator)
+            cc::println();
+        need_separator = true;
+    };
+
+    if (sections.trace)
+    {
+        separate();
+        itrace::format_options fmt;
+        fmt.stack = opts.stack;
+        fmt.source = opts.source;
+        fmt.register_diffs = opts.register_diffs;
+
+        itrace::source_cache sources;
+        auto const total = cc::u32(traces.value().size());
+        for (auto const& t : traces.value())
+        {
+            cc::print(itrace::format_trace(t, total, fmt, sources));
+            cc::println();
+        }
+    }
+
+    if (sections.stats)
+    {
+        separate();
+        cc::print(itrace::format_stats(itrace::collect_stats(traces.value())));
+    }
+
+    if (sections.memory)
+    {
+        separate();
+        cc::print(itrace::format_memory_raw(traces.value(), mem));
+    }
+
+    if (sections.cachelines)
+    {
+        separate();
+        cc::print(itrace::format_memory_cachelines(traces.value(), mem));
+    }
+
+    if (sections.memory_stats)
+    {
+        separate();
+        cc::print(itrace::format_memory_stats(itrace::collect_memory_stats(traces.value(), mem)));
+    }
+
+    if (sections.timing)
+    {
+        separate();
+        cc::print(itrace::format_mca_timing(traces.value(), mca_results));
     }
 
     return exit_ok;

@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -300,6 +302,110 @@ def check_missing_symbol_fails(t: Tracer) -> None:
         raise Failure(f"a missing symbol must not succeed:\n{out}\n{err}")
 
 
+# itrace_fixture_touch writes a stack array and read-modify-writes the global itrace_global_counter,
+# so its memory views must show a frame region and name the global.
+MEMORY_SYMBOL = "itrace_fixture_touch"
+
+
+def check_memory_names_the_global(t: Tracer) -> None:
+    """The global is touched with a known extent, so the heap region must resolve its name."""
+    code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--sections", "memory")
+    if code != 0:
+        raise Failure(f"tracer exited {code} for --sections memory\n{out}\n{err}")
+
+    if "=== memory accesses ===" not in out:
+        raise Failure(f"--sections memory printed no memory header:\n{out}")
+    if "itrace_global_counter" not in out:
+        raise Failure(f"the memory view did not name the touched global:\n{out}")
+
+
+def check_memory_frame_region_is_opt_in(t: Tracer) -> None:
+    """The stack array lives in the current frame, excluded by default and shown with the flag."""
+    _, default_out, _ = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--sections", "memory")
+    _, framed_out, _ = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--sections", "memory",
+                         "--memory-regions", "heap,stack,frame")
+
+    if "; frame" in default_out:
+        raise Failure(f"frame accesses must be excluded by default:\n{default_out}")
+    if "; frame" not in framed_out:
+        raise Failure(f"the frame array was not shown even with --memory-regions frame:\n{framed_out}")
+
+
+def check_html_export_writes_a_self_contained_file(t: Tracer) -> None:
+    """--html writes one self-contained page. It forces a full capture, so the memory data (the
+    touched global) must be embedded, and without --sections it replaces stdout with a summary."""
+    tmp = Path(tempfile.gettempdir()) / "itrace_self_test_export.html"
+    tmp.unlink(missing_ok=True)
+    try:
+        code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100", "--html", str(tmp))
+        if code != 0:
+            raise Failure(f"tracer exited {code} for --html\n{out}\n{err}")
+        if "wrote" not in out:
+            raise Failure(f"--html without --sections should print a one-line summary, got:\n{out}")
+        if "=== trace " in out:
+            raise Failure(f"--html without --sections must not also render the trace to stdout:\n{out}")
+        if not tmp.is_file() or tmp.stat().st_size == 0:
+            raise Failure(f"--html did not write a non-empty file at {tmp}")
+
+        page = tmp.read_text(encoding="utf-8")
+        if not page.startswith("<!doctype html"):
+            raise Failure("the exported file is not an HTML document")
+        for needle in ("const TRACE_DATA", MEMORY_SYMBOL, "itrace_global_counter"):
+            if needle not in page:
+                raise Failure(f"the exported page is missing {needle!r}")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def find_llvm_mca() -> str | None:
+    """Locate llvm-mca for the timing checks — on PATH, or the default Windows LLVM install."""
+    found = shutil.which("llvm-mca")
+    if found:
+        return found
+    default = Path("C:/Program Files/LLVM/bin/llvm-mca.exe")
+    return str(default) if default.is_file() else None
+
+
+MCA_TOOL: str | None = None
+
+
+def check_timing_section_has_real_numbers(t: Tracer) -> None:
+    """--sections timing --mca must produce llvm-mca's block summary and per-instruction cycles."""
+    code, out, err = t("--symbol", SYMBOL, "--skip", "100", "--sections", "timing", "--mca", MCA_TOOL)
+    if code != 0:
+        raise Failure(f"tracer exited {code} for --sections timing\n{out}\n{err}")
+    for needle in ("IPC", "cycles", "uops", "@"):
+        if needle not in out:
+            raise Failure(f"the timing section is missing {needle!r}:\n{out}")
+
+
+def check_html_embeds_the_mca_object(t: Tracer) -> None:
+    """--html with --mca must embed the timing model in TRACE_DATA."""
+    tmp = Path(tempfile.gettempdir()) / "itrace_self_test_mca.html"
+    tmp.unlink(missing_ok=True)
+    try:
+        code, out, err = t("--symbol", SYMBOL, "--skip", "100", "--html", str(tmp), "--mca", MCA_TOOL)
+        if code != 0:
+            raise Failure(f"tracer exited {code} for --html --mca\n{out}\n{err}")
+        page = tmp.read_text(encoding="utf-8")
+        if '"mca":{"available":true' not in page:
+            raise Failure("the exported page does not embed an available mca object")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def check_sections_combine_in_one_run(t: Tracer) -> None:
+    """The point of --sections: several views, one capture. All must appear together."""
+    code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100",
+                       "--sections", "trace,memory,cachelines,memory-stats")
+    if code != 0:
+        raise Failure(f"tracer exited {code} for a multi-section run\n{out}\n{err}")
+
+    for header in ("=== trace ", "=== memory accesses ===", "=== cachelines ===", "=== memory stats ==="):
+        if header not in out:
+            raise Failure(f"the combined run is missing the {header!r} section:\n{out}")
+
+
 CHECKS = [
     ("records exactly one invocation, at the skipped-to hit", check_traces_one_invocation),
     ("breaks exactly on the function entry", check_entry_is_the_function_start),
@@ -312,11 +418,15 @@ CHECKS = [
     ("--stats tables the run instead of tracing it", check_stats_replaces_the_trace),
     ("--stats totals agree with the trace", check_stats_counts_match_the_trace),
     ("a missing symbol fails loudly", check_missing_symbol_fails),
+    ("the memory view resolves a touched global", check_memory_names_the_global),
+    ("frame accesses are opt-in", check_memory_frame_region_is_opt_in),
+    ("--sections combine several views in one capture", check_sections_combine_in_one_run),
+    ("--html writes a self-contained report", check_html_export_writes_a_self_contained_file),
 ]
 
 
 def main() -> int:
-    global verbose
+    global verbose, MCA_TOOL
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--preset", default=DEFAULT_PRESET, help=f"build preset (default: {DEFAULT_PRESET})")
@@ -331,10 +441,21 @@ def main() -> int:
     paths = build(args.preset)
     tracer = Tracer(paths[TRACER_TARGET], paths[FIXTURE_TARGET])
 
-    print(f"\nrunning {len(CHECKS)} checks against {paths[FIXTURE_TARGET].name} ...\n", flush=True)
+    # The timing checks need llvm-mca; skip them (not fail) when the toolchain lacks it.
+    checks = list(CHECKS)
+    MCA_TOOL = find_llvm_mca()
+    if MCA_TOOL:
+        checks += [
+            ("--sections timing reports real llvm-mca numbers", check_timing_section_has_real_numbers),
+            ("--html embeds the llvm-mca timing model", check_html_embeds_the_mca_object),
+        ]
+    else:
+        print("note: llvm-mca not found; skipping the timing checks", flush=True)
+
+    print(f"\nrunning {len(checks)} checks against {paths[FIXTURE_TARGET].name} ...\n", flush=True)
 
     failures = 0
-    for description, check in CHECKS:
+    for description, check in checks:
         try:
             check(tracer)
             print(f"  ok    {description}", flush=True)
@@ -344,10 +465,10 @@ def main() -> int:
 
     print()
     if failures:
-        print(f"{failures} of {len(CHECKS)} checks failed")
+        print(f"{failures} of {len(checks)} checks failed")
         return 1
 
-    print(f"all {len(CHECKS)} checks passed")
+    print(f"all {len(checks)} checks passed")
     return 0
 
 

@@ -30,6 +30,36 @@ register_snapshot snapshot_of(CONTEXT const& ctx)
     s.rflags = ctx.EFlags;
     return s;
 }
+
+/// The traced thread's whole stack reservation, [low, high). A stack is one VirtualAlloc
+/// reservation split into guard / committed / reserved sub-regions that share an AllocationBase, so
+/// we start from the region holding rsp and walk up while the base still matches. Used to tell a
+/// stack address from a heap/global one; [0, 0) when it cannot be read (a non-stack rsp, or a dead
+/// process), which classification reads as "no stack known".
+void read_stack_bounds(void* process, u64 rsp, u64& low, u64& high)
+{
+    low = 0;
+    high = 0;
+
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (VirtualQueryEx(process, reinterpret_cast<void const*>(rsp), &mbi, sizeof(mbi)) == 0)
+        return;
+
+    auto const alloc_base = u64(mbi.AllocationBase);
+    low = alloc_base;
+    high = u64(mbi.BaseAddress) + u64(mbi.RegionSize);
+
+    for (;;)
+    {
+        MEMORY_BASIC_INFORMATION next = {};
+        if (VirtualQueryEx(process, reinterpret_cast<void const*>(high), &next, sizeof(next)) == 0)
+            break;
+        if (u64(next.AllocationBase) != alloc_base)
+            break;
+
+        high = u64(next.BaseAddress) + u64(next.RegionSize);
+    }
+}
 } // namespace
 
 trace_session::trace_session(void* process, trace_config const& config) : _process(process), _config(config)
@@ -51,6 +81,11 @@ void trace_session::begin(u32 index,
     _trace.thread_id = thread_id;
     _trace.entry_rip = ctx.Rip;
     _entry_rsp = ctx.Rsp;
+
+    // Memory enrichment needs to tell stack addresses from heap/global ones; capture the bounds now,
+    // while the debuggee is stopped and its stack is committed. Cheap and harmless when unused.
+    if (_config.capture_registers)
+        read_stack_bounds(_process, ctx.Rsp, _trace.stack_low, _trace.stack_high);
 
     // The prologue has not run, so [rsp] is exactly the return address. This is the one moment where
     // reading it needs no unwind info at all.
