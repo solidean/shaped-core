@@ -18,6 +18,21 @@
 
 namespace sg::backend::dx12
 {
+dx12_command_list::dx12_command_list(dx12_context& ctx,
+                                     sg::epoch created_in,
+                                     sg::command_list_slot slot,
+                                     D3D12_COMMAND_LIST_TYPE queue,
+                                     ComPtr<ID3D12CommandAllocator> allocator,
+                                     ComPtr<ID3D12GraphicsCommandList> list)
+  : sg::command_list(ctx, created_in),
+    _ctx(ctx),
+    _slot(slot),
+    _queue(queue),
+    _allocator(cc::move(allocator)),
+    _list(cc::move(list))
+{
+}
+
 void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
                                             sg::pipeline_stage_flags stages,
                                             sg::access_flags access)

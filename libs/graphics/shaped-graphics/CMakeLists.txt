@@ -28,6 +28,9 @@ add_library(shaped-graphics
     src/shaped-graphics/binding_group.cc
     src/shaped-graphics/pipeline_cache.cc
     src/shaped-graphics/swapchain.cc
+    src/shaped-graphics/reload_generation.cc
+    src/shaped-graphics/render_routine.cc
+    src/shaped-graphics/routine_registry.cc
     src/shaped-graphics/context.cc
     src/shaped-graphics/context.persistent.cc
     src/shaped-graphics/context.transient.cc
@@ -56,6 +59,10 @@ target_sources(shaped-graphics
     src/shaped-graphics/context.download.hh
     src/shaped-graphics/context.uncached.hh
     src/shaped-graphics/context.cached.hh
+    src/shaped-graphics/reload_generation.hh
+    src/shaped-graphics/render_routine.hh
+    src/shaped-graphics/render_routine_base.hh
+    src/shaped-graphics/routine_registry.hh
     src/shaped-graphics/pipeline_cache.hh
     src/shaped-graphics/command_list.hh
     src/shaped-graphics/command_list.upload.hh
@@ -217,7 +224,14 @@ if(SC_BUILD_TESTS)
             LANGUAGE   hlsl
             SHADERS
                 double_values.hlsl:compute:main
+                pattern_fill.hlsl:compute:main
         )
+
+        # Render-routine framework tests drive a dx12 WARP context directly (create_dx12_context) and
+        # dispatch the pattern_fill shader, so they need both DXC and the dx12 backend on Windows.
+        if(WIN32 AND TARGET shaped-graphics-dx12)
+            target_sources(shaped-graphics-test PRIVATE tests/routine/routine-test.cc)
+        endif()
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

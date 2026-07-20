@@ -59,8 +59,14 @@ stance).
 ### shaped-rendering — `sr::`
 
 Render routines and helpers built on sg: the common building blocks of a renderer — mipmap
-generation, texture compression, tonemapping, and similar. Early-stage skeleton today. See
-the [shaped-rendering readme](../libs/graphics/shaped-rendering/readme.md).
+generation, texture compression, tonemapping, and similar. The **render-routine framework** itself (the
+`sg::render_routine` base with 3-phase hot-reload-aware init, and the per-context `ctx.routines`
+registry) lives in **shaped-graphics** — see its
+[render-routines doc](../libs/graphics/shaped-graphics/docs/render-routines.md). `sr` hosts the
+**concrete** routines built on it. sr also depends on **shaped-shader-library** (concrete routines
+acquire their shaders through it). See the
+[sr render-routines doc](../libs/graphics/shaped-rendering/docs/render-routines.md) and the
+[shaped-rendering readme](../libs/graphics/shaped-rendering/readme.md).
 
 ### shaped-viewer — `sv::`
 

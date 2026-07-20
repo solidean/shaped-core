@@ -34,8 +34,10 @@ One-liner per library:
   [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`,
   `command_list`, GPU resources, over per-backend static libs (dx12/vulkan tier
-  1; metal/webgpu tier 2; opengl/webgl legacy). Namespace `sg`. Depends on
-  clean-core + typed-geometry. Early stage — see [docs/graphics.md](docs/graphics.md).
+  1; metal/webgpu tier 2; opengl/webgl legacy). Also home to the **render-routine
+  framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete
+  routines live in shaped-rendering. Namespace `sg`. Depends on clean-core +
+  typed-geometry. Early stage — see [docs/graphics.md](docs/graphics.md).
 * **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL →
   `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed
   cache. Namespace `ssc::dxc`. Depends on shaped-graphics. Windows-only, and
@@ -46,9 +48,10 @@ One-liner per library:
   Namespace `slib`. Depends on shaped-graphics — **sg does not depend on it**.
   The shader system's front door is
   [shaped-graphics/docs/shaders.md](libs/graphics/shaped-graphics/docs/shaders.md).
-* **`libs/graphics/shaped-rendering`** — render routines on top of sg (mipmap
-  gen, tonemapping, texture compression, …). Namespace `sr`. Depends on
-  shaped-graphics. Early-stage skeleton.
+* **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's
+  routine framework (mipmap gen, tonemapping, texture compression, …). Namespace
+  `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their
+  shaders through it). Early-stage skeleton — no concrete routines have landed yet.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization
   renderer with a dev-friendly API. Namespace `sv`. Depends on shaped-rendering.
   Early-stage skeleton.

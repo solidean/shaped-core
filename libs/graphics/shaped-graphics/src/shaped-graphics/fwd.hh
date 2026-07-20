@@ -19,6 +19,10 @@ class context_upload_scope;
 class context_download_scope;
 class context_uncached_scope;
 class context_cached_scope;
+class routine_registry;
+class render_routine_base;
+template <class Derived>
+class render_routine;
 class pipeline_cache;
 class command_list;
 class command_list_upload_scope;

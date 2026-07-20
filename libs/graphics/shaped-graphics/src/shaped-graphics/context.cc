@@ -117,7 +117,10 @@ context::~context()
 void context::shutdown()
 {
     // A base context has no backend resources of its own; a backend overrides this to release its
-    // device/queue/tracking (and duplicate this idempotent flag flip).
+    // device/queue/tracking (and duplicate this idempotent flag flip). Routine instances are released at
+    // the top of each backend's shutdown (see routines.clear() there), before its resource systems are
+    // torn down — a routine's cached GPU state must not outlive the device it was built on.
+    routines.clear();
     _is_shut_down = true;
 }
 } // namespace sg

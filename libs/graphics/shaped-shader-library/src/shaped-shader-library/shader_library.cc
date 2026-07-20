@@ -2,6 +2,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-graphics/reload_generation.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -176,12 +177,17 @@ slib::shader_library::package_entry const& slib::shader_library::package_of(cc::
 
 cc::u64 slib::shader_library::generation() const
 {
-    return _generation.load();
+    return sg::reload_generation();
+}
+
+cc::u64 slib::current_reload_generation()
+{
+    return sg::reload_generation();
 }
 
 void slib::shader_library::note_reload()
 {
-    _generation.fetch_add(1);
+    sg::signal_reload();
 }
 
 void slib::shader_library::note_dependencies_changed()

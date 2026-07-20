@@ -154,6 +154,7 @@ ctx.is_submission_complete(token)       // bool — has that one command list fi
 // on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
 //   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
+cmd.context()                           // sg::context& — the context that created the list (outlives it); reach it without threading ctx separately
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
 ```
 
@@ -577,6 +578,32 @@ pipeline_cache pc;                                            // standalone use 
 pc.acquire_binding_group_layout(ctx, bindings);  pc.acquire_pipeline_layout(ctx, {.groups={gl}});  pc.acquire_compute_pipeline(ctx, desc);
 pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provider(p);  pc.apply_bookkeeping();
 // TODO: graphics / raytracing pipeline caching once those pipeline types land in sg.
+```
+
+## render routines — reusable GPU-work units  (see docs/render-routines.md)
+
+```cpp
+#include <shaped-graphics/render_routine.hh>
+// A routine is a per-context singleton reached BY TYPE. Derive from the CRTP base:
+class my_routine : public sg::render_routine<my_routine> { ... };
+// protected virtuals (all default to no-ops) — three-phase init, split so async compiles start early:
+void init_once(sg::context& ctx)          // first init only, NEVER on reload — persistent, shader-independent work
+void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
+void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
+// static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
+my_routine::acquire(cmd)                   // -> my_routine const&  — lazily create in cmd.context().routines, init (declare+materialize), return
+my_routine::prewarm(ctx)                   // void     — create + init_once/init_declare only (before a command list; async compiles fan out on the pool)
+my_routine::evict(ctx)                     // void     — drop this routine's instance + its cached GPU state
+// acquire memoizes the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
+// re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
+
+#include <shaped-graphics/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
+ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown
+// Per-context: a routine's cached GPU state dies with the context that built it — never stale across contexts.
+
+#include <shaped-graphics/reload_generation.hh>
+sg::reload_generation()                    // -> u64   — process-global "content-derived state invalidated" counter (read)
+sg::signal_reload()                        // void     — bump it (the shader library calls this on hot reload)
 ```
 
 ## memory placement — heaps & alloc-info  (stub)
