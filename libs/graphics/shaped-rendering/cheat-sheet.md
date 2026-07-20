@@ -47,6 +47,38 @@ win->show();  win->hide();
 - **A window must not outlive its system**, and `~window_system` asserts if one does.
 - **`native_window_handle()` is null off Windows and under a headless system** — nothing can present against those.
 
+## Input
+
+```cpp
+#include <shaped-rendering/input.hh>   // pulled in by window.hh
+
+for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
+{
+    e.window;                          // -> sr::window*, null if none was focused
+    if (auto const* k = std::get_if<sr::key_event>(&e.payload))
+        k->scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
+        k->character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
+        k->modifiers;   // sr::key_modifiers bit set; has_all(k->modifiers, ctrl | shift)
+        k->is_down;  k->is_repeat;
+    if (auto const* t = std::get_if<sr::text_event>(&e.payload))  t->text;        // cc::string, UTF-8
+    if (auto const* m = std::get_if<sr::mouse_move_event>(&e.payload))    m->x, m->y, m->dx, m->dy;  // float px
+    if (auto const* b = std::get_if<sr::mouse_button_event>(&e.payload))  b->button, b->is_down, b->x, b->y;
+    if (auto const* w = std::get_if<sr::mouse_wheel_event>(&e.payload))   w->dx, w->dy;  // ticks, may be fractional
+}
+
+win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
+win->start_text_input();              // begin text_events + IME for this window; stop_text_input() to end
+```
+
+- **`events()` is invalidated by the next `poll_events()`**, text included — copy anything you keep.
+- **Physical vs character**: `scancode` is position, `character` is layout. Movement uses `scancode`, ctrl+Z uses `character`.
+  `sr::scancode` is our own position vocabulary — its numeric values mean nothing outside sr.
+- **Never rebuild text from `key_event`s** — an IME commits a whole phrase, a dead key commits nothing until the
+  next keystroke, and a paste arrives as one `text_event`.
+- **Text input is off until `start_text_input()`**, because while it is on the OS may swallow keystrokes to compose.
+- **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
+- **`input_event::payload` is `std::variant` only until `cc::variant` exists** — the alternatives are the API.
+
 ## Writing a concrete routine
 
 ```cpp

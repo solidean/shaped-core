@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/input.hh>
 
 #if !SR_HAS_WINDOW
 #error "shaped-rendering was built without a window backend. Fetch SDL3 (uv run extern/sdl3/fetch-sdl3.py) and reconfigure."
@@ -93,6 +94,22 @@ public:
     /// Drop the close request and keep the window open, e.g. once a "discard unsaved changes?" prompt is declined.
     void clear_close_request() { _is_close_requested = false; }
 
+    /// Capture the cursor: it is hidden, confined to this window, and stops having a position.
+    /// mouse_move_event::dx/dy keep reporting motion and become unbounded, which is what an FPS-style camera wants;
+    /// x/y stop being meaningful.
+    /// Release it before showing any UI the user has to click.
+    void set_relative_mouse_mode(bool enabled);
+
+    [[nodiscard]] bool is_relative_mouse_mode() const { return _is_relative_mouse_mode; }
+
+    /// Begin delivering text_events for this window, and let the platform's IME and on-screen keyboard engage.
+    /// Off until asked for, because while it is on the OS may swallow keystrokes to compose a character.
+    /// Turn it on around a focused text field, not for the whole app.
+    void start_text_input();
+    void stop_text_input();
+
+    [[nodiscard]] bool is_text_input_active() const { return _is_text_input_active; }
+
 private:
     /// Windows come from window_system::try_create_window, which fills in everything below.
     /// Private only keeps one off the stack — cc::make_unique still reaches it through the friend below.
@@ -113,6 +130,8 @@ private:
     int _height = 0;
     bool _is_minimized = false;
     bool _is_close_requested = false;
+    bool _is_relative_mouse_mode = false;
+    bool _is_text_input_active = false;
 };
 
 /// How a window_system is created.
@@ -181,6 +200,11 @@ public:
     /// Events naming a window that no longer exists are discarded.
     void poll_events();
 
+    /// What the user did during the last poll_events, oldest first (see sr::input_event).
+    /// One stream across every window, in the order the OS reported them, each event naming the window it went to.
+    /// Invalidated by the next poll_events, text included — copy anything you need to keep.
+    [[nodiscard]] cc::span<input_event const> events() const { return _events; }
+
     /// Whether the OS asked the application as a whole to quit — a session logout, the platform's quit gesture.
     /// Latched, like a window's close request.
     /// A quit also raises the close request on every live window, so a single-window app can ignore this.
@@ -206,6 +230,15 @@ private:
     void assert_owning_thread() const;
 
     cc::vector<window*> _windows;
+
+    /// This frame's events, cleared at the top of every poll_events and handed out by events().
+    cc::vector<input_event> _events;
+
+    /// Modifiers as of the last key event seen, carried across polls.
+    /// Mouse events are stamped from this rather than from a live query, so a click reads the state as of its own
+    /// position in the event stream. See mouse_button_event::modifiers.
+    key_modifiers _modifiers = key_modifiers::none;
+
     u64 _owning_thread_id = 0;
     bool _is_headless = false;
     bool _is_quit_requested = false;

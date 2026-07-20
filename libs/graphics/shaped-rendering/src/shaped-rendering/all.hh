@@ -10,5 +10,6 @@
 #include <shaped-rendering/fwd.hh>
 
 #if SR_HAS_WINDOW
+#include <shaped-rendering/input.hh>
 #include <shaped-rendering/window.hh>
 #endif

@@ -1,10 +1,13 @@
 #include <SDL3/SDL.h>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <shaped-rendering/impl/input_translation.hh>
+#include <shaped-rendering/impl/window_internals.hh>
 #include <shaped-rendering/window.hh>
 
 // The SDL-backed implementation of sr::window and sr::window_system.
-// This is the only file in shaped-rendering that includes <SDL3/SDL.h> — see docs/coding-guidelines.md.
+// The pure SDL-to-sr mapping lives in impl/input_translation.hh so a test can reach it; everything that needs a
+// live window or the event queue is here.
 //
 // Both types live here because they are two halves of one mechanism.
 // The system's init, the window registration and the event dispatch all touch the same private state.
@@ -47,6 +50,25 @@ window* window_from_id(SDL_WindowID id)
         SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window), back_pointer_property, nullptr));
 }
 } // namespace
+
+u32 impl::backend_window_id(window const& w)
+{
+    // Walks SDL's own window list and matches on the back-pointer, so this shares the one source of truth with
+    // window_from_id rather than reaching into window's members.
+    int count = 0;
+    auto** const windows = SDL_GetWindows(&count);
+    if (windows == nullptr)
+        return 0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto* const back_pointer
+            = SDL_GetPointerProperty(SDL_GetWindowProperties(windows[i]), back_pointer_property, nullptr);
+        if (back_pointer == &w)
+            return u32(SDL_GetWindowID(windows[i]));
+    }
+    return 0;
+}
 
 window::~window()
 {
@@ -96,6 +118,36 @@ void window::hide()
     CC_ASSERT(ok, "SDL_HideWindow failed");
 }
 
+void window::set_relative_mouse_mode(bool enabled)
+{
+    _system->assert_owning_thread();
+
+    auto const ok = SDL_SetWindowRelativeMouseMode(as_sdl(_native_window), enabled);
+    CC_ASSERT(ok, "SDL_SetWindowRelativeMouseMode failed");
+
+    // Tracked from the request rather than queried back, so the getter still describes what was asked for on a
+    // platform that silently declines to capture.
+    _is_relative_mouse_mode = enabled;
+}
+
+void window::start_text_input()
+{
+    _system->assert_owning_thread();
+
+    auto const ok = SDL_StartTextInput(as_sdl(_native_window));
+    CC_ASSERT(ok, "SDL_StartTextInput failed");
+    _is_text_input_active = true;
+}
+
+void window::stop_text_input()
+{
+    _system->assert_owning_thread();
+
+    auto const ok = SDL_StopTextInput(as_sdl(_native_window));
+    CC_ASSERT(ok, "SDL_StopTextInput failed");
+    _is_text_input_active = false;
+}
+
 cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_system_description const& desc)
 {
     CC_ASSERT(SDL_IsMainThread(), "sr::window_system must be created on the process main thread");
@@ -128,6 +180,7 @@ cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_syste
     auto system = cc::make_unique<window_system>();
     system->_is_headless = desc.headless;
     system->_owning_thread_id = SDL_GetCurrentThreadID();
+    system->_modifiers = impl::modifiers_from_sdl(SDL_GetModState()); // seeded once; key events maintain it after
     ++s_live_system_count;
 
     return cc::move(system);
@@ -203,17 +256,81 @@ void window_system::unregister_window(window* w)
 {
     assert_owning_thread();
     _windows.remove_first_value(w);
+
+    // Anything already queued for this window would dangle for the rest of the frame, so it goes too.
+    // That is what lets input_event::window be a plain pointer the caller can dereference.
+    _events.remove_all_where([w](input_event const& e) { return e.window == w; });
 }
 
 void window_system::poll_events()
 {
     assert_owning_thread();
 
+    // Last frame's events die here, which is the lifetime events() documents.
+    _events.clear();
+
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
         switch (event.type)
         {
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+            // A key event carries the platform's own modifier state for that moment, so remembering it here is what
+            // lets a mouse event later in this same queue be stamped with the state as of its position in the
+            // stream rather than as of whenever the queue happened to be drained.
+            _modifiers = impl::modifiers_from_sdl(event.key.mod);
+
+            _events.push_back({.window = window_from_id(event.key.windowID),
+                               .payload = key_event{.scancode = impl::scancode_from_sdl(event.key.scancode),
+                                                    .character = impl::character_from_keycode(event.key.key),
+                                                    .modifiers = _modifiers,
+                                                    .is_down = event.key.down,
+                                                    .is_repeat = event.key.repeat}});
+            break;
+
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            // Modifiers can be pressed or released while another application had focus, and those changes produce
+            // no key event here. Re-sync so the first click after a window switch is not stamped with stale state.
+            _modifiers = impl::modifiers_from_sdl(SDL_GetModState());
+            break;
+
+        case SDL_EVENT_TEXT_INPUT:
+            // SDL owns the text only until the next pump, so it is copied rather than referenced.
+            if (event.text.text != nullptr)
+                _events.push_back({.window = window_from_id(event.text.windowID),
+                                   .payload = text_event{.text = cc::string(event.text.text)}});
+            break;
+
+        case SDL_EVENT_MOUSE_MOTION:
+            _events.push_back({.window = window_from_id(event.motion.windowID),
+                               .payload = mouse_move_event{.x = event.motion.x,
+                                                           .y = event.motion.y,
+                                                           .dx = event.motion.xrel,
+                                                           .dy = event.motion.yrel}});
+            break;
+
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            _events.push_back({.window = window_from_id(event.button.windowID),
+                               .payload = mouse_button_event{.button = impl::mouse_button_from_sdl(event.button.button),
+                                                             .modifiers = _modifiers,
+                                                             .is_down = event.button.down,
+                                                             .x = event.button.x,
+                                                             .y = event.button.y}});
+            break;
+
+        case SDL_EVENT_MOUSE_WHEEL:
+        {
+            _events.push_back(
+                {.window = window_from_id(event.wheel.windowID),
+                 .payload = mouse_wheel_event{.dx = impl::wheel_amount(event.wheel.x, event.wheel.direction),
+                                              .dy = impl::wheel_amount(event.wheel.y, event.wheel.direction),
+                                              .x = event.wheel.mouse_x,
+                                              .y = event.wheel.mouse_y}});
+            break;
+        }
+
         case SDL_EVENT_QUIT:
             _is_quit_requested = true;
             // A system quit is a request to close everything.

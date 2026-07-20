@@ -42,6 +42,25 @@ Three things worth knowing before you use it:
 Multiple windows work today: each has its own size, close latch and native handle, and `wsys->windows()` enumerates them.
 That is the groundwork for imgui docking and multiple viewports.
 
+## Input
+
+`poll_events()` also collects what the user did, drained as one globally-ordered stream:
+
+```cpp
+for (auto const& e : wsys->events())
+    if (auto const* k = std::get_if<sr::key_event>(&e.payload))
+        if (k->is_down && k->scancode == sr::scancode::escape)
+            e.window->request_close();
+```
+
+Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped
+`character`, because movement wants position while a ctrl+Z-style shortcut wants the letter.
+Text is separate: `text_event` delivers committed UTF-8 after `window::start_text_input()`, which is the only
+thing that handles IME composition, dead keys and paste correctly — never rebuild text from key events.
+`window::set_relative_mouse_mode()` captures the cursor for an FPS-style camera.
+
+See the [cheat-sheet](cheat-sheet.md) for the full surface.
+
 The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init,
 and the per-context `ctx.routines` registry) lives in **shaped-graphics** — see its
 [docs/render-routines.md](../shaped-graphics/docs/render-routines.md). `sr` hosts the **concrete**

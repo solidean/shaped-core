@@ -19,6 +19,12 @@ Windowing:
   imgui gamepad navigation will want it — a one-line flip, kept off today so Linux needs no libudev/evdev.
 - HiDPI: sizes are queried in pixels, but `SDL_WINDOW_HIGH_PIXEL_DENSITY` is not requested, so logical and pixel sizes are identical.
   Revisit with a per-monitor-DPI UI.
+- `input_event::payload` is a `std::variant` because [`cc::variant`](../../../base/clean-core/src/clean-core/container/variant.hh) is a declared-but-empty stub.
+  Switch it over when clean-core grows a real one — the alternatives are the API, the holder is not.
+- IME composition is not covered: a synthetic `SDL_EVENT_TEXT_INPUT` exercises delivery and the copy, but a real
+  round trip through a platform input method needs an IME and a person.
+- Gamepad input needs `SDL_JOYSTICK`, which is off in [extern/sdl3/CMakeLists.txt](../../../../extern/sdl3/CMakeLists.txt).
+- `sr::scancode` deliberately stops at F12 and skips the media, `AC_*` and `INTERNATIONAL*` keys; they read as `scancode::unknown`.
 - The hand-rolled Win32 windows in shaped-graphics' dx12 swapchain test and the two shaped-shader-compiler-dxc cube tests **cannot** be replaced by `sr::window`.
   Both libraries sit *below* sr, so consuming it would invert the dependency graph.
   The duplication is structural, not an oversight — a windowed test above sr belongs in shaped-viewer.

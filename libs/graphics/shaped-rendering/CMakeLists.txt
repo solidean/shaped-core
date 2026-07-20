@@ -43,7 +43,11 @@ target_compile_options(shaped-rendering
 # consumer must see the same answer. It changes no type's layout, only whether the window API exists.
 # SDL links PRIVATE: it is an implementation detail of impl/window_sdl.cc and reaches no public header.
 if(SC_HAS_SDL3)
-    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/window_sdl.cc)
+    target_sources(shaped-rendering
+        PRIVATE
+        src/shaped-rendering/impl/input_translation.cc
+        src/shaped-rendering/impl/window_sdl.cc
+    )
 
     target_sources(shaped-rendering
         PUBLIC
@@ -51,6 +55,7 @@ if(SC_HAS_SDL3)
         TYPE HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
         FILES
+        src/shaped-rendering/input.hh
         src/shaped-rendering/window.hh
     )
 
@@ -78,9 +83,17 @@ if(SC_BUILD_TESTS)
     if(SC_HAS_SDL3)
         target_sources(shaped-rendering-test
             PRIVATE
+            tests/input-dispatch-test.cc
+            tests/input-test.cc
+            tests/input-translation-test.cc
             tests/window-test.cc
             tests/window-manual-test.cc
         )
+
+        # input-translation-test.cc reaches into impl/ and so sees SDL headers directly. The one sanctioned place
+        # besides the backend itself — see docs/coding-guidelines.md. sr links SDL PRIVATE, so the test needs its
+        # own link to get the include directories.
+        target_link_libraries(shaped-rendering-test PRIVATE SDL3::SDL3)
 
         # Stage SDL3.dll next to the test binary so it starts. SDL3::SDL3 is a real (not imported) shared
         # target, so $<TARGET_RUNTIME_DLLS> reaches it through sr's PRIVATE link and no hand-listed DLL
