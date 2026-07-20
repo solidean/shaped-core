@@ -12,8 +12,40 @@ shaped-graphics + shaped-shader-library. Headers are included by full path from 
 > [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
-#include <shaped-rendering/all.hh>   // umbrella (fwd only for now — concrete routines land here later)
+#include <shaped-rendering/all.hh>   // umbrella (window API + concrete routines as they land)
 ```
+
+## Windows
+
+Present only when SDL3 was fetched — CMake defines `SR_HAS_WINDOW` to `1` or `0`.
+
+```cpp
+#include <shaped-rendering/window.hh>
+
+auto const wsys = sr::window_system::create({.headless = false});  // -> cc::unique_ptr<window_system>; try_create -> cc::result
+auto const win  = wsys->create_window({.title = "viewer", .width = 1280, .height = 720,
+                                       .is_resizable = true, .is_visible = true});  // -> cc::unique_ptr<window>
+
+wsys->poll_events();              // drains the OS queue; refreshes every live window. Once per frame.
+wsys->windows();                  // -> cc::span<window* const>, creation order, non-owning
+wsys->is_quit_requested();        // latched OS-level quit; clear_quit_request()
+wsys->is_headless();
+
+win->native_window_handle();      // -> void* — HWND on Windows; feeds sg::swapchain_description
+win->width();  win->height();     // -> int, pixels, as of the last poll_events
+win->is_minimized();              // 0x0 while true
+win->is_close_requested();        // latched; request_close() / clear_close_request()
+win->title();  win->set_title(sv);
+win->show();  win->hide();
+```
+
+- **Poll once per frame, or the window hangs.**
+  Nothing else advances a window's state, and an unpumped window is one the OS considers unresponsive.
+- **Skip the frame while `is_minimized()`.**
+  Size is 0x0 there, and `acquire_backbuffer`'s auto-resize would resize the chain to zero.
+- **`window_system` is main-thread bound and at most one may be alive per process.** Both assert.
+- **A window must not outlive its system**, and `~window_system` asserts if one does.
+- **`native_window_handle()` is null off Windows and under a headless system** — nothing can present against those.
 
 ## Writing a concrete routine
 

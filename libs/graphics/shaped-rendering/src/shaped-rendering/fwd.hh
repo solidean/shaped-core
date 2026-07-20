@@ -12,4 +12,12 @@ using namespace cc::primitive_defines;
 
 // Concrete render routines land here as they are implemented; the routine framework itself lives in
 // shaped-graphics (sg::render_routine / ctx.routines).
+
+#if SR_HAS_WINDOW
+// OS windows (see window.hh). Present only when a window backend was built in.
+struct window_description;        // value type — input to create_window
+struct window_system_description; // value type — input to window_system::create
+class window;
+class window_system;
+#endif
 } // namespace sr

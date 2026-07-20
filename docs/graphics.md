@@ -64,8 +64,22 @@ generation, texture compression, tonemapping, and similar. The **render-routine 
 registry) lives in **shaped-graphics** — see its
 [render-routines doc](../libs/graphics/shaped-graphics/docs/render-routines.md). `sr` hosts the
 **concrete** routines built on it. sr also depends on **shaped-shader-library** (concrete routines
-acquire their shaders through it). See the
-[sr render-routines doc](../libs/graphics/shaped-rendering/docs/render-routines.md) and the
+acquire their shaders through it).
+
+sr is also where the family meets the OS.
+`sr::window_system` / `sr::window` are the **window abstraction**, backed by SDL3 and exposing none of it.
+A window's `native_window_handle()` is what `sg::swapchain_description` consumes, so a windowed renderer can be written against sr alone.
+Multiple windows are supported today, which is the groundwork for imgui docking and multiple viewports.
+
+- **SDL3 is downloaded on demand**, not vendored: the first configure runs
+  [`extern/sdl3/fetch-sdl3.py`](../extern/sdl3/fetch-sdl3.py), which fetches the pinned source release
+  (`release-3.4.12`, SHA-256 verified) into `extern/sdl3/.install/` and builds it from source. One code
+  path on every platform, since upstream ships prebuilt dev packages only for Windows and macOS.
+  Roughly 35 s per preset cold, then cached; `SC_SKIP_SDL3=1` skips it.
+- **The window API is therefore optional**: CMake defines `SR_HAS_WINDOW` to `1` or `0`, and a checkout
+  without SDL3 builds and tests the rest of sr unchanged.
+
+See the [sr render-routines doc](../libs/graphics/shaped-rendering/docs/render-routines.md) and the
 [shaped-rendering readme](../libs/graphics/shaped-rendering/readme.md).
 
 ### shaped-viewer — `sv::`

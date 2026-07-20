@@ -126,7 +126,10 @@ source so a shipped binary is self-contained without a mode flag.
 [readme](../libs/graphics/shaped-rendering/readme.md) · [docs](../libs/graphics/shaped-rendering/docs/_index.md)
 
 Render routines and helpers on top of sg — the reusable building blocks of a renderer (mipmap
-generation, texture compression, tonemapping, …). Early-stage skeleton.
+generation, texture compression, tonemapping, …), still an early-stage skeleton.
+Also home to the **window abstraction** (`sr::window_system` / `sr::window`), backed by SDL3 and exposing none of it.
+A window's native handle feeds `sg::swapchain_description`.
+Optional — SDL3 is fetched on demand (`extern/sdl3`), and `SR_HAS_WINDOW` says whether it was.
 
 ### shaped-viewer — namespace `sv` — depends on shaped-rendering
 

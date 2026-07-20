@@ -48,10 +48,11 @@ One-liner per library:
   Namespace `slib`. Depends on shaped-graphics — **sg does not depend on it**.
   The shader system's front door is
   [shaped-graphics/docs/shaders.md](libs/graphics/shaped-graphics/docs/shaders.md).
-* **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's
-  routine framework (mipmap gen, tonemapping, texture compression, …). Namespace
-  `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their
-  shaders through it). Early-stage skeleton — no concrete routines have landed yet.
+* **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
+  Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it).
+  No concrete routines have landed yet.
+  sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
+  Optional: SDL3 is fetched on demand by `extern/sdl3`, and `SR_HAS_WINDOW` (1/0) says whether it was.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization
   renderer with a dev-friendly API. Namespace `sv`. Depends on shaped-rendering.
   Early-stage skeleton.

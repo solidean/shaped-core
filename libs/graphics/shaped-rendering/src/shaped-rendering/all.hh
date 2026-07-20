@@ -2,7 +2,13 @@
 
 /// Full umbrella include for shaped-rendering.
 ///
-/// Concrete render routines land here as they are implemented. The render-routine framework itself
-/// (sg::render_routine, ctx.routines) lives in shaped-graphics — include <shaped-graphics/render_routine.hh>.
+/// Pulls in the window API when one was built in (SR_HAS_WINDOW), and the concrete render routines as they
+/// are implemented.
+/// The render-routine framework itself (sg::render_routine, ctx.routines) lives in shaped-graphics — include
+/// <shaped-graphics/render_routine.hh>.
 
 #include <shaped-rendering/fwd.hh>
+
+#if SR_HAS_WINDOW
+#include <shaped-rendering/window.hh>
+#endif

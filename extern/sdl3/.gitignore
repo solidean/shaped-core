@@ -1,0 +1,2 @@
+# The SDL3 source tree is downloaded on demand (fetch-sdl3.py), never committed.
+/.install/
