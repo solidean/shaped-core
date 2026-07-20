@@ -108,6 +108,27 @@ Distinguished constant values are **static data members**, not factories: `vec::
 `pos::zero`, `comp::zero`, `bivec::zero`, `mat::zero`, `mat::identity`, `quat::zero`,
 `quat::identity`. Provide these for new types where a canonical value exists.
 
+**At call sites, prefer the literal over the factory** where tg offers one.
+`angle` has `_rad_f`/`_rad_d`/`_deg_f`/`_deg_d`, and they exist precisely so the safe path is also the short one:
+
+```cpp
+auto const fov = 60_deg_f;                            // prefer
+auto const fov = tg::angle_f::make_from_degree(60);   // avoid — noise at every call site
+```
+
+Pull the literals in once, not per file.
+A library with its own namespace does it in its `fwd.hh`, the same way it adopts `cc::primitive_defines`:
+
+```cpp
+namespace my_lib { using namespace tg::literals; }    // in my_lib/fwd.hh — 60_deg_f works library-wide
+```
+
+`using namespace tg::literals;` at file scope is for code that isn't inside a namespace — a test, an
+example, a `main.cc`.
+
+`make_from_degree` stays right when the value is a runtime expression that reads worse as `x * 1_deg_f`.
+`make_*` is the *definition-side* naming rule — not an instruction to spell out the factory where sugar exists.
+
 **Implementation note:** a static data member cannot be `constexpr` of its own (incomplete) class
 type, so these are declared `static T const zero;` in the class and defined `inline` out of line
 in the same header (`template <...> inline T<...> const T<...>::zero = ...;`). They are therefore

@@ -3,61 +3,89 @@ ignorePaths: []
 dictionaryDefinitions: []
 dictionaries: []
 words:
+  - aabb
   - aabbs
   - Allman
+  - bary
   - blas
   - blit
+  - blits
+  - closesthit
   - CPPRTTI
   - CPPUNWIND
   - crossrefs
   - DXGI
   - dxil
+  - Embree
   - emcc
   - emrun
-  - emscripten
   - Emscripten
+  - emscripten
   - emsdk
+  - fovy
   - fprofile
   - GLFW
   - hlsli
   - HRESULT
+  - hwnd
   - IDXGI
   - imgui
+  - initializers
+  - isize
   - kondo
   - libline
+  - LPARAM
+  - lparam
+  - lpfn
+  - lpsz
+  - LRESULT
   - mimalloc's
   - miscompiles
-  - msvc
   - MSVC
+  - msvc
   - noprofile
   - numthreads
   - ORBIS
+  - OVERLAPPEDWINDOW
   - pessimized
   - precommit
   - pycache
   - qtcreator
   - raygen
+  - raygeneration
+  - raytraced
   - raytracing
+  - readwrite
   - relwithdebinfo
   - rtti
+  - Samp
+  - samplable
+  - signedness
   - singlethreaded
+  - skimmable
   - slib
   - slib's
   - smod
-  - Solidean
   - SOLIDEAN
+  - Solidean
+  - stbd
   - stdlib
   - subresource
   - swapchain
+  - TEXCOORD
   - tlas
   - toolsets
   - tweakable
   - uncompiled
+  - vbuf
   - vcvars
   - venv
   - vulkan
-  - wasi
   - WASI
+  - wasi
+  - WNDCLASSEXW
   - workdir
+  - WPARAM
+  - wparam
 ignoreWords: []
 import: []

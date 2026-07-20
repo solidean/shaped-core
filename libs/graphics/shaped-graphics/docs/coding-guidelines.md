@@ -12,7 +12,7 @@ that isn't obvious from the code), that's the signal to add the rule here.
 
 ## Editorial: no meta-commentary, no contrasting with the past
 
-Two rules for how we write sg comments and docs, on top of the repo-wide concise-comment guidance.
+Two rules for sg comments and docs, on top of the repo-wide [prose style](../../../../docs/coding-guidelines.md#prose-style--one-semantic-point-per-line) — one semantic point per line, never a reflowed block.
 
 - **No meta-commentary in class/API comments about how the code is organized** — where a concept
   "lives", that only the concept is shared while backends differ, how some other backend might
@@ -224,6 +224,42 @@ owner is both cheaper and more honest than a shared handle. Not minting a typede
 single-use instead of runtime flags, and collapses "explicit drop" and "scope exit" onto one code
 path (destruction). The backref + "context outlives its objects" rule is what makes the destructor's
 teardown safe to run without a `weak_ptr` check on every operation.
+
+## Default to the typed wrappers: `buffer<T>` / `texture_2d`, not `raw_*`
+
+Reach for the typed factory first, in sg code and in callers/tests alike:
+
+```cpp
+auto const vbuf = ctx.persistent.create_buffer<tg::pos3f>(cube.size(), usage);   // prefer
+auto const img = ctx.transient.create_texture_2d({.format = …, .width = …});     // prefer
+
+auto const vbuf = ctx.persistent.create_raw_buffer(count * sizeof(tg::pos3f), usage);  // avoid
+```
+
+The typed wrapper counts in elements, not bytes.
+Its view factories (`as_uniform_buffer()`, `as_readwrite_view()`, …) infer the element type and are `requires`-gated.
+A nonsensical binding is then a compile error rather than a driver complaint.
+
+**The transfer API takes typed buffers directly** — `cmd.upload.data_to_buffer(buf, range)`,
+`pod_to_buffer(buf, value)`, `cmd.download.data_from_buffer(buf)`, and the `ctx.upload`/`ctx.download`
+async twins.
+Range element, pod value and `buffer<T>` all agree on the same `T`, so a mismatch is a compile error
+and `T` never has to be spelled out.
+**A `.raw()` in a transfer call is a smell** — it means an overload is missing; add it rather than
+unwrapping at the call site.
+
+`raw_*` stays the escape hatch for byte-addressed work, and for a struct field that genuinely holds a
+`raw_buffer_handle` — a `blas_triangles`'s vertex buffer, say.
+Those reach through `.raw()`.
+
+## Per-frame resources are `ctx.transient`, not `ctx.persistent`
+
+Anything sized by the current frame is created from `ctx.transient` and expires with the epoch — an offscreen render/trace target, a scratch buffer, a binding group.
+Don't hoist it into a persistent handle plus a hand-rolled "did the size change?" cache.
+The transient scope already does that, more cheaply, and the cache is one more thing to get wrong on a resize.
+
+`ctx.persistent` is for what genuinely outlives a frame.
+Meshes, acceleration structures, and buffers whose *contents* are refreshed per frame but whose identity is stable.
 
 ## Resources may be empty (size 0)
 

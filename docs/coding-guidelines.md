@@ -1,13 +1,83 @@
 # Coding Guidelines
 
-This document defines the coding standards and design principles for the shaped-core libraries.
-These guidelines prioritize correctness, performance, maintainability, and readability for
-foundational C++ libraries. Most examples use `clean-core` (`cc::`) since it is the shared
-foundation every other library builds on.
+The coding standards and design principles for the shaped-core libraries.
+Priorities: correctness, performance, maintainability, readability.
+Most examples use `clean-core` (`cc::`) — the shared foundation every other library builds on.
 
-> [.clang-format](../.clang-format) is authoritative for formatting. Where this document and the
-> format config disagree, **the config wins** — fix the doc, not the code. [.clang-tidy](../.clang-tidy)
-> is still being calibrated; treat its warnings as advisory guidance, not gospel.
+> [.clang-format](../.clang-format) is authoritative for formatting.
+> Where this document and the format config disagree, **the config wins** — fix the doc, not the code.
+> [.clang-tidy](../.clang-tidy) is still being calibrated; treat its warnings as advisory, not gospel.
+
+---
+
+## The style is still evolving — how to deal with older code
+
+These guidelines are **living**: they get sharper as we go.
+The codebase is too large to rewrite on every refinement, so the rule is a ratchet, not a big bang.
+
+- **New code follows the newest guidelines**, always.
+  That is this document plus the library-local `docs/coding-guidelines.md` where one exists.
+- **You will see older style** — reflowed comments, `T x(args);`, structs filled field-by-field.
+  That is history, not a counter-example.
+  Do **not** proactively convert it.
+- **Migrate drive-by** what you are already editing — the function *and* its doc comment.
+  Editing a file doesn't mean sweeping the file; never sweep neighbors.
+- **Keep the guidelines current.**
+  A new convention is recorded in the same change that introduces it.
+  Here, in the library-local guidelines, in the affected cheat sheets, in [CLAUDE.md](../CLAUDE.md).
+  A convention that lives only in a review comment does not exist.
+
+Two things override drive-by migration.
+Wording the author deliberately set — keep it.
+Churn that would bury the actual point of a diff — do it separately.
+
+---
+
+## Prose style — one semantic point per line
+
+**Never reflow prose into a justified block. A new point starts a new line.**
+
+This binds **everything we write in prose**:
+
+- `///` doc comments and `//` inline comments
+- **every Markdown file in the repo** — [docs/](_index.md), readmes, cheat sheets, [CLAUDE.md](../CLAUDE.md), skill files
+- commit messages and PR descriptions
+
+Reflowed prose cannot be skimmed.
+Every point starts at an unpredictable column, so the eye must read all of it to find the line that matters.
+Reading the *first few words of each line* has to give the shape of the whole passage.
+
+```cpp
+// good — each line is one point, skimmable down the left edge
+// Robust full GWN — exact integer predicates keep the integer and fractional terms in agreement.
+// No spurious ±1 near the surface.
+// Prepared object, built once from the mesh.
+// Bakes a fixed axis-aligned ray; takes no x0.
+// Requires Embree. See gwn_mesh_robust.hh.
+
+// bad — one reflowed block; every point starts mid-line
+/// Whether the GPU device has been lost (driver reset / TDR / removed adapter). Sticky once set:
+/// the context is unusable and must be torn down and recreated. Submit / advance / fence waits and
+/// the throwing create wrappers raise sg::device_lost_exception once this is true; a caller polling
+/// the `try_*` surface breaks its retry loop by checking this (device loss never comes true).
+```
+
+Concretely:
+
+- **A line ends because the point ends — never because a column was reached.**
+  There is no fill column. Don't wrap at 80, at 100, or at 120 out of habit.
+  The 120-column limit binds *code*, not prose; clang-format does not reflow comments.
+- **Line length is free.** Typically 20–150 characters, whatever the point needs; **200 is the hard ceiling**.
+  A point that long usually holds two — split it at the seam rather than wrapping it.
+- **A short orphan line is the tell.** A line carrying only a few trailing words of the line above means you wrapped early — join them.
+  Every line is either a whole point, or long enough that it plainly had to break.
+- **New point ⇒ new line.**
+  A sentence ending mid-line is the signal you got it wrong.
+- **Front-load.** Put the surprising part first, on its own line.
+  Preconditions, ownership, threading and edge cases outrank restating the signature.
+- **Cut ruthlessly.** Short lines are not the goal, concision is.
+  A long comment split across many lines is still a long comment.
+  If it explains several unrelated concerns, split it or move the rationale to a higher-level doc.
 
 ---
 
@@ -98,8 +168,18 @@ as `T const* p` and `T const& r`.
 **Prefer almost-always-auto style:**
 ```cpp
 auto const x = T{ ... };  // preferred
-T const x = { ... };       // acceptable but less consistent
-T x;                       // fine if initialized later
+auto const y = T(a, b);   // preferred — call the constructor on the right-hand side
+T const x = { ... };      // acceptable but less consistent
+T x;                      // fine if initialized later
+```
+
+**Never constructor-init a variable** (`T x(args...);`).
+It reads as a plain declaration until you reach the parenthesis, and it is the most-vexing-parse trap.
+Move the construction to the right-hand side, where `auto` can carry the left:
+
+```cpp
+tg::pos3f const p(x, y, z);           // avoid
+auto const p = tg::pos3f(x, y, z);    // prefer
 ```
 
 ### Headers & Forward Declarations
@@ -255,18 +335,49 @@ struct texture
 
 ### Initialization
 
-Prefer designated initializers where possible:
+**Reach for designated initializers first.**
+They name each field where it is set, survive field reordering, and default what you don't mention.
+
 ```cpp
-auto const config = Config{
-    .buffer_size = 1024,
-    .enable_cache = true,
-    .timeout_ms = 5000
-};
+auto const config = config_t{.buffer_size = 1024, .enable_cache = true, .timeout_ms = 5000};
 ```
 
-Fall back to braced initialization when designated initializers aren't applicable:
+**Do not fill a struct field-by-field after declaring it.**
+The `x.a = …; x.b = …;` shape repeats the variable name on every line.
+It leaves a forgotten field silently at its default, and the object exists half-built in between.
+
 ```cpp
-auto const vec = std::vector<int>{1, 2, 3};
+// avoid
+shader_description sd;
+sd.source = source;
+sd.entry_point = entry;
+sd.stage = stage;
+compile(sd);
+
+// prefer
+compile({.source = source, .entry_point = entry, .stage = stage});
+```
+
+**Use-once descriptions belong in the call.**
+A description built and immediately handed to one function is written *as* that argument.
+Braced list for a `span` parameter, designated initializers per element.
+A named local earns its name only when it is reused, or when naming it clarifies a long call.
+
+```cpp
+// prefer — the views exist only for this call
+auto group = ctx.transient.create_binding_group(layout, {{.name = "scene", .view = tlas->as_view()},
+                                                         {.name = "Output", .view = img.as_readwrite_view()}});
+```
+
+Fall back to plain braced initialization where designated initializers don't apply — a container, or a non-aggregate:
+```cpp
+auto const values = cc::vector<int>{1, 2, 3};
+```
+
+When the remaining fields must come from API calls (handles returned by `add_*` helpers, say), designated-init what you can and let the calls follow:
+```cpp
+auto rpd = sg::raytracing_pipeline_description{.layout = layout, .max_payload_size = sizeof(float) * 4};
+auto const raygen_h = rpd.add_raygen_shader(cc::move(raygen));
 ```
 
 ---
@@ -330,6 +441,20 @@ pattern, why device resets / alloc failures are *not* assertions) lives in
 - Use explicitly sized types (`i32`, `u64`, `f32`, etc.) only when bit width or precision
   actually matters: serialized/ABI layout, hashing, bit manipulation, values that can
   straddle the 32-bit limit, or GPU/interop structs.
+- **Never write `cc::isize` / `cc::u64` / … inside a library.** The sized aliases are vocabulary — as
+  close to language-provided as we get — and a `cc::` prefix on them is noise, not information.
+  Pull them into your own namespace once, in your `fwd.hh`, and then write them bare everywhere:
+  ```cpp
+  namespace my_lib { using namespace cc::primitive_defines; }   // in my_lib/fwd.hh
+  ```
+  clean-core, nexus, typed-geometry, sg, sr, sv and slib all already do this, so inside any of them
+  `isize` / `i64` / `f32` just work. The `cc::` prefix stays right for actual clean-core *types*
+  (`cc::span`, `cc::vector`, …) — the ADL-capture rule is about those, not about the primitives.
+- **Write `sizeof(T)` bare** at call sites — no `cc::isize(sizeof(T))` armor.
+  The implicit conversion to `isize` is fine; the cast is pure noise.
+  If a linter complains, turn that check off in [.clang-tidy](../.clang-tidy) with a rationale comment — don't decorate every call site.
+  The cast belongs only inside arithmetic a library performs for its callers — `offset * isize(sizeof(T))` in a container header.
+  There the signedness of the whole expression is the point.
 - Avoid "magic sentinels" like `-1` for invalid states. Prefer `optional` or `variant` unless there's a justified performance or memory reason.
 - Give each distinct index / handle / id role its own strong enum:
   `enum class name : int { invalid = -1 };`. The compiler then rejects mixing roles
@@ -425,43 +550,37 @@ public:
 
 ## Comments & Documentation
 
+[Prose style](#prose-style--one-semantic-point-per-line) applies here first:
+one semantic point per line, no reflowed blocks, free line length.
+
 ### Code Comments
 
-- Explain invariants, assumptions, and non-obvious design decisions. Favor **why**
-  over **how** — the code already shows how.
-- Do not restate code. Prefer comments that answer "what would surprise a competent
-  reader here?"
-- Inline comments justify unusual operations, hidden dependencies, representation
-  choices, or correctness constraints. Delete comments that merely describe the action
-  being performed — unless they serve the grouping rule below.
-- Use comments to provide grouping and structure. Skimming the comments of a longer
-  function should reveal its logical flow.
-
-**Be concise.** Aim for comments that read without stress — not maximally terse, but a
-long, flowing, chatty style is actively problematic. If a comment explains multiple
-unrelated concerns, split it or move the rationale to higher-level documentation.
+- Explain invariants, assumptions, and non-obvious design decisions.
+  Favor **why** over **how** — the code already shows how.
+- Do not restate code. Answer "what would surprise a competent reader here?"
+- Inline comments justify unusual operations, hidden dependencies, representation choices or correctness constraints.
+  Delete comments that merely describe the action being performed, unless they serve the grouping rule below.
+- Use comments for grouping and structure.
+  Skimming a long function's comments should reveal its logical flow.
 
 ### Documentation Comments
 
-Use `///` for documentation. **No doc tags, no XML.**
+Use `///` for documentation.
+**No doc tags, no XML** (`@param`, `\return`, `<summary>`, …) — API docs aren't generated here, and the tags only cost signal in the editor.
 
-**Design philosophy:** Comments are most often read directly in source code, so they must read naturally without rich formatting tools.
+Doc comments are read in the source, unrendered. Write for that.
 
-- Write plain, natural language. Describe what matters concisely — resulting state,
-  ownership, lifetime, and invariants of a function, not its implementation steps.
-- Call out edge cases (zero handling, threading, which `result` it can fail with,
-  laziness/caching).
-- Insert blank lines every few lines to break up walls of text and improve skimmability.
-- Keep lines within the 120-column limit.
-- **Include at least one usage example** (~2-10 lines) in doc comments for each major struct/data type.
+- Describe resulting state, ownership, lifetime, and invariants — not implementation steps.
+- State constraints as *what must hold*: "capacity must be > 0", not "asserts on capacity <= 0".
+- Call out edge cases: zero/empty, threading, which `result` it fails with, laziness/caching.
+- Don't restate the signature. Spend the comment on what the types don't show.
+- No comments on trivial getters and one-liners.
+- **One usage example** (~2-10 lines) in the doc comment of each major struct/data type.
 
 ```cpp
-/// allocates a new buffer with the specified capacity
-///
-/// if allocation fails, returns an error
-/// the buffer is zero-initialized
-///
-/// NOTE: capacity must be > 0
+/// Allocates a new buffer of `capacity` elements, zero-initialized.
+/// Capacity must be > 0.
+/// Fails with alloc_error when the allocator is exhausted.
 [[nodiscard]] cc::result<buffer> allocate_buffer(int capacity);
 ```
 
@@ -627,11 +746,15 @@ container& operator=(container&& rhs)
 
 ## Summary Checklist
 
+- [ ] Prose (comments + docs) is one point per line, never a reflowed block
+- [ ] New code in the current style; code you edited migrated drive-by, nothing else swept
 - [ ] East const (`T const`)
-- [ ] Almost-always-auto style
+- [ ] Almost-always-auto style; no `T x(args);` constructor-init of variables
 - [ ] clang-format applied (120 cols, Allman, clang-format >= 22)
 - [ ] Headers compile standalone
-- [ ] Designated initializers where possible
+- [ ] Designated initializers first; no field-by-field struct filling
+- [ ] Use-once descriptions written inline at the call site
+- [ ] Bare `sizeof(T)` at call sites, no `cc::isize(sizeof(T))`
 - [ ] Non-trivial logic uses static factory methods, not constructors
 - [ ] Forward declarations in `fwd.hh`
 - [ ] Single-argument ctors are `explicit`

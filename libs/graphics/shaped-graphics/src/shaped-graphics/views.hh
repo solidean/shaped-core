@@ -610,6 +610,12 @@ public:
         return h < 1 ? 1 : h;
     }
 
+    /// (width, height) of the viewed mip level — the size to drive a dispatch or a projection with.
+    [[nodiscard]] tg::vec2i size() const { return tg::vec2i(this->width(), this->height()); }
+
+    /// width / height of the viewed mip level. Both are clamped to >= 1, so this never divides by zero.
+    [[nodiscard]] float aspect_ratio() const { return float(this->width()) / float(this->height()); }
+
     // Bind as a rendering-scope target, choosing what happens to its contents at pass start. `&&`
     // overloads move the view into the target; the `const&` overloads copy. See command_list.raster.hh.
     [[nodiscard]] color_target cleared(tg::vec4f color) const&;
@@ -656,6 +662,12 @@ public:
         int const h = _texture->height() >> _range.mip_range.start;
         return h < 1 ? 1 : h;
     }
+
+    /// (width, height) of the viewed mip level — matches the color targets it is paired with.
+    [[nodiscard]] tg::vec2i size() const { return tg::vec2i(this->width(), this->height()); }
+
+    /// width / height of the viewed mip level. Both are clamped to >= 1, so this never divides by zero.
+    [[nodiscard]] float aspect_ratio() const { return float(this->width()) / float(this->height()); }
 
     // Bind as a rendering-scope target, choosing what happens to its contents at pass start. `&&`
     // overloads move the view into the target; the `const&` overloads copy. See command_list.raster.hh.

@@ -121,6 +121,7 @@ a.radians();   a.degree();                       // read back as T
 a + b   a - b   -a   a * s   s * a   a / s        // 1D vector space; NO wrap-around; a == b
 a.sin(); a.cos(); a.tan(); a.sin_cos(); a.sec(); a.csc(); a.cot();   // trig members (has_trigonometry)
 using namespace tg::literals;  90_deg_f;  3.14_rad_d;  // _rad_f/_rad_d/_deg_f/_deg_d
+// PREFER the literal over make_from_degree for constants: `60_deg_f`, not `angle_f::make_from_degree(60)`
 ```
 
 ## mat — column-major matrix

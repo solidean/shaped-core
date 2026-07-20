@@ -16,6 +16,7 @@ directly" are different claims:
 | `<typeinfo>`         | yes       | `typeid` / `std::type_info` are language-level RTTI, not reimplementable.|
 | `<typeindex>`        | yes       | `std::type_index` — the hashable/orderable handle over `std::type_info`. |
 | `<initializer_list>` | yes       | Required by the language for braced-init-list constructors.             |
+| `<chrono>`           | yes       | Wall/monotonic clocks are OS facilities, and the unit-safe `duration`/`time_point` algebra is exactly what we would rewrite. Use `steady_clock` for elapsed time, never `system_clock` (it can jump). A `cc::` time vocabulary may still land later for the *formatting* / serialization side. |
 | `<atomic>`           | **no — via [`cc::atomic`](../src/clean-core/thread/atomic.hh)** | `std::atomic` maps to compiler/hardware atomics, so we do not reimplement it — with threads `cc::atomic` *is* `std::atomic`. But a build can have no threads at all (`CC_HAS_THREADS == 0`), and there the counts should be plain loads and stores. Only a `cc::` seam can drop the atomicity; a hand-written `std::atomic` stays a `lock xadd` no flag can reach. |
 
 **Tier 1 — blessed to include and call.** Use them directly.
