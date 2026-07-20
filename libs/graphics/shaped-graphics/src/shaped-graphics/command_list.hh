@@ -30,6 +30,11 @@ public:
     /// The epoch this list was opened in. It must be submitted or dropped before that epoch advances.
     [[nodiscard]] epoch created_in_epoch() const { return _epoch; }
 
+    /// The context that created this list — it always outlives the list. Lets a consumer that only holds
+    /// the command list reach the context (e.g. to acquire a pipeline) without threading it separately.
+    /// (`class context` disambiguates the type from this accessor of the same name.)
+    [[nodiscard]] class context& context() const { return *_context; }
+
     // buffer transfer — host↔device copies recorded at this point in the list
 
     /// Host→device upload facade: `cmd.upload.bytes_to_buffer(...)` / `cmd.upload.data_to_buffer(...)`.
@@ -55,7 +60,7 @@ public:
     command_list_query_scope query;
 
 protected:
-    explicit command_list(epoch created_in);
+    command_list(sg::context& ctx, epoch created_in);
 
     // Backend seams the upload/download/copy/compute scopes forward to (contracts documented there);
     // friends so the scopes can reach them.
@@ -156,5 +161,6 @@ protected:
     [[nodiscard]] virtual gpu_timestamp query_record_gpu_timestamp() = 0;
 
     epoch _epoch = epoch::invalid;
+    class context* _context = nullptr; // the creating context; outlives this list
 };
 } // namespace sg

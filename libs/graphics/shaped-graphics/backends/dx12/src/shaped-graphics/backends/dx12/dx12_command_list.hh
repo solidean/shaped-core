@@ -20,20 +20,13 @@ namespace sg::backend::dx12
 class dx12_command_list final : public sg::command_list
 {
 public:
+    // Defined in the .cc: the sg::command_list base needs dx12_context complete to upcast it to sg::context.
     dx12_command_list(dx12_context& ctx,
                       sg::epoch created_in,
                       sg::command_list_slot slot,
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
-                      ComPtr<ID3D12GraphicsCommandList> list)
-      : sg::command_list(created_in),
-        _ctx(ctx),
-        _slot(slot),
-        _queue(queue),
-        _allocator(cc::move(allocator)),
-        _list(cc::move(list))
-    {
-    }
+                      ComPtr<ID3D12GraphicsCommandList> list);
 
     // Auto-drops (with a warning) a list left neither submitted nor dropped — the explicit path is
     // submit_dx12_command_list / drop_dx12_command_list. No-op once either has run (they mark it consumed).

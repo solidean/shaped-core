@@ -10,6 +10,10 @@ void dx12_context::shutdown()
     if (_is_shut_down)
         return;
 
+    // Release per-context routine instances first: they may cache epoch/allocator-managed resources
+    // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.
+    routines.clear();
+
     // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing
     // every resource (in-flight and staged) and running finalizers — before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.

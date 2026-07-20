@@ -42,6 +42,9 @@
 #include <shaped-graphics/raw_texture.hh>
 #include <shaped-graphics/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing_shader_table.hh>
+#include <shaped-graphics/reload_generation.hh>
+#include <shaped-graphics/render_routine.hh>
+#include <shaped-graphics/routine_registry.hh>
 #include <shaped-graphics/swapchain.hh>
 #include <shaped-graphics/texture.hh>
 #include <shaped-graphics/types.hh>

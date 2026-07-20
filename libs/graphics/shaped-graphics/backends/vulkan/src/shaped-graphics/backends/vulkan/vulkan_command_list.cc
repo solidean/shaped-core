@@ -7,6 +7,15 @@
 
 namespace sg::backend::vulkan
 {
+vulkan_command_list::vulkan_command_list(vulkan_context& ctx,
+                                         sg::epoch created_in,
+                                         sg::command_list_slot slot,
+                                         VkCommandPool pool,
+                                         VkCommandBuffer buffer)
+  : sg::command_list(ctx, created_in), _ctx(ctx), _slot(slot), _pool(pool), _buffer(buffer)
+{
+}
+
 vulkan_command_list::~vulkan_command_list()
 {
     if (_consumed)

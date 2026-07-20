@@ -149,12 +149,13 @@ TEST("slib - a scan with nothing changed reloads nothing")
     f.start();
 
     auto const generation_before = f.pkg.invert->generation();
+    auto const lib_generation_before = f.lib.generation(); // process-global now, so compare relatively
     f.lib.poll_hot_reload();
     f.lib.poll_hot_reload();
 
     CHECK(f.source() == "v1");
     CHECK(f.pkg.invert->generation() == generation_before);
-    CHECK(f.lib.generation() == 0);
+    CHECK(f.lib.generation() == lib_generation_before); // a no-op scan advances nothing
 }
 
 TEST("slib - a shader never acquired is not compiled by a reload")
