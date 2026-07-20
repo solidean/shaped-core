@@ -5,6 +5,8 @@
 #include <shaped-graphics/render_routine_base.hh>
 #include <shaped-graphics/routine_registry.hh>
 
+#include <memory>
+
 namespace sg
 {
 /// CRTP base for a concrete render routine. Derive as
@@ -35,18 +37,42 @@ public:
     /// reload generation — the reference a static execute() reads from.
     [[nodiscard]] static Derived const& acquire(command_list& cmd)
     {
-        Derived& self = cmd.context().routines.template get_or_create<Derived>();
+        Derived& self = instance(cmd.context());
         self.ensure_initialized(cmd);
         return self;
     }
 
-    /// Prewarm form: runs init_once + init_declare (kicking off async compiles) before a command list
-    /// exists. Materialize happens later, on the first acquire(cmd).
-    static Derived const& acquire_no_materialize(context& ctx)
+    /// Create the instance and run init_once + init_declare (kicking off async compiles) before a command
+    /// list exists. Materialize happens later, on the first acquire(cmd).
+    static void prewarm(context& ctx) { instance(ctx).ensure_initialized_no_materialize(ctx); }
+
+    /// Drop this routine's instance on ctx, releasing its cached GPU resources. A no-op if it was never
+    /// acquired there.
+    static void evict(context& ctx) { ctx.routines.template evict<Derived>(); }
+
+private:
+    /// Per-thread memo of the last instance handed out, so the steady state costs a pointer compare
+    /// instead of a locked map lookup. Weak on purpose: a cached slot must never keep a routine alive
+    /// past evict/clear/context shutdown — expiry is exactly what invalidates it.
+    struct cache_entry
     {
-        Derived& self = ctx.routines.template get_or_create<Derived>();
-        self.ensure_initialized_no_materialize(ctx);
-        return self;
+        context* ctx = nullptr;
+        Derived* routine = nullptr;
+        std::weak_ptr<Derived> alive;
+    };
+
+    /// The per-context instance for Derived, created on first use.
+    [[nodiscard]] static Derived& instance(context& ctx)
+    {
+        static thread_local cache_entry cache;
+        // A live weak_ptr means the registry still owns it; together with the context compare that also
+        // rules out a new context reusing a dead one's address.
+        if (cache.ctx == &ctx && !cache.alive.expired())
+            return *cache.routine;
+
+        auto const held = ctx.routines.template get_or_create<Derived>();
+        cache = {&ctx, held.get(), held};
+        return *held;
     }
 };
 } // namespace sg

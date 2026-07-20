@@ -16,8 +16,9 @@ The composable base every routine builds on lives in **shaped-graphics**, not he
 
 ```text
 sg::render_routine<D>   [done]  one unit of GPU work; 3-phase init (once/declare/materialize), re-inits on reload
-                                reached by type via static acquire(cmd) — no handle, no registration
-ctx.routines            [done]  per-context registry: lazy self-registration, prewarm<...>() / evict<R>() / clear()
+                                reached by type via static acquire(cmd) / prewarm(ctx) / evict(ctx) — no handle,
+                                no registration
+ctx.routines            [done]  per-context registry: lazy self-registration, clear()
 sg::reload_generation   [done]  process-global hot-reload counter (bumped by the shader library on reload)
 ```
 

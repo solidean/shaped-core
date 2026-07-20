@@ -8,7 +8,7 @@ The **framework itself lives in shaped-graphics** — `sg::render_routine`, the 
 first:
 
 - **[shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md)** — the
-  routine base, three-phase init, by-type `acquire`, `ctx.routines` (prewarm / evict / clear), and hot
+  routine base, three-phase init, by-type `acquire` / `prewarm` / `evict`, `ctx.routines.clear()`, and hot
   reload, end to end.
 
 ## Writing a concrete routine

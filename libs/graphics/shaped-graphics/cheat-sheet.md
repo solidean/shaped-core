@@ -579,15 +579,14 @@ class my_routine : public sg::render_routine<my_routine> { ... };
 void init_once(sg::context& ctx)          // first init only, NEVER on reload — persistent, shader-independent work
 void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
 void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
-// static entry points the CRTP adds (Derived const& — the reference a static execute() reads from):
+// static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
 my_routine::acquire(cmd)                   // -> my_routine const&  — lazily create in cmd.context().routines, init (declare+materialize), return
-my_routine::acquire_no_materialize(ctx)    // -> my_routine const&  — prewarm: init_once + init_declare only (before a command list)
+my_routine::prewarm(ctx)                   // void     — create + init_once/init_declare only (before a command list; async compiles fan out on the pool)
+my_routine::evict(ctx)                     // void     — drop this routine's instance + its cached GPU state
+// acquire memoizes the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
 // re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
 
-#include <shaped-graphics/routine_registry.hh>   // (via context.hh) — the ctx.routines scope
-ctx.routines.get_or_create<R>()            // -> R&    — the per-context instance (created + registered on first call), keyed by type
-ctx.routines.prewarm<A, B, C>()            // void     — create each + run init_once/init_declare (async compiles fan out on the pool)
-ctx.routines.evict<R>()                    // void     — drop one routine's instance + its cached GPU state
+#include <shaped-graphics/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
 ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown
 // Per-context: a routine's cached GPU state dies with the context that built it — never stale across contexts.
 

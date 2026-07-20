@@ -146,6 +146,64 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
+TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)")
+{
+    auto const ctx = make_warp_context();
+    if (ctx == nullptr)
+        SKIP("no dx12 WARP device");
+
+    auto cmd = ctx->create_command_list();
+
+    auto const& first = counting_routine::acquire(*cmd);
+    CHECK(first.once == 1);
+
+    // Drive the first instance's declare count to 2, so it is distinguishable from a fresh one.
+    sg::signal_reload();
+    (void)counting_routine::acquire(*cmd);
+    CHECK(first.declare == 2);
+
+    counting_routine::evict(*ctx);
+
+    // A fresh instance, built from scratch: every phase back at 1. A cached slot that survived the
+    // eviction would instead hand back the old object (declare == 2) — or worse, a freed one.
+    auto const& second = counting_routine::acquire(*cmd);
+    CHECK(second.once == 1);
+    CHECK(second.declare == 1);
+    CHECK(second.materialize == 1);
+
+    ctx->drop_command_list(cc::move(cmd));
+}
+
+TEST("sg - two live contexts keep separate routine instances")
+{
+    auto const ctx_a = make_warp_context();
+    if (ctx_a == nullptr)
+        SKIP("no dx12 WARP device");
+    auto const ctx_b = make_warp_context();
+    REQUIRE(ctx_b != nullptr);
+
+    auto cmd_a = ctx_a->create_command_list();
+    auto cmd_b = ctx_b->create_command_list();
+
+    auto const& ra = counting_routine::acquire(*cmd_a);
+    auto const& rb = counting_routine::acquire(*cmd_b);
+    CHECK(&ra != &rb);
+
+    // Interleaved acquires must keep landing on the right instance — neither context may be served the
+    // other's routine, however the per-thread acquire cache ping-pongs between them.
+    (void)counting_routine::acquire(*cmd_a);
+    (void)counting_routine::acquire(*cmd_b);
+    (void)counting_routine::acquire(*cmd_a);
+
+    CHECK(ra.once == 1);
+    CHECK(ra.declare == 1);
+    CHECK(rb.once == 1);
+    CHECK(rb.declare == 1);
+
+    ctx_a->drop_command_list(cc::move(cmd_a));
+    ctx_b->drop_command_list(cc::move(cmd_b));
+}
+
 TEST("sg - a routine compiles a shader and dispatches it end to end")
 {
     auto const ctx = make_warp_context();

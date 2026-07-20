@@ -64,9 +64,8 @@ pattern_fill_routine::execute(cmd, out);
 ```
 
 `acquire(cmd)` reaches the context through `cmd.context()`, so it takes only the command list.
-`acquire_no_materialize(ctx)` is the prewarm variant — it runs init_once + init_declare before any
-command list exists, so async compiles start as early as possible; materialize then happens on the
-first `acquire(cmd)`.
+`prewarm(ctx)` is the variant for before a command list exists — it runs init_once + init_declare, so
+async compiles start as early as possible; materialize then happens on the first `acquire(cmd)`.
 
 ## Per-context, reached by type: `ctx.routines`
 
@@ -80,17 +79,26 @@ it** — a routine can never hand stale, wrong-context handles to a second conte
 contexts, or destroying and recreating one (as tests do), just works: the new context starts with an
 empty registry and rebuilds from scratch.
 
+The registry itself is not the API — everything type-keyed is reached through the routine's own
+statics, and only `clear()` is public on `ctx.routines`:
+
 ```cpp
-ctx.routines.prewarm<bloom_routine, tonemap_routine, ssao_routine>();  // create + init_declare, before a list
-ctx.routines.evict<bloom_routine>();                                    // drop one routine's cached GPU state
-ctx.routines.clear();                                                   // drop all (VRAM pressure / context switch)
+bloom_routine::prewarm(ctx);    // create + init_once/init_declare, before a command list exists
+tonemap_routine::prewarm(ctx);
+bloom_routine::evict(ctx);      // drop one routine's instance + its cached GPU state
+ctx.routines.clear();           // drop all (VRAM pressure / context switch)
 ```
 
-`prewarm` is the opt-in fan-out for startup: it creates the listed routines and runs their
-`init_declare`, kicking off every async pipeline compile at once so they build in parallel on the
-installed async pool (`cc::install_default_async_pool`). It is a flat list of types — no dependency
-graph. A routine that composes others just calls them; lazy registration covers correctness, and you
-list the leaves you want prewarmed. `clear()` runs automatically on context shutdown.
+`prewarm` is the opt-in fan-out for startup: prewarming a set of routines kicks off all their async
+pipeline compiles at once, so they build in parallel on the installed async pool
+(`cc::install_default_async_pool`). There is no dependency graph — a routine that composes others just
+calls them; lazy registration covers correctness, and you prewarm the leaves you care about.
+`clear()` runs automatically on context shutdown.
+
+`acquire` hits a per-thread, per-routine-type memo of the last instance handed out, so the steady
+state is a pointer compare rather than a locked map lookup. The memo holds only a weak reference, so
+it can never keep a routine alive past `evict` / `clear` / context shutdown — expiry is what
+invalidates it.
 
 Map access is guarded, so `acquire` is safe from parallel command-list recording. (Initializing a
 *single* routine concurrently from two threads is not yet synchronized — a follow-up for when parallel

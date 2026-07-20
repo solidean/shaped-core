@@ -28,14 +28,6 @@ namespace sg
 class render_routine_base
 {
 public:
-    /// Runs init_once (first time only), then init_declare (first time + after each reload). The prewarm
-    /// entry point: call it before opening a command list so async compiles start as early as possible.
-    void ensure_initialized_no_materialize(context& ctx);
-
-    /// The above, then init_materialize. The context is reached through cmd.context(). Safe to call every
-    /// frame — a no-op once initialized at the current generation.
-    void ensure_initialized(command_list& cmd);
-
     virtual ~render_routine_base() = default;
 
     render_routine_base(render_routine_base const&) = delete;
@@ -49,6 +41,18 @@ protected:
     virtual void init_materialize(command_list& cmd) { (void)cmd; }
 
 private:
+    // The phase engine is driven by the CRTP's static entry points (acquire / prewarm), not by user code.
+    template <class>
+    friend class render_routine;
+
+    /// Runs init_once (first time only), then init_declare (first time + after each reload). The prewarm
+    /// entry point: call it before opening a command list so async compiles start as early as possible.
+    void ensure_initialized_no_materialize(context& ctx);
+
+    /// The above, then init_materialize. The context is reached through cmd.context(). Safe to call every
+    /// frame — a no-op once initialized at the current generation.
+    void ensure_initialized(command_list& cmd);
+
     /// The process-global reload generation to compare against (sg::reload_generation).
     [[nodiscard]] static u64 current_generation();
 

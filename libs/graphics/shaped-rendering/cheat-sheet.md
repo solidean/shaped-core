@@ -31,4 +31,4 @@ protected:
 ```
 
 See the [shaped-graphics cheat sheet](../shaped-graphics/cheat-sheet.md) for the full framework surface
-(`acquire` / `acquire_no_materialize`, the three init phases, `ctx.routines.prewarm/evict/clear`).
+(`acquire` / `prewarm` / `evict`, the three init phases, `ctx.routines.clear()`).

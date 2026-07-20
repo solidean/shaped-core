@@ -1,7 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/container/vector.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context
 #include <shaped-graphics/render_routine_base.hh>
@@ -22,63 +22,22 @@ template <class T>
 }
 } // namespace impl
 
-/// Per-context registry of render-routine instances, reached as `ctx.routines`. A routine is a
+/// Per-context storage of render-routine instances, reached as `ctx.routines`. A routine is a
 /// per-context singleton: the first acquire of a given type creates and registers it here (lazy
 /// self-registration — no explicit registration, no by-name lookup), and it lives until the context is
-/// shut down or it is explicitly evicted. Routines are normally reached through sg::render_routine's
-/// static acquire(cmd), which calls get_or_create under the hood; you touch this directly only to
-/// prewarm, evict, or clear.
+/// shut down or it is explicitly evicted.
 ///
-/// A thin per-context sub-object like ctx.cached: it holds a back-reference to its context and is
-/// created and destroyed with it. Map access is guarded, so acquire is safe from parallel command-list
-/// recording; initializing a *single* routine concurrently from two threads is not yet synchronized (a
-/// follow-up for when parallel init lands). Do not clear()/evict() a registry while another thread is
-/// still recording against the same context.
+/// Everything type-keyed is private and driven through sg::render_routine's statics
+/// (`R::acquire(cmd)` / `R::prewarm(ctx)` / `R::evict(ctx)`); the only public operation here is
+/// clear(). A thin per-context sub-object like ctx.cached, created and destroyed with its context.
+///
+/// Map access is guarded, so acquire is safe from parallel command-list recording; initializing a
+/// *single* routine concurrently from two threads is not yet synchronized (a follow-up for when
+/// parallel init lands). Do not clear()/evict() a registry while another thread is still recording
+/// against the same context.
 class routine_registry
 {
 public:
-    /// The instance for R (created + registered on first call), keyed by type. Returns a stable
-    /// reference — the routine is heap-held and does not move when the registry grows.
-    template <class R>
-    [[nodiscard]] R& get_or_create()
-    {
-        static_assert(std::is_base_of_v<render_routine_base, R>, "R must derive from render_routine_base");
-        void const* const key = impl::routine_type_key<R>();
-        // cc::mutex::lock returns by value, so hand back a (copyable) pointer into the stable heap object.
-        R* const routine = _entries.lock(
-            [key](cc::vector<entry>& entries) -> R*
-            {
-                for (auto const& e : entries)
-                    if (e.key == key)
-                        return static_cast<R*>(e.routine.get());
-                auto created = std::make_shared<R>();
-                R* const raw = created.get();
-                entries.push_back({key, cc::move(created)});
-                return raw;
-            });
-        return *routine;
-    }
-
-    /// Prewarm the given routine types: create each + run init_once + init_declare, so all their async
-    /// pipeline compiles are in flight at once (they build in parallel on the installed async pool).
-    /// Materialize still happens lazily on the first acquire(cmd). The declares run sequentially for now;
-    /// the async *compiles* are what parallelize.
-    template <class... R>
-    void prewarm()
-    {
-        (get_or_create<R>().ensure_initialized_no_materialize(_ctx), ...);
-    }
-
-    /// Drop the instance for R, releasing its cached GPU resources (if nothing else holds them). A no-op
-    /// if R was never acquired.
-    template <class R>
-    void evict()
-    {
-        void const* const key = impl::routine_type_key<R>();
-        _entries.lock([key](cc::vector<entry>& entries)
-                      { entries.remove_first_where([key](entry const& e) { return e.key == key; }); });
-    }
-
     /// Drop every instance, releasing their cached GPU resources. Run on context shutdown, and callable
     /// early under VRAM pressure or before switching to another live context.
     void clear();
@@ -91,15 +50,41 @@ public:
 
 private:
     friend class context;
-    explicit routine_registry(context& ctx) : _ctx(ctx) {}
+    template <class>
+    friend class render_routine;
 
-    struct entry
+    routine_registry() = default;
+
+    using routine_map = cc::map<void const*, std::shared_ptr<render_routine_base>>;
+
+    /// Shared owner of R's instance, created + registered on first call. The routine is heap-held, so
+    /// the pointer stays valid while it is registered (the caller's weak_ptr sees eviction).
+    template <class R>
+    [[nodiscard]] std::shared_ptr<R> get_or_create()
     {
-        void const* key;
-        std::shared_ptr<render_routine_base> routine;
-    };
+        static_assert(std::is_base_of_v<render_routine_base, R>, "R must derive from render_routine_base");
+        void const* const key = impl::routine_type_key<R>();
+        // cc::mutex::lock returns by value, so hand back a (copyable) shared owner, not a reference.
+        auto base = _entries.lock(
+            [key](routine_map& entries) -> std::shared_ptr<render_routine_base>
+            {
+                auto e = entries.entry(key);
+                // Deliberately not get_or_emplace: its argument would be evaluated on the hit path too,
+                // allocating a routine per call only to throw it away.
+                return e.exists() ? e.value() : e.emplace(std::make_shared<R>());
+            });
+        return std::static_pointer_cast<R>(cc::move(base));
+    }
 
-    context& _ctx;
-    cc::mutex<cc::vector<entry>> _entries;
+    /// Drop the instance for R, releasing its cached GPU resources (if nothing else holds them). A no-op
+    /// if R was never acquired.
+    template <class R>
+    void evict()
+    {
+        void const* const key = impl::routine_type_key<R>();
+        _entries.lock([key](routine_map& entries) { entries.erase(key); });
+    }
+
+    cc::mutex<routine_map> _entries;
 };
 } // namespace sg
