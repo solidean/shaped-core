@@ -1,6 +1,8 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
+#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/command_list.hh>
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/raw_buffer.hh>
@@ -92,6 +94,47 @@ INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle con
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
     CHECK(data.value()[3] == 8);
+}
+
+// The buffer<T> overloads of upload/download: `T` comes from the buffer alone, so nothing is spelled out
+// twice and the span / pod / offset all agree on it. Pins that a cc::vector, a C array and a braced list
+// all convert to the span parameter — the deduction there is non-obvious (T is deduced only from the
+// buffer, via type_identity_t) and would silently regress into "no matching overload".
+INVOCABLE_TEST("sg - typed buffer<T> upload/download need no raw()", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const buf = ctx->persistent.create_buffer<int>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+
+    auto const in = cc::vector<int>{5, 6, 7, 8};
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.data_to_buffer(buf, in);               // cc::vector -> span<int const>
+    cmd->upload.pod_to_buffer(buf, 42, 1);             // single element, offset counted in ints
+    auto future = cmd->download.data_from_buffer(buf); // whole buffer; T deduced, no <int>
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = ctx->wait_for(future);
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == 4);
+    CHECK(data.value()[0] == 5);
+    CHECK(data.value()[1] == 42); // pod_to_buffer overwrote element 1
+    CHECK(data.value()[3] == 8);
+
+    // The other span sources, and the ranged download overload.
+    int const raw_array[2] = {100, 200};
+    auto cmd2 = ctx->create_command_list();
+    REQUIRE(cmd2 != nullptr);
+    cmd2->upload.data_to_buffer(buf, raw_array, 2); // C array
+    cmd2->upload.data_to_buffer(buf, {11, 22});     // braced list
+    auto future2 = cmd2->download.data_from_buffer(buf, 1, 3);
+    ctx->submit_command_list(cc::move(cmd2));
+
+    auto const data2 = ctx->wait_for(future2);
+    REQUIRE(data2.has_value());
+    REQUIRE(data2.value().size() == 3);
+    CHECK(data2.value()[0] == 22);  // element 1 <- braced list
+    CHECK(data2.value()[1] == 100); // element 2 <- C array
+    CHECK(data2.value()[2] == 200);
 }
 
 INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::context_handle const& ctx))

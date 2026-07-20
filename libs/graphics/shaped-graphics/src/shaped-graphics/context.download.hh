@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/buffer.hh> // typed buffer<T> — the preferred overloads below take it
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/texture_region.hh>
@@ -27,22 +28,38 @@ namespace sg
 /// facade over its owning context: it forwards each op to the context's backend impl.
 class context_download_scope
 {
+    // Typed-buffer overloads — the preferred form. `buffer<T>` supplies the element type, so `T` is deduced
+    // rather than spelled out and the offset / count are in units of that same `T`.
+public:
+    /// Streams `count` elements of `T` from `src` starting at `offset_in_elements`. See bytes_from_buffer.
+    template <class T>
+    [[nodiscard]] data_future<T> data_from_buffer(buffer<T> const& src, isize offset_in_elements, isize count)
+    {
+        return data_from_buffer<T>(src.raw(), offset_in_elements, count);
+    }
+
+    /// Streams the whole of `src` back. See bytes_from_buffer.
+    template <class T>
+    [[nodiscard]] data_future<T> data_from_buffer(buffer<T> const& src)
+    {
+        return data_from_buffer<T>(src.raw(), 0, src.element_count());
+    }
+
+    // Raw overloads — element type supplied by the call site rather than the buffer.
 public:
     /// Streams `size_in_bytes` from `buffer` starting at `offset_in_bytes` back to the host on the copy
     /// queue. The buffer must have been created with buffer_usage::copy_src. Returns a bytes_future that
     /// becomes ready once the copy has landed the bytes in the host destination. A zero-size read yields an
     /// already-ready, empty future. Precondition: offset_in_bytes + size_in_bytes <= buffer size.
-    [[nodiscard]] bytes_future bytes_from_buffer(raw_buffer_handle buffer,
-                                                 cc::isize offset_in_bytes,
-                                                 cc::isize size_in_bytes);
+    [[nodiscard]] bytes_future bytes_from_buffer(raw_buffer_handle buffer, isize offset_in_bytes, isize size_in_bytes);
 
     /// Downloads `count` elements of a trivially-copyable type; `offset_in_elements` and `count` are in
     /// elements of T. See bytes_from_buffer.
     template <class T>
-    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, cc::isize offset_in_elements, cc::isize count)
+    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, isize offset_in_elements, isize count)
     {
         static_assert(std::is_trivially_copyable_v<T>, "download element type must be trivially copyable");
-        auto const stride = cc::isize(sizeof(T));
+        auto const stride = isize(sizeof(T));
         return data_future<T>(bytes_from_buffer(cc::move(buffer), offset_in_elements * stride, count * stride));
     }
 
@@ -57,14 +74,14 @@ public:
     /// and memory. May be called any time: the copy actor adopts it between windows (draining outstanding
     /// copies first), so in-flight downloads are unaffected. Distinct from set_budget, which sizes the
     /// separate inline (cmd.download) readback ring.
-    void set_async_window_size(cc::isize bytes);
+    void set_async_window_size(isize bytes);
 
     /// Sets the inline readback ring capacity in bytes (> 0) — the ring all `cmd.download` readbacks stage
     /// through, bounding the in-flight inline-download volume. May be called any time, repeatedly: it
     /// records a *pending* budget and returns immediately without touching the GPU. The change takes effect
     /// at the next advance_epoch, which drains outstanding readbacks and reallocates the ring; until then
     /// the current budget stays in force. Backends without an inline-download path ignore it.
-    void set_budget(cc::isize bytes);
+    void set_budget(isize bytes);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_download_scope(context_download_scope const&) = delete;

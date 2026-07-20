@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/buffer.hh> // typed buffer<T> — the preferred overloads below take it
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/texture_region.hh>
@@ -14,23 +15,39 @@ namespace sg
 /// A thin facade over its owning command list: it forwards each op to the list's backend impl.
 class command_list_download_scope
 {
+    // Typed-buffer overloads — the preferred form. `buffer<T>` supplies the element type, so `T` is deduced
+    // rather than spelled out and the offset / count are in units of that same `T`.
+public:
+    /// Reads `count` elements of `T` from `src` starting at `offset_in_elements`. See bytes_from_buffer.
+    template <class T>
+    [[nodiscard]] data_future<T> data_from_buffer(buffer<T> const& src, isize offset_in_elements, isize count)
+    {
+        return data_from_buffer<T>(src.raw(), offset_in_elements, count);
+    }
+
+    /// Reads the whole of `src` back. See bytes_from_buffer.
+    template <class T>
+    [[nodiscard]] data_future<T> data_from_buffer(buffer<T> const& src)
+    {
+        return data_from_buffer<T>(src.raw(), 0, src.element_count());
+    }
+
+    // Raw overloads — element type supplied by the call site rather than the buffer.
 public:
     /// Reads `size_in_bytes` from `buffer` starting at `offset_in_bytes` back to the host. The buffer
     /// must have been created with buffer_usage::copy_src. Returns a bytes_future that becomes ready
     /// once the submitted list has finished on the GPU and the bytes have been copied to the host. A
     /// zero-size read yields an already-ready, empty future. Precondition: offset_in_bytes +
     /// size_in_bytes <= buffer size.
-    [[nodiscard]] bytes_future bytes_from_buffer(raw_buffer_handle buffer,
-                                                 cc::isize offset_in_bytes,
-                                                 cc::isize size_in_bytes);
+    [[nodiscard]] bytes_future bytes_from_buffer(raw_buffer_handle buffer, isize offset_in_bytes, isize size_in_bytes);
 
     /// Downloads `count` elements of a trivially-copyable type; `offset_in_elements` and `count` are in
     /// elements of T. See bytes_from_buffer.
     template <class T>
-    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, cc::isize offset_in_elements, cc::isize count)
+    [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, isize offset_in_elements, isize count)
     {
         static_assert(std::is_trivially_copyable_v<T>, "download element type must be trivially copyable");
-        auto const stride = cc::isize(sizeof(T));
+        auto const stride = isize(sizeof(T));
         return data_future<T>(bytes_from_buffer(cc::move(buffer), offset_in_elements * stride, count * stride));
     }
 

@@ -77,6 +77,8 @@ ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sti
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
 ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain_handle>  (fallible twin)
+// PREFER the typed factories below (create_buffer<T> / create_texture_2d) — raw_* is the byte-level escape hatch.
+// PREFER ctx.transient for anything sized by the current frame; ctx.persistent only for what outlives it.
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
 ctx.persistent.try_create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (fallible core; every create_* has a try_ twin)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
@@ -87,11 +89,13 @@ ctx.transient.set_budget(size)                     // void — shared transient 
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
 ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset_in_bytes=0)  // void — ASYNC stream host bytes into buf on the copy queue (needs copy_dst); fire-and-forget, pin holds the bytes; later lists reading buf auto-wait; empty = no-op
 ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset_in_elements=0)   // void — typed convenience; re-views the SAME pin as bytes (no copy). offset in ELEMENTS of T. build the pin with cc::make_pinned_data / cc::as_pinned_data
+                                                   //   buf may be a raw_buffer_handle OR a buffer<T> — pass the typed buffer and T is deduced (no .raw())
 ctx.upload.bytes_to_texture(tex, cc::pinned_data<byte const>, subresource={}, region={})  // void — ASYNC upload tightly-packed pixels into one texture (sub)region (needs copy_dst); later lists reading tex auto-wait
 ctx.upload.set_async_window_size(bytes)            // void — resize the async staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
 ctx.upload.set_inline_budget(bytes)                // void — resize the inline (cmd.upload) ring; applied at the next advance_epoch; default 16 MiB
 ctx.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_future — ASYNC read buf back on the copy queue (needs copy_src); read auto-waits on the last writer, a later writer auto-waits on the read; drop the future to cancel; size 0 = ready empty future
 ctx.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T. See bytes_from_buffer
+ctx.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 ctx.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — ASYNC read one texture (sub)region back (needs copy_src), tightly packed
 ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
 ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); default 16 MiB
@@ -163,9 +167,13 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 // explicitly, in the epoch it opened in (not reused). Leaving it to go out of scope auto-drops it + warns.
 cmd.upload.bytes_to_buffer(buf, bytes, offset_in_bytes=0)     // void — stage host bytes into buf (needs copy_dst); empty = no-op
 cmd.upload.data_to_buffer(buf, range, offset_in_elements=0)   // void — typed convenience (trivially-copyable contiguous range); offset in ELEMENTS
+cmd.upload.pod_to_buffer(buf, value, offset_in_elements=0)    // void — single trivially-copyable value; offset in ELEMENTS of T (bytes_to_buffer is the fractional-offset escape hatch)
+                                                              //   PREFER passing a buffer<T> as `buf`: the data param is then span<T const> and value is T — one T, no static_assert needed. .raw() in a transfer call = a missing overload
+                                                              //   (typed form takes span<T const>, so vector / C array / {1,2,3} all convert; only the raw form accepts any contiguous_range)
 cmd.upload.bytes_to_texture(tex, bytes, subresource={}, region={})  // void — inline upload tightly-packed pixels into one texture (sub)region (needs copy_dst); drives the copy_dst layout barrier; visible to later cmds in the list
 cmd.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
 cmd.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T
+cmd.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 cmd.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — inline read one texture (sub)region back (needs copy_src), tightly packed; ready once the submitted list runs
 sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/backend/subresource.hh>
 sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/texture_region.hh>
@@ -383,6 +391,8 @@ sg::depth_stencil_view       // depth-stencil target (DSV) — via .as_depth_ste
 // each holds { raw_texture_handle, texture_view_dimension, pixel_format, subresource_range } (single mip).
 v.texture() v.dimension() v.format() v.range()   // getters
 v.width() v.height()         // int — the viewed mip's pixel size (mip-adjusted, >= 1)
+v.size()                     // -> tg::vec2i (width, height) — drive a dispatch / transient texture with this
+v.aspect_ratio()             // -> float  width/height; both clamped >= 1, so never divides by zero
 // Do NOT erase to raw_view (never shader-visible / in a binding group); a backend consumes them directly.
 sg::is_render_target_format(f) // bool — a renderable color format (not depth, not compressed, not undefined)
 ```
@@ -397,7 +407,8 @@ sg::present_mode                // vsync (wait for vblank) | immediate (uncapped
 auto sc = ctx.create_swapchain({.native_window_handle = hwnd});   // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
 // per frame:
 auto rt = sc->acquire_backbuffer();   // -> render_target_view for the current back buffer (auto-resizes to the window, once/epoch)
-int w = rt.width(); int h = rt.height();  // THIS frame's size — the swapchain has no size getter (a later acquire may resize)
+auto size = rt.size();                   // -> tg::vec2i, THIS frame's size — the swapchain has no size getter (a later acquire may resize)
+float aspect = rt.aspect_ratio();        // -> float, for the projection; rt.width() / rt.height() are still there as ints
 //   ... render into rt this frame (rt.cleared(color) / cmd.raster.render_to({.color_targets = {...}})) ...
 ctx.submit_command_list_and_present(*sc, std::move(cmd));  // the present path: folds the present-layout transition into cmd,
                                                            //   submits, then presents — exactly one per successful acquire

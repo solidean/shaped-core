@@ -204,42 +204,63 @@ Guidance, not invariants — use judgment.
 
 ## Style preferences
 
-Authority: [docs/coding-guidelines.md](docs/coding-guidelines.md) (design +
-conventions) and `.clang-format` (formatting). Don't duplicate them — read them.
-Essentials:
+Authority: [docs/coding-guidelines.md](docs/coding-guidelines.md) (design + conventions) and
+`.clang-format` (formatting).
+Don't duplicate them — read them. Essentials:
 
-* Namespaces `lower_case` (`cc`, `nx`); types / functions / variables
-  `snake_case`; template parameters `UpperCase`; macros `UPPER_CASE`; private
-  members `_snake_case`. The internal-details namespace is **`impl`** (e.g.
-  `cc::impl`), **never** `detail`; internal-only headers live under an `impl/`
-  subfolder.
+* Namespaces `lower_case` (`cc`, `nx`); types / functions / variables `snake_case`;
+  template parameters `UpperCase`; macros `UPPER_CASE`; private members `_snake_case`.
+* The internal-details namespace is **`impl`** (e.g. `cc::impl`), **never** `detail`.
+  Internal-only headers live under an `impl/` subfolder.
 * **East const** (`T const`, `span<T const>`); pointers bind left (`T const* p`).
-  120-column limit, Allman braces, 4-space indent.
+* 120-column limit, Allman braces, 4-space indent.
 * `.hh` for headers, `.cc` for implementations; headers compile standalone.
-* Prefer explicit data flow, value types, and composition over deep inheritance;
-  avoid hidden global state, speculative abstraction, and large "manager" classes.
+* Prefer explicit data flow, value types and composition over deep inheritance.
+  Avoid hidden global state, speculative abstraction and large "manager" classes.
+* **Almost-always-auto.** Never constructor-init a variable.
+  `auto const p = tg::pos3f(x, y, z);`, not `tg::pos3f const p(x, y, z);`.
+* **Designated initializers first.** Don't declare a struct and then fill it field-by-field — write `f({.a = …, .b = …})`.
+  A description used once belongs *in* the call — braced list for a `span`, designated init per element.
+  Name a local only when it's reused or genuinely long.
+* **Bare `sizeof(T)`** at call sites — no `cc::isize(sizeof(T))` armor.
+  If a linter complains, silence the check in `.clang-tidy`; don't decorate the code.
 
-Comments — concise, reader-facing:
+### Prose — one semantic point per line
 
-* `///` for type/member docs, `//` for inline. **No Doxygen / Javadoc / XML-doc
-  tags** (`@param`, `\return`, `<summary>`, …) — API docs aren't generated here.
-* Write for someone reading the code to learn what it does and the preconditions
-  that matter. Cliff notes, not essays — a line or two, the surprising bits first.
-* State constraints as *what must hold*, not what happens otherwise: "size must be
-  >= 0", not "asserts on negative size".
-* Don't restate the signature. Spend the comment on what types don't show — a
-  consumed argument, an invariant, an edge case (zero, empty, ownership,
-  threading, which `result` it fails with).
-* Cut the backstory: no rationale aimed at the author, no "why we chose this", no
-  task/PR references (those go in the commit message or higher-level docs).
+Full rule: [docs/coding-guidelines.md](docs/coding-guidelines.md#prose-style--one-semantic-point-per-line).
+
+* **Never reflow prose into a justified block. A new point starts a new line.**
+* This binds **all prose we write**: `///` and `//` comments, **every `.md` file in the repo** (docs, readmes, cheat sheets, this file, skill files), commit messages and PR descriptions.
+* **A line ends because the point ends — never because a column was reached.** There is no fill column: don't wrap at 80, 100 or 120 out of habit.
+* Line length is free — typically 20–150 chars, **hard ceiling 200**. A point that long usually holds two: split at the seam instead of wrapping.
+  The 120-col limit binds code, not prose.
+* **A short orphan line is the tell.** A line carrying only a few trailing words of the line above means you wrapped early — join them.
+* A sentence that ends mid-line, with the next point starting on that same line, is the other failure mode.
+  The first words of each line must give the shape of the passage.
+* Front-load the surprising part.
+  Preconditions, ownership, threading and edge cases outrank restating the signature.
+* `///` for type/member docs, `//` for inline.
+  **No Doxygen / Javadoc / XML-doc tags** (`@param`, `\return`, `<summary>`, …) — API docs aren't generated here.
+* State constraints as *what must hold*: "size must be >= 0", not "asserts on negative size".
+* Cut the backstory: no rationale aimed at the author, no "why we chose this", no task/PR references.
+  Those go in the commit message or a higher-level doc.
 * No comments on trivial getters / one-liners.
-* This concise style is the standard **going forward**. Much of the codebase
-  still uses an older verbose style; you may opportunistically rewrite comments to
-  the concise style in code you're already editing — don't sweep unrelated files,
-  and keep the user's wording where they've deliberately set it.
 
-Helper scripts (Python): uv-run shebang with PEP 723 inline dependency metadata,
-matching [dev.py:1-5](dev.py#L1-L5); invoke as `uv run <script>.py`.
+### The style is evolving — don't retrofit the whole repo
+
+Much of the codebase predates the current rules — reflowed comments, `T x(args);`,
+field-by-field struct filling.
+That is history, not a counter-example.
+
+* Write **new** code in the newest style, always.
+* **Never proactively convert** untouched code.
+* **Migrate drive-by** what you are already editing — the function *and* its doc comment.
+  Editing a file doesn't mean sweeping the file; never sweep neighbors.
+* Keep the guidelines **current**.
+  A newly agreed convention is recorded in the same change: here, in `docs/coding-guidelines.md`, in the library-local guidelines, in the affected cheat sheets.
+* Keep wording the user deliberately set.
+
+Helper scripts (Python): uv-run shebang with PEP 723 inline dependency metadata, matching [dev.py:1-5](dev.py#L1-L5); invoke as `uv run <script>.py`.
 
 ---
 
