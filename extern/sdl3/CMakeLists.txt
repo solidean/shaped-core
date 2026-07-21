@@ -14,6 +14,24 @@ if(NOT EXISTS "${SDL3_INSTALL}/pin.txt")
         "dev.py does this automatically; see tools/dev/lib/pipeline/prereqs.py.")
 endif()
 
+# SDL refuses to configure on a unix without X11 or wayland development headers, and its refusal is a
+# FATAL_ERROR that would take the whole repo's configure down with it — not just sr.
+# Check first and bow out instead, so a bare container or a machine without the packages still configures
+# everything else; SC_HAS_SDL3 then reports OFF and sr builds without its window API.
+# Headers only: SDL loads the libraries themselves at run time.
+if(UNIX AND NOT APPLE)
+    include(CheckIncludeFile)
+    check_include_file("X11/Xlib.h" SC_SDL3_HAS_X11_HEADERS)
+    check_include_file("wayland-client.h" SC_SDL3_HAS_WAYLAND_HEADERS)
+
+    if(NOT SC_SDL3_HAS_X11_HEADERS AND NOT SC_SDL3_HAS_WAYLAND_HEADERS)
+        message(STATUS
+            "sdl3: no X11 or wayland development headers found — skipping SDL3, so sr::window is unavailable.\n"
+            "  Install them to get it: https://wiki.libsdl.org/SDL3/README-linux#build-dependencies")
+        return()
+    endif()
+endif()
+
 # SDL's build is driven by ~100 options, most defaulting to "on when SDL is the top-level project".
 # It is not, here, so most of these already hold.
 # We set them anyway, FORCEd, so the build we get never depends on SDL's notion of who is top-level, and so a

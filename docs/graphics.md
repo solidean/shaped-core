@@ -76,6 +76,11 @@ Multiple windows are supported today, which is the groundwork for imgui docking 
   (`release-3.4.12`, SHA-256 verified) into `extern/sdl3/.install/` and builds it from source. One code
   path on every platform, since upstream ships prebuilt dev packages only for Windows and macOS.
   Roughly 35 s per preset cold, then cached; `SC_SKIP_SDL3=1` skips it.
+- **On Linux it needs X11 or wayland development headers** (`libx11-dev libxext-dev libwayland-dev
+  libxkbcommon-dev wayland-protocols` on Ubuntu; see
+  [SDL's list](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies)).
+  Without them SDL3 is skipped rather than fatal: the rest of sr still configures and builds, just without
+  the window API.
 - **The window API is therefore optional**: CMake defines `SR_HAS_WINDOW` to `1` or `0`, and a checkout
   without SDL3 builds and tests the rest of sr unchanged.
 
