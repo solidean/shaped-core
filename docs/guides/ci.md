@@ -96,9 +96,19 @@ gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp/linux-gcc
 Only the Linux jobs install anything beyond `uv`, and only for SDL3.
 
 SDL refuses to configure on a unix that has neither X11 nor wayland **development headers**, so the three
-Linux workflows `apt-get install libx11-dev libxext-dev libwayland-dev libxkbcommon-dev wayland-protocols`.
+Linux workflows install them with `apt-get`.
 Headers only — sr's window and input tests are headless, running on SDL's dummy video driver, so no display
 and no runtime windowing library is involved.
+
+The list is not just `libx11-dev`: with X11 enabled, SDL also requires every X extension it uses (XCURSOR,
+XDBE, XFIXES, XINPUT, XRANDR, XSCRNSAVER, XSHAPE, XSYNC, XTEST) and fails configure naming the first one
+missing. In Ubuntu terms that is
+
+    libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev
+    libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols
+
+If SDL ever demands another, the error names the package group — the authoritative list is
+`SDL_missing_dependency` in the fetched tree's `cmake/sdlchecks.cmake`.
 
 Without them nothing breaks: [extern/sdl3](../../extern/sdl3/CMakeLists.txt) checks first and bows out, and
 `SC_HAS_SDL3` reports OFF so the rest of sr still builds.
