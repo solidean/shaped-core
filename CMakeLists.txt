@@ -69,6 +69,18 @@ else()
     set(SC_HAS_DXC_COMPILER OFF)
 endif()
 
+# Whether a window backend is available.
+# shaped-rendering's sr::window is backed by SDL3, present only once extern/sdl3 has fetched it.
+# Computed here for symmetry with SC_HAS_DXC_COMPILER.
+# Also because an `if(TARGET ...)` down in the library would read as a local choice, when it is a fact
+# about the environment.
+# A plain variable, not a cached option.
+if(TARGET SDL3::SDL3)
+    set(SC_HAS_SDL3 ON)
+else()
+    set(SC_HAS_SDL3 OFF)
+endif()
+
 # Browser test-runner helper (sc_add_nexus_web_runner). Included before the libs so both clean-core and
 # nexus can build an Emscripten `*-web.html` runner; a no-op on native toolchains.
 include(libs/base/nexus/cmake/NexusWebRunner.cmake)

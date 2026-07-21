@@ -24,6 +24,26 @@ sg::reload_generation   [done]  process-global hot-reload counter (bumped by the
 
 `sr` itself hosts the **concrete** routines below.
 
+## Windowing **[done]**
+
+The OS window abstraction, backed by SDL3 and exposing none of it.
+This is where the graphics family meets the operating system.
+
+```text
+sr::window_system      [done]  platform init + the event pump; creates windows; main-thread bound, one per process
+sr::window             [done]  one OS window: native handle, pixel size, minimized state, latched close request
+multiple windows       [done]  per-window state and id-keyed dispatch; wsys->windows() enumerates them
+sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, relative mode
+                               one globally-ordered stream per frame, drained through wsys->events()
+fullscreen / borderless [planned]
+HiDPI                  [planned]  SDL_WINDOW_HIGH_PIXEL_DENSITY once a per-monitor-DPI UI needs it
+gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see TODO
+imgui multi-viewport   [planned]  the reason the multi-window mechanism is already in place
+```
+
+The API is always present. Only the backend is optional, since SDL3 is fetched on demand — without one,
+`window_system::try_create` fails and `SR_HAS_WINDOW` is 0.
+
 ## Intended scope (routines, all [planned])
 
 ```text

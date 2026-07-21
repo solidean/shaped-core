@@ -12,8 +12,75 @@ shaped-graphics + shaped-shader-library. Headers are included by full path from 
 > [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
-#include <shaped-rendering/all.hh>   // umbrella (fwd only for now — concrete routines land here later)
+#include <shaped-rendering/all.hh>   // umbrella (window API + concrete routines as they land)
 ```
+
+## Windows
+
+Always available. Without a backend (SDL3 not fetched) `try_create` fails instead of the API disappearing;
+`SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" for the rare case you need it at compile time.
+
+```cpp
+#include <shaped-rendering/window.hh>
+
+auto const wsys = sr::window_system::create({.headless = false});  // -> cc::unique_ptr<window_system>; try_create -> cc::result
+auto const win  = wsys->create_window({.title = "viewer", .width = 1280, .height = 720,
+                                       .is_resizable = true, .is_visible = true});  // -> cc::unique_ptr<window>
+
+wsys->poll_events();              // drains the OS queue; refreshes every live window. Once per frame.
+wsys->windows();                  // -> cc::span<window* const>, creation order, non-owning
+wsys->is_quit_requested();        // latched OS-level quit; clear_quit_request()
+wsys->is_headless();
+
+win->native_window_handle();      // -> void* — HWND on Windows; feeds sg::swapchain_description
+win->width();  win->height();     // -> int, pixels, as of the last poll_events
+win->is_minimized();              // 0x0 while true
+win->is_close_requested();        // latched; request_close() / clear_close_request()
+win->title();  win->set_title(sv);
+win->show();  win->hide();
+```
+
+- **Poll once per frame, or the window hangs.**
+  Nothing else advances a window's state, and an unpumped window is one the OS considers unresponsive.
+- **Skip the frame while `is_minimized()`.**
+  Size is 0x0 there, and `acquire_backbuffer`'s auto-resize would resize the chain to zero.
+- **`window_system` is main-thread bound and at most one may be alive per process.** Both assert.
+- **A window must not outlive its system**, and `~window_system` asserts if one does.
+- **`native_window_handle()` is null off Windows and under a headless system** — nothing can present against those.
+
+## Input
+
+```cpp
+#include <shaped-rendering/input.hh>   // pulled in by window.hh
+
+for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
+{
+    e.window;                          // -> sr::window*, null if none was focused
+    if (auto const* k = std::get_if<sr::key_event>(&e.payload))
+        k->scancode;    // sr::scancode — PHYSICAL position; WASD stays WASD on AZERTY
+        k->character;   // char32_t — layout-mapped codepoint, 0 if unprintable; for ctrl+Z-style shortcuts
+        k->modifiers;   // sr::key_modifiers bit set; has_all(k->modifiers, ctrl | shift)
+        k->is_down;  k->is_repeat;
+    if (auto const* t = std::get_if<sr::text_event>(&e.payload))  t->text;        // cc::string, UTF-8
+    if (auto const* m = std::get_if<sr::mouse_move_event>(&e.payload))    m->cursor_pos, m->delta;  // pos2f, vec2f
+    if (auto const* b = std::get_if<sr::mouse_button_event>(&e.payload))  b->button, b->is_down, b->cursor_pos;
+    if (auto const* w = std::get_if<sr::mouse_wheel_event>(&e.payload))   w->delta;  // ticks, may be fractional
+}
+
+win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
+win->start_text_input();              // begin text_events + IME for this window; stop_text_input() to end
+```
+
+- **`events()` is invalidated by the next `poll_events()`**, text included — copy anything you keep.
+- **Physical vs character**: `scancode` is position, `character` is layout. Movement uses `scancode`, ctrl+Z uses `character`.
+  `sr::scancode` is our own position vocabulary — its numeric values mean nothing outside sr.
+- **Never rebuild text from `key_event`s** — an IME commits a whole phrase, a dead key commits nothing until the
+  next keystroke, and a paste arrives as one `text_event`.
+- **Text input is off until `start_text_input()`**, because while it is on the OS may swallow keystrokes to compose.
+- **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
+- **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
+  tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
+- **`input_event::payload` is `std::variant` only until `cc::variant` exists** — the alternatives are the API.
 
 ## Writing a concrete routine
 

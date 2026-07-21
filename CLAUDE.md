@@ -48,10 +48,12 @@ One-liner per library:
   Namespace `slib`. Depends on shaped-graphics — **sg does not depend on it**.
   The shader system's front door is
   [shaped-graphics/docs/shaders.md](libs/graphics/shaped-graphics/docs/shaders.md).
-* **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's
-  routine framework (mipmap gen, tonemapping, texture compression, …). Namespace
-  `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their
-  shaders through it). Early-stage skeleton — no concrete routines have landed yet.
+* **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
+  Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it).
+  No concrete routines have landed yet.
+  sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
+  The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails
+  instead of the types disappearing. `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization
   renderer with a dev-friendly API. Namespace `sv`. Depends on shaped-rendering.
   Early-stage skeleton.
@@ -230,7 +232,8 @@ Don't duplicate them — read them. Essentials:
 Full rule: [docs/coding-guidelines.md](docs/coding-guidelines.md#prose-style--one-semantic-point-per-line).
 
 * **Never reflow prose into a justified block. A new point starts a new line.**
-* This binds **all prose we write**: `///` and `//` comments, **every `.md` file in the repo** (docs, readmes, cheat sheets, this file, skill files), commit messages and PR descriptions.
+* This binds **all prose we write**, whatever the language it sits in: `///` and `//` comments, **`CMakeLists.txt` / `.cmake` `#` comments**, Python comments and docstrings, **every `.md` file in the repo** (docs, readmes, cheat sheets, this file, skill files), commit messages and PR descriptions.
+  If you are writing sentences for a human, it applies — build files are not exempt.
 * **A line ends because the point ends — never because a column was reached.** There is no fill column: don't wrap at 80, 100 or 120 out of habit.
 * Line length is free — typically 20–150 chars, **hard ceiling 200**. A point that long usually holds two: split at the seam instead of wrapping.
   The 120-col limit binds code, not prose.

@@ -91,11 +91,39 @@ gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp/linux-gcc
 #   test_diag  base_path="build/.tmp/linux-gcc/ci-logs.zip" errors_only=true
 ```
 
+### System packages
+
+Only the Linux jobs install anything beyond `uv`, and only for SDL3.
+
+SDL refuses to configure on a unix that has neither X11 nor wayland **development headers**, so the three
+Linux workflows install them with `apt-get`.
+Headers only — sr's window and input tests are headless, running on SDL's dummy video driver, so no display
+and no runtime windowing library is involved.
+
+The list is not just `libx11-dev`: with X11 enabled, SDL also requires every X extension it uses (XCURSOR,
+XDBE, XFIXES, XINPUT, XRANDR, XSCRNSAVER, XSHAPE, XSYNC, XTEST) and fails configure naming the first one
+missing. In Ubuntu terms that is
+
+    libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev
+    libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols
+
+If SDL ever demands another, the error names the package group — the authoritative list is
+`SDL_missing_dependency` in the fetched tree's `cmake/sdlchecks.cmake`.
+
+Without them nothing breaks: [extern/sdl3](../../extern/sdl3/CMakeLists.txt) checks first and bows out, and
+`SC_HAS_SDL3` reports OFF so the rest of sr still builds.
+That is the point of installing them — otherwise the window and input tests would silently vanish from the
+Linux runs rather than fail, which is the worst of both.
+
+The same applies to a developer machine: a Linux checkout without those packages configures and builds fine,
+it just has no `sr::window`.
+
 ### Toolchains
 
 Most jobs use the **runner's preinstalled toolchain** — clang/gcc, CMake, and
 Ninja all ship on the GitHub images — so the only provisioning is installing
-`uv` (the `dev.py` runner). Where a runner carries several versions of a
+`uv` (the `dev.py` runner), plus SDL3's windowing headers on Linux (see
+[System packages](#system-packages)). Where a runner carries several versions of a
 compiler, the job **pins the one we expect with `dev.py`'s `--toolset`** rather
 than shimming `PATH` with symlinks: a missing toolset is then a hard, loud error
 instead of a silent fall-through to whatever the default is. `--toolset` also
@@ -211,8 +239,8 @@ WASI), running the iOS/Android binaries on a simulator/emulator (today they are
 build-only), and build caching (ccache/sccache).
 
 **Prefer Linux for additional checks.** Linux runners spin up faster and cost
-less than Windows/macOS, and the `ubuntu-26.04` job needs no toolchain-install
-steps — so it has the lowest end-to-end latency. New gates (extra presets, lint
+less than Windows/macOS, and the `ubuntu-26.04` job installs no toolchain (only
+SDL3's headers) — so it has the lowest end-to-end latency. New gates (extra presets, lint
 passes, coverage) are cheapest to add there unless they specifically require
 another platform — which is also why the deep config matrix lives on Linux
 clang.

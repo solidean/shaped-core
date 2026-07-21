@@ -40,8 +40,13 @@ Churn that would bury the actual point of a diff — do it separately.
 This binds **everything we write in prose**:
 
 - `///` doc comments and `//` inline comments
+- **`CMakeLists.txt` and `.cmake` files** — a `#` comment is prose like any other, and build files are read
+  by someone hunting one specific decision, which is exactly the skimming a reflowed block defeats
+- Python comments and docstrings, including [dev.py](../dev.py) and `tools/`
 - **every Markdown file in the repo** — [docs/](_index.md), readmes, cheat sheets, [CLAUDE.md](../CLAUDE.md), skill files
 - commit messages and PR descriptions
+
+The rule is about **prose**, not about the language it sits in. If you are writing sentences for a human, it applies.
 
 Reflowed prose cannot be skimmed.
 Every point starts at an unpredictable column, so the eye must read all of it to find the line that matters.
