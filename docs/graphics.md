@@ -80,9 +80,10 @@ Multiple windows are supported today, which is the groundwork for imgui docking 
   [CI's system packages](guides/ci.md#system-packages) for the Ubuntu list, or
   [SDL's own](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies).
   Without them SDL3 is skipped rather than fatal: the rest of sr still configures and builds, just without
-  the window API.
-- **The window API is therefore optional**: CMake defines `SR_HAS_WINDOW` to `1` or `0`, and a checkout
-  without SDL3 builds and tests the rest of sr unchanged.
+  a window backend.
+- **Only the backend is optional, not the API.** Without SDL3, `sr::window_system::try_create` fails with a
+  reason rather than the types disappearing, so a caller compiles either way and finds out at run time.
+  `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 
 See the [sr render-routines doc](../libs/graphics/shaped-rendering/docs/render-routines.md) and the
 [shaped-rendering readme](../libs/graphics/shaped-rendering/readme.md).

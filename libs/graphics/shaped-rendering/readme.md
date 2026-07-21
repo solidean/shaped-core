@@ -29,9 +29,10 @@ while (!win->is_close_requested())
 
 Three things worth knowing before you use it:
 
-* **SDL3 backs it, and SDL3 is fetched on demand, so the API is optional.**
-  CMake defines `SR_HAS_WINDOW` to `1` or `0`, and a checkout without SDL3 builds everything else in sr unchanged.
-  No SDL type reaches a public header — see [coding-guidelines](docs/coding-guidelines.md).
+* **SDL3 backs it, and SDL3 is fetched on demand — so the backend is optional, not the API.**
+  Without one, `window_system::try_create` fails with a reason instead of the types disappearing, so the same
+  code compiles either way. `SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" when you need it at
+  compile time. No SDL type reaches a public header — see [coding-guidelines](docs/coding-guidelines.md).
 * **`window_system` is main-thread bound.**
   Create it, create windows from it, poll it and destroy it all on one thread.
   On macOS that thread must be the process main thread.

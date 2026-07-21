@@ -33,6 +33,21 @@ TEST("sr - key modifiers combine and test as a bit set")
     CHECK(accumulated == (ctrl | shift));
 }
 
+TEST("sr - window system creation reports whether a backend exists")
+{
+    // The API is here either way; only the answer changes. A caller writes this once and it compiles in both
+    // builds, which is the point of not gating the types on SR_HAS_WINDOW.
+    auto const created = sr::window_system::try_create({.headless = true});
+
+#if SR_HAS_WINDOW
+    CHECK(created.has_value());
+#else
+    CHECK(created.has_error());
+#endif
+}
+
+#if SR_HAS_WINDOW
+
 TEST("sr - a fresh window system has no events")
 {
     auto const wsys = sr::window_system::create({.headless = true});
@@ -71,3 +86,5 @@ TEST("sr - relative mouse mode round-trips")
     win->set_relative_mouse_mode(false);
     CHECK(!win->is_relative_mouse_mode());
 }
+
+#endif // SR_HAS_WINDOW

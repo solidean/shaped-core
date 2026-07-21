@@ -9,10 +9,6 @@
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/input.hh>
 
-#if !SR_HAS_WINDOW
-#error "shaped-rendering was built without a window backend. Fetch SDL3 (uv run extern/sdl3/fetch-sdl3.py) and reconfigure."
-#endif
-
 namespace sr
 {
 /// How a window is created.
@@ -167,8 +163,12 @@ struct window_system_description
 class window_system
 {
 public:
-    /// Brings the window subsystem up, or fails with the platform's reason.
+    /// Brings the window subsystem up, or fails with the reason.
     /// Fails when no display is available and headless was not requested.
+    ///
+    /// Also fails when shaped-rendering was built without a window backend, which is the only thing
+    /// SR_HAS_WINDOW changes — the API is always here, so code compiles either way and finds out now.
+    /// Check this result rather than the macro unless you need the answer at compile time.
     [[nodiscard]] static cc::result<cc::unique_ptr<window_system>> try_create(window_system_description const& desc = {});
 
     /// Throwing counterpart of try_create.

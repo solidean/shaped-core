@@ -12,6 +12,8 @@
 // native-handle-to-swapchain path are all out of reach — a headless window has no native handle.
 // Those live in window-manual-test.cc and, for the swapchain, above sr.
 
+#if SR_HAS_WINDOW
+
 TEST("sr - window system creates and shuts down")
 {
     auto const wsys = sr::window_system::create({.headless = true});
@@ -97,3 +99,5 @@ TEST("sr - a second window system asserts")
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK_ASSERTS(sr::window_system::create({.headless = true}));
 }
+
+#endif // SR_HAS_WINDOW

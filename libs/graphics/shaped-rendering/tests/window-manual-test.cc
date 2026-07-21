@@ -13,6 +13,8 @@
 // The first needs only a display and finishes on its own.
 // The second opens a visible window and runs until someone closes it.
 
+#if SR_HAS_WINDOW
+
 TEST("sr - window native handle (manual)", nx::config::manual)
 {
     // The claim the whole abstraction rests on: a real window yields the handle sg::swapchain_description wants.
@@ -54,3 +56,5 @@ TEST("sr - window (manual)", nx::config::manual)
 
     cc::println("close requested — shutting down");
 }
+
+#endif // SR_HAS_WINDOW

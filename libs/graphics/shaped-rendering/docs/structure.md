@@ -41,7 +41,8 @@ gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see TO
 imgui multi-viewport   [planned]  the reason the multi-window mechanism is already in place
 ```
 
-The window API is optional: SDL3 is fetched on demand, and CMake defines `SR_HAS_WINDOW` to `1` or `0`.
+The API is always present. Only the backend is optional, since SDL3 is fetched on demand — without one,
+`window_system::try_create` fails and `SR_HAS_WINDOW` is 0.
 
 ## Intended scope (routines, all [planned])
 

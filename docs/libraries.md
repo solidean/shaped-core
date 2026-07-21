@@ -129,7 +129,8 @@ Render routines and helpers on top of sg — the reusable building blocks of a r
 generation, texture compression, tonemapping, …), still an early-stage skeleton.
 Also home to the **window abstraction** (`sr::window_system` / `sr::window`), backed by SDL3 and exposing none of it.
 A window's native handle feeds `sg::swapchain_description`.
-Optional — SDL3 is fetched on demand (`extern/sdl3`), and `SR_HAS_WINDOW` says whether it was.
+The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails rather
+than the types disappearing, and `SR_HAS_WINDOW` says whether one was compiled in.
 
 ### shaped-viewer — namespace `sv` — depends on shaped-rendering
 

@@ -43,11 +43,22 @@ Three things fall out of that one seam, none of them obvious from the code:
 * Adding or replacing a windowing backend is one new `.cc` plus a CMake branch, with no public API movement.
   The same shape as shaped-shader-library's `impl/watch_backend_*.cc`.
 
-## The window API is gated, and the gate is `SR_HAS_WINDOW`
+## The API is always there; only the backend is optional
 
-SDL3 is fetched on demand, so sr must build without it.
-CMake defines `SR_HAS_WINDOW` to `1` or `0` — always defined, never defined-vs-undefined.
-`window.hh`, `fwd.hh` and `all.hh` all branch on `#if SR_HAS_WINDOW`.
+SDL3 is fetched on demand, so sr must build without it — but the window and input **types are unconditional**.
+Without a backend, `window_system::try_create` fails with a reason instead of the type ceasing to exist.
 
-Anything new that needs SDL goes inside that same `#if` and the same CMake branch.
-Never add a second flag: two gates that can disagree is a build configuration nobody tests.
+That is deliberate. A caller writes the same code in both builds and learns the answer from a `cc::result`
+it was already obliged to handle, rather than from a macro it has to remember to `#if` on. The failure also
+carries a message that says what to do; a missing type only produces a compile error about `sr::window`.
+
+`SR_HAS_WINDOW` is still defined to `1` or `0` — always defined, never defined-vs-undefined — but it now
+answers a narrower question: *is a backend compiled in*. Reach for it only when you need that at compile
+time, such as a test that asserts which way `try_create` will go. Never to decide whether the API exists.
+
+Anything new that needs SDL goes in `impl/`, behind the same CMake branch that picks `window_sdl.cc` or
+`window_null.cc`. Never add a second flag: two gates that can disagree is a build configuration nobody tests.
+
+The null backend fails at `try_create` and asserts everywhere else, because no `window_system` can exist
+without a backend, so nothing downstream of it is reachable. A window method running there means a failed
+`try_create` went unchecked — worth an assert rather than a silent no-op.
