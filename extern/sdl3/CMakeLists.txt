@@ -14,10 +14,10 @@ if(NOT EXISTS "${SDL3_INSTALL}/pin.txt")
         "dev.py does this automatically; see tools/dev/lib/pipeline/prereqs.py.")
 endif()
 
-# SDL refuses to configure on a unix without X11 or wayland development headers, and its refusal is a
-# FATAL_ERROR that would take the whole repo's configure down with it — not just sr.
-# Check first and bow out instead, so a bare container or a machine without the packages still configures
-# everything else; SC_HAS_SDL3 then reports OFF and sr builds without its window API.
+# SDL refuses to configure on a unix without X11 or wayland development headers.
+# Its refusal is a FATAL_ERROR, which would take the whole repo's configure down with it — not just sr.
+# So check first and bow out instead, and a bare container still configures everything else.
+# SC_HAS_SDL3 then reports OFF and sr builds without a window backend.
 # Headers only: SDL loads the libraries themselves at run time.
 if(UNIX AND NOT APPLE)
     include(CheckIncludeFile)
@@ -34,8 +34,8 @@ endif()
 
 # SDL's build is driven by ~100 options, most defaulting to "on when SDL is the top-level project".
 # It is not, here, so most of these already hold.
-# We set them anyway, FORCEd, so the build we get never depends on SDL's notion of who is top-level, and so a
-# stale cache entry cannot flip one back on.
+# We set them anyway, FORCEd, so the build never depends on SDL's notion of who is top-level.
+# It also stops a stale cache entry flipping one back on.
 # Grouped by what the answer buys us.
 
 # Linkage: shared.

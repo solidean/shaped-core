@@ -142,8 +142,8 @@ TEST("sr - modifiers carry forward from key events onto mouse events")
     CHECK(has_all(b->modifiers, key_modifiers::shift));
     CHECK(b->button == mouse_button::left);
     CHECK(b->is_down);
-    CHECK(b->x == 12.0f);
-    CHECK(b->y == 34.0f);
+    CHECK(b->cursor_pos[0] == 12.0f);
+    CHECK(b->cursor_pos[1] == 34.0f);
 }
 
 TEST("sr - committed text arrives as its own event, copied")

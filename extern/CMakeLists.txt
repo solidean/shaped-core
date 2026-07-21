@@ -20,10 +20,11 @@ option(SC_USE_VENDORED_DXC "Wrap the built-from-source DXC in extern/dxc/.instal
 # where it decodes an instruction set nothing present can execute.
 option(SC_USE_VENDORED_ZYDIS "Build the fetched Zydis in extern/zydis/.install (OFF expects an external `zydis` target)" ON)
 
-# SDL3 is fetched-on-demand rather than vendored as source — its tree is ~50 MB across several thousand files.
+# SDL3 is fetched-on-demand rather than vendored as source.
+# Its tree is ~50 MB across several thousand files.
 # It backs shaped-rendering's sr::window, and unlike DXC and Zydis it is wanted on every platform.
 # Wire it only when it has actually been fetched, so a plain checkout still configures.
-# shaped-rendering gates its window sources on the SDL3::SDL3 target existing.
+# shaped-rendering gates its window backend on the SDL3::SDL3 target existing.
 option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF expects an external `SDL3::SDL3` target)" ON)
 
 if(SC_USE_VENDORED_MIMALLOC)

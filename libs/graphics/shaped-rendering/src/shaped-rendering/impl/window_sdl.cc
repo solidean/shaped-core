@@ -186,11 +186,6 @@ cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_syste
     return cc::move(system);
 }
 
-cc::unique_ptr<window_system> window_system::create(window_system_description const& desc)
-{
-    return try_create(desc).or_throw();
-}
-
 window_system::~window_system()
 {
     assert_owning_thread();
@@ -247,11 +242,6 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
     return cc::move(win);
 }
 
-cc::unique_ptr<window> window_system::create_window(window_description const& desc)
-{
-    return try_create_window(desc).or_throw();
-}
-
 void window_system::unregister_window(window* w)
 {
     assert_owning_thread();
@@ -304,10 +294,8 @@ void window_system::poll_events()
 
         case SDL_EVENT_MOUSE_MOTION:
             _events.push_back({.window = window_from_id(event.motion.windowID),
-                               .payload = mouse_move_event{.x = event.motion.x,
-                                                           .y = event.motion.y,
-                                                           .dx = event.motion.xrel,
-                                                           .dy = event.motion.yrel}});
+                               .payload = mouse_move_event{.cursor_pos = tg::pos2f(event.motion.x, event.motion.y),
+                                                           .delta = tg::vec2f(event.motion.xrel, event.motion.yrel)}});
             break;
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -316,18 +304,16 @@ void window_system::poll_events()
                                .payload = mouse_button_event{.button = impl::mouse_button_from_sdl(event.button.button),
                                                              .modifiers = _modifiers,
                                                              .is_down = event.button.down,
-                                                             .x = event.button.x,
-                                                             .y = event.button.y}});
+                                                             .cursor_pos = tg::pos2f(event.button.x, event.button.y)}});
             break;
 
         case SDL_EVENT_MOUSE_WHEEL:
         {
-            _events.push_back(
-                {.window = window_from_id(event.wheel.windowID),
-                 .payload = mouse_wheel_event{.dx = impl::wheel_amount(event.wheel.x, event.wheel.direction),
-                                              .dy = impl::wheel_amount(event.wheel.y, event.wheel.direction),
-                                              .x = event.wheel.mouse_x,
-                                              .y = event.wheel.mouse_y}});
+            _events.push_back({.window = window_from_id(event.wheel.windowID),
+                               .payload = mouse_wheel_event{
+                                   .delta = tg::vec2f(impl::wheel_amount(event.wheel.x, event.wheel.direction),
+                                                      impl::wheel_amount(event.wheel.y, event.wheel.direction)),
+                                   .cursor_pos = tg::pos2f(event.wheel.mouse_x, event.wheel.mouse_y)}});
             break;
         }
 

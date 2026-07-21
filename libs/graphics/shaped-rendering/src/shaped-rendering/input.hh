@@ -2,12 +2,10 @@
 
 #include <clean-core/string/string.hh>
 #include <shaped-rendering/fwd.hh>
+#include <typed-geometry/linalg/pos.hh> // tg::pos2f
+#include <typed-geometry/linalg/vec.hh> // tg::vec2f
 
 #include <variant>
-
-#if !SR_HAS_WINDOW
-#error "shaped-rendering was built without a window backend. Fetch SDL3 (uv run extern/sdl3/fetch-sdl3.py) and reconfigure."
-#endif
 
 namespace sr
 {
@@ -217,17 +215,16 @@ struct text_event
 };
 
 /// Cursor motion.
-/// In relative mouse mode x and y stop being meaningful and only dx/dy are — see window::set_relative_mouse_mode.
+/// In relative mouse mode cursor_pos stops being meaningful and only delta is — see
+/// window::set_relative_mouse_mode.
 struct mouse_move_event
 {
     /// Cursor position in pixels, relative to the window's client area.
-    float x = 0;
-    float y = 0;
+    tg::pos2f cursor_pos;
 
     /// Motion since the previous event, in pixels.
     /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
-    float dx = 0;
-    float dy = 0;
+    tg::vec2f delta;
 };
 
 struct mouse_button_event
@@ -243,8 +240,7 @@ struct mouse_button_event
     bool is_down = false;
 
     /// Cursor position when the button changed, in pixels relative to the window's client area.
-    float x = 0;
-    float y = 0;
+    tg::pos2f cursor_pos;
 };
 
 /// A scroll, already corrected for the platform's scroll direction.
@@ -252,12 +248,11 @@ struct mouse_wheel_event
 {
     /// Scroll amount in ticks; positive is right and away from the user.
     /// Fractional on trackpads and high-resolution wheels, so do not assume whole steps.
-    float dx = 0;
-    float dy = 0;
+    tg::vec2f delta;
 
     /// Cursor position when the scroll happened, in pixels relative to the window's client area.
-    float x = 0;
-    float y = 0;
+    /// Where the pointer was, not any position of the wheel itself.
+    tg::pos2f cursor_pos;
 };
 
 /// One thing the user did.

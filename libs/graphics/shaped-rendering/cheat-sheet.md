@@ -17,7 +17,8 @@ shaped-graphics + shaped-shader-library. Headers are included by full path from 
 
 ## Windows
 
-Present only when SDL3 was fetched — CMake defines `SR_HAS_WINDOW` to `1` or `0`.
+Always available. Without a backend (SDL3 not fetched) `try_create` fails instead of the API disappearing;
+`SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" for the rare case you need it at compile time.
 
 ```cpp
 #include <shaped-rendering/window.hh>
@@ -61,9 +62,9 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
         k->modifiers;   // sr::key_modifiers bit set; has_all(k->modifiers, ctrl | shift)
         k->is_down;  k->is_repeat;
     if (auto const* t = std::get_if<sr::text_event>(&e.payload))  t->text;        // cc::string, UTF-8
-    if (auto const* m = std::get_if<sr::mouse_move_event>(&e.payload))    m->x, m->y, m->dx, m->dy;  // float px
-    if (auto const* b = std::get_if<sr::mouse_button_event>(&e.payload))  b->button, b->is_down, b->x, b->y;
-    if (auto const* w = std::get_if<sr::mouse_wheel_event>(&e.payload))   w->dx, w->dy;  // ticks, may be fractional
+    if (auto const* m = std::get_if<sr::mouse_move_event>(&e.payload))    m->cursor_pos, m->delta;  // pos2f, vec2f
+    if (auto const* b = std::get_if<sr::mouse_button_event>(&e.payload))  b->button, b->is_down, b->cursor_pos;
+    if (auto const* w = std::get_if<sr::mouse_wheel_event>(&e.payload))   w->delta;  // ticks, may be fractional
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
@@ -77,6 +78,8 @@ win->start_text_input();              // begin text_events + IME for this window
   next keystroke, and a paste arrives as one `text_event`.
 - **Text input is off until `start_text_input()`**, because while it is on the OS may swallow keystrokes to compose.
 - **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
+- **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
+  tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
 - **`input_event::payload` is `std::variant` only until `cc::variant` exists** — the alternatives are the API.
 
 ## Writing a concrete routine
