@@ -110,6 +110,14 @@ key_modifiers modifiers_from_sdl(SDL_Keymod mod)
 
 char32_t character_from_keycode(SDL_Keycode keycode)
 {
+    // SDL packs two kinds of value into one u32.
+    // A key that produces a character *is* that character's codepoint — SDLK_A is 0x61, 'a'.
+    // Every other key is its scancode with a flag bit set: SDLK_SCANCODE_MASK (1<<30) for named keys, so
+    // SDLK_F1 is 0x4000003a, and SDLK_EXTENDED_MASK (1<<29) for extended ones.
+    // Both flags land above Unicode's ceiling, so a range test separates the two without naming SDL's masks.
+    //
+    // This does admit the C0 controls SDL defines as codepoints — enter is U+000D, tab U+0009, escape U+001B,
+    // backspace U+0008 — so a non-zero character is not the same as a printable one.
     constexpr auto unicode_max = SDL_Keycode(0x10FFFF);
     return keycode > 0 && keycode <= unicode_max ? char32_t(keycode) : char32_t(0);
 }

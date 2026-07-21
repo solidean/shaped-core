@@ -194,6 +194,9 @@ struct key_event
     /// The character this key produces under the current layout, or 0 when it produces none.
     /// What to test for a shortcut a user would describe by letter, like ctrl+Z, which follows the layout.
     /// Not text input — a held key repeats here but composes properly only through text_event.
+    ///
+    /// Non-zero is not the same as printable: enter, tab, escape and backspace report the C0 control they
+    /// stand for (U+000D, U+0009, U+001B, U+0008). Match those on scancode instead.
     char32_t character = 0;
 
     key_modifiers modifiers = key_modifiers::none;

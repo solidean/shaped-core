@@ -81,6 +81,13 @@ TEST("sr - printable keycodes become their codepoint")
     CHECK(impl::character_from_keycode(SDLK_LEFT) == 0);
     CHECK(impl::character_from_keycode(SDLK_LSHIFT) == 0);
     CHECK(impl::character_from_keycode(SDLK_UNKNOWN) == 0);
+
+    // SDL defines these as the C0 controls they stand for, and they are inside the Unicode range, so they
+    // come through as characters. A non-zero character is therefore not the same as a printable one.
+    CHECK(impl::character_from_keycode(SDLK_RETURN) == U'\r');
+    CHECK(impl::character_from_keycode(SDLK_TAB) == U'\t');
+    CHECK(impl::character_from_keycode(SDLK_BACKSPACE) == U'\b');
+    CHECK(impl::character_from_keycode(SDLK_ESCAPE) == char32_t(0x1B));
 }
 
 TEST("sr - mouse buttons map, and anything unexpected lands on x2")
