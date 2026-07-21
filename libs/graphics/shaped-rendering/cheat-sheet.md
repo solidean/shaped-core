@@ -8,7 +8,7 @@ shaped-graphics + shaped-shader-library. Headers are included by full path from 
 > `ctx.routines`, `sg::reload_generation` (see
 > [shaped-graphics/cheat-sheet.md](../shaped-graphics/cheat-sheet.md) and
 > [shaped-graphics/docs/render-routines.md](../shaped-graphics/docs/render-routines.md)). `sr` hosts
-> the concrete routines (mipmap gen, tonemapping, …), which land later. Format conventions live in
+> the concrete routines — Dear ImGui today, mipmap gen / tonemapping later. Format conventions live in
 > [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
@@ -81,6 +81,36 @@ win->start_text_input();              // begin text_events + IME for this window
 - **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
   tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
 - **`input_event::payload` is `std::variant` only until `cc::variant` exists** — the alternatives are the API.
+
+## Dear ImGui
+
+Full doc: [docs/imgui.md](docs/imgui.md). Vendored docking branch; `<imgui.h>` is available to consumers.
+
+```cpp
+lib.add_package(sr::shader_package());       // once at startup, or routines acquire nothing
+
+auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports stubbed; move-only
+
+imgui.begin_frame({.display_size = tg::vec2i(w, h), .delta_time = dt, .framebuffer_scale = {1, 1}});
+ImGui::ShowDemoWindow();                     // any imgui calls
+imgui.end_frame();                           // = ImGui::Render()
+
+{
+    auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
+    sr::imgui_routine::execute(*cmd, ImGui::GetDrawData(), {.target_format = fmt, .target_size = tg::vec2i(w, h)});
+}
+
+sr::imgui_routine::live_texture_count(ctx);           // -> isize, atlas textures alive (tests/diagnostics)
+sr::imgui_routine::release_textures(ctx, draw_data);  // drop them; a later frame rebuilds
+```
+
+Gotchas:
+
+- **`target_format` must not be sRGB** — imgui's colors are already sRGB-encoded; asserts rather than
+  double-encoding. Bind a non-srgb view of the same resource.
+- **One call, inside the scope.** Textures, geometry upload and draws all happen in `execute()`.
+- **One thread.** The state is mutex-guarded, so two threads cannot corrupt it — but the routine is a
+  per-context singleton holding *this frame's* geometry, so record imgui from one thread.
 
 ## Writing a concrete routine
 

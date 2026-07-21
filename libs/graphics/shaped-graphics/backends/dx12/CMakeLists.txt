@@ -120,6 +120,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-cached-pso-test.cc
         tests/dx12-placed-test.cc
         tests/dx12-transient-test.cc
+        tests/dx12-buffer-barrier-test.cc
         tests/dx12-texture-barrier-test.cc
         tests/dx12-texture-view-test.cc
         tests/dx12-rtv-dsv-test.cc

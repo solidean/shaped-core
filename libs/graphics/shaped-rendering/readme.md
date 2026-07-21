@@ -2,7 +2,7 @@
 
 Concrete render routines and helpers on top of [shaped-graphics](../shaped-graphics/readme.md).
 Namespace `sr`. Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines acquire
-their shaders through it), plus transitively typed-geometry + clean-core.
+their shaders through it) and the vendored **imgui**, plus transitively typed-geometry + clean-core.
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sr is the home for the common building blocks of a renderer built on sg — mipmap generation, texture compression, tonemapping, and similar reusable render routines.
@@ -62,6 +62,9 @@ thing that handles IME composition, dead keys and paste correctly — never rebu
 
 See the [cheat-sheet](cheat-sheet.md) for the full surface.
 
+It also hosts the **Dear ImGui renderer** — the renderer half of an imgui backend, drawn entirely
+through sg with no native graphics calls. See [docs/imgui.md](docs/imgui.md).
+
 The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init,
 and the per-context `ctx.routines` registry) lives in **shaped-graphics** — see its
 [docs/render-routines.md](../shaped-graphics/docs/render-routines.md). `sr` hosts the **concrete**
@@ -72,13 +75,14 @@ routines built on top of it; they land as they are implemented. See
 ## Building & testing
 
 Build and test through the repo driver — never run the `shaped-rendering-test` binary directly.
-Beyond the window suite it is a smoke test for now.
 The render-routine framework is tested in shaped-graphics, where it lives; concrete routines bring their own tests as they land.
 
 ```bash
-uv run dev.py test "sr - "        # the window suite — headless, runs anywhere
-uv run dev.py test "sr smoke"     # the shaped-rendering smoke test
-uv run dev.py test "sg - routine" # the render-routine framework tests (in shaped-graphics)
+uv run dev.py test "sr"                 # everything in shaped-rendering
+uv run dev.py test "sr - "              # the window suite — headless, runs anywhere
+uv run dev.py test "sr::impl"           # the imgui arithmetic — no device needed, runs everywhere
+uv run dev.py test "sr::imgui_routine"  # imgui end to end on a dx12 WARP device (skips without one)
+uv run dev.py test "sg - routine"       # the render-routine framework tests (in shaped-graphics)
 ```
 
 The window suite runs on SDL's dummy video driver, so it needs no display.

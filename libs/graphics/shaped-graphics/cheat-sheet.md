@@ -297,6 +297,7 @@ sg::pixel_format             // enum: undefined, r8/rg8/rgba8/bgra8 (unorm/snorm
                              //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
 sg::is_depth_format(f)       // bool  — depth or depth-stencil
 sg::has_stencil(f)           // bool  — carries a stencil plane
+sg::is_srgb_format(f)        // bool  — hardware applies the sRGB transfer function on read/write
 sg::is_compressed_format(f)  // bool  — BC block-compressed (4x4 blocks)
 sg::format_block_size(f)     // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)   // int   — 1 (uncompressed) or 4 (BC)

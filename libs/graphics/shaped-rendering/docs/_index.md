@@ -13,6 +13,8 @@ The render-routine *framework* lives in shaped-graphics (see
 
 ## Topics
 
+- [imgui](imgui.md) — the Dear ImGui renderer: how to drive it, why it is three types, and the 1.92
+  texture protocol a backend has to implement.
 - [render-routines](render-routines.md) — sr-side overview: writing a concrete routine, with a link to
   the framework doc in shaped-graphics.
 - [structure](structure.md) — the intended module roadmap with status tags, including windowing.

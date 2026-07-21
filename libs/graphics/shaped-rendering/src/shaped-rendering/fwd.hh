@@ -30,4 +30,14 @@ struct mouse_move_event;
 struct mouse_button_event;
 struct mouse_wheel_event;
 struct input_event;
+
+// Dear ImGui, drawn through sg. imgui_context owns the ImGui context and the frame bracket;
+// imgui_routine owns the GPU resources and records the draws.
+class imgui_context;
+class imgui_routine;
+
+namespace impl
+{
+class imgui_texture_registry;
+}
 } // namespace sr

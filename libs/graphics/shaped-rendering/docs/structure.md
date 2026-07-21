@@ -44,6 +44,20 @@ imgui multi-viewport   [planned]  the reason the multi-window mechanism is alrea
 The API is always present. Only the backend is optional, since SDL3 is fetched on demand — without one,
 `window_system::try_create` fails and `SR_HAS_WINDOW` is 0.
 
+## Dear ImGui **[done]**
+
+The renderer half of an imgui backend, drawn entirely through `sg` — no native graphics calls.
+See [imgui.md](imgui.md) for the shape and the reasoning.
+
+```text
+sr::imgui_context     [done]  owns the ImGui context + the frame bracket; docking on, viewports stubbed
+sr::imgui_routine     [done]  the render routine: atlas textures, geometry, pipelines; one execute()
+sr::shader_package()  [done]  sr's shader package, to register with a slib::shader_library
+```
+
+Still open: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas path.
+Multi-viewport is no longer blocked now that windowing has landed — see the windowing section above.
+
 ## Intended scope (routines, all [planned])
 
 ```text
@@ -54,4 +68,4 @@ render passes / helpers [planned]
 common shader utilities [planned]
 ```
 
-The exact module layout settles as the first routines land; keep this roadmap updated as it does.
+The exact module layout settles as more routines land; keep this roadmap updated as it does.

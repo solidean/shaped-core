@@ -49,8 +49,8 @@ One-liner per library:
   The shader system's front door is
   [shaped-graphics/docs/shaders.md](libs/graphics/shaped-graphics/docs/shaders.md).
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
-  Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it).
-  No concrete routines have landed yet.
+  Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui`.
+  Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails
   instead of the types disappearing. `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.

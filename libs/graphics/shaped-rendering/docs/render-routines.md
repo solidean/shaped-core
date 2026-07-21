@@ -31,5 +31,24 @@ protected:
 `init_declare` — a routine-author dependency. The framework in `sg` needs no shader library; reload
 tracking is `sg`'s own generation counter.
 
-No concrete routines have landed yet — they arrive here as they are implemented, each with its own
-tests. See [structure.md](structure.md) for the roadmap.
+Register `sr::shader_package()` with your `slib::shader_library` once at startup, or every routine here
+acquires nothing and draws nothing.
+
+## A routine owns shader-derived state — nothing else
+
+`init_declare` re-runs on every shader reload, so a routine's members are the things that *should* be
+rebuilt then: layouts, pipelines, compiled shaders. Anything whose lifetime is driven from outside —
+a resource pool, a per-frame allocation, a registry the caller mutates — does not belong in a routine,
+and trying to put it there shows up immediately as a fight with `acquire()` returning a `const&`.
+
+The worked example is Dear ImGui ([imgui.md](imgui.md)). ImGui owns the lifetime of its font atlas, so the
+atlas lives on `sr::imgui_renderer`, an ordinary object the application holds, while
+`sr::imgui_draw_routine` keeps only the layouts and pipelines and reads everything else out of its
+`params`. That split is what let the routine stay `const` and the sg framework stay unchanged.
+
+The one member the imgui routine does mutate is a `mutable` pipeline cache keyed by target format —
+memoization of a pure function, and a stand-in for `ctx.cached.acquire_raster_pipeline` once
+`pipeline_cache` grows a graphics tier.
+
+Concrete routines arrive here as they are implemented, each with its own tests.
+See [structure.md](structure.md) for the roadmap.

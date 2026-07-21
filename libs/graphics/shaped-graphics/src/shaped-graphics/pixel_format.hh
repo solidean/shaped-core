@@ -108,6 +108,26 @@ enum class pixel_format : u16
     return is_depth_stencil_format(f) ? 2 : 1;
 }
 
+/// True for the sRGB-encoded formats — those where the hardware applies the sRGB transfer function on
+/// read and write, so shader-side values are linear while stored texels are encoded.
+/// Matters whenever content is already sRGB-encoded before it reaches the target (UI colors, an imported
+/// 8-bit texture): writing it to one of these encodes it a second time.
+[[nodiscard]] constexpr bool is_srgb_format(pixel_format f)
+{
+    switch (f)
+    {
+    case pixel_format::rgba8_unorm_srgb:
+    case pixel_format::bgra8_unorm_srgb:
+    case pixel_format::bc1_rgba_unorm_srgb:
+    case pixel_format::bc2_unorm_srgb:
+    case pixel_format::bc3_unorm_srgb:
+    case pixel_format::bc7_rgba_unorm_srgb:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// True for the BC block-compressed formats (4x4 texel blocks).
 [[nodiscard]] constexpr bool is_compressed_format(pixel_format f)
 {

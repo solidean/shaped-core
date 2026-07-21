@@ -8,6 +8,10 @@
 option(SC_USE_VENDORED_MIMALLOC "Build the in-tree vendored mimalloc (OFF expects an external `mimalloc` target)" ON)
 option(SC_USE_VENDORED_XXHASH "Build the in-tree vendored xxHash (OFF expects an external `xxhash` target)" ON)
 
+# Dear ImGui, tracked on the docking branch. Consumed by shaped-rendering, which draws it through sg —
+# upstream's own per-API backends are not vendored, so nothing here pulls in native graphics calls.
+option(SC_USE_VENDORED_IMGUI "Build the in-tree vendored Dear ImGui (OFF expects an external `imgui` target)" ON)
+
 # DXC is built-from-source (not vendored as source) and only consumed by the Windows-only
 # shaped-shader-compiler-dxc library. Wire it only when it has actually been built, so a plain
 # checkout still configures; the graphics library gates itself on the `dxc` target existing.
@@ -33,6 +37,10 @@ endif()
 
 if(SC_USE_VENDORED_XXHASH)
     add_subdirectory(xxhash)
+endif()
+
+if(SC_USE_VENDORED_IMGUI)
+    add_subdirectory(imgui)
 endif()
 
 if(SC_USE_VENDORED_DXC AND WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")

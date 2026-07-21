@@ -3,6 +3,13 @@
 Running list of known follow-ups. Bigger design intent lives in [structure.md](structure.md).
 
 - First routines on the framework: mipmap generation, texture compression, tonemapping.
+- imgui: wire the platform half once the windowing system lands — input events, cursors, clipboard
+  (see the `TODO(windowing)` block in `imgui_context.cc`).
+- imgui: multi-viewport (`ImGuiConfigFlags_ViewportsEnable`) needs per-viewport OS windows + swapchains.
+- imgui: `ImDrawCmd::UserCallback` is skipped; supporting it also means `ImDrawCallback_ResetRenderState`.
+- imgui: an Alpha8 atlas path (the shader samples `.rgba`, so `TexDesiredFormat` is pinned to RGBA32).
+- `imgui_draw_routine` keeps its own pipeline-per-format map; fold it into
+  `ctx.cached.acquire_raster_pipeline` once `pipeline_cache` grows a graphics tier.
 - Concrete routines currently need dx12 + DXC (Windows) for a real shader; the framework itself is
   cross-platform. Broaden once a non-Windows shader path exists.
 - The routine library watches `std::shared_ptr<slib::shader_library>`; `add_shader_library` accepts any
