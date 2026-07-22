@@ -40,8 +40,8 @@ Three things worth knowing before you use it:
 * **Rendering is not.**
   `native_window_handle()` is fixed for a window's lifetime, so a render thread may drive the swapchain as long as `poll_events` stays on the main thread.
 
-Multiple windows work today: each has its own size, close latch and native handle, and `wsys->windows()` enumerates them.
-That is the groundwork for imgui docking and multiple viewports.
+Multiple windows work today: each has its own size, position, focus, close latch and native handle, and `wsys->windows()` enumerates them.
+That is what imgui's multi-viewport support is built on — see [docs/imgui.md](docs/imgui.md).
 
 ## Input
 
@@ -90,8 +90,11 @@ What that cannot reach — a real window manager delivering close and resize eve
 
 ```bash
 uv run dev.py test "sr - window native handle (manual)" --manual   # creates a hidden real window, checks the handle
-uv run dev.py test "sr - window (manual)" --manual --mirror-test-output   # opens a window; close it to end
+uv run dev.py test "sr - window (manual)" --manual --mirror-test-output --timeout 0   # opens a window; close it to end
 ```
+
+`--timeout 0` matters for any test that waits on a person: dev.py kills a test binary after 60s by default and reports it failed.
+The same applies to the imgui one, `uv run dev.py test "sr - imgui window (manual)" --manual --mirror-test-output --timeout 0`.
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
 

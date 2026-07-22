@@ -33,6 +33,44 @@ TEST("sr - window reports its requested size before any poll")
     CHECK(!win->is_close_requested());
 }
 
+TEST("sr - window position and size read back without an intervening poll")
+{
+    // The write-through is the point: imgui's viewport backend sets a position and reads it again inside one
+    // frame, long before the next poll_events would refresh it.
+    auto const wsys = sr::window_system::create({.headless = true});
+    auto const win = wsys->create_window({.title = "placed", .width = 640, .height = 480});
+
+    win->set_position(tg::pos2i(120, -40));
+    CHECK(win->position() == tg::pos2i(120, -40)); // a negative coordinate is a legal desktop position
+
+    win->set_size(tg::vec2i(800, 600));
+    CHECK(win->width() == 800);
+    CHECK(win->height() == 600);
+}
+
+TEST("sr - the display list is never empty and its work area fits inside its bounds")
+{
+    // imgui's multi-viewport path refuses a frame outright while the monitor list is empty, and the dummy
+    // video driver reports no displays at all — so a headless system substitutes one.
+    auto const wsys = sr::window_system::create({.headless = true});
+
+    auto const displays = wsys->displays();
+    REQUIRE(!displays.empty());
+
+    for (auto const& d : displays)
+    {
+        CHECK(d.size[0] > 0);
+        CHECK(d.size[1] > 0);
+        CHECK(d.content_scale > 0.0f);
+
+        // The usable area is what a window should open into, so it can never be larger than the monitor.
+        CHECK(d.work_position[0] >= d.position[0]);
+        CHECK(d.work_position[1] >= d.position[1]);
+        CHECK(d.work_position[0] + d.work_size[0] <= d.position[0] + d.size[0]);
+        CHECK(d.work_position[1] + d.work_size[1] <= d.position[1] + d.size[1]);
+    }
+}
+
 TEST("sr - windows register in creation order and unregister on destruction")
 {
     auto const wsys = sr::window_system::create({.headless = true});
@@ -98,6 +136,71 @@ TEST("sr - a second window system asserts")
 {
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK_ASSERTS(sr::window_system::create({.headless = true}));
+}
+
+TEST("sr - a window knows the system it came from")
+{
+    auto const wsys = sr::window_system::create({.headless = true});
+    auto const win = wsys->create_window({.title = "owned"});
+
+    CHECK(&win->system() == wsys.get());
+}
+
+TEST("sr - the cursor shape is tracked and starts as an arrow")
+{
+    // The dummy video driver has no real pointer, so what is checkable here is the bookkeeping: the shape a
+    // caller set is the shape it reads back, and setting the same one twice is not an error.
+    // Whether the OS actually draws it needs a display, which is the manual bucket's job.
+    auto const wsys = sr::window_system::create({.headless = true});
+
+    CHECK(wsys->cursor() == sr::cursor_shape::arrow);
+    CHECK(wsys->is_cursor_visible());
+
+    wsys->set_cursor(sr::cursor_shape::text);
+    CHECK(wsys->cursor() == sr::cursor_shape::text);
+
+    wsys->set_cursor(sr::cursor_shape::text); // the every-frame case: a no-op, not a re-set
+    CHECK(wsys->cursor() == sr::cursor_shape::text);
+
+    wsys->set_cursor(sr::cursor_shape::resize_nwse);
+    CHECK(wsys->cursor() == sr::cursor_shape::resize_nwse);
+}
+
+TEST("sr - hiding the cursor leaves its shape alone")
+{
+    // Visibility and shape are independent, so showing the pointer again must restore what was set rather than
+    // resetting it to an arrow.
+    auto const wsys = sr::window_system::create({.headless = true});
+
+    wsys->set_cursor(sr::cursor_shape::pointer);
+    wsys->set_cursor_visible(false);
+
+    CHECK(!wsys->is_cursor_visible());
+    CHECK(wsys->cursor() == sr::cursor_shape::pointer);
+
+    wsys->set_cursor_visible(true);
+    CHECK(wsys->is_cursor_visible());
+    CHECK(wsys->cursor() == sr::cursor_shape::pointer);
+}
+
+TEST("sr - clipboard text round-trips")
+{
+    // The clipboard is real even under the dummy driver: SDL keeps its own when the platform has none.
+    auto const wsys = sr::window_system::create({.headless = true});
+
+    wsys->set_clipboard_text("shaped");
+    CHECK(wsys->has_clipboard_text());
+    CHECK(wsys->clipboard_text() == "shaped");
+
+    // A cc::string_view is not null-terminated, so a substring is the case that catches a missing
+    // materialization: the wrong length would carry the rest of the source string with it.
+    auto const source = cc::string("shaped-core");
+    wsys->set_clipboard_text(source.subview({.offset = 0, .size = 6}));
+    CHECK(wsys->clipboard_text() == "shaped");
+
+    // Empty is a legitimate value, not an error.
+    wsys->set_clipboard_text("");
+    CHECK(wsys->clipboard_text() == "");
 }
 
 #endif // SR_HAS_WINDOW

@@ -35,10 +35,14 @@ sr::window             [done]  one OS window: native handle, pixel size, minimiz
 multiple windows       [done]  per-window state and id-keyed dispatch; wsys->windows() enumerates them
 sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, relative mode
                                one globally-ordered stream per frame, drained through wsys->events()
-fullscreen / borderless [planned]
+sr::cursor_shape       [done]  the pointer's shape, set on the system (process-global, like the platform's)
+clipboard              [done]  get/set text on the system clipboard
+window position       [done]  position()/set_position(); write-through, so a get right after a set reads it
+window focus          [done]  is_focused() as of the last poll, focus() to ask for it
+borderless / topmost  [done]  window_description: has_decoration, is_always_on_top, has_taskbar_icon, is_focusable
+fullscreen            [planned]
 HiDPI                  [planned]  SDL_WINDOW_HIGH_PIXEL_DENSITY once a per-monitor-DPI UI needs it
 gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see TODO
-imgui multi-viewport   [planned]  the reason the multi-window mechanism is already in place
 ```
 
 The API is always present. Only the backend is optional, since SDL3 is fetched on demand — without one,

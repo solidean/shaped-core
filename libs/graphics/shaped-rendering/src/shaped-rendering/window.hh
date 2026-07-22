@@ -8,9 +8,34 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/input.hh>
+#include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/linalg/vec.hh>
 
 namespace sr
 {
+/// The shape the mouse pointer is drawn as.
+///
+/// One cursor is showing at a time for the whole process, so this is set on the window_system rather than on a
+/// window — see window_system::set_cursor.
+///
+/// Every shape here is one the platform provides. A shape the platform lacks falls back to the closest one it
+/// has, which is the platform's business, not ours; nothing here fails.
+enum class cursor_shape : u8
+{
+    arrow,       ///< the default pointer
+    text,        ///< an I-beam, over editable text
+    wait,        ///< busy and not interactive — an hourglass or spinner
+    progress,    ///< busy but still interactive — usually the arrow with a spinner
+    crosshair,   ///< precise selection
+    pointer,     ///< a pointing hand, over something that acts like a link
+    move,        ///< four-way arrow, for dragging a whole object
+    not_allowed, ///< the action is refused here — usually a slashed circle
+    resize_ns,   ///< over a horizontal edge
+    resize_ew,   ///< over a vertical edge
+    resize_nesw, ///< over the bottom-left or top-right corner
+    resize_nwse, ///< over the bottom-right or top-left corner
+};
+
 /// How a window is created.
 /// Defaults describe a resizable, visible 1280x720 window.
 struct window_description
@@ -31,6 +56,23 @@ struct window_description
     /// Whether the window is mapped on creation.
     /// Create hidden to finish GPU setup before the first frame is visible, then call show().
     bool is_visible = true;
+
+    /// Whether the window has a title bar and a frame.
+    /// A UI library that draws its own chrome — imgui's multi-viewport windows, a tooltip, a popup — wants
+    /// this off, and then owns dragging and resizing itself.
+    bool has_decoration = true;
+
+    /// Whether the window stays above ordinary windows.
+    /// For a popup or a tooltip that must not be buried by the window it belongs to.
+    bool is_always_on_top = false;
+
+    /// Whether the window appears in the task bar and the task switcher.
+    /// Off for a window that is part of another window's UI rather than a place the user switches to.
+    bool has_taskbar_icon = true;
+
+    /// Whether the window may take the keyboard focus when it is shown.
+    /// Off for a tooltip or a menu, which must appear without stealing focus from what the user is typing in.
+    bool is_focusable = true;
 };
 
 /// A single OS window.
@@ -67,8 +109,31 @@ public:
     [[nodiscard]] int width() const { return _width; }
     [[nodiscard]] int height() const { return _height; }
 
+    /// Top-left of the client area in desktop coordinates, as of the last poll_events or the last set_position.
+    /// Multi-monitor desktops put origins wherever they like, so a coordinate may be negative.
+    [[nodiscard]] tg::pos2i position() const { return _position; }
+
+    /// Moves the window so its client area starts at `position`.
+    /// Takes effect immediately, and position() reads back the new value without waiting for a poll.
+    /// The window manager may refuse or adjust the move — the next poll_events reports where it actually landed.
+    void set_position(tg::pos2i position);
+
+    /// Resizes the client area; both components must be > 0.
+    /// Like set_position, this is write-through: width()/height() read back the request at once, and the next
+    /// poll_events reports what the window manager granted.
+    void set_size(tg::vec2i size);
+
     /// Whether the window is minimized and so has no drawable area.
     [[nodiscard]] bool is_minimized() const { return _is_minimized; }
+
+    /// Whether this window has the keyboard focus, as of the last poll_events.
+    /// At most one window in the process has it, and none does while another application is in front.
+    [[nodiscard]] bool is_focused() const { return _is_focused; }
+
+    /// Asks the window manager to raise this window and give it the keyboard focus.
+    /// A request, not a guarantee — a window manager may refuse to steal focus, so read is_focused after the
+    /// next poll_events rather than assuming it took.
+    void focus();
 
     [[nodiscard]] cc::string_view title() const { return _title; }
 
@@ -106,6 +171,10 @@ public:
 
     [[nodiscard]] bool is_text_input_active() const { return _is_text_input_active; }
 
+    /// The system this window came from, and which must outlive it.
+    /// Saves threading a window_system& alongside a window& through code that already has one.
+    [[nodiscard]] window_system& system() const;
+
 private:
     /// Windows come from window_system::try_create_window, which fills in everything below.
     /// Private only keeps one off the stack — cc::make_unique still reaches it through the friend below.
@@ -124,10 +193,32 @@ private:
     cc::string _title;
     int _width = 0;
     int _height = 0;
+    tg::pos2i _position = tg::pos2i(0, 0);
     bool _is_minimized = false;
+    bool _is_focused = false;
     bool _is_close_requested = false;
     bool _is_relative_mouse_mode = false;
     bool _is_text_input_active = false;
+};
+
+/// One monitor attached to the desktop, as of the last poll_events.
+///
+/// All coordinates are in the same desktop space as window::position, so a window is on the display whose
+/// bounds contain it. A multi-monitor desktop puts origins wherever the user arranged them, which is why a
+/// coordinate here may be negative.
+struct display_info
+{
+    /// The display's full rectangle.
+    tg::pos2i position;
+    tg::vec2i size;
+
+    /// The part not covered by task bars, docks and other permanent desktop furniture.
+    /// This is where a window should open; `size` is what a fullscreen window covers.
+    tg::pos2i work_position;
+    tg::vec2i work_size;
+
+    /// Pixels per logical unit — 1 on a standard-density display, 2 on a typical HiDPI one.
+    float content_scale = 1.0f;
 };
 
 /// How a window_system is created.
@@ -215,6 +306,38 @@ public:
     /// Whether this system was created headless (see window_system_description).
     [[nodiscard]] bool is_headless() const { return _is_headless; }
 
+    /// Every monitor attached to the desktop, primary first, queried fresh on each call.
+    /// Never empty while a display is available; a headless system reports one synthetic display, so code
+    /// that places windows against a monitor has something well-formed to work with either way.
+    [[nodiscard]] cc::vector<display_info> displays() const;
+
+    // Mouse cursor.
+    //
+    // Process-global, not per-window: one cursor is showing at a time, whichever window the pointer is over.
+    // Cheap to set every frame — the platform cursor is only touched when the shape actually changes, which is
+    // what a UI library driving this from its hover state needs.
+
+    void set_cursor(cursor_shape shape);
+    [[nodiscard]] cursor_shape cursor() const { return _cursor; }
+
+    /// Whether the pointer is drawn at all. Independent of its shape, so hiding and showing it again restores
+    /// the shape that was set. Note window::set_relative_mouse_mode hides it too, for as long as it is on.
+    void set_cursor_visible(bool visible);
+    [[nodiscard]] bool is_cursor_visible() const { return _is_cursor_visible; }
+
+    // System clipboard.
+    //
+    // Process-global and shared with every other application, so treat a read as untrusted input of unbounded
+    // size. Text only; images and files are not modelled.
+
+    /// The clipboard's text, or empty when it holds none (including when it holds something that is not text).
+    /// Returns a copy — the platform's buffer is not ours to hold.
+    [[nodiscard]] cc::string clipboard_text() const;
+
+    void set_clipboard_text(cc::string_view text);
+
+    [[nodiscard]] bool has_clipboard_text() const;
+
 private:
     /// Systems come from try_create, which brings the platform up first.
     /// Private the same way window is, and with the same caveat.
@@ -238,6 +361,11 @@ private:
     /// Mouse events are stamped from this rather than from a live query, so a click reads the state as of its own
     /// position in the event stream. See mouse_button_event::modifiers.
     key_modifiers _modifiers = key_modifiers::none;
+
+    /// The cursor as last set. Tracked so set_cursor can skip the platform call when nothing changed, and so
+    /// hiding and showing the pointer restores the shape rather than resetting it to an arrow.
+    cursor_shape _cursor = cursor_shape::arrow;
+    bool _is_cursor_visible = true;
 
     u64 _owning_thread_id = 0;
     bool _is_headless = false;

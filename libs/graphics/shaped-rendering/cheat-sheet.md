@@ -25,7 +25,9 @@ Always available. Without a backend (SDL3 not fetched) `try_create` fails instea
 
 auto const wsys = sr::window_system::create({.headless = false});  // -> cc::unique_ptr<window_system>; try_create -> cc::result
 auto const win  = wsys->create_window({.title = "viewer", .width = 1280, .height = 720,
-                                       .is_resizable = true, .is_visible = true});  // -> cc::unique_ptr<window>
+                                       .is_resizable = true, .is_visible = true,
+                                       .has_decoration = true, .is_always_on_top = false,
+                                       .has_taskbar_icon = true, .is_focusable = true});  // -> cc::unique_ptr<window>
 
 wsys->poll_events();              // drains the OS queue; refreshes every live window. Once per frame.
 wsys->windows();                  // -> cc::span<window* const>, creation order, non-owning
@@ -34,11 +36,29 @@ wsys->is_headless();
 
 win->native_window_handle();      // -> void* — HWND on Windows; feeds sg::swapchain_description
 win->width();  win->height();     // -> int, pixels, as of the last poll_events
+win->position();                  // -> tg::pos2i, desktop coords, may be negative on a multi-monitor desktop
+win->set_position(tg::pos2i(x, y));  win->set_size(tg::vec2i(w, h));  // write-through: the getter reads it back at once
+win->is_focused();                // -> bool, as of the last poll_events;  win->focus() asks for it
 win->is_minimized();              // 0x0 while true
 win->is_close_requested();        // latched; request_close() / clear_close_request()
 win->title();  win->set_title(sv);
 win->show();  win->hide();
+win->system();                    // -> window_system& — the system it came from
+
+wsys->set_cursor(sr::cursor_shape::text);   // arrow/text/wait/progress/crosshair/pointer/move/not_allowed/
+wsys->cursor();                             //   resize_ns/resize_ew/resize_nesw/resize_nwse
+wsys->set_cursor_visible(false);  wsys->is_cursor_visible();
+
+wsys->clipboard_text();           // -> cc::string, empty if the clipboard holds no text
+wsys->set_clipboard_text(sv);
+wsys->has_clipboard_text();
 ```
+
+- **Cursor and clipboard are process-global**, hence on the system rather than a window: one cursor shows at a
+  time, whichever window the pointer is over.
+- **`set_cursor` is cheap to call every frame** — the platform is only touched when the shape changes.
+- **Hiding the cursor does not reset its shape**, so showing it again restores what was set.
+- **Treat clipboard text as untrusted input** of unbounded size: it comes from any other application.
 
 - **Poll once per frame, or the window hangs.**
   Nothing else advances a window's state, and an unpumped window is one the OS considers unresponsive.
