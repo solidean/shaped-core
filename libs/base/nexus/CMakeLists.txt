@@ -96,6 +96,9 @@ target_link_libraries(nexus
 # the runtime source of truth is always nx::bench::available_hw_counters().
 if(WIN32)
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_windows.cc)
+    # advapi32: ETW Trace{Query,Set}Information + the token APIs used to enable SeSystemProfilePrivilege.
+    # The Thread Profiling API (EnableThreadProfiling, ...) lives in kernel32, which is linked by default.
+    target_link_libraries(nexus PUBLIC advapi32)
     target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
 elseif(LINUX)
     target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_linux.cc)
