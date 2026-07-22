@@ -1,10 +1,16 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
+
+#include <chrono>
+#include <thread>
 
 // The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated
 // into the build dir and private to this binary.
@@ -32,6 +38,27 @@ protected:
     void init_once(sg::context&) override { ++once; }
     void init_declare(sg::context&) override { ++declare; }
     void init_materialize(sg::command_list&) override { ++materialize; }
+};
+
+// Like counting_routine, but counted atomically so racing acquires can be checked. The counters are static
+// so the test can read them after the race without a handle to the per-context instance. racing_routine is
+// used by exactly one test, with one context, which resets them before the race.
+class racing_routine : public sg::render_routine<racing_routine>
+{
+public:
+    static inline cc::atomic<int> once = 0;
+    static inline cc::atomic<int> declare = 0;
+
+protected:
+    void init_once(sg::context&) override { ++once; }
+    // The sleep widens the window a racing second caller would slip through, so the test below actually
+    // exercises the lock instead of passing because the first thread happened to finish first. Only the
+    // winner ever sleeps, so it costs one interval, not one per thread.
+    void init_declare(sg::context&) override
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        ++declare;
+    }
 };
 
 // The end-to-end routine: owns its pipeline via init_declare, dispatches in execute. Reached by type —
@@ -241,3 +268,46 @@ TEST("sg - a routine compiles a shader and dispatches it end to end")
             ok = false;
     CHECK(ok);
 }
+
+
+// Gated on CC_HAS_THREADS: a single-threaded build (SC_THREADS=OFF, the WASM/no-threads mode) compiles
+// cc::mutex with no mutex member and no locking at all, because nothing in such a build is supposed to
+// contend. Spawning std::threads there would race by construction and prove nothing about the guard.
+#if CC_HAS_THREADS
+
+TEST("sg - concurrent acquires of one routine run each phase exactly once")
+{
+    // The phase engine is guarded, so racing acquires must not both run init_declare. Without that lock
+    // this is a plain data race on the phase flags, and the counts come out above one under contention.
+    auto const ctx = make_warp_context();
+    if (ctx == nullptr)
+        SKIP("no dx12 WARP device");
+
+    // racing_routine's counters are static (see there), so clear them before the race — a prior run in the
+    // same process would otherwise carry in.
+    racing_routine::once = 0;
+    racing_routine::declare = 0;
+
+    constexpr auto thread_count = 8;
+    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+
+    cc::atomic<int> ready = 0;
+    for (auto i = 0; i < thread_count; ++i)
+        threads.emplace_back(
+            [&]
+            {
+                // Line the threads up so they hit the phase engine together, not one after another.
+                ++ready;
+                while (ready.load() < thread_count)
+                    std::this_thread::yield();
+                racing_routine::prewarm(*ctx);
+            });
+
+    for (auto& t : threads)
+        t.join();
+
+    CHECK(racing_routine::once.load() == 1);
+    CHECK(racing_routine::declare.load() == 1);
+}
+
+#endif // CC_HAS_THREADS

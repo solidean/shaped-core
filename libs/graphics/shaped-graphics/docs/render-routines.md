@@ -34,7 +34,7 @@ class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
 public:
     static void execute(sg::command_list& cmd, sg::buffer<sg::u32> const& out)
     {
-        auto const& self = acquire(cmd);                 // lazily creates + initializes; returns the routine
+        auto& self = acquire(cmd);                       // lazily creates + initializes; returns the routine
         auto const pipeline = cc::async_blocking_get_singlethreaded(self._pipeline);
         auto const group = cmd.context().transient.create_binding_group(
             self._group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
@@ -66,6 +66,10 @@ pattern_fill_routine::execute(cmd, out);
 `acquire(cmd)` reaches the context through `cmd.context()`, so it takes only the command list.
 `prewarm(ctx)` is the variant for before a command list exists — it runs init_once + init_declare, so
 async compiles start as early as possible; materialize then happens on the first `acquire(cmd)`.
+
+The example above is deliberately the minimum, and it assumes one recording thread: its members are
+touched without a lock. A routine recorded from several threads — or one holding anything that changes
+after init — needs the `cc::mutex<state>` shape from [Threading](#threading) below.
 
 ## Per-context, reached by type: `ctx.routines`
 
@@ -100,11 +104,70 @@ state is a pointer compare rather than a locked map lookup. The memo holds only 
 it can never keep a routine alive past `evict` / `clear` / context shutdown — expiry is what
 invalidates it.
 
-Map access is guarded, so `acquire` is safe from parallel command-list recording. (Initializing a
-*single* routine concurrently from two threads is not yet synchronized — a follow-up for when parallel
-`init_declare` lands; today `prewarm` runs the declares sequentially and the async *compiles* are what
-parallelize. Do not `clear()`/`evict()` a registry while another thread is still recording against the
-same context.)
+## Threading
+
+A routine is a per-context singleton handed to every caller on that context, so the threading model has
+to be explicit. It is three separate guarantees, and only the first two are the framework's:
+
+1. **The registry is guarded.** `acquire` is safe from parallel command-list recording.
+2. **The phase engine is guarded.** Racing acquires of one routine run each phase exactly once — the
+   losers block until the winner is done, then observe it initialized. The phase callbacks therefore
+   run under that lock, and must not call back into `acquire` / `prewarm` for the same routine.
+3. **A routine's own mutable state is the routine's job.** The framework cannot know what a routine
+   keeps or how it wants it synchronized.
+
+That third point is the one that bites. `acquire` returns a **non-const** reference precisely because
+routines are expected to hold state — a pipeline cache keyed by target format, a resource registry, a
+scratch buffer that grows. Anything `execute` writes is written through a reference two threads may
+hold at once.
+
+The shape to reach for first is a single `cc::mutex<state>` holding everything the routine owns, locked
+once per entry point:
+
+```cpp
+class my_routine : public sg::render_routine<my_routine>
+{
+public:
+    static void execute(sg::command_list& cmd, /* args */)
+    {
+        auto& self = acquire(cmd);
+        self._state.lock([&](state& s) { /* read and write s freely */ });
+    }
+
+protected:
+    void init_declare(sg::context& ctx) override
+    {
+        _state.lock([&](state& s) { /* rebuild the shader-derived half of s */ });
+    }
+
+private:
+    struct state { /* pipelines, layouts, caches, per-frame scratch */ };
+    cc::mutex<state> _state;
+};
+```
+
+One mutex over everything keeps the rule checkable by inspection, and it costs nothing real: two threads
+recording the same routine serialize, which is what they would have to do anyway.
+
+**State written in `init_declare` and only read afterwards is not exempt.** A reload on another thread
+re-runs `init_declare` while this thread is recording, so those members belong behind the same mutex as
+the rest. Note the lock order this implies — the phase lock is taken first, then the routine's own — so
+a routine must never take its own lock and then call `acquire`.
+
+Do not `clear()` / `evict()` a registry while another thread is still recording against the same context.
+
+### Known gap: submission order is not modeled
+
+The three guarantees cover *recording*, not *submission*, and that is not yet sound.
+A routine can be recorded into command list A and then, in sequence, into command list B — each recording
+correct in isolation — yet leave an implicit GPU-ordering dependency between the two: something the routine
+owns that B's work assumes A's has already run (an upload it recorded, a resource transition, a buffer it
+grew). The framework enforces nothing about the order those lists are *submitted*. Submit B before A and the
+dependency inverts — the result is wrong even though every lock was held correctly.
+
+So the model does not yet cover a routine recorded across several command lists whose submission order
+differs from their recording order. Until it does, keep such a routine's dependent work within one list, or
+submit the lists in the order they were recorded.
 
 ### Parametrized routines
 

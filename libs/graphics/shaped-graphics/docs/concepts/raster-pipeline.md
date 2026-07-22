@@ -58,16 +58,20 @@ backends bake them into the PSO (dx12 `RTVFormats` / `DSVFormat` / `SampleDesc`;
 `VkPipelineRenderingCreateInfo`). The rendering scope's bound *textures* must then match the pipeline's
 `color_targets` (count + format) and `depth_stencil_format`; a mismatch is a driver/debug-layer error.
 
-## Draws sit on the raster facades, not the rendering-scope handle
+## Draws sit on any of the raster facades
 
 A rendering scope is opened with `cmd.raster.render_to(info)` (RAII) or `cmd.raster.manual.begin_rendering
 / end_rendering`. Draw recording — `bind_pipeline`, `bind_group`, `bind_vertex_buffers` /
-`bind_index_buffer`, the `set_*` dynamic state, `draw` / `draw_indexed` — lives on **both**
-`command_list_raster_scope` (`cmd.raster`) and `command_list_raster_manual_scope` (`cmd.raster.manual`),
-**not** on the `rendering_scope` RAII object, which stays a pure begin/end lifetime guard. Both facades are
-thin forwarders to the same `command_list` `raster_*` backend seams; a draw is valid only while a scope is
-open (the backend asserts). This keeps the RAII handle free of state and lets the manual (no-RAII-object)
-path record draws through a coherent object.
+`bind_index_buffer`, the `set_*` dynamic state, `draw` / `draw_indexed` — lives on the `rendering_scope`
+RAII object that `render_to` returns, and equally on `command_list_raster_scope` (`cmd.raster`) and
+`command_list_raster_manual_scope` (`cmd.raster.manual`). All three are thin forwarders to the same
+`command_list` `raster_*` backend seams; a draw is valid only while a scope is open (the backend asserts).
+
+Recording through the returned scope keeps the "draw into this pass" flow on the object that opened it — and
+lets a routine handed only the scope record without a separate `command_list` argument. `cmd.raster` records
+the same draws for a caller not holding the scope, and `cmd.raster.manual` is the path with no RAII object
+at all. Only *raster* operations are mirrored onto the scope; uploads, downloads and the context stay on the
+command list, reached through `scope.command_list()`.
 
 ## Backend split (dx12 real, vulkan stubbed)
 

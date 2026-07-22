@@ -67,8 +67,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
   (state object) + `raytracing_shader_table` + `cmd.raytracing.dispatch_rays`, the two-phase handle/index
   model, and why records hold only a shader identifier.
 - [raster pipeline](concepts/raster-pipeline.md) — the graphics path: a `raster_pipeline` (PSO) with its
-  fixed-function state baked in, why the target formats live in the description, and why draws sit on
-  `cmd.raster` / `cmd.raster.manual` rather than the `rendering_scope` handle.
+  fixed-function state baked in, why the target formats live in the description, and how draws record on the
+  `rendering_scope` handle as well as `cmd.raster` / `cmd.raster.manual`.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an
   epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/error/optional.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context, sg::command_list
 
 namespace sg
@@ -25,6 +26,11 @@ namespace sg
 /// declare + materialize, while init_once state is preserved. A routine reads that counter directly —
 /// it needs no library reference. Instances live per-context in ctx.routines, so their cached GPU state
 /// dies with the context that built it — no stale handles across contexts.
+///
+/// Threading: the phase engine is guarded, so concurrent acquires of one routine are safe and each phase
+/// runs exactly once — the losers of the race block until the winner is done, then see it initialized.
+/// The phase callbacks therefore run under this lock and must not call back into acquire/prewarm for the
+/// same routine. A routine's *own* mutable state is a separate matter it owns; see sg::render_routine.
 class render_routine_base
 {
 public:
@@ -45,6 +51,15 @@ private:
     template <class>
     friend class render_routine;
 
+    /// Which phases have run, and at which reload generation. Behind a mutex because two threads may
+    /// acquire the same routine at once and each phase must run only once.
+    struct init_state
+    {
+        bool once_done = false;
+        cc::optional<u64> declared_generation;
+        cc::optional<u64> materialized_generation;
+    };
+
     /// Runs init_once (first time only), then init_declare (first time + after each reload). The prewarm
     /// entry point: call it before opening a command list so async compiles start as early as possible.
     void ensure_initialized_no_materialize(context& ctx);
@@ -53,11 +68,15 @@ private:
     /// frame — a no-op once initialized at the current generation.
     void ensure_initialized(command_list& cmd);
 
+    // The bodies of the two above, minus the locking — so they may call each other, which the entry points
+    // cannot: cc::mutex is not recursive. Only ever called with `_init` already held.
+
+    void ensure_initialized_no_materialize_impl(init_state& s, context& ctx);
+    void ensure_initialized_impl(init_state& s, command_list& cmd);
+
     /// The process-global reload generation to compare against (sg::reload_generation).
     [[nodiscard]] static u64 current_generation();
 
-    bool _init_once_done = false;
-    cc::optional<u64> _declared_generation;
-    cc::optional<u64> _materialized_generation;
+    cc::mutex<init_state> _init;
 };
 } // namespace sg

@@ -31,10 +31,10 @@ template <class T>
 /// (`R::acquire(cmd)` / `R::prewarm(ctx)` / `R::evict(ctx)`); the only public operation here is
 /// clear(). A thin per-context sub-object like ctx.cached, created and destroyed with its context.
 ///
-/// Map access is guarded, so acquire is safe from parallel command-list recording; initializing a
-/// *single* routine concurrently from two threads is not yet synchronized (a follow-up for when
-/// parallel init lands). Do not clear()/evict() a registry while another thread is still recording
-/// against the same context.
+/// Map access is guarded, so acquire is safe from parallel command-list recording, and each routine
+/// guards its own init phases (see render_routine_base). What is *not* covered here is the state a
+/// routine holds itself — that is the routine's job, behind its own cc::mutex (see sg::render_routine).
+/// Do not clear()/evict() a registry while another thread is still recording against the same context.
 class routine_registry
 {
 public:

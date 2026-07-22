@@ -4,32 +4,46 @@
 
 namespace sg
 {
-void render_routine_base::ensure_initialized_no_materialize(context& ctx)
+void render_routine_base::ensure_initialized_no_materialize_impl(init_state& s, context& ctx)
 {
-    if (!_init_once_done)
+    if (!s.once_done)
     {
         init_once(ctx);
-        _init_once_done = true;
+        s.once_done = true;
     }
 
     u64 const current = current_generation();
-    if (_declared_generation != current)
+    if (s.declared_generation != current)
     {
         init_declare(ctx);
-        _declared_generation = current;
+        s.declared_generation = current;
     }
+}
+
+void render_routine_base::ensure_initialized_impl(init_state& s, command_list& cmd)
+{
+    ensure_initialized_no_materialize_impl(s, cmd.context());
+
+    // Compared against the generation declare just ran at, not a fresh read of the counter: a reload
+    // landing between the two would otherwise leave materialize marked current against a stale declare,
+    // and the next frame would re-run declare alone and never catch materialize up.
+    if (s.materialized_generation != s.declared_generation)
+    {
+        init_materialize(cmd);
+        s.materialized_generation = s.declared_generation;
+    }
+}
+
+void render_routine_base::ensure_initialized_no_materialize(context& ctx)
+{
+    // The lock is held across the phase callbacks on purpose: a second thread acquiring the same routine
+    // must wait and then observe it initialized, rather than run init_declare a second time in parallel.
+    _init.lock([&](init_state& s) { ensure_initialized_no_materialize_impl(s, ctx); });
 }
 
 void render_routine_base::ensure_initialized(command_list& cmd)
 {
-    ensure_initialized_no_materialize(cmd.context());
-
-    u64 const current = current_generation();
-    if (_materialized_generation != current)
-    {
-        init_materialize(cmd);
-        _materialized_generation = current;
-    }
+    _init.lock([&](init_state& s) { ensure_initialized_impl(s, cmd); });
 }
 
 u64 render_routine_base::current_generation()

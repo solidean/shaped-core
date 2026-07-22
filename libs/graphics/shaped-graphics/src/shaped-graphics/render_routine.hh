@@ -16,26 +16,44 @@ namespace sg
 /// and the routine gets a by-type entry point — no handle, no registration call, no by-name lookup.
 /// acquire(cmd) finds (or lazily creates) this routine's per-context instance in cmd.context().routines,
 /// initializes it, and returns it. The customary shape is a static execute() that opens with
-/// `auto const& self = acquire(cmd);` and reads the routine's members through `self`:
+/// `auto& self = acquire(cmd);` and works through `self`:
 ///
 ///   class my_routine : public sg::render_routine<my_routine>
 ///   {
 ///   public:
 ///       static void execute(sg::command_list& cmd, /* args */)
 ///       {
-///           auto const& self = acquire(cmd);
-///           // ... bind self._pipeline, dispatch ...
+///           auto& self = acquire(cmd);
+///           // ... bind self's pipelines, dispatch ...
 ///       }
 ///   protected:
 ///       void init_declare(sg::context& ctx) override { /* acquire shaders + pipelines */ }
 ///   };
+///
+/// A routine is expected to *hold state* — pipelines keyed by target format, a resource registry, a
+/// scratch buffer it grows. That is why acquire hands out a mutable reference rather than a const one.
+///
+/// Threading, in three parts:
+///
+///   - the registry is guarded, so acquiring from parallel command-list recording is safe;
+///   - the phase engine is guarded, so each init phase runs exactly once even under a concurrent
+///     acquire (see render_routine_base);
+///   - **a routine's own mutable state is the routine's job to guard.** acquire() hands the same
+///     instance to every caller on the context, so anything execute() writes must sit behind a
+///     cc::mutex the routine owns. Putting all of it in one `cc::mutex<state>` and locking once per
+///     entry point is the shape to reach for first — it keeps the rule checkable by inspection.
+///
+/// State written in init_declare and merely *read* later is no exception: a reload on another thread
+/// re-runs init_declare while this thread is recording, so that state belongs behind the same mutex.
+///
+/// Do not clear()/evict() a registry while another thread is still recording against the same context.
 template <class Derived>
 class render_routine : public render_routine_base
 {
 public:
     /// The per-context instance for Derived, fully initialized (declare + materialize) at the current
-    /// reload generation — the reference a static execute() reads from.
-    [[nodiscard]] static Derived const& acquire(command_list& cmd)
+    /// reload generation — the reference a static execute() works through.
+    [[nodiscard]] static Derived& acquire(command_list& cmd)
     {
         Derived& self = instance(cmd.context());
         self.ensure_initialized(cmd);

@@ -88,8 +88,15 @@ struct draw_indexed_config
 };
 
 /// RAII handle for an open rendering scope, returned by cmd.raster.render_to. Opens the scope on
-/// construction (begin_rendering) and closes it at end of scope (end_rendering). Draw calls are recorded
-/// through cmd.raster / cmd.raster.manual while this scope is alive — not on this handle.
+/// construction (begin_rendering) and closes it at end of scope (end_rendering).
+///
+/// The raster draw recording lives on this handle: bind a pipeline, set viewport / scissor / inline
+/// constants, draw. The same calls are also on `cmd.raster` (both forward to the one command list), but
+/// recording through the scope keeps the "draw into this pass" flow on the object that opened it, and lets
+/// a routine handed only the scope record without a separate command_list argument.
+///
+/// Only raster operations are here. Anything else the command list offers — uploads, downloads, the context
+/// — is reached through `command_list()`; a rendering scope does not mirror them.
 class rendering_scope
 {
 public:
@@ -102,11 +109,66 @@ public:
     rendering_scope& operator=(rendering_scope const&) = delete;
     rendering_scope& operator=(rendering_scope&&) = delete;
 
+    // scope queries
+
+    /// The command list this scope records into — for the non-raster operations a scope does not mirror
+    /// (`command_list().context()`, `command_list().upload`, …). (`class command_list` disambiguates the
+    /// type from this accessor of the same name.)
+    [[nodiscard]] class command_list& command_list() const { return _cmd; }
+
+    /// Pixel extent the scope's targets share — the size to drive a viewport, scissor or projection with.
+    [[nodiscard]] tg::vec2i render_target_size() const { return _size; }
+
+    /// Formats of the bound color targets, in order — usually one. A routine's pipeline bakes these in, so
+    /// they are what to build (or key) that pipeline against.
+    [[nodiscard]] cc::span<pixel_format const> color_formats() const { return _color_formats; }
+
+    /// Format of the bound depth-stencil target, or empty when the scope has none attached.
+    [[nodiscard]] cc::optional<pixel_format> depth_format() const { return _depth_format; }
+
+    // raster draw recording — valid while this scope is alive. Identical to the same calls on cmd.raster;
+    // both forward to the owning command list.
+
+    /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
+    void bind_pipeline(raster_pipeline const& pipeline);
+    /// Binds `group` to descriptor set `set` of the active pipeline's layout (must match that slot).
+    void bind_group(int set, binding_group const& group);
+    /// Binds vertex buffers to consecutive input slots starting at `first_slot` (slot first_slot+i <- views[i]).
+    void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
+    void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
+    void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
+    /// Binds the index buffer read by draw_indexed.
+    void bind_index_buffer(index_buffer_view const& view);
+    /// Overrides the rendering scope's viewport / scissor for subsequent draws.
+    void set_viewport(viewport const& vp);
+    void set_scissor(tg::aabb2i const& rect);
+    /// Sets the stencil reference the depth-stencil state's stencil test compares against.
+    void set_stencil_reference(u32 reference);
+    /// Sets the constant RGBA blend factor that referencing factors use.
+    void set_blend_constants(tg::vec4f constants);
+    /// Writes inline constants into the bound pipeline layout's inline_constants block.
+    void set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset = {});
+    /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
+    template <class T>
+    void set_inline_constants(T const& value, cc::optional<cc::isize> offset = {})
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "inline-constants payload must be trivially copyable");
+        static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
+        set_inline_constants(cc::as_bytes(cc::span<T const>(&value, 1)), offset);
+    }
+    /// Records a non-indexed draw of the active pipeline.
+    void draw(draw_config const& config = {});
+    /// Records an indexed draw of the active pipeline (an index buffer must be bound).
+    void draw_indexed(draw_indexed_config const& config = {});
+
 private:
     friend class command_list_raster_scope;
-    rendering_scope(command_list& cmd, rendering_info const& info); // begins rendering with `info`
+    rendering_scope(class command_list& cmd, rendering_info const& info); // begins rendering with `info`
 
-    command_list& _cmd;
+    class command_list& _cmd;
+    tg::vec2i _size;
+    cc::fixed_vector<pixel_format, max_color_targets> _color_formats;
+    cc::optional<pixel_format> _depth_format;
 };
 
 /// Low-level rendering passthrough, reached as cmd.raster.manual: begin / end a rendering scope by hand,
