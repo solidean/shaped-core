@@ -13,7 +13,8 @@ Usage:
     uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
     uv run dev.py test-web [LIBRARY]        Open the browser test runner (Emscripten; all libs, or one)
     uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
-    uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, crossrefs, test)
+    uv run dev.py lint clang-tidy           Run the clang-tidy whitelist gates (must be zero to commit)
+    uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, lint, crossrefs, test)
     uv run dev.py coverage run [NAME]       Collect LLVM test coverage (run/merge/report)
     uv run dev.py pgo run                    Profile-guided optimization (instrument/train/optimize/measure)
     uv run dev.py clean [--all]             Remove build artifacts
@@ -74,6 +75,7 @@ from tools.dev.cmd import (  # noqa: E402
     doctor,
     format,
     info,
+    lint,
     list_presets,
     list_targets,
     list_toolsets,
@@ -93,6 +95,7 @@ COMMANDS = [
     test,
     test_web,
     format,
+    lint,
     check,
     coverage,
     pgo,

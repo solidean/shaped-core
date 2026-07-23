@@ -12,7 +12,7 @@ from .lib.core import console, report
 from .lib.core.archive import archive_diag, archive_logs
 from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
-from .lib.core.process import configure_mirroring, emsdk_env, find_emsdk_root
+from .lib.core.process import configure_mirroring, emsdk_env, find_emsdk_root, response_file, run_step
 from .lib.pipeline.build import build
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
@@ -40,6 +40,7 @@ from .lib.quality.format import (
     format_sources,
     required_major,
     run_format,
+    source_roots,
     violating_files,
 )
 from .lib.toolchain import clangd
@@ -125,6 +126,9 @@ __all__ = [
     "configure_mirroring",
     "emsdk_env",
     "find_emsdk_root",
+    "response_file",
+    "run_step",
+    "source_roots",
     "PresetError",
     "discover_targets",
     "executables",

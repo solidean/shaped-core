@@ -1,0 +1,89 @@
+# clang-tidy gate config — the strict whitelist.
+#
+# This is NOT the root .clang-tidy.
+# The root config is the IDE incubator: broad `bugprone-*` / `readability-*` / `modernize-*` categories
+# with a blacklist, deliberately overzealous so editors surface candidate checks.
+# This file is the opposite — an explicit whitelist of *true gates* that must report zero before a commit.
+# A check graduates from the incubator into this gate once the tree is clean under it.
+#
+# This is our own schema, not clang-tidy's native format: the runner (tools/lint/clang-tidy.py) reads it and
+# hands clang-tidy a generated `-*,<gates>` config. That is what lets every check carry its rationale inline —
+# clang-tidy's own `Checks:` is one comma-joined string with nowhere to attach a per-check note.
+# Only `gates` and `options` reach clang-tidy; `incubator` and `excluded` are documentation the runner ignores.
+
+# Enabled gates — each must report zero to commit. `why` is the rationale that earns it a place here.
+gates:
+  - check: bugprone-no-return-in-nonvoid-functions
+    why: >-
+      Control-flow correctness: a non-void function that falls off the end is UB.
+      Already a root .clang-tidy WarningsAsErrors — this is its permanent home.
+
+  - check: bugprone-return-const-ref-from-parameter
+    why: >-
+      Returning a `const&` bound to a by-value / temporary parameter dangles; sharper under C++23.
+      Already a root .clang-tidy WarningsAsErrors.
+
+  - check: modernize-use-nullptr
+    why: No `0` / `NULL` pointer literals — `nullptr` is the house style (C++23-only codebase).
+
+  - check: modernize-use-override
+    why: "`override` wherever a member overrides a virtual, so the compiler catches signature drift."
+
+  - check: modernize-use-using
+    why: "`using` alias over `typedef` — the modern, readable form."
+
+  - check: modernize-use-bool-literals
+    why: "`true` / `false` for bool, not `0` / `1`."
+
+  - check: modernize-redundant-void-arg
+    why: "`f()`, not the C-ism `f(void)`."
+
+  - check: readability-duplicate-include
+    why: A repeated `#include` of the same header is always dead noise.
+
+  - check: performance-move-const-arg
+    why: >-
+      Flags `cc::move` of a const / trivially-copyable value (a no-op move) — matches our move discipline.
+      See the option below (carried over from the root config).
+
+# clang-tidy CheckOptions carried into the generated config.
+options:
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: true
+
+# Incubator candidates — guideline-backed but likelier to have pre-existing hits, so parked here until green.
+# Promote into `gates` once the tree verifies clean under the check (the incubator -> gate ratchet).
+incubator:
+  - check: bugprone-use-after-move
+    why: Subobject-safe move discipline (coding-guidelines.md, Common Design Pitfalls).
+  - check: bugprone-unhandled-self-assignment
+    why: Self-assignment safety.
+  - check: performance-for-range-copy
+    why: "\"Avoid unnecessary copies\" — a range-for that copies each element."
+  - check: performance-unnecessary-copy-initialization
+    why: "\"Avoid unnecessary copies\" — a local copy that could be a const&."
+  - check: performance-unnecessary-value-param
+    why: "\"Avoid unnecessary copies\" — a by-value param that could be a const&."
+  - check: modernize-use-equals-default
+    why: "\"Specify all four\" copy/move ops — prefer `= default` over an empty body."
+  - check: modernize-use-equals-delete
+    why: "\"Specify all four\" copy/move ops — prefer `= delete` over a private undefined decl."
+  - check: misc-unused-using-decls
+    why: A `using` declaration nothing references is dead.
+  - check: readability-redundant-string-init
+    why: "`string s = \"\"` is a redundant initializer."
+
+# Deliberately NOT gated — they fight the coding guidelines rather than enforce them. Recorded so the
+# omission is a decision, not an oversight.
+excluded:
+  - check: bugprone-sizeof-expression
+    why: Bare `sizeof(T)` is house style (coding-guidelines.md, Integer & Numeric Types).
+  - check: readability-magic-numbers
+    why: Too eager; flags obvious constants.
+  - check: readability-identifier-naming
+    why: Naming is the root config's job for the IDE; a hard gate here would be huge and noisy.
+  - check: misc-definitions-in-headers
+    why: Header-only inline libraries define in headers by design.
+
+# Header diagnostics are scoped at the command line (`--header-filter`, see tools/lint/clang-tidy.py),
+# so the regex is built from the first-party source roots per run rather than pinned here.

@@ -21,7 +21,8 @@ uv run dev.py <command> [options]
 | `build`        | Build (auto-configures first if inputs changed). `-t/--target` to scope.      |
 | `test`         | Build, then run test binaries (`*-test`). Optional name/binary filter.        |
 | `format`       | clang-format `libs/` sources in place (see below).                            |
-| `check`        | Run pre-commit checks (format, crossrefs, test) and report one green/red verdict. |
+| `lint clang-tidy` | Run the clang-tidy whitelist gates (see below). `dev.py lint` is the linting front door. |
+| `check`        | Run pre-commit checks (format, lint, crossrefs, test) and report one green/red verdict. |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
@@ -240,8 +241,17 @@ Registered checks:
 | Check       | What it does                                                                   | `--fix`? |
 |-------------|--------------------------------------------------------------------------------|----------|
 | `format`    | clang-format `libs/` sources. Dirty-only by default; `--all` for the whole tree. | yes (rewrites in place) |
+| `lint`      | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--all` for the whole tree.  | yes (applies clang-tidy fixes) |
 | `crossrefs` | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `test`      | Build + run the full suite on the debug, default, release **and** (Linux/macOS) sanitizer presets. | no (report only) |
+
+`lint` runs the clang-tidy gates via [tools/lint/clang-tidy.py](../../tools/lint/clang-tidy.py) against the
+strict whitelist in [tools/lint/clang-tidy-gates.yml](../../tools/lint/clang-tidy-gates.yml) — a
+must-be-zero set, deliberately distinct from the root `.clang-tidy` that clangd reads (the broader IDE
+incubator). Only `.cc` translation units are linted (a bare header has no compile-database entry; its
+diagnostics surface through the `.cc` that includes it). Dirty-only by default so gates adopt
+incrementally; `--all` widens to the whole tree, and `--fix` lets clang-tidy rewrite. Run it directly with
+`uv run dev.py lint clang-tidy`; `dev.py lint` is the linting front door and will grow further linters.
 
 `crossrefs` scans markdown links (`[text](path#L42)`, including line/heading
 anchors) and `//`-comment doc references (`docs/...md`) across `libs/`, `docs/`,
