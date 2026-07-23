@@ -288,6 +288,40 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
     return checks
 
 
+def _windows_pmu_check() -> tuple[str, bool | None, str]:
+    """Report whether non-admin PMU profiling (nexus/bench hardware counters) is set up on Windows.
+
+    tools/setup-pmu-access.ps1 grants three things together — Performance Log Users membership,
+    SeSystemProfilePrivilege, and ETW session-GUID ACLs. The ACLs live under an admin-only registry key we
+    cannot read here, but the script grants all three atomically, so the group + privilege in the current
+    token are a faithful proxy for "the setup ran". PMU counters are optional (baseline timing/cycles work
+    without them), so a missing setup is advisory (SKIP), never a hard failure.
+    """
+    label = "PMU profiling (nexus/bench)"
+    try:
+        groups = subprocess.run(["whoami", "/groups", "/fo", "csv", "/nh"],
+                                capture_output=True, text=True, timeout=15).stdout or ""
+        priv = subprocess.run(["whoami", "/priv", "/fo", "csv", "/nh"],
+                              capture_output=True, text=True, timeout=15).stdout or ""
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return (label, None, f"could not query the process token ({e})")
+
+    has_group = "S-1-5-32-559" in groups  # Performance Log Users (well-known, language-independent SID)
+    has_priv = "SeSystemProfilePrivilege" in priv
+    if has_group and has_priv:
+        return (label, True,
+                "non-admin hardware counters configured (Performance Log Users + SeSystemProfilePrivilege)")
+
+    missing = []
+    if not has_group:
+        missing.append("Performance Log Users membership")
+    if not has_priv:
+        missing.append("SeSystemProfilePrivilege")
+    return (label, None,
+            f"not set up ({' and '.join(missing)} missing) — run tools/setup-pmu-access.ps1 elevated, then "
+            f"sign out and back in (see docs/guides/profiling.md). Baseline timing/cycles work without it.")
+
+
 def doctor(
     root: Path, preset: Preset | None = None, emsdk_path: str | None = None
 ) -> list[tuple[str, bool | None, str]]:
@@ -344,5 +378,8 @@ def doctor(
     checks.extend(_emscripten_checks(emsdk_path))
 
     checks.extend(_clangd_checks(root))
+
+    if platform.system() == "Windows":
+        checks.append(_windows_pmu_check())
 
     return checks
