@@ -61,6 +61,6 @@ These err toward a miss (never a false positive), and are documented so the boun
 
 shaped-linter is the sibling of the [clang-tidy gate framework](../../lint/) — the place for rules clang-tidy structurally cannot express (e.g. macro-placement).
 It shares one philosophy: **every rule carries a mandatory rationale**, and output is a grouped-by-rule digest that leads each group with that `why`.
-Eventually it becomes `dev.py lint shaped`; today it is standalone, proven end-to-end before any `dev.py` wiring.
+It runs as `dev.py lint shaped`, and is a `dev.py check` gate (`shaped-lint`) that runs **dirty-only** — like the clang-tidy gates, so the rules adopt incrementally rather than requiring a repo-wide sweep first.
 
 See [writing-a-rule.md](writing-a-rule.md) to add a rule.

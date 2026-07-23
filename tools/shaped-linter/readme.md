@@ -15,9 +15,15 @@ Namespace `scl` (internals `scl::impl`).
 Drive it through `dev.py`, which builds it and resolves its path — never construct build paths by hand:
 
 ```bash
-uv run dev.py build -t shaped-linter
-uv run dev.py test shaped-linter-test
+uv run dev.py lint shaped              # lint the first-party C++ sources
+uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh
+uv run dev.py lint shaped --fix        # apply the suggested fixes in place
+
+uv run dev.py build -t shaped-linter   # build the tool
+uv run dev.py test shaped-linter-test  # run its tests
 ```
+
+It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form member initializer is flagged, the existing tree is not swept).
 
 ## Usage
 

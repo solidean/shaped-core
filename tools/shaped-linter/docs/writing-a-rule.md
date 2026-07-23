@@ -97,6 +97,9 @@ ctx.report({
 Spans are `{file_id, byte_begin, byte_end}` (half-open).
 Get text with `ctx.source.span_text(span)`; resolve to line/column happens later, in the reporter.
 
+Output is UTF-8: `main` sets the Windows console to `CP_UTF8` at startup, so the repo's typography (em dashes, `…`) and any UTF-8 in the echoed source line render correctly.
+Still, prefer a short ASCII `message` (e.g. `= value` over `= …`) — it stays clean when grepped from a log.
+
 ### 3. Register it
 
 Add one line to [`registry.cc`](../src/shaped-linter/rules/registry.cc)'s `all_rules()`:

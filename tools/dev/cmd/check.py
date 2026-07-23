@@ -68,6 +68,16 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             ctx, preset_specs=None, dirty_only=not all_scope, fix=fix, mirror=mirror, verbose=verbose,
         )
 
+    def check_shaped_lint(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
+        # shaped-linter (tools/shaped-linter) — our own parser-based custom rules, the sibling of the
+        # clang-tidy gates for checks clang-tidy structurally cannot express. Dirty-only by default (just
+        # the next commit's .cc/.hh) so a not-yet-clean tree adopts it incrementally; --all widens to the
+        # whole tree. --fix applies its suggested fixes in place. Static check, so it runs before the tests.
+        from .lint import run_shaped_linter
+        return run_shaped_linter(
+            ctx, preset_specs=None, dirty_only=not all_scope, fix=fix, mirror=mirror, verbose=verbose,
+        )
+
     def check_crossrefs(*, fix: bool, all_scope: bool, mirror: bool, verbose: bool) -> bool:
         # Always full-repo: a moved file breaks links in other, untouched files, so a
         # dirty-only scan would miss exactly the breakage this guards against. Not
@@ -117,6 +127,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                   True, check_format),
         dev.Check("lint", "clang-tidy gates on the next commit's C++ (dirty-only; --all for the whole tree)",
                   True, check_lint),
+        dev.Check("shaped-lint", "shaped-linter custom rules on the next commit's C++ (dirty-only; --all for the whole tree)",
+                  True, check_shaped_lint),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release (and where supported, sanitizer) presets",

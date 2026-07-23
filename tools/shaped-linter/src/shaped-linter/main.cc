@@ -8,12 +8,26 @@
 #include <shaped-linter/report/reporter.hh>
 #include <shaped-linter/rules/engine.hh>
 
+#if defined(_WIN32)
+#include <clean-core/platform/win32_sanitized.hh>
+#endif
+
 namespace
 {
 // 0 = ran clean (no findings), 1 = bad usage / IO error, 2 = findings reported.
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_findings = 2;
+
+/// Make the console interpret our output (already UTF-8 bytes from cc::print) as UTF-8, so the repo's
+/// typography and any UTF-8 in echoed source lines render instead of codepage mojibake. A no-op when
+/// output is redirected — the pipe carries the same UTF-8 bytes, which the reader decodes as UTF-8.
+void enable_utf8_console()
+{
+#if defined(_WIN32)
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+}
 
 int run(scl::options const& opts)
 {
@@ -59,6 +73,8 @@ int run(scl::options const& opts)
 
 int main(int argc, char const* const* argv)
 {
+    enable_utf8_console();
+
     auto opts = scl::parse_options(cc::span<char const* const>(argv, cc::isize(argc)));
 
     if (opts.has_error())

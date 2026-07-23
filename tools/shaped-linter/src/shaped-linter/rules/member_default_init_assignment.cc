@@ -102,7 +102,7 @@ void check(lint_context& ctx)
         ctx.report({
             .rule_id = k_id,
             .span = m.init_span,
-            .message = cc::string("member default initializer should use assignment form (`= …`), not brace form"),
+            .message = cc::string("member default initializer should use assignment form (`= value`), not brace form"),
             .sev = severity::warning,
             .suggested_fix = fix{.edits = {edit}},
         });
