@@ -39,7 +39,7 @@ sg::compiled_shader make_double_shader()
 // Dispatch `pipeline` over `count` threads, reading back Output[i] and checking it equals i*2.
 void check_doubles(sg::context& ctx,
                    sg::compute_pipeline const& pipeline,
-                   sg::binding_group_layout_handle group_layout,
+                   sg::binding_group_layout_handle const& group_layout,
                    int count)
 {
     auto buf = ctx.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),

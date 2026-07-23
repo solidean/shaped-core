@@ -44,11 +44,7 @@ struct Tracked
 
     Tracked(Tracked&& rhs) noexcept : value(rhs.value) { ++move_ctor_count; }
 
-    Tracked& operator=(Tracked const& rhs)
-    {
-        value = rhs.value;
-        return *this;
-    }
+    Tracked& operator=(Tracked const& rhs) = default;
 
     Tracked& operator=(Tracked&& rhs) noexcept
     {
@@ -76,11 +72,7 @@ struct TrackedCopy
 
     TrackedCopy(TrackedCopy const& rhs) : value(rhs.value) { ++copy_ctor_count; }
 
-    TrackedCopy& operator=(TrackedCopy const& rhs)
-    {
-        value = rhs.value;
-        return *this;
-    }
+    TrackedCopy& operator=(TrackedCopy const& rhs) = default;
 };
 
 struct TrackedMove
@@ -1553,7 +1545,7 @@ TEST("vector - destruction order")
         {
             auto v1 = cc::vector<Tracked>::create_defaulted(10);
             auto v2 = cc::vector<Tracked>::create_filled(5, Tracked(42));
-            auto v3 = v1;
+            auto v3 = v1; // NOLINT(performance-unnecessary-copy-initialization): copy is counted by the test
             auto v4 = cc::move(v2);
         }
 

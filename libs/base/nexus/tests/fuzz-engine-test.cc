@@ -79,7 +79,7 @@ TEST("fuzz engine - detects a failed CHECK inside an operation")
 TEST("fuzz engine - uncreatable argument type is a setup error, not a finding")
 {
     auto t = nx::fuzz::test::create();
-    t->add_op("needs-string", [](cc::string) {});
+    t->add_op("needs-string", [](cc::string const&) {});
 
     auto res = t->execute_fuzzer(1);
     CHECK(!res.is_ok);

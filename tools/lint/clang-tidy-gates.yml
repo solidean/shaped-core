@@ -46,32 +46,37 @@ gates:
       Flags `cc::move` of a const / trivially-copyable value (a no-op move) — matches our move discipline.
       See the option below (carried over from the root config).
 
+  - check: bugprone-use-after-move
+    why: Reading a moved-from object; underpins subobject-safe move discipline (coding-guidelines.md, Common Design Pitfalls).
+  - check: bugprone-unhandled-self-assignment
+    why: A copy-assignment that isn't safe against `x = x`.
+  - check: performance-for-range-copy
+    why: '"Avoid unnecessary copies" — a range-for loop variable that copies each element instead of binding const&.'
+  - check: performance-unnecessary-copy-initialization
+    why: >-
+      "Avoid unnecessary copies" — a local initialized as a copy but never modified (could be a const&).
+      A deliberate copy in a test marks itself with a // NOLINT and a reason.
+  - check: performance-unnecessary-value-param
+    why: '"Avoid unnecessary copies" — a by-value parameter only read, which could be a const& (or a moved sink).'
+  - check: modernize-use-equals-default
+    why: >-
+      A hand-written special member equivalent to the compiler''s — prefer `= default`.
+      Where a non-defaulted body is the point (e.g. a dtor written to make a type non-trivial) mark it // NOLINT.
+  - check: modernize-use-equals-delete
+    why: '"Specify all four" copy/move ops — prefer `= delete` over a private undefined declaration.'
+  - check: misc-unused-using-decls
+    why: A `using` declaration nothing references is dead.
+  - check: readability-redundant-string-init
+    why: 'A redundant initializer like `string s = ""`.'
+
 # clang-tidy CheckOptions carried into the generated config.
 options:
   - key: performance-move-const-arg.CheckTriviallyCopyableMove
     value: true
 
-# Incubator candidates — guideline-backed but likelier to have pre-existing hits, so parked here until green.
-# Promote into `gates` once the tree verifies clean under the check (the incubator -> gate ratchet).
-incubator:
-  - check: bugprone-use-after-move
-    why: Subobject-safe move discipline (coding-guidelines.md, Common Design Pitfalls).
-  - check: bugprone-unhandled-self-assignment
-    why: Self-assignment safety.
-  - check: performance-for-range-copy
-    why: "\"Avoid unnecessary copies\" — a range-for that copies each element."
-  - check: performance-unnecessary-copy-initialization
-    why: "\"Avoid unnecessary copies\" — a local copy that could be a const&."
-  - check: performance-unnecessary-value-param
-    why: "\"Avoid unnecessary copies\" — a by-value param that could be a const&."
-  - check: modernize-use-equals-default
-    why: "\"Specify all four\" copy/move ops — prefer `= default` over an empty body."
-  - check: modernize-use-equals-delete
-    why: "\"Specify all four\" copy/move ops — prefer `= delete` over a private undefined decl."
-  - check: misc-unused-using-decls
-    why: A `using` declaration nothing references is dead.
-  - check: readability-redundant-string-init
-    why: "`string s = \"\"` is a redundant initializer."
+# Incubator candidates — guideline-backed checks parked here until the tree verifies clean under them, then
+# promoted into `gates` (the incubator -> gate ratchet). Empty right now: the previous batch all graduated.
+incubator: []
 
 # Deliberately NOT gated — they fight the coding guidelines rather than enforce them. Recorded so the
 # omission is a decision, not an oversight.

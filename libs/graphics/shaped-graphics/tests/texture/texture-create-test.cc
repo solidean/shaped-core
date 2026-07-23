@@ -9,7 +9,7 @@
 // (see tests/context/context-test.cc for the mechanism). Creation only — using a texture in a command
 // list (views, barriers, copies) is future work.
 
-INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -35,7 +35,7 @@ INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle ctx
     CHECK(typed.height() == 128);
 }
 
-INVOCABLE_TEST("sg - a single-slice 2D array is distinct from a 2D texture", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - a single-slice 2D array is distinct from a 2D texture", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -56,7 +56,7 @@ INVOCABLE_TEST("sg - a single-slice 2D array is distinct from a 2D texture", (sg
     CHECK(typed.array_layers() == 1);
 }
 
-INVOCABLE_TEST("sg - allocates a persistent 3D texture", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - allocates a persistent 3D texture", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -77,7 +77,7 @@ INVOCABLE_TEST("sg - allocates a persistent 3D texture", (sg::context_handle ctx
     CHECK(typed.depth() == 16);
 }
 
-INVOCABLE_TEST("sg - allocates a transient texture", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - allocates a transient texture", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -97,7 +97,7 @@ INVOCABLE_TEST("sg - allocates a transient texture", (sg::context_handle ctx))
 // Typed factories: a shape-specific description (only the free params) -> the wrapped texture<Traits>,
 // with the shape-fixed fields filled in under the hood.
 
-INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -114,7 +114,7 @@ INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle 
     CHECK(!tex.raw()->is_multisampled());
 }
 
-INVOCABLE_TEST("sg - typed create_texture_3d (persistent)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed create_texture_3d (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -128,7 +128,7 @@ INVOCABLE_TEST("sg - typed create_texture_3d (persistent)", (sg::context_handle 
     CHECK(tex.depth() == 16);
 }
 
-INVOCABLE_TEST("sg - typed create_texture_cube fills square extents (persistent)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed create_texture_cube fills square extents (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -140,7 +140,7 @@ INVOCABLE_TEST("sg - typed create_texture_cube fills square extents (persistent)
     CHECK(tex.height() == 64); // width == height == size
 }
 
-INVOCABLE_TEST("sg - typed create_texture_2d_array (persistent)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed create_texture_2d_array (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -154,7 +154,7 @@ INVOCABLE_TEST("sg - typed create_texture_2d_array (persistent)", (sg::context_h
     CHECK(tex.array_layers() == 4);
 }
 
-INVOCABLE_TEST("sg - typed create_texture_2d_ms (persistent)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed create_texture_2d_ms (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -168,7 +168,7 @@ INVOCABLE_TEST("sg - typed create_texture_2d_ms (persistent)", (sg::context_hand
     CHECK(tex.sample_count() == 4);
 }
 
-INVOCABLE_TEST("sg - typed create_texture_2d (transient, no alloc)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed create_texture_2d (transient, no alloc)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -180,7 +180,7 @@ INVOCABLE_TEST("sg - typed create_texture_2d (transient, no alloc)", (sg::contex
     CHECK(tex.width() == 128);
 }
 
-INVOCABLE_TEST("sg - typed try_create_texture_2d (persistent)", (sg::context_handle ctx))
+INVOCABLE_TEST("sg - typed try_create_texture_2d (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
