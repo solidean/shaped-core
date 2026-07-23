@@ -32,8 +32,8 @@ cc::optional<tg::aabb2i> compute_scissor(tg::aabb2f const& clip_rect,
     auto const raw_min = to_framebuffer(clip_rect.min);
     auto const raw_max = to_framebuffer(clip_rect.max);
 
-    // Clamp into the target. imgui hands out rects that poke outside it (a window dragged off-screen),
-    // and both tier-1 backends reject an out-of-bounds scissor outright.
+    // Clamp into the target.
+    // imgui hands out rects that poke outside it (a window dragged off-screen), and both tier-1 backends reject an out-of-bounds scissor outright.
     auto const clamped = tg::aabb2i(tg::pos2i(raw_min[0] < 0 ? 0 : raw_min[0], raw_min[1] < 0 ? 0 : raw_min[1]),
                                     tg::pos2i(raw_max[0] > target_size[0] ? target_size[0] : raw_max[0],
                                               raw_max[1] > target_size[1] ? target_size[1] : raw_max[1]));

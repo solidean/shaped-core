@@ -104,33 +104,58 @@ win->start_text_input();              // begin text_events + IME for this window
 
 ## Dear ImGui
 
-Full doc: [docs/imgui.md](docs/imgui.md). Vendored docking branch; `<imgui.h>` is available to consumers.
+Full doc: [docs/imgui.md](docs/imgui.md). Vendored docking-branch bundle (Dear ImGui + ImPlot + ImGuizmo); headers include as `<imgui/imgui.h>`, `<imgui/implot.h>`, `<imgui/imguizmo.h>`.
 
 ```cpp
 lib.add_package(sr::shader_package());       // once at startup, or routines acquire nothing
 
-auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports stubbed; move-only
+auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports off; move-only
+auto imgui = sr::imgui_context::create({.enable_viewports = true});  // opt in — changes coordinates, see below
 
+wsys->poll_events();
+imgui.process_events(*wsys);                 // feed input; MUST precede begin_frame (NewFrame commits it)
+imgui.begin_frame(*win, dt);                 // size from the window + hands it imgui's text-input intent
+// or, without a window:
 imgui.begin_frame({.display_size = tg::vec2i(w, h), .delta_time = dt, .framebuffer_scale = {1, 1}});
 ImGui::ShowDemoWindow();                     // any imgui calls
 imgui.end_frame();                           // = ImGui::Render()
 
+imgui.wants_keyboard();  imgui.wants_mouse();  // -> bool — check before acting on the same input yourself
+imgui.process_event(e);                      // one event, when the caller filters the stream itself
+
+// batteries-included: imgui owns the window — renders main + every viewport and presents, in one call
+sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.09f, 0.09f, 0.11f, 1.0f));  // clear_color default = opaque black
+
+// or the compositing path — draw imgui into your own pass (over a 3D scene), then drive viewports yourself:
 {
     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
-    sr::imgui_routine::execute(*cmd, ImGui::GetDrawData(), {.target_format = fmt, .target_size = tg::vec2i(w, h)});
+    sr::imgui_routine::execute(pass, ImGui::GetDrawData());  // format + size read from the scope's target
 }
-
-sr::imgui_routine::live_texture_count(ctx);           // -> isize, atlas textures alive (tests/diagnostics)
-sr::imgui_routine::release_textures(ctx, draw_data);  // drop them; a later frame rebuilds
+// multi-viewport only, AFTER the main draw is recorded, BEFORE its present — both required once enabled:
+imgui.update_viewports();                             // open / move / close the OS windows
+sr::imgui_routine::render_viewports(*ctx);            // draw + present each; own swapchain, NOT in a scope
+ctx->submit_command_list_and_present(*sc, cc::move(cmd));
 ```
 
 Gotchas:
 
-- **`target_format` must not be sRGB** — imgui's colors are already sRGB-encoded; asserts rather than
-  double-encoding. Bind a non-srgb view of the same resource.
+- **The scope's color format must not be sRGB** — imgui's colors are already sRGB-encoded; asserts rather
+  than double-encoding. Bind a non-srgb view of the same resource.
 - **One call, inside the scope.** Textures, geometry upload and draws all happen in `execute()`.
+  `render_viewports` is the opposite — it opens its own scopes and submits, so never call it inside one.
+- **Viewports change what a coordinate means.** Mouse positions and `ImGui::SetNextWindowPos` become
+  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`. An `input_event` must
+  name its `window` for `process_event` to translate it.
+- **Viewports make `update_viewports()` mandatory every frame.** Skip it and imgui stops hit-testing the
+  mouse entirely — nothing hovers. `begin_frame` asserts rather than letting that go quiet.
+- **Present the viewports before the main window, not after.** A window that has moved keeps showing the
+  content drawn for its old position until its next frame composites; a vsync-blocking main present in
+  between makes that a full frame, and a dragged window's contents visibly lag it.
 - **One thread.** The state is mutex-guarded, so two threads cannot corrupt it — but the routine is a
   per-context singleton holding *this frame's* geometry, so record imgui from one thread.
+- **Cursors and clipboard are wired**: imgui sets the pointer shape through `window_system::set_cursor`,
+  but only while `wants_mouse()`, so an app drawing its own cursor over the 3D view is left alone. Copy and
+  paste reach the system clipboard.
 
 ## Writing a concrete routine
 

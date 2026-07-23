@@ -1,21 +1,19 @@
 #include <clean-core/container/pinned_data.hh>
-#include <imgui.h>
+#include <imgui/imgui.h>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/imgui_context.hh>
-#include <shaped-rendering/imgui_renderer.hh>
+#include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 
 #include <memory>
 
-// The imgui renderer end to end on a dx12 WARP device: build a frame of real imgui draw data, service the
-// texture protocol, record the draws into an offscreen target, and read the pixels back.
+// The imgui routine end to end on a dx12 WARP device: build a frame of real imgui draw data, service the texture protocol, record the draws into an offscreen target, and read the pixels back.
 //
-// No window and no swapchain are involved — the target is a plain rgba8 texture with copy_src, which is
-// how the repo's other raster tests run headless on CI.
+// No window and no swapchain are involved — the target is a plain rgba8 texture with copy_src, which is how the repo's other raster tests run headless on CI.
 
 namespace
 {
@@ -29,36 +27,34 @@ struct imgui_fixture
     sg::context_handle ctx;
     slib::shader_library shader_lib;
     sr::imgui_context imgui;
-    sr::imgui_renderer renderer;
     sg::texture_2d target;
 
-    /// Runs one full frame: build the UI, then prepare + render into `target`.
+    /// Runs one full frame: build the UI, then draw it into `target`.
+    ///
+    /// `display_pos` is where the target's top-left sits in imgui's coordinate space.
+    /// Zero for a lone viewport at the origin, and the window's desktop position for a multi-viewport secondary window — the routine has to subtract it from both the projection and the scissors.
     template <class F>
-    void frame(F&& build_ui)
+    void frame(F&& build_ui, tg::pos2f display_pos = tg::pos2f(0.0f, 0.0f))
     {
         imgui.begin_frame({.display_size = tg::vec2i(target_width, target_height), .delta_time = 1.0f / 60.0f});
         build_ui();
         imgui.end_frame();
 
         auto* const draw_data = ImGui::GetDrawData();
+        draw_data->DisplayPos = ImVec2(display_pos[0], display_pos[1]);
 
         auto cmd = ctx->create_command_list();
-        renderer.prepare(*cmd, draw_data); // outside the scope: the geometry upload is a copy
         {
             auto pass = cmd->raster.render_to(
                 {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-            renderer.render(
-                *cmd, draw_data,
-                {.target_format = sg::pixel_format::rgba8_unorm, .target_size = tg::vec2i(target_width, target_height)});
+            sr::imgui_routine::execute(pass, draw_data);
         }
         ctx->submit_command_list(cc::move(cmd));
 
-        // What a real frame ends with. Draining here also keeps each test self-contained: transient
-        // geometry is recycled, and no GPU work is left in flight when the fixture is torn down.
+        // What a real frame ends with.
+        // Draining here also keeps each test self-contained: transient geometry is recycled, and no GPU work is left in flight when the fixture is torn down.
         ctx->advance_epoch_and_wait_for_idle();
     }
-
-    [[nodiscard]] cc::isize live_texture_count() const { return renderer.live_texture_count(); }
 
     [[nodiscard]] cc::pinned_data<cc::byte const> read_back()
     {
@@ -91,7 +87,6 @@ std::unique_ptr<imgui_fixture> make_fixture()
     fixture->shader_lib.add_package(sr::shader_package());
 
     fixture->imgui = sr::imgui_context::create();
-    fixture->renderer = sr::imgui_renderer::create(*fixture->ctx);
     fixture->target = fixture->ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba8_unorm,
          .width = target_width,
@@ -126,7 +121,7 @@ void draw_test_window()
 }
 } // namespace
 
-TEST("sr::imgui_renderer - draws a window into an offscreen target")
+TEST("sr::imgui_routine - draws a window into an offscreen target")
 {
     auto const f = make_fixture();
     if (f == nullptr)
@@ -136,55 +131,61 @@ TEST("sr::imgui_renderer - draws a window into an offscreen target")
     auto const pixels = f->read_back();
     REQUIRE(pixels.size() == cc::isize(target_width) * cc::isize(target_height) * 4);
 
-    // Deliberately not a golden-image comparison: that would break on every imgui version bump without
-    // catching anything these checks do not.
+    // Deliberately not a golden-image comparison: that would break on every imgui version bump without catching anything these checks do not.
     CHECK(any_pixel_drawn(pixels));
 
     // Inside the window imgui was told to draw, the clear color must be gone.
     CHECK(pixel_at(pixels, 100, 100) != cc::byte(0));
 
-    // Far outside it, the clear color must survive — which is what proves the scissor is doing its job
-    // rather than the whole target being painted.
+    // Far outside it, the clear color must survive — which is what proves the scissor is doing its job rather than the whole target being painted.
     CHECK(pixel_at(pixels, 250, 250) == cc::byte(0));
 }
 
-TEST("sr::imgui_renderer - the font atlas is created once across frames")
+TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target")
 {
+    // The multi-viewport path, which a single viewport at the origin never reaches:
+    // geometry arrives in desktop coordinates and the target covers only part of the desktop, so the routine must subtract the window's origin.
+    // Pinned end-to-end rather than only in compute_ortho_constants, because arithmetic being right is not the same as it reaching the draw.
     auto const f = make_fixture();
     if (f == nullptr)
         SKIP("no dx12 WARP device with DXIL + DXC");
 
-    f->frame(&draw_test_window);
-    CHECK(f->live_texture_count() == 1); // the font atlas
+    auto const draw_box = []
+    {
+        auto* const list = ImGui::GetForegroundDrawList();
+        list->AddRectFilled(ImVec2(100.0f, 100.0f), ImVec2(150.0f, 150.0f), IM_COL32(255, 0, 0, 255));
+    };
 
-    // This is what actually proves the 1.92 texture protocol is implemented rather than accidentally
-    // working on frame one: a backend that ignored the status would keep creating textures.
-    f->frame(&draw_test_window);
-    f->frame(&draw_test_window);
-    CHECK(f->live_texture_count() == 1);
+    f->frame(draw_box);
+    auto const centered = f->read_back();
+    CHECK(pixel_at(centered, 125, 125) != cc::byte(0));
+    CHECK(pixel_at(centered, 85, 95) == cc::byte(0));
+
+    // Same geometry, but the target's top-left is now at (40, 30) in imgui space — so it must land 40 left and 30 up from where it did, and vacate where it was.
+    f->frame(draw_box, tg::pos2f(40.0f, 30.0f));
+    auto const shifted = f->read_back();
+    CHECK(pixel_at(shifted, 85, 95) != cc::byte(0));
+    CHECK(pixel_at(shifted, 125, 125) == cc::byte(0));
 }
 
-TEST("sr::imgui_renderer - a shader reload keeps drawing and keeps the atlas")
+TEST("sr::imgui_routine - a shader reload keeps drawing")
 {
     auto const f = make_fixture();
     if (f == nullptr)
         SKIP("no dx12 WARP device with DXIL + DXC");
-
-    f->frame(&draw_test_window);
-    CHECK(f->live_texture_count() == 1);
-
-    // A reload re-runs the routine's init_declare, which rebuilds the layouts. A pipeline still cached
-    // against the old ones would now be stale — this is the check that the routine drops them.
-    sg::signal_reload();
 
     f->frame(&draw_test_window);
     CHECK(any_pixel_drawn(f->read_back()));
 
-    // The atlas lives on the renderer, not the routine, so a shader reload must not disturb it.
-    CHECK(f->live_texture_count() == 1);
+    // A reload re-runs the routine's init_declare, which rebuilds the layouts.
+    // A pipeline still cached against the old ones would now be stale — this is the check that the routine drops them and keeps drawing.
+    sg::signal_reload();
+
+    f->frame(&draw_test_window);
+    CHECK(any_pixel_drawn(f->read_back()));
 }
 
-TEST("sr::imgui_renderer - an empty frame records nothing and does not assert")
+TEST("sr::imgui_routine - an empty frame records nothing and does not assert")
 {
     auto const f = make_fixture();
     if (f == nullptr)
@@ -195,21 +196,4 @@ TEST("sr::imgui_renderer - an empty frame records nothing and does not assert")
     auto const pixels = f->read_back();
     REQUIRE(pixels.size() == cc::isize(target_width) * cc::isize(target_height) * 4);
     CHECK(!any_pixel_drawn(pixels)); // still the clear color
-}
-
-TEST("sr::imgui_renderer - releasing textures lets a later frame rebuild them")
-{
-    auto const f = make_fixture();
-    if (f == nullptr)
-        SKIP("no dx12 WARP device with DXIL + DXC");
-
-    f->frame(&draw_test_window);
-    CHECK(f->live_texture_count() == 1);
-
-    f->renderer.release_textures(ImGui::GetDrawData());
-    CHECK(f->live_texture_count() == 0);
-
-    // imgui still holds the pixels, so its side goes back to WantCreate and the next frame rebuilds.
-    f->frame(&draw_test_window);
-    CHECK(f->live_texture_count() == 1);
 }

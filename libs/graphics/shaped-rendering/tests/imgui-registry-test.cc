@@ -2,10 +2,9 @@
 #include <nexus/test.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 
-// The arithmetic behind the imgui renderer, checked against hand-computed numbers. None of this needs a
-// device, so it runs on every platform — which matters, because these are the parts most likely to be
-// subtly wrong (an off-by-one scissor clamp, a row-pitch mistake) and the hardest to spot in a rendered
-// image.
+// The arithmetic behind the imgui renderer, checked against hand-computed numbers.
+// None of this needs a device, so it runs on every platform — which matters,
+// because these are the parts most likely to be subtly wrong (an off-by-one scissor clamp, a row-pitch mistake) and the hardest to spot in a rendered image.
 
 using namespace sr;
 
@@ -68,8 +67,7 @@ TEST("sr::impl - scissor passes a rect that is fully inside")
 
 TEST("sr::impl - scissor clamps a rect straddling the top-left")
 {
-    // imgui emits negative clip coordinates for a window dragged off-screen; both tier-1 backends reject
-    // a negative scissor outright, so it must be clamped rather than passed through.
+    // imgui emits negative clip coordinates for a window dragged off-screen; both tier-1 backends reject a negative scissor outright, so it must be clamped rather than passed through.
     auto const r = impl::compute_scissor(tg::aabb2f(tg::pos2f(-50, -30), tg::pos2f(100, 200)), tg::pos2f(0, 0),
                                          tg::vec2f(1, 1), tg::vec2i(800, 600));
 
@@ -90,8 +88,8 @@ TEST("sr::impl - scissor clamps a rect straddling the bottom-right")
 
 TEST("sr::impl - scissor rejects a fully off-target rect")
 {
-    // Degenerate after clamping. Submitting this as a zero-area scissor is what a naive clamp does, and
-    // it is a validation error rather than a harmless no-op.
+    // Degenerate after clamping.
+    // Submitting this as a zero-area scissor is what a naive clamp does, and it is a validation error rather than a harmless no-op.
     CHECK(!impl::compute_scissor(tg::aabb2f(tg::pos2f(900, 700), tg::pos2f(1000, 800)), tg::pos2f(0, 0),
                                  tg::vec2f(1, 1), tg::vec2i(800, 600))
                .has_value());
@@ -107,8 +105,8 @@ TEST("sr::impl - scissor rejects a fully off-target rect")
 
 TEST("sr::impl - scissor translates by display pos and scales to framebuffer pixels")
 {
-    // display_pos shifts the rect out of display space; framebuffer_scale then converts to real pixels
-    // (2x on a retina-style display). Both apply, in that order.
+    // display_pos shifts the rect out of display space; framebuffer_scale then converts to real pixels (2x on a retina-style display).
+    // Both apply, in that order.
     auto const r = impl::compute_scissor(tg::aabb2f(tg::pos2f(110, 70), tg::pos2f(210, 170)), tg::pos2f(100, 50),
                                          tg::vec2f(2, 2), tg::vec2i(800, 600));
 
@@ -119,8 +117,7 @@ TEST("sr::impl - scissor translates by display pos and scales to framebuffer pix
 
 TEST("sr::impl - packing a sub-rect tightens the row pitch")
 {
-    // A 4-wide, 3-tall RGBA image where each byte encodes its own linear index, so a mispacked row or a
-    // wrong stride shows up as a concrete wrong number rather than a plausible-looking blur.
+    // A 4-wide, 3-tall RGBA image where each byte encodes its own linear index, so a mispacked row or a wrong stride shows up as a concrete wrong number rather than a plausible-looking blur.
     constexpr auto width = 4;
     constexpr auto height = 3;
     constexpr auto bpp = 4;
@@ -159,8 +156,7 @@ TEST("sr::impl - packing a full-width rect is a straight copy")
 
 TEST("sr::impl - each pack allocates its own buffer")
 {
-    // ctx.upload is fire-and-forget and holds the pin until the copy runs, so two packs must not alias —
-    // reusing one scratch buffer would let a second repack overwrite bytes a pending copy still reads.
+    // ctx.upload is fire-and-forget and holds the pin until the copy runs, so two packs must not alias — reusing one scratch buffer would let a second repack overwrite bytes a pending copy still reads.
     constexpr auto width = 2;
     constexpr auto bpp = 1;
     auto const image = cc::vector<cc::byte>{cc::byte(1), cc::byte(2), cc::byte(3), cc::byte(4)};
