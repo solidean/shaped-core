@@ -73,6 +73,26 @@ What exists today (the scalar seam, the linalg core, and the first geometry
 primitives) and the full roadmap live in
 [structure.md](../libs/base/typed-geometry/docs/structure.md).
 
+## io
+
+Getting data in and out, in various formats. Layered on `base`, below the graphics stack.
+
+### babel-serializer — namespace `babel` — depends on clean-core, typed-geometry
+
+[readme](../libs/io/babel-serializer/readme.md) ·
+[cheat-sheet](../libs/io/babel-serializer/cheat-sheet.md) ·
+[docs](../libs/io/babel-serializer/docs/_index.md)
+
+Serialization and deserialization of various formats — often thin wrappers over existing
+libraries, often our own take on a parse. Two layers, kept distinct: each format parses into an
+**unopinionated native structure** (JSON stays a tree of values, OBJ stays parallel attribute
+arrays), and **opinionated aggregators** ("load an image", "load a mesh" across formats) sit on
+top of those. Reading is optimized for the read-once-into-a-basically-immutable-structure case —
+great to traverse and query, deliberately not for insertion; writing gets a separate API. Readers
+take a `cc::read_stream` and parse against its buffered window rather than slurping the input.
+A JSON reader (`data/`) and a Wavefront OBJ reader (`geometry/`) exist today; the roadmap lives in
+[structure.md](../libs/io/babel-serializer/docs/structure.md).
+
 ## graphics
 
 The graphics stack, layered on top of `base`. See [graphics.md](graphics.md) for the family
@@ -148,9 +168,9 @@ shaped-rendering           shaped-shader-compiler-dxc
      ↓                              ↓
      └──────────→ shaped-graphics ←─┘ ──→ backends (dx12, vulkan, metal, webgpu, opengl, webgl)
                         ↓
-              typed-geometry     nexus
-                     ↓             ↓
-                     └─ clean-core ┘
+   babel-serializer → typed-geometry     nexus     # io: babel-serializer (format readers)
+          ↓                  ↓             ↓        # depends on typed-geometry + clean-core;
+          └──────────→ clean-core ←────────┘        # nothing depends on it yet
                            ↓
                      (no dependencies)
 ```

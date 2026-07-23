@@ -129,6 +129,7 @@ target_sources(clean-core
     src/clean-core/streams/stream.hh
     src/clean-core/streams/span_stream.hh
     src/clean-core/streams/file_stream.hh
+    src/clean-core/streams/read_line.hh
     src/clean-core/streams/impl/stream.hh
     src/clean-core/streams/impl/native_file.hh
 )
@@ -271,6 +272,7 @@ if(SC_BUILD_TESTS)
         tests/streams/stream-test.cc
         tests/streams/span_stream-test.cc
         tests/streams/file_stream-test.cc
+        tests/streams/read_line-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-pool-test.cc
