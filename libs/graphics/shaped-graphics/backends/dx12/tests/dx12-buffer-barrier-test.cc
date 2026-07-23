@@ -13,8 +13,8 @@ namespace dx12 = sg::backend::dx12;
 {
     return dx12::make_buffer_barrier(nullptr, {.needed = true,
                                                .src_stages = sg::pipeline_stage_flags::copy,
-                                               .src_access = sg::access_flags::copy_write,
                                                .dst_stages = dst_stages,
+                                               .src_access = sg::access_flags::copy_write,
                                                .dst_access = dst_access});
 }
 } // namespace

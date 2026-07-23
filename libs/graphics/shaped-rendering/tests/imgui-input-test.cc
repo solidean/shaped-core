@@ -127,6 +127,10 @@ TEST("sr::imgui_context - a key press and its modifiers reach imgui")
 {
     auto imgui = sr::imgui_context::create();
 
+    // Pin platform-independent modifiers: imgui defaults ConfigMacOSXBehaviors on under __APPLE__, which swaps Cmd<>Ctrl inside AddKeyEvent — a ctrl press would then land as KeySuper on macOS.
+    // This test pins sr's own translation (ctrl modifier -> ImGuiMod_Ctrl), not imgui's mac shortcut policy.
+    ImGui::GetIO().ConfigMacOSXBehaviors = false;
+
     imgui.process_event(
         {.payload = key_event{.scancode = scancode::z, .modifiers = key_modifiers::ctrl, .is_down = true}});
     imgui.begin_frame({.display_size = tg::vec2i(200, 100)});
