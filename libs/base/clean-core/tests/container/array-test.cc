@@ -35,11 +35,7 @@ struct Tracked
 
     Tracked(Tracked&& rhs) noexcept : value(rhs.value) { ++move_ctor_count; }
 
-    Tracked& operator=(Tracked const& rhs)
-    {
-        value = rhs.value;
-        return *this;
-    }
+    Tracked& operator=(Tracked const& rhs) = default;
 
     Tracked& operator=(Tracked&& rhs) noexcept
     {
@@ -67,11 +63,7 @@ struct TrackedCopy
 
     TrackedCopy(TrackedCopy const& rhs) : value(rhs.value) { ++copy_ctor_count; }
 
-    TrackedCopy& operator=(TrackedCopy const& rhs)
-    {
-        value = rhs.value;
-        return *this;
-    }
+    TrackedCopy& operator=(TrackedCopy const& rhs) = default;
 };
 
 struct TrackedMove
@@ -123,6 +115,7 @@ struct CountingResource : cc::memory_resource
         allocate_bytes = [](cc::byte** out_ptr, cc::isize min_bytes, cc::isize max_bytes, cc::isize alignment,
                             void* userdata) -> cc::isize
         {
+            CC_UNUSED(max_bytes); // the resource interface fixes the signature; this size hint is unused here
             auto* self = static_cast<CountingResource*>(userdata);
             ++self->allocations;
             if (min_bytes == 0)
@@ -501,7 +494,7 @@ TEST("array - copy constructor deep copy")
             a[i].value = i;
 
         {
-            auto b(a);
+            auto b(a); // NOLINT(performance-unnecessary-copy-initialization): the copy is the test subject
             CHECK(b.size() == 5);
         }
 
@@ -1089,7 +1082,7 @@ TEST("array - destruction order")
         {
             auto a = cc::array<Tracked>::create_defaulted(10);
             auto b = cc::array<Tracked>::create_filled(5, Tracked(42));
-            auto c = a;
+            auto c = a; // NOLINT(performance-unnecessary-copy-initialization): copy is counted by the test
             auto d = cc::move(b);
         }
 

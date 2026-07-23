@@ -34,11 +34,7 @@ struct Tracked
 
     Tracked(Tracked&& rhs) noexcept : value(rhs.value) { ++move_ctor_count; }
 
-    Tracked& operator=(Tracked const& rhs)
-    {
-        value = rhs.value;
-        return *this;
-    }
+    Tracked& operator=(Tracked const& rhs) = default;
 
     Tracked& operator=(Tracked&& rhs) noexcept
     {

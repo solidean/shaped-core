@@ -1656,7 +1656,10 @@ TEST("result - CC_RETURN_IF_ERROR - real-world patterns")
         { return succeed ? cc::result<int>{42} : cc::error("connection failed"); };
 
         auto query_db = [](int conn_id, bool succeed) -> cc::result<cc::string>
-        { return succeed ? cc::result<cc::string>{"query result"} : cc::error("query failed"); };
+        {
+            CC_UNUSED(conn_id);
+            return succeed ? cc::result<cc::string>{"query result"} : cc::error("query failed");
+        };
 
         auto fetch_user = [&](bool conn_ok, bool query_ok) -> cc::result<cc::string>
         {
@@ -1695,10 +1698,16 @@ TEST("result - CC_RETURN_IF_ERROR - real-world patterns")
         { return succeed ? cc::result<int, cc::string>{123} : cc::error("file not found"); };
 
         auto read_file = [](int handle, bool succeed) -> cc::result<cc::string, cc::string>
-        { return succeed ? cc::result<cc::string, cc::string>{"file contents"} : cc::error("read error"); };
+        {
+            CC_UNUSED(handle);
+            return succeed ? cc::result<cc::string, cc::string>{"file contents"} : cc::error("read error");
+        };
 
         auto parse_json = [](cc::string const& contents, bool succeed) -> cc::result<int, cc::string>
-        { return succeed ? cc::result<int, cc::string>{999} : cc::error("parse error"); };
+        {
+            CC_UNUSED(contents);
+            return succeed ? cc::result<int, cc::string>{999} : cc::error("parse error");
+        };
 
         auto load_config = [&](bool open_ok, bool read_ok, bool parse_ok) -> cc::result<int, cc::string>
         {

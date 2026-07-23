@@ -506,6 +506,7 @@ TEST("function_ref - copy assignment works correctly")
         auto f = []() { return 42; };
         auto check = [](cc::function_ref<int()> ref1, cc::function_ref<int()> ref2)
         {
+            CC_UNUSED(ref1); // only ref2 is asserted on here
             CHECK(ref2.is_valid());
             CHECK(ref2() == 42);
         };

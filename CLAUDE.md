@@ -145,17 +145,24 @@ uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 uv run dev.py test               # build + run the full suite
 uv run dev.py build [-t <target>]
 uv run dev.py format             # clang-format all libs/ .cc/.hh in place
+uv run dev.py lint clang-tidy    # run the clang-tidy whitelist gates
 uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's safe
 uv run dev.py doctor             # sanity-check the toolchain
 ```
 
 **Before committing, run `uv run dev.py check --fix`** — the pre-commit gate:
-clang-format (dirty-only, auto-fixed), a full-repo cross-reference check, then the
+clang-format (dirty-only, auto-fixed), the clang-tidy gates (dirty-only), a full-repo cross-reference check, then the
 test suite across debug/default/release and (Linux/macOS) sanitizer presets
 (asserts on and off). `--no-test` skips the tests; `check crossrefs` / `check
-format` run a single gate; `check --list` lists them. The format check pins
+format` / `check lint` run a single gate; `check --list` lists them. The format check pins
 `.clang-format`'s clang-format major version (`--allow-different-version` to
 proceed anyway).
+
+The clang-tidy gates are a **strict whitelist** in
+[tools/lint/clang-tidy-gates.yml](tools/lint/clang-tidy-gates.yml) — every entry a true gate that must be zero to commit.
+That is deliberately distinct from the root [.clang-tidy](.clang-tidy), which stays the broader IDE incubator (clangd reads it);
+a check graduates from the incubator into the gate once the tree is clean under it.
+`dev.py lint` is the linting front door — clang-tidy is its first tenant.
 
 `dev.py` is quiet by default — it logs each step under `build/<preset>/run-logs/`.
 The loop: **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` after a
@@ -357,6 +364,7 @@ how to write one (keep it current when public API changes).
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |
 | Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
+| Run the clang-tidy gates         | `uv run dev.py lint clang-tidy` (`--dirty-only` in `check`; gates in [tools/lint/clang-tidy-gates.yml](tools/lint/clang-tidy-gates.yml)) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |

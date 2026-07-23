@@ -34,7 +34,7 @@ dx12_binding_group::~dx12_binding_group()
 }
 
 cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& ctx,
-                                                                 dx12_binding_group_layout_handle layout,
+                                                                 dx12_binding_group_layout_handle const& layout,
                                                                  cc::span<sg::named_view const> views,
                                                                  cc::span<sg::named_sampler const> samplers,
                                                                  sg::lifetime_scope scope)

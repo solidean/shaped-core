@@ -13,7 +13,7 @@ namespace
 struct non_trivial // NOLINT
 {
     int value = 0;
-    ~non_trivial() {} // makes it non-trivial
+    ~non_trivial() {} // NOLINT(modernize-use-equals-default): the user-provided body is what makes it non-trivial
 };
 } // namespace
 

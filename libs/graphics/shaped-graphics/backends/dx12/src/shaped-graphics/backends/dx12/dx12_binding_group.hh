@@ -40,7 +40,7 @@ class dx12_binding_group final : public sg::binding_group
 {
 public:
     [[nodiscard]] static cc::result<dx12_binding_group_handle> create(dx12_context& ctx,
-                                                                      dx12_binding_group_layout_handle layout,
+                                                                      dx12_binding_group_layout_handle const& layout,
                                                                       cc::span<sg::named_view const> views,
                                                                       cc::span<sg::named_sampler const> samplers,
                                                                       sg::lifetime_scope scope);

@@ -33,6 +33,7 @@ Checks: >-
   -readability-qualified-auto,
   -readability-math-missing-parentheses,
   -readability-use-concise-preprocessor-directives,
+  -readability-redundant-member-init,
   modernize-*,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
@@ -40,6 +41,7 @@ Checks: >-
   -misc-use-anonymous-namespace,
   -misc-non-private-member-variables-in-classes,
   -misc-no-recursion,
+  -misc-const-correctness,
   performance-*,
   -performance-enum-size
 
@@ -54,6 +56,11 @@ Checks: >-
 # -cppcoreguidelines-avoid-c-arrays: Allow for legacy code and simple local arrays
 # -bugprone-narrowing-conversions: False positives in loops (e.g. unsigned to int)
 # -cppcoreguidelines-narrowing-conversions: False positives in loops (e.g. unsigned to int)
+# -readability-redundant-member-init: We keep explicit member initializers on purpose — they control which
+#   fields a designated-initializer list may omit without warning, so an initializer that looks "redundant"
+#   is load-bearing here.
+# -misc-const-correctness: We care about const-correctness of APIs, but this also flags every local that
+#   could be const, where it is a signal/noise tradeoff and not mechanical.
 # -readability-simplify-boolean-expr: False positives inside assert macros
 # -readability-use-concise-preprocessor-directives: We prefer explicit `#if defined(X)` / `#elif defined(X)`; it reads consistently and extends to compound conditions, unlike #ifdef/#elifdef
 # -readability-use-anyofallof: We don't use std::ranges (overhead)

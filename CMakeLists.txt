@@ -122,6 +122,12 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_ARCH_X64 AND TARGET zydis)
     add_subdirectory(tools/instruction-tracer)
 endif()
 
+# shaped-linter: a self-contained C++ custom linter (its own lexer + parser, no LLVM). Cross-platform,
+# so it gates on SC_BUILD_TOOLS alone; clean-core and nexus are already added above.
+if(SC_BUILD_TOOLS)
+    add_subdirectory(tools/shaped-linter)
+endif()
+
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
 # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
 sc_finalize_web_runners()

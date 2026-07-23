@@ -1,0 +1,111 @@
+# clang-tidy gate config — the strict whitelist.
+#
+# This is NOT the root .clang-tidy.
+# The root config is the IDE incubator: broad `bugprone-*` / `readability-*` / `modernize-*` categories
+# with a blacklist, deliberately overzealous so editors surface candidate checks.
+# This file is the opposite — an explicit whitelist of *true gates* that must report zero before a commit.
+# A check graduates from the incubator into this gate once the tree is clean under it.
+#
+# This is our own schema, not clang-tidy's native format: the runner (tools/lint/clang-tidy.py) reads it and
+# hands clang-tidy a generated `-*,<gates>` config. That is what lets every check carry its rationale inline —
+# clang-tidy's own `Checks:` is one comma-joined string with nowhere to attach a per-check note.
+# Only `gates` and `options` reach clang-tidy; `incubator` and `excluded` are documentation the runner ignores.
+
+# Enabled gates — each must report zero to commit. `why` is the rationale that earns it a place here.
+gates:
+  - check: bugprone-no-return-in-nonvoid-functions
+    why: >-
+      Control-flow correctness: a non-void function that falls off the end is UB.
+      Already a root .clang-tidy WarningsAsErrors — this is its permanent home.
+
+  - check: bugprone-return-const-ref-from-parameter
+    why: >-
+      Returning a `const&` bound to a by-value / temporary parameter dangles; sharper under C++23.
+      Already a root .clang-tidy WarningsAsErrors.
+
+  - check: modernize-use-nullptr
+    why: No `0` / `NULL` pointer literals — `nullptr` is the house style (C++23-only codebase).
+
+  - check: modernize-use-override
+    why: "`override` wherever a member overrides a virtual, so the compiler catches signature drift."
+
+  - check: modernize-use-using
+    why: "`using` alias over `typedef` — the modern, readable form."
+
+  - check: modernize-use-bool-literals
+    why: "`true` / `false` for bool, not `0` / `1`."
+
+  - check: modernize-redundant-void-arg
+    why: "`f()`, not the C-ism `f(void)`."
+
+  - check: readability-duplicate-include
+    why: A repeated `#include` of the same header is always dead noise.
+
+  - check: performance-move-const-arg
+    why: >-
+      Flags `cc::move` of a const / trivially-copyable value (a no-op move) — matches our move discipline.
+      See the option below (carried over from the root config).
+
+  - check: bugprone-use-after-move
+    why: Reading a moved-from object; underpins subobject-safe move discipline (coding-guidelines.md, Common Design Pitfalls).
+  - check: bugprone-unhandled-self-assignment
+    why: A copy-assignment that isn't safe against `x = x`.
+  - check: performance-for-range-copy
+    why: '"Avoid unnecessary copies" — a range-for loop variable that copies each element instead of binding const&.'
+  - check: performance-unnecessary-copy-initialization
+    why: >-
+      "Avoid unnecessary copies" — a local initialized as a copy but never modified (could be a const&).
+      A deliberate copy in a test marks itself with a // NOLINT and a reason.
+  - check: performance-unnecessary-value-param
+    why: >-
+      "Avoid unnecessary copies" — a by-value parameter that is only read.
+      Fix: take it by const& (or, if it is a sink stored/forwarded exactly once, keep by value and cc::move it).
+  - check: modernize-use-equals-default
+    why: >-
+      A hand-written special member equivalent to the compiler''s — prefer `= default`.
+      Where a non-defaulted body is the point (e.g. a dtor written to make a type non-trivial) mark it // NOLINT.
+  - check: modernize-use-equals-delete
+    why: '"Specify all four" copy/move ops — prefer `= delete` over a private undefined declaration.'
+  - check: misc-unused-using-decls
+    why: A `using` declaration nothing references is dead.
+  - check: readability-redundant-string-init
+    why: 'A redundant initializer like `string s = ""`.'
+  - check: misc-unused-parameters
+    why: >-
+      An unused function parameter (common with fixed-signature callbacks).
+      Fix: mark it CC_UNUSED(param) in the body — it keeps the name as documentation.
+
+# clang-tidy CheckOptions carried into the generated config.
+options:
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: true
+
+# Incubator candidates — guideline-backed checks parked here until the tree verifies clean under them, then
+# promoted into `gates` (the incubator -> gate ratchet). Empty right now: the previous batch all graduated.
+incubator: []
+
+# Deliberately NOT gated — they fight the coding guidelines rather than enforce them. Recorded so the
+# omission is a decision, not an oversight.
+excluded:
+  - check: bugprone-sizeof-expression
+    why: Bare `sizeof(T)` is house style (coding-guidelines.md, Integer & Numeric Types).
+  - check: readability-magic-numbers
+    why: Too eager; flags obvious constants.
+  - check: readability-identifier-naming
+    why: Naming is the root config's job for the IDE; a hard gate here would be huge and noisy.
+  - check: misc-definitions-in-headers
+    why: Header-only inline libraries define in headers by design.
+  - check: misc-include-cleaner
+    why: >-
+      Enforces include-what-you-use, which fights our "transitive includes are fine" guideline
+      (coding-guidelines.md, Headers & Forward Declarations).
+      On this tree it reported ~4860 hits, and none of its categories are safely fixable:
+      ~4740 were "missing include" (it wants every used symbol directly included — exactly the transitive
+      pattern we allow), and the ~120 "unused include" were dominated by umbrella headers (all.hh) and
+      macro / platform headers (win32_sanitized.hh) whose removal breaks the build, plus self-header false
+      positives (a `.cc` flagged for including its own `.hh`).
+      clang-tidy can't report only the unused half, so it can't be a gate; a future custom unused-include
+      linter that skips those cases could.
+
+# Header diagnostics are scoped at the command line (`--header-filter`, see tools/lint/clang-tidy.py),
+# so the regex is built from the first-party source roots per run rather than pinned here.

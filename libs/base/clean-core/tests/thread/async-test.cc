@@ -699,7 +699,7 @@ namespace
 // and sum them. leaf_exec counts leaf-frame runs, so we can assert no completed node is recomputed and that
 // undemanded work stays cold. (Internal frames legitimately run twice — once to register deps and return
 // wait, once to compute after they are ready — which is inherent to the re-entrant poll model.)
-cc::shared_async<cc::i64> build_sum_tree(int depth, std::shared_ptr<cc::i64> leaf_exec)
+cc::shared_async<cc::i64> build_sum_tree(int depth, std::shared_ptr<cc::i64> const& leaf_exec)
 {
     if (depth == 0)
         return cc::make_async_lazy<cc::i64>(

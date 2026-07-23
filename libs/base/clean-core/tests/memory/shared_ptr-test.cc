@@ -123,7 +123,11 @@ struct only_strong_traits
         bool const last = p->strong.fetch_sub(1, cc::memory_order_acq_rel) == 1;
         return {last, last}; // no weak count to wait on: destroy and free together
     }
-    static void destroy_object(only_strong* p) { ++only_strong::torn; }
+    static void destroy_object(only_strong* p)
+    {
+        CC_UNUSED(p);
+        ++only_strong::torn;
+    }
     static void free_storage(only_strong* p)
     {
         ++only_strong::freed;
@@ -146,7 +150,7 @@ TEST("shared_ptr - default traits: make, copy/move keep alive, single destroy")
         CHECK(tracked::live == 1);
 
         {
-            auto q = p; // copy: still one object, two owners
+            auto q = p; // NOLINT(performance-unnecessary-copy-initialization): the copy is the shared-ownership subject
             CHECK(q.get() == p.get());
         }
         CHECK(tracked::destroyed == 0); // dropping the copy did not destroy
@@ -200,7 +204,7 @@ TEST("shared_ptr - default traits: plain value type (shared_ptr<int>)")
     auto p = cc::make_shared<int>(123);
     REQUIRE(p.is_valid());
     CHECK(*p == 123);
-    auto q = p;
+    auto q = p; // NOLINT(performance-unnecessary-copy-initialization): a shared-owner copy is the subject
     *q = 7;
     CHECK(*p == 7); // same object
 }
@@ -233,7 +237,7 @@ TEST("shared_ptr - intrusive: refcounts, single payload teardown + free")
         CHECK(p->weak.load() == 1);
 
         {
-            auto q = p;
+            auto q = p; // NOLINT(performance-unnecessary-copy-initialization): the copy is what bumps the refcount
             CHECK(p->strong.load() == 2);
         }
         CHECK(p->strong.load() == 1);
@@ -399,7 +403,7 @@ TEST("shared_ptr - strong-only traits: no weak, destroy + free together")
         auto p = cc::make_shared<only_strong, only_strong_traits>(3);
         CHECK(p->value == 3);
         CHECK(p->strong.load() == 1);
-        auto q = p;
+        auto q = p; // NOLINT(performance-unnecessary-copy-initialization): the copy is what bumps the refcount
         CHECK(p->strong.load() == 2);
     }
     CHECK(only_strong::torn == 1);
