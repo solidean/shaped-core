@@ -1,8 +1,8 @@
 # shaped-rendering
 
 Concrete render routines and helpers on top of [shaped-graphics](../shaped-graphics/readme.md).
-Namespace `sr`. Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines acquire
-their shaders through it), plus transitively typed-geometry + clean-core.
+Namespace `sr`.
+Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines acquire their shaders through it) and the vendored **imgui**, plus transitively typed-geometry + clean-core.
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sr is the home for the common building blocks of a renderer built on sg — mipmap generation, texture compression, tonemapping, and similar reusable render routines.
@@ -30,9 +30,9 @@ while (!win->is_close_requested())
 Three things worth knowing before you use it:
 
 * **SDL3 backs it, and SDL3 is fetched on demand — so the backend is optional, not the API.**
-  Without one, `window_system::try_create` fails with a reason instead of the types disappearing, so the same
-  code compiles either way. `SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" when you need it at
-  compile time. No SDL type reaches a public header — see [coding-guidelines](docs/coding-guidelines.md).
+  Without one, `window_system::try_create` fails with a reason instead of the types disappearing, so the same code compiles either way.
+  `SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" when you need it at compile time.
+  No SDL type reaches a public header — see [coding-guidelines](docs/coding-guidelines.md).
 * **`window_system` is main-thread bound.**
   Create it, create windows from it, poll it and destroy it all on one thread.
   On macOS that thread must be the process main thread.
@@ -40,8 +40,8 @@ Three things worth knowing before you use it:
 * **Rendering is not.**
   `native_window_handle()` is fixed for a window's lifetime, so a render thread may drive the swapchain as long as `poll_events` stays on the main thread.
 
-Multiple windows work today: each has its own size, close latch and native handle, and `wsys->windows()` enumerates them.
-That is the groundwork for imgui docking and multiple viewports.
+Multiple windows work today: each has its own size, position, focus, close latch and native handle, and `wsys->windows()` enumerates them.
+That is what imgui's multi-viewport support is built on — see [docs/imgui.md](docs/imgui.md).
 
 ## Input
 
@@ -54,31 +54,40 @@ for (auto const& e : wsys->events())
             e.window->request_close();
 ```
 
-Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped
-`character`, because movement wants position while a ctrl+Z-style shortcut wants the letter.
-Text is separate: `text_event` delivers committed UTF-8 after `window::start_text_input()`, which is the only
-thing that handles IME composition, dead keys and paste correctly — never rebuild text from key events.
+Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped `character`,
+because movement wants position while a ctrl+Z-style shortcut wants the letter.
+Text is separate: `text_event` delivers committed UTF-8 after `window::start_text_input()`, which is the only thing that handles IME composition, dead keys and paste correctly —
+never rebuild text from key events.
 `window::set_relative_mouse_mode()` captures the cursor for an FPS-style camera.
+
+The pointer's shape and the system clipboard hang off `window_system` rather than a window, because both are process-global:
+`set_cursor(cursor_shape)` / `set_cursor_visible(bool)`, and `clipboard_text()` / `set_clipboard_text(sv)`.
 
 See the [cheat-sheet](cheat-sheet.md) for the full surface.
 
-The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init,
-and the per-context `ctx.routines` registry) lives in **shaped-graphics** — see its
-[docs/render-routines.md](../shaped-graphics/docs/render-routines.md). `sr` hosts the **concrete**
-routines built on top of it; they land as they are implemented. See
-[docs/render-routines.md](docs/render-routines.md) for the sr-side overview and
-[docs/structure.md](docs/structure.md) for the wider roadmap.
+## Dear ImGui
+
+sr also hosts the **Dear ImGui backend** — both halves, drawn entirely through sg with no native graphics calls.
+`sr::imgui_context` owns the ImGui context, feeds it input from `window_system::events()`, and hands the window imgui's cursor and text-input intent;
+`sr::imgui_routine` is the render routine that draws it.
+See [docs/imgui.md](docs/imgui.md).
+
+The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init, and the per-context `ctx.routines` registry) lives in **shaped-graphics** —
+see its [docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
+`sr` hosts the **concrete** routines built on top of it; they land as they are implemented.
+See [docs/render-routines.md](docs/render-routines.md) for the sr-side overview and [docs/structure.md](docs/structure.md) for the wider roadmap.
 
 ## Building & testing
 
 Build and test through the repo driver — never run the `shaped-rendering-test` binary directly.
-Beyond the window suite it is a smoke test for now.
 The render-routine framework is tested in shaped-graphics, where it lives; concrete routines bring their own tests as they land.
 
 ```bash
-uv run dev.py test "sr - "        # the window suite — headless, runs anywhere
-uv run dev.py test "sr smoke"     # the shaped-rendering smoke test
-uv run dev.py test "sg - routine" # the render-routine framework tests (in shaped-graphics)
+uv run dev.py test "sr"                 # everything in shaped-rendering
+uv run dev.py test "sr - "              # the window suite — headless, runs anywhere
+uv run dev.py test "sr::impl"           # the imgui arithmetic — no device needed, runs everywhere
+uv run dev.py test "sr::imgui_routine"  # imgui end to end on a dx12 WARP device (skips without one)
+uv run dev.py test "sg - routine"       # the render-routine framework tests (in shaped-graphics)
 ```
 
 The window suite runs on SDL's dummy video driver, so it needs no display.
@@ -86,8 +95,11 @@ What that cannot reach — a real window manager delivering close and resize eve
 
 ```bash
 uv run dev.py test "sr - window native handle (manual)" --manual   # creates a hidden real window, checks the handle
-uv run dev.py test "sr - window (manual)" --manual --mirror-test-output   # opens a window; close it to end
+uv run dev.py test "sr - window (manual)" --manual --mirror-test-output --timeout 0   # opens a window; close it to end
 ```
+
+`--timeout 0` matters for any test that waits on a person: dev.py kills a test binary after 60s by default and reports it failed.
+The same applies to the imgui one, `uv run dev.py test "sr - imgui window (manual)" --manual --mirror-test-output --timeout 0`.
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.
 

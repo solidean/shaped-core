@@ -6,8 +6,7 @@
 #include <shaped-rendering/window.hh>
 
 // The SDL-backed implementation of sr::window and sr::window_system.
-// The pure SDL-to-sr mapping lives in impl/input_translation.hh so a test can reach it; everything that needs a
-// live window or the event queue is here.
+// The pure SDL-to-sr mapping lives in impl/input_translation.hh so a test can reach it; everything that needs a live window or the event queue is here.
 //
 // Both types live here because they are two halves of one mechanism.
 // The system's init, the window registration and the event dispatch all touch the same private state.
@@ -21,10 +20,8 @@ namespace
 /// SDL's event queue is process-global, so a second live system would steal the first one's events.
 int s_live_system_count = 0;
 
-/// Property under which a window stashes itself on its SDL window, so an event's window id resolves back to the
-/// sr::window in one step.
-/// Keeping the back-pointer on the SDL window rather than in a side table means there is one source of truth,
-/// which cannot fall out of sync with window lifetime.
+/// Property under which a window stashes itself on its SDL window, so an event's window id resolves back to the sr::window in one step.
+/// Keeping the back-pointer on the SDL window rather than in a side table means there is one source of truth, which cannot fall out of sync with window lifetime.
 constexpr char const* back_pointer_property = "sr.window";
 
 SDL_Window* as_sdl(void* native_window)
@@ -49,12 +46,62 @@ window* window_from_id(SDL_WindowID id)
     return static_cast<window*>(
         SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window), back_pointer_property, nullptr));
 }
+
+SDL_SystemCursor as_sdl(cursor_shape shape)
+{
+    switch (shape)
+    {
+    case cursor_shape::arrow:
+        return SDL_SYSTEM_CURSOR_DEFAULT;
+    case cursor_shape::text:
+        return SDL_SYSTEM_CURSOR_TEXT;
+    case cursor_shape::wait:
+        return SDL_SYSTEM_CURSOR_WAIT;
+    case cursor_shape::progress:
+        return SDL_SYSTEM_CURSOR_PROGRESS;
+    case cursor_shape::crosshair:
+        return SDL_SYSTEM_CURSOR_CROSSHAIR;
+    case cursor_shape::pointer:
+        return SDL_SYSTEM_CURSOR_POINTER;
+    case cursor_shape::move:
+        return SDL_SYSTEM_CURSOR_MOVE;
+    case cursor_shape::not_allowed:
+        return SDL_SYSTEM_CURSOR_NOT_ALLOWED;
+    case cursor_shape::resize_ns:
+        return SDL_SYSTEM_CURSOR_NS_RESIZE;
+    case cursor_shape::resize_ew:
+        return SDL_SYSTEM_CURSOR_EW_RESIZE;
+    case cursor_shape::resize_nesw:
+        return SDL_SYSTEM_CURSOR_NESW_RESIZE;
+    case cursor_shape::resize_nwse:
+        return SDL_SYSTEM_CURSOR_NWSE_RESIZE;
+    }
+    return SDL_SYSTEM_CURSOR_DEFAULT;
+}
+
+constexpr int cursor_shape_count = int(cursor_shape::resize_nwse) + 1;
+
+/// The SDL cursor per shape, created on first use and destroyed with the system.
+///
+/// File-scope rather than a window_system member because window.hh must name no SDL type,
+/// and because at most one system is alive at a time (s_live_system_count) — the same reasoning that lets that counter be a global.
+/// Creating each shape once matters: a UI library sets the cursor every frame from its hover state.
+SDL_Cursor* s_cursors[cursor_shape_count] = {};
+
+void destroy_cursors()
+{
+    for (auto& cursor : s_cursors)
+    {
+        if (cursor != nullptr)
+            SDL_DestroyCursor(cursor);
+        cursor = nullptr;
+    }
+}
 } // namespace
 
 u32 impl::backend_window_id(window const& w)
 {
-    // Walks SDL's own window list and matches on the back-pointer, so this shares the one source of truth with
-    // window_from_id rather than reaching into window's members.
+    // Walks SDL's own window list and matches on the back-pointer, so this shares the one source of truth with window_from_id rather than reaching into window's members.
     int count = 0;
     auto** const windows = SDL_GetWindows(&count);
     if (windows == nullptr)
@@ -90,10 +137,10 @@ void* window::native_window_handle() const
 #endif
 }
 
-// These three return void, so a platform refusal cannot be reported — it is a bug or a broken driver, not
-// something a caller can act on. Assert on it and let the state we already updated stand.
-// The result goes through a local: CC_ASSERT does not evaluate its condition once assertions are off, so
-// calling SDL inside the macro would drop the call entirely in a release build.
+// The setters below return void, so a platform refusal cannot be reported — it is a bug or a broken driver, not something a caller can act on.
+// Assert on it and let the state we already updated stand.
+// The result goes through a local: CC_ASSERT does not evaluate its condition once assertions are off,
+// so calling SDL inside the macro would drop the call entirely in a release build.
 
 void window::set_title(cc::string_view title)
 {
@@ -118,6 +165,36 @@ void window::hide()
     CC_ASSERT(ok, "SDL_HideWindow failed");
 }
 
+// Both of these write the cached value through before asking SDL, so a get right after a set reads the request rather than a value only the next poll_events would refresh.
+// imgui's viewport backend does exactly that within one frame.
+
+void window::set_position(tg::pos2i position)
+{
+    _system->assert_owning_thread();
+
+    _position = position;
+    auto const ok = SDL_SetWindowPosition(as_sdl(_native_window), position[0], position[1]);
+    CC_ASSERT(ok, "SDL_SetWindowPosition failed");
+}
+
+void window::set_size(tg::vec2i size)
+{
+    _system->assert_owning_thread();
+    CC_ASSERT(size[0] > 0 && size[1] > 0, "window size must be positive");
+
+    _width = size[0];
+    _height = size[1];
+    auto const ok = SDL_SetWindowSize(as_sdl(_native_window), size[0], size[1]);
+    CC_ASSERT(ok, "SDL_SetWindowSize failed");
+}
+
+void window::focus()
+{
+    _system->assert_owning_thread();
+    auto const ok = SDL_RaiseWindow(as_sdl(_native_window));
+    CC_ASSERT(ok, "SDL_RaiseWindow failed");
+}
+
 void window::set_relative_mouse_mode(bool enabled)
 {
     _system->assert_owning_thread();
@@ -125,8 +202,7 @@ void window::set_relative_mouse_mode(bool enabled)
     auto const ok = SDL_SetWindowRelativeMouseMode(as_sdl(_native_window), enabled);
     CC_ASSERT(ok, "SDL_SetWindowRelativeMouseMode failed");
 
-    // Tracked from the request rather than queried back, so the getter still describes what was asked for on a
-    // platform that silently declines to capture.
+    // Tracked from the request rather than queried back, so the getter still describes what was asked for on a platform that silently declines to capture.
     _is_relative_mouse_mode = enabled;
 }
 
@@ -148,6 +224,116 @@ void window::stop_text_input()
     _is_text_input_active = false;
 }
 
+window_system& window::system() const
+{
+    CC_ASSERT(_system != nullptr, "window has no system — it was not created through window_system");
+    return *_system;
+}
+
+void window_system::set_cursor(cursor_shape shape)
+{
+    assert_owning_thread();
+
+    if (shape == _cursor)
+        return; // called every frame from a hover state, so the no-change path must not reach the platform
+
+    _cursor = shape;
+
+    auto& cached = s_cursors[int(shape)];
+    if (cached == nullptr)
+        cached = SDL_CreateSystemCursor(as_sdl(shape));
+
+    // A shape the platform cannot provide is not an error: keep whatever is showing rather than falling back to an arrow, which would be a visible glitch on the one platform that lacks it.
+    if (cached != nullptr)
+        SDL_SetCursor(cached);
+}
+
+void window_system::set_cursor_visible(bool visible)
+{
+    assert_owning_thread();
+
+    if (visible == _is_cursor_visible)
+        return;
+
+    _is_cursor_visible = visible;
+    auto const ok = visible ? SDL_ShowCursor() : SDL_HideCursor();
+    CC_ASSERT(ok, "could not change cursor visibility");
+}
+
+cc::string window_system::clipboard_text() const
+{
+    assert_owning_thread();
+
+    // SDL hands back an owned copy that must be freed, and null when the clipboard holds no text.
+    auto* const text = SDL_GetClipboardText();
+    if (text == nullptr)
+        return {};
+
+    auto result = cc::string(text);
+    SDL_free(text);
+    return result;
+}
+
+void window_system::set_clipboard_text(cc::string_view text)
+{
+    assert_owning_thread();
+
+    // cc::string_view is not null-terminated and SDL takes a C string.
+    auto const terminated = cc::string::create_copy_c_str_materialized(text);
+    auto const ok = SDL_SetClipboardText(terminated.c_str_if_terminated());
+    CC_ASSERT(ok, "SDL_SetClipboardText failed");
+}
+
+bool window_system::has_clipboard_text() const
+{
+    assert_owning_thread();
+    return SDL_HasClipboardText();
+}
+
+cc::vector<display_info> window_system::displays() const
+{
+    assert_owning_thread();
+
+    auto result = cc::vector<display_info>();
+
+    auto count = 0;
+    auto* const ids = SDL_GetDisplays(&count);
+    if (ids != nullptr)
+    {
+        for (auto i = 0; i < count; ++i)
+        {
+            SDL_Rect bounds = {};
+            SDL_Rect usable = {};
+            if (!SDL_GetDisplayBounds(ids[i], &bounds))
+                continue;
+
+            // Falls back to the full bounds rather than dropping the display: a monitor whose usable area the platform will not report is still a monitor,
+            // and a zero-sized work area is worse than an approximate one.
+            if (!SDL_GetDisplayUsableBounds(ids[i], &usable))
+                usable = bounds;
+
+            auto const scale = SDL_GetDisplayContentScale(ids[i]);
+
+            result.push_back({.position = tg::pos2i(bounds.x, bounds.y),
+                              .size = tg::vec2i(bounds.w, bounds.h),
+                              .work_position = tg::pos2i(usable.x, usable.y),
+                              .work_size = tg::vec2i(usable.w, usable.h),
+                              .content_scale = scale > 0.0f ? scale : 1.0f});
+        }
+        SDL_free(ids);
+    }
+
+    // The dummy video driver reports no displays at all.
+    // One synthetic entry keeps the postcondition — and imgui's multi-viewport sanity check, which refuses a frame with an empty monitor list.
+    if (result.empty())
+        result.push_back({.position = tg::pos2i(0, 0),
+                          .size = tg::vec2i(1920, 1080),
+                          .work_position = tg::pos2i(0, 0),
+                          .work_size = tg::vec2i(1920, 1080)});
+
+    return result;
+}
+
 cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_system_description const& desc)
 {
     CC_ASSERT(SDL_IsMainThread(), "sr::window_system must be created on the process main thread");
@@ -156,16 +342,23 @@ cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_syste
     // Set before init: the driver is chosen while the video subsystem comes up.
     // Reset rather than left alone in the normal case — the hint is process-global and outlives SDL_Quit.
     // Without the reset, one headless system would leave every later system in the process headless too.
-    auto const hint_ok = desc.headless ? SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy") //
-                                       : SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
-    CC_ASSERT(hint_ok, "could not set the SDL video-driver hint");
+    if (desc.headless)
+    {
+        auto const hint_ok = SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+        CC_ASSERT(hint_ok, "could not set the SDL video-driver hint");
+    }
+    else
+    {
+        // Deliberately unchecked: SDL_ResetHint reports false when the hint was never set at all, which is the normal case in a process that has not created a headless system yet.
+        // Either way the hint is now unset, which is all this path asks for — asserting here would fire on the first real window.
+        (void)SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
+    }
 
     if (!SDL_Init(SDL_INIT_VIDEO))
         return cc::error(last_sdl_error());
 
     // The hint is a request, so confirm it took rather than trusting it.
-    // A headless system that quietly got a real driver would open real windows on a CI machine, which the
-    // assert above cannot catch in a build with assertions off.
+    // A headless system that quietly got a real driver would open real windows on a CI machine, which the assert above cannot catch in a build with assertions off.
     if (desc.headless)
     {
         auto const* const driver = SDL_GetCurrentVideoDriver();
@@ -191,6 +384,9 @@ window_system::~window_system()
     assert_owning_thread();
     CC_ASSERT(_windows.empty(), "every sr::window must be destroyed before its window_system");
 
+    // Before SDL_Quit: the cursors are SDL objects, and freeing them after the subsystem is down is a use-after-free that only shows up under a leak checker.
+    destroy_cursors();
+
     SDL_Quit();
     --s_live_system_count;
 }
@@ -210,6 +406,14 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
         flags |= SDL_WINDOW_RESIZABLE;
     if (!desc.is_visible)
         flags |= SDL_WINDOW_HIDDEN;
+    if (!desc.has_decoration)
+        flags |= SDL_WINDOW_BORDERLESS;
+    if (desc.is_always_on_top)
+        flags |= SDL_WINDOW_ALWAYS_ON_TOP;
+    if (!desc.has_taskbar_icon)
+        flags |= SDL_WINDOW_UTILITY;
+    if (!desc.is_focusable)
+        flags |= SDL_WINDOW_NOT_FOCUSABLE;
 
     auto title = cc::string::create_copy_c_str_materialized(desc.title);
     auto* const sdl_window = SDL_CreateWindow(title.c_str_materialize(), desc.width, desc.height, flags);
@@ -226,13 +430,22 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
     if (props == 0)
         return cc::error(last_sdl_error());
 
-    // The size SDL actually gave us, which a window manager may have clamped.
+    // The size and position SDL actually gave us, which a window manager may have clamped or placed itself.
     // Queried now so the getters are meaningful before the first poll_events.
     if (!SDL_GetWindowSizeInPixels(sdl_window, &win->_width, &win->_height))
         return cc::error(last_sdl_error());
 
-    // A hard failure rather than best-effort: without the back-pointer, window_from_id never resolves this
-    // window, and it would silently never see a close or resize event again.
+    auto position_x = 0;
+    auto position_y = 0;
+    if (!SDL_GetWindowPosition(sdl_window, &position_x, &position_y))
+        return cc::error(last_sdl_error());
+    win->_position = tg::pos2i(position_x, position_y);
+
+    // A window shown on creation usually arrives focused, and SDL has already delivered that event by now —
+    // seeding from the live flags rather than waiting for the next poll keeps the first frame honest.
+    win->_is_focused = (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+
+    // A hard failure rather than best-effort: without the back-pointer, window_from_id never resolves this window, and it would silently never see a close or resize event again.
     if (!SDL_SetPointerProperty(props, back_pointer_property, win.get()))
         return cc::error(last_sdl_error());
 
@@ -266,9 +479,9 @@ void window_system::poll_events()
         {
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
-            // A key event carries the platform's own modifier state for that moment, so remembering it here is what
-            // lets a mouse event later in this same queue be stamped with the state as of its position in the
-            // stream rather than as of whenever the queue happened to be drained.
+            // A key event carries the platform's own modifier state for that moment,
+            // so remembering it here is what lets a mouse event later in this same queue be stamped with the state as of its position in the stream
+            // rather than as of whenever the queue happened to be drained.
             _modifiers = impl::modifiers_from_sdl(event.key.mod);
 
             _events.push_back({.window = window_from_id(event.key.windowID),
@@ -280,9 +493,16 @@ void window_system::poll_events()
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
-            // Modifiers can be pressed or released while another application had focus, and those changes produce
-            // no key event here. Re-sync so the first click after a window switch is not stamped with stale state.
+            if (auto* const w = window_from_id(event.window.windowID))
+                w->_is_focused = true;
+            // Modifiers can be pressed or released while another application had focus, and those changes produce no key event here.
+            // Re-sync so the first click after a window switch is not stamped with stale state.
             _modifiers = impl::modifiers_from_sdl(SDL_GetModState());
+            break;
+
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            if (auto* const w = window_from_id(event.window.windowID))
+                w->_is_focused = false;
             break;
 
         case SDL_EVENT_TEXT_INPUT:
@@ -340,6 +560,11 @@ void window_system::poll_events()
             }
             break;
 
+        case SDL_EVENT_WINDOW_MOVED:
+            if (auto* const w = window_from_id(event.window.windowID))
+                w->_position = tg::pos2i(event.window.data1, event.window.data2);
+            break;
+
         case SDL_EVENT_WINDOW_MINIMIZED:
             if (auto* const w = window_from_id(event.window.windowID))
             {
@@ -356,8 +581,7 @@ void window_system::poll_events()
             if (auto* const w = window_from_id(event.window.windowID))
             {
                 w->_is_minimized = false;
-                // On failure the previous size stands, which is the best available answer here — poll_events
-                // returns void, and the next size event will correct it.
+                // On failure the previous size stands, which is the best available answer here — poll_events returns void, and the next size event will correct it.
                 auto const ok = SDL_GetWindowSizeInPixels(as_sdl(w->_native_window), &w->_width, &w->_height);
                 CC_ASSERT(ok, "SDL_GetWindowSizeInPixels failed");
             }

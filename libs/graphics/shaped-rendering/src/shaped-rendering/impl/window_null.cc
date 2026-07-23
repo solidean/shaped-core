@@ -4,10 +4,9 @@
 
 // The window backend used when shaped-rendering was built without one, because SDL3 was not fetched.
 //
-// try_create fails with a reason a caller can print, and that is the whole backend: no window_system can
-// exist, so no window can either, and every other entry point here is unreachable rather than empty.
-// Asserting that is better than a silent no-op — a window method running without a backend means the
-// failure from try_create went unchecked, and that is worth finding.
+// try_create fails with a reason a caller can print, and that is the whole backend:
+// no window_system can exist, so no window can either, and every other entry point here is unreachable rather than empty.
+// Asserting that is better than a silent no-op — a window method running without a backend means the failure from try_create went unchecked, and that is worth finding.
 
 namespace sr
 {
@@ -74,6 +73,21 @@ void window::hide()
     unreachable_without_backend();
 }
 
+void window::focus()
+{
+    unreachable_without_backend();
+}
+
+void window::set_position(tg::pos2i)
+{
+    unreachable_without_backend();
+}
+
+void window::set_size(tg::vec2i)
+{
+    unreachable_without_backend();
+}
+
 void window::set_relative_mouse_mode(bool)
 {
     unreachable_without_backend();
@@ -89,8 +103,44 @@ void window::stop_text_input()
     unreachable_without_backend();
 }
 
+window_system& window::system() const
+{
+    unreachable_without_backend();
+}
+
+void window_system::set_cursor(cursor_shape)
+{
+    unreachable_without_backend();
+}
+
+void window_system::set_cursor_visible(bool)
+{
+    unreachable_without_backend();
+}
+
+cc::string window_system::clipboard_text() const
+{
+    unreachable_without_backend();
+}
+
+void window_system::set_clipboard_text(cc::string_view)
+{
+    unreachable_without_backend();
+}
+
+bool window_system::has_clipboard_text() const
+{
+    unreachable_without_backend();
+}
+
+cc::vector<display_info> window_system::displays() const
+{
+    unreachable_without_backend();
+}
+
 u32 impl::backend_window_id(window const&)
 {
     unreachable_without_backend();
 }
+
 } // namespace sr

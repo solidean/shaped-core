@@ -160,3 +160,50 @@ void cc::string::materialize_heap(isize const min_back_capacity)
     // Move the allocation into the heap wrapper
     _data.heap = data_heap::create_from_allocation(cc::move(alloc));
 }
+
+void cc::string::materialize_heap_front(isize const front_capacity, isize const back_capacity)
+{
+    CC_ASSERT(is_small(), "already heap");
+    CC_ASSERT(front_capacity >= 0 && back_capacity >= 0, "capacities must be non-negative");
+
+    // Save small string state before overwriting the union
+    auto const small_sz = _data.small.size;
+    auto const res = remove_small_tag(_data.small.custom_resource);
+    auto const data_copy = _data.blocks;
+
+    // Construct data_heap in place
+    new (cc::placement_new, &_data.heap) data_heap();
+
+    // Total capacity = front slack + content + back slack; the content starts at offset front_capacity.
+    auto const byte_size = cc::align_up(front_capacity + small_sz + back_capacity, data_heap::alloc_alignment());
+    auto alloc = cc::allocation<char>::create_empty_bytes(byte_size, byte_size, data_heap::alloc_alignment(), res,
+                                                          front_capacity);
+
+    // Copy only the live bytes, not a fixed small_capacity block: at offset front_capacity a full-width copy could run past alloc_end.
+    // small_sz bytes always fit — [front_capacity, front_capacity + small_sz) lies within the allocation.
+    std::memcpy(alloc.obj_start, &data_copy, size_t(small_sz));
+    alloc.obj_end = alloc.obj_start + small_sz;
+
+    // Move the allocation into the heap wrapper
+    _data.heap = data_heap::create_from_allocation(cc::move(alloc));
+}
+
+void cc::string::demote_to_small()
+{
+    CC_ASSERT(!is_small(), "already small");
+    CC_ASSERT(size() <= small_capacity, "content does not fit inline");
+
+    // Save content and resource before tearing down the heap union.
+    // resource() reads the tagged pointer member, which aliases the allocation's custom_resource here;
+    // in heap mode the tag bit is clear, so remove_small_tag is a no-op and returns the real resource.
+    auto const sz = _data.heap.size();
+    auto const res = resource();
+    char buf[small_capacity];
+    std::memcpy(buf, _data.heap.data(), size_t(sz));
+
+    // Free the heap allocation, then re-establish small mode and restore the bytes.
+    _data.heap.~data_heap();
+    initialize_small_empty(res);
+    std::memcpy(_data.small.data, buf, size_t(sz));
+    _data.small.size = u8(sz);
+}

@@ -22,24 +22,23 @@ template <class T>
 }
 } // namespace impl
 
-/// Per-context storage of render-routine instances, reached as `ctx.routines`. A routine is a
-/// per-context singleton: the first acquire of a given type creates and registers it here (lazy
-/// self-registration — no explicit registration, no by-name lookup), and it lives until the context is
-/// shut down or it is explicitly evicted.
+/// Per-context storage of render-routine instances, reached as `ctx.routines`.
+/// A routine is a per-context singleton:
+/// the first acquire of a given type creates and registers it here (lazy self-registration — no explicit registration, no by-name lookup),
+/// and it lives until the context is shut down or it is explicitly evicted.
 ///
-/// Everything type-keyed is private and driven through sg::render_routine's statics
-/// (`R::acquire(cmd)` / `R::prewarm(ctx)` / `R::evict(ctx)`); the only public operation here is
-/// clear(). A thin per-context sub-object like ctx.cached, created and destroyed with its context.
+/// Everything type-keyed is private and driven through sg::render_routine's statics (`R::acquire(cmd)` / `R::prewarm(ctx)` / `R::evict(ctx)`);
+/// the only public operation here is clear().
+/// A thin per-context sub-object like ctx.cached, created and destroyed with its context.
 ///
-/// Map access is guarded, so acquire is safe from parallel command-list recording; initializing a
-/// *single* routine concurrently from two threads is not yet synchronized (a follow-up for when
-/// parallel init lands). Do not clear()/evict() a registry while another thread is still recording
-/// against the same context.
+/// Map access is guarded, so acquire is safe from parallel command-list recording, and each routine guards its own init phases (see render_routine_base).
+/// What is *not* covered here is the state a routine holds itself — that is the routine's job, behind its own cc::mutex (see sg::render_routine).
+/// Do not clear()/evict() a registry while another thread is still recording against the same context.
 class routine_registry
 {
 public:
-    /// Drop every instance, releasing their cached GPU resources. Run on context shutdown, and callable
-    /// early under VRAM pressure or before switching to another live context.
+    /// Drop every instance, releasing their cached GPU resources.
+    /// Run on context shutdown, and callable early under VRAM pressure or before switching to another live context.
     void clear();
 
     // Pinned to its owning context: neither copyable nor movable.
@@ -57,8 +56,8 @@ private:
 
     using routine_map = cc::map<void const*, std::shared_ptr<render_routine_base>>;
 
-    /// Shared owner of R's instance, created + registered on first call. The routine is heap-held, so
-    /// the pointer stays valid while it is registered (the caller's weak_ptr sees eviction).
+    /// Shared owner of R's instance, created + registered on first call.
+    /// The routine is heap-held, so the pointer stays valid while it is registered (the caller's weak_ptr sees eviction).
     template <class R>
     [[nodiscard]] std::shared_ptr<R> get_or_create()
     {
@@ -76,8 +75,8 @@ private:
         return std::static_pointer_cast<R>(cc::move(base));
     }
 
-    /// Drop the instance for R, releasing its cached GPU resources (if nothing else holds them). A no-op
-    /// if R was never acquired.
+    /// Drop the instance for R, releasing its cached GPU resources (if nothing else holds them).
+    /// A no-op if R was never acquired.
     template <class R>
     void evict()
     {
