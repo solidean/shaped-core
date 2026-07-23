@@ -20,6 +20,11 @@ struct imgui_context_description
     ///
     /// Needs a window_system, so a caller driving begin_frame(frame_info) alone must leave this off.
     bool enable_viewports = false;
+
+    /// Whether create() paints the context in the Solidean theme (sr::apply_solidean_default_style).
+    /// On by default, so an app gets the brand look without a call.
+    /// Turn it off to keep imgui's stock dark theme, or to apply your own style after create().
+    bool apply_default_style = true;
 };
 
 /// Owns the Dear ImGui context and brackets a frame — the platform half of an imgui backend, as far as it goes without a windowing system.
