@@ -150,6 +150,7 @@ def source_roots(root: Path) -> list[Path]:
     return [
         root / "libs",
         root / "tools" / "instruction-tracer",
+        root / "tools" / "shaped-linter",
     ]
 
 
