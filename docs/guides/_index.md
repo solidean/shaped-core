@@ -6,6 +6,9 @@ Task-oriented how-tos for working in shaped-core. (Back to [docs/_index.md](../_
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
 - [disassembly.md](disassembly.md) — `dev.py assembly search` / `show`: a local godbolt over the
   built object files, for reading the optimizer's actual codegen (a hot loop, an atomic, an inline).
+- [profiling.md](profiling.md) — measure what the code actually cost at run time: nexus/bench hardware
+  performance counters (instructions, cache misses, branch mispredicts) via `nx::bench` and
+  `dev.py profiling`.
 - [ci.md](ci.md) — the per-platform GitHub Actions workflows (Windows / Linux clang), what they
   run via `dev.py`, and diagnosing failures with the `gh` CLI.
 - [coverage.md](coverage.md) — collect LLVM source-based test coverage with `dev.py coverage`

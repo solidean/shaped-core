@@ -78,6 +78,7 @@ from tools.dev.cmd import (  # noqa: E402
     list_targets,
     list_toolsets,
     pgo,
+    profiling,
     test,
     test_web,
 )
@@ -99,6 +100,7 @@ COMMANDS = [
     diagnose,
     info,
     assembly,
+    profiling,
     doctor,
     list_presets,
     list_targets,

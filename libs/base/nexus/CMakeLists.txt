@@ -6,6 +6,7 @@ add_library(nexus
     src/nexus/run.cc
     src/nexus/test.cc
     src/nexus/guide.cc
+    src/nexus/bench/hardware_counters.cc
     src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
     src/nexus/tests/config.cc
@@ -40,6 +41,9 @@ target_sources(nexus
     src/nexus/run.hh
     src/nexus/test.hh
     src/nexus/guide.hh
+    src/nexus/bench/fwd.hh
+    src/nexus/bench/hardware_counters.hh
+    src/nexus/bench/bench.hh
     src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
     src/nexus/tests/config.hh
@@ -87,6 +91,23 @@ target_link_libraries(nexus
     clean-core
 )
 
+# nexus/bench hardware-counter backend: exactly one per platform.
+# NX_BENCH_HAS_HW_COUNTERS (1/0) is a coarse compile-time hint "was a real PMU backend compiled in";
+# the runtime source of truth is always nx::bench::available_hw_counters().
+if(WIN32)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_windows.cc)
+    # advapi32: the ETW control + real-time consumer APIs (StartTrace / TraceSetInformation / OpenTrace /
+    # ProcessTrace / ControlTrace) plus the token APIs used to enable SeSystemProfilePrivilege.
+    target_link_libraries(nexus PUBLIC advapi32)
+    target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
+elseif(LINUX)
+    target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_linux.cc)
+    target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=1)
+else()
+    target_sources(nexus PRIVATE src/nexus/bench/impl/hardware_counters_none.cc)
+    target_compile_definitions(nexus PUBLIC NX_BENCH_HAS_HW_COUNTERS=0)
+endif()
+
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(nexus-test
@@ -99,6 +120,8 @@ if(SC_BUILD_TESTS)
         tests/test-invocable-test.cc
         tests/test-alias-test.cc
         tests/test-typed-value-test.cc
+        tests/bench-hardware-counters-test.cc
+        tests/bench-cache-traversal-test.cc
         tests/fuzz-engine-test.cc
         tests/fuzz-minimize-test.cc
         tests/fuzz-regression-test.cc
