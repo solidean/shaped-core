@@ -124,6 +124,7 @@ struct CountingResource : cc::memory_resource
         allocate_bytes = [](cc::byte** out_ptr, cc::isize min_bytes, cc::isize max_bytes, cc::isize alignment,
                             void* userdata) -> cc::isize
         {
+            CC_UNUSED(max_bytes); // the resource interface fixes the signature; this size hint is unused here
             auto* self = static_cast<CountingResource*>(userdata);
             ++self->allocations;
             if (min_bytes == 0)

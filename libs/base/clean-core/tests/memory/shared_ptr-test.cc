@@ -123,7 +123,11 @@ struct only_strong_traits
         bool const last = p->strong.fetch_sub(1, cc::memory_order_acq_rel) == 1;
         return {last, last}; // no weak count to wait on: destroy and free together
     }
-    static void destroy_object(only_strong* p) { ++only_strong::torn; }
+    static void destroy_object(only_strong* p)
+    {
+        CC_UNUSED(p);
+        ++only_strong::torn;
+    }
     static void free_storage(only_strong* p)
     {
         ++only_strong::freed;

@@ -65,7 +65,31 @@ _DIAG_RE = re.compile(
 )
 
 
-def _tidy_config_arg(*, include_incubator: bool = False) -> str:
+def _load_gates() -> dict:
+    """Parse the gates config, exiting with a clean message on a read/parse error."""
+    try:
+        with open(GATES_CONFIG, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as e:
+        print(dev.console.red(f"ERROR: cannot read {dev.report.rel(GATES_CONFIG, ROOT)}: {e}"), file=sys.stderr)
+        sys.exit(2)
+
+
+def _enabled_entries(data: dict, *, include_incubator: bool) -> list[dict]:
+    """The check entries that are active this run: `gates`, plus `incubator` when previewing."""
+    entries = list(data.get("gates", []))
+    if include_incubator:
+        entries += data.get("incubator", [])
+    return entries
+
+
+def _rationales(data: dict, *, include_incubator: bool) -> dict[str, str]:
+    """Map each active check to its `why` (rationale, often carrying a fix hint) for the grouped digest."""
+    return {e["check"]: e.get("why", "") for e in _enabled_entries(data, include_incubator=include_incubator)
+            if e.get("check")}
+
+
+def _tidy_config_arg(data: dict, *, include_incubator: bool = False) -> str:
     """Translate our gates schema into clang-tidy's `--config=` argument.
 
     Only `gates` and `options` reach clang-tidy: the enabled checks become `-*,<check>,...` (a strict
@@ -74,17 +98,7 @@ def _tidy_config_arg(*, include_incubator: bool = False) -> str:
     and ignored. Passing `--config` (rather than a config file) also stops clang-tidy from auto-discovering
     the root .clang-tidy.
     """
-    try:
-        with open(GATES_CONFIG, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError) as e:
-        print(dev.console.red(f"ERROR: cannot read {dev.report.rel(GATES_CONFIG, ROOT)}: {e}"), file=sys.stderr)
-        sys.exit(2)
-
-    enabled = list(data.get("gates", []))
-    if include_incubator:
-        enabled += data.get("incubator", [])
-    checks = ["-*"] + [g["check"] for g in enabled]
+    checks = ["-*"] + [g["check"] for g in _enabled_entries(data, include_incubator=include_incubator)]
     options = []
     for o in data.get("options", []):
         v = o["value"]
@@ -145,12 +159,13 @@ def _parse_diagnostics(text: str) -> dict[str, list[str]]:
     return groups
 
 
-def _render_grouped(groups: dict[str, list[str]], limit: int) -> list[str]:
+def _render_grouped(groups: dict[str, list[str]], limit: int, rationales: dict[str, str]) -> list[str]:
     """A bounded, grouped digest of the diagnostics — one section per check, kept within ~`limit` lines.
 
     Every failing check stays visible (at least one file each, even past the limit); the remaining line
     budget is spread across checks round-robin, so small checks show in full and the largest are truncated
-    with a `... N more` marker. Checks are ordered by failure count, descending.
+    with a `... N more` marker. Checks are ordered by failure count, descending. Each section leads with the
+    check's `why` from the gates config (the rationale, often with a fix hint) so it's clear how to resolve.
     """
     ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     n_checks = len(ordered)
@@ -174,6 +189,9 @@ def _render_grouped(groups: dict[str, list[str]], limit: int) -> list[str]:
     lines: list[str] = []
     for check, items in ordered:
         lines.append(dev.console.bold(f"[{check}]") + dev.console.dim(f"  ({len(items)})"))
+        why = rationales.get(check)
+        if why:
+            lines.append(dev.console.dim(f"  why: {why}"))
         shown = alloc[check]
         lines.extend(f"  - {item}" for item in items[:shown])
         if shown < len(items):
@@ -240,6 +258,15 @@ def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tup
 
 
 def main() -> None:
+    # Emit UTF-8 regardless of the Windows console codepage: our prose (and clang-tidy's) carries em dashes,
+    # and dev.py's run_step reads this process's pipes as UTF-8 — a codepage mismatch would mangle them.
+    # Rewrap the raw byte buffers directly; reconfigure() reports success but doesn't take under `uv run`.
+    import io
+    for name in ("stdout", "stderr"):
+        buffer = getattr(getattr(sys, name), "buffer", None)
+        if buffer is not None:
+            setattr(sys, name, io.TextIOWrapper(buffer, encoding="utf-8", errors="replace", line_buffering=True))
+
     parser = argparse.ArgumentParser(description="Run the clang-tidy gates over shaped-core C++ sources.")
     parser.add_argument("--build-dir", metavar="DIR", default=None,
                         help="Directory holding compile_commands.json (default: the platform preset's build dir)")
@@ -276,10 +303,11 @@ def main() -> None:
         print(dev.console.green("clang-tidy: nothing to lint (no .cc sources in scope)"), file=sys.stderr)
         sys.exit(0)
 
+    gates = _load_gates()
     base_cmd = [
         clang_tidy,
         "-p", str(build_dir),
-        _tidy_config_arg(include_incubator=args.include_incubator),
+        _tidy_config_arg(gates, include_incubator=args.include_incubator),
         f"--header-filter={_header_filter_regex()}",
         "--warnings-as-errors=*",  # every whitelisted check is a gate: any firing -> non-zero exit
         "--quiet",  # suppress the per-file "N warnings generated" chatter — ×N files is just noise
@@ -309,7 +337,8 @@ def main() -> None:
         print(dev.console.dim(
             f"clang-tidy: {total} diagnostic(s) across {len(groups)} check(s) - "
             f"grouped digest (raw output exceeded {args.limit} lines):"), file=sys.stderr)
-        print("\n".join(_render_grouped(groups, args.limit)), file=sys.stderr)
+        rationales = _rationales(gates, include_incubator=args.include_incubator)
+        print("\n".join(_render_grouped(groups, args.limit, rationales)), file=sys.stderr)
 
     if returncode == 0:
         print(dev.console.green("clang-tidy: OK"), file=sys.stderr)

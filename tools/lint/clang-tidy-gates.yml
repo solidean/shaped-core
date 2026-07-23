@@ -57,7 +57,9 @@ gates:
       "Avoid unnecessary copies" — a local initialized as a copy but never modified (could be a const&).
       A deliberate copy in a test marks itself with a // NOLINT and a reason.
   - check: performance-unnecessary-value-param
-    why: '"Avoid unnecessary copies" — a by-value parameter only read, which could be a const& (or a moved sink).'
+    why: >-
+      "Avoid unnecessary copies" — a by-value parameter that is only read.
+      Fix: take it by const& (or, if it is a sink stored/forwarded exactly once, keep by value and cc::move it).
   - check: modernize-use-equals-default
     why: >-
       A hand-written special member equivalent to the compiler''s — prefer `= default`.
@@ -68,6 +70,10 @@ gates:
     why: A `using` declaration nothing references is dead.
   - check: readability-redundant-string-init
     why: 'A redundant initializer like `string s = ""`.'
+  - check: misc-unused-parameters
+    why: >-
+      An unused function parameter (common with fixed-signature callbacks).
+      Fix: mark it CC_UNUSED(param) in the body — it keeps the name as documentation.
 
 # clang-tidy CheckOptions carried into the generated config.
 options:
@@ -89,6 +95,17 @@ excluded:
     why: Naming is the root config's job for the IDE; a hard gate here would be huge and noisy.
   - check: misc-definitions-in-headers
     why: Header-only inline libraries define in headers by design.
+  - check: misc-include-cleaner
+    why: >-
+      Enforces include-what-you-use, which fights our "transitive includes are fine" guideline
+      (coding-guidelines.md, Headers & Forward Declarations).
+      On this tree it reported ~4860 hits, and none of its categories are safely fixable:
+      ~4740 were "missing include" (it wants every used symbol directly included — exactly the transitive
+      pattern we allow), and the ~120 "unused include" were dominated by umbrella headers (all.hh) and
+      macro / platform headers (win32_sanitized.hh) whose removal breaks the build, plus self-header false
+      positives (a `.cc` flagged for including its own `.hh`).
+      clang-tidy can't report only the unused half, so it can't be a gate; a future custom unused-include
+      linter that skips those cases could.
 
 # Header diagnostics are scoped at the command line (`--header-filter`, see tools/lint/clang-tidy.py),
 # so the regex is built from the first-party source roots per run rather than pinned here.
