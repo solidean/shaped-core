@@ -1,24 +1,59 @@
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
-
 #include <shaped-linter/cli/options.hh>
+#include <shaped-linter/lex/source_manager.hh>
+#include <shaped-linter/report/reporter.hh>
+#include <shaped-linter/rules/engine.hh>
 
 namespace
 {
-// 0 = ran clean (no findings), 1 = bad usage, 2 = findings reported.
+// 0 = ran clean (no findings), 1 = bad usage / IO error, 2 = findings reported.
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
-[[maybe_unused]] constexpr int exit_findings = 2;
+constexpr int exit_findings = 2;
 
 int run(scl::options const& opts)
 {
-    // M0 scaffold: the lexer / parser / rule engine land in later milestones.
-    // For now, prove the wiring — echo what we would lint.
-    cc::println("shaped-linter: {} file(s) to lint (engine not yet implemented)", opts.files.size());
-    for (auto const& f : opts.files)
-        cc::println("  {}", f);
-    return exit_ok;
+    scl::source_manager sm;
+    cc::vector<scl::finding> all;
+
+    for (auto const& file : opts.files)
+    {
+        auto buffer = sm.add_from_file(file);
+        if (buffer.has_error())
+        {
+            cc::eprintln("error: cannot read {}: {}", file, buffer.error().to_string());
+            return exit_usage;
+        }
+
+        auto found = scl::run_rules(*buffer.value());
+        for (auto& f : found)
+            all.push_back(cc::move(f));
+    }
+
+    if (all.empty())
+    {
+        cc::println("shaped-linter: no findings in {} file(s)", opts.files.size());
+        return exit_ok;
+    }
+
+    scl::report_findings(all, sm, {.color = !opts.no_color});
+
+    if (opts.apply_fixes)
+    {
+        auto const changed = scl::apply_fixes(sm, all);
+        if (changed.has_error())
+        {
+            cc::eprintln("error applying fixes: {}", changed.error().to_string());
+            return exit_usage;
+        }
+        cc::println("shaped-linter: applied {} fix(es) across {} file(s)", all.size(), changed.value());
+    }
+
+    return exit_findings;
 }
 } // namespace
 

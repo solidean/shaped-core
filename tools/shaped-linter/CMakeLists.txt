@@ -14,6 +14,12 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/lex/lexer.cc
 
     src/shaped-linter/parse/parser.cc
+
+    src/shaped-linter/rules/member_default_init_assignment.cc
+    src/shaped-linter/rules/registry.cc
+    src/shaped-linter/rules/engine.cc
+
+    src/shaped-linter/report/reporter.cc
 )
 
 target_compile_features(shaped-linter-core PUBLIC cxx_std_23)
@@ -37,6 +43,9 @@ if(SC_BUILD_TESTS)
         tests/lex/lexer-test.cc
 
         tests/parse/parser-test.cc
+
+        tests/rules/member_default_init_assignment-test.cc
+        tests/rules/engine-test.cc
     )
 
     target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus)
