@@ -5,6 +5,9 @@ produced: search for a symbol, then read its disassembly — useful for confirmi
 what the optimizer actually emitted (does the atomic fold away? did this inline?
 is the loop vectorized?). Back to [guides](_index.md).
 
+This is the static view — the code the CPU *might* run.
+For the runtime cost it actually paid — instructions retired, cache misses, branch mispredicts — see [profiling.md](profiling.md) (nexus/bench hardware counters).
+
 ```bash
 uv run dev.py assembly search <pattern>    # find symbols (mangled + demangled), grouped by target
 uv run dev.py assembly show <symbol>       # disassemble one function
