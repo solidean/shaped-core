@@ -64,18 +64,21 @@ TEST("nexus bench - hardware counters query and measure")
     CHECK(cycles.value() > 0);
 #endif
 
-    // Full PMU counters: assert plausibility when the machine reports them available, else note the skip.
-    if (is_available(hw_counter::instructions_retired))
+    // Full PMU counters: assert plausibility when the counter actually flowed, else note the skip. Gating on
+    // the measured value (not on enumeration availability) keeps this honest everywhere: a real value is
+    // checked on Linux/Windows machines that can read the PMU, and machines where it cannot flow — virtualized
+    // CI, or a box without the one-time PMU setup — take the skip instead of failing.
+    auto const instructions = m.value_of(hw_counter::instructions_retired);
+    if (instructions.has_value())
     {
-        auto const instructions = m.value_of(hw_counter::instructions_retired);
-        REQUIRE(instructions.has_value());
         CHECK(instructions.value() > 0);
         // A 2M-iteration loop retires well over a million instructions; a very loose sanity floor.
         CHECK(instructions.value() >= 1'000'000);
     }
     else
     {
-        SUCCEED("PMU counters unavailable on this machine (baseline-only run) — expected on virtualized CI");
+        SUCCEED("PMU counters did not flow on this machine (baseline-only run) — expected on virtualized CI or "
+                "without the one-time PMU setup");
     }
 }
 
@@ -89,17 +92,45 @@ TEST("nexus bench - default counter set is non-empty and starts with the baselin
     CHECK(set[1] == hw_counter::reference_cycles);
 }
 
+// Manual: print the hardware counters this machine can measure right now (and, when a PMU is present but not
+// readable, the setup hint). Driven by `dev.py profiling counters`; run directly with the exact test name.
+TEST("nexus bench - list hardware counters", nx::config::manual)
+{
+    nx::bench::print_hw_counters();
+}
+
 TEST("nexus bench - an explicit counter set is honored and the body runs once")
 {
     using nx::bench::hw_counter;
 
     auto call_count = 0;
-    hw_counter const wanted[] = {hw_counter::elapsed_nanoseconds, hw_counter::instructions_retired};
+    auto const m = nx::bench::measure_hw_counters(
+        [&] { ++call_count; },
+        {.counters = cc::vector<hw_counter>{hw_counter::elapsed_nanoseconds, hw_counter::instructions_retired}});
 
-    auto const m = nx::bench::measure_hw_counters([&] { ++call_count; }, wanted);
-
-    CHECK(call_count == 1);       // invoked exactly once
+    CHECK(call_count == 1);       // one pass -> invoked exactly once
     CHECK(m.samples.size() == 2); // one sample per requested counter
     CHECK(m.samples[0].id == hw_counter::elapsed_nanoseconds);
     CHECK(m.samples[1].id == hw_counter::instructions_retired);
+}
+
+TEST("nexus bench - measure_all gathers every available counter across passes")
+{
+    using nx::bench::hw_counter;
+
+    // The default set has more PMU counters than fit the hardware budget at once. With measure_all the body
+    // is re-run over subsets so every counter the machine can read comes back valid — none left behind.
+    auto call_count = 0;
+    auto const m = nx::bench::measure_hw_counters(
+        [&]
+        {
+            ++call_count;
+            run_workload(200'000);
+        },
+        {.measure_all = true});
+
+    CHECK(call_count >= 1); // at least one pass (more when counters need several)
+    for (auto const& info : nx::bench::available_hw_counters())
+        if (info.available)
+            CHECK(m.value_of(info.id).has_value()); // every measurable counter got a value
 }

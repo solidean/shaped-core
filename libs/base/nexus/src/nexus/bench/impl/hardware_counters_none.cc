@@ -31,6 +31,12 @@ cc::vector<backend_counter> backend_enumerate_counters()
     return out;
 }
 
+cc::string backend_setup_hint()
+{
+    // No PMU on this platform, so there is no setup that would make one readable — say nothing.
+    return {};
+}
+
 cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc::span<hw_counter const> counters)
 {
     auto pmu_requested = false;

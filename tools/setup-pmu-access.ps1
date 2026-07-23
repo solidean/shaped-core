@@ -1,19 +1,21 @@
 # setup-pmu-access.ps1
 #
 # Prepares the current account for NON-ELEVATED hardware-counter (PMU) profiling with nexus/bench.
-# It grants two permissions Microsoft documents as prerequisites for non-admin ETW profiling:
-#   1. membership in the built-in "Performance Log Users" group (may start/stop/control ETW sessions), and
-#   2. the "Profile system performance" user right (SeSystemProfilePrivilege), for system-wide profiling.
+# It grants the permissions Microsoft documents as prerequisites for a non-admin SystemTraceProvider session:
+#   1. membership in the built-in "Performance Log Users" group (may start/stop/control ETW sessions),
+#   2. the "Profile system performance" user right (SeSystemProfilePrivilege), for system-wide profiling, and
+#   3. ETW DACL grants (EventAccessControl) on the fixed session GUID and the System-Trace-Provider GUID —
+#      the piece that actually lets a non-admin StartTrace the PMU system logger (without it StartTrace
+#      returns ERROR_ACCESS_DENIED even with 1+2).
 #
-# These are necessary but not always sufficient.
-# A PMU-backed SystemTraceProvider session can additionally require ACLs on the logger-session and
-# System-Trace-Provider GUIDs; those depend on how the profiler creates its session and are NOT set here.
-# The legacy NT Kernel Logger stays administrator-only regardless of this script.
-# So read this as "grants the standard prerequisites", not "guarantees unelevated PMU access".
+# The session GUID granted here MUST match s_session_guid in
+# libs/base/nexus/src/nexus/bench/impl/hardware_counters_windows.cc — the ACL is keyed on that exact GUID.
+# The legacy NT Kernel Logger stays administrator-only regardless of this script; nexus/bench uses its own
+# private-named system logger, not that one.
 #
-# It changes exactly two things and nothing else: membership in Performance Log Users, and the
-# SeSystemProfilePrivilege assignment for this one account (granted directly via the LSA policy API,
-# LsaAddAccountRights — additive, so no other account or right is affected).
+# It changes exactly these things and nothing else: membership in Performance Log Users, the
+# SeSystemProfilePrivilege assignment for this one account (via LsaAddAccountRights — additive), and additive
+# DACL entries on the two ETW GUIDs (EventAccessControl AddDACL — no existing entry is replaced).
 # On domain-managed machines, Group Policy may later re-overwrite the assigned right.
 #
 # Run once from an elevated PowerShell, then sign out and back in (the token picks up the group and right at
@@ -68,6 +70,15 @@ public static class PmuRights
     [DllImport("advapi32.dll")]
     static extern int LsaNtStatusToWinError(uint Status);
 
+    // EventAccessControl adds/modifies the DACL on an ETW session or provider GUID. It is the primitive that
+    // lets a non-admin start a SystemTraceProvider session: the caller's SID must be ACL'd onto both the
+    // session GUID and the System-Trace-Provider GUID. Returns a Win32 error directly (0 == success).
+    [DllImport("advapi32.dll")]
+    static extern uint EventAccessControl(ref Guid Guid, uint Operation, byte[] Sid, uint Rights,
+        [MarshalAs(UnmanagedType.U1)] bool AllowOrDeny);
+
+    const uint EventSecurityAddDACL = 2;       // EVENTSECURITYOPERATION: add to the DACL (do not replace)
+
     const int POLICY_CREATE_ACCOUNT = 0x00000010;
     const int POLICY_LOOKUP_NAMES = 0x00000800;
     const uint STATUS_OBJECT_NAME_NOT_FOUND = 0xC0000034;
@@ -106,6 +117,13 @@ public static class PmuRights
             finally { Marshal.FreeHGlobal(rights[0].Buffer); }
         }
         finally { LsaClose(policy); }
+    }
+
+    // Grant `rights` on an ETW `guid` (session or provider) to `sid`, additively. Idempotent.
+    public static void GrantEtwAccess(byte[] sid, Guid guid, uint rights)
+    {
+        uint status = EventAccessControl(ref guid, EventSecurityAddDACL, sid, rights, true);
+        if (status != 0) throw new Win32Exception((int)status, "EventAccessControl failed");
     }
 
     public static string[] Enumerate(byte[] sid)
@@ -186,8 +204,22 @@ Add-ToPerformanceLogUsers $Account
 Write-Host "Granting SeSystemProfilePrivilege..."
 [PmuRights]::Add($sidBytes, "SeSystemProfilePrivilege")
 
+# ETW GUID ACLs — the piece that actually lets a non-admin StartTrace the SystemTraceProvider session.
+# The session GUID MUST match s_session_guid in hardware_counters_windows.cc.
+# On the session GUID: query + start-realtime + consume-realtime; on the provider GUID: enable-provider.
+$SessionGuid = [Guid]"6b3c9a10-2f4d-4e8a-9c1b-7d5e3a2f8b60"
+$SystemTraceControlGuid = [Guid]"9e814aad-3204-11d2-9a82-006008a86939"
+$WMIGUID_QUERY = 0x0001; $TRACELOG_CREATE_REALTIME = 0x0020; $TRACELOG_ACCESS_REALTIME = 0x0400
+$TRACELOG_GUID_ENABLE = 0x0080
+
+Write-Host "Granting ETW access on the session GUID $SessionGuid..."
+[PmuRights]::GrantEtwAccess($sidBytes, $SessionGuid, $WMIGUID_QUERY -bor $TRACELOG_CREATE_REALTIME -bor $TRACELOG_ACCESS_REALTIME)
+
+Write-Host "Granting ETW access on the System-Trace-Provider GUID..."
+[PmuRights]::GrantEtwAccess($sidBytes, $SystemTraceControlGuid, $TRACELOG_GUID_ENABLE)
+
 Assert-Configured $Account $sidBytes $sidValue
 
 Write-Host ""
-Write-Host "Verified. Sign out and back in before measuring hardware counters unelevated."
-Write-Host "Note: a PMU-backed ETW session may still need per-session ACLs (see the header) that this script does not set."
+Write-Host "Verified. The token privilege and group membership need a sign-out/in to take effect;"
+Write-Host "the ETW GUID ACLs persist in the registry and apply to new sessions immediately."

@@ -106,16 +106,67 @@ void print_hw_counters()
     cc::println("hardware counters ({} of {} measurable on this machine):", available_count, counters.size());
     for (auto const& c : counters)
         cc::println("  {} {}: {}", c.available ? "[x]" : "[ ]", c.name, c.description);
+
+    // When a PMU exists but is not readable, say what to do about it (the [ ] rows above are the "missing").
+    auto const hint = impl::backend_setup_hint();
+    if (!hint.empty())
+        cc::println("  missing PMU access — {}", hint);
 }
 
-hw_measurement measure_hw_counters(cc::function_ref<void()> body)
+hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_config const& config)
 {
-    return measure_hw_counters(body, default_hw_counter_set());
-}
+    auto const requested
+        = config.counters.has_value() ? cc::span<hw_counter const>(config.counters.value()) : default_hw_counter_set();
 
-hw_measurement measure_hw_counters(cc::function_ref<void()> body, cc::span<hw_counter const> counters)
-{
-    return {.samples = impl::backend_measure(body, counters)};
+    // One pass: whatever fits the hardware's PMC budget is measured; the rest come back invalid.
+    auto best = impl::backend_measure(body, requested);
+    if (!config.measure_all)
+        return {.samples = best};
+
+    auto is_baseline
+        = [](hw_counter c) { return c == hw_counter::elapsed_nanoseconds || c == hw_counter::reference_cycles; };
+
+    // The PMU counters still lacking a value after the passes so far, in request order.
+    auto still_missing = [&]
+    {
+        cc::vector<hw_counter> out;
+        for (auto const& s : best)
+            if (!s.valid && !is_baseline(s.id))
+                out.push_back(s.id);
+        return out;
+    };
+
+    // measure_all: re-run the body over the not-yet-measured counters, each pass grabbing a budget-sized
+    // chunk (the backend degrades from the end), until every requested counter has a value — or a pass adds
+    // nothing, meaning no PMU counter is readable at all (then stop rather than loop forever).
+    for (auto missing = still_missing(); !missing.empty(); missing = still_missing())
+    {
+        cc::vector<hw_counter> subset;
+        subset.reserve(missing.size() + 2);
+        subset.push_back(hw_counter::elapsed_nanoseconds); // baseline is free (no PMC slot) and re-armed anyway
+        subset.push_back(hw_counter::reference_cycles);
+        for (auto const c : missing)
+            subset.push_back(c);
+
+        auto const pass = impl::backend_measure(body, subset);
+        auto progressed = false;
+        for (auto const& s : pass)
+        {
+            if (!s.valid || is_baseline(s.id))
+                continue;
+            for (auto& b : best)
+                if (b.id == s.id && !b.valid)
+                {
+                    b = s;
+                    progressed = true;
+                    break;
+                }
+        }
+        if (!progressed)
+            break;
+    }
+
+    return {.samples = best};
 }
 } // namespace nx::bench
 

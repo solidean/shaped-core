@@ -33,6 +33,12 @@ cc::vector<backend_counter> backend_enumerate_counters();
 /// always valid; PMU counters degrade to `valid == false` when they cannot be read.
 cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc::span<hw_counter const> counters);
 
+/// A one-line hint on how to make the PMU readable, or empty when there is nothing to say.
+/// Non-empty exactly when this CPU has a PMU but the current process cannot read it (missing privilege /
+/// setup / sandbox) — the front prints it so an unmeasurable machine says what to do. Empty when the PMU is
+/// readable (even if some individual counters lack a source) or when the platform has no PMU at all.
+cc::string backend_setup_hint();
+
 /// The portable fallback name for a counter, used when a backend has no distinct native name to report
 /// (defined by the front so every backend spells the baseline counters the same way).
 cc::string_view logical_counter_name(hw_counter c);

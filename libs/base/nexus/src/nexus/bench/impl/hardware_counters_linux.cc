@@ -103,6 +103,19 @@ cc::vector<backend_counter> backend_enumerate_counters()
     return out;
 }
 
+cc::string backend_setup_hint()
+{
+    // If the PMU is present but perf_event_open is blocked, point at the paranoid knob; otherwise say nothing.
+    auto const fd = open_event(s_pmu_events[0], -1); // the instructions event
+    if (fd >= 0)
+    {
+        ::close(fd);
+        return {};
+    }
+    return cc::string("perf_event_open is blocked — check /proc/sys/kernel/perf_event_paranoid (or a "
+                      "container/sandbox may forbid it).");
+}
+
 cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc::span<hw_counter const> counters)
 {
     // Open a group for every requested PMU counter; the first successful open is the group leader.
