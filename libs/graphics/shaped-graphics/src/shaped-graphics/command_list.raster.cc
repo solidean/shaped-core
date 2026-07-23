@@ -64,9 +64,8 @@ depth_stencil_target depth_stencil_view::discarded() &&
 
 rendering_scope::rendering_scope(class command_list& cmd, rendering_info const& info) : _cmd(cmd)
 {
-    // Snapshot the target formats and extent so a routine recording into the scope reads them back rather
-    // than being told them again. All targets in a scope share the extent; take it from the first color
-    // target, or the depth-stencil one for a depth-only pass.
+    // Snapshot the target formats and extent so a routine recording into the scope reads them back rather than being told them again.
+    // All targets in a scope share the extent; take it from the first color target, or the depth-stencil one for a depth-only pass.
     for (auto const& ct : info.color_targets)
         _color_formats.push_back(ct.view.format());
 
@@ -86,8 +85,8 @@ rendering_scope::~rendering_scope()
     _cmd.raster_end_rendering();
 }
 
-// Raster draw recording on the scope — the same thin forwarders as command_list_raster_scope, reaching the
-// command list's backend seams directly (rendering_scope is a friend of command_list).
+// Raster draw recording on the scope — the same thin forwarders as command_list_raster_scope,
+// reaching the command list's backend seams directly (rendering_scope is a friend of command_list).
 
 void rendering_scope::bind_pipeline(raster_pipeline const& pipeline)
 {

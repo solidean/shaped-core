@@ -3,13 +3,11 @@
 
 // Window tests that run unattended, on SDL's dummy video driver (window_system_description::headless).
 //
-// These cover the object graph and the bookkeeping: creation, ownership, the registration table, the per-window
-// close latch.
+// These cover the object graph and the bookkeeping: creation, ownership, the registration table, the per-window close latch.
 // That is most of what can break in this layer.
 //
 // They cannot cover anything that needs a display.
-// Close and resize events from a real window manager, pixel sizes on a high-density display, and the
-// native-handle-to-swapchain path are all out of reach — a headless window has no native handle.
+// Close and resize events from a real window manager, pixel sizes on a high-density display, and the native-handle-to-swapchain path are all out of reach — a headless window has no native handle.
 // Those live in window-manual-test.cc and, for the swapchain, above sr.
 
 #if SR_HAS_WINDOW
@@ -35,8 +33,7 @@ TEST("sr - window reports its requested size before any poll")
 
 TEST("sr - window position and size read back without an intervening poll")
 {
-    // The write-through is the point: imgui's viewport backend sets a position and reads it again inside one
-    // frame, long before the next poll_events would refresh it.
+    // The write-through is the point: imgui's viewport backend sets a position and reads it again inside one frame, long before the next poll_events would refresh it.
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "placed", .width = 640, .height = 480});
 

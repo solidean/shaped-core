@@ -2,17 +2,17 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// The texel formats sg textures speak in. Deliberately restrictive: every value has a direct
-/// equivalent in each realistic backend (DX12 / Vulkan / Metal / WebGPU). Formats that are
-/// backend-specific, mobile-only, or absent somewhere are left out until a concrete need plus a
-/// per-backend capability query justify them (see libs/graphics/shaped-graphics/docs/concepts/textures.md).
+/// The texel formats sg textures speak in.
+/// Deliberately restrictive: every value has a direct equivalent in each realistic backend (DX12 / Vulkan / Metal / WebGPU).
+/// Formats that are backend-specific, mobile-only, or absent somewhere are left out until a concrete need plus a per-backend capability query justify them
+/// (see libs/graphics/shaped-graphics/docs/concepts/textures.md).
 
 namespace sg
 {
-/// A GPU texel format. `undefined` is the null value (no format). Block-compressed (BC) formats are
-/// included but are a *runtime* capability everywhere (Vk `textureCompressionBC`, WGPU
-/// `texture-compression-bc`, Metal `supportsBCTextureCompression`) — the enumerant always maps, but a
-/// backend may still reject it on a given adapter until a capability query gates its use.
+/// A GPU texel format.
+/// `undefined` is the null value (no format).
+/// Block-compressed (BC) formats are included but are a *runtime* capability everywhere (Vk `textureCompressionBC`, WGPU `texture-compression-bc`, Metal `supportsBCTextureCompression`) —
+/// the enumerant always maps, but a backend may still reject it on a given adapter until a capability query gates its use.
 enum class pixel_format : u16
 {
     undefined,
@@ -101,17 +101,14 @@ enum class pixel_format : u16
     return is_depth_format(f) && has_stencil(f);
 }
 
-/// Number of aspect planes a format exposes as subresources: 2 for a combined depth+stencil format
-/// (depth and stencil are separately tracked planes), 1 otherwise.
+/// Number of aspect planes a format exposes as subresources: 2 for a combined depth+stencil format (depth and stencil are separately tracked planes), 1 otherwise.
 [[nodiscard]] constexpr int format_aspect_count(pixel_format f)
 {
     return is_depth_stencil_format(f) ? 2 : 1;
 }
 
-/// True for the sRGB-encoded formats — those where the hardware applies the sRGB transfer function on
-/// read and write, so shader-side values are linear while stored texels are encoded.
-/// Matters whenever content is already sRGB-encoded before it reaches the target (UI colors, an imported
-/// 8-bit texture): writing it to one of these encodes it a second time.
+/// True for the sRGB-encoded formats — those where the hardware applies the sRGB transfer function on read and write, so shader-side values are linear while stored texels are encoded.
+/// Matters whenever content is already sRGB-encoded before it reaches the target (UI colors, an imported 8-bit texture): writing it to one of these encodes it a second time.
 [[nodiscard]] constexpr bool is_srgb_format(pixel_format f)
 {
     switch (f)
@@ -153,8 +150,8 @@ enum class pixel_format : u16
     }
 }
 
-/// True for a color format usable as a render target: any non-depth, non-compressed
-/// format. A coarse capability check — a given adapter may still restrict blending on some of these.
+/// True for a color format usable as a render target: any non-depth, non-compressed format.
+/// A coarse capability check — a given adapter may still restrict blending on some of these.
 [[nodiscard]] constexpr bool is_render_target_format(pixel_format f)
 {
     return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f);
@@ -166,7 +163,8 @@ enum class pixel_format : u16
     return is_compressed_format(f) ? 4 : 1;
 }
 
-/// Bytes occupied by one block — one texel for uncompressed, one 4x4 block for BC. `undefined` is 0.
+/// Bytes occupied by one block — one texel for uncompressed, one 4x4 block for BC.
+/// `undefined` is 0.
 [[nodiscard]] constexpr int format_block_size(pixel_format f)
 {
     switch (f)

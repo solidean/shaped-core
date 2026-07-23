@@ -11,8 +11,7 @@
 //     uv run dev.py test "sr - window (manual)" --manual --mirror-test-output --timeout 0
 //
 // The first needs only a display and finishes on its own.
-// The second opens a visible window and runs until someone closes it — hence `--timeout 0`, without which
-// dev.py kills the binary after 60s and reports the test as failed.
+// The second opens a visible window and runs until someone closes it — hence `--timeout 0`, without which dev.py kills the binary after 60s and reports the test as failed.
 
 #if SR_HAS_WINDOW
 

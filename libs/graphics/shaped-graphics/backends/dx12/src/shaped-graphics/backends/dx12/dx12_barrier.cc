@@ -63,15 +63,16 @@ namespace
 {
 /// Reconcile a stage-derived sync with the access it is paired with, for index-buffer reads.
 ///
-/// D3D12 validates sync against access pairwise, and ACCESS_INDEX_BUFFER pairs only with SYNC_INDEX_INPUT
-/// or the broader SYNC_DRAW — the index fetch happens in the input assembler, not in vertex shading.
-/// Pairing it with SYNC_VERTEX_SHADING is rejected outright, and *adding* INDEX_INPUT does not help: the
-/// offending VERTEX_SHADING x INDEX_BUFFER pair is still there. So VERTEX_SHADING has to go.
+/// D3D12 validates sync against access pairwise, and ACCESS_INDEX_BUFFER pairs only with SYNC_INDEX_INPUT or the broader SYNC_DRAW —
+/// the index fetch happens in the input assembler, not in vertex shading.
+/// Pairing it with SYNC_VERTEX_SHADING is rejected outright, and *adding* INDEX_INPUT does not help:
+/// the offending VERTEX_SHADING x INDEX_BUFFER pair is still there.
+/// So VERTEX_SHADING has to go.
 ///
-/// sg's stage vocabulary has no input-assembler stage (`vertex` covers all of vertex processing), which is
-/// why this cannot be decided in d3d12_sync_from — only here is the access known. When the same barrier
-/// also carries an access that genuinely needs vertex shading (one buffer bound as both vertex and index,
-/// as the transient allocator can produce), SYNC_DRAW is the one bit legal with both.
+/// sg's stage vocabulary has no input-assembler stage (`vertex` covers all of vertex processing), which is why this cannot be decided in d3d12_sync_from —
+/// only here is the access known.
+/// When the same barrier also carries an access that genuinely needs vertex shading (one buffer bound as both vertex and index, as the transient allocator can produce),
+/// SYNC_DRAW is the one bit legal with both.
 [[nodiscard]] D3D12_BARRIER_SYNC sync_for_access(D3D12_BARRIER_SYNC sync, sg::access_flags access)
 {
     if (sync == D3D12_BARRIER_SYNC_NONE || !sg::has_all(access, sg::access_flags::index_read))
@@ -95,7 +96,8 @@ D3D12_BUFFER_BARRIER make_buffer_barrier(ID3D12Resource* resource, sg::access_ba
     D3D12_BUFFER_BARRIER bb = {};
     bb.SyncBefore = sync_for_access(d3d12_sync_from(b.src_stages), b.src_access);
     bb.SyncAfter = sync_for_access(d3d12_sync_from(b.dst_stages), b.dst_access);
-    // D3D12 rule: SYNC_NONE pairs with ACCESS_NO_ACCESS. With a real stage set we translate the access.
+    // D3D12 rule: SYNC_NONE pairs with ACCESS_NO_ACCESS.
+    // With a real stage set we translate the access.
     bb.AccessBefore
         = bb.SyncBefore == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.src_access);
     bb.AccessAfter
@@ -144,8 +146,8 @@ D3D12_TEXTURE_BARRIER make_texture_barrier(ID3D12Resource* resource,
     D3D12_TEXTURE_BARRIER tb = {};
     tb.SyncBefore = d3d12_sync_from(b.src_stages);
     tb.SyncAfter = d3d12_sync_from(b.dst_stages);
-    // D3D12 rule: SYNC_NONE pairs with ACCESS_NO_ACCESS (a layout-only transition at the end of a list has
-    // no subsequent access). With a real stage set we translate the access.
+    // D3D12 rule: SYNC_NONE pairs with ACCESS_NO_ACCESS (a layout-only transition at the end of a list has no subsequent access).
+    // With a real stage set we translate the access.
     tb.AccessBefore
         = tb.SyncBefore == D3D12_BARRIER_SYNC_NONE ? D3D12_BARRIER_ACCESS_NO_ACCESS : d3d12_access_from(b.src_access);
     tb.AccessAfter
@@ -176,8 +178,8 @@ void submit_barriers(ID3D12GraphicsCommandList* list,
     HRESULT const hr = list->QueryInterface(IID_PPV_ARGS(&list7));
     CC_ASSERT(SUCCEEDED(hr) && list7, "enhanced barriers require ID3D12GraphicsCommandList7 (SDK/driver too old)");
 
-    // One barrier group per type; both go into a single Barrier call so the whole operation's hazards are
-    // resolved at once.
+    // One barrier group per type;
+    // both go into a single Barrier call so the whole operation's hazards are resolved at once.
     D3D12_BARRIER_GROUP groups[2] = {};
     UINT num_groups = 0;
     if (!buffer_barriers.empty())

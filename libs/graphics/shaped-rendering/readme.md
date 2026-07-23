@@ -1,8 +1,8 @@
 # shaped-rendering
 
 Concrete render routines and helpers on top of [shaped-graphics](../shaped-graphics/readme.md).
-Namespace `sr`. Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines acquire
-their shaders through it) and the vendored **imgui**, plus transitively typed-geometry + clean-core.
+Namespace `sr`.
+Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines acquire their shaders through it) and the vendored **imgui**, plus transitively typed-geometry + clean-core.
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sr is the home for the common building blocks of a renderer built on sg — mipmap generation, texture compression, tonemapping, and similar reusable render routines.
@@ -30,9 +30,9 @@ while (!win->is_close_requested())
 Three things worth knowing before you use it:
 
 * **SDL3 backs it, and SDL3 is fetched on demand — so the backend is optional, not the API.**
-  Without one, `window_system::try_create` fails with a reason instead of the types disappearing, so the same
-  code compiles either way. `SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" when you need it at
-  compile time. No SDL type reaches a public header — see [coding-guidelines](docs/coding-guidelines.md).
+  Without one, `window_system::try_create` fails with a reason instead of the types disappearing, so the same code compiles either way.
+  `SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" when you need it at compile time.
+  No SDL type reaches a public header — see [coding-guidelines](docs/coding-guidelines.md).
 * **`window_system` is main-thread bound.**
   Create it, create windows from it, poll it and destroy it all on one thread.
   On macOS that thread must be the process main thread.
@@ -54,23 +54,28 @@ for (auto const& e : wsys->events())
             e.window->request_close();
 ```
 
-Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped
-`character`, because movement wants position while a ctrl+Z-style shortcut wants the letter.
-Text is separate: `text_event` delivers committed UTF-8 after `window::start_text_input()`, which is the only
-thing that handles IME composition, dead keys and paste correctly — never rebuild text from key events.
+Keyboard events carry both a **physical** `scancode` (position, so WASD survives AZERTY) and the layout-mapped `character`,
+because movement wants position while a ctrl+Z-style shortcut wants the letter.
+Text is separate: `text_event` delivers committed UTF-8 after `window::start_text_input()`, which is the only thing that handles IME composition, dead keys and paste correctly —
+never rebuild text from key events.
 `window::set_relative_mouse_mode()` captures the cursor for an FPS-style camera.
+
+The pointer's shape and the system clipboard hang off `window_system` rather than a window, because both are process-global:
+`set_cursor(cursor_shape)` / `set_cursor_visible(bool)`, and `clipboard_text()` / `set_clipboard_text(sv)`.
 
 See the [cheat-sheet](cheat-sheet.md) for the full surface.
 
-It also hosts the **Dear ImGui renderer** — the renderer half of an imgui backend, drawn entirely
-through sg with no native graphics calls. See [docs/imgui.md](docs/imgui.md).
+## Dear ImGui
 
-The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init,
-and the per-context `ctx.routines` registry) lives in **shaped-graphics** — see its
-[docs/render-routines.md](../shaped-graphics/docs/render-routines.md). `sr` hosts the **concrete**
-routines built on top of it; they land as they are implemented. See
-[docs/render-routines.md](docs/render-routines.md) for the sr-side overview and
-[docs/structure.md](docs/structure.md) for the wider roadmap.
+sr also hosts the **Dear ImGui backend** — both halves, drawn entirely through sg with no native graphics calls.
+`sr::imgui_context` owns the ImGui context, feeds it input from `window_system::events()`, and hands the window imgui's cursor and text-input intent;
+`sr::imgui_routine` is the render routine that draws it.
+See [docs/imgui.md](docs/imgui.md).
+
+The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init, and the per-context `ctx.routines` registry) lives in **shaped-graphics** —
+see its [docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
+`sr` hosts the **concrete** routines built on top of it; they land as they are implemented.
+See [docs/render-routines.md](docs/render-routines.md) for the sr-side overview and [docs/structure.md](docs/structure.md) for the wider roadmap.
 
 ## Building & testing
 

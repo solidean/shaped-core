@@ -21,10 +21,10 @@ namespace dx12 = sg::backend::dx12;
 
 TEST("sg dx12 - an index-buffer read syncs on INDEX_INPUT, never VERTEX_SHADING")
 {
-    // D3D12 validates sync against access pairwise: ACCESS_INDEX_BUFFER paired with SYNC_VERTEX_SHADING is
-    // rejected outright ("incompatible"), because the index fetch happens in the input assembler. sg's stage
-    // vocabulary has no input-assembler stage, so `vertex` is what the draw declares — and the translation
-    // has to correct it. Merely adding INDEX_INPUT is not enough; the VERTEX_SHADING bit must be gone.
+    // D3D12 validates sync against access pairwise: ACCESS_INDEX_BUFFER paired with SYNC_VERTEX_SHADING is rejected outright ("incompatible"),
+    // because the index fetch happens in the input assembler.
+    // sg's stage vocabulary has no input-assembler stage, so `vertex` is what the draw declares — and the translation has to correct it.
+    // Merely adding INDEX_INPUT is not enough; the VERTEX_SHADING bit must be gone.
     auto const b = after_copy_to(sg::pipeline_stage_flags::vertex, sg::access_flags::index_read);
 
     CHECK((b.AccessAfter & D3D12_BARRIER_ACCESS_INDEX_BUFFER) != 0);
@@ -44,8 +44,8 @@ TEST("sg dx12 - a vertex-buffer read still syncs on VERTEX_SHADING")
 
 TEST("sg dx12 - one buffer read as both index and vertex widens to SYNC_DRAW")
 {
-    // The transient allocator can hand a draw's vertex and index data out of one resource, so both accesses
-    // merge into a single barrier. No narrow sync bit is legal with both, and SYNC_DRAW covers the pair.
+    // The transient allocator can hand a draw's vertex and index data out of one resource, so both accesses merge into a single barrier.
+    // No narrow sync bit is legal with both, and SYNC_DRAW covers the pair.
     auto const b
         = after_copy_to(sg::pipeline_stage_flags::vertex, sg::access_flags::index_read | sg::access_flags::vertex_read);
 

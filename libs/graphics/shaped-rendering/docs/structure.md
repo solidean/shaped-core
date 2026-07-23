@@ -1,18 +1,16 @@
 # shaped-rendering structure (sr::)
 
-The living roadmap for shaped-rendering. Section headers carry a status tag: **[done]** /
-**[in progress]** / **[planned]**. This document is design intent, not a guarantee of final API.
+The living roadmap for shaped-rendering.
+Section headers carry a status tag: **[done]** / **[in progress]** / **[planned]**.
+This document is design intent, not a guarantee of final API.
 
 ## Goals
 
-Reusable render routines and helpers built on shaped-graphics (`sg::`) — the common code a
-renderer needs, factored out of any single renderer so both internal tools and shaped-viewer
-can share it.
+Reusable render routines and helpers built on shaped-graphics (`sg::`) — the common code a renderer needs, factored out of any single renderer so both internal tools and shaped-viewer can share it.
 
 ## Render-routine framework **[done, in shaped-graphics]**
 
-The composable base every routine builds on lives in **shaped-graphics**, not here — see
-[shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md):
+The composable base every routine builds on lives in **shaped-graphics**, not here — see [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md):
 
 ```text
 sg::render_routine<D>   [done]  one unit of GPU work; 3-phase init (once/declare/materialize), re-inits on reload
@@ -45,8 +43,8 @@ HiDPI                  [planned]  SDL_WINDOW_HIGH_PIXEL_DENSITY once a per-monit
 gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see TODO
 ```
 
-The API is always present. Only the backend is optional, since SDL3 is fetched on demand — without one,
-`window_system::try_create` fails and `SR_HAS_WINDOW` is 0.
+The API is always present.
+Only the backend is optional, since SDL3 is fetched on demand — without one, `window_system::try_create` fails and `SR_HAS_WINDOW` is 0.
 
 ## Dear ImGui **[done]**
 
@@ -54,13 +52,17 @@ The renderer half of an imgui backend, drawn entirely through `sg` — no native
 See [imgui.md](imgui.md) for the shape and the reasoning.
 
 ```text
-sr::imgui_context     [done]  owns the ImGui context + the frame bracket; docking on, viewports stubbed
-sr::imgui_routine     [done]  the render routine: atlas textures, geometry, pipelines; one execute()
+sr::imgui_context     [done]  owns the ImGui context + the frame bracket; docking always on
+                              also the input feed: sr::input_event -> imgui, and text-input intent -> window
+                              and the platform viewport callbacks, onto sr::window
+sr::imgui_routine     [done]  the render routine: atlas textures, pipelines; one execute()
+                              plus render_viewports(): a swapchain per secondary viewport
 sr::shader_package()  [done]  sr's shader package, to register with a slib::shader_library
+imgui multi-viewport  [done]  opt-in via create({.enable_viewports = true}) — it changes what an imgui
+                              coordinate means, so it is never turned on behind a caller's back
 ```
 
-Still open: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas path.
-Multi-viewport is no longer blocked now that windowing has landed — see the windowing section above.
+Still open beyond those: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas path.
 
 ## Intended scope (routines, all [planned])
 

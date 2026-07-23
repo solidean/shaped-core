@@ -24,8 +24,8 @@ void render_routine_base::ensure_initialized_impl(init_state& s, command_list& c
 {
     ensure_initialized_no_materialize_impl(s, cmd.context());
 
-    // Compared against the generation declare just ran at, not a fresh read of the counter: a reload
-    // landing between the two would otherwise leave materialize marked current against a stale declare,
+    // Compared against the generation declare just ran at, not a fresh read of the counter:
+    // a reload landing between the two would otherwise leave materialize marked current against a stale declare,
     // and the next frame would re-run declare alone and never catch materialize up.
     if (s.materialized_generation != s.declared_generation)
     {
@@ -36,8 +36,8 @@ void render_routine_base::ensure_initialized_impl(init_state& s, command_list& c
 
 void render_routine_base::ensure_initialized_no_materialize(context& ctx)
 {
-    // The lock is held across the phase callbacks on purpose: a second thread acquiring the same routine
-    // must wait and then observe it initialized, rather than run init_declare a second time in parallel.
+    // The lock is held across the phase callbacks on purpose:
+    // a second thread acquiring the same routine must wait and then observe it initialized, rather than run init_declare a second time in parallel.
     _init.lock([&](init_state& s) { ensure_initialized_no_materialize_impl(s, ctx); });
 }
 

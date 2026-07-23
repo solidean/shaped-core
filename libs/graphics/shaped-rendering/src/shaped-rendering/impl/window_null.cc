@@ -4,10 +4,9 @@
 
 // The window backend used when shaped-rendering was built without one, because SDL3 was not fetched.
 //
-// try_create fails with a reason a caller can print, and that is the whole backend: no window_system can
-// exist, so no window can either, and every other entry point here is unreachable rather than empty.
-// Asserting that is better than a silent no-op — a window method running without a backend means the
-// failure from try_create went unchecked, and that is worth finding.
+// try_create fails with a reason a caller can print, and that is the whole backend:
+// no window_system can exist, so no window can either, and every other entry point here is unreachable rather than empty.
+// Asserting that is better than a silent no-op — a window method running without a backend means the failure from try_create went unchecked, and that is worth finding.
 
 namespace sr
 {

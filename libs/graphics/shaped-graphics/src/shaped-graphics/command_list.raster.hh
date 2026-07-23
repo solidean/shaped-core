@@ -15,14 +15,14 @@
 #include <initializer_list>
 #include <type_traits>
 
-/// Raster (graphics-pipeline) recording: bind a set of color / depth-stencil targets as a rendering
-/// scope and, per target, clear / preserve / discard its contents. Reached as `cmd.raster`. Draw support
-/// arrives with the graphics pipeline; for now a scope only applies its begin-ops (clear/discard).
+/// Raster (graphics-pipeline) recording: bind a set of color / depth-stencil targets as a rendering scope and, per target, clear / preserve / discard its contents.
+/// Reached as `cmd.raster`.
+/// Draw support arrives with the graphics pipeline; for now a scope only applies its begin-ops (clear/discard).
 
 namespace sg
 {
-/// What happens to a target's contents at the start of a rendering scope. Set through the view's
-/// .cleared() / .preserved() / .discarded() members, not by hand.
+/// What happens to a target's contents at the start of a rendering scope.
+/// Set through the view's .cleared() / .preserved() / .discarded() members, not by hand.
 enum class target_op : cc::u8
 {
     preserve, ///< keep the existing contents
@@ -39,8 +39,8 @@ struct color_target
     tg::vec4f clear_color; ///< used only when op == clear
 };
 
-/// A depth-stencil target of a rendering scope. Build with view.cleared(depth[, stencil]) /
-/// view.preserved() / view.discarded().
+/// A depth-stencil target of a rendering scope.
+/// Build with view.cleared(depth[, stencil]) / view.preserved() / view.discarded().
 struct depth_stencil_target
 {
     depth_stencil_view view;
@@ -49,7 +49,8 @@ struct depth_stencil_target
     cc::u8 clear_stencil = 0; ///< used only when op == clear
 };
 
-/// The region of the target(s) rendering maps to, plus the depth range. Offset/size are in pixels.
+/// The region of the target(s) rendering maps to, plus the depth range.
+/// Offset/size are in pixels.
 /// Omitting the viewport from rendering_info uses the full target extent with depth [0, 1].
 struct viewport
 {
@@ -59,8 +60,8 @@ struct viewport
     float max_depth = 1.0f;
 };
 
-/// The targets + rasterizer state a rendering scope binds — passed to cmd.raster.render_to /
-/// cmd.raster.manual.begin_rendering. viewport / scissor unset default to the full target extent.
+/// The targets + rasterizer state a rendering scope binds — passed to cmd.raster.render_to / cmd.raster.manual.begin_rendering.
+/// viewport / scissor unset default to the full target extent.
 struct rendering_info
 {
     cc::fixed_vector<color_target, max_color_targets> color_targets;
@@ -69,17 +70,17 @@ struct rendering_info
     cc::optional<tg::aabb2i> scissor; ///< pixel rect; unset => full target extent
 };
 
-/// Parameters of a non-indexed draw: a `{offset = first vertex, size = vertex count}` vertex range, drawn
-/// once per instance in the `{offset = first instance, size = instance count}` instance range.
+/// Parameters of a non-indexed draw: a `{offset = first vertex, size = vertex count}` vertex range,
+/// drawn once per instance in the `{offset = first instance, size = instance count}` instance range.
 struct draw_config
 {
     cc::offset_size vertex_range = {.offset = 0, .size = 0};
     cc::offset_size instance_range = {.offset = 0, .size = 1};
 };
 
-/// Parameters of an indexed draw: an `{offset = first index, size = index count}` index range into the
-/// bound index buffer, each index offset by `vertex_offset` before the vertex fetch, drawn once per
-/// instance in the `{offset = first instance, size = instance count}` instance range.
+/// Parameters of an indexed draw: an `{offset = first index, size = index count}` index range into the bound index buffer,
+/// each index offset by `vertex_offset` before the vertex fetch,
+/// drawn once per instance in the `{offset = first instance, size = instance count}` instance range.
 struct draw_indexed_config
 {
     cc::offset_size index_range = {.offset = 0, .size = 0};
@@ -87,23 +88,22 @@ struct draw_indexed_config
     int vertex_offset = 0; ///< added to each index before the vertex fetch (sub-mesh base vertex)
 };
 
-/// RAII handle for an open rendering scope, returned by cmd.raster.render_to. Opens the scope on
-/// construction (begin_rendering) and closes it at end of scope (end_rendering).
+/// RAII handle for an open rendering scope, returned by cmd.raster.render_to.
+/// Opens the scope on construction (begin_rendering) and closes it at end of scope (end_rendering).
 ///
-/// The raster draw recording lives on this handle: bind a pipeline, set viewport / scissor / inline
-/// constants, draw. The same calls are also on `cmd.raster` (both forward to the one command list), but
-/// recording through the scope keeps the "draw into this pass" flow on the object that opened it, and lets
-/// a routine handed only the scope record without a separate command_list argument.
+/// The raster draw recording lives on this handle: bind a pipeline, set viewport / scissor / inline constants, draw.
+/// The same calls are also on `cmd.raster` (both forward to the one command list),
+/// but recording through the scope keeps the "draw into this pass" flow on the object that opened it,
+/// and lets a routine handed only the scope record without a separate command_list argument.
 ///
-/// Only raster operations are here. Anything else the command list offers — uploads, downloads, the context
-/// — is reached through `command_list()`; a rendering scope does not mirror them.
+/// Only raster operations are here.
+/// Anything else the command list offers — uploads, downloads, the context — is reached through `command_list()`; a rendering scope does not mirror them.
 class rendering_scope
 {
 public:
     ~rendering_scope();
 
-    // Pinned to its command list: neither copyable nor movable (render_to returns it by mandatory
-    // copy-elision, so no move is needed).
+    // Pinned to its command list: neither copyable nor movable (render_to returns it by mandatory copy-elision, so no move is needed).
     rendering_scope(rendering_scope const&) = delete;
     rendering_scope(rendering_scope&&) = delete;
     rendering_scope& operator=(rendering_scope const&) = delete;
@@ -111,23 +111,22 @@ public:
 
     // scope queries
 
-    /// The command list this scope records into — for the non-raster operations a scope does not mirror
-    /// (`command_list().context()`, `command_list().upload`, …). (`class command_list` disambiguates the
-    /// type from this accessor of the same name.)
+    /// The command list this scope records into — for the non-raster operations a scope does not mirror (`command_list().context()`, `command_list().upload`, …).
+    /// (`class command_list` disambiguates the type from this accessor of the same name.)
     [[nodiscard]] class command_list& command_list() const { return _cmd; }
 
     /// Pixel extent the scope's targets share — the size to drive a viewport, scissor or projection with.
     [[nodiscard]] tg::vec2i render_target_size() const { return _size; }
 
-    /// Formats of the bound color targets, in order — usually one. A routine's pipeline bakes these in, so
-    /// they are what to build (or key) that pipeline against.
+    /// Formats of the bound color targets, in order — usually one.
+    /// A routine's pipeline bakes these in, so they are what to build (or key) that pipeline against.
     [[nodiscard]] cc::span<pixel_format const> color_formats() const { return _color_formats; }
 
     /// Format of the bound depth-stencil target, or empty when the scope has none attached.
     [[nodiscard]] cc::optional<pixel_format> depth_format() const { return _depth_format; }
 
-    // raster draw recording — valid while this scope is alive. Identical to the same calls on cmd.raster;
-    // both forward to the owning command list.
+    // raster draw recording — valid while this scope is alive.
+    // Identical to the same calls on cmd.raster; both forward to the owning command list.
 
     /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
     void bind_pipeline(raster_pipeline const& pipeline);
@@ -171,17 +170,17 @@ private:
     cc::optional<pixel_format> _depth_format;
 };
 
-/// Low-level rendering passthrough, reached as cmd.raster.manual: begin / end a rendering scope by hand,
-/// forwarding straight to the backend. begin_rendering and end_rendering must be balanced. Prefer
-/// render_to, which pairs them via RAII.
+/// Low-level rendering passthrough, reached as cmd.raster.manual: begin / end a rendering scope by hand, forwarding straight to the backend.
+/// begin_rendering and end_rendering must be balanced.
+/// Prefer render_to, which pairs them via RAII.
 class command_list_raster_manual_scope
 {
 public:
     void begin_rendering(rendering_info const& info);
     void end_rendering();
 
-    // Draw recording — valid only while a rendering scope is open (begin_rendering / render_to). The same
-    // API is on cmd.raster; both forward to the owning command list.
+    // Draw recording — valid only while a rendering scope is open (begin_rendering / render_to).
+    // The same API is on cmd.raster; both forward to the owning command list.
 
     /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
     void bind_pipeline(raster_pipeline const& pipeline);
@@ -228,20 +227,20 @@ private:
     command_list& _cmd;
 };
 
-/// Raster recording facade for a command list, reached as `cmd.raster`: open a rendering scope over a
-/// set of targets, clearing / preserving / discarding each. `manual` exposes the same begin/end by hand.
+/// Raster recording facade for a command list, reached as `cmd.raster`: open a rendering scope over a set of targets, clearing / preserving / discarding each.
+/// `manual` exposes the same begin/end by hand.
 class command_list_raster_scope
 {
 public:
-    /// Opens a rendering scope over `info`'s targets (applying each target's clear / discard) and
-    /// returns an RAII handle; rendering ends when the returned scope is destroyed.
+    /// Opens a rendering scope over `info`'s targets (applying each target's clear / discard) and returns an RAII handle;
+    /// rendering ends when the returned scope is destroyed.
     [[nodiscard]] rendering_scope render_to(rendering_info const& info);
 
     /// Low-level passthrough: begin / end a rendering scope by hand. Prefer render_to.
     command_list_raster_manual_scope manual;
 
-    // Draw recording — valid only while a rendering scope is open (render_to keeps one alive; or
-    // manual.begin_rendering). The same API is on cmd.raster.manual; both forward to the command list.
+    // Draw recording — valid only while a rendering scope is open (render_to keeps one alive; or manual.begin_rendering).
+    // The same API is on cmd.raster.manual; both forward to the command list.
 
     /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
     void bind_pipeline(raster_pipeline const& pipeline);

@@ -15,11 +15,10 @@ namespace sr
 {
 /// The shape the mouse pointer is drawn as.
 ///
-/// One cursor is showing at a time for the whole process, so this is set on the window_system rather than on a
-/// window — see window_system::set_cursor.
+/// One cursor is showing at a time for the whole process, so this is set on the window_system rather than on a window — see window_system::set_cursor.
 ///
-/// Every shape here is one the platform provides. A shape the platform lacks falls back to the closest one it
-/// has, which is the platform's business, not ours; nothing here fails.
+/// Every shape here is one the platform provides.
+/// A shape the platform lacks falls back to the closest one it has, which is the platform's business, not ours; nothing here fails.
 enum class cursor_shape : u8
 {
     arrow,       ///< the default pointer
@@ -58,8 +57,7 @@ struct window_description
     bool is_visible = true;
 
     /// Whether the window has a title bar and a frame.
-    /// A UI library that draws its own chrome — imgui's multi-viewport windows, a tooltip, a popup — wants
-    /// this off, and then owns dragging and resizing itself.
+    /// A UI library that draws its own chrome — imgui's multi-viewport windows, a tooltip, a popup — wants this off, and then owns dragging and resizing itself.
     bool has_decoration = true;
 
     /// Whether the window stays above ordinary windows.
@@ -82,8 +80,7 @@ struct window_description
 /// Every method must run on the thread that created that system — see window_system.
 ///
 /// A window does not pump its own events.
-/// window_system::poll_events refreshes every live window at once, so size, minimized state and the close
-/// request all read as of the last poll.
+/// window_system::poll_events refreshes every live window at once, so size, minimized state and the close request all read as of the last poll.
 ///
 ///     auto const win = wsys->create_window({.title = "viewer", .width = 1600, .height = 900});
 ///     auto const sc = ctx->create_swapchain({.native_window_handle = win->native_window_handle()});
@@ -119,8 +116,7 @@ public:
     void set_position(tg::pos2i position);
 
     /// Resizes the client area; both components must be > 0.
-    /// Like set_position, this is write-through: width()/height() read back the request at once, and the next
-    /// poll_events reports what the window manager granted.
+    /// Like set_position, this is write-through: width()/height() read back the request at once, and the next poll_events reports what the window manager granted.
     void set_size(tg::vec2i size);
 
     /// Whether the window is minimized and so has no drawable area.
@@ -131,8 +127,7 @@ public:
     [[nodiscard]] bool is_focused() const { return _is_focused; }
 
     /// Asks the window manager to raise this window and give it the keyboard focus.
-    /// A request, not a guarantee — a window manager may refuse to steal focus, so read is_focused after the
-    /// next poll_events rather than assuming it took.
+    /// A request, not a guarantee — a window manager may refuse to steal focus, so read is_focused after the next poll_events rather than assuming it took.
     void focus();
 
     [[nodiscard]] cc::string_view title() const { return _title; }
@@ -203,9 +198,8 @@ private:
 
 /// One monitor attached to the desktop, as of the last poll_events.
 ///
-/// All coordinates are in the same desktop space as window::position, so a window is on the display whose
-/// bounds contain it. A multi-monitor desktop puts origins wherever the user arranged them, which is why a
-/// coordinate here may be negative.
+/// All coordinates are in the same desktop space as window::position, so a window is on the display whose bounds contain it.
+/// A multi-monitor desktop puts origins wherever the user arranged them, which is why a coordinate here may be negative.
 struct display_info
 {
     /// The display's full rectangle.
@@ -237,8 +231,7 @@ struct window_system_description
 /// On macOS that thread must be the process main thread.
 /// Violations assert.
 ///
-/// At most one may be alive per process — the OS event queue is process-global, so two would steal each other's
-/// events.
+/// At most one may be alive per process — the OS event queue is process-global, so two would steal each other's events.
 ///
 /// It must outlive every window created from it.
 /// Windows are owned by the caller and may be created and destroyed freely between polls.
@@ -257,8 +250,8 @@ public:
     /// Brings the window subsystem up, or fails with the reason.
     /// Fails when no display is available and headless was not requested.
     ///
-    /// Also fails when shaped-rendering was built without a window backend, which is the only thing
-    /// SR_HAS_WINDOW changes — the API is always here, so code compiles either way and finds out now.
+    /// Also fails when shaped-rendering was built without a window backend, which is the only thing SR_HAS_WINDOW changes —
+    /// the API is always here, so code compiles either way and finds out now.
     /// Check this result rather than the macro unless you need the answer at compile time.
     [[nodiscard]] static cc::result<cc::unique_ptr<window_system>> try_create(window_system_description const& desc = {});
 
@@ -307,28 +300,28 @@ public:
     [[nodiscard]] bool is_headless() const { return _is_headless; }
 
     /// Every monitor attached to the desktop, primary first, queried fresh on each call.
-    /// Never empty while a display is available; a headless system reports one synthetic display, so code
-    /// that places windows against a monitor has something well-formed to work with either way.
+    /// Never empty while a display is available; a headless system reports one synthetic display,
+    /// so code that places windows against a monitor has something well-formed to work with either way.
     [[nodiscard]] cc::vector<display_info> displays() const;
 
     // Mouse cursor.
     //
     // Process-global, not per-window: one cursor is showing at a time, whichever window the pointer is over.
-    // Cheap to set every frame — the platform cursor is only touched when the shape actually changes, which is
-    // what a UI library driving this from its hover state needs.
+    // Cheap to set every frame — the platform cursor is only touched when the shape actually changes, which is what a UI library driving this from its hover state needs.
 
     void set_cursor(cursor_shape shape);
     [[nodiscard]] cursor_shape cursor() const { return _cursor; }
 
-    /// Whether the pointer is drawn at all. Independent of its shape, so hiding and showing it again restores
-    /// the shape that was set. Note window::set_relative_mouse_mode hides it too, for as long as it is on.
+    /// Whether the pointer is drawn at all.
+    /// Independent of its shape, so hiding and showing it again restores the shape that was set.
+    /// Note window::set_relative_mouse_mode hides it too, for as long as it is on.
     void set_cursor_visible(bool visible);
     [[nodiscard]] bool is_cursor_visible() const { return _is_cursor_visible; }
 
     // System clipboard.
     //
-    // Process-global and shared with every other application, so treat a read as untrusted input of unbounded
-    // size. Text only; images and files are not modelled.
+    // Process-global and shared with every other application, so treat a read as untrusted input of unbounded size.
+    // Text only; images and files are not modelled.
 
     /// The clipboard's text, or empty when it holds none (including when it holds something that is not text).
     /// Returns a copy — the platform's buffer is not ours to hold.
@@ -346,7 +339,8 @@ private:
     friend class window;
     friend struct cc::node_allocation<window_system>; // cc::make_unique constructs through it
 
-    /// Drops a window from the dispatch table. Called from ~window.
+    /// Drops a window from the dispatch table.
+    /// Called from ~window.
     void unregister_window(window* w);
 
     /// Asserts the calling thread is the one this system was created on.
@@ -358,12 +352,12 @@ private:
     cc::vector<input_event> _events;
 
     /// Modifiers as of the last key event seen, carried across polls.
-    /// Mouse events are stamped from this rather than from a live query, so a click reads the state as of its own
-    /// position in the event stream. See mouse_button_event::modifiers.
+    /// Mouse events are stamped from this rather than from a live query, so a click reads the state as of its own position in the event stream.
+    /// See mouse_button_event::modifiers.
     key_modifiers _modifiers = key_modifiers::none;
 
-    /// The cursor as last set. Tracked so set_cursor can skip the platform call when nothing changed, and so
-    /// hiding and showing the pointer restores the shape rather than resetting it to an arrow.
+    /// The cursor as last set.
+    /// Tracked so set_cursor can skip the platform call when nothing changed, and so hiding and showing the pointer restores the shape rather than resetting it to an arrow.
     cursor_shape _cursor = cursor_shape::arrow;
     bool _is_cursor_visible = true;
 

@@ -6,14 +6,12 @@
 
 namespace sg
 {
-/// Base class for a reusable, self-contained unit of GPU work — a post-process pass, a LUT bake, a
-/// mipmap generate, a texture copy. It owns its own lazy, hot-reload-aware initialization, so a call
-/// site only has to ask for it and use it. Concrete routines derive from the CRTP sg::render_routine
-/// (render_routine.hh), which adds the by-type acquire(cmd) entry point; this base carries the phase
-/// engine they share.
+/// Base class for a reusable, self-contained unit of GPU work — a post-process pass, a LUT bake, a mipmap generate, a texture copy.
+/// It owns its own lazy, hot-reload-aware initialization, so a call site only has to ask for it and use it.
+/// Concrete routines derive from the CRTP sg::render_routine (render_routine.hh), which adds the by-type acquire(cmd) entry point;
+/// this base carries the phase engine they share.
 ///
-/// Initialization is three phases, kept apart so async pipeline compilation can start long before a
-/// command list exists:
+/// Initialization is three phases, kept apart so async pipeline compilation can start long before a command list exists:
 ///
 ///   init_once        persistent one-time work, independent of shader content. Never re-runs — not
 ///                    even on hot reload (e.g. a CPU-computed noise buffer, uploaded once).
@@ -21,16 +19,16 @@ namespace sg
 ///                    off uploads. Records no GPU work and opens no command list. Re-runs after a reload.
 ///   init_materialize record GPU init work (dispatches, clears, LUT bakes). Re-runs after a reload.
 ///
-/// Most routines need only init_declare; the other two default to no-ops. Re-init is driven by sg's
-/// process-global reload generation (sg::reload_generation): when it moves, the next ensure_* re-runs
-/// declare + materialize, while init_once state is preserved. A routine reads that counter directly —
-/// it needs no library reference. Instances live per-context in ctx.routines, so their cached GPU state
-/// dies with the context that built it — no stale handles across contexts.
+/// Most routines need only init_declare; the other two default to no-ops.
+/// Re-init is driven by sg's process-global reload generation (sg::reload_generation):
+/// when it moves, the next ensure_* re-runs declare + materialize, while init_once state is preserved.
+/// A routine reads that counter directly — it needs no library reference.
+/// Instances live per-context in ctx.routines, so their cached GPU state dies with the context that built it — no stale handles across contexts.
 ///
-/// Threading: the phase engine is guarded, so concurrent acquires of one routine are safe and each phase
-/// runs exactly once — the losers of the race block until the winner is done, then see it initialized.
-/// The phase callbacks therefore run under this lock and must not call back into acquire/prewarm for the
-/// same routine. A routine's *own* mutable state is a separate matter it owns; see sg::render_routine.
+/// Threading: the phase engine is guarded, so concurrent acquires of one routine are safe and each phase runs exactly once —
+/// the losers of the race block until the winner is done, then see it initialized.
+/// The phase callbacks therefore run under this lock and must not call back into acquire/prewarm for the same routine.
+/// A routine's *own* mutable state is a separate matter it owns; see sg::render_routine.
 class render_routine_base
 {
 public:
@@ -51,8 +49,8 @@ private:
     template <class>
     friend class render_routine;
 
-    /// Which phases have run, and at which reload generation. Behind a mutex because two threads may
-    /// acquire the same routine at once and each phase must run only once.
+    /// Which phases have run, and at which reload generation.
+    /// Behind a mutex because two threads may acquire the same routine at once and each phase must run only once.
     struct init_state
     {
         bool once_done = false;
@@ -60,16 +58,17 @@ private:
         cc::optional<u64> materialized_generation;
     };
 
-    /// Runs init_once (first time only), then init_declare (first time + after each reload). The prewarm
-    /// entry point: call it before opening a command list so async compiles start as early as possible.
+    /// Runs init_once (first time only), then init_declare (first time + after each reload).
+    /// The prewarm entry point: call it before opening a command list so async compiles start as early as possible.
     void ensure_initialized_no_materialize(context& ctx);
 
-    /// The above, then init_materialize. The context is reached through cmd.context(). Safe to call every
-    /// frame — a no-op once initialized at the current generation.
+    /// The above, then init_materialize.
+    /// The context is reached through cmd.context().
+    /// Safe to call every frame — a no-op once initialized at the current generation.
     void ensure_initialized(command_list& cmd);
 
-    // The bodies of the two above, minus the locking — so they may call each other, which the entry points
-    // cannot: cc::mutex is not recursive. Only ever called with `_init` already held.
+    // The bodies of the two above, minus the locking — so they may call each other, which the entry points cannot: cc::mutex is not recursive.
+    // Only ever called with `_init` already held.
 
     void ensure_initialized_no_materialize_impl(init_state& s, context& ctx);
     void ensure_initialized_impl(init_state& s, command_list& cmd);
