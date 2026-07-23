@@ -883,18 +883,16 @@ public:
         if (is_small()) [[likely]]
             return;
 
-        // Mirror data_heap::shrink_to_fit's tightness test: it only reallocates when the current
-        // allocation differs from the tight size. If it is already tight, there is nothing to release.
-        auto const tight_bytes = cc::align_up(size(), data_heap::alloc_alignment());
-        if (_data.heap._data.alloc_size_bytes() == tight_bytes)
-            return;
-
-        // A reallocation is going to happen anyway: if the content fits inline, prefer SSO (frees
-        // the allocation outright) over a smaller heap block.
+        // Content that fits inline always returns to SSO, freeing the heap allocation outright — the only path back to SSO, and a strict win over any heap block.
+        // This must come before any heap-tightness test: with a 128-byte alloc_alignment (some targets' cache line) a block can read as already-tight for the current size yet still be demotable to SSO.
         if (size() <= small_capacity)
+        {
             demote_to_small();
-        else
-            _data.heap.shrink_to_fit();
+            return;
+        }
+
+        // Otherwise tighten the heap block in place; data_heap::shrink_to_fit is itself a no-op when the allocation is already tight.
+        _data.heap.shrink_to_fit();
     }
 
     /// Replaces every occurrence of from with to, in place.
