@@ -9,8 +9,8 @@
 #include <type_traits>
 
 /// Owning UTF-8 byte string with small-string optimization (SSO).
-/// Stores up to small_capacity bytes inline without allocation (39 on 64-bit platforms; fewer where
-/// pointers are smaller, e.g. wasm32); longer strings use heap storage via cc::allocation<char>.
+/// Stores up to small_capacity bytes inline without allocation (39 on 64-bit platforms; fewer where pointers are smaller, e.g. wasm32).
+/// Longer strings use heap storage via cc::allocation<char>.
 /// size() counts bytes, not codepoints; embedded '\0' bytes are allowed.
 /// data() returns contiguous bytes but is NOT null-terminated.
 ///
@@ -18,8 +18,8 @@
 /// Use c_str_materialize() to obtain a temporary '\0'-terminated pointer valid only until the next mutation.
 /// This design avoids the overhead of maintaining a persistent terminator for all operations.
 ///
-/// Memory resource choice ("custom_resource is sticky") is preserved across all operations, including transitions
-/// between SSO and heap. Mutating operations may invalidate pointers and references, as with std::string.
+/// Memory resource choice ("custom_resource is sticky") is preserved across all operations, including transitions between SSO and heap.
+/// Mutating operations may invalidate pointers and references, as with std::string.
 ///
 /// Performance characteristics:
 /// SSO fast paths (small strings, up to small_capacity bytes) avoid allocation and branch on size checks.
@@ -32,10 +32,9 @@ struct cc::string
     // constants
 private:
     /// Maximum number of bytes that can be stored inline without heap allocation.
-    /// Derived from the heap layout rather than hardcoded: the inline buffer fills the space before the
-    /// custom_resource pointer (which data_small must alias for the SSO tag bit), minus one byte for the
-    /// size tag. This tracks the pointer size automatically — 39 bytes on 64-bit, fewer where pointers are
-    /// smaller (e.g. wasm32, which has 32-bit pointers).
+    /// Derived from the heap layout rather than hardcoded.
+    /// The inline buffer fills the space before the custom_resource pointer (which data_small must alias for the SSO tag bit), minus one byte for the size tag.
+    /// This tracks the pointer size automatically — 39 bytes on 64-bit, fewer where pointers are smaller (e.g. wasm32, which has 32-bit pointers).
     static constexpr isize small_capacity = isize(offsetof(allocation<char>, custom_resource)) - 1;
 
     // factories
@@ -59,21 +58,8 @@ public:
         CC_ASSERT(size >= 0, "string size must be non-negative");
 
         string result;
-        if (size <= small_capacity)
-        {
-            result.initialize_small_empty(resource);
-            for (isize i = 0; i < size; ++i)
-                result._data.small.data[i] = value;
-            result._data.small.size = static_cast<u8>(size);
-        }
-        else
-        {
-            // Allocate heap storage and fill
-            result.initialize_heap_from_data("", 0, resource);
-            result._data.heap.resize_to_uninitialized(size);
-            for (isize i = 0; i < size; ++i)
-                result._data.heap.data()[i] = value;
-        }
+        result.initialize_small_empty(resource);
+        result.resize_to_filled(size, value);
         return result;
     }
 
@@ -88,17 +74,8 @@ public:
         CC_ASSERT(size >= 0, "string size must be non-negative");
 
         string result;
-        if (size <= small_capacity)
-        {
-            result.initialize_small_empty(resource);
-            result._data.small.size = static_cast<u8>(size);
-            // Note: bytes are uninitialized; caller must fill them
-        }
-        else
-        {
-            result.initialize_heap_from_data("", 0, resource);
-            result._data.heap.resize_to_uninitialized(size);
-        }
+        result.initialize_small_empty(resource);
+        result.resize_to_uninitialized(size);
         return result;
     }
 
@@ -120,21 +97,14 @@ public:
     /// If capacity <= 39, uses SSO mode (no allocation).
     /// Otherwise, allocates heap storage with the specified capacity from the memory resource.
     /// The string is initially empty (size() == 0), but can grow up to capacity without reallocation.
-    /// Complexity: O(1). (allocation only, no initialization).
+    /// Complexity: O(1) (allocation only, no initialization).
     [[nodiscard]] static string create_with_capacity(isize capacity, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(capacity >= 0, "capacity must be non-negative");
 
         string result;
-        if (capacity <= small_capacity)
-        {
-            result.initialize_small_empty(resource);
-        }
-        else
-        {
-            result.initialize_heap_from_data("", 0, resource);
-            result._data.heap.reserve_back(capacity);
-        }
+        result.initialize_small_empty(resource);
+        result.reserve_back(capacity); // stays inline while capacity fits, else materializes to heap
         return result;
     }
 
@@ -424,10 +394,12 @@ public:
         return data()[i];
     }
 
-    /// Returns the first byte. Precondition: !empty().
+    /// Returns the first byte.
+    /// Precondition: !empty().
     [[nodiscard]] char front() const { return string_view(*this).front(); }
 
-    /// Returns the last byte. Precondition: !empty().
+    /// Returns the last byte.
+    /// Precondition: !empty().
     [[nodiscard]] char back() const { return string_view(*this).back(); }
 
     // span access
@@ -443,16 +415,19 @@ public:
 
     // string_view read forwarding
 public:
-    /// Lexicographically compares with another view. Returns <0, 0, or >0.
+    /// Lexicographically compares with another view.
+    /// Returns <0, 0, or >0.
     [[nodiscard]] int compare(string_view other) const { return string_view(*this).compare(other); }
 
-    /// Finds the first occurrence of substring at or after pos, or -1. Precondition: 0 <= pos <= size().
+    /// Finds the first occurrence of substring at or after pos, or -1.
+    /// Precondition: 0 <= pos <= size().
     [[nodiscard]] isize find(string_view substring, isize pos = 0) const
     {
         return string_view(*this).find(substring, pos);
     }
 
-    /// Finds the first occurrence of c at or after pos, or -1. Precondition: 0 <= pos <= size().
+    /// Finds the first occurrence of c at or after pos, or -1.
+    /// Precondition: 0 <= pos <= size().
     [[nodiscard]] isize find(char c, isize pos = 0) const { return string_view(*this).find(c, pos); }
 
     /// Finds the last occurrence of substring at or before pos (-1 = from the end), or -1.
@@ -479,7 +454,8 @@ public:
     /// The view is invalidated by any mutation of this string.
     [[nodiscard]] string_view subview(start_end r) const { return string_view(*this).subview(r); }
 
-    /// Returns an owning copy of [offset, size()). Precondition: 0 <= offset <= size().
+    /// Returns an owning copy of [offset, size()).
+    /// Precondition: 0 <= offset <= size().
     [[nodiscard]] string substring(isize offset) const { return string(subview(offset)); }
 
     /// Returns an owning copy of [r.offset, r.offset + r.size).
@@ -682,35 +658,281 @@ public:
         }
     }
 
-    /// Replaces every occurrence of from with to, in place. Returns the number of replacements.
+    // capacity queries
+public:
+    /// Number of bytes that can be appended at the back without reallocation.
+    /// In SSO mode this is the unused inline room (small_capacity - size()).
+    [[nodiscard]] isize capacity_back() const
+    {
+        if (is_small()) [[likely]]
+            return small_capacity - _data.small.size;
+        else
+            return _data.heap.capacity_back();
+    }
+
+    /// Number of bytes of unused capacity before the content (front slack).
+    /// Always 0 in SSO mode (the inline layout has no front offset); grows only via reserve_front on the heap.
+    [[nodiscard]] isize capacity_front() const
+    {
+        if (is_small()) [[likely]]
+            return 0;
+        else
+            return _data.heap.capacity_front();
+    }
+
+    // resize and capacity
+public:
+    /// Resizes to new_size bytes, leaving any newly added bytes uninitialized.
+    /// Growing extends at the back; shrinking drops trailing bytes.
+    /// Existing bytes are preserved.
+    /// Stays in SSO mode while new_size fits inline; otherwise materializes to heap.
+    /// The storage mode is never demoted here — only shrink_to_fit() may return to SSO.
+    /// Precondition: new_size >= 0.
+    void resize_to_uninitialized(isize new_size)
+    {
+        CC_ASSERT(new_size >= 0, "string size must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (new_size <= small_capacity)
+            {
+                _data.small.size = u8(new_size); // grow: new bytes uninitialized; shrink: trailing bytes dropped
+                return;
+            }
+            materialize_heap(new_size - _data.small.size);
+        }
+
+        _data.heap.resize_to_uninitialized(new_size);
+    }
+
+    /// Resizes to new_size bytes, filling any newly added bytes with value.
+    /// Growing extends at the back; shrinking drops trailing bytes.
+    /// Existing bytes are preserved.
+    /// Stays in SSO mode while new_size fits inline; otherwise materializes to heap.
+    /// Precondition: new_size >= 0.
+    void resize_to_filled(isize new_size, char value)
+    {
+        CC_ASSERT(new_size >= 0, "string size must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (new_size <= small_capacity)
+            {
+                for (isize i = _data.small.size; i < new_size; ++i) // empty loop when shrinking
+                    _data.small.data[i] = value;
+                _data.small.size = u8(new_size);
+                return;
+            }
+            materialize_heap(new_size - _data.small.size);
+        }
+
+        _data.heap.resize_to_filled(new_size, value);
+    }
+
+    /// Resizes to new_size bytes, zero-filling any newly added bytes.
+    /// Growing extends at the back; shrinking drops trailing bytes.
+    /// Existing bytes are preserved.
+    /// Precondition: new_size >= 0.
+    void resize_to_defaulted(isize new_size) { resize_to_filled(new_size, char()); }
+
+    /// Shrinks to new_size bytes by dropping the trailing bytes.
+    /// Does not reallocate or change the storage mode.
+    /// Precondition: 0 <= new_size <= size().
+    void resize_down_to(isize new_size)
+    {
+        CC_ASSERT(0 <= new_size && new_size <= size(), "resize_down_to: new_size must be in [0, size()]");
+
+        if (is_small()) [[likely]]
+            _data.small.size = u8(new_size);
+        else
+            _data.heap.resize_down_to(new_size);
+    }
+
+    /// Discards all current content, then resizes to new_size bytes left uninitialized.
+    /// Unlike resize_*, existing bytes are NOT preserved when growing.
+    /// Stays in SSO mode while new_size fits inline; otherwise materializes to heap.
+    /// Precondition: new_size >= 0.
+    void clear_resize_to_uninitialized(isize new_size)
+    {
+        CC_ASSERT(new_size >= 0, "string size must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (new_size <= small_capacity)
+            {
+                _data.small.size = u8(new_size);
+                return;
+            }
+            // content is about to be discarded, so the inline copy inside materialize_heap is harmless
+            materialize_heap(new_size - _data.small.size);
+        }
+
+        _data.heap.clear_resize_to_uninitialized(new_size);
+    }
+
+    /// Discards all current content, then resizes to new_size bytes all filled with value.
+    /// Unlike resize_*, existing bytes are NOT preserved when growing.
+    /// Precondition: new_size >= 0.
+    void clear_resize_to_filled(isize new_size, char value)
+    {
+        CC_ASSERT(new_size >= 0, "string size must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (new_size <= small_capacity)
+            {
+                for (isize i = 0; i < new_size; ++i)
+                    _data.small.data[i] = value;
+                _data.small.size = u8(new_size);
+                return;
+            }
+            materialize_heap(new_size - _data.small.size);
+        }
+
+        _data.heap.clear_resize_to_filled(new_size, value);
+    }
+
+    /// Discards all current content, then resizes to new_size zero-filled bytes.
+    /// Precondition: new_size >= 0.
+    void clear_resize_to_defaulted(isize new_size) { clear_resize_to_filled(new_size, char()); }
+
+    /// Ensures at least count MORE bytes can be appended at the back without reallocation.
+    /// count is a delta on top of the current size, not an absolute capacity.
+    /// A no-op while the string stays inline (SSO already reserves small_capacity bytes); otherwise materializes to heap with room for count more bytes.
+    /// Uses exponential growth to amortize future reservations.
+    /// Precondition: count >= 0.
+    void reserve_back(isize count)
+    {
+        CC_ASSERT(count >= 0, "reserve count must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (_data.small.size + count <= small_capacity)
+                return;
+            materialize_heap(count);
+        }
+
+        _data.heap.reserve_back(count);
+    }
+
+    /// Ensures at least count MORE bytes can be appended at the back without reallocation.
+    /// Like reserve_back but allocates exactly the needed space (no exponential slack).
+    /// Precondition: count >= 0.
+    void reserve_back_exact(isize count)
+    {
+        CC_ASSERT(count >= 0, "reserve count must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (_data.small.size + count <= small_capacity)
+                return;
+            materialize_heap(count);
+        }
+
+        _data.heap.reserve_back_exact(count);
+    }
+
+    /// Ensures at least count MORE bytes of unused capacity BEFORE the content (front slack).
+    /// No string operation consumes front slack today; it survives back-growth until shrink_to_fit().
+    ///
+    /// A small string always materializes to heap here — SSO cannot represent a front offset.
+    /// The new allocation holds small_capacity + count bytes, content placed so capacity_front() == count and the back capacity matches what SSO had (small_capacity - size).
+    /// Precondition: count >= 0.
+    void reserve_front(isize count)
+    {
+        CC_ASSERT(count >= 0, "reserve count must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (count == 0)
+                return;
+            // keep the SSO-equivalent back room (small_capacity - size) behind the content
+            materialize_heap_front(count, small_capacity - _data.small.size);
+            return;
+        }
+
+        _data.heap.reserve_front(count);
+    }
+
+    /// Ensures at least count MORE bytes of front slack, allocating exactly the needed space.
+    /// A small string materializes to heap with capacity_front() == count and no back slack.
+    /// Precondition: count >= 0.
+    void reserve_front_exact(isize count)
+    {
+        CC_ASSERT(count >= 0, "reserve count must be non-negative");
+
+        if (is_small()) [[likely]]
+        {
+            if (count == 0)
+                return;
+            materialize_heap_front(count, 0);
+            return;
+        }
+
+        _data.heap.reserve_front_exact(count);
+    }
+
+    /// Releases excess capacity so the allocation fits the current content.
+    /// A no-op in SSO mode (already minimal) and for an already-tight heap allocation.
+    /// When a heap string would reallocate and its content fits inline, it drops back to SSO, freeing the heap allocation entirely.
+    /// Otherwise the heap block is tightened in place.
+    /// This is the only operation that returns a heap string to SSO.
+    /// May invalidate pointers.
+    void shrink_to_fit()
+    {
+        if (is_small()) [[likely]]
+            return;
+
+        // Content that fits inline always returns to SSO, freeing the heap allocation outright — the only path back to SSO, and a strict win over any heap block.
+        // This must come before any heap-tightness test: with a 128-byte alloc_alignment (some targets' cache line) a block can read as already-tight for the current size yet still be demotable to SSO.
+        if (size() <= small_capacity)
+        {
+            demote_to_small();
+            return;
+        }
+
+        // Otherwise tighten the heap block in place; data_heap::shrink_to_fit is itself a no-op when the allocation is already tight.
+        _data.heap.shrink_to_fit();
+    }
+
+    /// Replaces every occurrence of from with to, in place.
+    /// Returns the number of replacements.
     /// Complexity: O(size()).
     isize replace_all(char from, char to);
 
     /// Replaces every non-overlapping occurrence of from with to (scanning left to right).
     /// An empty from matches nothing and the string is left unchanged (returns 0).
-    /// Returns the number of replacements. May reallocate. Complexity: O(size() * from.size()).
+    /// Returns the number of replacements.
+    /// May reallocate.
+    /// Complexity: O(size() * from.size()).
     isize replace_all(string_view from, string_view to);
 
-    /// Replaces the first occurrence of from with to. Returns true if a replacement was made.
+    /// Replaces the first occurrence of from with to.
+    /// Returns true if a replacement was made.
     bool replace_first(char from, char to);
 
-    /// Replaces the first occurrence of from with to (no-op for empty from). Returns true if replaced.
+    /// Replaces the first occurrence of from with to (no-op for empty from).
+    /// Returns true if replaced.
     bool replace_first(string_view from, string_view to);
 
-    /// Replaces the last occurrence of from with to. Returns true if a replacement was made.
+    /// Replaces the last occurrence of from with to.
+    /// Returns true if a replacement was made.
     bool replace_last(char from, char to);
 
-    /// Replaces the last occurrence of from with to (no-op for empty from). Returns true if replaced.
+    /// Replaces the last occurrence of from with to (no-op for empty from).
+    /// Returns true if replaced.
     bool replace_last(string_view from, string_view to);
 
     /// Replaces the bytes [r.offset, r.offset + r.size) with the contents of with.
     /// Precondition: r designates a valid range of this string (r.size >= 0, r.offset + r.size <= size()).
-    /// May reallocate. Complexity: O(size() + with.size()).
+    /// May reallocate.
+    /// Complexity: O(size() + with.size()).
     void replace(offset_size r, string_view with);
 
     /// Replaces the bytes [r.start, r.end) with the contents of with.
     /// Precondition: r designates a valid range of this string (r.end >= r.start, r.end <= size()).
-    /// May reallocate. Complexity: O(size() + with.size()).
+    /// May reallocate.
+    /// Complexity: O(size() + with.size()).
     void replace(start_end r, string_view with);
 
     // comparisons
@@ -730,8 +952,7 @@ public:
     /// Complexity: O(size()).
     [[nodiscard]] bool operator==(string const& rhs) const { return string_view(*this) == string_view(rhs); }
 
-    /// Structural hash over the bytes; delegates to string_view so equal content hashes equally
-    /// regardless of SSO vs heap storage (and matches a string_view of the same content).
+    /// Structural hash over the bytes; delegates to string_view so equal content hashes equally regardless of SSO vs heap storage (and matches a string_view of the same content).
     [[nodiscard]] friend u64 hash(string const& s) { return hash(string_view(s)); }
 
     /// Checks if this string starts with the given prefix.
@@ -754,13 +975,15 @@ public:
     /// Complexity: O(size()).
     [[nodiscard]] bool contains(char c) const { return string_view(*this).contains(c); }
 
-    // helpers
-private:
-    /// Checks if the string is currently in small (SSO) mode.
-    /// Uses the low bit of the custom_resource pointer as a tag.
+    // storage mode
+public:
+    /// True while the string is in small (SSO) mode: content is stored inline, no heap allocation exists.
     /// Bit set (1) means small mode; bit clear (0) means heap mode.
+    /// Only shrink_to_fit() may turn a heap string back into a small one.
     [[nodiscard]] bool is_small() const { return (reinterpret_cast<uintptr_t>(_data.small.custom_resource) & 1) != 0; }
 
+    // helpers
+private:
     /// Returns the memory resource associated with this string.
     /// Removes the small-mode tag bit if present.
     /// nullptr means use the default global memory resource.
@@ -799,6 +1022,16 @@ private:
     /// Precondition: is_small() must be true.
     /// After this call, is_small() returns false and the old small data is lost.
     void materialize_heap(isize min_back_capacity);
+
+    /// Transitions from small mode to heap mode, placing the content with front_capacity unused bytes before it and back_capacity unused bytes after it (capacity_front() == front_capacity afterwards).
+    /// Precondition: is_small() and front_capacity >= 0 and back_capacity >= 0.
+    void materialize_heap_front(isize front_capacity, isize back_capacity);
+
+    /// Transitions from heap mode back to small mode, freeing the heap allocation.
+    /// Copies the live bytes into the inline buffer and preserves the memory resource.
+    /// Precondition: !is_small() and size() <= small_capacity.
+    /// After this call, is_small() returns true.
+    void demote_to_small();
 
     // data member
 private:

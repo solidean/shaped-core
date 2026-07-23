@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 project(shaped-graphics-dx12 LANGUAGES CXX)
 
-# The dx12 backend is its own static library that links the shaped-graphics core. It creates a
-# live D3D12 device, command lists, and GPU buffers, so it links the DirectX 12 libs from the
-# Windows SDK (always present on the Windows path the enclosing CMakeLists gates it to).
+# The dx12 backend is its own static library that links the shaped-graphics core.
+# It creates a live D3D12 device, command lists, and GPU buffers, so it links the DirectX 12 libs from the Windows SDK (always present on the Windows path the enclosing CMakeLists gates it to).
 add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_context.cc
     src/shaped-graphics/backends/dx12/dx12_context.create.cc
@@ -89,8 +88,8 @@ target_include_directories(shaped-graphics-dx12
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# d3d12/dxgi/dxguid ship with the Windows SDK on the default lib path; d3dcompiler is only needed
-# once we compile shaders (not yet).
+# d3d12/dxgi/dxguid ship with the Windows SDK on the default lib path;
+# d3dcompiler is only needed once we compile shaders (not yet).
 target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid)
 
 target_compile_options(shaped-graphics-dx12
@@ -98,11 +97,11 @@ target_compile_options(shaped-graphics-dx12
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# Backend-specific test binary. The home for real dx12-specific tests — feature smoke tests plus
-# backend-internal invariant tests (pooling, epochs) that reach into concrete dx12 types. Split per
-# topic; see libs/graphics/shaped-graphics/docs/concepts/backends.md. Named *-test so the dev.py
-# runner discovers it. Only exists
-# on Windows because this whole subdirectory is gated there by the sg CMakeLists.
+# Backend-specific test binary.
+# The home for real dx12-specific tests — feature smoke tests plus backend-internal invariant tests (pooling, epochs) that reach into concrete dx12 types.
+# Split per topic; see libs/graphics/shaped-graphics/docs/concepts/backends.md.
+# Named *-test so the dev.py runner discovers it.
+# Only exists on Windows because this whole subdirectory is gated there by the sg CMakeLists.
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-dx12-test
         tests/main.cc
@@ -120,6 +119,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-cached-pso-test.cc
         tests/dx12-placed-test.cc
         tests/dx12-transient-test.cc
+        tests/dx12-buffer-barrier-test.cc
         tests/dx12-texture-barrier-test.cc
         tests/dx12-texture-view-test.cc
         tests/dx12-rtv-dsv-test.cc

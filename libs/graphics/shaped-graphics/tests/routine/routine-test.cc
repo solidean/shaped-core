@@ -1,4 +1,7 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -6,16 +9,17 @@
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
-// The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated
-// into the build dir and private to this binary.
+#include <chrono>
+#include <thread>
+
+// The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated into the build dir and private to this binary.
 #include <sg_test_shaders.hh>
 
-// Render-routine framework tests, on a dx12 WARP context (software, present on any Windows host, so
-// they run on headless CI). WARP + DXC are Windows-only, which is why this file is gated on the dx12
-// backend and a shader compiler in the CMakeLists. Three things are proven here:
+// Render-routine framework tests, on a dx12 WARP context (software, present on any Windows host, so they run on headless CI).
+// WARP + DXC are Windows-only, which is why this file is gated on the dx12 backend and a shader compiler in the CMakeLists.
+// Three things are proven here:
 //   1. the framework's phase orchestration re-runs declare/materialize on a reload, but not init_once,
-//   2. routines are per-context — a fresh context re-initializes from scratch (no stale cross-context
-//      state, the bug the per-context registry design fixes by construction), and
+//   2. routines are per-context — a fresh context re-initializes from scratch (no stale cross-context state, the bug the per-context registry design fixes by construction), and
 //   3. a real routine compiles a compute shader through slib and dispatches it end to end.
 
 namespace
@@ -34,8 +38,28 @@ protected:
     void init_materialize(sg::command_list&) override { ++materialize; }
 };
 
-// The end-to-end routine: owns its pipeline via init_declare, dispatches in execute. Reached by type —
-// no handle, no registration call.
+// Like counting_routine, but counted atomically so racing acquires can be checked.
+// The counters are static so the test can read them after the race without a handle to the per-context instance.
+// racing_routine is used by exactly one test, with one context, which resets them before the race.
+class racing_routine : public sg::render_routine<racing_routine>
+{
+public:
+    static inline cc::atomic<int> once = 0;
+    static inline cc::atomic<int> declare = 0;
+
+protected:
+    void init_once(sg::context&) override { ++once; }
+    // The sleep widens the window a racing second caller would slip through, so the test below actually exercises the lock instead of passing because the first thread happened to finish first.
+    // Only the winner ever sleeps, so it costs one interval, not one per thread.
+    void init_declare(sg::context&) override
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        ++declare;
+    }
+};
+
+// The end-to-end routine: owns its pipeline via init_declare, dispatches in execute.
+// Reached by type — no handle, no registration call.
 class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
 {
 public:
@@ -98,8 +122,8 @@ TEST("sg - routine phases run once, then re-run declare + materialize on a reloa
     CHECK(routine.declare == 1);
     CHECK(routine.materialize == 1);
 
-    // A second pass at the same generation changes nothing (same per-context instance). We re-read
-    // through `routine`, so the returned reference is intentionally discarded.
+    // A second pass at the same generation changes nothing (same per-context instance).
+    // We re-read through `routine`, so the returned reference is intentionally discarded.
     (void)counting_routine::acquire(*cmd);
     CHECK(routine.once == 1);
     CHECK(routine.declare == 1);
@@ -131,8 +155,8 @@ TEST("sg - routines are per-context: each context builds its own instance from s
         ctx_a->drop_command_list(cc::move(cmd_a));
     } // ctx_a shuts down here — its routine instance (and cached GPU state) is released with it.
 
-    // Advance the global generation. On A's instance this would only bump declare/materialize; a fresh
-    // context must instead build its OWN instance from scratch — init_once included.
+    // Advance the global generation.
+    // On A's instance this would only bump declare/materialize; a fresh context must instead build its OWN instance from scratch — init_once included.
     sg::signal_reload();
 
     auto const ctx_b = make_warp_context();
@@ -164,8 +188,8 @@ TEST("sg - evicting a routine drops its instance (the acquire cache does not res
 
     counting_routine::evict(*ctx);
 
-    // A fresh instance, built from scratch: every phase back at 1. A cached slot that survived the
-    // eviction would instead hand back the old object (declare == 2) — or worse, a freed one.
+    // A fresh instance, built from scratch: every phase back at 1.
+    // A cached slot that survived the eviction would instead hand back the old object (declare == 2) — or worse, a freed one.
     auto const& second = counting_routine::acquire(*cmd);
     CHECK(second.once == 1);
     CHECK(second.declare == 1);
@@ -189,8 +213,7 @@ TEST("sg - two live contexts keep separate routine instances")
     auto const& rb = counting_routine::acquire(*cmd_b);
     CHECK(&ra != &rb);
 
-    // Interleaved acquires must keep landing on the right instance — neither context may be served the
-    // other's routine, however the per-thread acquire cache ping-pongs between them.
+    // Interleaved acquires must keep landing on the right instance — neither context may be served the other's routine, however the per-thread acquire cache ping-pongs between them.
     (void)counting_routine::acquire(*cmd_a);
     (void)counting_routine::acquire(*cmd_b);
     (void)counting_routine::acquire(*cmd_a);
@@ -241,3 +264,45 @@ TEST("sg - a routine compiles a shader and dispatches it end to end")
             ok = false;
     CHECK(ok);
 }
+
+
+// Gated on CC_HAS_THREADS: a single-threaded build (SC_THREADS=OFF, the WASM/no-threads mode) compiles cc::mutex with no mutex member and no locking at all,
+// because nothing in such a build is supposed to contend.
+// Spawning std::threads there would race by construction and prove nothing about the guard.
+#if CC_HAS_THREADS
+
+TEST("sg - concurrent acquires of one routine run each phase exactly once")
+{
+    // The phase engine is guarded, so racing acquires must not both run init_declare. Without that lock
+    // this is a plain data race on the phase flags, and the counts come out above one under contention.
+    auto const ctx = make_warp_context();
+    if (ctx == nullptr)
+        SKIP("no dx12 WARP device");
+
+    // racing_routine's counters are static (see there), so clear them before the race — a prior run in the same process would otherwise carry in.
+    racing_routine::once = 0;
+    racing_routine::declare = 0;
+
+    constexpr auto thread_count = 8;
+    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+
+    cc::atomic<int> ready = 0;
+    for (auto i = 0; i < thread_count; ++i)
+        threads.emplace_back(
+            [&]
+            {
+                // Line the threads up so they hit the phase engine together, not one after another.
+                ++ready;
+                while (ready.load() < thread_count)
+                    std::this_thread::yield();
+                racing_routine::prewarm(*ctx);
+            });
+
+    for (auto& t : threads)
+        t.join();
+
+    CHECK(racing_routine::once.load() == 1);
+    CHECK(racing_routine::declare.load() == 1);
+}
+
+#endif // CC_HAS_THREADS

@@ -196,12 +196,14 @@ cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a poin
 // then bind a raster_pipeline and draw. vulkan is a stub. dx12 real on WARP.
 auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1))},       // -> sg::rendering_scope (RAII)
                                   .depth_stencil_target=dsv.cleared(1.0f)});              //   end_rendering() at scope exit
+// pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)
+//   pass.color_formats() -> span<pixel_format const> | pass.depth_format() -> optional<pixel_format>. The raster draw calls are also on `pass`.
 // view builders: view.cleared(color/depth[,stencil]) | view.preserved() | view.discarded() -> color_target / depth_stencil_target
 // rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor }
 //   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
 cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
 
-// draw recording — on cmd.raster / cmd.raster.manual (NOT the rendering_scope handle); valid while a scope is open:
+// draw recording — on the `pass` scope, or equivalently cmd.raster / cmd.raster.manual (all forward to the one list); valid while a scope is open:
 cmd.raster.bind_pipeline(raster_pipeline)               // void — active raster PSO + IA topology + graphics root sig
 cmd.raster.bind_group(set, binding_group)              // void — bind at slot `set` (indexes the pipeline layout's groups)
 cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
@@ -297,6 +299,7 @@ sg::pixel_format             // enum: undefined, r8/rg8/rgba8/bgra8 (unorm/snorm
                              //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
 sg::is_depth_format(f)       // bool  — depth or depth-stencil
 sg::has_stencil(f)           // bool  — carries a stencil plane
+sg::is_srgb_format(f)        // bool  — hardware applies the sRGB transfer function on read/write
 sg::is_compressed_format(f)  // bool  — BC block-compressed (4x4 blocks)
 sg::format_block_size(f)     // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)   // int   — 1 (uncompressed) or 4 (BC)
@@ -591,10 +594,14 @@ void init_once(sg::context& ctx)          // first init only, NEVER on reload �
 void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
 void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
-my_routine::acquire(cmd)                   // -> my_routine const&  — lazily create in cmd.context().routines, init (declare+materialize), return
+my_routine::acquire(cmd)                   // -> my_routine&  — lazily create in cmd.context().routines, init (declare+materialize), return
 my_routine::prewarm(ctx)                   // void     — create + init_once/init_declare only (before a command list; async compiles fan out on the pool)
 my_routine::evict(ctx)                     // void     — drop this routine's instance + its cached GPU state
 // acquire memoizes the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
+// A routine is EXPECTED to hold state — hence the non-const reference. Threading, three parts:
+//   registry guarded (acquire from parallel recording is fine); phase engine guarded (each phase runs once);
+//   the routine's OWN mutable state is the routine's job — put it behind one cc::mutex<state> and lock per entry point.
+//   That includes state written in init_declare and only read later: a reload on another thread rewrites it.
 // re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
 
 #include <shaped-graphics/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP

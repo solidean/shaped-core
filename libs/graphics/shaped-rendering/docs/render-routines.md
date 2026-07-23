@@ -1,15 +1,11 @@
 # Render routines (in shaped-rendering)
 
-shaped-rendering (`sr`) is the home for **concrete render routines** — the actual GPU algorithms
-(mipmap generation, tonemapping, texture compression, …), each built on the render-routine framework.
+shaped-rendering (`sr`) is the home for **concrete render routines** — the actual GPU algorithms (mipmap generation, tonemapping, texture compression, …), each built on the render-routine framework.
 
-The **framework itself lives in shaped-graphics** — `sg::render_routine`, the per-context
-`ctx.routines` registry, and the `sg::reload_generation` hot-reload counter. Read its front-door doc
-first:
+The **framework itself lives in shaped-graphics** — `sg::render_routine`, the per-context `ctx.routines` registry, and the `sg::reload_generation` hot-reload counter.
+Read its front-door doc first:
 
-- **[shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md)** — the
-  routine base, three-phase init, by-type `acquire` / `prewarm` / `evict`, `ctx.routines.clear()`, and hot
-  reload, end to end.
+- **[shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md)** — the routine base, three-phase init, by-type `acquire` / `prewarm` / `evict`, `ctx.routines.clear()`, and hot reload, end to end.
 
 ## Writing a concrete routine
 
@@ -27,9 +23,21 @@ protected:
 };
 ```
 
-`sr` depends on **shaped-shader-library** because a concrete routine acquires its shaders through it in
-`init_declare` — a routine-author dependency. The framework in `sg` needs no shader library; reload
-tracking is `sg`'s own generation counter.
+`sr` depends on **shaped-shader-library** because a concrete routine acquires its shaders through it in `init_declare` — a routine-author dependency.
+The framework in `sg` needs no shader library; reload tracking is `sg`'s own generation counter.
 
-No concrete routines have landed yet — they arrive here as they are implemented, each with its own
-tests. See [structure.md](structure.md) for the roadmap.
+Register `sr::shader_package()` with your `slib::shader_library` once at startup, or every routine here acquires nothing and draws nothing.
+
+## A routine holds state — and guards it
+
+`acquire()` returns a non-const reference: routines are expected to keep things.
+What a routine owes in exchange is guarding them, because `acquire()` hands the same per-context instance to every caller.
+The shape is a single `cc::mutex<state>` locked once per entry point — see [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md#threading).
+
+The worked example is Dear ImGui ([imgui.md](imgui.md)).
+`sr::imgui_routine` holds three kinds of state in one `state` struct:
+shader-derived (layouts, pipelines — rebuilt by `init_declare` on every reload), imgui-owned (the font atlas textures — deliberately *not* rebuilt), and per-frame (the geometry).
+Sorting members by which of those they are is most of the design work; the locking then falls out.
+
+Concrete routines arrive here as they are implemented, each with its own tests.
+See [structure.md](structure.md) for the roadmap.
