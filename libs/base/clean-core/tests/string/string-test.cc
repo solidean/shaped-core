@@ -1063,6 +1063,10 @@ TEST("string - resize and capacity")
         return true;
     };
 
+    // The inline SSO capacity, derived the same way as cc::string::small_capacity: the allocation header's four pointers and one isize fill the space before custom_resource, minus one byte for the size tag.
+    // 39 on 64-bit, fewer where pointers are smaller (23 on wasm32).
+    cc::isize const small_capacity = cc::isize(4 * sizeof(void*) + sizeof(cc::isize) - 1);
+
     SECTION("resize_to_uninitialized grows within SSO, preserving existing bytes")
     {
         cc::string s = cc::string("abc");
@@ -1175,7 +1179,7 @@ TEST("string - resize and capacity")
         cc::string s = cc::string("abc");
         CHECK(s.is_small());
         CHECK(s.capacity_front() == 0);
-        CHECK(s.capacity_back() == 39 - 3); // small_capacity - size
+        CHECK(s.capacity_back() == small_capacity - 3);
     }
 
     SECTION("reserve_front materializes a small string to heap, preserving content")
@@ -1185,8 +1189,8 @@ TEST("string - resize and capacity")
         CHECK(!s.is_small()); // SSO cannot represent a front offset, so it always allocates
         CHECK(s == cc::string_view{"abc"});
         CHECK(s.size() == 3);
-        CHECK(s.capacity_front() == 10);    // exactly the requested front slack
-        CHECK(s.capacity_back() >= 39 - 3); // SSO-equivalent back room preserved (>= due to alignment)
+        CHECK(s.capacity_front() == 10);                // exactly the requested front slack
+        CHECK(s.capacity_back() >= small_capacity - 3); // SSO-equivalent back room preserved (>= due to alignment)
     }
 
     SECTION("reserve_front(0) on a small string is a no-op")
@@ -1247,12 +1251,12 @@ TEST("string - resize and capacity")
         CHECK(all_equal(s, 0, 50, 'a'));
     }
 
-    SECTION("SSO boundary: 39 stays small, 40 materializes")
+    SECTION("SSO boundary: small_capacity stays small, one more materializes")
     {
         cc::string s;
-        s.resize_to_uninitialized(39);
+        s.resize_to_uninitialized(small_capacity);
         CHECK(s.is_small());
-        s.resize_to_uninitialized(40);
+        s.resize_to_uninitialized(small_capacity + 1);
         CHECK(!s.is_small());
     }
 
