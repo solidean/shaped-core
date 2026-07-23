@@ -1052,3 +1052,214 @@ TEST("string - as_span / as_bytes")
         CHECK(s.as_bytes().size() == s.size());
     }
 }
+
+TEST("string - resize and capacity")
+{
+    auto const all_equal = [](cc::string const& s, cc::isize begin, cc::isize end, char c)
+    {
+        for (cc::isize i = begin; i < end; ++i)
+            if (s[i] != c)
+                return false;
+        return true;
+    };
+
+    SECTION("resize_to_uninitialized grows within SSO, preserving existing bytes")
+    {
+        cc::string s = cc::string("abc");
+        s.resize_to_uninitialized(10);
+        CHECK(s.is_small());
+        CHECK(s.size() == 10);
+        CHECK(s[0] == 'a');
+        CHECK(s[1] == 'b');
+        CHECK(s[2] == 'c');
+    }
+
+    SECTION("resize_to_filled grows and shrinks within SSO")
+    {
+        cc::string s = cc::string("abc");
+        s.resize_to_filled(6, 'x');
+        CHECK(s.is_small());
+        CHECK(s == cc::string_view{"abcxxx"});
+
+        s.resize_to_filled(3, 'x');
+        CHECK(s == cc::string_view{"abc"});
+    }
+
+    SECTION("resize_to_defaulted zero-fills new bytes")
+    {
+        cc::string s = cc::string("ab");
+        s.resize_to_defaulted(4);
+        CHECK(s.size() == 4);
+        CHECK(s[2] == '\0');
+        CHECK(s[3] == '\0');
+    }
+
+    SECTION("resize_to_filled SSO->heap preserves existing, fills the tail")
+    {
+        cc::string s = cc::string("abc");
+        s.resize_to_filled(50, 'y');
+        CHECK(!s.is_small());
+        CHECK(s.size() == 50);
+        CHECK(s[0] == 'a');
+        CHECK(s[1] == 'b');
+        CHECK(s[2] == 'c');
+        CHECK(all_equal(s, 3, 50, 'y'));
+    }
+
+    SECTION("resize_to_uninitialized SSO->heap preserves existing bytes")
+    {
+        cc::string s = cc::string("hello");
+        s.resize_to_uninitialized(64);
+        CHECK(!s.is_small());
+        CHECK(s.size() == 64);
+        CHECK(s.subview({.start = cc::isize(0), .end = cc::isize(5)}) == cc::string_view{"hello"});
+    }
+
+    SECTION("resize_down_to on a heap string stays heap")
+    {
+        cc::string s = cc::string::create_filled(50, 'z');
+        CHECK(!s.is_small());
+        s.resize_down_to(10);
+        CHECK(!s.is_small()); // resize never demotes the storage mode
+        CHECK(s.size() == 10);
+        CHECK(all_equal(s, 0, 10, 'z'));
+    }
+
+    SECTION("clear_resize_to_filled SSO->heap discards existing content")
+    {
+        cc::string s = cc::string("abc");
+        s.clear_resize_to_filled(50, 'q');
+        CHECK(!s.is_small());
+        CHECK(s.size() == 50);
+        CHECK(all_equal(s, 0, 50, 'q'));
+    }
+
+    SECTION("clear_resize_to_defaulted zero-fills")
+    {
+        cc::string s = cc::string("abc");
+        s.clear_resize_to_defaulted(5);
+        CHECK(s.size() == 5);
+        CHECK(all_equal(s, 0, 5, '\0'));
+    }
+
+    SECTION("reserve_back stays small when the result fits inline")
+    {
+        cc::string s;
+        s.reserve_back(20);
+        CHECK(s.is_small());
+        CHECK(s.empty());
+        s.append(cc::string_view{"test"});
+        CHECK(s == cc::string_view{"test"});
+    }
+
+    SECTION("reserve_back materializes to heap beyond SSO capacity")
+    {
+        cc::string s;
+        s.reserve_back(100);
+        CHECK(!s.is_small());
+        CHECK(s.empty());
+        s.append(cc::string_view{"hello world"});
+        CHECK(s == cc::string_view{"hello world"});
+    }
+
+    SECTION("reserve_back_exact behaves like reserve_back for correctness")
+    {
+        cc::string s = cc::string("abc");
+        s.reserve_back_exact(200);
+        CHECK(!s.is_small());
+        CHECK(s == cc::string_view{"abc"});
+    }
+
+    SECTION("capacity queries in SSO mode")
+    {
+        cc::string s = cc::string("abc");
+        CHECK(s.is_small());
+        CHECK(s.capacity_front() == 0);
+        CHECK(s.capacity_back() == 39 - 3); // small_capacity - size
+    }
+
+    SECTION("reserve_front materializes a small string to heap, preserving content")
+    {
+        cc::string s = cc::string("abc");
+        s.reserve_front(10);
+        CHECK(!s.is_small()); // SSO cannot represent a front offset, so it always allocates
+        CHECK(s == cc::string_view{"abc"});
+        CHECK(s.size() == 3);
+        CHECK(s.capacity_front() == 10);    // exactly the requested front slack
+        CHECK(s.capacity_back() >= 39 - 3); // SSO-equivalent back room preserved (>= due to alignment)
+    }
+
+    SECTION("reserve_front(0) on a small string is a no-op")
+    {
+        cc::string s = cc::string("abc");
+        s.reserve_front(0);
+        CHECK(s.is_small());
+        CHECK(s == cc::string_view{"abc"});
+        CHECK(s.capacity_front() == 0);
+    }
+
+    SECTION("reserve_front_exact leaves no back slack beyond alignment")
+    {
+        cc::string s = cc::string("abc");
+        s.reserve_front_exact(8);
+        CHECK(!s.is_small());
+        CHECK(s == cc::string_view{"abc"});
+        CHECK(s.capacity_front() == 8);
+    }
+
+    SECTION("reserve_front on a heap string leaves content intact")
+    {
+        cc::string s = cc::string::create_filled(50, 'a');
+        CHECK(!s.is_small());
+        s.reserve_front(16);
+        CHECK(!s.is_small());
+        CHECK(s.size() == 50);
+        CHECK(all_equal(s, 0, 50, 'a'));
+    }
+
+    SECTION("shrink_to_fit demotes to SSO when the content fits inline")
+    {
+        cc::string s = cc::string::create_filled(100, 'a');
+        s.resize_down_to(5);
+        CHECK(!s.is_small()); // still heap after the shrink
+        s.shrink_to_fit();
+        CHECK(s.is_small()); // reallocation was due anyway, so it returned to SSO
+        CHECK(s == cc::string_view{"aaaaa"});
+    }
+
+    SECTION("shrink_to_fit stays heap when the content exceeds SSO capacity")
+    {
+        cc::string s = cc::string::create_filled(100, 'a');
+        s.resize_down_to(50);
+        s.shrink_to_fit();
+        CHECK(!s.is_small());
+        CHECK(s.size() == 50);
+        CHECK(all_equal(s, 0, 50, 'a'));
+    }
+
+    SECTION("shrink_to_fit leaves an already-tight heap string untouched")
+    {
+        cc::string s = cc::string::create_filled(50, 'a');
+        CHECK(!s.is_small());
+        s.shrink_to_fit();
+        CHECK(!s.is_small());
+        CHECK(s.size() == 50);
+        CHECK(all_equal(s, 0, 50, 'a'));
+    }
+
+    SECTION("SSO boundary: 39 stays small, 40 materializes")
+    {
+        cc::string s;
+        s.resize_to_uninitialized(39);
+        CHECK(s.is_small());
+        s.resize_to_uninitialized(40);
+        CHECK(!s.is_small());
+    }
+
+    SECTION("resize down to zero empties the string")
+    {
+        cc::string s = cc::string("abc");
+        s.resize_down_to(0);
+        CHECK(s.empty());
+    }
+}

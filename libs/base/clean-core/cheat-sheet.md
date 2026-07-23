@@ -189,6 +189,12 @@ cc::string str = "shaped";                // ctors: char, (ptr,size), (begin,end
 auto s2 = cc::string::create_filled(n, 'x');   // also create_copy_of(sv), create_uninitialized(n),
                                                //       create_with_capacity(n), create_copy_c_str_materialized(sv)
 str.push_back('!');  str.append(sv);  str += other;  auto j = str + "x";   // mutate / concat
+str.resize_to_uninitialized(n);  str.resize_to_defaulted(n);  str.resize_to_filled(n,'x');  str.resize_down_to(n);
+str.clear_resize_to_uninitialized(n);        // + _defaulted(n) / _filled(n,'x') — discard content, then size to n
+str.reserve_back(n);                         // n MORE bytes; + reserve_back_exact(n); no-op while SSO already fits
+str.reserve_front(n);  str.reserve_front_exact(n);  // front slack; a small string always allocates (SSO has no front offset)
+str.capacity_back();  str.capacity_front();  // -> isize free bytes at back / front (front is 0 while SSO)
+str.shrink_to_fit();                         // release excess capacity; may demote heap->SSO (only when reallocating)
 str.size();  str.empty();  str[i];  str.data();   // data() is NOT null-terminated
 str.front();  str.back();  str.compare(o);  str.find(x,pos=0);  str.rfind(x,pos=-1);   // string_view reads forwarded
 str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (invalidated by mutation)
