@@ -10,6 +10,7 @@ add_library(shaped-rendering
     src/shaped-rendering/window.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
+    src/shaped-rendering/imgui_style.cc
     src/shaped-rendering/shaders.cc
     src/shaped-rendering/impl/imgui_draw_math.cc
     src/shaped-rendering/impl/imgui_input_translation.cc
@@ -28,6 +29,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/window.hh
     src/shaped-rendering/imgui_context.hh
     src/shaped-rendering/imgui_routine.hh
+    src/shaped-rendering/imgui_style.hh
     src/shaped-rendering/shaders.hh
 )
 
@@ -104,6 +106,7 @@ if(SC_BUILD_TESTS)
         tests/window-manual-test.cc
         tests/imgui-registry-test.cc
         tests/imgui-input-test.cc
+        tests/imgui-style-test.cc
     )
 
     target_link_libraries(shaped-rendering-test

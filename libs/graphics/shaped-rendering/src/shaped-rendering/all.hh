@@ -8,6 +8,7 @@
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
+#include <shaped-rendering/imgui_style.hh>
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/window.hh>

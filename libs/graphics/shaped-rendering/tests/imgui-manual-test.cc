@@ -110,7 +110,7 @@ TEST("sr - imgui window (manual)", nx::config::manual)
     auto const sc = ctx->create_swapchain(
         {.native_window_handle = win->native_window_handle(), .format = sg::pixel_format::bgra8_unorm});
 
-    auto imgui = sr::imgui_context::create({.enable_viewports = true});
+    auto imgui = sr::imgui_context::create({.enable_viewports = true}); // create() applies the Solidean theme by default
 
     cc::println("opened {}x{}; close the window to end", win->width(), win->height());
 
@@ -144,7 +144,8 @@ TEST("sr - imgui window (manual)", nx::config::manual)
 
         // imgui owns this window, so the batteries-included path renders the whole frame — the main window and every secondary viewport — in one call.
         // See sr::imgui_routine::execute for the compositing path.
-        sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.09f, 0.09f, 0.11f, 1.0f));
+        // The #0b0d12 brand ground, so the central dockspace matches the theme's window backgrounds.
+        sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.043f, 0.051f, 0.071f, 1.0f));
         ctx->advance_epoch(sc->buffer_count());
     }
 

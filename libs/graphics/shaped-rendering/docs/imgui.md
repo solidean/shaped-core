@@ -87,6 +87,23 @@ This frame's geometry is deliberately *not* in there.
 It comes from the transient scope and lives on the stack for one `execute()`, which is what makes the call re-entrant across viewports —
 with multi-viewport imgui calls it once per viewport per frame, and geometry cached on the routine would have each viewport overwrite the last one's.
 
+## Theming
+
+The Solidean dark theme — the brand violet (`#6830FF`) and its lit variant (`#A37BFF`) as accents down to the separators, borders and resize grips, code cyan (`#5FC0D0`) for the highlights that must read against the violet, all on the near-black `#0b0d12` ground.
+
+`sr::imgui_context::create()` applies it by default, so nothing is needed to get the brand look:
+
+```cpp
+auto imgui = sr::imgui_context::create();                              // themed
+auto imgui = sr::imgui_context::create({.apply_default_style = false}); // stock imgui dark, or style it yourself
+```
+
+`sr::apply_solidean_default_style()` styles the current context on demand — for the opt-out case, or to re-apply after changing it.
+The `ImGuiStyle&` overload writes into a style you own instead, for a caller that keeps several around or diffs against the default.
+
+The colors are sRGB-encoded, which is what the routine draws unconverted — so this pairs with the same non-srgb target the rest of the renderer requires.
+Drawn into an `_srgb` target it comes out washed out, the inverse of the double-encoding the routine asserts against.
+
 ## The 1.92 texture protocol
 
 This is the part that is not optional and not obvious.

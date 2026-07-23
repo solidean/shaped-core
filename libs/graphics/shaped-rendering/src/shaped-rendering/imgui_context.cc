@@ -2,6 +2,7 @@
 #include <clean-core/memory/allocation.hh> // cc::default_memory_resource
 #include <imgui/imgui.h>
 #include <shaped-rendering/imgui_context.hh>
+#include <shaped-rendering/imgui_style.hh>
 #include <shaped-rendering/impl/imgui_input_translation.hh>
 #include <shaped-rendering/window.hh>
 
@@ -229,6 +230,11 @@ imgui_context imgui_context::create(imgui_context_description const& desc)
 
     // We set the cursor shape from ImGui::GetMouseCursor each frame — see begin_frame(window&, float).
     io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
+
+    // The brand theme, unless the caller opted out to keep imgui's stock dark or set its own.
+    // CreateContext made ctx current, so the current-context overload styles exactly this one.
+    if (desc.apply_default_style)
+        apply_solidean_default_style();
 
     // The config flag itself is set in install_viewports, not here: viewports need a window_system, and
     // begin_frame(window&) is the first point one is in reach.

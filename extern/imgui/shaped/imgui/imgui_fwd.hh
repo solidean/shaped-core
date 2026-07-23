@@ -17,6 +17,7 @@
 // context, IO and platform windows
 struct ImGuiContext;
 struct ImGuiIO;
+struct ImGuiStyle;
 struct ImGuiViewport;
 struct ImGuiPlatformIO;
 

@@ -109,8 +109,9 @@ Full doc: [docs/imgui.md](docs/imgui.md). Vendored docking-branch bundle (Dear I
 ```cpp
 lib.add_package(sr::shader_package());       // once at startup, or routines acquire nothing
 
-auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports off; move-only
+auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports off, Solidean theme on; move-only
 auto imgui = sr::imgui_context::create({.enable_viewports = true});  // opt in — changes coordinates, see below
+auto imgui = sr::imgui_context::create({.apply_default_style = false});  // keep stock imgui dark instead
 
 wsys->poll_events();
 imgui.process_events(*wsys);                 // feed input; MUST precede begin_frame (NewFrame commits it)
@@ -122,6 +123,9 @@ imgui.end_frame();                           // = ImGui::Render()
 
 imgui.wants_keyboard();  imgui.wants_mouse();  // -> bool — check before acting on the same input yourself
 imgui.process_event(e);                      // one event, when the caller filters the stream itself
+
+sr::apply_solidean_default_style();          // re-apply the Solidean theme to the current context (create() already did, unless opted out)
+sr::apply_solidean_default_style(style);     // or into any ImGuiStyle you own
 
 // batteries-included: imgui owns the window — renders main + every viewport and presents, in one call
 sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.09f, 0.09f, 0.11f, 1.0f));  // clear_color default = opaque black
