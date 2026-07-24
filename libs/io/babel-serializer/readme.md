@@ -14,7 +14,7 @@ auto const tag0 = doc.root()["tags"][0].as_double(); // 1
 Headers are included by their full path from `src/`, e.g. `#include <babel-serializer/geometry/obj.hh>`.
 Each format lives in its own sub-namespace (`babel::json`, `babel::obj`); `<babel-serializer/all.hh>` is the umbrella.
 
-This library is at an **early stage** — a JSON reader, an OBJ reader, and a live SQLite handle exist so far.
+This library is at an **early stage** — a JSON reader, an OBJ reader, a live SQLite handle, and PNG/JPG image read+write exist so far.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
 ## Design at a glance
@@ -37,11 +37,16 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 | (root)      | `fwd.hh` (forward decls + vocabulary aliases), `all.hh` (umbrella) |
 | `data/`     | `json` — the JSON reader (`document` / `node` / `ref`, `read`); `sqlite` — a live SQLite handle (`database` / `statement` / `row`) |
 | `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`) |
+| `image/`    | `png` / `jpg` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
 
 `sqlite` deviates from the "reader over a `cc::read_stream`" shape on purpose: SQLite is a live database *engine*, so it is a
 thin RAII wrapper over an open connection (open a file / `:memory:` / a byte image, `exec` / `query`, iterate rows), full read/write.
 Its engine backend is fetched on demand and may be absent — the API stays always-callable, reporting absence at runtime via `is_available()`.
 See [docs/coding-guidelines.md](docs/coding-guidelines.md) for that always-available-API convention.
+
+`image` is babel's first **writer** and first **committed** third-party backend.
+The per-format `png` / `jpg` codecs read *and* write, exposing each format's own metadata (much of it still `[todo]`); `image` sits on top for the plain-pixels case.
+The backend is the vendored **stb** single-file libraries — always in-tree and always linked, so no availability probe, but kept `PRIVATE` behind `image/impl/` so no stb header reaches a babel public header.
 
 ## Building & testing
 

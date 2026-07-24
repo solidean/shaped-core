@@ -5,7 +5,7 @@ Serialization / deserialization of various formats. Namespace `babel`; headers i
 > Each format parses into an unopinionated, read-once structure; string_view / span overloads wrap a `span_read_stream_adapter`.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (json + obj + sqlite)
+#include <babel-serializer/all.hh>   // umbrella (json + obj + sqlite + image)
 ```
 
 ---
@@ -116,6 +116,46 @@ if (!stmt.is_ok())               // a step error ends the loop silently; read it
 stmt.reset();                    // re-execute (keeps bound parameters); clear_bindings() resets them to NULL
 ```
 
+## Images (`babel::image` + `babel::png` / `babel::jpg`)
+
+Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
+Backend is the vendored, always-linked **stb** (`extern/stb`), kept behind `image/impl/stb_backend` — no stb header reaches a babel header.
+
+```cpp
+#include <babel-serializer/image/image.hh>  // aggregator — the "I just want pixels" layer
+
+cc::result<babel::image::image> read(cc::span<cc::byte const> bytes); // auto-detects PNG / JPG
+cc::result<babel::image::image> read(cc::read_stream& in);            // slurps, then decodes
+cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // png / jpg from magic bytes
+
+struct image {                        // row-major, top-left origin, tightly packed
+    int width; int height; int channels;      // 1 grey / 2 GA / 3 rgb / 4 rgba
+    babel::image::component comp;             // u8 (decoded today) | u16 | f32 (API-ready)
+    cc::vector<cc::byte> pixels;
+    bool is_empty(); int bytes_per_component(); isize row_stride();
+};
+
+// writing — babel's first writer. encode -> bytes, or write to a stream. jpg_quality ignored for PNG.
+cc::result<cc::vector<cc::byte>> encode(image const&, babel::image::format fmt, {.jpg_quality = 90});
+cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::format fmt, {...});
+```
+
+```cpp
+#include <babel-serializer/image/png.hh>   // low-level PNG: pixels + native metadata
+#include <babel-serializer/image/jpg.hh>   // low-level JPG: pixels + native metadata
+
+babel::png::data p = babel::png::read(bytes).value();
+p.width; p.height; p.channels; p.pixels;       // populated from the decoder
+p.bit_depth; p.color; p.interlace;             // native IHDR fields (parsed natively)
+p.gamma; p.icc_profile; p.texts; p.physical;   // [todo] designed, not yet populated (stb exposes no metadata)
+
+babel::jpg::data j = babel::jpg::read(bytes).value();
+j.bit_depth; j.progressive; j.chroma; j.jfif_density; // native SOF/JFIF fields
+j.icc_profile; j.exif; j.comments;                    // [todo] designed, not yet populated
+
+babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stream, ...)
+```
+
 ## Gotchas
 
 - **Read-once, not mutable.** `json::document` is great to traverse, has no insertion API by design.
@@ -129,6 +169,10 @@ stmt.reset();                    // re-execute (keeps bound parameters); clear_b
 - **SQLite backend may be absent.** The API is *always* declared and callable; when the fetch-on-demand backend wasn't compiled in, `is_available()` is false and every `open_*` returns a `cc::result` error — never a missing symbol. Branch on `is_available()`, never on a macro.
 - **SQLite handles are live and non-owning downstream.** `database` / `statement` are move-only and own their handle. A `row` and any `as_string()` / `as_blob()` it hands back are only valid until the next step or the statement dies — copy out (`cc::string::create_copy_of`) to keep them.
 - **SQLite param vs. column indexing differs.** Bind parameters are **1-based** (`stmt.bind(1, …)`); result columns are **0-based** (`row.as_i64(0)`). A row-step error is sticky, not per-row: the range-for just ends — check `is_ok()` / `error()` after the loop.
+- **Images are top-left origin, tightly packed.** `row_stride() == width * channels * bytes_per_component()`; no padding. Pixels are 8-bit today regardless of the file's native `bit_depth` (a u16 / f32 path is API-ready but not yet decoded).
+- **JPG is lossy; PNG is lossless.** Round-trip PNG for exact pixels; expect small per-channel deltas through JPG. `channels` is the *decoded* count (palette PNGs are de-palettized, Adam7 is de-interlaced) — the native `color` / `interlace` fields still tell you the original encoding.
+- **Image metadata is mostly `[todo]`.** stb decodes pixels only. The structural header fields (`bit_depth` / `color` / `interlace`; `progressive` / `chroma` / `jfif_density`) are parsed natively, but the rich metadata fields (ICC, gamma, text chunks, EXIF, comments) are *designed but not yet populated* — a future native chunk/marker walker fills them without an API change.
+- **Aggregator vs. low-level.** `babel::image` is for "just the pixels" and dispatches by format; reach for `babel::png` / `babel::jpg` when you need a format's own metadata. The aggregator never touches stb — it delegates to the codecs.
 
 ## Umbrellas
 
@@ -136,5 +180,8 @@ stmt.reset();                    // re-execute (keeps bound parameters); clear_b
 #include <babel-serializer/data/json.hh>     // just JSON
 #include <babel-serializer/data/sqlite.hh>   // just SQLite
 #include <babel-serializer/geometry/obj.hh>  // just OBJ
+#include <babel-serializer/image/png.hh>     // just PNG (low-level)
+#include <babel-serializer/image/jpg.hh>     // just JPG (low-level)
+#include <babel-serializer/image/image.hh>   // the image aggregator
 #include <babel-serializer/all.hh>           // everything
 ```

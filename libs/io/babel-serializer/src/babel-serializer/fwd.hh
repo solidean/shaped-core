@@ -36,3 +36,28 @@ struct row;
 class statement;
 class database;
 } // namespace babel::sqlite
+
+namespace babel::png
+{
+enum class color_type : u8;
+enum class interlace_method : u8;
+enum class component : u8;
+struct text_entry;
+struct physical_dimensions;
+struct data;
+} // namespace babel::png
+
+namespace babel::jpg
+{
+enum class subsampling : u8;
+enum class density_unit : u8;
+struct density;
+struct data;
+} // namespace babel::jpg
+
+namespace babel::image
+{
+enum class format : u8;
+enum class component : u8;
+struct image;
+} // namespace babel::image

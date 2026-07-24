@@ -7,6 +7,11 @@ add_library(babel-serializer
     src/babel-serializer/data/json.cc
     src/babel-serializer/data/sqlite.cc
     src/babel-serializer/geometry/obj.cc
+
+    src/babel-serializer/image/image.cc
+    src/babel-serializer/image/jpg.cc
+    src/babel-serializer/image/png.cc
+    src/babel-serializer/image/impl/stb_backend.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -24,6 +29,11 @@ target_sources(babel-serializer
     src/babel-serializer/data/sqlite.hh
 
     src/babel-serializer/geometry/obj.hh
+
+    # image/impl/*.hh is internal (the stb backend seam) — deliberately NOT in the public FILE_SET.
+    src/babel-serializer/image/image.hh
+    src/babel-serializer/image/jpg.hh
+    src/babel-serializer/image/png.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -52,6 +62,10 @@ else()
     target_compile_definitions(babel-serializer PRIVATE BABEL_HAS_SQLITE=0)
 endif()
 
+# The stb image backend is committed in-source (extern/stb), so the target always exists and the link is unconditional — no if(TARGET stb) and no availability gate (contrast sqlite above).
+# stb is linked PRIVATE: the stb_image.h / stb_image_write.h headers live only inside image/impl/stb_backend.cc and never reach a babel public header (see docs/coding-guidelines.md).
+target_link_libraries(babel-serializer PRIVATE stb)
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-serializer
     PUBLIC
@@ -67,6 +81,8 @@ if(SC_BUILD_TESTS)
         tests/data/sqlite-test.cc
 
         tests/geometry/obj-test.cc
+
+        tests/image/image-test.cc
     )
 
     target_link_libraries(babel-serializer-test

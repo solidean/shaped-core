@@ -37,6 +37,10 @@ src/babel-serializer/
     sqlite     [done]          live database engine (read/write; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
     obj        [done]          reader
+  image/       [in progress]   image formats (read + write; committed stb backend)
+    png        [done]          low-level reader + writer (native IHDR fields; rich metadata [todo])
+    jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
+    image      [done]          aggregator: pixel buffer + format-dispatching read/encode/write
 ```
 
 ## data/ [in progress]
@@ -100,16 +104,57 @@ OBJ's 1-based and negative/relative indices are both resolved to 0-based here; a
 
 `[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`, `.stl`, `.gltf`.
 
-## Aggregators [planned]
+## image/ [in progress]
 
+Images bend the library's two shapes in two ways, both deliberate.
+
+- **The aggregator ships alongside the format layer, not after it.**
+  Every image format decodes to the *same* packed pixel buffer, so the "load an image" aggregator (`babel::image`) is useful immediately — there is no format-specific pixel shape to wait on.
+  It dispatches by format and delegates to the low-level codecs; it never touches the backend itself.
+- **The format layer is a real reader/writer pair, and the first writer in babel.**
+  `babel::png` and `babel::jpg` are the format-shaped layer: decoded pixels **plus** the format's own metadata.
+  Reading slurps then decodes (stb needs the whole buffer); writing establishes babel's `encode -> bytes` + `write(write_stream&)` convention (see [coding-guidelines.md](coding-guidelines.md)).
+
+The backend is the vendored **stb** single-file libraries — babel's first **committed** third-party dependency (contrast sqlite's fetched-on-demand engine).
+Because it is always in-tree, it is always linked; there is no availability probe.
+It stays behind `image/impl/stb_backend` and links `PRIVATE`, so no stb header reaches a babel public header.
+
+### png [done]
+
+Low-level PNG reader + writer.
+`read` returns a `data` with the decoded pixels (8-bit, expanded / de-palettized / de-interlaced by the backend) and the native IHDR fields (`bit_depth`, `color`, `interlace`) parsed directly.
+The richer metadata fields (gamma, ICC, text chunks, physical dimensions, ...) are **designed but `[todo]`** — stb exposes none of it, so populating them needs a native chunk walker.
+The fields exist now so that walker lands without an API change.
+`encode` / `write` emit PNG via stb (lossless).
+
+### jpg [done]
+
+Low-level JPEG reader + writer, same shape.
+Native SOF/JFIF fields (`bit_depth`, `progressive`, `chroma` subsampling, `jfif_density`) are parsed by walking the marker segments up to the first scan.
+The variable-length metadata (`icc_profile` reassembled across APP2 markers, `exif`, `comments`) is `[todo]`.
+`encode` / `write` emit baseline JPEG via stb at a `quality` (lossy).
+
+### image [done]
+
+The aggregator: a plain `{ width, height, channels, component, pixels }` buffer, `detect_format` from the magic bytes, `read` that auto-detects and delegates, and `encode` / `write` that build the low-level struct and hand it to the matching codec.
+`component` is `u8` today with `u16` / `f32` reserved so the API already spans the reasonable pixel formats (16-bit PNG, HDR) without a future break.
+
+### Other image formats [planned]
+
+`[planned]` further stb-supported containers (bmp / tga / gif / hdr), 16-bit and float decode paths, and the native metadata walkers that fill the `[todo]` fields.
+
+## Aggregators
+
+`[done]` **`load_image`** is here — it is `babel::image` in the `image/` group above, dispatching across image formats and returning a plain pixel buffer + format enum (never an `sg` texture, so babel stays below the graphics stack).
+The name lives in the group as `babel::image::read` rather than a free `load_image`, but it *is* the planned image aggregator.
 `[planned]` `load_mesh` — dispatches across mesh formats and returns a triangle mesh.
 Wants a `tg::mesh` (typed-geometry roadmap, not built yet); until then the format readers hand back their native structures.
-`[planned]` `load_image` — dispatches across image formats and returns a plain pixel buffer + format enum (never an `sg` texture, so babel stays below the graphics stack).
 
 ## Dependency note
 
 Among shaped-core libraries babel-serializer depends only on clean-core and typed-geometry, and sits above typed-geometry and below the graphics stack.
 The image aggregator returning a plain pixel buffer (not an `sg::texture`) is what keeps that layering intact.
 
-The sqlite format adds the library's first **third-party** dependency (the vendored SQLite amalgamation), but it changes none of the above:
-the backend is fetched on demand, linked `PRIVATE`, and its absence is a runtime condition — no shaped-core layering is affected, and the public API never grows a third-party include.
+The sqlite format added the library's first **third-party** dependency (the vendored SQLite amalgamation), fetched on demand and linked `PRIVATE`.
+The image formats add the first **committed** third-party dependency (the vendored stb single-file libraries), also linked `PRIVATE`.
+Neither changes the layering: the backends stay out of every public header, so no shaped-core layer is affected and the public API never grows a third-party include.
