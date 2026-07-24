@@ -28,3 +28,11 @@ struct face;
 struct group;
 struct data;
 } // namespace babel::obj
+
+namespace babel::sqlite
+{
+enum class column_kind : cc::u8;
+struct row;
+class statement;
+class database;
+} // namespace babel::sqlite

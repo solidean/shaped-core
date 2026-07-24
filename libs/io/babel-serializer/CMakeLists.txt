@@ -5,6 +5,7 @@ project(babel-serializer LANGUAGES CXX)
 # structure; opinionated aggregators sit on top later. See readme.md and docs/structure.md.
 add_library(babel-serializer
     src/babel-serializer/data/json.cc
+    src/babel-serializer/data/sqlite.cc
     src/babel-serializer/geometry/obj.cc
 )
 
@@ -20,6 +21,7 @@ target_sources(babel-serializer
     src/babel-serializer/all.hh
 
     src/babel-serializer/data/json.hh
+    src/babel-serializer/data/sqlite.hh
 
     src/babel-serializer/geometry/obj.hh
 )
@@ -39,6 +41,17 @@ target_include_directories(babel-serializer
 # clean-core provides streams / containers / result; typed-geometry provides vec / pos for the geometry formats.
 target_link_libraries(babel-serializer PUBLIC clean-core typed-geometry)
 
+# The SQLite backend is fetched on demand (extern/sqlite), so the target exists only once it has been fetched.
+# The babel::sqlite API is always compiled (sqlite.cc above); only the backend link is conditional.
+# BABEL_HAS_SQLITE is PRIVATE — it selects the real vs. stub implementation inside sqlite.cc and never reaches
+# a public header or user code (see docs/coding-guidelines.md). sqlite3.h stays PRIVATE too: sqlite.hh is opaque.
+if(TARGET sqlite)
+    target_compile_definitions(babel-serializer PRIVATE BABEL_HAS_SQLITE=1)
+    target_link_libraries(babel-serializer PRIVATE sqlite)
+else()
+    target_compile_definitions(babel-serializer PRIVATE BABEL_HAS_SQLITE=0)
+endif()
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-serializer
     PUBLIC
@@ -51,6 +64,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
 
         tests/data/json-test.cc
+        tests/data/sqlite-test.cc
 
         tests/geometry/obj-test.cc
     )

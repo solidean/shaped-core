@@ -31,6 +31,12 @@ option(SC_USE_VENDORED_ZYDIS "Build the fetched Zydis in extern/zydis/.install (
 # shaped-rendering gates its window backend on the SDL3::SDL3 target existing.
 option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF expects an external `SDL3::SDL3` target)" ON)
 
+# SQLite is fetched-on-demand rather than vendored as source (its amalgamated sqlite3.c is ~9.5 MB of generated C) and, like SDL3, is wanted on every platform.
+# It backs babel-serializer's babel::sqlite format.
+# Wire it only when it has actually been fetched, so a plain checkout still configures;
+# babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
+option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
+
 if(SC_USE_VENDORED_MIMALLOC)
     add_subdirectory(mimalloc)
 endif()
@@ -53,4 +59,8 @@ endif()
 
 if(SC_USE_VENDORED_SDL3 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdl3/.install/pin.txt")
     add_subdirectory(sdl3)
+endif()
+
+if(SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
+    add_subdirectory(sqlite)
 endif()
