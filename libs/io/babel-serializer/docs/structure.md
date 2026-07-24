@@ -34,6 +34,7 @@ Two more rules bind the whole library:
 src/babel-serializer/
   data/        [in progress]   text / structured data formats
     json       [done]          reader
+    sqlite     [done]          live database engine (read/write; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
     obj        [done]          reader
 ```
@@ -57,6 +58,27 @@ Planned refinements:
 - `[planned]` **richer errors** — a `parse_error` with line/column (today: a `cc::result` message carrying the byte offset).
 - `[planned]` **lossless numbers** — recover exact integers (today numbers are `double`); costs an arena copy of the raw slice.
 - `[planned]` **compact node** — union the string / container payload fields (today they are separate for clarity).
+
+### sqlite [done]
+
+The first format that breaks the two shapes above, and deliberately so.
+
+- **Not a one-shot stream parser.** SQLite is a live database *engine*, not a byte format, so `babel::sqlite` is a thin
+  RAII wrapper over an open connection you keep talking to — no `read(cc::read_stream&)`. Open a file (`open`),
+  an existing file read-only (`open_readonly`), a transient `:memory:` db (`open_memory`), or a serialized byte image
+  (`open_blob`, via `sqlite3_deserialize`); `serialize()` round-trips back to bytes.
+- **Full read/write.** `exec` runs result-less SQL (DDL, INSERT/UPDATE/DELETE, PRAGMA, transactions);
+  `prepare` / `query` return a move-only `statement` you bind parameters on and iterate as result `row`s with a range-for.
+- **First third-party dependency, fetched on demand.** The engine backend is the vendored SQLite amalgamation under
+  `extern/sqlite`, fetched (not committed, ~9.5 MB) the same way as Zydis / SDL3. `SC_SKIP_SQLITE` opts out.
+- **Always-available API.** Because the backend may be absent, the whole `babel::sqlite` API is *always* declared and
+  callable: when it was not compiled in, `is_available()` is false and every `open_*` returns a `cc::result` error.
+  The compile switch lives only inside `sqlite.cc`, never in a public header or user code — see [coding-guidelines.md](coding-guidelines.md).
+
+Planned refinement:
+
+- `[planned]` **typed query layer** — a compile-time-validated, typed query front end (in the spirit of `cc::format`)
+  on top of the prepared-statement API.
 
 ### Other data formats [planned]
 
@@ -86,5 +108,8 @@ Wants a `tg::mesh` (typed-geometry roadmap, not built yet); until then the forma
 
 ## Dependency note
 
-babel-serializer depends only on clean-core and typed-geometry, and sits above typed-geometry and below the graphics stack.
+Among shaped-core libraries babel-serializer depends only on clean-core and typed-geometry, and sits above typed-geometry and below the graphics stack.
 The image aggregator returning a plain pixel buffer (not an `sg::texture`) is what keeps that layering intact.
+
+The sqlite format adds the library's first **third-party** dependency (the vendored SQLite amalgamation), but it changes none of the above:
+the backend is fetched on demand, linked `PRIVATE`, and its absence is a runtime condition — no shaped-core layering is affected, and the public API never grows a third-party include.

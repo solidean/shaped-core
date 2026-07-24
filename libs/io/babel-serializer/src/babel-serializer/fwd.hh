@@ -3,7 +3,7 @@
 #include <clean-core/fwd.hh>
 
 /// Aggregate forward declarations for babel-serializer.
-/// Each format lives in its own sub-namespace (babel::json, babel::obj) and owns its own header;
+/// Each format lives in its own sub-namespace (babel::json, babel::sqlite, babel::obj) and owns its own header;
 /// include that header directly when it is all you need.
 
 namespace babel
