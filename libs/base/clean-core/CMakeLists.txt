@@ -129,7 +129,6 @@ target_sources(clean-core
     src/clean-core/streams/stream.hh
     src/clean-core/streams/span_stream.hh
     src/clean-core/streams/file_stream.hh
-    src/clean-core/streams/read_line.hh
     src/clean-core/streams/impl/stream.hh
     src/clean-core/streams/impl/native_file.hh
 )

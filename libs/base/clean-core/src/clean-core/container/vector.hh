@@ -8,7 +8,6 @@
 // - retyping APIs
 // - equality, order, hashing
 // - insert/emplace at arbitrary positions
-// - push_back_range
 // - contains/contains_where/find/find_where/count/count_where
 // - sort
 // - assign (replace parts of content)
@@ -66,10 +65,12 @@ public:
 
     // appending operations
 public:
-    using base::emplace_back;        // construct element at back (with allocation if needed)
-    using base::emplace_back_stable; // construct element at back (requires capacity)
-    using base::push_back;           // add element at back (with allocation if needed)
-    using base::push_back_stable;    // add element at back (requires capacity)
+    using base::emplace_back;           // construct element at back (with allocation if needed)
+    using base::emplace_back_stable;    // construct element at back (requires capacity)
+    using base::push_back;              // add element at back (with allocation if needed)
+    using base::push_back_range;        // append a range at back (sized range -> one reservation)
+    using base::push_back_range_stable; // append a range at back (requires capacity)
+    using base::push_back_stable;       // add element at back (requires capacity)
 
     // single element removal
 public:

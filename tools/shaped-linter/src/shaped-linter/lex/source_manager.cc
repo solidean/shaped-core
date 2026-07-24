@@ -24,7 +24,7 @@ cc::result<source_buffer const*> source_manager::add_from_file(cc::string_view p
     CC_RETURN_IF_ERROR(size);
 
     auto bytes = cc::vector<cc::byte>::create_defaulted(size.value());
-    CC_RETURN_IF_ERROR(stream.read_full(bytes));
+    CC_RETURN_IF_ERROR(stream.read_exact(bytes));
 
     auto text = cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size()));
     return &add_from_text(cc::move(text), path);

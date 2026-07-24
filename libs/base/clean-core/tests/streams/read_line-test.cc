@@ -1,8 +1,8 @@
 #include "stream-test-types.hh"
 
 #include <clean-core/container/vector.hh>
-#include <clean-core/streams/read_line.hh>
 #include <clean-core/streams/span_stream.hh>
+#include <clean-core/streams/stream.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
@@ -23,7 +23,7 @@ cc::vector<cc::string> collect_lines(Stream& s)
     auto line = cc::string();
     while (true)
     {
-        auto r = cc::read_line(s, line);
+        auto r = s.read_line(line);
         REQUIRE(r.has_value());
         if (!r.value())
             break;
@@ -90,7 +90,7 @@ TEST("read_line - empty input yields no line and clears out")
     cc::read_stream s = adapter;
 
     auto line = cc::string("prefilled");
-    auto r = cc::read_line(s, line);
+    auto r = s.read_line(line);
     REQUIRE(r.has_value());
     CHECK(!r.value());
     CHECK(line == ""); // cleared even when nothing is read
@@ -113,4 +113,36 @@ TEST("read_line - lines and CRLF split across buffer refills")
         CHECK(lines[2] == "a chunked");
         CHECK(lines[3] == "pipe");
     }
+}
+
+TEST("read_line - max_size splits a long line into bounded pieces, losing nothing")
+{
+    auto const text = cc::string_view("abcdefgh\nij");
+    cc::span_read_stream_adapter adapter{as_bytes(text)};
+    cc::read_stream s = adapter;
+
+    auto line = cc::string();
+
+    // "abcdefgh" (8 bytes) comes back in <=3-byte pieces; the newline is consumed only with the final piece.
+    auto r = s.read_line(line, cc::isize(3));
+    REQUIRE(r.has_value());
+    CHECK(r.value());
+    CHECK(line == "abc");
+
+    r = s.read_line(line, cc::isize(3));
+    REQUIRE((r.has_value() && r.value()));
+    CHECK(line == "def");
+
+    r = s.read_line(line, cc::isize(3));
+    REQUIRE((r.has_value() && r.value()));
+    CHECK(line == "gh"); // stops at the newline before hitting the cap
+
+    // remainder after the newline
+    r = s.read_line(line, cc::isize(3));
+    REQUIRE((r.has_value() && r.value()));
+    CHECK(line == "ij");
+
+    r = s.read_line(line, cc::isize(3));
+    REQUIRE(r.has_value());
+    CHECK(!r.value()); // end of data
 }

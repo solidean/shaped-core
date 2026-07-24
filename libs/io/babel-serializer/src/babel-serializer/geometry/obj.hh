@@ -17,7 +17,7 @@
 // aggregator (which wants a tg::mesh; not built yet). All indices are resolved to 0-based here (OBJ's 1-based
 // and negative/relative forms are both applied), with -1 meaning "attribute absent" on a corner.
 //
-// Parses line by line off a cc::read_stream (cc::read_line) — it never buffers the whole file.
+// Parses line by line off a cc::read_stream (read_stream::read_line) — it never buffers the whole file.
 //
 //   auto m = babel::obj::read(source).value();
 //   for (auto const& f : m.faces)

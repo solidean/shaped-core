@@ -59,6 +59,7 @@ auto v = cc::vector<int>::create_defaulted(n);   // also: create_filled(n, val),
                                                  //       create_with_capacity(n), create_with_resource(res)
 v.push_back(x);  v.emplace_back(args...);        // append (reallocates if needed)
 v.push_back_stable(x);                           // append, asserts spare capacity (no realloc)
+v.push_back_range(rng);                          // append a whole range (sized -> single reservation); push_back_range_stable(rng) needs capacity
 v.pop_back();                                    // -> T (moved out);  remove_back() discards
 v.remove_at(i);  v.remove_at_unordered(i);       // erase by index (ordered / O(1) swap-with-last)
 v.remove_all_where(pred);  v.remove_all_value(x);// -> isize removed;  also remove_first/last_*
@@ -533,7 +534,9 @@ s.ready_bytes();                          // -> span<byte const> buffered & read
 s.consume(n);                             // consume n ready bytes
 s.at_end();                               // -> result<bool>; dry check on seekable, else refills once
 s.read(dst);                              // -> result<isize> up to dst.size(); 0 only at end-of-data
-s.read_full(dst);  s.read_pod<T>();      // -> result<unit> / result<T>; error if the stream ends early
+s.read_exact(dst);  s.read_pod<T>();     // -> result<unit> / result<T>; error if the stream ends early
+s.read_all();                             // -> result<vector<byte>> whole remaining stream; one precise alloc when the size is known
+s.read_line(str);  s.read_line(str, max);// -> result<bool> one line into str (terminator stripped); optional max bytes, else unbounded
 // write (write capability):
 s.writable_bytes();                           // -> span<byte> free space to write into: [curr, end)
 s.produce(n);                              // mark n bytes (written into writable_bytes()) as produced

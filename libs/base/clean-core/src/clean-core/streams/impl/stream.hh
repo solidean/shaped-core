@@ -3,10 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // min/max, unit
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh> // read_all result buffer
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/streams/stream_flush.hh> // public: cc::seek_dir, cc::stream_flush_fn
+#include <clean-core/string/string.hh>        // read_line output buffer
 
 #include <cstring> // std::memcpy
 #include <type_traits>
@@ -188,14 +190,14 @@ public:
         return total;
     }
 
-    /// Read a full dst.size() bytes into dst; errors if the stream ends short.
-    cc::result<cc::unit> read_full(cc::span<cc::byte> dst)
+    /// Read exactly dst.size() bytes into dst; errors if the stream ends short.
+    cc::result<cc::unit> read_exact(cc::span<cc::byte> dst)
         requires(can_read)
     {
         auto n = this->read(dst);
         CC_RETURN_IF_ERROR(n);
         if (n.value() != dst.size())
-            return cc::error("read_full: unexpected end of stream");
+            return cc::error("read_exact: unexpected end of stream");
         return cc::unit{};
     }
 
@@ -206,8 +208,110 @@ public:
     {
         static_assert(std::is_trivially_copyable_v<T>, "read_pod needs a trivially-copyable T");
         T value;
-        CC_RETURN_IF_ERROR(this->read_full(cc::span<cc::byte>(reinterpret_cast<cc::byte*>(&value), cc::isize(sizeof(T)))));
+        CC_RETURN_IF_ERROR(
+            this->read_exact(cc::span<cc::byte>(reinterpret_cast<cc::byte*>(&value), cc::isize(sizeof(T)))));
         return value;
+    }
+
+    /// Read the whole remaining stream into one contiguous buffer, consuming it (the stream ends at EOF).
+    ///
+    /// DO NOT hand-roll this over ready_bytes/flush in user code.
+    /// The stream is ALREADY buffered by its adapter, so a manual loop just adds a second, pointless user-space buffer.
+    /// This pushes each ready window straight into the result and refills — there is never a double copy.
+    /// When the source can report its remaining size, the buffer is sized exactly once up front and filled with stable appends, so the common case is a single precise allocation.
+    /// That covers any seekable stream, and any non-seekable one whose adapter still tracks position (most real streams).
+    cc::result<cc::vector<cc::byte>> read_all()
+        requires(can_read)
+    {
+        CC_ASSERT(this->is_valid(), "read_all on invalid stream");
+
+        auto out = cc::vector<cc::byte>();
+        auto const hint = this->impl_remaining_hint(); // exact remaining bytes if the source can report them
+        auto const precise = hint.has_value();
+        if (precise)
+            out.reserve_back(cc::isize(hint.value()));
+
+        while (true)
+        {
+            auto window = this->ready_bytes();
+            if (window.empty())
+            {
+                CC_RETURN_IF_ERROR(this->flush());
+                window = this->ready_bytes();
+                if (window.empty())
+                    break; // genuine end of data
+            }
+            if (precise)
+                out.push_back_range_stable(window); // capacity reserved exactly; no reallocation
+            else
+                out.push_back_range(window); // unknown size: grow as we go
+            this->consume(window.size());
+        }
+        return out;
+    }
+
+    /// Read one line into `out` (cleared first), excluding the terminator.
+    /// A trailing '\r' of a "\r\n" ending is stripped, so Unix and Windows endings both work.
+    /// Returns true when a line was read, false at end-of-data with nothing left.
+    /// The final line of input without a trailing newline is returned once (true), then the next call returns false.
+    /// An empty line yields true with an empty `out`.
+    ///
+    /// `max_size` bounds the bytes appended to `out`; `cc::nullopt` (the default) reads a line in full, so a pathological newline-free input can grow `out` up to the whole stream.
+    /// When set and a line is longer, the call returns true with `out.size() == *max_size`, and the rest of the line (including its newline) stays buffered for the next call.
+    /// No data is lost, but a long line comes back in pieces.
+    cc::result<bool> read_line(cc::string& out, cc::optional<cc::isize> max_size = cc::nullopt)
+        requires(can_read)
+    {
+        CC_ASSERT(this->is_valid(), "read_line on invalid stream");
+        CC_ASSERT(!max_size.has_value() || max_size.value() >= 0, "read_line: max_size must be non-negative");
+
+        out.clear();
+        auto read_any = false;
+        while (true)
+        {
+            auto window = this->ready_bytes();
+            if (window.empty())
+            {
+                CC_RETURN_IF_ERROR(this->flush());
+                window = this->ready_bytes();
+                if (window.empty())
+                    return read_any; // genuine end of data
+            }
+            read_any = true;
+
+            auto const* const base = reinterpret_cast<char const*>(window.data());
+            auto newline = cc::isize(-1);
+            for (auto i = cc::isize(0); i < window.size(); ++i)
+                if (base[i] == '\n')
+                {
+                    newline = i;
+                    break;
+                }
+
+            // How many bytes of this window we may still append before hitting max_size.
+            auto const budget = max_size.has_value() ? max_size.value() - out.size() : cc::isize(-1);
+            auto const capped = max_size.has_value() && budget <= (newline >= 0 ? newline : window.size());
+            if (capped)
+            {
+                // Fill exactly to the cap and stop; leave the rest of the line (and its '\n') for next time.
+                out += cc::string_view(base, budget);
+                this->consume(budget);
+                return true;
+            }
+
+            if (newline >= 0)
+            {
+                out += cc::string_view(base, newline);
+                this->consume(newline + 1); // consume the line and its '\n'
+                if (!out.empty() && out[out.size() - 1] == '\r')
+                    out.resize_down_to(out.size() - 1); // strip the '\r' of a "\r\n" ending (may split across windows)
+                return true;
+            }
+
+            // no newline in this window: take all of it and refill
+            out += cc::string_view(base, window.size());
+            this->consume(window.size());
+        }
     }
 
     // writing
@@ -363,6 +467,23 @@ private:
             return _end;
     }
 
+    /// Exact remaining byte count if the source can report it cheaply, else nullopt.
+    /// Never disturbs the buffer — dry probes only.
+    /// A dry_relative probe is safe on any stream (try_as_seekable uses the same one to detect seekability).
+    /// A real position (>= 0) means the source tracks position, so the dry_end probe that follows is safe too.
+    /// A genuinely non-seekable source returns -1, and we bail.
+    cc::optional<cc::i64> impl_remaining_hint()
+        requires(can_read)
+    {
+        auto const pos = this->impl_flush(0, seek_dir::dry_relative);
+        if (pos.has_error() || pos.value() < 0)
+            return cc::nullopt;
+        auto const end = this->impl_flush(0, seek_dir::dry_end);
+        if (end.has_error() || end.value() < 0)
+            return cc::nullopt;
+        return end.value() - pos.value();
+    }
+
     cc::result<cc::i64> impl_flush(cc::i64 offset, seek_dir dir)
     {
         CC_ASSERT(this->is_valid(), "flush on invalid stream");
@@ -414,7 +535,7 @@ private:
     cc::byte* _end = nullptr;
     stream_flush_fn _flush = nullptr;
     void* _context = nullptr;
-    [[no_unique_address]] stream_first_write_t<Access> _first_write{};
-    [[no_unique_address]] stream_write_end_t<Access> _write_end{};
+    [[no_unique_address]] stream_first_write_t<Access> _first_write = {};
+    [[no_unique_address]] stream_write_end_t<Access> _write_end = {};
 };
 } // namespace cc::impl
