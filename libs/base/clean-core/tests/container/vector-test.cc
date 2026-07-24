@@ -1633,3 +1633,34 @@ TEST("vector - recursive element type")
     CHECK(root.children[0].children[0].value == 4);
     CHECK(root.children[1].children.empty());
 }
+
+TEST("vector - push_back_range appends a sized range in one reservation")
+{
+    auto v = cc::vector<int>{1, 2};
+    auto const more = cc::vector<int>{3, 4, 5};
+
+    v.push_back_range(more);
+    REQUIRE(v.size() == 5);
+    CHECK(v[0] == 1);
+    CHECK(v[2] == 3);
+    CHECK(v[4] == 5);
+
+    // a plain C array / span is a sized range too
+    int const tail[2] = {6, 7};
+    v.push_back_range(cc::span<int const>(tail));
+    REQUIRE(v.size() == 7);
+    CHECK(v[5] == 6);
+    CHECK(v[6] == 7);
+}
+
+TEST("vector - push_back_range_stable appends into reserved capacity")
+{
+    auto v = cc::vector<int>();
+    v.reserve(4);
+    auto const data = cc::vector<int>{10, 20, 30, 40};
+
+    v.push_back_range_stable(data); // capacity covers the whole range
+    REQUIRE(v.size() == 4);
+    CHECK(v[0] == 10);
+    CHECK(v[3] == 40);
+}

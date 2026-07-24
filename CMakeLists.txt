@@ -94,6 +94,9 @@ add_subdirectory(libs/base/clean-core)
 add_subdirectory(libs/base/nexus)
 add_subdirectory(libs/base/typed-geometry)
 
+# io stack: serialization / format codecs (babel-serializer), layered on base.
+add_subdirectory(libs/io/babel-serializer)
+
 # graphics stack: shaped-graphics (sg) -> shaped-rendering (sr) -> shaped-viewer (sv).
 # Added in dependency order; sg pulls in its per-backend static libraries itself.
 add_subdirectory(libs/graphics/shaped-graphics)

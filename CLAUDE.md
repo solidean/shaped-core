@@ -32,6 +32,13 @@ One-liner per library:
   (`vec`/`pos`/`comp`; `bivec`/`mat`/`quat`/transforms/geometry/mesh planned).
   Namespace `tg`. Depends on clean-core. Early stage — see its
   [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
+* **`libs/io/babel-serializer`** — serialization / deserialization of various formats.
+  Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion),
+  with **opinionated aggregators** ("load an image", "load a mesh") planned on top.
+  Readers take a `cc::read_stream` and parse against its buffered window.
+  A JSON reader (`data/`) and a Wavefront OBJ reader (`geometry/`) exist so far.
+  Namespace `babel`. Depends on clean-core + typed-geometry.
+  Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`,
   `command_list`, GPU resources, over per-backend static libs (dx12/vulkan tier
   1; metal/webgpu tier 2; opengl/webgl legacy). Also home to the **render-routine
@@ -79,7 +86,8 @@ shaped-viewer → shaped-rendering → shaped-graphics (+ backends)
         shaped-shader-library → shaped-shader-compiler-dxc
                                           ↓
 nexus    typed-geometry  ←────────────────┘
-   ↓         ↓
+   ↓         ↓   ↑
+   ↓         ↓   └── babel-serializer  (io; also depends on clean-core)
      clean-core
         ↓
   (no dependencies)

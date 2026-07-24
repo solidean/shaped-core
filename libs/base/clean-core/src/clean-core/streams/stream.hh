@@ -103,7 +103,9 @@ struct read_stream : private impl::stream<impl::stream_access::read, false>
     using engine::flush;           // -> result<i64>; refill the window
     using engine::is_valid;        // bound to an adapter?
     using engine::read;            // -> result<isize>; copy up to N, returns count
-    using engine::read_full;       // -> result<unit>; copy exactly N or error
+    using engine::read_all;        // -> result<vector<byte>>; whole remaining stream (one precise alloc when sized)
+    using engine::read_exact;      // -> result<unit>; copy exactly N or error
+    using engine::read_line;       // -> result<bool>; one line into a cc::string (optional max_size)
     using engine::read_pod;        // -> result<T>
     using engine::ready_bytes;     // -> span<byte const>; buffered bytes, viewed in place (no copy)
     using engine::try_as_seekable; // -> optional<seekable_read_stream>
@@ -140,7 +142,9 @@ struct read_write_stream : private impl::stream<impl::stream_access::read_write,
     using engine::is_valid;
     using engine::produce;
     using engine::read;
-    using engine::read_full;
+    using engine::read_all;
+    using engine::read_exact;
+    using engine::read_line;
     using engine::read_pod;
     using engine::ready_bytes;
     using engine::try_as_seekable; // -> optional<seekable_read_write_stream>
@@ -164,7 +168,9 @@ struct seekable_read_stream : private impl::stream<impl::stream_access::read, tr
     using engine::is_valid;
     using engine::position; // -> result<i64>
     using engine::read;
-    using engine::read_full;
+    using engine::read_all;
+    using engine::read_exact;
+    using engine::read_line;
     using engine::read_pod;
     using engine::ready_bytes;
     using engine::remaining_bytes; // -> result<i64>
@@ -211,7 +217,9 @@ struct seekable_read_write_stream : private impl::stream<impl::stream_access::re
     using engine::position;
     using engine::produce;
     using engine::read;
-    using engine::read_full;
+    using engine::read_all;
+    using engine::read_exact;
+    using engine::read_line;
     using engine::read_pod;
     using engine::ready_bytes;
     using engine::remaining_bytes;

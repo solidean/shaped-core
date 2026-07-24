@@ -114,3 +114,45 @@ TEST("stream - first_write is set on write and reset after each flush")
     CHECK(bytes_equal(adapter.written(), cc::span<cc::byte const>(expected)));
     CHECK(adapter.flushes_with_pending() == 2); // exactly the two flushes that carried data
 }
+
+TEST("stream - read_all on a seekable source (precise, single allocation)")
+{
+    cc::byte data[5] = {b(10), b(11), b(12), b(13), b(14)};
+    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>(data)};
+    cc::read_stream s = adapter; // narrowed to non-seekable, but the adapter still reports position
+
+    auto all = s.read_all();
+    REQUIRE(all.has_value());
+    CHECK(bytes_equal(all.value(), cc::span<cc::byte const>(data)));
+
+    // consumed to end: a second read_all yields nothing
+    auto again = s.read_all();
+    REQUIRE(again.has_value());
+    CHECK(again.value().empty());
+}
+
+TEST("stream - read_all on a non-seekable pipe (grows across chunks)")
+{
+    cc::byte source[70];
+    auto const source_size = cc::isize(sizeof(source));
+    for (auto i = cc::isize(0); i < source_size; ++i)
+        source[i] = b(int(i));
+
+    // chunk 16 < 64-byte buffer < 70-byte total, so the read spans several refills, and the pipe reports no position -> read_all cannot size up front and must grow.
+    mock_pipe_read_stream_adapter adapter{cc::span<cc::byte const>(source), cc::isize(16)};
+    cc::read_stream s = adapter.stream();
+
+    auto all = s.read_all();
+    REQUIRE(all.has_value());
+    CHECK(bytes_equal(all.value(), cc::span<cc::byte const>(source)));
+}
+
+TEST("stream - read_all on an empty source yields an empty buffer")
+{
+    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>()};
+    cc::read_stream s = adapter;
+
+    auto all = s.read_all();
+    REQUIRE(all.has_value());
+    CHECK(all.value().empty());
+}

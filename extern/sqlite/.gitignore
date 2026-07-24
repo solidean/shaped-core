@@ -1,0 +1,3 @@
+# The SQLite amalgamation is fetched on demand (fetch-sqlite.py), never committed:
+# sqlite3.c is ~9.5 MB of generated C and only babel-serializer's sqlite format needs it.
+/.install/

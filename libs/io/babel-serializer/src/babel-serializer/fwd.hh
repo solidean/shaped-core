@@ -1,0 +1,63 @@
+#pragma once
+
+#include <clean-core/fwd.hh>
+
+/// Aggregate forward declarations for babel-serializer.
+/// Each format lives in its own sub-namespace (babel::json, babel::sqlite, babel::obj) and owns its own header;
+/// include that header directly when it is all you need.
+
+namespace babel
+{
+// Pull in the shaped-core vocabulary types (i32, u8, isize, ...) so we write them bare inside babel
+// without leaking them into the global namespace.
+using namespace cc::primitive_defines;
+} // namespace babel
+
+namespace babel::json
+{
+enum class node_kind : cc::u8;
+struct node;
+class document;
+struct ref;
+} // namespace babel::json
+
+namespace babel::obj
+{
+struct corner;
+struct face;
+struct group;
+struct data;
+} // namespace babel::obj
+
+namespace babel::sqlite
+{
+enum class column_kind : cc::u8;
+struct row;
+class statement;
+class database;
+} // namespace babel::sqlite
+
+namespace babel::png
+{
+enum class color_type : u8;
+enum class interlace_method : u8;
+enum class component : u8;
+struct text_entry;
+struct physical_dimensions;
+struct data;
+} // namespace babel::png
+
+namespace babel::jpg
+{
+enum class subsampling : u8;
+enum class density_unit : u8;
+struct density;
+struct data;
+} // namespace babel::jpg
+
+namespace babel::image
+{
+enum class format : u8;
+enum class component : u8;
+struct image;
+} // namespace babel::image

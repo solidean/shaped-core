@@ -4,6 +4,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/allocation.hh>
 
+#include <cstring> // std::memcpy (push_back_range fast path)
 #include <initializer_list>
 #include <new>
 
@@ -726,10 +727,72 @@ public:
     /// See emplace_back for guarantees and complexity.
     constexpr T& push_back(T&& value) { return this->emplace_back(cc::move(value)); }
 
+    /// Appends every element of `range` to the back, allocating at most once.
+    /// A sized range (one exposing `.size()`) is reserved up front, so a large append is a single allocation; an unsized range falls back to per-element `emplace_back`.
+    /// If capacity already covers the whole range, no invalidation of any kind occurs.
+    /// Fast path: a contiguous range of exactly T with trivially-copyable T is appended in one `std::memcpy`.
+    /// Amortized O(range size).
+    template <class Range>
+    constexpr void push_back_range(Range const& range)
+    {
+        if constexpr (requires { isize(range.size()); })
+        {
+            auto const count = isize(range.size());
+            this->reserve_back(count);
+
+            // A contiguous range of exactly T (trivially copyable) is a bulk memory copy, no per-element ctor.
+            if constexpr (std::is_trivially_copyable_v<T> && requires(Range const& r) {
+                              r.data();
+                              requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                          })
+            {
+                if (count > 0)
+                    std::memcpy(_data.obj_end, range.data(), size_t(count) * sizeof(T));
+                _data.obj_end += count;
+            }
+            else
+            {
+                for (auto&& e : range)
+                    this->emplace_back_stable(cc::forward<decltype(e)>(e));
+            }
+        }
+        else
+        {
+            for (auto&& e : range)
+                this->emplace_back(cc::forward<decltype(e)>(e));
+        }
+    }
+
+    /// Appends every element of `range` to the back using existing capacity.
+    /// Requires `has_capacity_back_for(<range size>)`; caller must reserve in advance.
+    /// No allocation occurs; pointers, references, and iterators remain valid (stable operation). O(range size).
+    /// Fast path: a contiguous range of exactly T with trivially-copyable T is appended in one `std::memcpy`.
+    /// Low-level primitive for performance-critical or reference-sensitive code.
+    template <class Range>
+    constexpr void push_back_range_stable(Range const& range)
+    {
+        if constexpr (std::is_trivially_copyable_v<T> && requires(Range const& r) {
+                          isize(r.size());
+                          r.data();
+                          requires std::is_same_v<std::remove_cv_t<std::remove_pointer_t<decltype(r.data())>>, T>;
+                      })
+        {
+            auto const count = isize(range.size());
+            CC_ASSERT(this->has_capacity_back_for(count), "not enough capacity for push_back_range_stable");
+            if (count > 0)
+                std::memcpy(_data.obj_end, range.data(), size_t(count) * sizeof(T));
+            _data.obj_end += count;
+        }
+        else
+        {
+            for (auto&& e : range)
+                this->emplace_back_stable(cc::forward<decltype(e)>(e));
+        }
+    }
+
     // TODO:
     // - emplace_front
     // - push_front
-    // - push_back_range
     // - push_front_range
 
     // removals

@@ -78,7 +78,7 @@ cc::vector<cc::byte> read_whole(cc::string_view path)
     auto rs = rpr.value().stream();
     auto const n = rs.size().value();
     auto out = cc::vector<cc::byte>::create_defaulted(n);
-    REQUIRE(rs.read_full(out).has_value());
+    REQUIRE(rs.read_exact(out).has_value());
     return out;
 }
 } // namespace
@@ -97,7 +97,7 @@ TEST("file_stream - write then read round-trip across many buffers")
     CHECK(rs.size().value() == 10000);
 
     auto out = cc::vector<cc::byte>::create_defaulted(10000);
-    REQUIRE(rs.read_full(out).has_value());
+    REQUIRE(rs.read_exact(out).has_value());
     CHECK(bytes_equal(out, pattern));
 
     // fully drained now; a repeated flush at EOF stays at end and keeps the position
@@ -119,7 +119,7 @@ TEST("file_stream - write buffer exactly full")
     CHECK(rs.size().value() == cc::file_write_stream_adapter::k_buffer_size);
 
     auto out = cc::vector<cc::byte>::create_defaulted(pattern.size());
-    REQUIRE(rs.read_full(out).has_value());
+    REQUIRE(rs.read_exact(out).has_value());
     CHECK(bytes_equal(out, pattern));
 }
 
@@ -157,7 +157,7 @@ TEST("file_stream - partial consume then refill preserves the leftover")
 
     // reading the rest crosses the buffer boundary; the leftover from the first fill must be preserved
     auto rest = cc::vector<cc::byte>::create_defaulted(6000 - 10);
-    REQUIRE(rs.read_full(rest).has_value());
+    REQUIRE(rs.read_exact(rest).has_value());
     CHECK(bytes_equal(rest, cc::span<cc::byte const>(pattern).subspan(cc::offset_size{.offset = 10, .size = 6000 - 10})));
 }
 
@@ -253,7 +253,7 @@ TEST("file_stream - read_write can read the whole file")
     auto s = rw.value().stream();
     CHECK(s.size().value() == 300);
     auto out = cc::vector<cc::byte>::create_defaulted(300);
-    REQUIRE(s.read_full(out).has_value());
+    REQUIRE(s.read_exact(out).has_value());
     CHECK(bytes_equal(out, original));
 }
 

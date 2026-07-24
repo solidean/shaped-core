@@ -271,6 +271,7 @@ if(SC_BUILD_TESTS)
         tests/streams/stream-test.cc
         tests/streams/span_stream-test.cc
         tests/streams/file_stream-test.cc
+        tests/streams/read_line-test.cc
 
         tests/thread/async-test.cc
         tests/thread/async-pool-test.cc

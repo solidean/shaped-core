@@ -11,10 +11,13 @@ None is fatal — a failure leaves the dependent target unbuilt and configure pr
   SC_SKIP_ZYDIS=1 to skip.
 - SDL3: shaped-rendering's sr::window is built on the source release fetched into
   extern/sdl3/.install/. Set SC_SKIP_SDL3=1 to skip.
+- SQLite: babel-serializer's babel::sqlite format links the amalgamation fetched into
+  extern/sqlite/.install/ — ~9.5 MB of generated C we keep out of the history. Set
+  SC_SKIP_SQLITE=1 to skip.
 
-SDL3 is the one that runs on every platform, so it is also the one that makes a cold Linux or macOS
-configure do real work: ~15 MB downloaded, then SDL compiled once (~35 s per preset on Windows).
-Both are cached afterwards, by pin.txt and by the build tree respectively.
+SDL3 and SQLite run on every platform, so they are what make a cold Linux or macOS configure do
+real work: ~15 MB (SDL3) plus ~3 MB (SQLite) downloaded, then SDL compiled once (~35 s per preset
+on Windows). All are cached afterwards, by pin.txt and by the build tree respectively.
 """
 
 from __future__ import annotations
@@ -138,4 +141,22 @@ def ensure_sdl3(root: Path, preset_name: str = "") -> None:
         windows_only=False,
         doing="downloading the pinned SDL3 source release for sr::window",
         dependent="shaped-rendering's window API",
+    )
+
+
+def ensure_sqlite(root: Path, preset_name: str = "") -> None:
+    """Download the SQLite amalgamation into extern/sqlite/.install when it is missing or at the
+    wrong pin. Runs on every platform, like SDL3. No-op for cross-target presets, when SC_SKIP_SQLITE
+    is set, or when the install is already current. A failure is reported but not fatal — configure
+    proceeds and babel-serializer builds with its SQLite format reporting the backend unavailable."""
+    _ensure(
+        root,
+        preset_name,
+        name="sqlite",
+        directory="sqlite",
+        script_name="fetch-sqlite.py",
+        skip_env="SC_SKIP_SQLITE",
+        windows_only=False,
+        doing="downloading the pinned SQLite amalgamation for babel::sqlite",
+        dependent="babel-serializer's SQLite format",
     )
