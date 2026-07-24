@@ -8,6 +8,10 @@
 option(SC_USE_VENDORED_MIMALLOC "Build the in-tree vendored mimalloc (OFF expects an external `mimalloc` target)" ON)
 option(SC_USE_VENDORED_XXHASH "Build the in-tree vendored xxHash (OFF expects an external `xxhash` target)" ON)
 
+# stb single-file image libraries (stb_image + stb_image_write), committed in-source (two small headers).
+# Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
+option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
+
 # Dear ImGui, tracked on the docking branch.
 # Consumed by shaped-rendering, which draws it through sg —
 # upstream's own per-API backends are not vendored, so nothing here pulls in native graphics calls.
@@ -43,6 +47,10 @@ endif()
 
 if(SC_USE_VENDORED_XXHASH)
     add_subdirectory(xxhash)
+endif()
+
+if(SC_USE_VENDORED_STB)
+    add_subdirectory(stb)
 endif()
 
 if(SC_USE_VENDORED_IMGUI)
