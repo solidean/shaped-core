@@ -25,6 +25,25 @@ bool is_paren_neutralizing(token const& t)
         || t.is_keyword("operator") || t.text == "__declspec" || t.text == "__attribute__";
 }
 
+/// The punctuation that may appear at top level in a declaration ahead of its initializer: name
+/// qualification, pointer/reference declarators, the `,` of a multi-declarator statement, an access
+/// specifier's or mem-initializer's `:`, a destructor `~`, a pack `...`.
+///
+/// Anything else — `+=`, `.`, `->`, `?`, a comparison — makes the segment an expression, and then a brace
+/// group in it is a temporary rather than an initializer. `s += cc::string_view{" world"}` is the shape
+/// this catches: it has tokens ahead of the qualified name, so "a type is in front of it" is not enough.
+///
+/// The closers `)`, `]`, `>` are deliberately absent even though a declaration contains them: each is
+/// consumed by the balanced skip that its opener started, so reaching one here means the segment began
+/// mid-expression. Listing `>` as allowed would let `a > T{1};` read as declaring `T`.
+bool is_declaration_punct(token const& t)
+{
+    for (auto const p : {"::", "*", "&", "&&", ",", ":", "~", "..."})
+        if (t.is_punct(p))
+            return true;
+    return false;
+}
+
 /// A statement can carry a brace group that is an expression, not an initializer — `return T{1};`,
 /// `throw e{2};`, `case k:`. Seeing one of these at the top of a segment disqualifies the whole segment
 /// from being a declaration, which is what keeps function-scope parsing free of false positives.
@@ -103,6 +122,24 @@ struct parser_impl
         return toks.size();
     }
 
+    /// The first index of the `::`-joined name run ending at `id_index`, clamped to `begin`.
+    /// `cc::a::b` walks back from `b` to `cc`, a leading `::` included; an unqualified id is its own run.
+    /// This is what tells a type-plus-declarator apart from a single qualified name: in `cc::atomic<int> x`
+    /// the run at `x` is just `x`, with the type ahead of it, while in `cc::void_function` the run is the
+    /// whole segment and there is no type left over.
+    isize qualified_name_begin(isize id_index, isize begin) const
+    {
+        isize i = id_index;
+        while (i - 1 >= begin && punct(i - 1, "::"))
+        {
+            if (i - 2 >= begin && tk(i - 2).is(token_kind::identifier))
+                i -= 2; // one more qualifier
+            else
+                return i - 1; // a leading `::` — the run is rooted at global scope
+        }
+        return i;
+    }
+
     /// Parse the declarations in the half-open index range [begin, end). `scope` is what a
     /// brace-initialized declaration found here becomes — a data member, a namespace-scope variable, or
     /// a local. Records, namespaces, function bodies, nested blocks and lambda bodies are all descended.
@@ -136,13 +173,14 @@ struct parser_impl
         bool paren_group_seen = false;
         bool def_head = false; // saw a type-defining keyword (class/struct/union/enum) at top level
         bool is_record = false;
-        bool stmt_head = false; // saw a statement keyword — this segment cannot be a declaration
+        // Saw something that rules this segment out as a declaration: a statement keyword, or punctuation
+        // that only an expression carries.
+        bool not_a_declaration = false;
         record_keyword rec_kw = record_keyword::struct_;
         isize rec_name_index = -1;
         bool expect_record_name = false;
         isize declarator_index = -1; // last top-level identifier — the declarator-id candidate
         isize prev_top_index = -1;   // previous top-level significant token (for the neutralize check)
-        isize top_token_count = 0;   // significant top-level tokens before the '{'
 
         isize pos = begin;
         while (pos < end && !is_eof(pos))
@@ -156,7 +194,6 @@ struct parser_impl
                 rec_kw = record_keyword_of(t.text);
                 expect_record_name = true;
                 prev_top_index = pos;
-                ++top_token_count;
                 ++pos;
                 continue;
             }
@@ -164,14 +201,13 @@ struct parser_impl
             {
                 def_head = true;
                 prev_top_index = pos;
-                ++top_token_count;
                 ++pos;
                 if (kw(pos, "class") || kw(pos, "struct")) // `enum class` / `enum struct`
                     ++pos;
                 continue;
             }
             if (is_statement_keyword(t))
-                stmt_head = true;
+                not_a_declaration = true;
 
             if (t.is_punct("{"))
             {
@@ -206,14 +242,14 @@ struct parser_impl
                 // statement keyword, is a nested block (`{ … }`, an `else` / `do` / `try` body) or an
                 // expression (`return P{a, b};`) — never an initializer. Descend rather than running past
                 // it looking for a ';' that belongs to a later statement.
-                if (scope == decl_scope::function_scope && (declarator_index < 0 || stmt_head))
+                if (scope == decl_scope::function_scope && (declarator_index < 0 || not_a_declaration))
                 {
                     auto const after = skip_balanced(pos, "{", "}");
                     parse_scope(pos + 1, after - 1, decl_scope::function_scope, parent);
                     return after;
                 }
 
-                return finish_brace_init(begin, pos, end, scope, declarator_index, top_token_count, stmt_head, parent);
+                return finish_brace_init(begin, pos, end, scope, declarator_index, not_a_declaration, parent);
             }
 
             if (t.is_punct("=")) // a top-level '=' is assignment-form init (never a comparison — those lex whole)
@@ -230,7 +266,6 @@ struct parser_impl
                     paren_group_seen = true;
                 descend_lambdas(pos, after, scope, parent);
                 prev_top_index = after - 1;
-                ++top_token_count;
                 pos = after;
                 continue;
             }
@@ -238,7 +273,6 @@ struct parser_impl
             {
                 auto const after = skip_balanced(pos, "[", "]");
                 prev_top_index = after - 1;
-                ++top_token_count;
                 pos = after;
                 continue;
             }
@@ -246,7 +280,6 @@ struct parser_impl
             {
                 auto const after = skip_angles(pos);
                 prev_top_index = after - 1;
-                ++top_token_count;
                 pos = after;
                 continue;
             }
@@ -260,8 +293,10 @@ struct parser_impl
                 }
                 declarator_index = pos;
             }
+            else if (t.is(token_kind::punctuation) && !is_declaration_punct(t))
+                not_a_declaration = true; // an operator at top level — this segment is an expression
+
             prev_top_index = pos;
-            ++top_token_count;
             ++pos;
         }
         return pos;
@@ -352,20 +387,28 @@ struct parser_impl
     /// `open_brace` is an initializer '{'. Emit a variable_declaration for it and for every FURTHER
     /// declarator in the same statement that is also brace-initialized, then run to the ';'.
     ///
-    /// Outside a record body a brace group is only a declaration when the segment actually looks like
-    /// one: at least a type and a declarator ahead of the brace (so the temporary `T{1};` is not read as
-    /// a declaration of `T`), and no statement keyword in front of it.
+    /// A brace group is only a declaration when the segment actually looks like one: a declarator-id, with a
+    /// type still ahead of it, and nothing in front that only an expression carries.
+    ///
+    /// "A type ahead of it" is what the declarator-id's qualified-name run decides, and counting tokens
+    /// cannot: `cc::void_function{}()` has three tokens before the brace, yet they are one qualified name
+    /// with nothing left over for a type — it is a temporary being called, not a declaration of
+    /// `void_function`. Same for the bare temporaries `T{1};`, `cc::T{1};` and `cc::vector<int>{1, 2};`.
+    /// An out-of-line static member definition (`int S::x{0};`) keeps its `::` and stays a declaration,
+    /// because the run at `x` starts after the leading `int`.
+    ///
+    /// The run alone is not enough, though — `s += cc::string_view{" world"}` has tokens ahead of the
+    /// qualified name too. `not_a_declaration` is the other half: see `is_declaration_punct`.
     isize finish_brace_init(isize begin,
                             isize open_brace,
                             isize end,
                             decl_scope scope,
                             isize declarator_index,
-                            isize top_token_count,
-                            bool stmt_head,
+                            bool not_a_declaration,
                             isize parent)
     {
         bool const looks_like_declaration
-            = declarator_index >= 0 && !stmt_head && (scope == decl_scope::record_scope || top_token_count >= 2);
+            = declarator_index >= 0 && !not_a_declaration && qualified_name_begin(declarator_index, begin) > begin;
 
         // Run to the statement's ';', skipping any further balanced group. Along the way, a top-level ','
         // starts the next declarator — `int a{1}, b{2};` declares two variables, and only re-running the

@@ -317,6 +317,84 @@ TEST("shaped-linter - parser - expressions in statement position are not declara
         auto const p = parse_text("void f() { g({1, 2}); }");
         CHECK(p.brace_vars().size() == 0);
     }
+    SECTION("qualified braced temporary as a statement")
+    {
+        // `cc::T` is one qualified name, so nothing is left over to be the type — counting the tokens
+        // ahead of the brace finds three and reads this as a declaration of `T`.
+        auto const p = parse_text("void f() { cc::T{1}; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("qualified temporary that is immediately called")
+    {
+        auto const p = parse_text("void f() { cc::void_function{}(); }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("assigning through a called temporary")
+    {
+        auto const p = parse_text("void f() { cc::identify_function{}(x) = 20; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("temporary of a template type")
+    {
+        CHECK(parse_text("void f() { cc::vector<int>{1, 2}; }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { vector<int>{1, 2}; }").brace_vars().size() == 0);
+    }
+    SECTION("temporary rooted at global scope")
+    {
+        auto const p = parse_text("void f() { ::cc::T{1}; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("temporary on the right of a compound assignment")
+    {
+        // `s +=` puts real tokens ahead of the qualified name, so the qualified-name run alone accepts
+        // this; the `+=` is the only thing that says it is an expression.
+        auto const p = parse_text("void f() { s += cc::string_view{\" world\"}; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("other operators in front of a temporary")
+    {
+        CHECK(parse_text("void f() { total = total + P{1, 2}; }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { obj.field->reset(T{1}); }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { g(c ? P{1} : P{2}); }").brace_vars().size() == 0);
+    }
+    SECTION("a comparison, whose `>` a declaration only ever reaches inside a template skip")
+    {
+        CHECK(parse_text("void f() { a > T{1}; }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { a < T{1}; }").brace_vars().size() == 0);
+    }
+}
+
+TEST("shaped-linter - parser - declarator punctuation does not read as an operator")
+{
+    // The flip side of the operator check: a pointer, a reference and an access specifier all carry
+    // punctuation that a declaration legitimately has, so these must still be found.
+    SECTION("pointer and reference declarators")
+    {
+        CHECK(parse_text("struct S { int* p{nullptr}; };").brace_vars().size() == 1);
+        CHECK(parse_text("void f() { int& r{x}; }").brace_vars().size() == 1);
+        CHECK(parse_text("struct S { int** pp{nullptr}; };").brace_vars().size() == 1);
+    }
+    SECTION("an access specifier's colon")
+    {
+        auto const p = parse_text("class C { public: int x{3}; private: int _y{4}; };");
+        CHECK(p.brace_vars().size() == 2);
+    }
+    SECTION("a second declarator after a comma")
+    {
+        CHECK(parse_text("struct S { int a, b{2}; };").brace_vars().size() == 1);
+    }
+}
+
+TEST("shaped-linter - parser - an out-of-line static member definition is a declaration")
+{
+    // The mirror image of a qualified temporary: the declarator-id carries a `::` too, but `int` ahead of
+    // it is the type, so this really is a variable — and the rewrite must not eat the `S::`.
+    auto const p = parse_text("int S::x{8};");
+    auto const m = p.brace_vars();
+    REQUIRE(m.size() == 1);
+    CHECK(p.text(m[0]->name) == "x");
+    CHECK(p.text(m[0]->declarator) == "x");
+    CHECK(p.text(m[0]->init_span) == "{8}");
 }
 
 TEST("shaped-linter - parser - namespace-scope variable is found, tagged namespace_scope")

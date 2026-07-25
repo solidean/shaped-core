@@ -59,7 +59,10 @@ Descending into function bodies is where false positives would come from, so eac
 * **Mem-initializer vs function body.** In `S() : a{1}, b{2} {}` every brace group looks alike. Only the *last* one is the body: a mem-initializer is always followed by `,` or by the body's own `{`, so the scanner keeps going while either follows and descends only into the group where neither does.
 * **Nested block vs initializer.** At function scope a `{` with no declarator in front of it is a block (`{ … }`, an `else` / `do` / `try` body), not an initializer — it is descended, not run past.
 * **Statement keyword.** `return`, `throw`, `case`, `co_return`, … at the top of a segment disqualify it from being a declaration, which is what stops `return P{1, 2};` from reading as one.
-* **Enough tokens to be a declaration.** Outside a record body a brace init needs at least a type *and* a declarator ahead of it, so the temporary `T{1};` is not read as declaring `T`.
+* **A type ahead of the declarator-id.** A brace init needs a type *and* a declarator, and the declarator-id's `::`-joined name run is what decides whether one is left over.
+  In `cc::atomic<int> x{0}` the run at `x` is just `x`, with the type ahead of it; in `cc::void_function{}()` the run is the whole segment, so this is a temporary being called, not a declaration of `void_function`.
+  That also settles `T{1};`, `cc::T{1};` and `cc::vector<int>{1, 2};` — while `int S::x{0};`, an out-of-line static member definition, stays a declaration because its run starts after the `int`.
+  Counting the tokens ahead of the brace cannot tell these apart: a qualified name has several and a type none of them.
 
 Lambda bodies are reached by a separate sweep: any group being skipped at function scope is walked for a `]` followed — past an optional parameter list, `mutable` / `noexcept` / a trailing return type — by `{`. That `]`-then-`(`-or-`{` shape is what separates a lambda introducer from a subscript `a[i]` and an attribute `[[nodiscard]]`. It is what reaches `auto f = [] { int y{0}; };` and `run([] { … });` alike.
 
