@@ -545,6 +545,7 @@ s.write(src);  s.write_pod(v);            // -> result<unit>; a bounded sink tha
 s.seek_to(abs);  s.skip(delta);  s.seek_from_end(off);   // -> result<i64> new position
 s.position();  s.size();  s.remaining_bytes();  // -> result<i64>; dry queries — do NOT disturb the buffer
 cc::move(s).try_as_seekable();            // -> optional<seekable_*>; consumes s on success, else s stays valid
+cc::read_stream r = cc::move(seekable);   // narrow to any weaker stream; RVALUE ONLY, and it consumes the source
 
 #include <clean-core/streams/span_stream.hh> // in-memory adapters (seekable, unbuffered — whole span is the window)
 cc::span_read_stream_adapter(bytes);  cc::span_write_stream_adapter(buf);  cc::span_read_write_stream_adapter(buf);
@@ -590,9 +591,11 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`, and `flags`.
   Check the header before relying on one.
 - **Streams are move-only real types (private-inheritance wrappers over one engine).**
-  Streams do NOT convert to each other — the ADAPTER converts straight to any legal
-  narrowing (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write`
-  never). A moved-from stream asserts on use.
+  Conversions only ever NARROW (`seekable_* -> plain`, `read_write -> read`/`write`;
+  `read <-> write` never). An adapter converts to any legal narrowing; a stream
+  narrows to another stream only **from an rvalue**, consuming it — so one backend
+  never has two live views. A consumed / moved-from stream asserts on use.
+  Narrowing away write capability with unflushed bytes pending asserts.
 - **Flush a write stream before dropping its adapter** — buffered bytes are lost
   otherwise (there is no auto-flush). A stream borrows into its adapter, so the
   adapter must outlive it; the file adapter's 4 KiB buffer is *inline*, so once a

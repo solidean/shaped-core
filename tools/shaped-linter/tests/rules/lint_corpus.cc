@@ -175,17 +175,12 @@ cc::result<lint_corpus_group> load_lint_corpus(cc::string_view file_path, cc::st
     auto adapter = cc::file_read_stream_adapter::open(file_path);
     CC_RETURN_IF_ERROR(adapter);
 
-    auto stream = adapter.value().stream();
-    auto size = stream.size();
-    CC_RETURN_IF_ERROR(size);
+    // The adapter narrows straight to the plain read_stream every babel reader takes, so the file feeds the
+    // markdown parser through its buffer — no slurp.
+    cc::read_stream stream = adapter.value();
+    auto doc = md::read(stream);
+    CC_RETURN_IF_ERROR(doc);
 
-    // TEMPORARY: slurped rather than streamed. `file_read_stream_adapter::stream()` hands out a
-    // cc::seekable_read_stream, and clean-core offers no narrowing conversion from that to the plain
-    // cc::read_stream every babel reader takes — so a file cannot reach the streaming path at all today.
-    // Corpus files are a few KB, so this costs nothing; the real fix is that conversion in clean-core.
-    auto bytes = cc::vector<cc::byte>::create_defaulted(size.value());
-    CC_RETURN_IF_ERROR(stream.read_exact(bytes));
-
-    return parse_lint_corpus(cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size()), relative_path);
+    return build_group(doc.value(), relative_path);
 }
 } // namespace scl

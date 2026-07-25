@@ -162,8 +162,8 @@ Give your adapter a `stream()` method (as above). For ergonomics, add an implici
 conversion so the adapter can be passed straight to a function taking a stream — and,
 via the `cc::impl::stream_narrows_to` constraint, to any legal *narrowing* too (e.g.
 a read_write adapter into a plain `cc::read_stream` parameter). Construct the target
-type **directly** — streams don't convert to one another, so the adapter is the one
-thing that hands out a narrower type:
+type **directly** from your bounds rather than building the natural stream and
+narrowing it — same constraint, one step less:
 
 ```cpp
 template <class Stream>
