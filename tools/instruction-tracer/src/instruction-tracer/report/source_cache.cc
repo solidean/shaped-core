@@ -1,9 +1,7 @@
 #include "source_cache.hh"
 
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/char_predicates.hh>
-
-#include <fstream>
-#include <string>
 
 namespace itrace
 {
@@ -25,15 +23,16 @@ cc::vector<cc::string> const& source_cache::lines_of(cc::string_view path)
     if (entry.exists())
         return entry.value();
 
-    cc::vector<cc::string> lines;
+    auto lines = cc::vector<cc::string>();
 
-    // clean-core has no file I/O; std::ifstream is the seam.
-    auto file = std::ifstream(std::string(path.data(), size_t(path.size())));
-    if (file.is_open())
+    // The adapter owns the buffer the stream reads through, so it must outlive the stream.
+    auto adapter = cc::file_read_stream_adapter::open(path);
+    if (adapter.has_value())
     {
-        std::string line;
-        while (std::getline(file, line))
-            lines.push_back(cc::string(cc::string_view(line.data(), isize(line.size()))));
+        auto stream = adapter.value().stream();
+        auto line = cc::string();
+        while (stream.read_line(line).value_or(false)) // a read error ends the loop like an unreadable file
+            lines.push_back(line);
     }
 
     // An unreadable file caches as empty, so we do not retry it per instruction.
@@ -61,10 +60,7 @@ cc::string_view source_cache::raw_line(cc::string_view path, u32 line_number)
     if (isize(line_number) > lines.size())
         return {};
 
-    cc::string_view l = lines[isize(line_number) - 1];
-    if (!l.empty() && l.back() == '\r') // std::getline keeps the CR of a CRLF line ending
-        l.remove_suffix(1);
-    return l;
+    return lines[isize(line_number) - 1]; // read_line already dropped the CR of a CRLF ending
 }
 
 u32 source_cache::line_count(cc::string_view path)

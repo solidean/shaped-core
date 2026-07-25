@@ -1,5 +1,6 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/platform/win32_sanitized.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <instruction-tracer/cli/options.hh>
@@ -17,8 +18,7 @@
 #include <instruction-tracer/report/trace_formatter.hh>
 #include <instruction-tracer/report/trace_stats.hh>
 
-#include <filesystem>
-#include <fstream>
+#include <filesystem> // file_size: clean-core has no filesystem-metadata API
 
 namespace
 {
@@ -71,13 +71,14 @@ cc::u64 file_size_of(cc::string_view path)
     return ec ? 0 : cc::u64(n);
 }
 
-bool write_text_file(cc::string_view path, cc::string_view content)
+cc::result<cc::unit> write_text_file(cc::string_view path, cc::string_view content)
 {
-    std::ofstream f(std::string(path.data(), size_t(path.size())), std::ios::binary);
-    if (!f.is_open())
-        return false;
-    f.write(content.data(), std::streamsize(content.size()));
-    return bool(f);
+    auto adapter = cc::file_write_stream_adapter::create(path);
+    CC_RETURN_IF_ERROR(adapter);
+    auto stream = adapter.value().stream();
+    CC_RETURN_IF_ERROR(stream.write(cc::as_bytes(content)));
+    CC_RETURN_IF_ERROR(stream.flush()); // no auto-flush: buffered bytes are lost otherwise
+    return cc::unit{};
 }
 
 /// Run llvm-mca over every trace and align its analysis back onto the full instruction stream. One
@@ -198,9 +199,9 @@ int run(itrace::options const& opts)
 
         itrace::source_cache sources;
         auto const page = itrace::export_html(traces.value(), meta, sources, mca_results);
-        if (!write_text_file(opts.html_path, page))
+        if (auto const written = write_text_file(opts.html_path, page); !written.has_value())
         {
-            cc::eprintln("error: could not write HTML report to '{}'", opts.html_path);
+            cc::eprintln("error: could not write HTML report to '{}': {}", opts.html_path, written.error().to_string());
             return exit_usage;
         }
 
