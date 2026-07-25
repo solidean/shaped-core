@@ -2,7 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
-#include <shaped-linter/rules/member_default_init_assignment.hh>
+#include <shaped-linter/rules/default_init_assignment.hh>
 
 namespace scl
 {
@@ -11,7 +11,7 @@ cc::span<rule const> all_rules()
     static cc::vector<rule> const rules = []
     {
         cc::vector<rule> v;
-        v.push_back(member_default_init_assignment_rule());
+        v.push_back(default_init_assignment_rule());
 
         // A rationale is mandatory — the reporter leads every group with it, mirroring the gate culture.
         for (auto const& r : v)

@@ -17,13 +17,23 @@ struct parsed
     token_stream ts;
     syntax_tree tree;
 
-    /// Every brace-form member declaration in the tree (across all records).
-    cc::vector<node const*> brace_members() const
+    /// Every brace-form variable declaration in the tree, in any scope.
+    cc::vector<node const*> brace_vars() const
     {
         cc::vector<node const*> out;
         for (auto const& n : tree.nodes)
-            if (n.kind == node_kind::member_declaration && n.init_form == member_init_form::brace)
+            if (n.kind == node_kind::variable_declaration && n.form == init_form::brace)
                 out.push_back(&n);
+        return out;
+    }
+
+    /// Every brace-form variable declaration in a given scope.
+    cc::vector<node const*> brace_vars_in(decl_scope scope) const
+    {
+        cc::vector<node const*> out;
+        for (auto const* n : brace_vars())
+            if (n->scope == scope)
+                out.push_back(n);
         return out;
     }
 
@@ -51,7 +61,7 @@ parsed parse_text(cc::string_view s)
 TEST("shaped-linter - parser - the chase_lev_deque atomic member")
 {
     auto const p = parse_text("struct S { alignas(64) cc::atomic<cc::i64> _top{0}; };");
-    auto const m = p.brace_members();
+    auto const m = p.brace_vars();
     REQUIRE(m.size() == 1);
     CHECK(p.text(m[0]->name) == "_top");
     CHECK(p.text(m[0]->init_inner) == "0");
@@ -66,7 +76,7 @@ TEST("shaped-linter - parser - several atomic members")
                               "  alignas(64) cc::atomic<cc::i64> _bottom{0};\n"
                               "  alignas(64) cc::atomic<ring*> _ring{nullptr};\n"
                               "};");
-    auto const m = p.brace_members();
+    auto const m = p.brace_vars();
     REQUIRE(m.size() == 3);
     CHECK(p.text(m[0]->name) == "_top");
     CHECK(p.text(m[1]->name) == "_bottom");
@@ -74,10 +84,10 @@ TEST("shaped-linter - parser - several atomic members")
     CHECK(p.text(m[2]->init_inner) == "nullptr");
 }
 
-TEST("shaped-linter - parser - assignment form is not a brace member")
+TEST("shaped-linter - parser - assignment form is not a brace init")
 {
     auto const p = parse_text("struct S { int x = 0; cc::atomic<int> y = 0; };");
-    CHECK(p.brace_members().size() == 0);
+    CHECK(p.brace_vars().size() == 0);
     CHECK(p.record_count() == 1);
 }
 
@@ -86,7 +96,7 @@ TEST("shaped-linter - parser - empty and multi-element braces")
     SECTION("empty brace")
     {
         auto const p = parse_text("struct S { int y{}; };");
-        auto const m = p.brace_members();
+        auto const m = p.brace_vars();
         REQUIRE(m.size() == 1);
         CHECK(p.text(m[0]->name) == "y");
         CHECK(p.text(m[0]->init_inner) == "");
@@ -94,7 +104,7 @@ TEST("shaped-linter - parser - empty and multi-element braces")
     SECTION("multi-element brace")
     {
         auto const p = parse_text("struct S { P p{1, 2}; };");
-        auto const m = p.brace_members();
+        auto const m = p.brace_vars();
         REQUIRE(m.size() == 1);
         CHECK(p.text(m[0]->name) == "p");
         CHECK(p.text(m[0]->init_inner) == "1, 2");
@@ -102,49 +112,141 @@ TEST("shaped-linter - parser - empty and multi-element braces")
     SECTION("static inline member")
     {
         auto const p = parse_text("struct S { static inline cc::atomic<int> live{0}; };");
-        auto const m = p.brace_members();
+        auto const m = p.brace_vars();
         REQUIRE(m.size() == 1);
         CHECK(p.text(m[0]->name) == "live");
     }
     SECTION("mutable member")
     {
         auto const p = parse_text("struct S { mutable cc::atomic<cc::i64> _c{0}; };");
-        auto const m = p.brace_members();
+        auto const m = p.brace_vars();
         REQUIRE(m.size() == 1);
         CHECK(p.text(m[0]->name) == "_c");
     }
 }
 
-TEST("shaped-linter - parser - locals inside a function are not members")
+TEST("shaped-linter - parser - locals inside a function are found, tagged function_scope")
 {
     SECTION("plain local")
     {
         auto const p = parse_text("struct S { void f() { int x{0}; } };");
-        CHECK(p.brace_members().size() == 0);
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "x");
+        CHECK(p.text(m[0]->init_inner) == "0");
     }
     SECTION("static local")
     {
         auto const p = parse_text("struct S { void f() { static cc::atomic<int> s{1}; } };");
-        CHECK(p.brace_members().size() == 0);
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "s");
+    }
+    SECTION("local inside a nested block")
+    {
+        auto const p = parse_text("void f() { if (c) { int y{2}; } }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("local inside a for body")
+    {
+        auto const p = parse_text("void f() { for (auto const& x : v) { int y{3}; } }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("free function at file scope")
+    {
+        auto const p = parse_text("void f() { int y{0}; }");
+        CHECK(p.brace_vars_in(decl_scope::function_scope).size() == 1);
     }
 }
 
-TEST("shaped-linter - parser - constructor init-list is not a member init")
+TEST("shaped-linter - parser - lambda bodies are descended")
 {
-    auto const p = parse_text("struct S { S() : _x{0} {} int _x; };");
-    CHECK(p.brace_members().size() == 0);
+    SECTION("lambda in an initializer")
+    {
+        auto const p = parse_text("void f() { auto g = [] { int y{1}; }; }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("lambda with a parameter list")
+    {
+        auto const p = parse_text("void f() { auto g = [](int a) mutable { int y{2}; }; }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->init_inner) == "2");
+    }
+    SECTION("lambda as a call argument")
+    {
+        auto const p = parse_text("void f() { run([] { int y{3}; }); }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->init_inner) == "3");
+    }
+    SECTION("a capture is not a lambda body")
+    {
+        // `a[i]` and `[[nodiscard]]` both carry a `]` that must not be read as an introducer.
+        auto const p = parse_text("void f() { auto v = a[i]; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
 }
 
-TEST("shaped-linter - parser - namespace-scope variable is not a member")
+TEST("shaped-linter - parser - constructor init-list is not an initializer")
+{
+    SECTION("single member")
+    {
+        auto const p = parse_text("struct S { S() : _x{0} {} int _x; };");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("several members")
+    {
+        auto const p = parse_text("struct S { S() : _a{0}, _b{1} {} int _a; int _b; };");
+        CHECK(p.brace_vars().size() == 0);
+    }
+}
+
+TEST("shaped-linter - parser - expressions in statement position are not declarations")
+{
+    SECTION("braced return value")
+    {
+        auto const p = parse_text("P f() { return P{1, 2}; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("braced temporary as a statement")
+    {
+        auto const p = parse_text("void f() { T{1}; }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("aggregate at a call site")
+    {
+        auto const p = parse_text("void f() { g({1, 2}); }");
+        CHECK(p.brace_vars().size() == 0);
+    }
+}
+
+TEST("shaped-linter - parser - namespace-scope variable is found, tagged namespace_scope")
 {
     auto const p = parse_text("namespace n { cc::atomic<int> g{0}; }");
-    CHECK(p.brace_members().size() == 0);
+    auto const m = p.brace_vars_in(decl_scope::namespace_scope);
+    REQUIRE(m.size() == 1);
+    CHECK(p.text(m[0]->name) == "g");
+    CHECK(p.text(m[0]->init_inner) == "0");
+}
+
+TEST("shaped-linter - parser - data members are tagged record_scope")
+{
+    auto const p = parse_text("struct S { int a{1}; };");
+    CHECK(p.brace_vars_in(decl_scope::record_scope).size() == 1);
+    CHECK(p.brace_vars_in(decl_scope::function_scope).size() == 0);
 }
 
 TEST("shaped-linter - parser - nested record members are found")
 {
     auto const p = parse_text("struct O { struct I { int a{1}; }; int b{2}; };");
-    auto const m = p.brace_members();
+    auto const m = p.brace_vars();
     REQUIRE(m.size() == 2);
     // Both a (nested) and b (outer) are found, in declaration order.
     CHECK(p.text(m[0]->name) == "a");
@@ -168,7 +270,7 @@ TEST("shaped-linter - parser - directives before a namespace do not swallow it")
                               "    alignas(64) cc::atomic<cc::i64> _top{0};\n"
                               "};\n"
                               "}\n");
-    auto const m = p.brace_members();
+    auto const m = p.brace_vars();
     REQUIRE(m.size() == 1);
     CHECK(p.text(m[0]->name) == "_top");
     CHECK(p.text(m[0]->init_inner) == "0");
@@ -183,7 +285,7 @@ TEST("shaped-linter - parser - directives between members are skipped")
                               "#endif\n"
                               "  int b{3};\n"
                               "};");
-    auto const m = p.brace_members();
+    auto const m = p.brace_vars();
     // The directives are opaque; a/b are found (the #if-disabled member is still parsed — a known limit).
     CHECK(m.size() >= 2);
 }
@@ -199,7 +301,7 @@ TEST("shaped-linter - parser - static_assert and deleted ops before members")
                               "    D& operator=(D&&) = delete;\n"
                               "    alignas(64) cc::atomic<cc::i64> _top{0};\n"
                               "};");
-    auto const m = p.brace_members();
+    auto const m = p.brace_vars();
     REQUIRE(m.size() == 1);
     CHECK(p.text(m[0]->name) == "_top");
 }
@@ -209,7 +311,7 @@ TEST("shaped-linter - parser - class and union bodies")
     SECTION("class with access specifier")
     {
         auto const p = parse_text("class C { public: int x{3}; private: int _y{4}; };");
-        auto const m = p.brace_members();
+        auto const m = p.brace_vars();
         REQUIRE(m.size() == 2);
         CHECK(p.text(m[0]->name) == "x");
         CHECK(p.text(m[1]->name) == "_y");
@@ -217,7 +319,7 @@ TEST("shaped-linter - parser - class and union bodies")
     SECTION("enum body is not descended")
     {
         auto const p = parse_text("enum class E { A = 1, B = 2 };");
-        CHECK(p.brace_members().size() == 0);
+        CHECK(p.brace_vars().size() == 0);
         CHECK(p.record_count() == 0);
     }
 }

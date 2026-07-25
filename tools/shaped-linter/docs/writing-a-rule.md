@@ -17,16 +17,17 @@ Pick the **lowest** layer that can express your rule — it is cheaper and simpl
 * `rule_layer::tokens` — the rule reads the `token_stream` directly (spelling-level checks: a banned identifier, a macro name, a literal shape).
   The parse tree is not built if no enabled rule needs it.
 * `rule_layer::syntax_tree` — the rule walks the parsed `syntax_tree` (structural checks: something about a *member* vs a local, a record's shape).
-  This is what [`member-default-init-assignment`](../src/shaped-linter/rules/member_default_init_assignment.cc) uses.
+  This is what [`default-init-assignment`](../src/shaped-linter/rules/default_init_assignment.cc) uses.
 
-A structural rule must use the tree, not a token scan — the tree is what tells a member initializer apart from a local, a base-class init, or an aggregate at a call site.
+A structural rule must use the tree, not a token scan — the tree is what tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site, and it is what carries `node::scope` (`record_scope` / `namespace_scope` / `function_scope`).
+Read the scope off the node; never re-derive it in a rule.
 
 ## The slug and the rationale are mandatory
 
 Every rule carries:
 
-* an `id` — a stable, greppable kebab-case slug, like a clang-tidy check name (`member-default-init-assignment`).
-  It is printed in brackets on every finding line (`… [member-default-init-assignment]`), so it is easy to grep and to silence.
+* an `id` — a stable, greppable kebab-case slug, like a clang-tidy check name (`default-init-assignment`).
+  It is printed in brackets on every finding line (`… [default-init-assignment]`), so it is easy to grep and to silence.
 * a `rationale` — one sentence on *why*, ideally with the preferred fix.
   The reporter leads every group with it, and `all_rules()` asserts it is non-empty.
   This mirrors the clang-tidy gate culture, where every gate carries its `why`.
@@ -112,20 +113,22 @@ The registry is the single list of rules — mirroring how the clang-tidy gate c
 
 ### 4. Add it to the build
 
-List the new `.cc` in [`CMakeLists.txt`](../CMakeLists.txt) under `shaped-linter-core`, and its test under `shaped-linter-test`.
+List the new `.cc` in [`CMakeLists.txt`](../CMakeLists.txt) under `shaped-linter-core`, and its smoke test under `shaped-linter-test`.
+A corpus file needs no CMake change — the corpus directory is scanned at run time.
 
 ### 5. Test it
 
-Two layers, both nexus:
+Two layers, both nexus. The split and the corpus format are specified in [coding-guidelines.md](coding-guidelines.md); the short version:
 
-* **Raw `TEST`s** for units and hand-written cases — use `run_rules_on_text("<snippet>")` and assert on the findings (count, message, and the fix replacement).
+* **Smoke tests** in `tests/rules/<rule>-test.cc` — ordinary `TEST` + `SECTION` with `run_rules_on_text("<snippet>")`, asserting on the findings (count, rule id, fix replacement).
+  This is the scratchpad you build the rule in and where a regression gets pinned; keep it under ~200 lines.
   The whole detect-and-fix path is `apply_edits(src, edits)` (see [`engine-test.cc`](../tests/rules/engine-test.cc)).
-* **A data-driven corpus** via `INVOCABLE_TEST` + a driver `TEST` that calls `nx::invoke_tests(case.name, case)` per case (see [`member_default_init_assignment-test.cc`](../tests/rules/member_default_init_assignment-test.cc)).
-  Use a unique case struct as the key, and wire the driver so the invocable is never an orphan.
+* **A markdown corpus** at `tests/rules/corpus/<rule>.md` — ordinary prose with annotated `cpp` blocks (see [`default_init_assignment.md`](../tests/rules/corpus/default_init_assignment.md)).
+  This is where breadth lives; adding a case is adding a fenced block, not writing C++.
 
 **Always add both a positive and a negative** — a case that must fire and a look-alike that must not.
-For a structural rule, the negatives are the point: prove it does *not* fire on the local, the base-class init, the call-site aggregate.
-When you cut a corner in the parser, pin it with a test (even one asserting the known-wrong-but-safe behavior), so the boundary is documented and does not regress silently.
+For a structural rule, the negatives are the point: prove it does *not* fire on the mem-initializer, the braced return, the call-site aggregate.
+When you cut a corner in the parser, pin it in the corpus (even asserting the known-wrong-but-safe behavior), so the boundary is documented and does not regress silently.
 
 ## Growing the lexer or parser
 

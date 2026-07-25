@@ -15,7 +15,7 @@ add_library(shaped-linter-core STATIC
 
     src/shaped-linter/parse/parser.cc
 
-    src/shaped-linter/rules/member_default_init_assignment.cc
+    src/shaped-linter/rules/default_init_assignment.cc
     src/shaped-linter/rules/registry.cc
     src/shaped-linter/rules/engine.cc
 
@@ -44,9 +44,19 @@ if(SC_BUILD_TESTS)
 
         tests/parse/parser-test.cc
 
-        tests/rules/member_default_init_assignment-test.cc
+        tests/rules/default_init_assignment-test.cc
         tests/rules/engine-test.cc
+        tests/rules/lint_corpus.cc
+        tests/rules/corpus-test.cc
     )
 
-    target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus)
+    # babel-serializer is a test-only dependency: the corpus files are markdown, and babel::markdown
+    # reads them. A tool consuming a library is the allowed direction, and it keeps shaped-linter-core
+    # itself on clean-core alone.
+    target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus babel-serializer)
+
+    # The corpus lives in the source tree and is read at run time, so the test binary is told where it is.
+    # Adding a corpus file therefore needs no CMake change — only a re-run.
+    target_compile_definitions(shaped-linter-test
+        PRIVATE SCL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/rules/corpus")
 endif()

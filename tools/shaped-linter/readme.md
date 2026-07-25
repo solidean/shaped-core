@@ -23,7 +23,7 @@ uv run dev.py build -t shaped-linter   # build the tool
 uv run dev.py test shaped-linter-test  # run its tests
 ```
 
-It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form member initializer is flagged, the existing tree is not swept).
+It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
 
 ## Usage
 
@@ -41,7 +41,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 
 | Rule | What it enforces |
 |---|---|
-| `member-default-init-assignment` | A data member's default initializer uses assignment form `name = …`, not brace form `name{…}`. |
+| `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
 
 ## How it works
 
@@ -51,15 +51,21 @@ A layered pipeline, each rule declaring the highest layer it needs:
 source_buffer ─▶ lexer ─▶ token_stream ─▶ parser ─▶ syntax_tree ─▶ rule engine ─▶ findings ─▶ reporter
 ```
 
-See [docs/writing-a-rule.md](docs/writing-a-rule.md) to add a rule.
+See [docs/writing-a-rule.md](docs/writing-a-rule.md) to add a rule and [docs/architecture.md](docs/architecture.md) for how the layers fit together.
 
 ## Tests
 
 ```bash
 uv run dev.py test shaped-linter-test
+uv run dev.py test "shaped-linter - corpus files" -c default_init_assignment.md   # one corpus file
 ```
 
-Two layers, both nexus: raw `TEST`s for units, and a data-driven corpus via `INVOCABLE_TEST`.
+Two layers, both nexus:
+
+* **Smoke tests** per rule (`tests/rules/<rule>-test.cc`) — the scratchpad, kept small and debuggable.
+* **A markdown corpus** (`tests/rules/corpus/<rule>.md`) — ordinary prose with annotated `cpp` blocks, one invocation per file. This is where breadth lives, and adding a case needs no C++ and no CMake change.
+
+[docs/coding-guidelines.md](docs/coding-guidelines.md) specifies the annotation format and which layer a case belongs in.
 
 ## Layout
 
@@ -72,6 +78,6 @@ src/shaped-linter/
   report/    the grouped-by-rule findings reporter
   compdb/    (reserved) compile_commands.json reader
   main.cc    executable entry point
-docs/        guides (writing a rule)
-tests/       mirrors src/, plus a corpus for data-driven rule tests
+docs/        architecture, writing a rule, coding guidelines
+tests/       mirrors src/, plus rules/corpus/*.md — the data-driven rule corpus
 ```

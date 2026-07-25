@@ -42,20 +42,31 @@ Handled: identifiers/keywords, integer/float literals with digit separators and 
 
 ## What the parser recognizes, and what it skips
 
-The parser recognizes only what the rules need: namespaces (descended), records (`class`/`struct`/`union` with a body), and — inside a record body — data-member declarations with their initializer form.
+The parser recognizes only what the rules need: namespaces, records (`class`/`struct`/`union` with a body), function bodies, nested blocks, lambda bodies — all descended — and the variable declarations inside them, with their initializer form.
 Everything else is skipped as opaque.
 It walks declaration-by-declaration with a prefix-aware segment scanner that tracks bracket depth by skipping balanced groups.
 
-The scope distinction is the whole point: only a real parse tells a **member** initializer apart from a function-local, a namespace-scope global, a constructor init-list, or an aggregate at a call site.
+**The scope distinction is the whole point.** Every declaration node carries a `decl_scope` — `record_scope`, `namespace_scope`, or `function_scope` — so a rule never has to work out where it is. Only a real parse can do that, and only a real parse tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site.
 
-### Known corner-cuts (each safe, each pinned by a test)
+### The four judgements that keep function-scope parsing honest
 
-These err toward a miss (never a false positive), and are documented so the boundary does not regress silently:
+Descending into function bodies is where false positives would come from, so each is decided explicitly:
+
+* **Mem-initializer vs function body.** In `S() : a{1}, b{2} {}` every brace group looks alike. Only the *last* one is the body: a mem-initializer is always followed by `,` or by the body's own `{`, so the scanner keeps going while either follows and descends only into the group where neither does.
+* **Nested block vs initializer.** At function scope a `{` with no declarator in front of it is a block (`{ … }`, an `else` / `do` / `try` body), not an initializer — it is descended, not run past.
+* **Statement keyword.** `return`, `throw`, `case`, `co_return`, … at the top of a segment disqualify it from being a declaration, which is what stops `return P{1, 2};` from reading as one.
+* **Enough tokens to be a declaration.** Outside a record body a brace init needs at least a type *and* a declarator ahead of it, so the temporary `T{1};` is not read as declaring `T`.
+
+Lambda bodies are reached by a separate sweep: any group being skipped at function scope is walked for a `]` followed — past an optional parameter list, `mutable` / `noexcept` / a trailing return type — by `{`. That `]`-then-`(`-or-`{` shape is what separates a lambda introducer from a subscript `a[i]` and an attribute `[[nodiscard]]`. It is what reaches `auto f = [] { int y{0}; };` and `run([] { … });` alike.
+
+### Known corner-cuts (each pinned by a corpus case)
+
+Documented so the boundary does not regress silently:
 
 * **Multi-declarator brace-init** `int a{1}, b{2};` records only the first.
-* **Array data member** `T a[N]{…};` is skipped (the token before `{` is `]`, not a declarator-id).
 * **Function-pointer data member with init** `void(*cb)(){…};` may mis-segment (the extra `()` reads as a parameter list).
 * **`#if 0` disabled members** are still parsed as live code (directives are opaque) — a possible false positive, resolved only at the future preprocessor milestone.
+* **Deeply nested statements are reached, but blocks inside a skipped group are not** — a body only becomes visible through the paths above, so an exotic construct can still hide one.
 
 ## Relationship to the clang-tidy gates
 
@@ -63,4 +74,4 @@ shaped-linter is the sibling of the [clang-tidy gate framework](../../lint/) —
 It shares one philosophy: **every rule carries a mandatory rationale**, and output is a grouped-by-rule digest that leads each group with that `why`.
 It runs as `dev.py lint shaped`, and is a `dev.py check` gate (`shaped-lint`) that runs **dirty-only** — like the clang-tidy gates, so the rules adopt incrementally rather than requiring a repo-wide sweep first.
 
-See [writing-a-rule.md](writing-a-rule.md) to add a rule.
+See [writing-a-rule.md](writing-a-rule.md) to add a rule, and [coding-guidelines.md](coding-guidelines.md) for the conventions it follows — notably the two-layer test split (smoke tests plus a markdown corpus).

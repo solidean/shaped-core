@@ -300,7 +300,7 @@ TEST("markdown - parsing over a chunked stream matches in-memory")
 
     for (auto const chunk : {cc::isize(1), cc::isize(3), cc::isize(7)})
     {
-        chunked_reader reader{text, chunk};
+        chunked_reader reader = {text, chunk};
         auto stream = reader.stream();
         auto const doc = md::read(stream).value();
 

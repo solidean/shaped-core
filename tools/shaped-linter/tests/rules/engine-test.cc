@@ -73,6 +73,21 @@ TEST("shaped-linter - fix round-trip - several members at once")
              "};");
 }
 
+TEST("shaped-linter - fix round-trip - a function local")
+{
+    CHECK(lint_and_fix("void f() { int y{0}; }") == "void f() { int y = 0; }");
+}
+
+TEST("shaped-linter - fix round-trip - a local inside a lambda body")
+{
+    CHECK(lint_and_fix("void f() { auto g = [] { int y{1}; }; }") == "void f() { auto g = [] { int y = 1; }; }");
+}
+
+TEST("shaped-linter - fix round-trip - a namespace-scope variable")
+{
+    CHECK(lint_and_fix("namespace n { cc::atomic<int> g{0}; }") == "namespace n { cc::atomic<int> g = 0; }");
+}
+
 TEST("shaped-linter - fix round-trip - normalizes spacing before the brace")
 {
     // A space before the brace is absorbed: `x {0}` -> `x = 0`.

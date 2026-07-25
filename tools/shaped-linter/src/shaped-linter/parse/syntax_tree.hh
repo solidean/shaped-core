@@ -8,12 +8,12 @@
 namespace scl
 {
 /// The node kinds the parser produces. Deliberately tiny: shaped-linter only parses what its rules
-/// need (records and their data members), treating everything else as opaque.
+/// need (records and variable declarations), treating everything else as opaque.
 enum class node_kind : u8
 {
     translation_unit,
     record_definition, // a class/struct/union WITH a body
-    member_declaration,
+    variable_declaration,
 };
 
 enum class record_keyword : u8
@@ -24,17 +24,26 @@ enum class record_keyword : u8
 };
 
 /// How a declaration's initializer is spelled. `brace` is `name{…}`; `assignment` is `name = …`.
-enum class member_init_form : u8
+enum class init_form : u8
 {
     none,
     assignment,
     brace,
 };
 
+/// Where a variable declaration sits. Rules that care about the difference (a data member reads
+/// differently from a local) branch on this rather than on the tree shape.
+enum class decl_scope : u8
+{
+    namespace_scope, // file scope or a namespace body
+    record_scope,    // a data member of a class/struct/union
+    function_scope,  // a local — a function body, a nested block, or a lambda body
+};
+
 /// One node in the arena tree. Fields are interpreted by `kind`:
-///  - translation_unit / record_definition: `children` are node ids of the records/members inside.
+///  - translation_unit / record_definition: `children` are node ids of the records/variables inside.
 ///  - record_definition: `rec_keyword` and `name` (the record name span; empty if anonymous).
-///  - member_declaration: `init_form`, and for brace form `init_span` (the `{…}` incl. braces),
+///  - variable_declaration: `scope`, `form`, and for brace form `init_span` (the `{…}` incl. braces),
 ///    `init_inner` (strictly between the braces), and `name` (the declarator-id span).
 struct node
 {
@@ -44,14 +53,15 @@ struct node
     // record_definition
     record_keyword rec_keyword = record_keyword::struct_;
 
-    // record_definition (record name) OR member_declaration (declarator-id)
+    // record_definition (record name) OR variable_declaration (declarator-id)
     source_span name;
 
     // record_definition / translation_unit
     cc::vector<isize> children; // node ids
 
-    // member_declaration
-    member_init_form init_form = member_init_form::none;
+    // variable_declaration
+    decl_scope scope = decl_scope::namespace_scope;
+    init_form form = init_form::none;
     source_span init_span;  // brace form: the `{…}` including the braces
     source_span init_inner; // brace form: the bytes strictly between `{` and `}`
 };

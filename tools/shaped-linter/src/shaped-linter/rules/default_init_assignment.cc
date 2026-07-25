@@ -1,4 +1,4 @@
-#include "member_default_init_assignment.hh"
+#include "default_init_assignment.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/string.hh>
@@ -7,13 +7,13 @@ namespace scl
 {
 namespace
 {
-constexpr cc::string_view k_id = "member-default-init-assignment";
+constexpr cc::string_view k_id = "default-init-assignment";
 
 // The rationale is Philip's stated reason, kept verbatim — the reporter prints it with every finding.
 constexpr cc::string_view k_rationale
-    = "prefer a consistent assignment-form initialization `T v = value;` across the codebase "
-      "(for locals the deducing `auto v = value;` is a soft preference, not this rule); a member default "
-      "initializer must therefore use `=`, not brace form.";
+    = "prefer a consistent assignment-form initialization `T v = value;` across the codebase; every "
+      "variable initializer — data member, function local, or namespace-scope variable — must therefore "
+      "use `=`, not brace form.";
 
 bool is_space(char c)
 {
@@ -70,39 +70,45 @@ bool first_inner_is_designator(token_stream const& ts, source_span inner)
     return false;
 }
 
-/// The replacement text (without the leading " = ") for a brace-form member initializer:
+/// The replacement text (without the leading " = ") for a brace-form initializer:
 ///  - empty `{}`                    -> "{}"        (`int v{}`   -> `= {}`)
 ///  - top-level comma / designated  -> keep verbatim `{…}`   (`{a, b}` -> `= {a, b}`, `{.x=1}` kept)
 ///  - otherwise                     -> drop the braces, inner trimmed   (`{0}` -> `0`)
-cc::string fix_payload(lint_context const& ctx, node const& m)
+cc::string fix_payload(lint_context const& ctx, node const& v)
 {
-    auto const inner = trim(ctx.source.span_text(m.init_inner));
+    auto const inner = trim(ctx.source.span_text(v.init_inner));
     if (inner.empty())
         return cc::string("{}");
-    if (has_top_level_comma(ctx.tokens, m.init_inner) || first_inner_is_designator(ctx.tokens, m.init_inner))
-        return cc::string(ctx.source.span_text(m.init_span)); // keep the whole `{…}` verbatim
+    if (has_top_level_comma(ctx.tokens, v.init_inner) || first_inner_is_designator(ctx.tokens, v.init_inner))
+        return cc::string(ctx.source.span_text(v.init_span)); // keep the whole `{…}` verbatim
     return cc::string(inner);                                 // drop braces
+}
+
+/// A data member reads differently from a local, so the finding says which one it is.
+cc::string_view what_it_is(decl_scope scope)
+{
+    return scope == decl_scope::record_scope ? "member default initializer" : "variable initializer";
 }
 
 void check(lint_context& ctx)
 {
-    for (auto const& m : ctx.tree.nodes)
+    for (auto const& v : ctx.tree.nodes)
     {
-        if (m.kind != node_kind::member_declaration || m.init_form != member_init_form::brace)
+        if (v.kind != node_kind::variable_declaration || v.form != init_form::brace)
             continue;
 
-        auto payload = fix_payload(ctx, m);
+        auto payload = fix_payload(ctx, v);
 
         // Replace `name{…}` (from the end of the declarator-id through the closing brace) with `name = …`.
         auto const edit = text_edit{
-            .span = {.file_id = m.name.file_id, .byte_begin = m.name.byte_end, .byte_end = m.init_span.byte_end},
+            .span = {.file_id = v.name.file_id, .byte_begin = v.name.byte_end, .byte_end = v.init_span.byte_end},
             .replacement = cc::string(" = ") + payload,
         };
 
         ctx.report({
             .rule_id = k_id,
-            .span = m.init_span,
-            .message = cc::string("member default initializer should use assignment form (`= value`), not brace form"),
+            .span = v.init_span,
+            .message = cc::string(what_it_is(v.scope)) + " should use assignment form (`= value`), not brace form",
             .sev = severity::warning,
             .suggested_fix = fix{.edits = {edit}},
         });
@@ -110,7 +116,7 @@ void check(lint_context& ctx)
 }
 } // namespace
 
-rule const& member_default_init_assignment_rule()
+rule const& default_init_assignment_rule()
 {
     static rule const r = {
         .id = k_id,
