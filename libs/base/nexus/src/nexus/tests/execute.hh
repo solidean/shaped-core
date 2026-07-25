@@ -128,12 +128,29 @@ void report_invocation_cycle(nx::test_declaration const* decl);
 
 namespace nx::impl
 {
-void report_check_result(check_kind kind,
-                         cmp_op op,
-                         cc::string expr,
-                         bool passed,
-                         cc::vector<cc::string> extra_lines,
-                         cc::source_location location);
+// Everything one CHECK/REQUIRE evaluation reports.
+// The three sources of text are separate fields on purpose: rendering picks the operands or the diagnostic
+// per op and ALWAYS appends the user annotations, so a chained .context() can never be shadowed by one of
+// the framework's own strings (which is exactly what a single shared vector used to do).
+struct check_result
+{
+    check_kind kind;
+    cmp_op op;
+    cc::string expr;
+    bool passed = false;
+
+    bool operands_captured = false; // lhs/rhs hold the decomposed comparison
+    cc::string lhs;
+    cc::string rhs;
+
+    cc::string diagnostic; // the framework's own explanation (throws / asserts / a failing CC_ASSERT)
+
+    cc::vector<cc::string> extra_lines; // user annotations only, in chaining order
+
+    cc::source_location location;
+};
+
+void report_check_result(check_result result);
 
 // Appends a metric to the active test's execution. No-op when no test is running. Used by nx::guide.
 void record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better);

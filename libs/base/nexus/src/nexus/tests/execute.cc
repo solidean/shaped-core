@@ -277,6 +277,66 @@ char const* op_to_string(impl::cmp_op op)
     }
     return "?";
 }
+
+// The one-line failure text: what the op has to say, then every user annotation appended.
+// Both report_check_result paths (capture sink and real test context) go through this, so the two cannot
+// drift apart again — appending here is also what carries annotations into the JUnit body and the Catch2
+// <Expanded> element without either exporter knowing about them.
+cc::string render_expanded(impl::check_result const& r)
+{
+    using namespace impl;
+
+    cc::string expanded;
+    switch (r.op)
+    {
+    case cmp_op::none:
+        expanded = cc::format("'{}' failed", r.expr);
+        break;
+
+    case cmp_op::less:
+    case cmp_op::less_equal:
+    case cmp_op::greater:
+    case cmp_op::greater_equal:
+    case cmp_op::equal:
+    case cmp_op::not_equal:
+        if (r.operands_captured)
+            expanded = cc::format("{} {} {}", r.lhs, op_to_string(r.op), r.rhs);
+        else
+            expanded = "(could not capture expressions)";
+        break;
+
+    case cmp_op::throws:
+        expanded = r.diagnostic.empty() ? cc::string("expression did not throw an exception (but should have)")
+                                        : r.diagnostic;
+        break;
+
+    case cmp_op::throws_as:
+        expanded = r.diagnostic.empty()
+                     ? cc::string("expression did not throw an exception (but should have) or threw the wrong type")
+                     : r.diagnostic;
+        break;
+
+    case cmp_op::assert_fail:
+        expanded = r.diagnostic.empty() ? cc::string("assertion failed during test") : r.diagnostic;
+        break;
+
+    case cmp_op::asserts:
+        expanded = r.diagnostic.empty() ? cc::string("assertion should have failed (but did not)") : r.diagnostic;
+        break;
+
+    case cmp_op::skip:
+        CC_UNREACHABLE("skip should not produce a test error");
+    }
+
+    for (auto const& line : r.extra_lines)
+        if (!line.empty())
+        {
+            expanded += " | ";
+            expanded += line;
+        }
+
+    return expanded;
+}
 } // namespace
 } // namespace nx
 
@@ -457,12 +517,7 @@ void nx::impl::record_metric(cc::string_view name, double value, cc::string_view
     execution->metrics.push_back(nx::recorded_metric{cc::string(name), value, cc::string(unit), higher_is_better});
 }
 
-void nx::impl::report_check_result(check_kind kind,
-                                   cmp_op op,
-                                   cc::string expr,
-                                   bool passed,
-                                   cc::vector<cc::string> extra_lines,
-                                   cc::source_location location)
+void nx::impl::report_check_result(check_result result)
 {
     // Capture mode: a tool (e.g. the fuzz engine) is driving user code that is expected to fail
     // often. Tally the outcome and suppress both the host-test side effects and the control-flow
@@ -471,24 +526,15 @@ void nx::impl::report_check_result(check_kind kind,
     {
         auto& sink = *g_check_capture;
         ++sink.executed;
-        if (op == cmp_op::skip)
+        if (result.op == cmp_op::skip)
             return;
-        if (!passed)
+        if (!result.passed)
         {
             ++sink.failed;
-            if (kind == check_kind::require || op == cmp_op::assert_fail)
+            if (result.kind == check_kind::require || result.op == cmp_op::assert_fail)
                 sink.require_failed = true;
             if (sink.first_message.empty())
-            {
-                cc::string msg = expr;
-                for (auto const& line : extra_lines)
-                    if (!line.empty())
-                    {
-                        msg += " | ";
-                        msg += line;
-                    }
-                sink.first_message = cc::move(msg);
-            }
+                sink.first_message = cc::format("{} | {}", result.expr, render_expanded(result));
         }
         return;
     }
@@ -502,75 +548,26 @@ void nx::impl::report_check_result(check_kind kind,
     ++ctx.executed_checks;
 
     // If this is a SKIP, throw to abort test execution (counts as success)
-    if (op == cmp_op::skip)
+    if (result.op == cmp_op::skip)
         throw test_skipped{};
 
     // If the check failed, record it
-    if (!passed)
+    if (!result.passed)
     {
         ++ctx.failed_checks;
 
-        cc::string expanded;
-        switch (op)
-        {
-        case cmp_op::none:
-            expanded = cc::format("'{}' failed", expr);
-            break;
-
-        case cmp_op::less:
-        case cmp_op::less_equal:
-        case cmp_op::greater:
-        case cmp_op::greater_equal:
-        case cmp_op::equal:
-        case cmp_op::not_equal:
-            if (extra_lines.size() >= 2)
-                expanded = cc::format("{} {} {}", extra_lines[0], op_to_string(op), extra_lines[1]);
-            else
-                expanded = "(could not capture expressions)";
-            break;
-
-        case cmp_op::throws:
-            if (!extra_lines.empty())
-                expanded = extra_lines[0];
-            else
-                expanded = "expression did not throw an exception (but should have)";
-            break;
-
-        case cmp_op::throws_as:
-            if (!extra_lines.empty())
-                expanded = extra_lines[0];
-            else
-                expanded = "expression did not throw an exception (but should have) or threw the wrong type";
-            break;
-
-        case cmp_op::assert_fail:
-            if (!extra_lines.empty())
-                expanded = extra_lines[0];
-            else
-                expanded = "assertion failed during test";
-            break;
-
-        case cmp_op::asserts:
-            if (!extra_lines.empty())
-                expanded = extra_lines[0];
-            else
-                expanded = "assertion should have failed (but did not)";
-            break;
-
-        case cmp_op::skip:
-            CC_UNREACHABLE("skip should not produce a test error");
-        }
+        auto expanded = render_expanded(result);
 
         // Add test error
         ctx.errors.push_back(test_error{
-            .expr = std::move(expr),
-            .location = location,
-            .extra_lines = std::move(extra_lines),
+            .expr = std::move(result.expr),
+            .location = result.location,
+            .extra_lines = std::move(result.extra_lines),
             .expanded = std::move(expanded),
         });
 
         // If this was a REQUIRE, throw exception to abort test execution
-        if (kind == check_kind::require)
+        if (result.kind == check_kind::require)
             throw test_require_failed{};
     }
 }
@@ -699,8 +696,14 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                 [](cc::impl::assertion_info const& info)
                 {
                     // failing assertion has same semantics as REQUIRE -> it aborts
-                    nx::impl::report_check_result(impl::check_kind::require, impl::cmp_op::assert_fail, info.expression,
-                                                  false, {info.message}, info.location);
+                    nx::impl::report_check_result({
+                        .kind = impl::check_kind::require,
+                        .op = impl::cmp_op::assert_fail,
+                        .expr = info.expression,
+                        .passed = false,
+                        .diagnostic = info.message,
+                        .location = info.location,
+                    });
                 });
 
             body();
