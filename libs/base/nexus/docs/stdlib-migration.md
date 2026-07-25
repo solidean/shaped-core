@@ -38,21 +38,24 @@ worked around:
 These are not requests for new clean-core symbols — they exist only because a
 `cc::string` currently has to reach a `std` API.
 
-- **Console output via `std::cout` / `std::cerr`.** [run.cc](../src/nexus/run.cc),
+- **Console output via `std::cout` / `std::cerr`.**
   [execute.cc](../src/nexus/tests/execute.cc), [schedule.cc](../src/nexus/tests/schedule.cc).
-  `std::ostream` is intentionally **not** coming to clean-core; this migrates to
-  `cc::println` once that lands. A small `as_sv()` helper (`cc::string` →
-  `std::string_view`) and `os.write(s.data(), s.size())` exist purely to feed
-  strings to `std::ostream` (there is no `operator<<`) and go away with it.
-- **JUnit file output via `std::ofstream`.** [run.cc](../src/nexus/run.cc). Needs a
-  clean-core file-write path (e.g. `cc::println` to a file sink); no concrete
-  target yet.
+  `std::ostream` is intentionally **not** coming to clean-core, so each of these moves to
+  `cc::print` / `cc::println` the way [run.cc](../src/nexus/run.cc) already has.
+  While a file still uses `std::ostream` it needs the `as_sv()` bridge (`cc::string` →
+  `std::string_view`) and `os.write(s.data(), s.size())`, because there is no `operator<<`
+  for `cc::string`; both go away with the last stream.
+  Mixing the two is safe in the meantime — nobody calls `sync_with_stdio(false)`, so
+  `std::cout` and `cc::print` stay in order.
 - **`std::string` map key.** [execute.cc](../src/nexus/tests/execute.cc) bridges a
   `cc::string` section name to a `std::string` key on every lookup — only because
   the map is `std::unordered_map`. Removed together with `cc::map`.
 - **Console output in the fuzzer.** [fuzz/test.cc](../src/nexus/fuzz/test.cc) prints
   findings and the reproducer via `std::cerr` + the same `as_sv()` bridge — folds into
   the `cc::println` migration above.
+
+`nx::run` itself is done: it prints through `cc::print` / `cc::println` / `cc::eprintln`
+and includes no `<iostream>`.
 
 ---
 
