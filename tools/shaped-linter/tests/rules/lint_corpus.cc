@@ -64,7 +64,7 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
                 what = cc::format("empty rule id at offset {}", i);
                 return false;
             }
-            (negated ? out.forbid : out.expect).push_back(cc::string(id));
+            out.expect.push_back({.rule_id = cc::string(id), .negated = negated});
             i = close + 1;
             continue;
         }
@@ -96,12 +96,19 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             }
             ++i; // the closing quote
 
-            if (out.fix.has_value())
+            // A fix belongs to the rule in front of it — that is what associates it with a rule at all,
+            // and what lets two rules on one block each pin their own rewrite.
+            if (out.expect.empty())
             {
-                what = cc::string("a block may carry at most one `fix=`");
+                what = cc::string("`fix=` must follow a `[rule-id]` that produces it");
                 return false;
             }
-            out.fix = cc::move(value);
+            if (out.expect.back().negated)
+            {
+                what = cc::format("`~[{}]` must not fire, so it cannot carry a `fix=`", out.expect.back().rule_id);
+                return false;
+            }
+            out.expect.back().fixes.push_back(cc::move(value));
             continue;
         }
 
@@ -147,13 +154,11 @@ cc::result<lint_corpus_group> build_group(md::document const& doc, cc::string_vi
         if (!parse_annotations(n.info(), c, what))
             return cc::error(cc::format("{}:{}: bad corpus annotation: {}", relative_path, n.line(), what));
 
-        if (c.expect.empty() && c.forbid.empty())
+        if (c.expect.empty())
         {
             ++group.skipped; // an illustrative block, not a case
             continue;
         }
-        if (c.fix.has_value() && c.expect.empty())
-            return cc::error(cc::format("{}:{}: `fix=` needs a `[rule-id]` that produces it", relative_path, n.line()));
 
         group.cases.push_back(cc::move(c));
     }

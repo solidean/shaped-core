@@ -5,7 +5,8 @@ data members, function locals and namespace-scope variables alike.
 
 The fix is not a blind brace-strip: a braced list that *stays* a list keeps its braces behind the `=`.
 Blocks below are annotated with `[default-init-assignment]` for "fires once here",
-`~[default-init-assignment]` for "must stay quiet", and `fix="…"` for the exact replacement text.
+`~[default-init-assignment]` for "must stay quiet", and `fix="…"` for a replacement text the preceding
+rule produces — chained once per distinct rewrite, since a rule's fixes are pinned as a set.
 
 ## The fix shapes
 

@@ -70,14 +70,80 @@ isize count_of(cc::span<finding const> found, cc::string_view id)
     return n;
 }
 
-/// How many times `id` appears in a list of annotated rule ids.
-isize count_in(cc::span<cc::string const> ids, cc::string_view id)
+bool has(cc::span<cc::string_view const> haystack, cc::string_view needle)
 {
-    auto n = isize(0);
-    for (auto const& x : ids)
-        if (x == id)
-            ++n;
-    return n;
+    for (auto const& x : haystack)
+        if (x == needle)
+            return true;
+    return false;
+}
+
+/// Every distinct rule id the block names, in first-mention order — one comparison per rule, so a failure
+/// says which rule went wrong rather than only that some total was off.
+cc::vector<cc::string_view> mentioned_rules(cc::span<lint_corpus_expectation const> expect)
+{
+    auto out = cc::vector<cc::string_view>();
+    for (auto const& e : expect)
+        if (!has(out, e.rule_id))
+            out.push_back(e.rule_id);
+    return out;
+}
+
+/// The set of replacement texts, rendered sorted and comma-joined so two sets compare as one readable
+/// string. Each is bracketed, not quoted — a fix normally starts with a space, and nexus already quotes
+/// the whole rendered string. Duplicates are merged: what is pinned is WHICH rewrites a rule offers.
+cc::string render_fix_set(cc::span<cc::string_view const> texts)
+{
+    auto sorted = cc::vector<cc::string_view>();
+    for (auto const& t : texts)
+        if (!has(sorted, t))
+            sorted.push_back(t);
+    std::sort(sorted.begin(), sorted.end(),
+              [](cc::string_view a, cc::string_view b)
+              {
+                  auto const n = cc::min(a.size(), b.size());
+                  for (auto i = isize(0); i < n; ++i)
+                      if (a[i] != b[i])
+                          return a[i] < b[i];
+                  return a.size() < b.size();
+              });
+
+    auto out = cc::string();
+    for (auto const& t : sorted)
+    {
+        if (!out.empty())
+            out += ", ";
+        out += cc::format("[{}]", t);
+    }
+    return out.empty() ? cc::string("(none)") : out;
+}
+
+/// Every replacement `id` produced here — over all its findings and all their edits.
+cc::vector<cc::string_view> fixes_produced_by(cc::span<finding const> found, cc::string_view id)
+{
+    auto out = cc::vector<cc::string_view>();
+    for (auto const& f : found)
+    {
+        if (f.rule_id != id || !f.suggested_fix.has_value())
+            continue;
+        for (auto const& e : f.suggested_fix.value().edits)
+            out.push_back(e.replacement);
+    }
+    return out;
+}
+
+/// Every replacement the block wrote for `id`, gathered across all of that rule's annotations.
+cc::vector<cc::string_view> fixes_pinned_for(cc::span<lint_corpus_expectation const> expect, cc::string_view id)
+{
+    auto out = cc::vector<cc::string_view>();
+    for (auto const& e : expect)
+    {
+        if (e.rule_id != id)
+            continue;
+        for (auto const& f : e.fixes)
+            out.push_back(f);
+    }
+    return out;
 }
 } // namespace
 
@@ -87,33 +153,33 @@ INVOCABLE_TEST("shaped-linter - corpus cases", (lint_corpus_group const& group))
     {
         SECTION("{} (L{})", c.title, c.line)
         {
-            // Both sides of every comparison carry the corpus location. nexus renders a failed
-            // comparison as `lhs op rhs` built from the captured operands and drops a chained
-            // `.context()`, so folding the location into the values is what makes a failure say which
-            // markdown block broke instead of an anonymous `1 == 0`.
-            auto const at = [&](auto const& value) { return cc::format("{} @ {}:{}", value, group.path, c.line); };
-
+            auto const where = cc::format("{}:{}", group.path, c.line); // the block a failure came from
             auto const found = run_rules_on_text(c.source);
+
+            // How many findings each named rule owes: one per positive annotation, none for a `~[…]`.
+            auto expected_total = isize(0);
+            for (auto const& e : c.expect)
+                expected_total += e.negated ? 0 : 1;
 
             // Every finding must be accounted for. A rule firing without an annotation is real signal
             // (rules cross-talk), so it fails until the block names it.
-            CHECK(at(found.size()) == at(c.expect.size()));
+            CHECK(found.size() == expected_total).context(where);
 
-            for (auto const& id : c.expect)
-                CHECK(at(cc::format("{}x {}", count_of(found, id), id))
-                      == at(cc::format("{}x {}", count_in(c.expect, id), id)));
-            for (auto const& id : c.forbid)
-                CHECK(at(cc::format("{}x {}", count_of(found, id), id)) == at(cc::format("0x {}", id)));
-
-            if (c.fix.has_value())
+            for (auto const& id : mentioned_rules(c.expect))
             {
-                auto fixes = cc::vector<cc::string_view>();
-                for (auto const& f : found)
-                    if (f.suggested_fix.has_value() && f.suggested_fix.value().edits.size() == 1)
-                        fixes.push_back(f.suggested_fix.value().edits[0].replacement);
+                auto expected = isize(0);
+                for (auto const& e : c.expect)
+                    if (e.rule_id == id && !e.negated)
+                        ++expected;
 
-                REQUIRE(at(fixes.size()) == at(isize(1)));
-                CHECK(at(fixes[0]) == at(c.fix.value()));
+                CHECK(count_of(found, id) == expected).context(where).dump("rule", id);
+
+                // Naming one fix for a rule means naming them all: the sets must match exactly.
+                auto const pinned = fixes_pinned_for(c.expect, id);
+                if (!pinned.empty())
+                    CHECK(render_fix_set(fixes_produced_by(found, id)) == render_fix_set(pinned))
+                        .context(where)
+                        .dump("rule", id);
             }
         }
     }

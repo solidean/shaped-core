@@ -41,7 +41,22 @@ void f() { g({1, 2}); }
 |------------|---------|
 | `[rule-id]` | this rule must produce one finding here — repeat the annotation for N findings |
 | `~[rule-id]` | this rule must produce **no** finding here |
-| `fix="…"` | exactly one finding carries a suggested fix, and its replacement is this text (`\"` / `\\` escape) |
+| `fix="…"` | one replacement text the **preceding** rule produces; chain it for more (`\"` / `\\` escape) |
+
+`fix=` binds to the annotation in front of it, which is what associates a rewrite with a rule at all —
+two rules on one block each pin their own, even when the texts are identical.
+
+All fixes written for one rule form a **set**, and it is matched against the replacements that rule
+actually produced — over every finding, every edit, duplicates merged. Naming no fix for a rule leaves
+its fixes unchecked; naming one means naming them all. Because it is a set, order is irrelevant and
+these two are the same pin:
+
+```text
+```cpp [r] fix=" = 1" [r] fix=" = 2"
+```cpp [r] [r] fix=" = 1" fix=" = 2"
+```
+
+Finding *counts* come from the `[rule-id]` annotations alone — a `fix=` never adds one.
 
 Rules for writing one:
 
@@ -56,12 +71,9 @@ Rules for writing one:
 * **Pin corner-cuts as they behave, not as they should.** When the parser cuts a corner, the corpus
   records today's behavior so the boundary cannot move silently. Say so in the prose.
 
-The nearest preceding heading and the fence's line number name the case, so a failure reads
-`… @ default_init_assignment.md:18`.
-
-Both sides of every corpus comparison carry that location on purpose: nexus renders a failed comparison
-from the captured operands and drops a chained `.context()`, so folding the location into the compared
-values is the only way a failure says *which* block broke.
+The nearest preceding heading and the fence's line number name the case, and every comparison carries
+`{file}:{line}` as a chained `.context()`, so a failure says *which* block broke — plus a `.dump("rule", …)`
+naming the rule when the check is per-rule.
 
 ## How the corpus reaches the test binary
 

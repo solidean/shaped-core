@@ -122,9 +122,26 @@ Two layers, both nexus. The split and the corpus format are specified in [coding
 
 * **Smoke tests** in `tests/rules/<rule>-test.cc` — ordinary `TEST` + `SECTION` with `run_rules_on_text("<snippet>")`, asserting on the findings (count, rule id, fix replacement).
   This is the scratchpad you build the rule in and where a regression gets pinned; keep it under ~200 lines.
-  The whole detect-and-fix path is `apply_edits(src, edits)` (see [`engine-test.cc`](../tests/rules/engine-test.cc)).
+  The whole detect-and-fix path is `apply_edits(src, edits)` (see [`engine-test.cc`](../tests/rules/engine-test.cc)) — that is the layer that pins what the rewritten source *looks like*, which the corpus never does.
 * **A markdown corpus** at `tests/rules/corpus/<rule>.md` — ordinary prose with annotated `cpp` blocks (see [`default_init_assignment.md`](../tests/rules/corpus/default_init_assignment.md)).
   This is where breadth lives; adding a case is adding a fenced block, not writing C++.
+
+The corpus annotations, in short — the full specification is in [coding-guidelines.md](coding-guidelines.md):
+
+```text
+```cpp [your-rule] fix=" = 0"          one finding, and that is the rewrite it offers
+```cpp [your-rule] [your-rule]         two findings; their fixes are not pinned
+```cpp [your-rule] [your-rule] fix=" = 1" fix=" = 2"    two findings offering exactly these two rewrites
+```cpp ~[your-rule]                    must stay quiet
+```
+
+Two things are easy to get wrong:
+
+* **`fix=` binds to the rule annotation in front of it**, and a rule's fixes are pinned as a **set** — every replacement it produced, over every finding and every edit, duplicates merged.
+  So naming one fix for a rule means naming them all, and order never matters.
+* **The finding count comes from the `[rule-id]` annotations alone.** A `fix=` never adds one.
+
+A block is linted with `all_rules()` and the total must match exactly, so a second rule firing on your case fails until the block names it too — that is deliberate, it surfaces cross-talk.
 
 **Always add both a positive and a negative** — a case that must fire and a look-alike that must not.
 For a structural rule, the negatives are the point: prove it does *not* fire on the mem-initializer, the braced return, the call-site aggregate.
