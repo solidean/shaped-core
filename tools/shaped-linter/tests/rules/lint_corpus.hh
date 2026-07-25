@@ -22,6 +22,7 @@
 //   [rule-id]   the rule must produce one finding here (repeat the annotation for N findings)
 //   ~[rule-id]  the rule must produce NO finding here
 //   fix="…"     one replacement text the PRECEDING rule produces; chain it for more
+//   hint="…"    the same, for a rewrite `--fix` does not apply (see `struct hint`)
 //
 // `fix=` binds to the annotation in front of it, and all fixes written for one rule form a SET: the
 // replacements that rule actually produced — over all its findings, all their edits, duplicates merged —
@@ -29,17 +30,22 @@
 // naming them all. Because it is a set, `[r] fix="a" [r] fix="b"` and `[r] [r] fix="a" fix="b"` are the
 // same pin, and order does not matter. Finding COUNTS come from the `[rule-id]` annotations alone.
 //
+// `hint=` is the same pin over the same rule's hint edits, tracked separately: a block may name only its
+// fixes, only its hints, or both. A hint that carries prose and no edit contributes nothing to that set,
+// so its wording is pinned by the rule's smoke test rather than here.
+//
 // A `cpp` block with no annotation, and any non-`cpp` block, is illustration and is not checked.
 // See ../../docs/coding-guidelines.md for which cases belong here rather than in a rule's smoke tests.
 
 namespace scl
 {
-/// One `[rule-id]` / `~[rule-id]` annotation, with whatever `fix="…"` was chained onto it.
+/// One `[rule-id]` / `~[rule-id]` annotation, with whatever `fix="…"` / `hint="…"` was chained onto it.
 struct lint_corpus_expectation
 {
     cc::string rule_id;
     bool negated = false;         // `~[rule-id]`: this rule must not fire at all
     cc::vector<cc::string> fixes; // replacement texts, merged per rule id with every other annotation's
+    cc::vector<cc::string> hints; // the same, for the rewrites `--fix` does not apply
 };
 
 /// One annotated code block from a corpus file.

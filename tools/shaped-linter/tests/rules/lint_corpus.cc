@@ -69,14 +69,20 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             continue;
         }
 
-        // fix="…", with \" and \\ escapes
-        constexpr auto k_fix = cc::string_view("fix=");
-        if (n - i >= k_fix.size() && info.subview({.start = i, .end = i + k_fix.size()}) == k_fix)
+        // fix="…" / hint="…", with \" and \\ escapes. Both pin a replacement text and bind identically;
+        // they differ only in which of the rule's two rewrite channels they read.
+        auto matched_keyword = cc::string_view();
+        for (auto const kw : {cc::string_view("fix="), cc::string_view("hint=")})
+            if (n - i >= kw.size() && info.subview({.start = i, .end = i + kw.size()}) == kw)
+                matched_keyword = kw;
+
+        if (!matched_keyword.empty())
         {
-            i += k_fix.size();
+            auto const label = matched_keyword.subview({.start = 0, .end = matched_keyword.size() - 1});
+            i += matched_keyword.size();
             if (i >= n || info[i] != '"')
             {
-                what = cc::string("`fix=` must be followed by a double-quoted string");
+                what = cc::format("`{}=` must be followed by a double-quoted string", label);
                 return false;
             }
             ++i;
@@ -91,24 +97,27 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             }
             if (i >= n)
             {
-                what = cc::string("unterminated `fix=\"…\"`");
+                what = cc::format("unterminated `{}=\"…\"`", label);
                 return false;
             }
             ++i; // the closing quote
 
-            // A fix belongs to the rule in front of it — that is what associates it with a rule at all,
-            // and what lets two rules on one block each pin their own rewrite.
+            // A fix or hint belongs to the rule in front of it — that is what associates it with a rule at
+            // all, and what lets two rules on one block each pin their own rewrite.
             if (out.expect.empty())
             {
-                what = cc::string("`fix=` must follow a `[rule-id]` that produces it");
+                what = cc::format("`{}=` must follow a `[rule-id]` that produces it", label);
                 return false;
             }
             if (out.expect.back().negated)
             {
-                what = cc::format("`~[{}]` must not fire, so it cannot carry a `fix=`", out.expect.back().rule_id);
+                what = cc::format("`~[{}]` must not fire, so it cannot carry a `{}=`", out.expect.back().rule_id, label);
                 return false;
             }
-            out.expect.back().fixes.push_back(cc::move(value));
+            if (label == "fix")
+                out.expect.back().fixes.push_back(cc::move(value));
+            else
+                out.expect.back().hints.push_back(cc::move(value));
             continue;
         }
 

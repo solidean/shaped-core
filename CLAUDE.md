@@ -158,9 +158,16 @@ uv run dev.py test               # build + run the full suite
 uv run dev.py build [-t <target>]
 uv run dev.py format             # clang-format all libs/ .cc/.hh in place
 uv run dev.py lint clang-tidy    # run the clang-tidy whitelist gates
+uv run dev.py lint shaped        # run shaped-linter's own rules
 uv run dev.py check --fix        # run pre-commit checks, auto-fixing what's safe
 uv run dev.py doctor             # sanity-check the toolchain
 ```
+
+**Run `uv run dev.py lint shaped --dirty-only` once your first bigger chunk of work
+compiles** — don't save it for the pre-commit gate.
+Its rules encode conventions this file only summarizes, and seeing them fire on
+*your* code is the fastest way to learn how they apply.
+`--fix` applies what is mechanically safe; a `hint:` is a judgement call left to you.
 
 **Before committing, run `uv run dev.py check --fix`** — the pre-commit gate:
 clang-format (dirty-only, auto-fixed), the clang-tidy gates (dirty-only), a full-repo cross-reference check, then the
@@ -369,6 +376,7 @@ how to write one (keep it current when public API changes).
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"`                                  |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
+| Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
@@ -377,6 +385,7 @@ how to write one (keep it current when public API changes).
 | Record a benchmark metric (perf) | `GUIDE_BENCHMARK` + `nx::guide` ([docs/guides/perf-results.md](docs/guides/perf-results.md)) |
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Run the clang-tidy gates         | `uv run dev.py lint clang-tidy` (`--dirty-only` in `check`; gates in [tools/lint/clang-tidy-gates.yml](tools/lint/clang-tidy-gates.yml)) |
+| Run shaped-linter's own rules    | `uv run dev.py lint shaped [--dirty-only] [--fix]` ([readme](tools/shaped-linter/readme.md)) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |

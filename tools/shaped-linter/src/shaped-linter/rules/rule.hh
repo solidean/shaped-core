@@ -29,13 +29,31 @@ struct text_edit
 
 /// A suggested fix: one or more edits applied together. A single edit today; the vector future-proofs
 /// multi-edit rewrites.
+///
+/// A fix must be safe to apply unattended: wherever the rule fires, applying it compiles and preserves
+/// behavior. A rewrite that is a judgement call belongs in a `hint` instead.
 struct fix
 {
     cc::vector<text_edit> edits;
 };
 
+/// A suggested rewrite that `--fix` deliberately does NOT apply — the nicer form that only a human can
+/// sign off on, because it may fail to compile or (worse) change what the code means.
+///
+/// `message` is what to weigh, and is always printed. `edits` are optional: a hint whose better form
+/// cannot be spelled mechanically carries prose alone. Nothing in the engine applies a hint's edits;
+/// they exist so the reporter can show the exact replacement, and so a future `--apply-hints` could
+/// offer them one at a time.
+struct hint
+{
+    cc::string message;
+    cc::vector<text_edit> edits;
+};
+
 /// One reported problem. `rule_id` points at the reporting rule's stable literal (the greppable slug).
-/// `span` is what to underline. `suggested_fix` is present when the rule knows how to rewrite the code.
+/// `span` is what to underline.
+/// `suggested_fix` is present when the rule can rewrite the code safely, `suggested_hint` when the better
+/// form needs a human. The two are independent: a finding may carry both, and then the fix is what lands.
 struct finding
 {
     cc::string_view rule_id;
@@ -43,6 +61,7 @@ struct finding
     cc::string message;
     severity sev = severity::warning;
     cc::optional<fix> suggested_fix;
+    cc::optional<hint> suggested_hint;
 };
 
 /// The layers a rule can walk. A rule declares the highest it needs; the engine builds the parse tree

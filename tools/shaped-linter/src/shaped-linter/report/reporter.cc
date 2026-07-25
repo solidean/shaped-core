@@ -79,6 +79,16 @@ void report_findings(cc::span<finding const> findings, source_manager const& sm,
                 cc::println("{}    fix: replace `{}` with `{}`{}", p.dim, sm.span_text(f->span),
                             trim_left(e.replacement), p.reset);
             }
+
+            // A hint is advice, so it prints its reasoning and never claims to have changed anything.
+            // `--fix` skips it; the replacement is shown only so the reader can weigh it.
+            if (f->suggested_hint.has_value())
+            {
+                auto const& h = f->suggested_hint.value();
+                cc::println("{}    hint: {}{}", p.dim, h.message, p.reset);
+                for (auto const& e : h.edits)
+                    cc::println("{}          consider `{}` (not applied){}", p.dim, trim_left(e.replacement), p.reset);
+            }
         }
         cc::println();
     }

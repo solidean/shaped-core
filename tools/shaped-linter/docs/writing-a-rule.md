@@ -79,11 +79,10 @@ rule const& your_rule()
 }
 ```
 
-### 2. Emit findings (and an optional fix)
+### 2. Emit findings (and an optional fix or hint)
 
-A `finding` carries the `rule_id`, the `span` to underline, a `message`, a `severity`, and an optional `fix`.
-A `fix` is one or more `text_edit`s — each replaces a byte range with new text.
-Wire a fix in whenever you know the rewrite; the reporter shows it and `--fix` applies it (back-to-front per file, so offsets stay valid).
+A `finding` carries the `rule_id`, the `span` to underline, a `message`, a `severity`, and — independently — an optional `fix` and an optional `hint`.
+Both are one or more `text_edit`s, each replacing a byte range with new text.
 
 ```cpp
 ctx.report({
@@ -94,6 +93,29 @@ ctx.report({
     .suggested_fix = fix{.edits = {text_edit{.span = range_to_replace, .replacement = cc::string("new text")}}},
 });
 ```
+
+#### `fix` vs `hint` — the line between them
+
+**A `fix` must be safe to apply unattended.** Wherever the rule fires, applying it compiles and preserves behavior.
+The reporter shows it and `--fix` applies it (back-to-front per file, so offsets stay valid).
+Hold a rewrite to that bar or it does not belong in a fix: `--fix` runs across the whole tree at once, so one bad rewrite is a tree-wide breakage.
+
+**A `hint` is the better form that only a human can sign off on**, and `--fix` never applies it.
+Reach for it when the nicer rewrite may fail to compile, or — the serious case — may silently change what the code means.
+A hint carries a `message` saying what to weigh, plus optional `edits`; a hint whose better form cannot be spelled mechanically carries prose alone.
+
+```cpp
+    .suggested_hint = hint{
+        .message = cc::string("why a human has to decide, and what the better form is"),
+        .edits = {text_edit{.span = range_to_replace, .replacement = cc::string("nicer text")}},
+    },
+```
+
+The two are independent — a finding may carry both, and then the fix is what lands while the hint is printed alongside.
+[`default_init_assignment.cc`](../src/shaped-linter/rules/default_init_assignment.cc) is the worked example: its fix moves the `=` in and keeps the braces (always safe), while its hint offers the braceless `= value` for a member and the `auto v = T(value)` form for a local.
+Its block comment spells out which hazard rules out which rewrite — worth reading before you decide where your own rewrite belongs.
+
+Nothing in the engine reads a hint's edits; `apply_fixes` looks only at `suggested_fix`, and [`engine-test.cc`](../tests/rules/engine-test.cc) pins that.
 
 Spans are `{file_id, byte_begin, byte_end}` (half-open).
 Get text with `ctx.source.span_text(span)`; resolve to line/column happens later, in the reporter.
@@ -132,6 +154,7 @@ The corpus annotations, in short — the full specification is in [coding-guidel
 ```cpp [your-rule] fix=" = {0}"        one finding, and that is the rewrite it offers
 ```cpp [your-rule] [your-rule]         two findings; their fixes are not pinned
 ```cpp [your-rule] [your-rule] fix=" = 1" fix=" = 2"    two findings offering exactly these two rewrites
+```cpp [your-rule] fix=" = {0}" hint=" = 0"             the same block, pinning both channels
 ```cpp ~[your-rule]                    must stay quiet
 ```
 
@@ -140,6 +163,9 @@ Two things are easy to get wrong:
 * **`fix=` binds to the rule annotation in front of it**, and a rule's fixes are pinned as a **set** — every replacement it produced, over every finding and every edit, duplicates merged.
   So naming one fix for a rule means naming them all, and order never matters.
 * **The finding count comes from the `[rule-id]` annotations alone.** A `fix=` never adds one.
+
+`hint=` is the same pin over the same rule's hint edits, tracked separately — a block may name only its fixes, only its hints, or both.
+A prose-only hint contributes no edit, so its wording is pinned by the smoke test rather than the corpus, and so is the *absence* of a hint.
 
 A block is linted with `all_rules()` and the total must match exactly, so a second rule firing on your case fails until the block names it too — that is deliberate, it surfaces cross-talk.
 

@@ -132,6 +132,20 @@ cc::vector<cc::string_view> fixes_produced_by(cc::span<finding const> found, cc:
     return out;
 }
 
+/// The same over the hint channel. A prose-only hint has no edits and so contributes nothing.
+cc::vector<cc::string_view> hints_produced_by(cc::span<finding const> found, cc::string_view id)
+{
+    auto out = cc::vector<cc::string_view>();
+    for (auto const& f : found)
+    {
+        if (f.rule_id != id || !f.suggested_hint.has_value())
+            continue;
+        for (auto const& e : f.suggested_hint.value().edits)
+            out.push_back(e.replacement);
+    }
+    return out;
+}
+
 /// Every replacement the block wrote for `id`, gathered across all of that rule's annotations.
 cc::vector<cc::string_view> fixes_pinned_for(cc::span<lint_corpus_expectation const> expect, cc::string_view id)
 {
@@ -142,6 +156,19 @@ cc::vector<cc::string_view> fixes_pinned_for(cc::span<lint_corpus_expectation co
             continue;
         for (auto const& f : e.fixes)
             out.push_back(f);
+    }
+    return out;
+}
+
+cc::vector<cc::string_view> hints_pinned_for(cc::span<lint_corpus_expectation const> expect, cc::string_view id)
+{
+    auto out = cc::vector<cc::string_view>();
+    for (auto const& e : expect)
+    {
+        if (e.rule_id != id)
+            continue;
+        for (auto const& h : e.hints)
+            out.push_back(h);
     }
     return out;
 }
@@ -180,6 +207,13 @@ INVOCABLE_TEST("shaped-linter - corpus cases", (lint_corpus_group const& group))
                     CHECK(render_fix_set(fixes_produced_by(found, id)) == render_fix_set(pinned))
                         .context(where)
                         .dump("rule", id);
+
+                auto const pinned_hints = hints_pinned_for(c.expect, id);
+                if (!pinned_hints.empty())
+                    CHECK(render_fix_set(hints_produced_by(found, id)) == render_fix_set(pinned_hints))
+                        .context(where)
+                        .dump("rule", id)
+                        .dump("channel", "hint");
             }
         }
     }

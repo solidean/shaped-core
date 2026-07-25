@@ -42,6 +42,7 @@ void f() { g({1, 2}); }
 | `[rule-id]` | this rule must produce one finding here — repeat the annotation for N findings |
 | `~[rule-id]` | this rule must produce **no** finding here |
 | `fix="…"` | one replacement text the **preceding** rule produces; chain it for more (`\"` / `\\` escape) |
+| `hint="…"` | the same, over that rule's `hint` edits — the rewrites `--fix` does not apply |
 
 `fix=` binds to the annotation in front of it, which is what associates a rewrite with a rule at all —
 two rules on one block each pin their own, even when the texts are identical.
@@ -57,6 +58,11 @@ these two are the same pin:
 ```
 
 Finding *counts* come from the `[rule-id]` annotations alone — a `fix=` never adds one.
+
+`hint=` works identically and is tracked as its own set, so a block may pin only its fixes, only its
+hints, or both. Two things the corpus cannot express about hints, which therefore belong in the smoke
+test: a **prose-only** hint (one with no edits — it contributes nothing to the set) and the **absence**
+of a hint.
 
 Rules for writing one:
 

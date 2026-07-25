@@ -92,6 +92,8 @@ cc::result<isize> apply_fixes(source_manager const& sm, cc::span<finding const> 
     cc::set<u32> files;
     for (auto const& f : findings)
     {
+        // Only `suggested_fix`. A finding's `suggested_hint` is never read here — that is the whole
+        // distinction between the two, so it is enforced by this loop and nothing else.
         if (!f.suggested_fix.has_value())
             continue;
         for (auto const& e : f.suggested_fix.value().edits)

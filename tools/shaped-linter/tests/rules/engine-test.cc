@@ -104,6 +104,19 @@ TEST("shaped-linter - fix round-trip - an array bound survives the rewrite")
     CHECK(lint_and_fix("void f() { int a[2][3]{1}; }") == "void f() { int a[2][3] = {1}; }");
 }
 
+TEST("shaped-linter - apply_fixes ignores the hint channel")
+{
+    // The one behavior that makes a hint a hint. This member carries both channels — fix `= {false}` and
+    // hint `= false` — and the applied result must be the fix, with the hint's edit left on the floor.
+    auto const src = cc::string_view("struct S { cc::atomic<bool> _p{false}; };");
+    auto const found = run_rules_on_text(src);
+    REQUIRE(found.size() == 1);
+    REQUIRE(found[0].suggested_hint.has_value());
+    REQUIRE(found[0].suggested_hint.value().edits.size() == 1);
+
+    CHECK(lint_and_fix(src) == "struct S { cc::atomic<bool> _p = {false}; };");
+}
+
 TEST("shaped-linter - fix round-trip - every declarator of a multi-declarator statement")
 {
     CHECK(lint_and_fix("struct S { int a{1}, b{2}; };") == "struct S { int a = {1}, b = {2}; };");

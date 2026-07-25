@@ -21,6 +21,8 @@ uv run dev.py lint shaped --fix        # apply the suggested fixes in place
 
 uv run dev.py build -t shaped-linter   # build the tool
 uv run dev.py test shaped-linter-test  # run its tests
+
+uv run dev.py run shaped-linter <file>...   # point it at specific files (builds first)
 ```
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
@@ -42,6 +44,16 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 | Rule | What it enforces |
 |---|---|
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
+
+### `fix` and `hint`
+
+A finding can carry two kinds of rewrite, and the distinction is load-bearing:
+
+* a **`fix`** is safe to apply unattended — wherever the rule fires, applying it compiles and preserves behavior. `--fix` applies it.
+* a **`hint`** is the nicer form that only a human can sign off on, because it may fail to compile or silently change what the code means. It is **printed and never applied**, with a message saying what to weigh.
+
+`--fix` therefore stays trustworthy across a whole-tree run, and the judgement calls still get surfaced where you can see them.
+`default-init-assignment` uses both: its fix keeps the braces (`x{0}` → `x = {0}`), while its hint offers the braceless `= 0` for a data member and the `auto v = T(0)` form for a local.
 
 ## How it works
 
