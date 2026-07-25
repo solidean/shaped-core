@@ -36,7 +36,8 @@ One-liner per library:
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion),
   with **opinionated aggregators** ("load an image", "load a mesh") planned on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
-  A JSON reader (`data/`) and a Wavefront OBJ reader (`geometry/`) exist so far.
+  So far: JSON + markdown readers and a SQLite engine wrapper (`data/`), a Wavefront OBJ reader (`geometry/`),
+  and PNG/JPEG read+write under the `babel::image` aggregator (`image/`).
   Namespace `babel`. Depends on clean-core + typed-geometry.
   Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`,
@@ -70,6 +71,9 @@ Supporting directories:
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
   see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in
   binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules),
+  `lint/` (the clang-tidy gate whitelist),
+  `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see
+  [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`),
   and `instruction-tracer/` (a C++ tool — see
   [its readme](tools/instruction-tracer/readme.md) — that records what optimized
   code actually executed; drive it via `dev.py assembly trace`).
