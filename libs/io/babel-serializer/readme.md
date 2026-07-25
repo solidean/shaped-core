@@ -14,7 +14,7 @@ auto const tag0 = doc.root()["tags"][0].as_double(); // 1
 Headers are included by their full path from `src/`, e.g. `#include <babel-serializer/geometry/obj.hh>`.
 Each format lives in its own sub-namespace (`babel::json`, `babel::obj`); `<babel-serializer/all.hh>` is the umbrella.
 
-This library is at an **early stage** — a JSON reader, an OBJ reader, a live SQLite handle, and PNG/JPG image read+write exist so far.
+This library is at an **early stage** — a JSON reader, a markdown block reader, an OBJ reader, a live SQLite handle, and PNG/JPG image read+write exist so far.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
 ## Design at a glance
@@ -35,7 +35,7 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 | Folder      | What's in it |
 |-------------|--------------|
 | (root)      | `fwd.hh` (forward decls + vocabulary aliases), `all.hh` (umbrella) |
-| `data/`     | `json` — the JSON reader (`document` / `node` / `ref`, `read`); `sqlite` — a live SQLite handle (`database` / `statement` / `row`) |
+| `data/`     | `json` — the JSON reader (`document` / `node` / `ref`, `read`); `markdown` — the block-level markdown reader (same `document` / `ref` shape); `sqlite` — a live SQLite handle (`database` / `statement` / `row`) |
 | `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`) |
 | `image/`    | `png` / `jpg` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
 
@@ -56,6 +56,7 @@ Build and test through the repo driver — never run the `babel-serializer-test`
 uv run dev.py test            # build + run the full suite
 uv run dev.py test "json -"   # just the JSON tests while iterating
 uv run dev.py test "obj -"    # just the OBJ tests
+uv run dev.py test "markdown -"
 ```
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.

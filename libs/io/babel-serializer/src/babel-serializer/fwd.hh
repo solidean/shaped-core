@@ -3,7 +3,7 @@
 #include <clean-core/fwd.hh>
 
 /// Aggregate forward declarations for babel-serializer.
-/// Each format lives in its own sub-namespace (babel::json, babel::sqlite, babel::obj) and owns its own header;
+/// Each format lives in its own sub-namespace (babel::json, babel::markdown, babel::sqlite, babel::obj) and owns its own header;
 /// include that header directly when it is all you need.
 
 namespace babel
@@ -20,6 +20,14 @@ struct node;
 class document;
 struct ref;
 } // namespace babel::json
+
+namespace babel::markdown
+{
+enum class node_kind : cc::u8;
+struct node;
+class document;
+struct ref;
+} // namespace babel::markdown
 
 namespace babel::obj
 {
