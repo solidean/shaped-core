@@ -146,7 +146,7 @@ private:
             ensure_open_window();
             cc::isize const avail = _sys._window_bytes - _window_used;
             cc::isize const base = cc::isize(_current_window % cc::u64(num_staging_windows)) * _sys._window_bytes;
-            dx12_upload_allocation const alloc{_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
+            dx12_upload_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
             cc::isize const consumed = upload.execute_next_job(*_list.Get(), alloc);
             if (consumed == 0) // window tail too small for the next aligned texture row → roll to a fresh window

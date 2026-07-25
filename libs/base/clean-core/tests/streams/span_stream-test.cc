@@ -21,7 +21,7 @@ static_assert(!std::is_convertible_v<cc::span_write_stream_adapter, cc::read_str
 TEST("span_stream - read round-trip and seeking")
 {
     cc::byte const data[5] = {b(10), b(11), b(12), b(13), b(14)};
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>(data)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(data));
     cc::seekable_read_stream s = adapter.stream();
 
     // whole span is available up front (unbuffered)
@@ -52,7 +52,7 @@ TEST("span_stream - read round-trip and seeking")
 TEST("span_stream - read helpers")
 {
     cc::byte const data[4] = {b(1), b(2), b(3), b(4)};
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>(data)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(data));
     cc::seekable_read_stream s = adapter.stream();
 
     cc::vector<cc::byte> out = cc::vector<cc::byte>::create_defaulted(4);
@@ -68,7 +68,7 @@ TEST("span_stream - read helpers")
 
 TEST("span_stream - empty span is immediately at end")
 {
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>()};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>());
     cc::seekable_read_stream s = adapter.stream();
 
     CHECK(s.at_end().value());

@@ -36,12 +36,13 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
     {
         auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
         REQUIRE(tex != nullptr);
-        sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
+        sg::binding const b
+            = {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
         auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
-        sg::named_view const nv{.name = "Tex", .view = typed.as_readwrite_view()};
+        sg::named_view const nv = {.name = "Tex", .view = typed.as_readwrite_view()};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr); // create_texture_view UAV succeeded + the debug layer accepted it
     }
@@ -50,12 +51,13 @@ TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV descripto
     {
         auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readonly_texture));
         REQUIRE(tex != nullptr);
-        sg::binding const b{.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
+        sg::binding const b
+            = {.name = "Tex", .set = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
         auto layout = c.uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
-        sg::named_view const nv{.name = "Tex", .view = typed.as_readonly_view()};
+        sg::named_view const nv = {.name = "Tex", .view = typed.as_readonly_view()};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr);
     }

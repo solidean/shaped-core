@@ -36,7 +36,7 @@ cc::vector<cc::string> collect_lines(Stream& s)
 TEST("read_line - basic lines, final line without newline")
 {
     auto const text = cc::string_view("alpha\nbeta\ngamma");
-    cc::span_read_stream_adapter adapter{as_bytes(text)};
+    auto adapter = cc::span_read_stream_adapter(as_bytes(text));
     cc::read_stream s = adapter;
 
     auto const lines = collect_lines(s);
@@ -49,7 +49,7 @@ TEST("read_line - basic lines, final line without newline")
 TEST("read_line - trailing newline adds no phantom line")
 {
     auto const text = cc::string_view("a\nb\n");
-    cc::span_read_stream_adapter adapter{as_bytes(text)};
+    auto adapter = cc::span_read_stream_adapter(as_bytes(text));
     cc::read_stream s = adapter;
 
     auto const lines = collect_lines(s);
@@ -61,7 +61,7 @@ TEST("read_line - trailing newline adds no phantom line")
 TEST("read_line - empty lines are preserved")
 {
     auto const text = cc::string_view("\n\nx\n");
-    cc::span_read_stream_adapter adapter{as_bytes(text)};
+    auto adapter = cc::span_read_stream_adapter(as_bytes(text));
     cc::read_stream s = adapter;
 
     auto const lines = collect_lines(s);
@@ -74,7 +74,7 @@ TEST("read_line - empty lines are preserved")
 TEST("read_line - CRLF endings are stripped")
 {
     auto const text = cc::string_view("one\r\ntwo\r\nthree\r\n");
-    cc::span_read_stream_adapter adapter{as_bytes(text)};
+    auto adapter = cc::span_read_stream_adapter(as_bytes(text));
     cc::read_stream s = adapter;
 
     auto const lines = collect_lines(s);
@@ -86,7 +86,7 @@ TEST("read_line - CRLF endings are stripped")
 
 TEST("read_line - empty input yields no line and clears out")
 {
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>()};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>());
     cc::read_stream s = adapter;
 
     auto line = cc::string("prefilled");
@@ -103,7 +103,7 @@ TEST("read_line - lines and CRLF split across buffer refills")
     auto const text = cc::string_view("hello\r\nfrom\na chunked\r\npipe");
     for (auto const chunk : {cc::isize(1), cc::isize(2), cc::isize(3), cc::isize(7)})
     {
-        mock_pipe_read_stream_adapter adapter{as_bytes(text), chunk};
+        mock_pipe_read_stream_adapter adapter = {as_bytes(text), chunk};
         cc::read_stream s = adapter.stream();
 
         auto const lines = collect_lines(s);
@@ -118,7 +118,7 @@ TEST("read_line - lines and CRLF split across buffer refills")
 TEST("read_line - max_size splits a long line into bounded pieces, losing nothing")
 {
     auto const text = cc::string_view("abcdefgh\nij");
-    cc::span_read_stream_adapter adapter{as_bytes(text)};
+    auto adapter = cc::span_read_stream_adapter(as_bytes(text));
     cc::read_stream s = adapter;
 
     auto line = cc::string();

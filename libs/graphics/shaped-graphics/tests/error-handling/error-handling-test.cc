@@ -199,7 +199,7 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     REQUIRE(ctx != nullptr);
 
     // A one-entry layout expecting a read-write structured buffer named "Data".
-    sg::binding const b{
+    sg::binding const b = {
         .name = "Data",
         .set = 0,
         .index = 0,
@@ -215,14 +215,15 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     REQUIRE(buf != nullptr);
 
     // A view bound to a name the layout does not declare.
-    sg::named_view const unknown_name{.name = "Nope", .view = sg::buffer<cc::u32>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const unknown_name
+        = {.name = "Nope", .view = sg::buffer<cc::u32>::from_raw(buf).as_readwrite_buffer()};
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&unknown_name, 1)),
                     sg::binding_group_exception);
     // The fallible core surfaces the same failure as an error rather than throwing.
     CHECK(ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&unknown_name, 1)).has_error());
 
     // A read-only view bound to a read-write binding: right name, wrong kind.
-    sg::named_view const wrong_kind{.name = "Data", .view = sg::buffer<cc::u32>::from_raw(buf).as_readonly_buffer()};
+    sg::named_view const wrong_kind = {.name = "Data", .view = sg::buffer<cc::u32>::from_raw(buf).as_readonly_buffer()};
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&wrong_kind, 1)),
                     sg::binding_group_exception);
 

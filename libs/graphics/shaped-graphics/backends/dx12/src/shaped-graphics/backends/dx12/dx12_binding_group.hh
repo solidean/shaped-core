@@ -53,9 +53,9 @@ public:
 
     dx12_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
     dx12_binding_group_layout_handle layout;
-    D3D12_GPU_DESCRIPTOR_HANDLE table_start{};
+    D3D12_GPU_DESCRIPTOR_HANDLE table_start = {};
     dx12_descriptor_alloc table; // the group's CBV/SRV/UAV range (its start feeds table_start; count for freeing)
-    D3D12_GPU_DESCRIPTOR_HANDLE sampler_table_start{};
+    D3D12_GPU_DESCRIPTOR_HANDLE sampler_table_start = {};
     dx12_descriptor_alloc sampler_table; // the group's SAMPLER range (empty if the layout has no dynamic samplers)
     cc::vector<dx12_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
     cc::vector<dx12_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives

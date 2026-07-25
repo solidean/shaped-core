@@ -82,7 +82,7 @@ CC_COLD_FUNC void cc::impl::handle_assert_failure_sv(char const* expression,
                                                      cc::string_view message,
                                                      cc::source_location location)
 {
-    assertion_info const info{
+    assertion_info const info = {
         .expression = cc::string(expression),
         .message = cc::string(message),
         .location = location,

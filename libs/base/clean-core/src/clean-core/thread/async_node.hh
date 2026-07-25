@@ -926,7 +926,7 @@ private:
     /// strong owners' collective one) in the low half. Born 1/1 by init_control. Fused into one word (offset 0)
     /// so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the
     /// sole owner — see cc::fused_refcount. The state/lock live in a separate word.
-    cc::atomic<cc::u64> _counts{0};
+    cc::atomic<cc::u64> _counts = {0};
 
     /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits
     /// 2..4, the wake-pending flag in bit 1, and the spinlock in bit 0. Folding lock + state + wake in with the
@@ -937,7 +937,7 @@ private:
     /// lock RMWs. Deliberate: nearly all is_ready() calls target already-resolved nodes, which take no lock
     /// (completion is done) — no contention there. If a hot pre-completion is_ready() path ever contends,
     /// steal the MSB of _counts' weak half for a dedicated ready bit instead.
-    cc::atomic<cc::u64> _state_and_ops{0};
+    cc::atomic<cc::u64> _state_and_ops = {0};
 
     // No further members: this is a 16 B header. The payload (unresolved scratch ⊍ resolved value/error, incl.
     // the compute frame) is raw storage declared by the derived async_typed_node<T> at offset 16, via payload().

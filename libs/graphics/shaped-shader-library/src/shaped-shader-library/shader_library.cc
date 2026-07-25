@@ -260,9 +260,8 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
         return text;
     };
 
-    shader_source_description desc{.source = cc::move(source.value()),
-                                   .entry_point = cc::string::create_copy_of(entry_point),
-                                   .stage = stage};
+    shader_source_description desc
+        = {.source = cc::move(source.value()), .entry_point = cc::string::create_copy_of(entry_point), .stage = stage};
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())

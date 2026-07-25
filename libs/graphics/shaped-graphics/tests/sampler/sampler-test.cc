@@ -49,7 +49,7 @@ TEST("sg sampler - binding_type::sampler is not a view")
 
 TEST("sg sampler - named_sampler pairs a name with a sampler state")
 {
-    sg::named_sampler const ns{.name = "Samp", .sampler = {.mag_filter = sg::sampler_filter::nearest}};
+    sg::named_sampler const ns = {.name = "Samp", .sampler = {.mag_filter = sg::sampler_filter::nearest}};
     CHECK(ns.name == "Samp");
     CHECK(ns.sampler.mag_filter == sg::sampler_filter::nearest);
     CHECK(ns.sampler.min_filter == sg::sampler_filter::linear); // untouched default

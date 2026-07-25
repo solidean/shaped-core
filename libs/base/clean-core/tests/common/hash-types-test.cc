@@ -60,8 +60,8 @@ TEST("hash types - span / fixed_array / array families agree on content")
 
 TEST("hash types - pair")
 {
-    cc::pair<int, int> const p{1, 2};
-    cc::pair<int, int> const swapped{2, 1};
+    cc::pair<int, int> const p = {1, 2};
+    cc::pair<int, int> const swapped = {2, 1};
     CHECK(cc::make_hash(p) == cc::make_hash(1, 2));
     CHECK(cc::make_hash(p) != cc::make_hash(swapped));
 }

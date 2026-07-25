@@ -345,10 +345,10 @@ TEST("check - to_debug_string only called on failing checks")
 {
     nx::test_registry reg;
 
-    call_tracker pass_lhs{10};
-    call_tracker pass_rhs{10};
-    call_tracker fail_lhs{5};
-    call_tracker fail_rhs{7};
+    auto pass_lhs = call_tracker(10);
+    auto pass_rhs = call_tracker(10);
+    auto fail_lhs = call_tracker(5);
+    auto fail_rhs = call_tracker(7);
 
     reg.add_declaration("debug_string_test", {},
                         [&]
@@ -379,10 +379,10 @@ TEST("check - to_debug_string only called on failing REQUIRE")
 {
     nx::test_registry reg;
 
-    call_tracker pass_lhs{10};
-    call_tracker pass_rhs{10};
-    call_tracker fail_lhs{5};
-    call_tracker fail_rhs{7};
+    auto pass_lhs = call_tracker(10);
+    auto pass_rhs = call_tracker(10);
+    auto fail_lhs = call_tracker(5);
+    auto fail_rhs = call_tracker(7);
 
     int counter = 0;
 
@@ -420,10 +420,10 @@ TEST("check - to_debug_string with comparison operators")
 {
     nx::test_registry reg;
 
-    call_tracker pass_less{3};
-    call_tracker pass_less_rhs{5};
-    call_tracker fail_less{7};
-    call_tracker fail_less_rhs{2};
+    auto pass_less = call_tracker(3);
+    auto pass_less_rhs = call_tracker(5);
+    auto fail_less = call_tracker(7);
+    auto fail_less_rhs = call_tracker(2);
 
     reg.add_declaration("debug_string_comparison_test", {},
                         [&]

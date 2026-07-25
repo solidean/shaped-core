@@ -164,7 +164,7 @@ namespace
 // a frame-side guard would not.
 struct counted
 {
-    static inline cc::atomic<int> live{0};
+    static inline cc::atomic<int> live = {0};
 
     cc::i64 v = 0;
 

@@ -221,9 +221,9 @@ public:
 private:
     struct slot_state
     {
-        // Default-init braces are load-bearing: subresource_partition's default ctor is explicit, so
-        // aggregate `slot_state{}` needs them.
-        sg::subresource_partition partition{}; // this list's private state (extent set when seeded)
+        // subresource_partition's default ctor is explicit, so the initializer names the type: `= {}` is
+        // copy-list-init and would not pick it. Extent is set when the slot is seeded.
+        sg::subresource_partition partition = sg::subresource_partition();
         bool active = false;
         bool recorded = false;        // this slot's command list has added the texture to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)

@@ -363,7 +363,8 @@ public:
     //    Signal in submit so token order == queue/signal order (out-of-order signals could move the
     //    fence value backwards).
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
-    cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
+    // cc::mutex's value ctor is explicit, so the type is named rather than left to `= {…}`.
+    cc::mutex<sg::submission_token> _next_submission = cc::mutex<sg::submission_token>(sg::submission_token::first);
 
     // Hands each open command list a dense access-tracking slot (a backend helper for concurrent
     // recording); acquired at create, released at submit/drop. Each resource separately tracks how many

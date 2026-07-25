@@ -74,7 +74,7 @@ TEST("slib - real_filesystem reads files under its root")
     dir.write("a.hlsl", "void main() {}");
     dir.write("sub/b.hlsli", "#define X 1");
 
-    slib::real_filesystem fs{dir.root()};
+    auto fs = slib::real_filesystem(dir.root());
 
     CHECK(fs.read_text("a.hlsl").value() == "void main() {}");
     CHECK(fs.read_text("sub/b.hlsli").value() == "#define X 1");
@@ -90,7 +90,7 @@ TEST("slib - real_filesystem revision moves when a file's content changes")
     temp_dir dir("slib-real-fs-revision");
     dir.write("a.hlsl", "one");
 
-    slib::real_filesystem fs{dir.root()};
+    auto fs = slib::real_filesystem(dir.root());
     auto const first = fs.revision("a.hlsl");
     CHECK(first != slib::file_revision::none);
     CHECK(fs.revision("a.hlsl") == first); // stable while nothing changes
@@ -108,7 +108,7 @@ TEST("slib - real_filesystem confines lookups to its root")
     dir.write("sub/a.hlsl", "inside");
 
     // Rooted at the subdirectory: the file one level up must be unreachable from here.
-    slib::real_filesystem fs{cc::string((dir.path / "sub").string().c_str())};
+    auto fs = slib::real_filesystem(cc::string((dir.path / "sub").string().c_str()));
     CHECK(fs.exists("a.hlsl"));
 
     CHECK(!fs.exists("../a.hlsl"));
@@ -123,7 +123,7 @@ TEST("slib - real_filesystem over a missing root finds nothing")
 {
     // Not an error: this is what makes "mount the source dir over the embedded copy, if it exists"
     // work without a mode flag — a shipped build simply has no source dir.
-    slib::real_filesystem fs{cc::string("C:/definitely/not/a/real/shader/dir")};
+    auto fs = slib::real_filesystem(cc::string("C:/definitely/not/a/real/shader/dir"));
 
     CHECK(!fs.exists("a.hlsl"));
     CHECK(!fs.read_text("a.hlsl").has_value());
@@ -135,9 +135,9 @@ TEST("slib - real_filesystem watches its root for changes")
     temp_dir dir("slib-real-fs-watch");
     dir.write("a.hlsl", "v1");
 
-    slib::real_filesystem fs{dir.root()};
+    auto fs = slib::real_filesystem(dir.root());
 
-    cc::atomic<int> fires{0};
+    cc::atomic<int> fires = {0};
     auto const sub = fs.watch("", [&fires] { fires.fetch_add(1); });
 
     dir.write("a.hlsl", "a much longer v2");
@@ -162,7 +162,7 @@ TEST("slib - real_filesystem watches its root for changes")
 TEST("slib - real_filesystem cannot watch a root that does not exist")
 {
     temp_dir dir("slib-real-fs-watch-missing");
-    slib::real_filesystem fs{cc::string((dir.path / "nope").string().c_str())};
+    auto fs = slib::real_filesystem(cc::string((dir.path / "nope").string().c_str()));
 
     // nullopt, not a subscription that never fires: there is nothing to watch, so the only truthful answer
     // is "poll me". A shipped build with no source tree lands here.
@@ -174,9 +174,9 @@ TEST("slib - dropping a real_filesystem watch stops the sink")
     temp_dir dir("slib-real-fs-watch-stop");
     dir.write("a.hlsl", "v1");
 
-    slib::real_filesystem fs{dir.root()};
+    auto fs = slib::real_filesystem(dir.root());
 
-    cc::atomic<int> fires{0};
+    cc::atomic<int> fires = {0};
     {
         auto const sub = fs.watch("", [&fires] { fires.fetch_add(1); });
 
@@ -203,6 +203,6 @@ TEST("slib - real_filesystem does not read a directory as a file")
     temp_dir dir("slib-real-fs-dir");
     dir.write("sub/a.hlsl", "inside");
 
-    slib::real_filesystem fs{dir.root()};
+    auto fs = slib::real_filesystem(dir.root());
     CHECK(!fs.exists("sub")); // a directory is not a file
 }

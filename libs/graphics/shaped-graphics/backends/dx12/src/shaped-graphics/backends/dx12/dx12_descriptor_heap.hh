@@ -101,8 +101,8 @@ struct dx12_descriptor_heap
 
     dx12_context* _ctx = nullptr; // for retiring epochs when the transient ring is full
     ComPtr<ID3D12DescriptorHeap> heap;
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu_start{};
-    D3D12_GPU_DESCRIPTOR_HANDLE gpu_start{};
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu_start = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu_start = {};
     int increment = 0;
     int capacity = 0;
     int transient_capacity = 0; // [0, transient_capacity) is the ring; [transient_capacity, capacity) persistent

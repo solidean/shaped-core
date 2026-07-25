@@ -31,7 +31,7 @@ TEST("fuzz minimize - add1/is-not-7")
 
     SECTION("shrinks to 6 operations")
     {
-        cc::random rng{1u};
+        auto rng = cc::random(1u);
         auto minimized = res.failing_run.value().minimize(rng);
 
         // value "3" + 4x add1 (3->4->5->6->7) + the failing is-not-7 check == 6
@@ -40,7 +40,7 @@ TEST("fuzz minimize - add1/is-not-7")
 
     SECTION("minimized run still reproduces the failure")
     {
-        cc::random rng{2u};
+        auto rng = cc::random(2u);
         auto minimized = res.failing_run.value().minimize(rng);
 
         auto replay = minimized.replay();
@@ -62,7 +62,7 @@ TEST("fuzz minimize - seeded gen/test shrinks to 3 operations")
     auto res = find_failing(*t, 256);
     REQUIRE(res.failing_run.has_value());
 
-    cc::random rng{7u};
+    auto rng = cc::random(7u);
     auto minimized = res.failing_run.value().minimize(rng);
 
     // two distinct gens feeding the failing test call

@@ -108,7 +108,7 @@ TEST("sg bindings - named_view pairs a name with a bound view")
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
 
     // A typed view converts implicitly to the named_view's raw_view.
-    sg::named_view const nv{.name = "Output", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const nv = {.name = "Output", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
     CHECK(nv.name == "Output");
     CHECK(sg::access_of(nv.view) == sg::view_class::readwrite);
     CHECK(sg::shape_of(nv.view) == sg::view_shape::structured);

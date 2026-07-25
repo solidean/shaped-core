@@ -173,7 +173,7 @@ sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list
     {
         cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
         cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
-        dx12_download_allocation const alloc{_buffer.Get(), _mapped, offset, budget};
+        dx12_download_allocation const alloc = {_buffer.Get(), _mapped, offset, budget};
         dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
         if (pending.bytes == 0) // tail too small for an aligned row → skip to the seam
         {
@@ -223,7 +223,7 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     {
         cc::isize const off = cc::isize(cursor % cc::u64(_capacity));
         cc::isize const budget = _capacity - off; // contiguous bytes to the seam
-        dx12_download_allocation const alloc{_buffer.Get(), _mapped, off, budget};
+        dx12_download_allocation const alloc = {_buffer.Get(), _mapped, off, budget};
         dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
         CC_ASSERT(pending.bytes > 0, "inline readback made no progress");
         cursor += cc::u64(pending.bytes);

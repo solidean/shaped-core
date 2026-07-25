@@ -41,15 +41,15 @@ TEST("hash128 - empty input is well-defined")
 
 TEST("hash128 - value semantics")
 {
-    cc::hash128 const h{.low = 0x1122334455667788ull, .high = 0x99aabbccddeeff00ull};
+    cc::hash128 const h = {.low = 0x1122334455667788ull, .high = 0x99aabbccddeeff00ull};
     cc::hash128 const copy = h;
     CHECK(h == copy);
     CHECK(!(h != copy));
 
     // default operator<=> orders lexicographically by (low, high)
-    cc::hash128 const a{.low = 1, .high = 2};
-    cc::hash128 const bigger_low{.low = 2, .high = 0};
-    cc::hash128 const bigger_high{.low = 1, .high = 3};
+    cc::hash128 const a = {.low = 1, .high = 2};
+    cc::hash128 const bigger_low = {.low = 2, .high = 0};
+    cc::hash128 const bigger_high = {.low = 1, .high = 3};
     CHECK(a < bigger_low);
     CHECK(a < bigger_high);
     CHECK(hash(h) == h.low);

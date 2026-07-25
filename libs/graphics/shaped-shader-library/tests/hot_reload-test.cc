@@ -310,7 +310,7 @@ TEST("slib - a shader first acquired after hot reload started is still watched")
 
 TEST("slib - a watched poll does no work while nothing changes")
 {
-    counting_fixture f{true};
+    auto f = counting_fixture(true);
     CHECK(f.source() == "v1");
 
     f.lib.start_hot_reload({.unthreaded = true});
@@ -333,7 +333,7 @@ TEST("slib - a watched poll does no work while nothing changes")
 
 TEST("slib - hot reload falls back to polling when the filesystem cannot notify")
 {
-    counting_fixture f{false};
+    auto f = counting_fixture(false);
     CHECK(f.source() == "v1");
 
     f.lib.start_hot_reload({.unthreaded = true});
@@ -352,7 +352,7 @@ TEST("slib - hot reload falls back to polling when the filesystem cannot notify"
 
 TEST("slib - force_polling ignores a filesystem that could notify")
 {
-    counting_fixture f{true}; // it *can* notify; the config says not to care
+    auto f = counting_fixture(true); // it *can* notify; the config says not to care
     CHECK(f.source() == "v1");
 
     f.lib.start_hot_reload({.unthreaded = true, .force_polling = true});

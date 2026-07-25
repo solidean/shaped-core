@@ -441,11 +441,11 @@ void sweep()
         measure("step2_teb_diff", Size, v);
     }
     {
-        VarResource<Size> v{cc::default_memory_resource};
+        VarResource<Size> v = {cc::default_memory_resource};
         measure("mimalloc", Size, v);
     }
     {
-        VarResource<Size> v{&cc::system_memory_resource};
+        VarResource<Size> v = {&cc::system_memory_resource};
         measure("system", Size, v);
     }
     {

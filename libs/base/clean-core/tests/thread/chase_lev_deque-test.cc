@@ -182,8 +182,8 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
     for (auto& c : claims)
         c.store(0, cc::memory_order_relaxed);
 
-    cc::atomic<bool> done{false};
-    cc::atomic<int> claimed_total{0};
+    cc::atomic<bool> done = {false};
+    cc::atomic<int> claimed_total = {0};
 
     auto const claim = [&](int* p)
     {
@@ -264,9 +264,9 @@ TEST("chase_lev_deque - thieves racing for a single element never double-claim i
     constexpr int thieves = 3;
 
     deque d(8);
-    cc::atomic<int> claimed{0};
-    cc::atomic<bool> stop{false};
-    cc::atomic<int> round_gate{0};
+    cc::atomic<int> claimed = {0};
+    cc::atomic<bool> stop = {false};
+    cc::atomic<int> round_gate = {0};
 
     cc::vector<std::thread> ts;
     ts.reserve(thieves);

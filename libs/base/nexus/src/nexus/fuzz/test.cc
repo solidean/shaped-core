@@ -68,7 +68,7 @@ test::fuzz_result test::execute_fuzzer(int seed)
     // total-operation guard: protects against setups whose required-execution counts never settle.
     constexpr int max_operations = 100000;
 
-    cc::random rng{u64(seed)};
+    auto rng = cc::random(u64(seed));
     fuzz_runner runner(*_machine, rng);
     auto state = _machine->make_initial_state();
 
@@ -136,7 +136,7 @@ bool test::execute_fuzz_test(cc::string_view test_var)
         if (res.is_ok || !res.failing_run.has_value())
             continue;
 
-        cc::random rng{u64(seed)};
+        auto rng = cc::random(u64(seed));
         auto minimized = res.failing_run.value().minimize(rng);
         auto code = minimized.emit_regression(test_var, _dialect);
 

@@ -120,7 +120,7 @@ TEST("slib - a watch on a prefix that escapes the root never fires")
 TEST("slib - embedded_filesystem returns a subscription that never fires")
 {
     static constexpr slib::embedded_file k_files[] = {{.path = "a.hlsl", .text = "void main() {}"}};
-    slib::embedded_filesystem fs{k_files};
+    auto fs = slib::embedded_filesystem(k_files);
 
     int fires = 0;
     auto const sub = fs.watch("", [&fires] { ++fires; });

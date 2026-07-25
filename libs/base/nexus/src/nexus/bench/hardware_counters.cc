@@ -172,7 +172,7 @@ hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_con
 
 void nx::bench::impl::warn_pmu_unavailable_once(cc::string_view platform_hint)
 {
-    static std::atomic<bool> already_warned{false};
+    static std::atomic<bool> already_warned = {false};
     if (already_warned.exchange(true))
         return;
 

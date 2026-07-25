@@ -82,7 +82,7 @@ void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
     {
         cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
         cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
-        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, offset, budget};
+        dx12_upload_allocation const alloc = {_buffer.Get(), _mapped, offset, budget};
         cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
         cursor += cc::u64(consumed == 0 ? budget : consumed); // 0 = tail too small for an aligned row → skip to the seam
     }
@@ -109,7 +109,7 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
     {
         cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
         cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
-        dx12_upload_allocation const alloc{_buffer.Get(), _mapped, offset, budget};
+        dx12_upload_allocation const alloc = {_buffer.Get(), _mapped, offset, budget};
         cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
         CC_ASSERT(consumed > 0, "inline upload made no progress");
         cursor += cc::u64(consumed);

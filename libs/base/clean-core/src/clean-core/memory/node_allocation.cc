@@ -200,7 +200,9 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
 /// storage outlives this dtor on both the Itanium and MSVC TLS teardown paths.
 struct tls_default_allocator
 {
-    cc::node_allocator alloc{&system_node_memory_resource};
+    // node_allocator's resource ctor is explicit, so the initializer names the type — copy-list-init
+    // (`= {…}`) will not pick it.
+    cc::node_allocator alloc = cc::node_allocator(&system_node_memory_resource);
 
     ~tls_default_allocator()
     {
@@ -362,7 +364,7 @@ cc::u32 cc::impl::node_next_owner_id()
 {
     // process-unique, never recycled: an id is never reused, so a free is never miscategorized.
     // ids are not reclaimed on thread exit (that leaks the thread's slabs -- a known, deferred follow-up).
-    static cc::atomic<cc::u32> s_next_owner_id{1}; // 0 is reserved for "unassigned"
+    static cc::atomic<cc::u32> s_next_owner_id = {1}; // 0 is reserved for "unassigned"
     cc::u32 const id = s_next_owner_id.fetch_add(1, cc::memory_order_relaxed);
     CC_ASSERT(id != 0, "node owner-id space exhausted (>4B threads ever); cross-thread-free after "
                        "thread-exit is unsupported");

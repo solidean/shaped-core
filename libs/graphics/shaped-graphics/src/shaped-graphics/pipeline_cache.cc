@@ -212,7 +212,7 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
                                           [ctx_ptr = &ctx, shader = compiled_shader(desc.shader), layout = desc.layout](
                                               cc::async_context<compute_pipeline_handle>& actx) -> cc::async_step_status
                                           {
-                                              compute_pipeline_description const d{.shader = shader, .layout = layout};
+                                              compute_pipeline_description const d = {.shader = shader, .layout = layout};
                                               auto res = ctx_ptr->uncached.try_create_compute_pipeline(d);
                                               if (res.has_error())
                                                   return actx.error(cc::move(res.error()));

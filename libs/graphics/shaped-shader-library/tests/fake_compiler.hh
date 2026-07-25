@@ -86,7 +86,7 @@ private:
     sg::shader_format _format;
 
     // Mutable so the const compile path can count; the tests read these to prove laziness and caching.
-    mutable cc::atomic<cc::i64> _compile_count{0};
-    mutable cc::atomic<cc::i64> _preprocess_count{0};
+    mutable cc::atomic<cc::i64> _compile_count = {0};
+    mutable cc::atomic<cc::i64> _preprocess_count = {0};
 };
 } // namespace slib_test

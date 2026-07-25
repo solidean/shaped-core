@@ -28,7 +28,7 @@ cc::vector<cc::string> const& source_cache::lines_of(cc::string_view path)
     cc::vector<cc::string> lines;
 
     // clean-core has no file I/O; std::ifstream is the seam.
-    std::ifstream file{std::string(path.data(), size_t(path.size()))};
+    auto file = std::ifstream(std::string(path.data(), size_t(path.size())));
     if (file.is_open())
     {
         std::string line;

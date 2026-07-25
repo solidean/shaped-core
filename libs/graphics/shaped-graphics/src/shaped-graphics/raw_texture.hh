@@ -154,6 +154,6 @@ protected:
 
     texture_description _desc;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
-    mutable std::atomic<bool> _expired{false};                   // mutable: expire() is a const lifetime hook
+    mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
 };
 } // namespace sg

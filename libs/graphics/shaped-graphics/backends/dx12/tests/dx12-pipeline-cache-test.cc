@@ -56,7 +56,7 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     CHECK(pipeline_layout1.get() == pipeline_layout2.get());
 
     // Compute-pipeline caching: identical (shader, pipeline layout) return the same async node.
-    sg::compute_pipeline_description const desc{.shader = shader, .layout = pipeline_layout1};
+    sg::compute_pipeline_description const desc = {.shader = shader, .layout = pipeline_layout1};
     auto p1 = ctx.cached.acquire_compute_pipeline(desc);
     auto p2 = ctx.cached.acquire_compute_pipeline(desc);
     REQUIRE(p1 != nullptr);
@@ -73,7 +73,7 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
 
-    sg::named_view const out{.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const out = {.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()};
     auto group = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&out, 1));
     REQUIRE(group != nullptr);
 
@@ -133,13 +133,13 @@ TEST("sg pipeline_cache - a different shader yields a different pipeline node")
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
 
-    sg::compute_pipeline_description const desc{.shader = shader, .layout = pipeline_layout};
+    sg::compute_pipeline_description const desc = {.shader = shader, .layout = pipeline_layout};
     auto base = ctx.cached.acquire_compute_pipeline(desc);
 
     // Same pipeline layout but shader content differs (entry point) -> different key -> different node.
     sg::compiled_shader altered = make_double_shader();
     altered.entry_point = "other_main";
-    sg::compute_pipeline_description const desc2{.shader = altered, .layout = pipeline_layout};
+    sg::compute_pipeline_description const desc2 = {.shader = altered, .layout = pipeline_layout};
     auto other = ctx.cached.acquire_compute_pipeline(desc2);
 
     CHECK(base.get() != other.get());
