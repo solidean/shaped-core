@@ -25,6 +25,18 @@ bool is_paren_neutralizing(token const& t)
         || t.is_keyword("operator") || t.text == "__declspec" || t.text == "__attribute__";
 }
 
+/// The statement forms that carry a parenthesized header: `if (…)`, `switch (…)`, `while (…)`,
+/// `for (…)`. That header is a declaration scope — its init-statement and its condition may each declare
+/// a local, as in `for (int i{0}; …)` and `if (auto x{g()}; x > 0)`.
+///
+/// `do` is deliberately absent even though it ends in `while ( … )`: the grammar makes that an
+/// expression, never a declaration. `catch` is absent because its body is always a compound statement,
+/// so the generic path already handles it.
+bool is_control_flow_keyword(token const& t)
+{
+    return t.is_keyword("if") || t.is_keyword("switch") || t.is_keyword("while") || t.is_keyword("for");
+}
+
 /// The punctuation that may appear at top level in a declaration ahead of its initializer: name
 /// qualification, pointer/reference declarators, the `,` of a multi-declarator statement, an access
 /// specifier's or mem-initializer's `:`, a destructor `~`, a pack `...`.
@@ -170,6 +182,12 @@ struct parser_impl
             return end;
         }
 
+        // A control-flow statement is a form of its own — header, then a body that is one statement.
+        // Reaching it here rather than letting its paren group make the following '{' look like a
+        // function body is what makes a header declaration visible and a braceless body reachable.
+        if (is_control_flow_keyword(tk(begin)) || kw(begin, "else") || kw(begin, "do"))
+            return scan_control_flow(begin, end, parent);
+
         bool paren_group_seen = false;
         bool def_head = false; // saw a type-defining keyword (class/struct/union/enum) at top level
         bool is_record = false;
@@ -300,6 +318,94 @@ struct parser_impl
             ++pos;
         }
         return pos;
+    }
+
+    /// The `:` that splits a range-for header into declaration and range, or -1 when there is none.
+    /// `::` lexes whole, so only a real `:` is seen; a conditional's `:` is paired off against its `?`,
+    /// which is what keeps `for (int i = c ? a : b; …)` a plain three-clause `for`.
+    isize range_for_colon(isize begin, isize end) const
+    {
+        isize conditionals = 0;
+        for (isize i = begin; i < end && !is_eof(i); ++i)
+        {
+            if (punct(i, "("))
+                i = skip_balanced(i, "(", ")") - 1;
+            else if (punct(i, "["))
+                i = skip_balanced(i, "[", "]") - 1;
+            else if (punct(i, "{"))
+                i = skip_balanced(i, "{", "}") - 1;
+            else if (punct(i, "?"))
+                ++conditionals;
+            else if (punct(i, ":"))
+            {
+                if (conditionals == 0)
+                    return i;
+                --conditionals;
+            }
+        }
+        return -1;
+    }
+
+    /// The body of a control-flow statement: a compound statement whose contents are a scope, or — the
+    /// braceless form — exactly one statement, which may itself be a declaration (`if (c) int y{0};`).
+    isize scan_statement_body(isize pos, isize end, isize parent)
+    {
+        if (punct(pos, "{"))
+        {
+            auto const after = skip_balanced(pos, "{", "}");
+            parse_scope(pos + 1, after - 1, decl_scope::function_scope, parent);
+            return after;
+        }
+        return scan_one(pos, end, decl_scope::function_scope, parent);
+    }
+
+    /// `if` / `switch` / `while` / `for`, whose header is a declaration scope, plus the two bodies that
+    /// stand alone: `else`, and `do`'s body ahead of its trailing `while ( expression ) ;`.
+    ///
+    /// The header is handed to parse_scope, so a `for`'s three clauses and an `if`'s init-statement are
+    /// each read as a statement — a declaration where one is written, an expression otherwise. `do`'s
+    /// trailing parens are an expression by the grammar and are only swept for lambda bodies, and so is
+    /// a range-for's range: the `{…}` in `for (auto p : {"a", "b"})` initializes the range, not `p`.
+    isize scan_control_flow(isize begin, isize end, isize parent)
+    {
+        if (kw(begin, "else"))
+            return scan_statement_body(begin + 1, end, parent);
+
+        if (kw(begin, "do"))
+        {
+            auto pos = scan_statement_body(begin + 1, end, parent);
+            if (!kw(pos, "while"))
+                return pos;
+
+            ++pos;
+            if (punct(pos, "("))
+            {
+                auto const after = skip_balanced(pos, "(", ")");
+                descend_lambdas(pos, after, decl_scope::function_scope, parent);
+                pos = after;
+            }
+            return (pos < end && punct(pos, ";")) ? pos + 1 : pos;
+        }
+
+        auto pos = begin + 1;
+        if (punct(pos, "!")) // `if !consteval`
+            ++pos;
+        if (kw(pos, "constexpr") || kw(pos, "consteval")) // `if constexpr`, `if consteval` — no header
+            ++pos;
+
+        if (punct(pos, "("))
+        {
+            auto const after = skip_balanced(pos, "(", ")");
+            auto const header_end = after - 1; // the ')'
+            // A range-for splits at its `:`. Only the declaration ahead of it is a scope; behind it is
+            // the range, whose braced-init-list belongs to no declarator.
+            auto const colon = kw(begin, "for") ? range_for_colon(pos + 1, header_end) : isize(-1);
+            parse_scope(pos + 1, colon >= 0 ? colon : header_end, decl_scope::function_scope, parent);
+            if (colon >= 0)
+                descend_lambdas(colon, header_end, decl_scope::function_scope, parent);
+            pos = after;
+        }
+        return scan_statement_body(pos, end, parent);
     }
 
     /// Walk a group we are otherwise skipping and descend into any lambda body inside it. A lambda

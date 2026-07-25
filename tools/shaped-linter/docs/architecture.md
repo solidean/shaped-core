@@ -42,7 +42,7 @@ Handled: identifiers/keywords, integer/float literals with digit separators and 
 
 ## What the parser recognizes, and what it skips
 
-The parser recognizes only what the rules need: namespaces, records (`class`/`struct`/`union` with a body), function bodies, nested blocks, lambda bodies — all descended — and the variable declarations inside them, with their initializer form.
+The parser recognizes only what the rules need: namespaces, records (`class`/`struct`/`union` with a body), function bodies, nested blocks, lambda bodies, control-flow statements — all descended — and the variable declarations inside them, with their initializer form.
 Everything else is skipped as opaque.
 It walks declaration-by-declaration with a prefix-aware segment scanner that tracks bracket depth by skipping balanced groups.
 
@@ -57,7 +57,7 @@ The two differ exactly where a rewrite would otherwise delete the bound, so a ru
 Descending into function bodies is where false positives would come from, so each is decided explicitly:
 
 * **Mem-initializer vs function body.** In `S() : a{1}, b{2} {}` every brace group looks alike. Only the *last* one is the body: a mem-initializer is always followed by `,` or by the body's own `{`, so the scanner keeps going while either follows and descends only into the group where neither does.
-* **Nested block vs initializer.** At function scope a `{` with no declarator in front of it is a block (`{ … }`, an `else` / `do` / `try` body), not an initializer — it is descended, not run past.
+* **Nested block vs initializer.** At function scope a `{` with no declarator in front of it is a block (`{ … }`, a `try` / `catch` body), not an initializer — it is descended, not run past.
 * **Statement keyword.** `return`, `throw`, `case`, `co_return`, … at the top of a segment disqualify it from being a declaration, which is what stops `return P{1, 2};` from reading as one.
 * **A type ahead of the declarator-id.** A brace init needs a type *and* a declarator, and the declarator-id's `::`-joined name run is what decides whether one is left over.
   In `cc::atomic<int> x{0}` the run at `x` is just `x`, with the type ahead of it; in `cc::void_function{}()` the run is the whole segment, so this is a temporary being called, not a declaration of `void_function`.
@@ -66,6 +66,22 @@ Descending into function bodies is where false positives would come from, so eac
 
 Lambda bodies are reached by a separate sweep: any group being skipped at function scope is walked for a `]` followed — past an optional parameter list, `mutable` / `noexcept` / a trailing return type — by `{`. That `]`-then-`(`-or-`{` shape is what separates a lambda introducer from a subscript `a[i]` and an attribute `[[nodiscard]]`. It is what reaches `auto f = [] { int y{0}; };` and `run([] { … });` alike.
 
+### Statement forms, parsed as forms rather than inferred
+
+The segment scanner above is a *declaration* scanner. A statement whose shape the grammar fixes is parsed as that shape instead, so its parts land in the right place by construction — the same treatment `namespace` already gets.
+
+* **`if` / `switch` / `while` / `for`** — a parenthesized header, then a body.
+  The header is a declaration scope: `for (int i{0}; …)` and `if (auto x{g()}; x > 0)` each declare a local, and the header's own `begin` is the first token inside the parens, so the type a rule reconstructs is `int`, not `for (int`.
+  Its clauses are read as statements, which is why a `for`'s second and third clause and any plain condition come out as expressions.
+  `if constexpr` / `if consteval` are the same form with a specifier between the keyword and the header.
+* **A range-for splits at its `:`.** Only the range-declaration ahead of it is a scope; the range behind it is an expression, so the `{…}` in `for (auto p : {"a", "b"})` initializes the range and belongs to no declarator. A conditional's `:` is paired off against its `?`, which keeps `for (int i{0}; c ? a : b; ++i)` a plain three-clause `for`.
+* **`else` and `do`** — a body with no header of its own; `do`'s trailing `while ( … )` holds an *expression* by the grammar, so it is only swept for lambda bodies, never parsed as a scope.
+* **A body is exactly one statement**, braced or not. `if (c) int y{0};` declares a local as surely as `if (c) { int y{0}; }` does, and — the other direction — the statement is over at that point, so `if (c) g(a, T{1});` is an ordinary call again.
+
+Before this, control flow worked by accident: its paren group set the "saw a parameter list" flag, which made the following `{` look like a function body. That reached braced bodies and nothing else — headers were invisible and a braceless body silently dropped its declaration.
+
+`try` / `catch` are deliberately still on the generic path: the grammar requires their bodies to be compound statements, so the nested-block judgement already places them correctly.
+
 ### Known corner-cuts (each pinned by a corpus case)
 
 Documented so the boundary does not regress silently:
@@ -73,6 +89,8 @@ Documented so the boundary does not regress silently:
 * **Function-pointer data member with init** `void(*cb)(){…};` may mis-segment (the extra `()` reads as a parameter list).
 * **`#if 0` disabled members** are still parsed as live code (directives are opaque) — a possible false positive, resolved only at the future preprocessor milestone.
 * **Deeply nested statements are reached, but blocks inside a skipped group are not** — a body only becomes visible through the paths above, so an exotic construct can still hide one.
+* **A binary `&&` reads as declarator punctuation.** `ok && n < T{1}` reports `T`, because `&&` is also an rvalue reference and so does not break the name run that decides whether a type is left over. Separating the two needs a notion of declarator position, which the parser does not have yet — the natural next increment.
+* **A structured binding is invisible.** `for (auto [a, b] : m)` declares nothing the parser sees, since the `[…]` is skipped as a balanced group. Safe (invisible, not misread) but incomplete.
 
 ## Relationship to the clang-tidy gates
 

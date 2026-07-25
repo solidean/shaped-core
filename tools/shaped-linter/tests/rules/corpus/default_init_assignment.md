@@ -117,6 +117,43 @@ A local inside a loop body.
 void f() { for (auto const& x : v) { int y{3}; } }
 ```
 
+A declaration in a `for` header. The header is a scope of its own, so the declaration starts at `int`
+rather than at the keyword, and the second and third clauses stay expressions.
+
+```cpp [default-init-assignment] fix=" = {0}"
+void f() { for (int i{0}; i < n; ++i) { g(i); } }
+```
+
+Only a range-for's `:` splits a header, so a conditional in a middle clause keeps the init-statement.
+
+```cpp [default-init-assignment] fix=" = {0}"
+void f() { for (int i{0}; c ? a : b; ++i) { g(i); } }
+```
+
+An `if` init-statement, alongside a declaration in the body it guards.
+
+```cpp [default-init-assignment] [default-init-assignment] fix=" = {7}" fix=" = {8}"
+void f() { if (auto x{7}; x > 0) { int y{8}; } }
+```
+
+A `switch` init-statement.
+
+```cpp [default-init-assignment] fix=" = {g()}"
+void f() { switch (auto v{g()}; v) { default: break; } }
+```
+
+A braceless body is one statement, and a declaration is a statement.
+
+```cpp [default-init-assignment] fix=" = {9}"
+void f() { if (c) int y{9}; }
+```
+
+The same after an `else`, which carries a body without a header of its own.
+
+```cpp [default-init-assignment] fix=" = {10}"
+void f() { if (c) g(); else int y{10}; }
+```
+
 A local inside a lambda that is being assigned to a variable.
 
 ```cpp [default-init-assignment] fix=" = {4}"
@@ -270,6 +307,71 @@ An array initializer is already assignment form and keeps its own shape.
 
 ```cpp ~[default-init-assignment]
 int a[] = {1, 2};
+```
+
+A condition that is a braced temporary. Nothing is left over ahead of it to be a type, exactly as in
+statement position.
+
+```cpp ~[default-init-assignment]
+void f() { if (T{1}) { g(); } }
+```
+
+A condition comparing against one. The `<` opens a template-argument skip that lands on the brace, so the
+declarator-id is still `x`, whose run starts the header.
+
+```cpp ~[default-init-assignment]
+void f() { while (x < T{1}) { g(); } }
+```
+
+A condition in assignment form. It declares a local, but not one this rule reports.
+
+```cpp ~[default-init-assignment]
+void f() { while (auto e = next()) { g(e); } }
+```
+
+A range-for header carries no initializer at all — the `:` is declarator punctuation, not an `=`.
+
+```cpp ~[default-init-assignment]
+void f() { for (auto const& x : v) { g(x); } }
+```
+
+And behind that `:` is the range, whose braced-init-list belongs to no declarator. A range-declaration
+cannot carry an initializer, so the brace group here is never one.
+
+```cpp ~[default-init-assignment]
+void f() { for (auto const p : {"a", "b"}) { g(p); } }
+```
+
+Past a braceless body the statement is over, so an argument there is an expression again.
+
+```cpp ~[default-init-assignment]
+void f() { if (c) g(a, T{1}); }
+```
+
+A `do`'s trailing parens hold an expression by the grammar, never a declaration.
+
+```cpp ~[default-init-assignment]
+void f() { do { g(); } while (T{1}); }
+```
+
+## Corner-cuts, pinned as they behave
+
+Recorded so the boundary cannot move silently — not because the behavior is right.
+
+`&&` is legal declarator punctuation (an rvalue reference), so it does not break the run that decides
+whether a type is left over, and `T` reads as a declarator-id with `ok && n <` in front of it.
+Separating a binary `&&` from a declarator one needs a notion of declarator position, which the parser
+does not have yet. A condition is only the likeliest place to meet this; statement position does the same.
+
+```cpp [default-init-assignment] fix=" = {1}"
+void f() { if (ok && n < T{1}) { g(); } }
+```
+
+A structured binding is skipped as a balanced group, so a range-for over one declares nothing the parser
+can see — invisible rather than misread, which is the safe direction.
+
+```cpp ~[default-init-assignment]
+void f() { for (auto [a, b] : m) { g(a); } }
 ```
 
 ## Several declarators in one statement

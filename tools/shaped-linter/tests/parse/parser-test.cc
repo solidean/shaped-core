@@ -255,6 +255,167 @@ TEST("shaped-linter - parser - locals inside a function are found, tagged functi
     }
 }
 
+TEST("shaped-linter - parser - a control-flow header is a declaration scope")
+{
+    SECTION("for init-statement")
+    {
+        auto const p = parse_text("void f() { for (int i{0}; i < n; ++i) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "i");
+        CHECK(p.text(m[0]->init_inner) == "0");
+        // The header is its own scope, so the declaration starts at `int` — not at `for` or at the `(`,
+        // either of which would put the keyword into the type the rule reconstructs.
+        CHECK(p.text(m[0]->declarator) == "i");
+        CHECK(p.text(m[0]->span) == "int i{0};");
+    }
+    SECTION("for init-statement with two declarators")
+    {
+        auto const p = parse_text("void f() { for (int i{0}, j{1};;) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 2);
+        CHECK(p.text(m[0]->name) == "i");
+        CHECK(p.text(m[1]->name) == "j");
+    }
+    SECTION("if init-statement, alongside the body")
+    {
+        auto const p = parse_text("void f() { if (auto x{g()}; x > 0) { int y{1}; } }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 2);
+        CHECK(p.text(m[0]->name) == "x");
+        CHECK(p.text(m[1]->name) == "y");
+    }
+    SECTION("switch init-statement")
+    {
+        auto const p = parse_text("void f() { switch (auto v{g()}; v) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "v");
+    }
+    SECTION("if constexpr init-statement")
+    {
+        // The token ahead of the `(` is `constexpr`, so the header is found from the statement's keyword
+        // rather than from whatever sits in front of the paren group.
+        auto const p = parse_text("void f() { if constexpr (auto x{g()}; c) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "x");
+    }
+    SECTION("assignment form in a condition declares nothing we model")
+    {
+        CHECK(parse_text("void f() { while (auto e = next()) {} }").brace_vars().size() == 0);
+    }
+    SECTION("range-for")
+    {
+        CHECK(parse_text("void f() { for (auto const& x : v) {} }").brace_vars().size() == 0);
+    }
+    SECTION("range-for over a braced list")
+    {
+        // The `{…}` behind the `:` initializes the range, not the declarator — a range-declaration
+        // carries no initializer at all. Reading it as one is what made the linter report itself.
+        CHECK(parse_text("void f() { for (auto const p : {1, 2}) {} }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { for (auto& x : cc::vector<int>{1, 2}) {} }").brace_vars().size() == 0);
+    }
+    SECTION("a conditional's colon does not split a for header")
+    {
+        auto const p = parse_text("void f() { for (int i{0}; c ? a : b; ++i) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "i");
+    }
+    SECTION("a lambda in the range is still reached")
+    {
+        auto const p = parse_text("void f() { for (auto& x : make([] { int y{0}; return y; }())) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("range-for over a structured binding")
+    {
+        // A corner-cut, pinned as it behaves: the `[a, b]` is skipped as a balanced group, so no
+        // declarator-id is ever seen and the binding is invisible rather than misread.
+        CHECK(parse_text("void f() { for (auto [a, b] : m) {} }").brace_vars().size() == 0);
+    }
+}
+
+TEST("shaped-linter - parser - a control-flow body is one statement, braced or not")
+{
+    SECTION("braceless if body")
+    {
+        auto const p = parse_text("void f() { if (c) int y{0}; }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("braceless else body")
+    {
+        auto const p = parse_text("void f() { if (c) {} else int y{0}; }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("braceless do body")
+    {
+        auto const p = parse_text("void f() { do int y{0}; while (c); }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("a braceless body is one statement, not the rest of the block")
+    {
+        // The `T{1}` sits in a call after the body has been consumed, so nothing may read it as a header.
+        CHECK(parse_text("void f() { if (c) g(a, T{1}); }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { if (c) g(a); h(b, T{1}); }").brace_vars().size() == 0);
+    }
+    SECTION("do's trailing parens hold an expression, never a declaration")
+    {
+        CHECK(parse_text("void f() { do {} while (T{1}); }").brace_vars().size() == 0);
+    }
+    SECTION("a lambda in a header is reached exactly once")
+    {
+        // The header is parsed as a scope, which reaches the lambda by itself. Sweeping the same group
+        // for lambda bodies on top of that would report every declaration inside it twice.
+        auto const p = parse_text("void f() { if (any_of(v, [] { int y{0}; return y; })) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+    SECTION("a lambda at the head of a condition is reached exactly once")
+    {
+        auto const p = parse_text("void f() { if ([] { int y{0}; return y; }()) {} }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "y");
+    }
+}
+
+TEST("shaped-linter - parser - a condition is not a declaration")
+{
+    SECTION("a braced temporary as the whole condition")
+    {
+        CHECK(parse_text("void f() { if (T{1}) {} }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { switch (cc::T{1}) {} }").brace_vars().size() == 0);
+    }
+    SECTION("a comparison against a braced temporary")
+    {
+        CHECK(parse_text("void f() { while (x < T{1}) {} }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { if (x > T{1}) {} }").brace_vars().size() == 0);
+    }
+    SECTION("a for's second and third clauses are expressions")
+    {
+        CHECK(parse_text("void f() { for (i = 0; i < n; ++i) {} }").brace_vars().size() == 0);
+        CHECK(parse_text("void f() { for (auto it = b; it != e; ++it) {} }").brace_vars().size() == 0);
+    }
+    SECTION("a comparison behind a `&&`")
+    {
+        // A corner-cut, pinned as it behaves: `&&` is legal declarator punctuation (an rvalue reference),
+        // so `n`'s qualified-name run does not start the segment and `T` reads as a declarator-id.
+        // Telling the two apart needs a notion of declarator position, which the parser does not have yet.
+        CHECK(parse_text("void f() { if (ok && n < T{1}) {} }").brace_vars().size() == 1);
+        CHECK(parse_text("void f() { ok && n < T{1}; }").brace_vars().size() == 1);
+    }
+}
+
 TEST("shaped-linter - parser - lambda bodies are descended")
 {
     SECTION("lambda in an initializer")
