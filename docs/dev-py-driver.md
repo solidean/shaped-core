@@ -122,6 +122,12 @@ helper). Every command receives the `Context`, so commands never import `dev.py`
 **Add a command.** Create `tools/dev/cmd/<name>.py` with `NAME`, `add_parser(sub)`, and
 `run(args, ctx)`, then import it and add it to the `COMMANDS` list in [dev.py](../dev.py).
 Use the facade (`dev.X`) for mechanism and the `ctx` for policy/glue.
+[cmd/run.py](../tools/dev/cmd/run.py) is the smallest complete example — resolve a preset, build a
+target, run its artifact.
+
+A command that forwards trailing arguments to a child process must also be listed in `dev.py`'s
+`parse_known_args` allowance; `test` and `run` are the two. Everywhere else an unrecognized argument
+stays a hard error, so a typo fails loudly instead of being silently passed along.
 
 **Add a pre-commit check.** Checks are a registry in
 [cmd/check.py](../tools/dev/cmd/check.py): a list of `dev.Check(name, description,

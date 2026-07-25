@@ -20,8 +20,10 @@ uv run dev.py <command> [options]
 | `configure`    | Configure the CMake project for the selected preset(s).                       |
 | `build`        | Build (auto-configures first if inputs changed). `-t/--target` to scope.      |
 | `test`         | Build, then run test binaries (`*-test`). Optional name/binary filter.        |
+| `run`          | Build one **non-test** executable and run it, forwarding the rest of the command line. |
 | `format`       | clang-format `libs/` sources in place (see below).                            |
 | `lint clang-tidy` | Run the clang-tidy whitelist gates (see below). `dev.py lint` is the linting front door. |
+| `lint shaped`  | Run shaped-linter's own rules (see below). `--fix` applies what is mechanically safe. |
 | `check`        | Run pre-commit checks (format, lint, crossrefs, test) and report one green/red verdict. |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
@@ -42,6 +44,8 @@ uv run dev.py test "<pattern>"      # run just tests whose name matches (or a wh
 uv run dev.py test -t clean-core-test
 uv run dev.py build                 # build everything
 uv run dev.py build -t nexus        # build one target
+uv run dev.py run shaped-linter --fix libs/base/clean-core/src/clean-core/vector.hh
+uv run dev.py run instruction-tracer -- --help   # `--` when a program flag collides with one of ours
 uv run dev.py coverage run          # LLVM test coverage (see guides/coverage.md)
 uv run dev.py pgo run               # profile-guided optimization (see guides/pgo.md)
 uv run dev.py doctor
@@ -349,6 +353,30 @@ happened.
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and
 result recording stay consistent.
+
+## Running a non-test executable (`run`)
+
+`dev.py run <target> [args…]` is the counterpart for everything that is *not* a test: shaped-linter,
+instruction-tracer, a sample. It builds the target first, resolves its artifact for the preset, and
+runs it with the program's output mirrored live and **its exit code propagated verbatim** — a tool's
+non-zero "I found something" reaches the caller intact.
+
+```bash
+uv run dev.py run shaped-linter --fix path/to/file.cc
+uv run dev.py run shaped-linter --preset release-clang path/to/file.cc   # any preset
+uv run dev.py run instruction-tracer -- --help                          # `--` for a colliding flag
+```
+
+Reach for it instead of hand-writing `build/<preset>/tools/…/foo.exe`: that path hard-codes one
+preset and happily runs a stale binary when the build is behind.
+
+Everything dev.py does not recognize is forwarded to the program, so `--fix` lands on the tool while
+`--preset` still binds to dev.py. A program flag that collides with one of dev.py's own needs the `--`
+separator. `--quiet` captures the output to the step log instead of mirroring it; `--timeout SECS`
+bounds a program that might hang.
+
+`run` **refuses `*-test` targets** and points at `dev.py test` — bypassing discovery and result
+recording is exactly what the rule above forbids.
 
 ## Sanitizers
 
