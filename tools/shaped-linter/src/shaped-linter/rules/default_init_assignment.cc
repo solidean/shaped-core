@@ -13,7 +13,8 @@ constexpr cc::string_view k_id = "default-init-assignment";
 constexpr cc::string_view k_rationale
     = "prefer a consistent assignment-form initialization `T v = value;` across the codebase; every "
       "variable initializer — data member, function local, or namespace-scope variable — must therefore "
-      "use `=`, not brace form.";
+      "use `=`, not brace form. Where the braces were doing real work — an explicit constructor, or a "
+      "conversion that copy-initialization will not perform — name the type: `T v = T(value);`.";
 
 bool is_space(char c)
 {
@@ -99,9 +100,11 @@ void check(lint_context& ctx)
 
         auto payload = fix_payload(ctx, v);
 
-        // Replace `name{…}` (from the end of the declarator-id through the closing brace) with `name = …`.
+        // Replace `declarator{…}` (from the end of the whole declarator through the closing brace) with
+        // `declarator = …`. Starting at the declarator-id instead would swallow an array bound.
         auto const edit = text_edit{
-            .span = {.file_id = v.name.file_id, .byte_begin = v.name.byte_end, .byte_end = v.init_span.byte_end},
+            .span
+            = {.file_id = v.declarator.file_id, .byte_begin = v.declarator.byte_end, .byte_end = v.init_span.byte_end},
             .replacement = cc::string(" = ") + payload,
         };
 

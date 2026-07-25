@@ -54,6 +54,13 @@ Whitespace before the brace is absorbed by the rewrite rather than left dangling
 struct S { int x {0}; };
 ```
 
+An array bound belongs to the declarator, so the rewrite starts after it and `[N]` survives.
+The replacement text alone cannot show that — [engine-test.cc](../../rules/engine-test.cc) pins the applied result.
+
+```cpp [default-init-assignment] fix=" = {1, 2}"
+struct S { T a[N]{1, 2}; };
+```
+
 ## Every scope, not just record bodies
 
 A function local.
@@ -180,20 +187,28 @@ An array initializer is already assignment form and keeps its own shape.
 int a[] = {1, 2};
 ```
 
-## Known corner-cuts
+## Several declarators in one statement
 
-These are pinned as they behave today, not as they ideally would — the boundary is documented so it
-cannot regress silently. See ../../../docs/architecture.md.
+Every brace-initialized declarator is its own finding with its own rewrite.
 
-A multi-declarator brace init records only the first declarator — `b{2}` goes unreported.
-
-```cpp [default-init-assignment] fix=" = 1"
+```cpp [default-init-assignment] [default-init-assignment] fix=" = 1" fix=" = 2"
 struct S { int a{1}, b{2}; };
 ```
 
-An array data member *is* handled, and the rewrite happens to be right: the declarator-id is still the
-last top-level identifier (`a`), because `[N]` is skipped as a balanced group.
+Each keeps whatever suffix it carries.
 
-```cpp [default-init-assignment] fix=" = {1, 2}"
-struct S { T a[N]{1, 2}; };
+```cpp [default-init-assignment] [default-init-assignment] fix=" = 1" fix=" = 3"
+struct S { int a{1}, b[2]{3}; };
+```
+
+Only the brace-initialized ones are reported: `b` is already assignment form and `c` has no initializer.
+
+```cpp [default-init-assignment] fix=" = 1"
+struct S { int a{1}, b = 2, c; };
+```
+
+A comma inside an initializer does not start a declarator.
+
+```cpp [default-init-assignment] [default-init-assignment] fix=" = f(1, 2)" fix=" = 3"
+struct S { P a{f(1, 2)}, b{3}; };
 ```

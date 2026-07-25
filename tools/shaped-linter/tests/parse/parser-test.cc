@@ -125,6 +125,98 @@ TEST("shaped-linter - parser - empty and multi-element braces")
     }
 }
 
+TEST("shaped-linter - parser - the declarator span reaches past an array bound")
+{
+    // `name` identifies the variable; `declarator` is where an initializer rewrite may start. They differ
+    // exactly when a suffix sits between the two — an array bound — and conflating them drops it.
+    SECTION("array member")
+    {
+        auto const p = parse_text("struct S { T a[N]{1, 2}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "a");
+        CHECK(p.text(m[0]->declarator) == "a[N]");
+    }
+    SECTION("two-dimensional array member")
+    {
+        auto const p = parse_text("struct S { T a[2][3]{1}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->declarator) == "a[2][3]");
+    }
+    SECTION("no suffix: declarator is just the name")
+    {
+        auto const p = parse_text("struct S { int x{0}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->declarator) == "x");
+    }
+    SECTION("whitespace before the brace is not part of the declarator")
+    {
+        auto const p = parse_text("struct S { int x  {0}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->declarator) == "x");
+    }
+}
+
+TEST("shaped-linter - parser - every brace-initialized declarator of a statement is recorded")
+{
+    SECTION("two members in one declaration")
+    {
+        auto const p = parse_text("struct S { int a{1}, b{2}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 2);
+        CHECK(p.text(m[0]->name) == "a");
+        CHECK(p.text(m[1]->name) == "b");
+        CHECK(p.text(m[1]->init_inner) == "2");
+    }
+    SECTION("three locals in one declaration")
+    {
+        auto const p = parse_text("void f() { int a{1}, b{2}, c{3}; }");
+        auto const m = p.brace_vars_in(decl_scope::function_scope);
+        REQUIRE(m.size() == 3);
+        CHECK(p.text(m[2]->name) == "c");
+    }
+    SECTION("a later declarator carries its own array bound")
+    {
+        auto const p = parse_text("struct S { int a{1}, b[2]{3}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 2);
+        CHECK(p.text(m[1]->declarator) == "b[2]");
+    }
+    SECTION("a pointer declarator")
+    {
+        auto const p = parse_text("struct S { int a{1}, *p{nullptr}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 2);
+        CHECK(p.text(m[1]->name) == "p");
+    }
+
+    // Only brace-initialized declarators count — the rest of the statement stays as opaque as before.
+    SECTION("assignment form and a bare declarator alongside")
+    {
+        auto const p = parse_text("struct S { int a{1}, b = 2, c; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "a");
+    }
+    SECTION("a braced assignment initializer is still assignment form")
+    {
+        auto const p = parse_text("struct S { int a{1}, b = {2, 3}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 1);
+        CHECK(p.text(m[0]->name) == "a");
+    }
+    SECTION("a comma inside the initializer does not start a declarator")
+    {
+        auto const p = parse_text("struct S { P a{f(1, 2)}, b{3}; };");
+        auto const m = p.brace_vars();
+        REQUIRE(m.size() == 2);
+        CHECK(p.text(m[1]->name) == "b");
+    }
+}
+
 TEST("shaped-linter - parser - locals inside a function are found, tagged function_scope")
 {
     SECTION("plain local")

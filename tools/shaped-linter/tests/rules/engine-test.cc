@@ -93,3 +93,22 @@ TEST("shaped-linter - fix round-trip - normalizes spacing before the brace")
     // A space before the brace is absorbed: `x {0}` -> `x = 0`.
     CHECK(lint_and_fix("struct S { int x {0}; };") == "struct S { int x = 0; };");
 }
+
+TEST("shaped-linter - fix round-trip - an array bound survives the rewrite")
+{
+    // The whole point of the applied round-trip: a corpus `fix=` only pins the replacement TEXT, so it
+    // cannot see that the edit started too far left and ate the `[N]`.
+    CHECK(lint_and_fix("struct S { T a[N]{1, 2}; };") == "struct S { T a[N] = {1, 2}; };");
+    CHECK(lint_and_fix("struct S { int a[3]{0}; };") == "struct S { int a[3] = 0; };");
+    CHECK(lint_and_fix("void f() { int a[2][3]{1}; }") == "void f() { int a[2][3] = 1; }");
+}
+
+TEST("shaped-linter - fix round-trip - every declarator of a multi-declarator statement")
+{
+    CHECK(lint_and_fix("struct S { int a{1}, b{2}; };") == "struct S { int a = 1, b = 2; };");
+    CHECK(lint_and_fix("void f() { int a{1}, b{2}, c{3}; }") == "void f() { int a = 1, b = 2, c = 3; }");
+    CHECK(lint_and_fix("struct S { int a{1}, b[2]{3}; };") == "struct S { int a = 1, b[2] = 3; };");
+
+    // the declarators that are not brace-initialized are left exactly as they were
+    CHECK(lint_and_fix("struct S { int a{1}, b = 2, c; };") == "struct S { int a = 1, b = 2, c; };");
+}

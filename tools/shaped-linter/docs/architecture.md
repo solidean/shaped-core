@@ -48,6 +48,10 @@ It walks declaration-by-declaration with a prefix-aware segment scanner that tra
 
 **The scope distinction is the whole point.** Every declaration node carries a `decl_scope` — `record_scope`, `namespace_scope`, or `function_scope` — so a rule never has to work out where it is. Only a real parse can do that, and only a real parse tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site.
 
+**One statement can declare several variables.** `int a{1}, b[2]{3}, c = 4, d;` is scanned declarator-by-declarator past each top-level `,`, re-running the brace-vs-`=`-vs-`;` decision each time, so it yields a node for `a` and `b` and nothing for `c` or `d`.
+Each node carries both a `name` (the declarator-id, which is what a message says) and a `declarator` span reaching through any array suffix — `b[2]`, not `b`.
+The two differ exactly where a rewrite would otherwise delete the bound, so a rule that replaces an initializer starts at `declarator.byte_end`, never at `name.byte_end`.
+
 ### The four judgements that keep function-scope parsing honest
 
 Descending into function bodies is where false positives would come from, so each is decided explicitly:
@@ -63,7 +67,6 @@ Lambda bodies are reached by a separate sweep: any group being skipped at functi
 
 Documented so the boundary does not regress silently:
 
-* **Multi-declarator brace-init** `int a{1}, b{2};` records only the first.
 * **Function-pointer data member with init** `void(*cb)(){…};` may mis-segment (the extra `()` reads as a parameter list).
 * **`#if 0` disabled members** are still parsed as live code (directives are opaque) — a possible false positive, resolved only at the future preprocessor milestone.
 * **Deeply nested statements are reached, but blocks inside a skipped group are not** — a body only becomes visible through the paths above, so an exotic construct can still hide one.

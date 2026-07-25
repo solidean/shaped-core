@@ -44,7 +44,8 @@ enum class decl_scope : u8
 ///  - translation_unit / record_definition: `children` are node ids of the records/variables inside.
 ///  - record_definition: `rec_keyword` and `name` (the record name span; empty if anonymous).
 ///  - variable_declaration: `scope`, `form`, and for brace form `init_span` (the `{…}` incl. braces),
-///    `init_inner` (strictly between the braces), and `name` (the declarator-id span).
+///    `init_inner` (strictly between the braces), `name` (the declarator-id span), and `declarator`
+///    (the declarator-id plus any array suffix — a rewrite replacing the initializer starts at its end).
 struct node
 {
     node_kind kind = node_kind::translation_unit;
@@ -62,6 +63,7 @@ struct node
     // variable_declaration
     decl_scope scope = decl_scope::namespace_scope;
     init_form form = init_form::none;
+    source_span declarator; // brace form: the declarator-id THROUGH any array suffix — `a[N]`, not `a`
     source_span init_span;  // brace form: the `{…}` including the braces
     source_span init_inner; // brace form: the bytes strictly between `{` and `}`
 };

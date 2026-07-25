@@ -320,7 +320,37 @@ struct parser_impl
         return (j < end && punct(j, ";")) ? j + 1 : j;
     }
 
-    /// `open_brace` is an initializer '{'. Skip it, emit a variable_declaration, and run to the ';'.
+    /// Emit one brace-initialized declarator. `stmt_begin` / `stmt_last` bound the whole statement (the
+    /// node's `span`), `declarator_index` names it, and `open_brace` opens its initializer.
+    void add_brace_var(isize stmt_begin,
+                       isize stmt_last,
+                       isize declarator_index,
+                       isize open_brace,
+                       decl_scope scope,
+                       isize parent)
+    {
+        auto const close_brace = skip_balanced(open_brace, "{", "}") - 1;
+
+        node vn;
+        vn.kind = node_kind::variable_declaration;
+        vn.scope = scope;
+        vn.form = init_form::brace;
+        vn.name = tk(declarator_index).span;
+        // Everything from the declarator-id up to the brace belongs to the declarator — an array bound
+        // above all. A rewrite that starts at the id's end instead would eat the `[N]`.
+        vn.declarator = source_span::join(tk(declarator_index).span, tk(open_brace - 1).span);
+        vn.init_span = source_span::join(tk(open_brace).span, tk(close_brace).span);
+        vn.init_inner = {.file_id = file_id,
+                         .byte_begin = tk(open_brace).span.byte_end,
+                         .byte_end = tk(close_brace).span.byte_begin};
+        vn.span = source_span::join(tk(stmt_begin).span, tk(stmt_last).span);
+
+        auto const id = add_node(cc::move(vn));
+        tree.nodes[parent].children.push_back(id);
+    }
+
+    /// `open_brace` is an initializer '{'. Emit a variable_declaration for it and for every FURTHER
+    /// declarator in the same statement that is also brace-initialized, then run to the ';'.
     ///
     /// Outside a record body a brace group is only a declaration when the segment actually looks like
     /// one: at least a type and a declarator ahead of the brace (so the temporary `T{1};` is not read as
@@ -334,43 +364,79 @@ struct parser_impl
                             bool stmt_head,
                             isize parent)
     {
-        auto const after = skip_balanced(open_brace, "{", "}");
-        auto const close_brace = after - 1;
+        bool const looks_like_declaration
+            = declarator_index >= 0 && !stmt_head && (scope == decl_scope::record_scope || top_token_count >= 2);
 
-        // Run to the statement's ';', skipping any further balanced groups.
-        isize j = after;
+        // Run to the statement's ';', skipping any further balanced group. Along the way, a top-level ','
+        // starts the next declarator — `int a{1}, b{2};` declares two variables, and only re-running the
+        // brace-vs-`=`-vs-`;` decision per declarator keeps `int a{1}, b = 2, c;` down to just `a`.
+        auto const first_close = skip_balanced(open_brace, "{", "}") - 1;
+        auto braces = cc::vector<isize>(); // one open-brace index per brace-initialized declarator
+        auto names = cc::vector<isize>();  // its declarator-id
+        braces.push_back(open_brace);
+        names.push_back(declarator_index);
+
+        isize j = first_close + 1;
         while (j < end && !is_eof(j) && !punct(j, ";"))
         {
+            if (punct(j, ","))
+            {
+                ++j;
+                j = scan_next_declarator(j, end, looks_like_declaration ? &braces : nullptr,
+                                         looks_like_declaration ? &names : nullptr);
+                continue;
+            }
             if (punct(j, "{"))
                 j = skip_balanced(j, "{", "}");
             else if (punct(j, "("))
                 j = skip_balanced(j, "(", ")");
+            else if (punct(j, "["))
+                j = skip_balanced(j, "[", "]");
             else
                 ++j;
         }
         auto const semi = j;
 
-        bool const looks_like_declaration
-            = declarator_index >= 0 && !stmt_head && (scope == decl_scope::record_scope || top_token_count >= 2);
-
         if (looks_like_declaration)
         {
-            node vn;
-            vn.kind = node_kind::variable_declaration;
-            vn.scope = scope;
-            vn.form = init_form::brace;
-            vn.name = tk(declarator_index).span;
-            vn.init_span = source_span::join(tk(open_brace).span, tk(close_brace).span);
-            vn.init_inner = {.file_id = file_id,
-                             .byte_begin = tk(open_brace).span.byte_end,
-                             .byte_end = tk(close_brace).span.byte_begin};
-            auto const last = (semi < end && !is_eof(semi)) ? semi : close_brace;
-            vn.span = source_span::join(tk(begin).span, tk(last).span);
-            auto const id = add_node(cc::move(vn));
-            tree.nodes[parent].children.push_back(id);
+            auto const last = (semi < end && !is_eof(semi)) ? semi : first_close;
+            for (auto k = isize(0); k < braces.size(); ++k)
+                this->add_brace_var(begin, last, names[k], braces[k], scope, parent);
         }
 
         return (semi < end && punct(semi, ";")) ? semi + 1 : semi;
+    }
+
+    /// Consume one declarator of a comma-separated declaration, starting just past the ','. Records it in
+    /// `braces` / `names` (unless null) when it is brace-initialized; an `=` or a bare declarator records
+    /// nothing. Returns the index of whatever terminated it — never consuming that token, so the caller's
+    /// loop still sees the `=`, `,` or `;`.
+    isize scan_next_declarator(isize from, isize end, cc::vector<isize>* braces, cc::vector<isize>* names)
+    {
+        auto name_index = isize(-1);
+
+        isize j = from;
+        while (j < end && !is_eof(j) && !punct(j, ";") && !punct(j, ",") && !punct(j, "=") && !punct(j, "{"))
+        {
+            if (punct(j, "[")) // an array bound is part of the declarator
+                j = skip_balanced(j, "[", "]");
+            else if (punct(j, "(")) // a parenthesized init / function declarator: opaque, and not brace form
+                j = skip_balanced(j, "(", ")");
+            else
+            {
+                if (tk(j).is(token_kind::identifier))
+                    name_index = j; // the last identifier is the declarator-id, as in scan_one
+                ++j;
+            }
+        }
+
+        if (j < end && punct(j, "{") && name_index >= 0 && braces != nullptr)
+        {
+            braces->push_back(j);
+            names->push_back(name_index);
+            return skip_balanced(j, "{", "}");
+        }
+        return j;
     }
 
     /// Skip an assignment initializer up to and including its ';' (balanced groups skipped). At function
