@@ -40,14 +40,15 @@ TEST("shaped-linter - apply_edits - multiple edits back-to-front")
 
 TEST("shaped-linter - fix round-trip - single value")
 {
-    CHECK(lint_and_fix("struct S { cc::atomic<cc::u32> x{0}; };") == "struct S { cc::atomic<cc::u32> x = 0; };");
+    // The braces stay: `= 0` is copy-init, which an aggregate or an explicit constructor refuses.
+    CHECK(lint_and_fix("struct S { cc::atomic<cc::u32> x{0}; };") == "struct S { cc::atomic<cc::u32> x = {0}; };");
 }
 
 TEST("shaped-linter - fix round-trip - nullptr and false")
 {
     CHECK(lint_and_fix("struct S { cc::atomic<ring*> _ring{nullptr}; };")
-          == "struct S { cc::atomic<ring*> _ring = nullptr; };");
-    CHECK(lint_and_fix("struct S { cc::atomic<bool> _p{false}; };") == "struct S { cc::atomic<bool> _p = false; };");
+          == "struct S { cc::atomic<ring*> _ring = {nullptr}; };");
+    CHECK(lint_and_fix("struct S { cc::atomic<bool> _p{false}; };") == "struct S { cc::atomic<bool> _p = {false}; };");
 }
 
 TEST("shaped-linter - fix round-trip - empty braces")
@@ -68,30 +69,30 @@ TEST("shaped-linter - fix round-trip - several members at once")
                        "  cc::atomic<ring*> _ring{nullptr};\n"
                        "};")
           == "struct S {\n"
-             "  cc::atomic<cc::i64> _top = 0;\n"
-             "  cc::atomic<ring*> _ring = nullptr;\n"
+             "  cc::atomic<cc::i64> _top = {0};\n"
+             "  cc::atomic<ring*> _ring = {nullptr};\n"
              "};");
 }
 
 TEST("shaped-linter - fix round-trip - a function local")
 {
-    CHECK(lint_and_fix("void f() { int y{0}; }") == "void f() { int y = 0; }");
+    CHECK(lint_and_fix("void f() { int y{0}; }") == "void f() { int y = {0}; }");
 }
 
 TEST("shaped-linter - fix round-trip - a local inside a lambda body")
 {
-    CHECK(lint_and_fix("void f() { auto g = [] { int y{1}; }; }") == "void f() { auto g = [] { int y = 1; }; }");
+    CHECK(lint_and_fix("void f() { auto g = [] { int y{1}; }; }") == "void f() { auto g = [] { int y = {1}; }; }");
 }
 
 TEST("shaped-linter - fix round-trip - a namespace-scope variable")
 {
-    CHECK(lint_and_fix("namespace n { cc::atomic<int> g{0}; }") == "namespace n { cc::atomic<int> g = 0; }");
+    CHECK(lint_and_fix("namespace n { cc::atomic<int> g{0}; }") == "namespace n { cc::atomic<int> g = {0}; }");
 }
 
 TEST("shaped-linter - fix round-trip - normalizes spacing before the brace")
 {
-    // A space before the brace is absorbed: `x {0}` -> `x = 0`.
-    CHECK(lint_and_fix("struct S { int x {0}; };") == "struct S { int x = 0; };");
+    // A space before the brace is absorbed: `x {0}` -> `x = {0}`.
+    CHECK(lint_and_fix("struct S { int x {0}; };") == "struct S { int x = {0}; };");
 }
 
 TEST("shaped-linter - fix round-trip - an array bound survives the rewrite")
@@ -99,16 +100,16 @@ TEST("shaped-linter - fix round-trip - an array bound survives the rewrite")
     // The whole point of the applied round-trip: a corpus `fix=` only pins the replacement TEXT, so it
     // cannot see that the edit started too far left and ate the `[N]`.
     CHECK(lint_and_fix("struct S { T a[N]{1, 2}; };") == "struct S { T a[N] = {1, 2}; };");
-    CHECK(lint_and_fix("struct S { int a[3]{0}; };") == "struct S { int a[3] = 0; };");
-    CHECK(lint_and_fix("void f() { int a[2][3]{1}; }") == "void f() { int a[2][3] = 1; }");
+    CHECK(lint_and_fix("struct S { int a[3]{0}; };") == "struct S { int a[3] = {0}; };");
+    CHECK(lint_and_fix("void f() { int a[2][3]{1}; }") == "void f() { int a[2][3] = {1}; }");
 }
 
 TEST("shaped-linter - fix round-trip - every declarator of a multi-declarator statement")
 {
-    CHECK(lint_and_fix("struct S { int a{1}, b{2}; };") == "struct S { int a = 1, b = 2; };");
-    CHECK(lint_and_fix("void f() { int a{1}, b{2}, c{3}; }") == "void f() { int a = 1, b = 2, c = 3; }");
-    CHECK(lint_and_fix("struct S { int a{1}, b[2]{3}; };") == "struct S { int a = 1, b[2] = 3; };");
+    CHECK(lint_and_fix("struct S { int a{1}, b{2}; };") == "struct S { int a = {1}, b = {2}; };");
+    CHECK(lint_and_fix("void f() { int a{1}, b{2}, c{3}; }") == "void f() { int a = {1}, b = {2}, c = {3}; }");
+    CHECK(lint_and_fix("struct S { int a{1}, b[2]{3}; };") == "struct S { int a = {1}, b[2] = {3}; };");
 
     // the declarators that are not brace-initialized are left exactly as they were
-    CHECK(lint_and_fix("struct S { int a{1}, b = 2, c; };") == "struct S { int a = 1, b = 2, c; };");
+    CHECK(lint_and_fix("struct S { int a{1}, b = 2, c; };") == "struct S { int a = {1}, b = 2, c; };");
 }

@@ -31,13 +31,13 @@ void expect_none(cc::string_view source)
 
 TEST("shaped-linter - default-init - positive fixes")
 {
-    SECTION("single plain value drops braces")
+    SECTION("a single value keeps its braces")
     {
-        expect_single("struct S { cc::atomic<cc::u32> x{0}; };", " = 0");
+        expect_single("struct S { cc::atomic<cc::u32> x{0}; };", " = {0}");
     }
-    SECTION("nullptr drops braces")
+    SECTION("nullptr keeps its braces")
     {
-        expect_single("struct S { cc::atomic<ring*> _ring{nullptr}; };", " = nullptr");
+        expect_single("struct S { cc::atomic<ring*> _ring{nullptr}; };", " = {nullptr}");
     }
     SECTION("empty braces become empty-brace assignment")
     {
@@ -51,10 +51,9 @@ TEST("shaped-linter - default-init - positive fixes")
     {
         expect_single("struct S { P p{.a = 1}; };", " = {.a = 1}");
     }
-    SECTION("single call with inner comma drops braces")
+    SECTION("a call in the initializer is copied verbatim")
     {
-        // The comma is inside f(...), not top-level, so this is a single value -> drop.
-        expect_single("struct S { int n{f(a, b)}; };", " = f(a, b)");
+        expect_single("struct S { int n{f(a, b)}; };", " = {f(a, b)}");
     }
 }
 
@@ -62,23 +61,23 @@ TEST("shaped-linter - default-init - fires outside record bodies too")
 {
     SECTION("function local")
     {
-        expect_single("void f() { int y{0}; }", " = 0");
+        expect_single("void f() { int y{0}; }", " = {0}");
     }
     SECTION("static local in a member function")
     {
-        expect_single("struct S { void f() { static cc::atomic<int> s{1}; } };", " = 1");
+        expect_single("struct S { void f() { static cc::atomic<int> s{1}; } };", " = {1}");
     }
     SECTION("namespace-scope variable")
     {
-        expect_single("namespace n { cc::atomic<int> g{0}; }", " = 0");
+        expect_single("namespace n { cc::atomic<int> g{0}; }", " = {0}");
     }
     SECTION("local inside a nested block")
     {
-        expect_single("void f() { if (c) { int y{2}; } }", " = 2");
+        expect_single("void f() { if (c) { int y{2}; } }", " = {2}");
     }
     SECTION("local inside a lambda body")
     {
-        expect_single("void f() { auto g = [] { int y{3}; }; }", " = 3");
+        expect_single("void f() { auto g = [] { int y{3}; }; }", " = {3}");
     }
 }
 

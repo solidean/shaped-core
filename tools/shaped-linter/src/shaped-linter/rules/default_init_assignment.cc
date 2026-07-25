@@ -16,73 +16,18 @@ constexpr cc::string_view k_rationale
       "use `=`, not brace form. Where the braces were doing real work — an explicit constructor, or a "
       "conversion that copy-initialization will not perform — name the type: `T v = T(value);`.";
 
-bool is_space(char c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-/// Trim leading/trailing ASCII whitespace.
-cc::string_view trim(cc::string_view s)
-{
-    isize a = 0;
-    isize b = s.size();
-    while (a < b && is_space(s[a]))
-        ++a;
-    while (b > a && is_space(s[b - 1]))
-        --b;
-    return s.subview({.start = a, .end = b});
-}
-
-/// Whether the brace body has a comma at bracket depth 0 — the "multi-element / init-list" case that
-/// must keep its braces. Depth counts `()`, `[]`, and `{}` only (NOT `<>`): a mistaken angle-depth
-/// could hide a real top-level comma and make us drop braces around a list, producing invalid code, so
-/// we err toward keeping braces. Scans the already-lexed tokens inside `inner`.
-bool has_top_level_comma(token_stream const& ts, source_span inner)
-{
-    isize depth = 0;
-    for (auto const& t : ts.tokens)
-    {
-        if (t.span.byte_begin < inner.byte_begin || t.span.byte_end > inner.byte_end)
-            continue;
-        if (t.is_trivia())
-            continue;
-        if (t.is_punct("(") || t.is_punct("[") || t.is_punct("{"))
-            ++depth;
-        else if (t.is_punct(")") || t.is_punct("]") || t.is_punct("}"))
-            --depth;
-        else if (t.is_punct(",") && depth == 0)
-            return true;
-    }
-    return false;
-}
-
-/// Whether the first significant token inside the braces is `.` — a designated initializer, which must
-/// keep its braces.
-bool first_inner_is_designator(token_stream const& ts, source_span inner)
-{
-    for (auto const& t : ts.tokens)
-    {
-        if (t.span.byte_begin < inner.byte_begin || t.span.byte_end > inner.byte_end)
-            continue;
-        if (t.is_trivia())
-            continue;
-        return t.is_punct(".");
-    }
-    return false;
-}
-
-/// The replacement text (without the leading " = ") for a brace-form initializer:
-///  - empty `{}`                    -> "{}"        (`int v{}`   -> `= {}`)
-///  - top-level comma / designated  -> keep verbatim `{…}`   (`{a, b}` -> `= {a, b}`, `{.x=1}` kept)
-///  - otherwise                     -> drop the braces, inner trimmed   (`{0}` -> `0`)
+/// The replacement text (without the leading " = ") for a brace-form initializer: the `{…}` verbatim,
+/// always. `int v{}` -> `= {}`, `P p{a, b}` -> `= {a, b}`, `cc::atomic<int> x{0}` -> `= {0}`.
+///
+/// The braces STAY. Dropping them around a single value reads better, but it turns direct-list-init into
+/// copy-init, and a syntax-only linter cannot tell when that is legal: `Box a{10}` on an aggregate has no
+/// conversion from `int` to fall back on, and neither does an adapter whose constructor is explicit.
+/// Keeping them makes the rewrite copy-LIST-init, which every aggregate and every implicit constructor
+/// accepts. An explicit constructor still refuses it — there the rationale's `T v = T(value)` is the
+/// escape hatch, and no automatic rewrite can decide that for you.
 cc::string fix_payload(lint_context const& ctx, node const& v)
 {
-    auto const inner = trim(ctx.source.span_text(v.init_inner));
-    if (inner.empty())
-        return cc::string("{}");
-    if (has_top_level_comma(ctx.tokens, v.init_inner) || first_inner_is_designator(ctx.tokens, v.init_inner))
-        return cc::string(ctx.source.span_text(v.init_span)); // keep the whole `{…}` verbatim
-    return cc::string(inner);                                 // drop braces
+    return cc::string(ctx.source.span_text(v.init_span));
 }
 
 /// A data member reads differently from a local, so the finding says which one it is.

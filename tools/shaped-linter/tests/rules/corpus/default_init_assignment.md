@@ -3,24 +3,29 @@
 Every variable initializer uses assignment form `T v = value;`, never brace form `T v{value};` —
 data members, function locals and namespace-scope variables alike.
 
-The fix is not a blind brace-strip: a braced list that *stays* a list keeps its braces behind the `=`.
+The rewrite moves the `=` in and leaves the braces alone: `T v{x}` becomes `T v = {x}`, never `T v = x`.
+Dropping the braces reads better but changes direct-list-init into copy-init, and a linter with no type
+information cannot tell when that is legal — an aggregate has no converting constructor to fall back on,
+and neither does a type whose constructor is `explicit`. `= {x}` is copy-*list*-init, which every
+aggregate and every implicit constructor accepts.
+
 Blocks below are annotated with `[default-init-assignment]` for "fires once here",
 `~[default-init-assignment]` for "must stay quiet", and `fix="…"` for a replacement text the preceding
 rule produces — chained once per distinct rewrite, since a rule's fixes are pinned as a set.
 
 ## The fix shapes
 
-A single plain value drops its braces.
+The initializer is carried over verbatim, whatever is in it.
 
-```cpp [default-init-assignment] fix=" = 0"
+```cpp [default-init-assignment] fix=" = {0}"
 struct S { cc::atomic<cc::u32> x{0}; };
 ```
 
-```cpp [default-init-assignment] fix=" = nullptr"
+```cpp [default-init-assignment] fix=" = {nullptr}"
 struct S { cc::atomic<ring*> _ring{nullptr}; };
 ```
 
-```cpp [default-init-assignment] fix=" = false"
+```cpp [default-init-assignment] fix=" = {false}"
 struct S { cc::atomic<bool> _scan_pending{false}; };
 ```
 
@@ -30,27 +35,27 @@ Empty braces stay empty braces — `= {}` is the value-initializing form, `= ` a
 struct S { int value{}; };
 ```
 
-A top-level comma means the braces are a list, so they survive the rewrite.
+A list stays a list.
 
 ```cpp [default-init-assignment] fix=" = {a, b}"
 struct S { P p{a, b}; };
 ```
 
-A designated initializer is a list too, whatever its comma count.
+A designated initializer likewise.
 
 ```cpp [default-init-assignment] fix=" = {.a = 1}"
 struct S { P p{.a = 1}; };
 ```
 
-A comma *inside* a call is not a top-level comma — this is one value, so the braces go.
+A comma inside a call is just part of the initializer text.
 
-```cpp [default-init-assignment] fix=" = f(a, b)"
+```cpp [default-init-assignment] fix=" = {f(a, b)}"
 struct S { int n{f(a, b)}; };
 ```
 
 Whitespace before the brace is absorbed by the rewrite rather than left dangling.
 
-```cpp [default-init-assignment] fix=" = 0"
+```cpp [default-init-assignment] fix=" = {0}"
 struct S { int x {0}; };
 ```
 
@@ -65,55 +70,55 @@ struct S { T a[N]{1, 2}; };
 
 A function local.
 
-```cpp [default-init-assignment] fix=" = 0"
+```cpp [default-init-assignment] fix=" = {0}"
 void f() { int y{0}; }
 ```
 
 A static local inside a member function.
 
-```cpp [default-init-assignment] fix=" = 1"
+```cpp [default-init-assignment] fix=" = {1}"
 struct S { void f() { static cc::atomic<int> s{1}; } };
 ```
 
 A namespace-scope variable.
 
-```cpp [default-init-assignment] fix=" = 0"
+```cpp [default-init-assignment] fix=" = {0}"
 namespace n { cc::atomic<int> g{0}; }
 ```
 
 A file-scope variable, with no namespace around it.
 
-```cpp [default-init-assignment] fix=" = 7"
+```cpp [default-init-assignment] fix=" = {7}"
 cc::atomic<int> g{7};
 ```
 
 A local nested inside an `if` body — the parser descends into blocks, not just function bodies.
 
-```cpp [default-init-assignment] fix=" = 2"
+```cpp [default-init-assignment] fix=" = {2}"
 void f() { if (c) { int y{2}; } }
 ```
 
 A local inside a loop body.
 
-```cpp [default-init-assignment] fix=" = 3"
+```cpp [default-init-assignment] fix=" = {3}"
 void f() { for (auto const& x : v) { int y{3}; } }
 ```
 
 A local inside a lambda that is being assigned to a variable.
 
-```cpp [default-init-assignment] fix=" = 4"
+```cpp [default-init-assignment] fix=" = {4}"
 void f() { auto g = [] { int y{4}; }; }
 ```
 
 A lambda with a parameter list and a `mutable` specifier between it and the body.
 
-```cpp [default-init-assignment] fix=" = 5"
+```cpp [default-init-assignment] fix=" = {5}"
 void f() { auto g = [](int a) mutable { int y{5}; }; }
 ```
 
 A lambda passed straight as a call argument.
 
-```cpp [default-init-assignment] fix=" = 6"
+```cpp [default-init-assignment] fix=" = {6}"
 void f() { run([] { int y{6}; }); }
 ```
 
@@ -191,24 +196,24 @@ int a[] = {1, 2};
 
 Every brace-initialized declarator is its own finding with its own rewrite.
 
-```cpp [default-init-assignment] [default-init-assignment] fix=" = 1" fix=" = 2"
+```cpp [default-init-assignment] [default-init-assignment] fix=" = {1}" fix=" = {2}"
 struct S { int a{1}, b{2}; };
 ```
 
 Each keeps whatever suffix it carries.
 
-```cpp [default-init-assignment] [default-init-assignment] fix=" = 1" fix=" = 3"
+```cpp [default-init-assignment] [default-init-assignment] fix=" = {1}" fix=" = {3}"
 struct S { int a{1}, b[2]{3}; };
 ```
 
 Only the brace-initialized ones are reported: `b` is already assignment form and `c` has no initializer.
 
-```cpp [default-init-assignment] fix=" = 1"
+```cpp [default-init-assignment] fix=" = {1}"
 struct S { int a{1}, b = 2, c; };
 ```
 
 A comma inside an initializer does not start a declarator.
 
-```cpp [default-init-assignment] [default-init-assignment] fix=" = f(1, 2)" fix=" = 3"
+```cpp [default-init-assignment] [default-init-assignment] fix=" = {f(1, 2)}" fix=" = {3}"
 struct S { P a{f(1, 2)}, b{3}; };
 ```

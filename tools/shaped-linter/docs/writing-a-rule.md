@@ -129,7 +129,7 @@ Two layers, both nexus. The split and the corpus format are specified in [coding
 The corpus annotations, in short — the full specification is in [coding-guidelines.md](coding-guidelines.md):
 
 ```text
-```cpp [your-rule] fix=" = 0"          one finding, and that is the rewrite it offers
+```cpp [your-rule] fix=" = {0}"        one finding, and that is the rewrite it offers
 ```cpp [your-rule] [your-rule]         two findings; their fixes are not pinned
 ```cpp [your-rule] [your-rule] fix=" = 1" fix=" = 2"    two findings offering exactly these two rewrites
 ```cpp ~[your-rule]                    must stay quiet
