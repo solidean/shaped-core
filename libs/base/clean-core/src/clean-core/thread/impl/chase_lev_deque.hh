@@ -224,8 +224,8 @@ private:
     // Each on its own line. The owner writes _bottom on every push; thieves CAS _top on every steal; _ring is
     // read by both and written almost never. Sharing a line between any two of these would turn every push into
     // an invalidation of whatever the thieves are polling -- the exact traffic this deque exists to avoid.
-    alignas(64) cc::atomic<cc::i64> _top{0};
-    alignas(64) cc::atomic<cc::i64> _bottom{0};
-    alignas(64) cc::atomic<ring*> _ring{nullptr};
+    alignas(64) cc::atomic<cc::i64> _top = {0};
+    alignas(64) cc::atomic<cc::i64> _bottom = {0};
+    alignas(64) cc::atomic<ring*> _ring = {nullptr};
 };
 } // namespace cc::impl

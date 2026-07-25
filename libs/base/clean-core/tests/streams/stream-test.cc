@@ -6,13 +6,31 @@
 
 using namespace cc_stream_test;
 
-// --- streams don't convert to each other; adapters convert straight to any narrower type -------------------
+// --- conversions only ever narrow, and only from an rvalue -------------------------------------------------
 
-// A stream, once made, is its type: there is NO stream-to-stream conversion (see span_stream-test for the
-// adapter-side narrowing conversions, which is how you get a narrower type).
-static_assert(!std::is_constructible_v<cc::read_stream, cc::seekable_read_stream&&>);
-static_assert(!std::is_constructible_v<cc::read_stream, cc::seekable_read_write_stream&&>);
+// Every legal narrowing: drop seekable, and read_write -> read or write.
+static_assert(std::is_constructible_v<cc::read_stream, cc::seekable_read_stream&&>);
+static_assert(std::is_constructible_v<cc::write_stream, cc::seekable_write_stream&&>);
+static_assert(std::is_constructible_v<cc::read_stream, cc::read_write_stream&&>);
+static_assert(std::is_constructible_v<cc::write_stream, cc::read_write_stream&&>);
+static_assert(std::is_constructible_v<cc::read_write_stream, cc::seekable_read_write_stream&&>);
+static_assert(std::is_constructible_v<cc::seekable_read_stream, cc::seekable_read_write_stream&&>);
+static_assert(std::is_constructible_v<cc::seekable_write_stream, cc::seekable_read_write_stream&&>);
+static_assert(std::is_constructible_v<cc::read_stream, cc::seekable_read_write_stream&&>);
+static_assert(std::is_constructible_v<cc::write_stream, cc::seekable_read_write_stream&&>);
+
+// read and write are leaf capabilities: they never cross, in either direction.
 static_assert(!std::is_constructible_v<cc::read_stream, cc::write_stream&&>);
+static_assert(!std::is_constructible_v<cc::write_stream, cc::read_stream&&>);
+
+// Widening is not a conversion — a capability the source never had cannot appear.
+static_assert(!std::is_constructible_v<cc::read_write_stream, cc::read_stream&&>);
+static_assert(!std::is_constructible_v<cc::seekable_read_stream, cc::read_stream&&>);
+
+// An LVALUE never converts: narrowing consumes the source, so a second live view onto one adapter
+// (whose flush is stateful) can never exist.
+static_assert(!std::is_constructible_v<cc::read_stream, cc::seekable_read_stream&>);
+static_assert(!std::is_constructible_v<cc::write_stream, cc::read_write_stream&>);
 
 // streams are move-only
 static_assert(!std::is_copy_constructible_v<cc::read_stream>);
@@ -31,10 +49,58 @@ TEST("stream - adapter converts directly to a narrower stream")
     CHECK(bytes_equal(out, cc::span<cc::byte const>(data)));
 }
 
+TEST("stream - narrowing consumes the source and keeps reading through the same adapter")
+{
+    cc::byte data[4] = {b(1), b(2), b(3), b(4)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(data));
+
+    cc::seekable_read_stream seekable = adapter.stream();
+    REQUIRE(seekable.read_pod<cc::byte>().value() == b(1)); // consume one byte BEFORE narrowing
+
+    cc::read_stream plain = cc::move(seekable);
+    CHECK(!seekable.is_valid());
+    CHECK_ASSERTS(seekable.flush()); // the consumed source is unusable, not a second view
+
+    // the window carried over intact: reading resumes where the seekable stream left off
+    cc::vector<cc::byte> out = cc::vector<cc::byte>::create_defaulted(3);
+    REQUIRE(plain.read(out).value() == 3);
+    cc::byte const rest[3] = {b(2), b(3), b(4)};
+    CHECK(bytes_equal(out, cc::span<cc::byte const>(rest)));
+}
+
+TEST("stream - narrowing read_write to write keeps the write bound, not the read one")
+{
+    // `end` is the read boundary on a read_write stream but the write bound on a write stream, so this
+    // narrowing has to carry over write_end. Taking `end` would silently shrink the sink to the readable part.
+    auto adapter = mock_split_bounds_read_write_adapter(/*readable*/ cc::isize(4));
+
+    cc::read_write_stream rw = adapter.stream();
+    REQUIRE(rw.flush().has_value());
+    REQUIRE(rw.ready_bytes().size() == 4);     // read boundary
+    REQUIRE(rw.writable_bytes().size() == 16); // write capacity — deliberately wider
+
+    cc::write_stream w = cc::move(rw);
+    CHECK(!rw.is_valid());
+    CHECK(w.writable_bytes().size() == 16);
+}
+
+TEST("stream - narrowing away write capability with pending writes asserts")
+{
+    // The pending bytes sit in the source's buffer and drain only through a write-capable flush; a read_stream
+    // could never push them out, so losing them silently is the one thing this must not do.
+    auto adapter = mock_split_bounds_read_write_adapter(/*readable*/ cc::isize(0));
+
+    cc::read_write_stream rw = adapter.stream();
+    REQUIRE(rw.flush().has_value());
+    REQUIRE(rw.write(cc::span<cc::byte const>({b(9)})).has_value());
+
+    CHECK_ASSERTS(cc::read_stream(cc::move(rw)));
+}
+
 TEST("stream - move invalidates the source")
 {
     cc::byte data[3] = {b(7), b(8), b(9)};
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>(data)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(data));
 
     cc::seekable_read_stream a = adapter.stream();
     CHECK(a.is_valid());
@@ -83,7 +149,7 @@ TEST("stream - try_as_seekable fails on a non-seekable source, leaving it valid"
 TEST("stream - try_as_seekable succeeds on a seekable source")
 {
     cc::byte data[4] = {b(1), b(2), b(3), b(4)};
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>(data)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(data));
 
     // erase the seekable capability (adapter -> plain read_stream), then recover it via the dry probe
     cc::read_stream s = adapter;
@@ -118,7 +184,7 @@ TEST("stream - first_write is set on write and reset after each flush")
 TEST("stream - read_all on a seekable source (precise, single allocation)")
 {
     cc::byte data[5] = {b(10), b(11), b(12), b(13), b(14)};
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>(data)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(data));
     cc::read_stream s = adapter; // narrowed to non-seekable, but the adapter still reports position
 
     auto all = s.read_all();
@@ -139,7 +205,7 @@ TEST("stream - read_all on a non-seekable pipe (grows across chunks)")
         source[i] = b(int(i));
 
     // chunk 16 < 64-byte buffer < 70-byte total, so the read spans several refills, and the pipe reports no position -> read_all cannot size up front and must grow.
-    mock_pipe_read_stream_adapter adapter{cc::span<cc::byte const>(source), cc::isize(16)};
+    auto adapter = mock_pipe_read_stream_adapter(cc::span<cc::byte const>(source), cc::isize(16));
     cc::read_stream s = adapter.stream();
 
     auto all = s.read_all();
@@ -149,7 +215,7 @@ TEST("stream - read_all on a non-seekable pipe (grows across chunks)")
 
 TEST("stream - read_all on an empty source yields an empty buffer")
 {
-    cc::span_read_stream_adapter adapter{cc::span<cc::byte const>()};
+    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>());
     cc::read_stream s = adapter;
 
     auto all = s.read_all();

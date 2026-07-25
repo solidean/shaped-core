@@ -43,7 +43,56 @@ cc::string write_fixture()
     auto const s = path.string();
     return cc::string(cc::string_view(s.data(), isize(s.size())));
 }
+
+/// Write `content` verbatim to a temp path named `name`. Returns the path (caller removes it).
+cc::string write_file(char const* name, cc::string_view content)
+{
+    auto const path = std::filesystem::temp_directory_path() / name;
+    std::ofstream f(path, std::ios::binary);
+    f.write(content.data(), std::streamsize(content.size()));
+    auto const s = path.string();
+    return cc::string(cc::string_view(s.data(), isize(s.size())));
+}
+
+void remove_file(cc::string_view path)
+{
+    std::filesystem::remove(std::filesystem::path(std::string(path.data(), size_t(path.size()))));
+}
 } // namespace
+
+TEST("source cache - a CRLF file yields lines with no carriage return")
+{
+    // raw_line preserves indentation but must never hand a '\r' on to a source view. The line ending is
+    // normalized where the file is read, so nothing downstream has to know which ending it had.
+    auto const path = write_file("itrace_source_cache_crlf.cc", "  first\r\nsecond\r\n\r\nlast\r\n");
+
+    source_cache sources;
+    CHECK(sources.line_count(path) == 4);
+    CHECK(sources.raw_line(path, 1) == "  first");
+    CHECK(sources.line(path, 1) == "first");
+    CHECK(sources.raw_line(path, 3) == "");
+    CHECK(sources.raw_line(path, 4) == "last");
+
+    remove_file(path);
+}
+
+TEST("source cache - a final line without a newline still counts")
+{
+    auto const path = write_file("itrace_source_cache_no_eol.cc", "a\nb");
+
+    source_cache sources;
+    CHECK(sources.line_count(path) == 2);
+    CHECK(sources.raw_line(path, 2) == "b");
+
+    remove_file(path);
+}
+
+TEST("source cache - an unreadable file is empty, not an error")
+{
+    source_cache sources;
+    CHECK(sources.line_count("itrace_no_such_file_anywhere.cc") == 0);
+    CHECK(sources.line("itrace_no_such_file_anywhere.cc", 1) == "");
+}
 
 TEST("source view - grows, merges near lines, keeps far lines separate")
 {
@@ -68,7 +117,7 @@ TEST("source view - grows, merges near lines, keeps far lines separate")
 
     CHECK(f.ranges[0].lines.size() == 17);
 
-    std::filesystem::remove(std::filesystem::path(std::string(path.data(), size_t(path.size()))));
+    remove_file(path);
 }
 
 TEST("source view - marks executed lines and preserves indentation")
@@ -89,7 +138,7 @@ TEST("source view - marks executed lines and preserves indentation")
             CHECK(line.text == "    int indented = 10;"); // indentation preserved, unlike source_cache::line
     }
 
-    std::filesystem::remove(std::filesystem::path(std::string(path.data(), size_t(path.size()))));
+    remove_file(path);
 }
 
 TEST("source view - drops instructions without a source mapping")

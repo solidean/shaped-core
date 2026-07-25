@@ -74,7 +74,7 @@ TEST("slib - embedded_filesystem serves baked files at a constant revision")
         {.path = "a.hlsl", .text = "void main() {}"},
         {.path = "dir/b.hlsli", .text = "#define X 1"},
     };
-    slib::embedded_filesystem fs{k_files};
+    auto fs = slib::embedded_filesystem(k_files);
 
     CHECK(fs.read_text("a.hlsl").value() == "void main() {}");
     CHECK(fs.read_text("dir/b.hlsli").value() == "#define X 1");
@@ -93,6 +93,6 @@ TEST("slib - embedded_filesystem serves baked files at a constant revision")
 
 TEST("slib - embedded_filesystem is empty without files")
 {
-    slib::embedded_filesystem fs{{}};
+    auto fs = slib::embedded_filesystem({});
     CHECK(!fs.exists("a.hlsl"));
 }

@@ -242,7 +242,8 @@ public:
     //    in submit so token order == queue/signal order (out-of-order signals would break completion).
     //  - _command_pools: the command-pool pool (see vulkan_command_pool_set).
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
-    cc::mutex<sg::submission_token> _next_submission{sg::submission_token::first};
+    // cc::mutex's value ctor is explicit, so the type is named rather than left to `= {…}`.
+    cc::mutex<sg::submission_token> _next_submission = cc::mutex<sg::submission_token>(sg::submission_token::first);
     cc::mutex<vulkan_command_pool_set> _command_pools;
 
     // Hands each open command list a dense access-tracking slot (a backend helper for concurrent

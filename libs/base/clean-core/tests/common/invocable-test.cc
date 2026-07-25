@@ -121,7 +121,7 @@ TEST("invoke - 0-ary callable returns lvalue reference (decltype(auto) correctne
             int& ref;
             int& operator()() { return ref; }
         };
-        RefReturner r{data};
+        RefReturner r = {data};
 
         static_assert(std::is_same_v<decltype(cc::invoke(r)), int&>);
         cc::invoke(r) = 99;
@@ -258,7 +258,7 @@ TEST("invoke - member object pointer on object lvalue returns reference")
 {
     SECTION("decltype returns reference")
     {
-        MO m{5};
+        MO m = {5};
         static_assert(std::is_same_v<decltype(cc::invoke(&MO::x, m)), int&>);
 
         SUCCEED(); // just static checks
@@ -266,7 +266,7 @@ TEST("invoke - member object pointer on object lvalue returns reference")
 
     SECTION("can read and write through reference")
     {
-        MO m{5};
+        MO m = {5};
         CHECK(cc::invoke(&MO::x, m) == 5);
 
         cc::invoke(&MO::x, m) = 9;
@@ -275,7 +275,7 @@ TEST("invoke - member object pointer on object lvalue returns reference")
 
     SECTION("reference identity")
     {
-        MO m{42};
+        MO m = {42};
         int& ref = cc::invoke(&MO::x, m);
         CHECK(&ref == &m.x);
     }
@@ -285,7 +285,7 @@ TEST("invoke - member object pointer on pointer and smart pointer")
 {
     SECTION("raw pointer")
     {
-        MO m{10};
+        MO m = {10};
         MO* p = &m;
 
         static_assert(std::is_same_v<decltype(cc::invoke(&MO::x, p)), int&>);
@@ -574,7 +574,7 @@ TEST("invoke - proxy dereference type (custom smart-pointer-ish)")
     {
         S s;
         s.value = 50;
-        P proxy{&s};
+        P proxy = {&s};
 
         int result = cc::invoke(&S::f, proxy, 10);
         CHECK(result == 60);
@@ -583,14 +583,14 @@ TEST("invoke - proxy dereference type (custom smart-pointer-ish)")
 
     SECTION("member object via proxy")
     {
-        MO m{100};
+        MO m = {100};
 
         struct PMO
         {
             MO* p;
             MO& operator*() const { return *p; }
         };
-        PMO proxy{&m};
+        PMO proxy = {&m};
 
         CHECK(cc::invoke(&MO::x, proxy) == 100);
         cc::invoke(&MO::x, proxy) = 200;
@@ -601,7 +601,7 @@ TEST("invoke - proxy dereference type (custom smart-pointer-ish)")
     {
         S s;
         s.value = 75;
-        P const proxy{&s};
+        P const proxy = {&s};
 
         int result = cc::invoke(&S::f_const, proxy, 25);
         CHECK(result == 100);

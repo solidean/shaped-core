@@ -60,7 +60,7 @@ TEST("sg subresource - touching a sub-range splits while preserving the cover")
 
 TEST("sg subresource - whole-domain touch visits every box")
 {
-    sg::subresource_extent const e{3, 2, 2};
+    sg::subresource_extent const e = {3, 2, 2};
     sg::subresource_partition p(e);
 
     // Fresh: one whole-domain box -> exactly one visit (per-box, not per-cell).
@@ -79,7 +79,7 @@ TEST("sg subresource - whole-domain touch visits every box")
 
 TEST("sg subresource - try_merge collapses a uniform partition")
 {
-    sg::subresource_extent const e{4, 2, 1};
+    sg::subresource_extent const e = {4, 2, 1};
     sg::subresource_partition p(e);
 
     // Fragment by touching a sub-range, but apply the SAME declare+flush to every cell so all states match.
@@ -95,7 +95,7 @@ TEST("sg subresource - try_merge collapses a uniform partition")
 
 TEST("sg subresource - try_merge keeps distinct states apart")
 {
-    sg::subresource_extent const e{2, 1, 1};
+    sg::subresource_extent const e = {2, 1, 1};
     sg::subresource_partition p(e);
 
     // Give mip 0 a different state than mip 1.
@@ -109,7 +109,7 @@ TEST("sg subresource - try_merge keeps distinct states apart")
 
 TEST("sg subresource - for_each_box_in passes each covered box's range")
 {
-    sg::subresource_extent const e{4, 1, 1};
+    sg::subresource_extent const e = {4, 1, 1};
     sg::subresource_partition p(e);
 
     // Touch mip 1..3; the callback must see box ranges contained in [1,3), covering it exactly.

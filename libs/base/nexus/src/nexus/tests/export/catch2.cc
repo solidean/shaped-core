@@ -156,7 +156,8 @@ cc::string nx::write_catch2_results_xml(nx::test_schedule_execution const& execu
 {
     // TODO(catch2-xml):
     // - Emit captured StdOut / StdErr elements (useful for failure diagnostics and hung tests).
-    // - Support INFO/CAPTURE-style contextual messages in XML, not just failed expressions.
+    // - Emit chained .context()/.note()/.dump() as their own <Info> elements; today they ride along inside
+    //   <Expanded>, which reads fine but does not let an IDE separate them from the expression.
     // - Model partial test-case runs (SECTION re-entry / partNumber) instead of only a merged section tree.
     // - Add benchmark result reporting hooks (even if unimplemented for now).
     // - Include run metadata (run name, RNG seed) for reproducibility/debugging.

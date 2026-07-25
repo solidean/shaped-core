@@ -1,4 +1,5 @@
 #include <clean-core/common/hash.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/impl/watch_backend.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -8,8 +9,10 @@
 // contained here: every other part of slib addresses shader sources through a mounted slib::filesystem.
 // Keeping the dependency to one adaptor is also what makes the eventual move to a cc:: virtual filesystem a
 // local change.
+//
+// Reading is already off <filesystem> — it goes through cc's file stream adapters. What is left needs
+// filesystem *metadata* (is_regular_file, last_write_time, file_size), which clean-core does not model.
 #include <filesystem>
-#include <fstream>
 
 slib::real_filesystem::real_filesystem(cc::string root_dir) : _root_dir(cc::move(root_dir))
 {
@@ -38,22 +41,22 @@ cc::optional<cc::string> slib::real_filesystem::to_native_path(cc::string_view p
 
 cc::optional<cc::string> slib::real_filesystem::read_text(cc::string_view path) const
 {
-    auto native = to_native_path(path); // non-const: c_str_materialize appends the terminator
+    auto const native = to_native_path(path);
     if (!native.has_value())
         return cc::nullopt;
 
-    std::ifstream in(native.value().c_str_materialize(), std::ios::binary);
-    if (!in.is_open())
+    // The adapter owns the buffer the stream reads through, so it must outlive the stream.
+    auto adapter = cc::file_read_stream_adapter::open(native.value());
+    if (!adapter.has_value())
         return cc::nullopt;
 
-    cc::string text;
-    char buffer[4096];
-    while (in.read(buffer, sizeof(buffer)) || in.gcount() > 0)
-        text.append(cc::string_view(buffer, cc::isize(in.gcount())));
-
-    if (in.bad())
+    // read_all sizes the result from the stream's remaining bytes, so a whole file is one allocation.
+    auto stream = adapter.value().stream();
+    auto const bytes = stream.read_all();
+    if (!bytes.has_value())
         return cc::nullopt;
-    return text;
+
+    return cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size()));
 }
 
 slib::file_revision slib::real_filesystem::revision(cc::string_view path) const

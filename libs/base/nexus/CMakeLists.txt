@@ -114,6 +114,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/test-api-test.cc
         tests/test-check-test.cc
+        tests/test-check-render-test.cc
         tests/test-export-test.cc
         tests/test-registry-test.cc
         tests/test-section-test.cc

@@ -214,7 +214,7 @@ TEST("to_debug_string - empty tuple")
 
 TEST("to_debug_string - single element tuple")
 {
-    std::tuple<int> single{42};
+    std::tuple<int> single = {42};
     auto result = cc::to_debug_string(single);
 
     CHECK(result == "(42)");
@@ -222,7 +222,7 @@ TEST("to_debug_string - single element tuple")
 
 TEST("to_debug_string - pair")
 {
-    std::pair<int, int> p{10, 20};
+    std::pair<int, int> p = {10, 20};
     auto result = cc::to_debug_string(p);
 
     CHECK(result == "(10, 20)");
@@ -230,7 +230,7 @@ TEST("to_debug_string - pair")
 
 TEST("to_debug_string - multi-element tuple")
 {
-    std::tuple<int, int, int> triple{1, 2, 3};
+    std::tuple<int, int, int> triple = {1, 2, 3};
     auto result = cc::to_debug_string(triple);
 
     CHECK(result == "(1, 2, 3)");
@@ -246,7 +246,7 @@ TEST("to_debug_string - std::array as collection")
 
 TEST("to_debug_string - tuple with same size as array")
 {
-    std::tuple<int, int, int> tup{5, 10, 15};
+    std::tuple<int, int, int> tup = {5, 10, 15};
     auto result = cc::to_debug_string(tup);
 
     CHECK(result == "(5, 10, 15)");
@@ -266,7 +266,7 @@ TEST("to_debug_string - large tuple")
 
 TEST("to_debug_string - heterogeneous tuple with different dispatch paths")
 {
-    std::tuple<int, cc::string, std::vector<int>> mixed{42, "hello", {1, 2, 3}};
+    std::tuple<int, cc::string, std::vector<int>> mixed = {42, "hello", {1, 2, 3}};
     auto result = cc::to_debug_string(mixed);
 
     // int → to_string, string → wrapped in quotes, vector → iterable
@@ -275,7 +275,7 @@ TEST("to_debug_string - heterogeneous tuple with different dispatch paths")
 
 TEST("to_debug_string - tuple with custom stringable type")
 {
-    std::tuple<int, CustomStringable, int> custom{10, CustomStringable{99}, 20};
+    std::tuple<int, CustomStringable, int> custom = {10, CustomStringable{99}, 20};
     auto result = cc::to_debug_string(custom);
 
     CHECK(result == "(10, 99_custom, 20)");
@@ -283,7 +283,7 @@ TEST("to_debug_string - tuple with custom stringable type")
 
 TEST("to_debug_string - nested tuple and vector")
 {
-    std::tuple<std::vector<int>, int> nested{{5, 6}, 7};
+    std::tuple<std::vector<int>, int> nested = {{5, 6}, 7};
     auto result = cc::to_debug_string(nested);
 
     CHECK(result == "([5, 6], 7)");
@@ -295,7 +295,7 @@ TEST("to_debug_string - nested tuple and vector")
 
 TEST("to_debug_string - opaque struct produces hex dump")
 {
-    OpaqueType obj{0x12345678, 0xABCD, 0xEF};
+    OpaqueType obj = {0x12345678, 0xABCD, 0xEF};
     auto result = cc::to_debug_string(obj);
 
     // Should contain 0x as substring and underscores as alignment separators
@@ -316,7 +316,7 @@ TEST("to_debug_string - memory dump has alignment separators")
         alignas(16) uint64_t data[4];
     };
 
-    Aligned16 obj{{0, 0, 0, 0}};
+    Aligned16 obj = {{0, 0, 0, 0}};
     auto result = cc::to_debug_string(obj);
 
     // Format is raw(0x[HEX]_[HEX]...)
@@ -337,7 +337,7 @@ TEST("to_debug_string - large iterable truncates with ellipsis")
     for (int i = 0; i < 1000; ++i)
         large.push_back(i);
 
-    cc::debug_string_config cfg{100};
+    cc::debug_string_config cfg = {100};
     auto result = cc::to_debug_string(large, cfg);
 
     // Should be truncated
@@ -353,7 +353,7 @@ TEST("to_debug_string - large iterable respects max_length")
     for (int i = 0; i < 500; ++i)
         verbose.push_back("item_" + cc::to_string(i));
 
-    cc::debug_string_config cfg{80};
+    cc::debug_string_config cfg = {80};
     auto result = cc::to_debug_string(verbose, cfg);
 
     CHECK(result.ends_with(", ...]"));
@@ -365,7 +365,7 @@ TEST("to_debug_string - large tuple truncates")
     auto large = std::make_tuple(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
                                  25, 26, 27, 28, 29, 30);
 
-    cc::debug_string_config cfg{50};
+    cc::debug_string_config cfg = {50};
     auto result = cc::to_debug_string(large, cfg);
 
     CHECK(result.ends_with(", ...)"));
@@ -374,11 +374,11 @@ TEST("to_debug_string - large tuple truncates")
 
 TEST("to_debug_string - verbose tuple elements truncate")
 {
-    std::tuple<cc::string, cc::string, cc::string> verbose{"very_long_string_element_one_that_goes_on_and_on",
-                                                           "another_extremely_long_string_element_two",
-                                                           "yet_another_verbose_string_element_three"};
+    std::tuple<cc::string, cc::string, cc::string> verbose
+        = {"very_long_string_element_one_that_goes_on_and_on", "another_extremely_long_string_element_two",
+           "yet_another_verbose_string_element_three"};
 
-    cc::debug_string_config cfg{40};
+    cc::debug_string_config cfg = {40};
     auto result = cc::to_debug_string(verbose, cfg);
 
     CHECK(result.ends_with(", ...)"));
@@ -400,7 +400,7 @@ TEST("to_debug_string - nested structure truncates recursively")
         nested.push_back(inner);
     }
 
-    cc::debug_string_config cfg{100};
+    cc::debug_string_config cfg = {100};
     auto result = cc::to_debug_string(nested, cfg);
 
     // Should truncate before processing all elements
@@ -424,7 +424,7 @@ TEST("to_debug_string - deeply nested truncates at outer level")
         deep.push_back(mid);
     }
 
-    cc::debug_string_config cfg{120};
+    cc::debug_string_config cfg = {120};
     auto result = cc::to_debug_string(deep, cfg);
 
     CHECK(result.ends_with(", ...]"));
@@ -450,7 +450,7 @@ TEST("to_debug_string - vector of tuples with mixed types")
 
 TEST("to_debug_string - tuple containing vector and custom type")
 {
-    std::tuple<std::vector<int>, CustomStringable, cc::string> complex{{10, 20, 30}, CustomStringable{99}, "end"};
+    std::tuple<std::vector<int>, CustomStringable, cc::string> complex = {{10, 20, 30}, CustomStringable{99}, "end"};
 
     auto result = cc::to_debug_string(complex);
 
@@ -517,7 +517,7 @@ TEST("to_debug_string - vector of empty strings")
 
 TEST("to_debug_string - tuple with empty string")
 {
-    std::tuple<int, cc::string, int> with_empty{1, "", 2};
+    std::tuple<int, cc::string, int> with_empty = {1, "", 2};
     auto result = cc::to_debug_string(with_empty);
 
     // Empty string now shows as "" to make it visible
@@ -729,7 +729,7 @@ TEST("to_debug_string - char ensures visibility in collections")
 
     SECTION("tuple with mixed chars")
     {
-        std::tuple<char, char, char> mixed{' ', '\n', 'A'};
+        std::tuple<char, char, char> mixed = {' ', '\n', 'A'};
         auto result = cc::to_debug_string(mixed);
         CHECK(result == "(' ', '\\n', 'A')");
     }
@@ -801,7 +801,7 @@ TEST("to_debug_string - nullptr in containers")
 
     SECTION("tuple with nullptr")
     {
-        std::tuple<int, char*, int> with_nullptr{42, nullptr, 99};
+        std::tuple<int, char*, int> with_nullptr = {42, nullptr, 99};
         auto result = cc::to_debug_string(with_nullptr);
         CHECK(result == "(42, <nullptr>, 99)");
     }
@@ -884,7 +884,7 @@ TEST("to_debug_string - optional in containers")
 
     SECTION("tuple with optionals")
     {
-        std::tuple<cc::optional<int>, int, cc::optional<cc::string>> mixed{42, 99, cc::nullopt};
+        std::tuple<cc::optional<int>, int, cc::optional<cc::string>> mixed = {42, 99, cc::nullopt};
         auto result = cc::to_debug_string(mixed);
         CHECK(result == "(value(42), 99, nullopt)");
     }

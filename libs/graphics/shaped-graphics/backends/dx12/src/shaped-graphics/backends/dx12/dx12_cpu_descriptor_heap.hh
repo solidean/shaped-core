@@ -22,7 +22,7 @@ enum class cpu_descriptor_slot : int
 /// to return via the owning context's free_* when the RTV/DSV is no longer needed.
 struct dx12_descriptor_ref
 {
-    D3D12_CPU_DESCRIPTOR_HANDLE handle{};
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = {};
     cpu_descriptor_slot slot = cpu_descriptor_slot::invalid;
 };
 
@@ -52,7 +52,7 @@ struct dx12_cpu_descriptor_heap
     }
 
     ComPtr<ID3D12DescriptorHeap> heap;
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu_start{};
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu_start = {};
     int increment = 0;
     int capacity = 0;
 

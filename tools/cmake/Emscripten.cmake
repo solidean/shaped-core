@@ -41,7 +41,7 @@ if(EMSCRIPTEN)
     endif()
 
     # Make the test executables behave like native binaries under Node: NODERAWFS gives real-filesystem
-    # access (so nexus' --junit-xml std::ofstream and cwd-relative paths work), EXIT_RUNTIME propagates the
+    # access (so nexus' --junit-xml file write and cwd-relative paths work), EXIT_RUNTIME propagates the
     # process exit code (pass/fail), and memory growth avoids a fixed heap cap. These are link-time settings;
     # they no-op on the static libraries and apply to the linked test binaries.
     add_link_options("SHELL:-s NODERAWFS=1" "SHELL:-s EXIT_RUNTIME=1" "SHELL:-s ALLOW_MEMORY_GROWTH=1")

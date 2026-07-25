@@ -22,7 +22,7 @@ thread_local cc::async_scheduler* s_current_scheduler = nullptr;
 
 // Process-wide default scheduler for compute nodes that cannot run on the current thread. Read-mostly:
 // installed once at startup. Atomic so installation is visible to worker threads without extra synchronization.
-cc::atomic<cc::async_scheduler*> s_default_scheduler{nullptr};
+cc::atomic<cc::async_scheduler*> s_default_scheduler = {nullptr};
 
 // spilled dependency-list nodes come from the node slab allocator (wait-free free, cross-thread safe): a node
 // parked by one worker may be re-polled/torn down by another, which then frees these on a different thread.

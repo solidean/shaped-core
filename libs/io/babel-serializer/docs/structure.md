@@ -34,6 +34,7 @@ Two more rules bind the whole library:
 src/babel-serializer/
   data/        [in progress]   text / structured data formats
     json       [done]          reader
+    markdown   [done]          block-level reader (no inline parsing)
     sqlite     [done]          live database engine (read/write; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
     obj        [done]          reader
@@ -62,6 +63,30 @@ Planned refinements:
 - `[planned]` **richer errors** — a `parse_error` with line/column (today: a `cc::result` message carrying the byte offset).
 - `[planned]` **lossless numbers** — recover exact integers (today numbers are `double`); costs an arena copy of the raw slice.
 - `[planned]` **compact node** — union the string / container payload fields (today they are separate for clarity).
+
+### markdown [done]
+
+Reader only, and **block level only** — the deliberate cut that makes a first version tractable.
+
+The parsed `document` has exactly json's flat shape (preorder `node` array, contiguous child-index runs, one text arena)
+and the same non-owning kind-tolerant `ref` handle, so knowing one reader is knowing the other.
+Blocks covered: ATX headings, fenced code (with its info string), paragraphs with lazy continuation,
+bullet + ordered lists (nested), block quotes, and thematic breaks.
+Parsing is line-oriented over `read_stream::read_line`; every block records the 1-based source line it starts on,
+which is what makes a markdown file usable as a test corpus that can point at a failing case.
+
+**Inline spans are not parsed.** A paragraph's or heading's `text()` is the raw source, so `**bold**` comes back with its
+asterisks. That is the single biggest cut, and it is why there is no `emphasis` / `link` / `code_span` node kind.
+
+Markdown has no invalid input — every byte sequence is a valid document.
+The `cc::result` is there for stream I/O failure and for consistency with the other readers, never for a content error.
+
+Planned refinements:
+
+- `[planned]` **inline parsing** — emphasis, links, code spans and images as child nodes under a paragraph.
+- `[planned]` **setext headings** (`===` / `---` underlines), which need one line of lookahead against the thematic-break reading.
+- `[planned]` **indented code blocks** — cut for now because a naive 4-space rule collides with list-item content indentation.
+- `[planned]` **tables, HTML blocks, link reference definitions**, and exact tab-stop handling (tabs count as 4 columns today).
 
 ### sqlite [done]
 

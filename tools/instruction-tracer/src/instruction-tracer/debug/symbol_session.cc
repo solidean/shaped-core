@@ -185,7 +185,7 @@ cc::result<u64, symbol_error> symbol_session::resolve(target_spec const& spec) c
     // module: SymEnumSymbols with a base of 0 does not reach modules whose symbols are still
     // deferred (SYMOPT_DEFERRED_LOADS), so an unqualified sweep would silently find nothing.
     cc::vector<symbol_match> matches;
-    enum_context ctx{&matches, &_modules};
+    enum_context ctx = {&matches, &_modules};
     auto mask = cc::format("*{}*", spec.symbol);
 
     for (auto const& module : _modules.all())

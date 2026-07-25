@@ -1,7 +1,10 @@
 #include "run.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/tests/alias.hh>
@@ -13,27 +16,21 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <fstream>       // std::ofstream: JUnit report file output
-#include <iostream>      // std::cout / std::cerr: console output
-#include <string_view>   // std::string_view: streams a cc::string into std::ostream (no operator<<)
 #include <unordered_set> // std::unordered_set: cc has no set type yet
 
 namespace
 {
-// cc::string is not std::ostream-streamable, so view it as a std::string_view.
-std::string_view as_sv(cc::string_view s)
-{
-    return std::string_view(s.data(), size_t(s.size()));
-}
-
+// The "Compatible with Catch2" line is what makes the C++ TestMate IDE extension recognize the binary.
 void print_help()
 {
-    std::cout << "nexus - Unified test, fuzz, benchmark, and app runner for modern C++\n\n";
-    // Advertise Catch2 compatibility to enable C++ TestMate IDE extension recognition
-    std::cout << "Compatible with Catch2 v3.11.0 in some args\n\n";
-    std::cout << "Usage:\n";
-    std::cout << "  <test-executable> [options]\n\n";
-    std::cout << "For more information, see the nexus documentation.\n";
+    cc::print("nexus - Unified test, fuzz, benchmark, and app runner for modern C++\n"
+              "\n"
+              "Compatible with Catch2 v3.11.0 in some args\n"
+              "\n"
+              "Usage:\n"
+              "  <test-executable> [options]\n"
+              "\n"
+              "For more information, see the nexus documentation.\n");
 }
 
 // Derives a JUnit suite name from argv[0]: the basename without a directory or a
@@ -56,16 +53,21 @@ cc::string program_name(char const* argv0)
     return cc::string(name);
 }
 
-// Writes a cc::string to an std::ostream by bytes (cc::string has no operator<<).
-void write_to(std::ostream& os, cc::string_view s)
+// Writes a report file whole, replacing any existing content.
+cc::result<cc::unit> write_report_file(cc::string_view path, cc::string_view content)
 {
-    os.write(s.data(), s.size());
+    auto adapter = cc::file_write_stream_adapter::create(path);
+    CC_RETURN_IF_ERROR(adapter);
+    auto stream = adapter.value().stream();
+    CC_RETURN_IF_ERROR(stream.write(cc::as_bytes(content)));
+    CC_RETURN_IF_ERROR(stream.flush()); // no auto-flush: buffered bytes are lost otherwise
+    return cc::unit{};
 }
 
-// Prints failing tests, recursing into invoked (nested) executions. `prefix` is the accumulated
+// Prints failing tests to stderr, recursing into invoked (nested) executions. `prefix` is the accumulated
 // addressable path of the parent (invocation group + name segments), so a failing instance shows its
 // full "driver / group / test" location.
-void print_failing(std::ostream& os, nx::test_execution const& exec, cc::string const& prefix)
+void print_failing(nx::test_execution const& exec, cc::string const& prefix)
 {
     auto const* const decl = exec.instance.declaration;
 
@@ -84,10 +86,10 @@ void print_failing(std::ostream& os, nx::test_execution const& exec, cc::string 
     }
 
     if (exec.root.is_considered_failing && decl != nullptr)
-        os << "  " << as_sv(label) << " at " << decl->location.file_name() << ":" << decl->location.line() << "\n";
+        cc::eprintln("  {} at {}:{}", label, decl->location.file_name(), decl->location.line());
 
     for (auto const& child : exec.nested)
-        print_failing(os, child, label);
+        print_failing(child, label);
 }
 
 // Collects the declarations of all invoked (nested) executions — i.e. which invocable tests actually ran
@@ -129,7 +131,7 @@ int nx::run(int argc, char** argv)
     // Handle Catch2 XML discovery mode for TestMate integration
     if (config.is_catch2_xml_discovery)
     {
-        write_to(std::cout, write_catch2_discovery_xml(registry));
+        cc::print(write_catch2_discovery_xml(registry));
         return 0;
     }
 
@@ -140,18 +142,12 @@ int nx::run(int argc, char** argv)
     {
         auto const json = write_test_listing_json(program_name(argv[0]), config, registry);
         if (config.list_tests_json_file == "-")
-            write_to(std::cout, json);
-        else
+            cc::print(json);
+        else if (auto const written = write_report_file(config.list_tests_json_file, json); !written.has_value())
         {
-            std::ofstream out(config.list_tests_json_file.c_str_materialize());
-            if (out)
-                write_to(out, json);
-            else
-            {
-                std::cerr << "Error: could not open test listing JSON file: " << as_sv(config.list_tests_json_file)
-                          << "\n";
-                return 1;
-            }
+            cc::eprintln("Error: could not write test listing JSON file: {}: {}", config.list_tests_json_file,
+                         written.error().to_string());
+            return 1;
         }
         return 0;
     }
@@ -166,22 +162,20 @@ int nx::run(int argc, char** argv)
         // --guide-benchmarks across every test binary, and most contain no guide benchmarks.
         if (config.selected_bucket == nx::config::test_bucket::guide_benchmark)
         {
-            std::cout << "No guide benchmarks in this binary\n";
+            cc::println("No guide benchmarks in this binary");
             return 0;
         }
 
-        std::cerr << "Error: The current schedule did not select any tests\n";
+        cc::eprintln("Error: The current schedule did not select any tests");
         for (int i = 0; i < argc; ++i)
-        {
-            std::cerr << "  arg[" << i << "] = `" << argv[i] << "'\n";
-        }
+            cc::eprintln("  arg[{}] = `{}'", i, argv[i]);
         return 1;
     }
 
     if (config.verbose)
     {
         schedule.print();
-        std::cout << std::endl; // NOLINT
+        cc::println();
     }
 
     // Execute the scheduled tests
@@ -191,27 +185,25 @@ int nx::run(int argc, char** argv)
     // console output below still runs regardless of the reporting mode.
     if (!config.junit_xml_file.empty())
     {
-        std::ofstream out(config.junit_xml_file.c_str_materialize());
-        if (out)
-            write_to(out, write_junit_xml(program_name(argv[0]), execution));
-        else
-            std::cerr << "Error: could not open JUnit XML file: " << as_sv(config.junit_xml_file) << "\n";
+        auto const written = write_report_file(config.junit_xml_file, write_junit_xml(program_name(argv[0]), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
+                         written.error().to_string());
     }
 
     // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::guide). Also additive.
     if (!config.perf_json_file.empty())
     {
-        std::ofstream out(config.perf_json_file.c_str_materialize());
-        if (out)
-            write_to(out, write_perf_json(program_name(argv[0]), execution));
-        else
-            std::cerr << "Error: could not open perf JSON file: " << as_sv(config.perf_json_file) << "\n";
+        auto const written = write_report_file(config.perf_json_file, write_perf_json(program_name(argv[0]), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.perf_json_file,
+                         written.error().to_string());
     }
 
     // Handle Catch2 XML results reporting for TestMate integration
     if (config.report_catch2_xml_results)
     {
-        write_to(std::cout, write_catch2_results_xml(execution));
+        cc::print(write_catch2_results_xml(execution));
         return execution.count_failed_tests() > 0 ? 1 : 0;
     }
 
@@ -227,13 +219,13 @@ int nx::run(int argc, char** argv)
 
         if (has_metrics)
         {
-            std::cout << "\nRecorded metrics:\n";
+            cc::println("\nRecorded metrics:");
             for (auto const& exec : execution.executions)
                 for (auto const& metric : exec.metrics)
                 {
                     char const* const dir = metric.higher_is_better ? "(higher is better)" : "(lower is better)";
-                    std::cout << "  " << as_sv(exec.instance.declaration->name) << " | " << as_sv(metric.name) << " = "
-                              << metric.value << " " << as_sv(metric.unit) << " " << dir << "\n";
+                    cc::println("  {} | {} = {} {} {}", exec.instance.declaration->name, metric.name, metric.value,
+                                metric.unit, dir);
                 }
         }
     }
@@ -253,9 +245,8 @@ int nx::run(int argc, char** argv)
             if (decl.is_invocable() && decl.test_config.enabled && !invoked.contains(&decl))
             {
                 if (orphan_count == 0)
-                    std::cerr << "\nOrphan invocable tests (declared but never invoked):\n";
-                std::cerr << "  " << as_sv(decl.name) << " at " << decl.location.file_name() << ":"
-                          << decl.location.line() << "\n";
+                    cc::eprintln("\nOrphan invocable tests (declared but never invoked):");
+                cc::eprintln("  {} at {}:{}", decl.name, decl.location.file_name(), decl.location.line());
                 ++orphan_count;
             }
     }
@@ -270,19 +261,19 @@ int nx::run(int argc, char** argv)
     {
         if (failed_tests > 0)
         {
-            std::cerr << "\nFailed tests:\n";
+            cc::eprintln("\nFailed tests:");
             for (auto const& exec : execution.executions)
-                print_failing(std::cerr, exec, cc::string());
+                print_failing(exec, cc::string());
 
-            std::cerr << "\n" << failed_tests << " of " << total_tests << " tests failed\n";
-            std::cerr << "Failed " << failed_checks << " of " << total_checks << " checks\n";
+            cc::eprintln("\n{} of {} tests failed", failed_tests, total_tests);
+            cc::eprintln("Failed {} of {} checks", failed_checks, total_checks);
         }
         if (orphan_count > 0)
-            std::cerr << "\n" << orphan_count << " invocable test(s) were never invoked\n";
+            cc::eprintln("\n{} invocable test(s) were never invoked", orphan_count);
         return 1;
     }
 
     // All tests passed
-    std::cout << "All " << total_tests << " tests passed (" << total_checks << " checks)\n";
+    cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
     return 0;
 }

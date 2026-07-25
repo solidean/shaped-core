@@ -5,7 +5,7 @@ Serialization / deserialization of various formats. Namespace `babel`; headers i
 > Each format parses into an unopinionated, read-once structure; string_view / span overloads wrap a `span_read_stream_adapter`.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (json + obj + sqlite + image)
+#include <babel-serializer/all.hh>   // umbrella (json + markdown + obj + sqlite + image)
 ```
 
 ---
@@ -40,6 +40,38 @@ babel::json::ref e = r[2];        // i-th child (array or object); invalid ref i
 babel::json::ref v = r["key"];    // object member by key (first match wins); invalid ref if absent
 bool has = r.has("key");          // object has this member?
 cc::string_view key = e.key();    // this node's key within its parent object ("" for array elements)
+```
+
+## Markdown (`babel::markdown`)
+
+Block level only — same flat `document` / `ref` shape as JSON. Inline spans (emphasis, links, code spans) are **not** parsed.
+
+```cpp
+#include <babel-serializer/data/markdown.hh>
+
+cc::result<babel::markdown::document> read(cc::read_stream& in); // + string_view / span overloads
+
+babel::markdown::document doc = read(text).value();
+babel::markdown::ref root = doc.root();     // the document node; children are the top-level blocks
+babel::markdown::ref n = doc.node_at(3);    // preorder index; 0 .. node_count() visits every block
+isize count = doc.node_count();
+```
+
+`babel::markdown::ref` — cheap, copyable, kind-tolerant, exactly like `json::ref`:
+
+```cpp
+r.is_document() / is_heading() / is_paragraph() / is_code_block();
+r.is_list() / is_list_item() / is_block_quote() / is_thematic_break();
+babel::markdown::node_kind k = r.kind();
+
+i32 lvl = r.level();              // heading 1..6, else 0
+bool ord = r.is_ordered();        // ordered list?
+i32 line = r.line();              // 1-based source line the block starts on
+cc::string_view t = r.text();     // heading / paragraph / code text; raw, inline spans unparsed
+cc::string_view i = r.info();     // a code block's fence info string ("cpp", "cpp [rule] fix=…", …)
+
+isize n = r.size();               // child block count
+babel::markdown::ref c = r[0];    // i-th child block; invalid ref if out of range
 ```
 
 ## OBJ (`babel::obj`)
@@ -166,6 +198,9 @@ babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stre
 - **OBJ indices are resolved.** 1-based and negative/relative OBJ indices are both converted to 0-based here; a missing corner attribute is `-1`.
 - **OBJ is faithful, not a mesh.** No triangulation, no dedup — polygons stay polygons. `usemtl` / `o` / `g` / `s` are recorded (or skipped), not applied.
 - **Errors carry an offset / line.** JSON errors report the byte offset; OBJ errors report the line number. Both come back as a `cc::result` error.
+- **Markdown never fails on content.** Every input is a valid document — its `cc::result` reports stream I/O failure only. An unterminated fence simply runs to end of input.
+- **Markdown parses blocks, not inlines.** `text()` is the raw source, so `**bold**` keeps its asterisks and there are no inline child nodes. Setext headings, indented code blocks, tables and HTML blocks are `[planned]`, not silently handled.
+- **Markdown `line()` is what makes a corpus debuggable.** Every block records the 1-based line it starts on, so a failure can point at the file and line rather than at a string literal.
 - **SQLite backend may be absent.** The API is *always* declared and callable; when the fetch-on-demand backend wasn't compiled in, `is_available()` is false and every `open_*` returns a `cc::result` error — never a missing symbol. Branch on `is_available()`, never on a macro.
 - **SQLite handles are live and non-owning downstream.** `database` / `statement` are move-only and own their handle. A `row` and any `as_string()` / `as_blob()` it hands back are only valid until the next step or the statement dies — copy out (`cc::string::create_copy_of`) to keep them.
 - **SQLite param vs. column indexing differs.** Bind parameters are **1-based** (`stmt.bind(1, …)`); result columns are **0-based** (`row.as_i64(0)`). A row-step error is sticky, not per-row: the range-for just ends — check `is_ok()` / `error()` after the loop.
@@ -178,6 +213,7 @@ babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stre
 
 ```cpp
 #include <babel-serializer/data/json.hh>     // just JSON
+#include <babel-serializer/data/markdown.hh> // just markdown
 #include <babel-serializer/data/sqlite.hh>   // just SQLite
 #include <babel-serializer/geometry/obj.hh>  // just OBJ
 #include <babel-serializer/image/png.hh>     // just PNG (low-level)

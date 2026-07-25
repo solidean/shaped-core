@@ -2,6 +2,8 @@
 
 #include <clean-core/streams/impl/stream.hh>
 
+#include <type_traits>
+
 // =========================================================================================================
 // Generic byte streams
 // =========================================================================================================
@@ -53,10 +55,13 @@
 //     only on seekable streams, write-through only happens on write streams), so the flush callback trusts
 //     its inputs and asserts on a violation rather than defensively checking every call.
 //
-// CONVERSIONS happen at the ADAPTER, not between streams. An adapter converts straight to its natural
-// (most-capable) stream or to any legal NARROWING of it — drop seekable, and read_write -> read or write;
-// read and write are leaf capabilities that never cross. A stream itself, once made, is its type: there is no
-// stream-to-stream conversion (only move, which invalidates the source — streams are move-only).
+// CONVERSIONS only ever NARROW — drop seekable, and read_write -> read or write; read and write are leaf
+// capabilities that never cross. An adapter converts straight to its natural (most-capable) stream or to any
+// legal narrowing of it. A stream narrows to another stream too, but only FROM AN RVALUE: converting consumes
+// the source and leaves it invalid, so a backend never ends up with two live views. That matters because the
+// stream holds the curr/end window while flush is stateful in the adapter — a second overlay onto the same
+// backend would desynchronize both. Temporarily downgrading a stream and getting the original back is a
+// separate story, and not one this offers.
 
 namespace cc
 {
@@ -86,9 +91,9 @@ namespace cc
 // The six stream types. Each is a real, distinct type that PRIVATELY inherits the shared engine
 // (cc::impl::stream<Access, Seekable>) and explicitly pulls in only the methods its capability supports — so
 // the type's own definition IS its API, the way cc::vector lists its methods over allocating_container.
-// Private inheritance keeps the engine hidden; adapters construct these directly and there is no
-// stream-to-stream conversion (adapters convert straight to any narrower type — see span_stream.hh). The
-// engine is befriended so try_as_seekable can build the seekable variant.
+// Private inheritance keeps the engine hidden; adapters construct these directly (see span_stream.hh), and
+// each type also takes an RVALUE of any wider stream, consuming it. The engine is befriended so
+// try_as_seekable can build the seekable variant and so a narrowing constructor can take the source's state.
 
 /// Non-owning, move-only read view over a byte source. Refills on demand via its adapter.
 struct read_stream : private impl::stream<impl::stream_access::read, false>
@@ -97,6 +102,15 @@ struct read_stream : private impl::stream<impl::stream_access::read, false>
     template <impl::stream_access, bool>
     friend struct impl::stream;
     using engine::engine; // invalid stream; adapter bind (curr, end, flush, ctx)
+
+    /// Narrow a wider stream, consuming it — the source is left invalid.
+    template <class From>
+        requires(!std::is_reference_v<From> && !std::is_same_v<From, read_stream>
+                 && impl::stream_narrows_to<From, read_stream>)
+    read_stream(From&& source)
+    {
+        this->engine::impl_narrow_from(source);
+    }
 
     using engine::at_end;          // -> result<bool>
     using engine::consume;         // advance past n of ready_bytes()
@@ -119,6 +133,15 @@ struct write_stream : private impl::stream<impl::stream_access::write, false>
     friend struct impl::stream;
     using engine::engine;
 
+    /// Narrow a wider stream, consuming it — the source is left invalid.
+    template <class From>
+        requires(!std::is_reference_v<From> && !std::is_same_v<From, write_stream>
+                 && impl::stream_narrows_to<From, write_stream>)
+    write_stream(From&& source)
+    {
+        this->engine::impl_narrow_from(source);
+    }
+
     using engine::flush;           // -> result<i64>; drain pending writes
     using engine::is_valid;        //
     using engine::produce;         // advance past n written into writable_bytes()
@@ -135,6 +158,15 @@ struct read_write_stream : private impl::stream<impl::stream_access::read_write,
     template <impl::stream_access, bool>
     friend struct impl::stream;
     using engine::engine;
+
+    /// Narrow a wider stream, consuming it — the source is left invalid.
+    template <class From>
+        requires(!std::is_reference_v<From> && !std::is_same_v<From, read_write_stream>
+                 && impl::stream_narrows_to<From, read_write_stream>)
+    read_write_stream(From&& source)
+    {
+        this->engine::impl_narrow_from(source);
+    }
 
     using engine::at_end;
     using engine::consume;
@@ -162,6 +194,15 @@ struct seekable_read_stream : private impl::stream<impl::stream_access::read, tr
     friend struct impl::stream;
     using engine::engine;
 
+    /// Narrow a wider stream, consuming it — the source is left invalid.
+    template <class From>
+        requires(!std::is_reference_v<From> && !std::is_same_v<From, seekable_read_stream>
+                 && impl::stream_narrows_to<From, seekable_read_stream>)
+    seekable_read_stream(From&& source)
+    {
+        this->engine::impl_narrow_from(source);
+    }
+
     using engine::at_end;
     using engine::consume;
     using engine::flush;
@@ -187,6 +228,15 @@ struct seekable_write_stream : private impl::stream<impl::stream_access::write, 
     template <impl::stream_access, bool>
     friend struct impl::stream;
     using engine::engine;
+
+    /// Narrow a wider stream, consuming it — the source is left invalid.
+    template <class From>
+        requires(!std::is_reference_v<From> && !std::is_same_v<From, seekable_write_stream>
+                 && impl::stream_narrows_to<From, seekable_write_stream>)
+    seekable_write_stream(From&& source)
+    {
+        this->engine::impl_narrow_from(source);
+    }
 
     using engine::flush;
     using engine::is_valid;

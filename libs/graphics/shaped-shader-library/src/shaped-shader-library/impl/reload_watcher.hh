@@ -43,11 +43,12 @@ public:
     void clear_pending();
 
 private:
-    cc::atomic<bool> _scan_pending{false};
+    cc::atomic<bool> _scan_pending = {false};
 
     // Guarded rather than a bare pointer: disarm() has to mean an in-flight fire() has finished with the
     // actor, not merely that the next one will notice it is gone.
-    cc::mutex<cc::threaded_actor<check_now>*> _actor{nullptr};
+    // cc::mutex's value ctor is explicit, so the type is named rather than left to `= {…}`.
+    cc::mutex<cc::threaded_actor<check_now>*> _actor = cc::mutex<cc::threaded_actor<check_now>*>(nullptr);
 };
 
 /// Watching: the filesystem wakes the mailbox and the actor is otherwise parked, costing nothing while

@@ -55,7 +55,7 @@ TEST("fixed_array - aggregate initialization")
 {
     SECTION("direct initialization")
     {
-        cc::fixed_array<int, 3> a{1, 2, 3};
+        cc::fixed_array<int, 3> a = {1, 2, 3};
         CHECK(a[0] == 1);
         CHECK(a[1] == 2);
         CHECK(a[2] == 3);
@@ -94,19 +94,19 @@ TEST("fixed_array - contiguous storage")
 {
     SECTION("data() == begin()")
     {
-        cc::fixed_array<int, 5> a{10, 20, 30, 40, 50};
+        cc::fixed_array<int, 5> a = {10, 20, 30, 40, 50};
         CHECK(a.data() == a.begin());
     }
 
     SECTION("end() == begin() + size()")
     {
-        cc::fixed_array<int, 5> a{10, 20, 30, 40, 50};
+        cc::fixed_array<int, 5> a = {10, 20, 30, 40, 50};
         CHECK(a.end() == a.begin() + a.size());
     }
 
     SECTION("operator[] uses contiguous addresses")
     {
-        cc::fixed_array<int, 5> a{10, 20, 30, 40, 50};
+        cc::fixed_array<int, 5> a = {10, 20, 30, 40, 50};
         for (cc::isize i = 0; i < a.size(); ++i)
         {
             CHECK(&a[i] == a.data() + i);
@@ -115,7 +115,7 @@ TEST("fixed_array - contiguous storage")
 
     SECTION("range-for visits all elements in order")
     {
-        cc::fixed_array<int, 5> a{10, 20, 30, 40, 50};
+        cc::fixed_array<int, 5> a = {10, 20, 30, 40, 50};
         int expected = 10;
         int count = 0;
         for (auto val : a)
@@ -132,7 +132,7 @@ TEST("fixed_array - front/back correctness")
 {
     SECTION("N == 1")
     {
-        cc::fixed_array<int, 1> a{42};
+        cc::fixed_array<int, 1> a = {42};
         CHECK(a.front() == 42);
         CHECK(a.back() == 42);
         CHECK(a[0] == 42);
@@ -141,7 +141,7 @@ TEST("fixed_array - front/back correctness")
 
     SECTION("N == 2")
     {
-        cc::fixed_array<int, 2> a{1, 2};
+        cc::fixed_array<int, 2> a = {1, 2};
         CHECK(a.front() == 1);
         CHECK(a.back() == 2);
         CHECK(a[0] == 1);
@@ -153,7 +153,7 @@ TEST("fixed_array - const correctness")
 {
     SECTION("const reference access")
     {
-        cc::fixed_array<int, 3> a{1, 2, 3};
+        cc::fixed_array<int, 3> a = {1, 2, 3};
         cc::fixed_array<int, 3> const& c = a;
 
         CHECK(c[0] == 1);
@@ -167,7 +167,7 @@ TEST("fixed_array - const correctness")
 
     SECTION("const iterators")
     {
-        cc::fixed_array<int, 3> a{1, 2, 3};
+        cc::fixed_array<int, 3> a = {1, 2, 3};
         cc::fixed_array<int, 3> const& c = a;
 
         static_assert(std::is_same_v<decltype(c.begin()), int const*>);
@@ -217,7 +217,7 @@ TEST("fixed_array - structured binding")
     // fixed_array supports structured binding via tuple protocol
     SECTION("N == 2")
     {
-        cc::fixed_array<int, 2> a{1, 2};
+        cc::fixed_array<int, 2> a = {1, 2};
         auto [x, y] = a;
         CHECK(x == 1);
         CHECK(y == 2);
@@ -225,7 +225,7 @@ TEST("fixed_array - structured binding")
 
     SECTION("N == 3")
     {
-        cc::fixed_array<int, 3> a{10, 20, 30};
+        cc::fixed_array<int, 3> a = {10, 20, 30};
         auto [x, y, z] = a;
         CHECK(x == 10);
         CHECK(y == 20);
@@ -234,7 +234,7 @@ TEST("fixed_array - structured binding")
 
     SECTION("structured binding by reference")
     {
-        cc::fixed_array<int, 2> a{1, 2};
+        cc::fixed_array<int, 2> a = {1, 2};
         auto& [x, y] = a;
         x = 99;
         y = 88;
@@ -263,7 +263,7 @@ TEST("fixed_array - constexpr usage")
 
     SECTION("constexpr element access")
     {
-        constexpr cc::fixed_array<int, 3> a{10, 20, 30};
+        constexpr cc::fixed_array<int, 3> a = {10, 20, 30};
         static_assert(a[0] == 10);
         static_assert(a[1] == 20);
         static_assert(a[2] == 30);
@@ -309,7 +309,7 @@ TEST("fixed_array - non-trivial type construction")
     {
         tracked::reset();
         {
-            cc::fixed_array<tracked, 2> a{tracked{1}, tracked{2}};
+            cc::fixed_array<tracked, 2> a = {tracked{1}, tracked{2}};
             // 2 temporary ctors + 2 move ctors = 4 total (or 2 if move elision happens)
             // The key is: no extra default construction
             CHECK(a[0].value == 1);
@@ -323,7 +323,7 @@ TEST("fixed_array - non-trivial type construction")
     {
         tracked::reset();
         {
-            cc::fixed_array<tracked, 3> a{tracked{1}, tracked{2}, tracked{3}};
+            cc::fixed_array<tracked, 3> a = {tracked{1}, tracked{2}, tracked{3}};
             CHECK(a.size() == 3);
         }
         CHECK(tracked::ctor_count == tracked::dtor_count);
@@ -333,7 +333,7 @@ TEST("fixed_array - non-trivial type construction")
     {
         tracked::reset();
         {
-            cc::fixed_array<tracked, 1> a{tracked{42}};
+            cc::fixed_array<tracked, 1> a = {tracked{42}};
             CHECK(a[0].value == 42);
         }
         CHECK(tracked::ctor_count == tracked::dtor_count);
@@ -372,14 +372,14 @@ TEST("fixed_array - move-only type")
 {
     SECTION("aggregate initialization")
     {
-        cc::fixed_array<move_only, 2> a{move_only{1}, move_only{2}};
+        cc::fixed_array<move_only, 2> a = {move_only{1}, move_only{2}};
         CHECK(a[0].value == 1);
         CHECK(a[1].value == 2);
     }
 
     SECTION("element access does not require copyability")
     {
-        cc::fixed_array<move_only, 1> a{move_only{42}};
+        cc::fixed_array<move_only, 1> a = {move_only{42}};
         auto& x = a[0];
         CHECK(x.value == 42);
         CHECK(a.front().value == 42);
@@ -388,7 +388,7 @@ TEST("fixed_array - move-only type")
 
     SECTION("const correctness with move-only")
     {
-        cc::fixed_array<move_only, 1> a{move_only{42}};
+        cc::fixed_array<move_only, 1> a = {move_only{42}};
         cc::fixed_array<move_only, 1> const& c = a;
 
         // const reference should not require copy/move
@@ -398,7 +398,7 @@ TEST("fixed_array - move-only type")
 
     SECTION("structured binding with move-only")
     {
-        cc::fixed_array<move_only, 2> a{move_only{1}, move_only{2}};
+        cc::fixed_array<move_only, 2> a = {move_only{1}, move_only{2}};
         auto& [x, y] = a;
         CHECK(x.value == 1);
         CHECK(y.value == 2);
@@ -455,7 +455,7 @@ TEST("fixed_array - mutation")
 {
     SECTION("operator[] mutation")
     {
-        cc::fixed_array<int, 3> a{1, 2, 3};
+        cc::fixed_array<int, 3> a = {1, 2, 3};
         a[1] = 99;
         CHECK(a[0] == 1);
         CHECK(a[1] == 99);
@@ -464,7 +464,7 @@ TEST("fixed_array - mutation")
 
     SECTION("front/back mutation")
     {
-        cc::fixed_array<int, 3> a{1, 2, 3};
+        cc::fixed_array<int, 3> a = {1, 2, 3};
         a.front() = 10;
         a.back() = 30;
         CHECK(a[0] == 10);
@@ -474,7 +474,7 @@ TEST("fixed_array - mutation")
 
     SECTION("iterator mutation")
     {
-        cc::fixed_array<int, 3> a{1, 2, 3};
+        cc::fixed_array<int, 3> a = {1, 2, 3};
         for (auto& val : a)
         {
             val *= 2;
@@ -489,14 +489,14 @@ TEST("fixed_array - various sizes")
 {
     SECTION("N == 1")
     {
-        cc::fixed_array<int, 1> a{42};
+        cc::fixed_array<int, 1> a = {42};
         CHECK(a.size() == 1);
         CHECK(!a.empty());
     }
 
     SECTION("N == 10")
     {
-        cc::fixed_array<int, 10> a{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+        cc::fixed_array<int, 10> a = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
         CHECK(a.size() == 10);
         for (int i = 0; i < 10; ++i)
         {
@@ -511,7 +511,7 @@ TEST("fixed_array - non-trivial structured binding")
     {
         tracked::reset();
         {
-            cc::fixed_array<tracked, 2> a{tracked{1}, tracked{2}};
+            cc::fixed_array<tracked, 2> a = {tracked{1}, tracked{2}};
             auto const initial_ctors = tracked::ctor_count;
 
             auto& [x, y] = a;

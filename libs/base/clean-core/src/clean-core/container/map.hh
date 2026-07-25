@@ -524,6 +524,6 @@ private:
     cc::allocation<node*> _buckets; // power-of-two length; empty until first insert
     isize _size = 0;                // number of live entries
     cc::node_memory_resource* _node_res = cc::default_node_memory_resource; // backs the K/V nodes
-    [[no_unique_address]] Hash _hasher{};
-    [[no_unique_address]] KeyEqual _eq{};
+    [[no_unique_address]] Hash _hasher = {};
+    [[no_unique_address]] KeyEqual _eq = {};
 };

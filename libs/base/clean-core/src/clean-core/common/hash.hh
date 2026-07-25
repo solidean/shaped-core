@@ -169,10 +169,10 @@ struct make_hash_finalized_fn
 
 /// Composable hash (no finalize). The customization-point entry; a niebloid, so it cannot be ADL-hijacked
 /// and can be passed as a hasher.
-inline constexpr impl::make_hash_fn make_hash{};
+inline constexpr impl::make_hash_fn make_hash = {};
 
 /// Finalized hash = hash_finalize(make_hash(...)). Use for stand-alone keys and container hashes.
-inline constexpr impl::make_hash_finalized_fn make_hash_finalized{};
+inline constexpr impl::make_hash_finalized_fn make_hash_finalized = {};
 
 /// Default transparent hasher for the node-chaining associative containers (cc::map / cc::set).
 /// Finalizes (avalanches) via make_hash_finalized, so tables can mask low bits directly. Transparent: K and

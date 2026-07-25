@@ -5,6 +5,7 @@ project(babel-serializer LANGUAGES CXX)
 # structure; opinionated aggregators sit on top later. See readme.md and docs/structure.md.
 add_library(babel-serializer
     src/babel-serializer/data/json.cc
+    src/babel-serializer/data/markdown.cc
     src/babel-serializer/data/sqlite.cc
     src/babel-serializer/geometry/obj.cc
 
@@ -26,6 +27,7 @@ target_sources(babel-serializer
     src/babel-serializer/all.hh
 
     src/babel-serializer/data/json.hh
+    src/babel-serializer/data/markdown.hh
     src/babel-serializer/data/sqlite.hh
 
     src/babel-serializer/geometry/obj.hh
@@ -78,6 +80,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
 
         tests/data/json-test.cc
+        tests/data/markdown-test.cc
         tests/data/sqlite-test.cc
 
         tests/geometry/obj-test.cc

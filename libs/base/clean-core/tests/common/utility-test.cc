@@ -170,7 +170,7 @@ TEST("utility - max/min return references and handle equality")
 {
     SECTION("max with distinct values")
     {
-        Box a{10}, b{20};
+        Box a = {10}, b = {20};
         Box const& result = cc::max(a, b);
         CHECK(&result == &b); // returns ref to larger
         CHECK(result.v == 20);
@@ -178,14 +178,14 @@ TEST("utility - max/min return references and handle equality")
 
     SECTION("max with equal values returns b")
     {
-        Box a{15}, b{15};
+        Box a = {15}, b = {15};
         Box const& result = cc::max(a, b);
         CHECK(&result == &b); // when equal, max returns b
     }
 
     SECTION("min with distinct values")
     {
-        Box a{10}, b{20};
+        Box a = {10}, b = {20};
         Box const& result = cc::min(a, b);
         CHECK(&result == &a); // returns ref to smaller
         CHECK(result.v == 10);
@@ -193,7 +193,7 @@ TEST("utility - max/min return references and handle equality")
 
     SECTION("min with equal values returns a")
     {
-        Box a{15}, b{15};
+        Box a = {15}, b = {15};
         Box const& result = cc::min(a, b);
         CHECK(&result == &a); // when equal, min returns a
     }
@@ -296,7 +296,7 @@ TEST("utility - clamp returns correct reference")
 {
     SECTION("value in middle")
     {
-        Box v{15}, lo{10}, hi{20};
+        Box v = {15}, lo = {10}, hi = {20};
         Box const& result = cc::clamp(v, lo, hi);
         CHECK(&result == &v); // returns v when in range
         CHECK(result.v == 15);
@@ -304,7 +304,7 @@ TEST("utility - clamp returns correct reference")
 
     SECTION("value below range")
     {
-        Box v{5}, lo{10}, hi{20};
+        Box v = {5}, lo = {10}, hi = {20};
         Box const& result = cc::clamp(v, lo, hi);
         CHECK(&result == &lo); // returns lo when below
         CHECK(result.v == 10);
@@ -312,7 +312,7 @@ TEST("utility - clamp returns correct reference")
 
     SECTION("value above range")
     {
-        Box v{25}, lo{10}, hi{20};
+        Box v = {25}, lo = {10}, hi = {20};
         Box const& result = cc::clamp(v, lo, hi);
         CHECK(&result == &hi); // returns hi when above
         CHECK(result.v == 20);
@@ -320,21 +320,21 @@ TEST("utility - clamp returns correct reference")
 
     SECTION("value equals lo")
     {
-        Box v{10}, lo{10}, hi{20};
+        Box v = {10}, lo = {10}, hi = {20};
         Box const& result = cc::clamp(v, lo, hi);
         CHECK(&result == &v); // returns v when equal to boundary
     }
 
     SECTION("value equals hi")
     {
-        Box v{20}, lo{10}, hi{20};
+        Box v = {20}, lo = {10}, hi = {20};
         Box const& result = cc::clamp(v, lo, hi);
         CHECK(&result == &v); // returns v when equal to boundary
     }
 
     SECTION("lo equals hi")
     {
-        Box v{15}, boundary{10};
+        Box v = {15}, boundary = {10};
         Box const& result = cc::clamp(v, boundary, boundary);
         CHECK(&result == &boundary); // returns boundary when lo==hi
     }
@@ -489,7 +489,7 @@ TEST("utility - int_round_up_to_multiple rounds to next multiple")
 TEST("utility - swap respects custom ADL swap")
 {
     test_ns::AdlSwappable::reset_count();
-    test_ns::AdlSwappable a{10}, b{20};
+    test_ns::AdlSwappable a = {10}, b = {20};
 
     cc::swap(a, b);
 
@@ -515,7 +515,7 @@ TEST("utility - swap works with move-only types")
 TEST("utility - swap_by_move bypasses custom swap")
 {
     test_ns::AdlSwappable::reset_count();
-    test_ns::AdlSwappable a{10}, b{20};
+    test_ns::AdlSwappable a = {10}, b = {20};
 
     cc::swap_by_move(a, b);
 
@@ -1100,7 +1100,7 @@ TEST("utility - sentinel as end-of-range marker")
     SECTION("sentinel is default constructible")
     {
         cc::sentinel s;
-        cc::sentinel s2{};
+        cc::sentinel s2 = {};
 
         SUCCEED(); // Just checking it compiles
     }
@@ -1128,7 +1128,7 @@ TEST("utility - sentinel as end-of-range marker")
             cc::sentinel end() const { return {}; }
         };
 
-        counting_range range{5};
+        counting_range range = {5};
         int sum = 0;
         for (int val : range)
         {
@@ -1163,7 +1163,7 @@ TEST("utility - sentinel as end-of-range marker")
         };
 
         int arr[] = {10, 20, 30};
-        array_view view{arr, 3};
+        array_view view = {arr, 3};
 
         int sum = 0;
         for (int val : view)
@@ -1203,7 +1203,7 @@ TEST("utility - begin/end with containers")
             int const* end() const { return data + 3; }
         };
 
-        simple_container const c{};
+        simple_container const c = {};
         CHECK(cc::begin(c) == c.data);
         CHECK(cc::end(c) == c.data + 3);
     }
@@ -1307,7 +1307,7 @@ TEST("utility - begin/end constexpr")
         // verify cc::begin/end are constexpr-callable
         constexpr auto test = []() constexpr
         {
-            constexpr_container c{};
+            constexpr_container c = {};
             auto b = cc::begin(c);
             auto e = cc::end(c);
             return e - b;
@@ -1322,14 +1322,14 @@ TEST("utility - named range structs")
 {
     SECTION("offset_size designated init")
     {
-        cc::offset_size const r{.offset = 2, .size = 3};
+        cc::offset_size const r = {.offset = 2, .size = 3};
         CHECK(r.offset == 2);
         CHECK(r.size == 3);
     }
 
     SECTION("start_end designated init")
     {
-        cc::start_end const r{.start = 1, .end = 5};
+        cc::start_end const r = {.start = 1, .end = 5};
         CHECK(r.start == 1);
         CHECK(r.end == 5);
     }

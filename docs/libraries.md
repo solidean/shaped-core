@@ -90,8 +90,9 @@ arrays), and **opinionated aggregators** ("load an image", "load a mesh" across 
 top of those. Reading is optimized for the read-once-into-a-basically-immutable-structure case —
 great to traverse and query, deliberately not for insertion; writing gets a separate API. Readers
 take a `cc::read_stream` and parse against its buffered window rather than slurping the input.
-A JSON reader (`data/`) and a Wavefront OBJ reader (`geometry/`) exist today; the roadmap lives in
-[structure.md](../libs/io/babel-serializer/docs/structure.md).
+Today: JSON and markdown readers plus a SQLite engine wrapper (`data/`), a Wavefront OBJ reader (`geometry/`),
+and PNG/JPEG read+write with the `babel::image` aggregator on top (`image/`).
+The roadmap lives in [structure.md](../libs/io/babel-serializer/docs/structure.md).
 
 ## graphics
 

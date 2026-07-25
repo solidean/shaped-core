@@ -12,6 +12,12 @@ struct nx::impl::check_handle::impl_context
     cc::string expr_text;
     bool passed;
     cc::source_location location;
+
+    // mirrors nx::impl::check_result — see execute.hh for why these are three separate fields
+    bool operands_captured = false;
+    cc::string lhs;
+    cc::string rhs;
+    cc::string diagnostic;
     cc::vector<cc::string> extra_lines;
 };
 
@@ -37,8 +43,18 @@ nx::impl::check_handle::~check_handle() noexcept(false)
 {
     if (ctx)
     {
-        nx::impl::report_check_result(ctx->kind, ctx->op, cc::move(ctx->expr_text), ctx->passed,
-                                      cc::move(ctx->extra_lines), ctx->location);
+        nx::impl::report_check_result({
+            .kind = ctx->kind,
+            .op = ctx->op,
+            .expr = cc::move(ctx->expr_text),
+            .passed = ctx->passed,
+            .operands_captured = ctx->operands_captured,
+            .lhs = cc::move(ctx->lhs),
+            .rhs = cc::move(ctx->rhs),
+            .diagnostic = cc::move(ctx->diagnostic),
+            .extra_lines = cc::move(ctx->extra_lines),
+            .location = ctx->location,
+        });
     }
 }
 
@@ -46,6 +62,24 @@ nx::impl::check_handle nx::impl::check_handle::add_extra_line(cc::string line) &
 {
     if (!passed)
         ctx->extra_lines.push_back(cc::move(line));
+    return cc::move(*this);
+}
+
+nx::impl::check_handle nx::impl::check_handle::set_operands(cc::string lhs, cc::string rhs) &&
+{
+    if (!passed)
+    {
+        ctx->operands_captured = true;
+        ctx->lhs = cc::move(lhs);
+        ctx->rhs = cc::move(rhs);
+    }
+    return cc::move(*this);
+}
+
+nx::impl::check_handle nx::impl::check_handle::set_diagnostic(cc::string text) &&
+{
+    if (!passed)
+        ctx->diagnostic = cc::move(text);
     return cc::move(*this);
 }
 

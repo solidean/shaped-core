@@ -42,20 +42,55 @@ Handled: identifiers/keywords, integer/float literals with digit separators and 
 
 ## What the parser recognizes, and what it skips
 
-The parser recognizes only what the rules need: namespaces (descended), records (`class`/`struct`/`union` with a body), and — inside a record body — data-member declarations with their initializer form.
+The parser recognizes only what the rules need: namespaces, records (`class`/`struct`/`union` with a body), function bodies, nested blocks, lambda bodies, control-flow statements — all descended — and the variable declarations inside them, with their initializer form.
 Everything else is skipped as opaque.
 It walks declaration-by-declaration with a prefix-aware segment scanner that tracks bracket depth by skipping balanced groups.
 
-The scope distinction is the whole point: only a real parse tells a **member** initializer apart from a function-local, a namespace-scope global, a constructor init-list, or an aggregate at a call site.
+**The scope distinction is the whole point.** Every declaration node carries a `decl_scope` — `record_scope`, `namespace_scope`, or `function_scope` — so a rule never has to work out where it is. Only a real parse can do that, and only a real parse tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site.
 
-### Known corner-cuts (each safe, each pinned by a test)
+**One statement can declare several variables.** `int a{1}, b[2]{3}, c = 4, d;` is scanned declarator-by-declarator past each top-level `,`, re-running the brace-vs-`=`-vs-`;` decision each time, so it yields a node for `a` and `b` and nothing for `c` or `d`.
+Each node carries both a `name` (the declarator-id, which is what a message says) and a `declarator` span reaching through any array suffix — `b[2]`, not `b`.
+The two differ exactly where a rewrite would otherwise delete the bound, so a rule that replaces an initializer starts at `declarator.byte_end`, never at `name.byte_end`.
 
-These err toward a miss (never a false positive), and are documented so the boundary does not regress silently:
+### The four judgements that keep function-scope parsing honest
 
-* **Multi-declarator brace-init** `int a{1}, b{2};` records only the first.
-* **Array data member** `T a[N]{…};` is skipped (the token before `{` is `]`, not a declarator-id).
+Descending into function bodies is where false positives would come from, so each is decided explicitly:
+
+* **Mem-initializer vs function body.** In `S() : a{1}, b{2} {}` every brace group looks alike. Only the *last* one is the body: a mem-initializer is always followed by `,` or by the body's own `{`, so the scanner keeps going while either follows and descends only into the group where neither does.
+* **Nested block vs initializer.** At function scope a `{` with no declarator in front of it is a block (`{ … }`, a `try` / `catch` body), not an initializer — it is descended, not run past.
+* **Statement keyword.** `return`, `throw`, `case`, `co_return`, … at the top of a segment disqualify it from being a declaration, which is what stops `return P{1, 2};` from reading as one.
+* **A type ahead of the declarator-id.** A brace init needs a type *and* a declarator, and the declarator-id's `::`-joined name run is what decides whether one is left over.
+  In `cc::atomic<int> x{0}` the run at `x` is just `x`, with the type ahead of it; in `cc::void_function{}()` the run is the whole segment, so this is a temporary being called, not a declaration of `void_function`.
+  That also settles `T{1};`, `cc::T{1};` and `cc::vector<int>{1, 2};` — while `int S::x{0};`, an out-of-line static member definition, stays a declaration because its run starts after the `int`.
+  Counting the tokens ahead of the brace cannot tell these apart: a qualified name has several and a type none of them.
+
+Lambda bodies are reached by a separate sweep: any group being skipped at function scope is walked for a `]` followed — past an optional parameter list, `mutable` / `noexcept` / a trailing return type — by `{`. That `]`-then-`(`-or-`{` shape is what separates a lambda introducer from a subscript `a[i]` and an attribute `[[nodiscard]]`. It is what reaches `auto f = [] { int y{0}; };` and `run([] { … });` alike.
+
+### Statement forms, parsed as forms rather than inferred
+
+The segment scanner above is a *declaration* scanner. A statement whose shape the grammar fixes is parsed as that shape instead, so its parts land in the right place by construction — the same treatment `namespace` already gets.
+
+* **`if` / `switch` / `while` / `for`** — a parenthesized header, then a body.
+  The header is a declaration scope: `for (int i{0}; …)` and `if (auto x{g()}; x > 0)` each declare a local, and the header's own `begin` is the first token inside the parens, so the type a rule reconstructs is `int`, not `for (int`.
+  Its clauses are read as statements, which is why a `for`'s second and third clause and any plain condition come out as expressions.
+  `if constexpr` / `if consteval` are the same form with a specifier between the keyword and the header.
+* **A range-for splits at its `:`.** Only the range-declaration ahead of it is a scope; the range behind it is an expression, so the `{…}` in `for (auto p : {"a", "b"})` initializes the range and belongs to no declarator. A conditional's `:` is paired off against its `?`, which keeps `for (int i{0}; c ? a : b; ++i)` a plain three-clause `for`.
+* **`else` and `do`** — a body with no header of its own; `do`'s trailing `while ( … )` holds an *expression* by the grammar, so it is only swept for lambda bodies, never parsed as a scope.
+* **A body is exactly one statement**, braced or not. `if (c) int y{0};` declares a local as surely as `if (c) { int y{0}; }` does, and — the other direction — the statement is over at that point, so `if (c) g(a, T{1});` is an ordinary call again.
+
+Before this, control flow worked by accident: its paren group set the "saw a parameter list" flag, which made the following `{` look like a function body. That reached braced bodies and nothing else — headers were invisible and a braceless body silently dropped its declaration.
+
+`try` / `catch` are deliberately still on the generic path: the grammar requires their bodies to be compound statements, so the nested-block judgement already places them correctly.
+
+### Known corner-cuts (each pinned by a corpus case)
+
+Documented so the boundary does not regress silently:
+
 * **Function-pointer data member with init** `void(*cb)(){…};` may mis-segment (the extra `()` reads as a parameter list).
 * **`#if 0` disabled members** are still parsed as live code (directives are opaque) — a possible false positive, resolved only at the future preprocessor milestone.
+* **Deeply nested statements are reached, but blocks inside a skipped group are not** — a body only becomes visible through the paths above, so an exotic construct can still hide one.
+* **A binary `&&` reads as declarator punctuation.** `ok && n < T{1}` reports `T`, because `&&` is also an rvalue reference and so does not break the name run that decides whether a type is left over. Separating the two needs a notion of declarator position, which the parser does not have yet — the natural next increment.
+* **A structured binding is invisible.** `for (auto [a, b] : m)` declares nothing the parser sees, since the `[…]` is skipped as a balanced group. Safe (invisible, not misread) but incomplete.
 
 ## Relationship to the clang-tidy gates
 
@@ -63,4 +98,4 @@ shaped-linter is the sibling of the [clang-tidy gate framework](../../lint/) —
 It shares one philosophy: **every rule carries a mandatory rationale**, and output is a grouped-by-rule digest that leads each group with that `why`.
 It runs as `dev.py lint shaped`, and is a `dev.py check` gate (`shaped-lint`) that runs **dirty-only** — like the clang-tidy gates, so the rules adopt incrementally rather than requiring a repo-wide sweep first.
 
-See [writing-a-rule.md](writing-a-rule.md) to add a rule.
+See [writing-a-rule.md](writing-a-rule.md) to add a rule, and [coding-guidelines.md](coding-guidelines.md) for the conventions it follows — notably the two-layer test split (smoke tests plus a markdown corpus).

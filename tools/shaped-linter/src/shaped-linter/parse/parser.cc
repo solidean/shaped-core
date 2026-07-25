@@ -25,9 +25,52 @@ bool is_paren_neutralizing(token const& t)
         || t.is_keyword("operator") || t.text == "__declspec" || t.text == "__attribute__";
 }
 
+/// The statement forms that carry a parenthesized header: `if (…)`, `switch (…)`, `while (…)`,
+/// `for (…)`. That header is a declaration scope — its init-statement and its condition may each declare
+/// a local, as in `for (int i{0}; …)` and `if (auto x{g()}; x > 0)`.
+///
+/// `do` is deliberately absent even though it ends in `while ( … )`: the grammar makes that an
+/// expression, never a declaration. `catch` is absent because its body is always a compound statement,
+/// so the generic path already handles it.
+bool is_control_flow_keyword(token const& t)
+{
+    return t.is_keyword("if") || t.is_keyword("switch") || t.is_keyword("while") || t.is_keyword("for");
+}
+
+/// The punctuation that may appear at top level in a declaration ahead of its initializer: name
+/// qualification, pointer/reference declarators, the `,` of a multi-declarator statement, an access
+/// specifier's or mem-initializer's `:`, a destructor `~`, a pack `...`.
+///
+/// Anything else — `+=`, `.`, `->`, `?`, a comparison — makes the segment an expression, and then a brace
+/// group in it is a temporary rather than an initializer. `s += cc::string_view{" world"}` is the shape
+/// this catches: it has tokens ahead of the qualified name, so "a type is in front of it" is not enough.
+///
+/// The closers `)`, `]`, `>` are deliberately absent even though a declaration contains them: each is
+/// consumed by the balanced skip that its opener started, so reaching one here means the segment began
+/// mid-expression. Listing `>` as allowed would let `a > T{1};` read as declaring `T`.
+bool is_declaration_punct(token const& t)
+{
+    for (auto const p : {"::", "*", "&", "&&", ",", ":", "~", "..."})
+        if (t.is_punct(p))
+            return true;
+    return false;
+}
+
+/// A statement can carry a brace group that is an expression, not an initializer — `return T{1};`,
+/// `throw e{2};`, `case k:`. Seeing one of these at the top of a segment disqualifies the whole segment
+/// from being a declaration, which is what keeps function-scope parsing free of false positives.
+bool is_statement_keyword(token const& t)
+{
+    return t.is_keyword("return") || t.is_keyword("throw") || t.is_keyword("co_return") || t.is_keyword("co_yield")
+        || t.is_keyword("co_await") || t.is_keyword("case") || t.is_keyword("default") || t.is_keyword("else")
+        || t.is_keyword("do") || t.is_keyword("try") || t.is_keyword("catch") || t.is_keyword("goto")
+        || t.is_keyword("break") || t.is_keyword("continue") || t.is_keyword("new") || t.is_keyword("delete")
+        || t.is_keyword("using");
+}
+
 /// The recursive-descent driver over a flat array of significant tokens (trivia already dropped). It
 /// walks declaration-by-declaration, tracking bracket depth by skipping balanced groups, and emits
-/// record and member nodes into an arena.
+/// record and variable nodes into an arena.
 struct parser_impl
 {
     u32 file_id = 0;
@@ -91,18 +134,36 @@ struct parser_impl
         return toks.size();
     }
 
-    /// Parse the declarations in the half-open index range [begin, end). `member_scope` controls the
-    /// one scope-dependent behavior: a brace-initialized declaration becomes a member_declaration only
-    /// in a record body. Records and namespaces are descended in both scopes.
-    void parse_scope(isize begin, isize end, bool member_scope, isize parent)
+    /// The first index of the `::`-joined name run ending at `id_index`, clamped to `begin`.
+    /// `cc::a::b` walks back from `b` to `cc`, a leading `::` included; an unqualified id is its own run.
+    /// This is what tells a type-plus-declarator apart from a single qualified name: in `cc::atomic<int> x`
+    /// the run at `x` is just `x`, with the type ahead of it, while in `cc::void_function` the run is the
+    /// whole segment and there is no type left over.
+    isize qualified_name_begin(isize id_index, isize begin) const
+    {
+        isize i = id_index;
+        while (i - 1 >= begin && punct(i - 1, "::"))
+        {
+            if (i - 2 >= begin && tk(i - 2).is(token_kind::identifier))
+                i -= 2; // one more qualifier
+            else
+                return i - 1; // a leading `::` — the run is rooted at global scope
+        }
+        return i;
+    }
+
+    /// Parse the declarations in the half-open index range [begin, end). `scope` is what a
+    /// brace-initialized declaration found here becomes — a data member, a namespace-scope variable, or
+    /// a local. Records, namespaces, function bodies, nested blocks and lambda bodies are all descended.
+    void parse_scope(isize begin, isize end, decl_scope scope, isize parent)
     {
         isize pos = begin;
         while (pos < end && !is_eof(pos))
-            pos = scan_one(pos, end, member_scope, parent);
+            pos = scan_one(pos, end, scope, parent);
     }
 
-    /// Consume exactly one declaration starting at `begin`; return the index just past it.
-    isize scan_one(isize begin, isize end, bool member_scope, isize parent)
+    /// Consume exactly one declaration or statement starting at `begin`; return the index just past it.
+    isize scan_one(isize begin, isize end, decl_scope scope, isize parent)
     {
         // A namespace: descend its body as a declaration scope; skip an alias (`namespace A = B;`).
         if (kw(begin, "namespace"))
@@ -112,7 +173,7 @@ struct parser_impl
                 if (punct(i, "{"))
                 {
                     auto const body_close = skip_balanced(i, "{", "}") - 1; // index of the matching '}'
-                    parse_scope(i + 1, body_close, /*member_scope*/ false, parent);
+                    parse_scope(i + 1, body_close, decl_scope::namespace_scope, parent);
                     return body_close + 1;
                 }
                 if (punct(i, ";"))
@@ -121,9 +182,18 @@ struct parser_impl
             return end;
         }
 
+        // A control-flow statement is a form of its own — header, then a body that is one statement.
+        // Reaching it here rather than letting its paren group make the following '{' look like a
+        // function body is what makes a header declaration visible and a braceless body reachable.
+        if (is_control_flow_keyword(tk(begin)) || kw(begin, "else") || kw(begin, "do"))
+            return scan_control_flow(begin, end, parent);
+
         bool paren_group_seen = false;
         bool def_head = false; // saw a type-defining keyword (class/struct/union/enum) at top level
         bool is_record = false;
+        // Saw something that rules this segment out as a declaration: a statement keyword, or punctuation
+        // that only an expression carries.
+        bool not_a_declaration = false;
         record_keyword rec_kw = record_keyword::struct_;
         isize rec_name_index = -1;
         bool expect_record_name = false;
@@ -154,6 +224,8 @@ struct parser_impl
                     ++pos;
                 continue;
             }
+            if (is_statement_keyword(t))
+                not_a_declaration = true;
 
             if (t.is_punct("{"))
             {
@@ -162,17 +234,44 @@ struct parser_impl
                     if (is_record)
                         return finish_record(begin, pos, end, rec_kw, rec_name_index, parent);
 
-                    // A function body / enum body / other definition body — skip it whole.
                     auto after = skip_balanced(pos, "{", "}");
+
+                    // A constructor's mem-initializer list looks exactly like this: `S() : a{1}, b{2} {}`.
+                    // Only the LAST brace group of the segment is the body, and a mem-initializer is always
+                    // followed by ',' or by that body's '{' — so keep scanning when either follows.
+                    if (after < end && !is_eof(after) && (punct(after, ",") || punct(after, "{")))
+                    {
+                        prev_top_index = after - 1;
+                        pos = after;
+                        continue;
+                    }
+
+                    // The definition body. A function body is real code we descend into; an enum body
+                    // (def_head without a paren group) holds no declarations we model.
+                    if (!def_head)
+                        parse_scope(pos + 1, after - 1, decl_scope::function_scope, parent);
+
                     if (after < end && punct(after, ";"))
                         ++after;
                     return after;
                 }
-                return finish_brace_init(begin, pos, end, member_scope, declarator_index, parent);
+
+                // At function scope a brace group with no declarator in front of it, or one behind a
+                // statement keyword, is a nested block (`{ … }`, an `else` / `do` / `try` body) or an
+                // expression (`return P{a, b};`) — never an initializer. Descend rather than running past
+                // it looking for a ';' that belongs to a later statement.
+                if (scope == decl_scope::function_scope && (declarator_index < 0 || not_a_declaration))
+                {
+                    auto const after = skip_balanced(pos, "{", "}");
+                    parse_scope(pos + 1, after - 1, decl_scope::function_scope, parent);
+                    return after;
+                }
+
+                return finish_brace_init(begin, pos, end, scope, declarator_index, not_a_declaration, parent);
             }
 
             if (t.is_punct("=")) // a top-level '=' is assignment-form init (never a comparison — those lex whole)
-                return run_to_semicolon(pos + 1, end);
+                return run_to_semicolon(pos + 1, end, scope, parent);
 
             if (t.is_punct(";")) // a plain declaration / forward decl with no initializer
                 return pos + 1;
@@ -183,6 +282,7 @@ struct parser_impl
                 auto const after = skip_balanced(pos, "(", ")");
                 if (!neutralize)
                     paren_group_seen = true;
+                descend_lambdas(pos, after, scope, parent);
                 prev_top_index = after - 1;
                 pos = after;
                 continue;
@@ -211,10 +311,131 @@ struct parser_impl
                 }
                 declarator_index = pos;
             }
+            else if (t.is(token_kind::punctuation) && !is_declaration_punct(t))
+                not_a_declaration = true; // an operator at top level — this segment is an expression
+
             prev_top_index = pos;
             ++pos;
         }
         return pos;
+    }
+
+    /// The `:` that splits a range-for header into declaration and range, or -1 when there is none.
+    /// `::` lexes whole, so only a real `:` is seen; a conditional's `:` is paired off against its `?`,
+    /// which is what keeps `for (int i = c ? a : b; …)` a plain three-clause `for`.
+    isize range_for_colon(isize begin, isize end) const
+    {
+        isize conditionals = 0;
+        for (isize i = begin; i < end && !is_eof(i); ++i)
+        {
+            if (punct(i, "("))
+                i = skip_balanced(i, "(", ")") - 1;
+            else if (punct(i, "["))
+                i = skip_balanced(i, "[", "]") - 1;
+            else if (punct(i, "{"))
+                i = skip_balanced(i, "{", "}") - 1;
+            else if (punct(i, "?"))
+                ++conditionals;
+            else if (punct(i, ":"))
+            {
+                if (conditionals == 0)
+                    return i;
+                --conditionals;
+            }
+        }
+        return -1;
+    }
+
+    /// The body of a control-flow statement: a compound statement whose contents are a scope, or — the
+    /// braceless form — exactly one statement, which may itself be a declaration (`if (c) int y{0};`).
+    isize scan_statement_body(isize pos, isize end, isize parent)
+    {
+        if (punct(pos, "{"))
+        {
+            auto const after = skip_balanced(pos, "{", "}");
+            parse_scope(pos + 1, after - 1, decl_scope::function_scope, parent);
+            return after;
+        }
+        return scan_one(pos, end, decl_scope::function_scope, parent);
+    }
+
+    /// `if` / `switch` / `while` / `for`, whose header is a declaration scope, plus the two bodies that
+    /// stand alone: `else`, and `do`'s body ahead of its trailing `while ( expression ) ;`.
+    ///
+    /// The header is handed to parse_scope, so a `for`'s three clauses and an `if`'s init-statement are
+    /// each read as a statement — a declaration where one is written, an expression otherwise. `do`'s
+    /// trailing parens are an expression by the grammar and are only swept for lambda bodies, and so is
+    /// a range-for's range: the `{…}` in `for (auto p : {"a", "b"})` initializes the range, not `p`.
+    isize scan_control_flow(isize begin, isize end, isize parent)
+    {
+        if (kw(begin, "else"))
+            return scan_statement_body(begin + 1, end, parent);
+
+        if (kw(begin, "do"))
+        {
+            auto pos = scan_statement_body(begin + 1, end, parent);
+            if (!kw(pos, "while"))
+                return pos;
+
+            ++pos;
+            if (punct(pos, "("))
+            {
+                auto const after = skip_balanced(pos, "(", ")");
+                descend_lambdas(pos, after, decl_scope::function_scope, parent);
+                pos = after;
+            }
+            return (pos < end && punct(pos, ";")) ? pos + 1 : pos;
+        }
+
+        auto pos = begin + 1;
+        if (punct(pos, "!")) // `if !consteval`
+            ++pos;
+        if (kw(pos, "constexpr") || kw(pos, "consteval")) // `if constexpr`, `if consteval` — no header
+            ++pos;
+
+        if (punct(pos, "("))
+        {
+            auto const after = skip_balanced(pos, "(", ")");
+            auto const header_end = after - 1; // the ')'
+            // A range-for splits at its `:`. Only the declaration ahead of it is a scope; behind it is
+            // the range, whose braced-init-list belongs to no declarator.
+            auto const colon = kw(begin, "for") ? range_for_colon(pos + 1, header_end) : isize(-1);
+            parse_scope(pos + 1, colon >= 0 ? colon : header_end, decl_scope::function_scope, parent);
+            if (colon >= 0)
+                descend_lambdas(colon, header_end, decl_scope::function_scope, parent);
+            pos = after;
+        }
+        return scan_statement_body(pos, end, parent);
+    }
+
+    /// Walk a group we are otherwise skipping and descend into any lambda body inside it. A lambda
+    /// introducer is a `]` followed — past an optional parameter list, `mutable` / `noexcept` / a
+    /// trailing return type — by `{`. That `]`-then-`(`-or-`{` shape is what tells a lambda apart from
+    /// a subscript `a[i]` and from an attribute `[[nodiscard]]`.
+    /// Only meaningful at function scope; a lambda anywhere else has no locals we report on differently.
+    void descend_lambdas(isize open, isize after, decl_scope scope, isize parent)
+    {
+        if (scope != decl_scope::function_scope)
+            return;
+
+        for (isize i = open; i + 1 < after && !is_eof(i); ++i)
+        {
+            if (!punct(i, "]"))
+                continue;
+
+            isize j = i + 1;
+            if (punct(j, "(")) // the parameter list
+                j = skip_balanced(j, "(", ")");
+            while (j < after && !is_eof(j) && !punct(j, "{") && !punct(j, ";")) // mutable / noexcept / -> T
+                j = punct(j, "(") ? skip_balanced(j, "(", ")") : j + 1;
+
+            if (j >= after || !punct(j, "{"))
+                continue;
+
+            auto const body_end = skip_balanced(j, "{", "}");
+            parse_scope(j + 1, body_end - 1, decl_scope::function_scope, parent);
+            i = body_end - 1; // the body is parsed; do not rescan it for introducers
+        }
     }
 
     /// `open_brace` is the record body '{'. Emit the record_definition, recurse into its body, and
@@ -232,7 +453,7 @@ struct parser_impl
         auto const id = add_node(cc::move(rn));
         tree.nodes[parent].children.push_back(id);
 
-        parse_scope(open_brace + 1, body_close, /*member_scope*/ true, id);
+        parse_scope(open_brace + 1, body_close, decl_scope::record_scope, id);
 
         isize j = body_close + 1;
         while (j < end && !is_eof(j) && !punct(j, ";"))
@@ -240,47 +461,137 @@ struct parser_impl
         return (j < end && punct(j, ";")) ? j + 1 : j;
     }
 
-    /// `open_brace` is an initializer '{'. Skip it, emit a member_declaration in a record body, and run
-    /// to the terminating ';'.
-    isize finish_brace_init(isize begin, isize open_brace, isize end, bool member_scope, isize declarator_index, isize parent)
+    /// Emit one brace-initialized declarator. `stmt_begin` / `stmt_last` bound the whole statement (the
+    /// node's `span`), `declarator_index` names it, and `open_brace` opens its initializer.
+    void add_brace_var(isize stmt_begin,
+                       isize stmt_last,
+                       isize declarator_index,
+                       isize open_brace,
+                       decl_scope scope,
+                       isize parent)
     {
-        auto const after = skip_balanced(open_brace, "{", "}");
-        auto const close_brace = after - 1;
+        auto const close_brace = skip_balanced(open_brace, "{", "}") - 1;
 
-        // Run to the statement's ';', skipping any further balanced groups.
-        isize j = after;
+        node vn;
+        vn.kind = node_kind::variable_declaration;
+        vn.scope = scope;
+        vn.form = init_form::brace;
+        vn.name = tk(declarator_index).span;
+        // Everything from the declarator-id up to the brace belongs to the declarator — an array bound
+        // above all. A rewrite that starts at the id's end instead would eat the `[N]`.
+        vn.declarator = source_span::join(tk(declarator_index).span, tk(open_brace - 1).span);
+        vn.init_span = source_span::join(tk(open_brace).span, tk(close_brace).span);
+        vn.init_inner = {.file_id = file_id,
+                         .byte_begin = tk(open_brace).span.byte_end,
+                         .byte_end = tk(close_brace).span.byte_begin};
+        vn.span = source_span::join(tk(stmt_begin).span, tk(stmt_last).span);
+
+        auto const id = add_node(cc::move(vn));
+        tree.nodes[parent].children.push_back(id);
+    }
+
+    /// `open_brace` is an initializer '{'. Emit a variable_declaration for it and for every FURTHER
+    /// declarator in the same statement that is also brace-initialized, then run to the ';'.
+    ///
+    /// A brace group is only a declaration when the segment actually looks like one: a declarator-id, with a
+    /// type still ahead of it, and nothing in front that only an expression carries.
+    ///
+    /// "A type ahead of it" is what the declarator-id's qualified-name run decides, and counting tokens
+    /// cannot: `cc::void_function{}()` has three tokens before the brace, yet they are one qualified name
+    /// with nothing left over for a type — it is a temporary being called, not a declaration of
+    /// `void_function`. Same for the bare temporaries `T{1};`, `cc::T{1};` and `cc::vector<int>{1, 2};`.
+    /// An out-of-line static member definition (`int S::x{0};`) keeps its `::` and stays a declaration,
+    /// because the run at `x` starts after the leading `int`.
+    ///
+    /// The run alone is not enough, though — `s += cc::string_view{" world"}` has tokens ahead of the
+    /// qualified name too. `not_a_declaration` is the other half: see `is_declaration_punct`.
+    isize finish_brace_init(isize begin,
+                            isize open_brace,
+                            isize end,
+                            decl_scope scope,
+                            isize declarator_index,
+                            bool not_a_declaration,
+                            isize parent)
+    {
+        bool const looks_like_declaration
+            = declarator_index >= 0 && !not_a_declaration && qualified_name_begin(declarator_index, begin) > begin;
+
+        // Run to the statement's ';', skipping any further balanced group. Along the way, a top-level ','
+        // starts the next declarator — `int a{1}, b{2};` declares two variables, and only re-running the
+        // brace-vs-`=`-vs-`;` decision per declarator keeps `int a{1}, b = 2, c;` down to just `a`.
+        auto const first_close = skip_balanced(open_brace, "{", "}") - 1;
+        auto braces = cc::vector<isize>(); // one open-brace index per brace-initialized declarator
+        auto names = cc::vector<isize>();  // its declarator-id
+        braces.push_back(open_brace);
+        names.push_back(declarator_index);
+
+        isize j = first_close + 1;
         while (j < end && !is_eof(j) && !punct(j, ";"))
         {
+            if (punct(j, ","))
+            {
+                ++j;
+                j = scan_next_declarator(j, end, looks_like_declaration ? &braces : nullptr,
+                                         looks_like_declaration ? &names : nullptr);
+                continue;
+            }
             if (punct(j, "{"))
                 j = skip_balanced(j, "{", "}");
             else if (punct(j, "("))
                 j = skip_balanced(j, "(", ")");
+            else if (punct(j, "["))
+                j = skip_balanced(j, "[", "]");
             else
                 ++j;
         }
         auto const semi = j;
 
-        if (member_scope && declarator_index >= 0)
+        if (looks_like_declaration)
         {
-            node mn;
-            mn.kind = node_kind::member_declaration;
-            mn.init_form = member_init_form::brace;
-            mn.name = tk(declarator_index).span;
-            mn.init_span = source_span::join(tk(open_brace).span, tk(close_brace).span);
-            mn.init_inner = {.file_id = file_id,
-                             .byte_begin = tk(open_brace).span.byte_end,
-                             .byte_end = tk(close_brace).span.byte_begin};
-            auto const last = (semi < end && !is_eof(semi)) ? semi : close_brace;
-            mn.span = source_span::join(tk(begin).span, tk(last).span);
-            auto const id = add_node(cc::move(mn));
-            tree.nodes[parent].children.push_back(id);
+            auto const last = (semi < end && !is_eof(semi)) ? semi : first_close;
+            for (auto k = isize(0); k < braces.size(); ++k)
+                this->add_brace_var(begin, last, names[k], braces[k], scope, parent);
         }
 
         return (semi < end && punct(semi, ";")) ? semi + 1 : semi;
     }
 
-    /// Skip an assignment initializer up to and including its ';' (balanced groups skipped).
-    isize run_to_semicolon(isize from, isize end)
+    /// Consume one declarator of a comma-separated declaration, starting just past the ','. Records it in
+    /// `braces` / `names` (unless null) when it is brace-initialized; an `=` or a bare declarator records
+    /// nothing. Returns the index of whatever terminated it — never consuming that token, so the caller's
+    /// loop still sees the `=`, `,` or `;`.
+    isize scan_next_declarator(isize from, isize end, cc::vector<isize>* braces, cc::vector<isize>* names)
+    {
+        auto name_index = isize(-1);
+
+        isize j = from;
+        while (j < end && !is_eof(j) && !punct(j, ";") && !punct(j, ",") && !punct(j, "=") && !punct(j, "{"))
+        {
+            if (punct(j, "[")) // an array bound is part of the declarator
+                j = skip_balanced(j, "[", "]");
+            else if (punct(j, "(")) // a parenthesized init / function declarator: opaque, and not brace form
+                j = skip_balanced(j, "(", ")");
+            else
+            {
+                if (tk(j).is(token_kind::identifier))
+                    name_index = j; // the last identifier is the declarator-id, as in scan_one
+                ++j;
+            }
+        }
+
+        if (j < end && punct(j, "{") && name_index >= 0 && braces != nullptr)
+        {
+            braces->push_back(j);
+            names->push_back(name_index);
+            return skip_balanced(j, "{", "}");
+        }
+        return j;
+    }
+
+    /// Skip an assignment initializer up to and including its ';' (balanced groups skipped). At function
+    /// scope the skipped groups are still walked for lambda bodies — `auto f = [] { int y{0}; };` hides
+    /// real locals behind a '=' that would otherwise swallow them.
+    isize run_to_semicolon(isize from, isize end, decl_scope scope, isize parent)
     {
         isize j = from;
         while (j < end && !is_eof(j) && !punct(j, ";"))
@@ -294,6 +605,11 @@ struct parser_impl
             else
                 ++j;
         }
+
+        // The initializer is opaque except for one thing: a lambda body inside it is real code holding
+        // real locals (`auto f = [] { int y{0}; };`), so the whole initializer is swept for introducers.
+        descend_lambdas(from, j, scope, parent);
+
         return (j < end && punct(j, ";")) ? j + 1 : j;
     }
 };
@@ -318,7 +634,7 @@ cc::result<syntax_tree> parse(source_buffer const& buffer, token_stream const& t
     p.tree.root = p.add_node(cc::move(root));
 
     auto const eof_index = p.toks.size() - 1; // parse everything before the sentinel
-    p.parse_scope(0, eof_index, /*member_scope*/ false, p.tree.root);
+    p.parse_scope(0, eof_index, decl_scope::namespace_scope, p.tree.root);
 
     return cc::move(p.tree);
 }

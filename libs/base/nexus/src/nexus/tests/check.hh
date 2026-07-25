@@ -191,8 +191,22 @@ struct check_handle final
 
     static check_handle make(check_kind kind, cmp_op op, char const* expr_text, bool passed, cc::source_location loc);
 
+    // Framework-internal, used by the make_check_handle* factories below. Kept apart from dump/context so the
+    // auto-captured operands and the framework's own explanation never occupy a user annotation slot.
+
+    /// Record the decomposed operands of a comparison. Only stringifies on failure, like dump().
+    template <class L, class R>
+    check_handle capture_operands(L const& lhs, R const& rhs) &&
+    {
+        return cc::move(*this).set_operands(passed ? cc::string() : cc::to_debug_string(lhs),
+                                            passed ? cc::string() : cc::to_debug_string(rhs));
+    }
+
+    check_handle set_diagnostic(cc::string text) &&;
+
 private:
     check_handle add_extra_line(cc::string line) &&;
+    check_handle set_operands(cc::string lhs, cc::string rhs) &&;
 };
 
 // Factory function for check_handle
@@ -203,8 +217,7 @@ check_handle make_check_handle(check_kind kind,
                                cc::source_location loc)
 {
     return check_handle::make(kind, expr.op, expr_text, expr.passed, loc) //
-        .dump(expr.lhs)                                                   //
-        .dump(expr.rhs);
+        .capture_operands(expr.lhs, expr.rhs);
 }
 
 template <class T>
@@ -232,7 +245,7 @@ check_handle make_check_handle_throws(check_kind kind, char const* expr_text, F&
         threw_exception = true;
     }
 
-    return check_handle::make(kind, cmp_op::throws, expr_text, threw_exception, loc).context(cc::move(exception_info));
+    return check_handle::make(kind, cmp_op::throws, expr_text, threw_exception, loc).set_diagnostic(cc::move(exception_info));
 }
 
 // Helper for exception type checking
@@ -261,7 +274,8 @@ check_handle make_check_handle_throws_as(check_kind kind,
         exception_info += exception_type_text;
     }
 
-    return check_handle::make(kind, cmp_op::throws_as, expr_text, threw_correct_type, loc).context(cc::move(exception_info));
+    return check_handle::make(kind, cmp_op::throws_as, expr_text, threw_correct_type, loc)
+        .set_diagnostic(cc::move(exception_info));
 }
 
 // Helper for assertion failure checking
@@ -291,7 +305,8 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
         }
     }
 
-    return check_handle::make(kind, cmp_op::asserts, expr_text, assertion_fired, loc).context(cc::move(assertion_info));
+    return check_handle::make(kind, cmp_op::asserts, expr_text, assertion_fired, loc)
+        .set_diagnostic(cc::move(assertion_info));
 #else
     // Assertions are disabled - report success without executing the function
     // (executing the function could lead to UB since assertions are compiled out)

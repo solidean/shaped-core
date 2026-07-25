@@ -52,7 +52,7 @@ source_view_model collect_source_view(trace const& t, source_cache& sources, u32
             if (touched_lines.empty() || touched_lines.back() != l)
                 touched_lines.push_back(l);
 
-        source_file_view view{.path = tf.path};
+        source_file_view view = {.path = tf.path};
         for (auto const touched : touched_lines)
         {
             if (touched > count)

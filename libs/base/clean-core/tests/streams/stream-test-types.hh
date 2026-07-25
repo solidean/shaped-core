@@ -118,4 +118,43 @@ private:
     int _flushes_with_pending = 0;
     cc::byte _buffer[k_cap];
 };
+
+/// A read_write adapter whose read boundary and write capacity are deliberately DIFFERENT: a flush hands out
+/// `readable` bytes to read but the whole buffer to write into. On a span adapter the two always coincide, so
+/// this is the only shape that can tell `end` (read) and `write_end` (write) apart — which is exactly what a
+/// read_write -> write narrowing has to get right.
+class mock_split_bounds_read_write_adapter
+{
+public:
+    static constexpr cc::isize k_cap = 16;
+
+    explicit mock_split_bounds_read_write_adapter(cc::isize readable) : _readable(readable) {}
+
+    mock_split_bounds_read_write_adapter(mock_split_bounds_read_write_adapter&&) = delete; // pinned: borrowed _buffer
+    mock_split_bounds_read_write_adapter& operator=(mock_split_bounds_read_write_adapter&&) = delete;
+
+    [[nodiscard]] cc::read_write_stream stream() { return cc::read_write_stream(_buffer, _buffer, &impl_flush, this); }
+
+private:
+    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
+                                          cc::byte*& end,
+                                          cc::byte*& write_end,
+                                          void* ctx,
+                                          cc::i64 offset,
+                                          cc::seek_dir dir,
+                                          cc::byte* /*first_write*/)
+    {
+        auto& self = *static_cast<mock_split_bounds_read_write_adapter*>(ctx);
+        if (!(dir == cc::seek_dir::relative && offset == 0))
+            return cc::i64(-1); // not seekable
+
+        curr = self._buffer;
+        end = self._buffer + self._readable; // only the filled prefix is readable
+        write_end = self._buffer + k_cap;    // ... but the whole buffer can be written
+        return cc::i64(-1);
+    }
+
+    cc::isize _readable;
+    cc::byte _buffer[k_cap] = {};
+};
 } // namespace cc_stream_test

@@ -147,7 +147,7 @@ TEST("function_ref - construction from functor")
 {
     SECTION("const functor")
     {
-        Adder adder{10};
+        Adder adder = {10};
         auto check = [](cc::function_ref<int(int)> f)
         {
             CHECK(f.is_valid());
@@ -201,7 +201,7 @@ TEST("function_ref - construction from pointer-to-member-function")
 
     SECTION("const member function")
     {
-        S const obj{30, 0};
+        S const obj = {30, 0};
         auto check = [&obj](cc::function_ref<int(S const&, int)> f) { CHECK(f(obj, 12) == 42); };
         check(&S::add_const);
     }
@@ -224,7 +224,7 @@ TEST("function_ref - construction from pointer-to-member-object")
 {
     SECTION("member object with object")
     {
-        MO obj{42};
+        MO obj = {42};
         auto check = [&obj](cc::function_ref<int&(MO&)> f)
         {
             CHECK(f.is_valid());
@@ -238,7 +238,7 @@ TEST("function_ref - construction from pointer-to-member-object")
 
     SECTION("member object with pointer")
     {
-        MO obj{10};
+        MO obj = {10};
         MO* ptr = &obj;
 
         auto check = [&obj, ptr](cc::function_ref<int&(MO*)> f)
@@ -985,7 +985,7 @@ TEST("function_ref - implicit conversion from pointer-to-member-function tempora
     {
         auto call_const_member = [](cc::function_ref<int(S const&, int)> f, S const& obj, int x) { return f(obj, x); };
 
-        S const obj{.value = 30, .call_count = 0};
+        S const obj = {.value = 30, .call_count = 0};
         CHECK(call_const_member(&S::add_const, obj, 12) == 42);
     }
 
@@ -993,7 +993,7 @@ TEST("function_ref - implicit conversion from pointer-to-member-function tempora
     {
         auto call_via_ptr = [](cc::function_ref<int(S*, int)> f, S* ptr, int x) { return f(ptr, x); };
 
-        S obj{.value = 20, .call_count = 0};
+        S obj = {.value = 20, .call_count = 0};
         CHECK(call_via_ptr(&S::add, &obj, 5) == 25);
     }
 
@@ -1014,7 +1014,7 @@ TEST("function_ref - implicit conversion from pointer-to-member-object temporari
     {
         auto access_member = [](cc::function_ref<int&(MO&)> f, MO& obj) -> int& { return f(obj); };
 
-        MO obj{42};
+        MO obj = {42};
         CHECK(access_member(&MO::x, obj) == 42);
 
         access_member(&MO::x, obj) = 99;
@@ -1025,7 +1025,7 @@ TEST("function_ref - implicit conversion from pointer-to-member-object temporari
     {
         auto access_via_ptr = [](cc::function_ref<int&(MO*)> f, MO* ptr) -> int& { return f(ptr); };
 
-        MO obj{10};
+        MO obj = {10};
         CHECK(access_via_ptr(&MO::x, &obj) == 10);
 
         access_via_ptr(&MO::x, &obj) = 20;

@@ -178,7 +178,7 @@ void format_append(string& out, format_string<std::type_identity_t<Args>...> fmt
 template <class... Args>
 [[nodiscard]] isize format_to(span<char> out, format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
 {
-    cc::impl::format_span_sink_state state{.data = out.data(), .capacity = out.size(), .total = 0};
+    cc::impl::format_span_sink_state state = {.data = out.data(), .capacity = out.size(), .total = 0};
     auto sink = cc::impl::format_make_span_sink(state);
     cc::impl::format_dispatch(sink, fmt.view(), cc::forward<Args>(args)...);
     return state.total;

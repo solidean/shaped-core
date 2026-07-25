@@ -33,7 +33,7 @@ TEST("fuzz regression - add1 reaches 7")
         }
         REQUIRE(res.failing_run.has_value());
 
-        cc::random rng{1u};
+        auto rng = cc::random(1u);
         auto minimized = res.failing_run.value().minimize(rng);
         auto code = minimized.emit_regression("test", nx::fuzz::nexus_section_dialect());
 

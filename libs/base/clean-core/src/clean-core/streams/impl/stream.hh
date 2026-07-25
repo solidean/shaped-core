@@ -445,6 +445,42 @@ public:
         return result;
     }
 
+    // narrowing conversion
+public:
+    /// Take over a WIDER public stream's state, narrowing it (drop seekable, read_write -> read or write).
+    /// `source` must be a public stream type; it is left invalid, so only one live view onto the adapter can
+    /// survive. Reachable only from the public types' converting constructors — the engine is a private base,
+    /// so this never becomes part of a stream's API. `stream_narrows_to` gates which pairs get here.
+    template <class From>
+    void impl_narrow_from(From& source)
+    {
+        using from_engine = typename From::engine;
+        auto& src = static_cast<from_engine&>(source); // legal: every public type befriends every stream
+
+        // Pending writes live in the source's buffer and drain only through ITS write bound. Dropping write
+        // capability would strand them with no way to flush, so they have to be gone already.
+        if constexpr (from_engine::can_write && !can_write)
+            CC_ASSERT(src._first_write == nullptr, "flush pending writes before narrowing away write capability");
+
+        _curr = src._curr;
+
+        // `end` is the READ boundary on a read_write stream and the write bound on every other one, so a
+        // read_write -> write narrowing has to take the source's separate _write_end as its end.
+        if constexpr (from_engine::can_read && from_engine::can_write && can_write && !can_read)
+            _end = src._write_end;
+        else
+            _end = src._end;
+
+        _flush = src._flush;
+        _context = src._context;
+        if constexpr (can_write)
+            _first_write = src._first_write;
+        if constexpr (can_read && can_write)
+            _write_end = src._write_end;
+
+        src.impl_invalidate();
+    }
+
     // implementation
 private:
     template <stream_access, bool>

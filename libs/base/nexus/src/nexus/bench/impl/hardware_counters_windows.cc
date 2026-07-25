@@ -288,8 +288,8 @@ struct pmc_state
 
     u32 target_tid = 0;
     isize counter_count = 0;
-    std::atomic<i64> t_arm{0};
-    std::atomic<i64> t_disarm{INT64_MAX};
+    std::atomic<i64> t_arm = {0};
+    std::atomic<i64> t_disarm = {INT64_MAX};
 
     bool running[max_cpus] = {};
     u64 last_in[max_cpus][MAX_HW_COUNTERS] = {};

@@ -183,7 +183,7 @@ protected:
     accel_build_flags _build_flags = accel_build_flags::none;
     int _geometry_count = 0;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
-    mutable std::atomic<bool> _expired{false};                   // mutable: expire() is a const lifetime hook
+    mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
 };
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a
@@ -236,6 +236,6 @@ protected:
     int _instance_count = 0;
     cc::vector<blas_handle> _referenced_blases; // the ownership edge: keeps every referenced BLAS alive
     mutable cc::vector<cc::unique_function<void()>> _finalizers;
-    mutable std::atomic<bool> _expired{false};
+    mutable std::atomic<bool> _expired = {false};
 };
 } // namespace sg

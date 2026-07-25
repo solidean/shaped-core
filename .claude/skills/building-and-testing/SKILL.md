@@ -15,8 +15,14 @@ binary directly. Run it from the repo root via `uv`, with **no output piping**
 uv run dev.py test "<pattern>"   # auto-build + run just the matching test(s)
 uv run dev.py test               # build + run the full suite
 uv run dev.py build -t <target>  # build one target
+uv run dev.py run <target> [args…]  # build + run a NON-test executable (a tool, a sample)
 uv run dev.py doctor             # sanity-check the toolchain
 ```
+
+`run` is how you invoke one of our tools — never hand-write
+`build/<preset>/tools/…/foo.exe`, which pins one preset and silently runs a stale
+binary. It builds first, mirrors the program's output, and propagates its exit code.
+It refuses `*-test` targets: those are `dev.py test`.
 
 `dev.py` is **quiet by default**: it does not mirror child output. It captures
 each step (configure, build, every test binary) to `build/<preset>/run-logs/`,

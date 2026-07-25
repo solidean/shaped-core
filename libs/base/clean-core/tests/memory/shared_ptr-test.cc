@@ -40,9 +40,9 @@ struct node_base
     static inline int freed = 0;
     static void reset() { payload_torn = freed = 0; }
 
-    cc::atomic<cc::u32> strong{0};
-    cc::atomic<cc::u32> weak{0};
-    cc::node_class_index cls{}; // concrete size class, stashed so free frees the right (derived) size
+    cc::atomic<cc::u32> strong = {0};
+    cc::atomic<cc::u32> weak = {0};
+    cc::node_class_index cls = {}; // concrete size class, stashed so free frees the right (derived) size
 
     virtual void teardown_payload() = 0; // destroy the payload only; leaves the counts alive for weak refs
 
@@ -106,7 +106,7 @@ struct only_strong
     static inline int freed = 0;
     static void reset() { torn = freed = 0; }
 
-    cc::atomic<cc::u32> strong{0};
+    cc::atomic<cc::u32> strong = {0};
     int value;
     explicit only_strong(int v) : value(v) {}
 };
@@ -433,7 +433,7 @@ TEST("fused_refcount - init, inc, and the half layout")
     using fr = cc::fused_refcount;
     static_assert(fr::sole_owner == ((cc::u64(1) << 32) | 1));
 
-    cc::atomic<cc::u64> c{0};
+    cc::atomic<cc::u64> c = {0};
     fr::init(c);
     CHECK(c.load() == fr::sole_owner);
     CHECK(strong_of(c) == 1);
@@ -451,7 +451,7 @@ TEST("fused_refcount - init, inc, and the half layout")
 TEST("fused_refcount - release_strong reports destroy/free per the protocol")
 {
     using fr = cc::fused_refcount;
-    cc::atomic<cc::u64> c{0};
+    cc::atomic<cc::u64> c = {0};
 
     // (2,2): not the last strong -> nothing to do.
     fr::init(c);
@@ -500,10 +500,10 @@ namespace
 {
 struct race_node
 {
-    static inline cc::atomic<int> torn{0};
-    static inline cc::atomic<int> freed{0};
-    static inline cc::atomic<bool> tearing{false};
-    static inline cc::atomic<int> freed_during_teardown{0};
+    static inline cc::atomic<int> torn = {0};
+    static inline cc::atomic<int> freed = {0};
+    static inline cc::atomic<bool> tearing = {false};
+    static inline cc::atomic<int> freed_during_teardown = {0};
     static void reset()
     {
         torn = 0;
@@ -512,7 +512,7 @@ struct race_node
         freed_during_teardown = 0;
     }
 
-    cc::atomic<cc::u64> counts{0};
+    cc::atomic<cc::u64> counts = {0};
 
     void teardown_payload()
     {
@@ -524,7 +524,7 @@ struct race_node
     }
 
 private:
-    static inline cc::atomic<int> _sink{0};
+    static inline cc::atomic<int> _sink = {0};
 };
 
 struct race_traits
@@ -561,8 +561,8 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
 
         // Spawning costs far more than the teardown window, so the worker must already be spinning before the
         // strong drop starts — otherwise the two never overlap and the test samples nothing.
-        cc::atomic<bool> spinning{false};
-        cc::atomic<bool> go{false};
+        cc::atomic<bool> spinning = {false};
+        cc::atomic<bool> go = {false};
         std::thread t(
             [&]
             {
@@ -590,7 +590,7 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
 TEST("fused_refcount - try_lock_strong follows the high half only")
 {
     using fr = cc::fused_refcount;
-    cc::atomic<cc::u64> c{0};
+    cc::atomic<cc::u64> c = {0};
     fr::init(c);
 
     CHECK(fr::try_lock_strong(c)); // strong > 0 -> upgrade succeeds

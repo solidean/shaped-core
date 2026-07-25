@@ -12,13 +12,20 @@ where; not all of it is implemented yet.
 
 Libraries live under `libs/<category>/<lib>`:
 
-| Library                       | What it is                                                                                  |
-|-------------------------------|---------------------------------------------------------------------------------------------|
-| [clean-core](libs/base/clean-core/) | Foundational C++ data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, …). Namespace `cc`. |
-| [nexus](libs/base/nexus/)      | Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML). Namespace `nx`. |
-| [typed-geometry](libs/base/typed-geometry/) | The repo's strongly-typed math & geometry vocabulary, where the type system encodes the geometry. Intended home for linear algebra (`vec`/`pos`/`comp`/`mat`/`quat`), transforms, geometric primitives & queries (distance, intersection, containment), curves, color, sampling, spatial acceleration structures, symbolic/exact math, and meshes. Namespace `tg`. |
+| Category | Library | Namespace | What it is |
+|----------|---------|-----------|------------|
+| base | [clean-core](libs/base/clean-core/) | `cc` | Foundational C++ data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, …). No dependencies. |
+| base | [nexus](libs/base/nexus/) | `nx` | Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML), so IDE test integration works out of the box. Every `<lib>-test` binary is built on it. |
+| base | [typed-geometry](libs/base/typed-geometry/) | `tg` | The repo's strongly-typed math & geometry vocabulary, where the type system encodes the geometry. Intended home for linear algebra (`vec`/`pos`/`comp`/`mat`/`quat`), transforms, geometric primitives & queries (distance, intersection, containment), curves, color, sampling, spatial acceleration structures, symbolic/exact math, and meshes. |
+| io | [babel-serializer](libs/io/babel-serializer/) | `babel` | Serialization & deserialization of various formats. Each format parses into an unopinionated native structure, with opinionated aggregators ("load an image", "load a mesh") on top. JSON, markdown, Wavefront OBJ, SQLite, and PNG/JPEG images today. |
+| graphics | [shaped-graphics](libs/graphics/shaped-graphics/) | `sg` | The graphics-API wrapper: a backend-agnostic `context`, `command_list`, and GPU resource types over per-backend static libraries (dx12/vulkan tier 1, metal/webgpu tier 2, opengl/webgl legacy). Also home to the render-routine framework. |
+| graphics | [shaped-shader-compiler-dxc](libs/graphics/shaped-shader-compiler-dxc/) | `ssc::dxc` | A lean wrapper over the DirectX Shader Compiler: HLSL → `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed cache. Windows-only, built only once DXC has been fetched. |
+| graphics | [shaped-shader-library](libs/graphics/shaped-shader-library/) | `slib` | Shader packages + hot reloading. Any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts. |
+| graphics | [shaped-rendering](libs/graphics/shaped-rendering/) | `sr` | Concrete render routines on top of sg (mipmap generation, tonemapping, texture compression, …), the Dear ImGui renderer, and the SDL3-backed window abstraction (`sr::window_system` / `sr::window`). |
+| graphics | [shaped-viewer](libs/graphics/shaped-viewer/) | `sv` | The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API. The top of the graphics stack. |
 
-See [docs/libraries.md](docs/libraries.md) for the full catalog.
+The graphics stack is early-stage — docs and buildable skeletons, with several core types still stubbed.
+See [docs/libraries.md](docs/libraries.md) for the full catalog, including what each library is *for* beyond what exists today.
 
 ## Quick start
 
@@ -92,7 +99,8 @@ checkout with `--emsdk-path` (no permanent activation needed). See
 
 ```
 libs/<category>/<lib>   # the libraries (src/<lib>/, tests/, optional docs/)
-tools/                  # dev/ (build & test modules) and bin/ (checked-in binaries)
+tools/                  # dev/ (build & test modules), cmake/, bin/ (checked-in binaries),
+                        # lint/ (clang-tidy gates), shaped-linter/, instruction-tracer/
 docs/                   # repo-wide docs — start at docs/_index.md
 dev.py                  # build & test driver
 CMakeLists.txt          # top-level build
