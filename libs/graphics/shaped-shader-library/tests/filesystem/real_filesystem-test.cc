@@ -73,12 +73,19 @@ TEST("slib - real_filesystem reads files under its root")
     temp_dir dir("slib-real-fs-read");
     dir.write("a.hlsl", "void main() {}");
     dir.write("sub/b.hlsli", "#define X 1");
+    dir.write("empty.hlsli", "");
 
     auto fs = slib::real_filesystem(dir.root());
 
     CHECK(fs.read_text("a.hlsl").value() == "void main() {}");
     CHECK(fs.read_text("sub/b.hlsli").value() == "#define X 1");
     CHECK(fs.exists("a.hlsl"));
+
+    // An empty include is a file that reads as "", never one that is missing — the two answers drive very
+    // different behavior upstream.
+    auto const empty = fs.read_text("empty.hlsli");
+    REQUIRE(empty.has_value());
+    CHECK(empty.value() == "");
 
     CHECK(!fs.exists("missing.hlsl"));
     CHECK(!fs.read_text("missing.hlsl").has_value());
