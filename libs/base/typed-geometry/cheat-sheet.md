@@ -148,6 +148,7 @@ tg::quat_f q;                                   // default zero; data is {x,y,z,
 tg::quat_f::zero;   tg::quat_f::identity;        // identity = (0,0,0,1)
 tg::quat_f(x, y, z, w);                           // explicit ctor; q[i], q.data
 tg::quat_f::make_rotation_x(a); ..._y; ..._z; ..._axis_angle(axis, a);  // requires has_trigonometry
+tg::quat_f::make_from_basis(x_axis, y_axis, z_axis);  // rotation sending +x/+y/+z onto the given orthonormal axes; requires has_sqrt
 q1 * q2;                                          // composition (applies q2 then q1)
 q * v;                                            // rotate a vec3
 q.length();  q.normalized();                      // requires has_sqrt;  q.length_sqr() always

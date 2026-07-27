@@ -55,6 +55,40 @@ TEST("tg quat - rotations")
     }
 }
 
+TEST("tg quat - make_from_basis")
+{
+    auto const ex = tg::vec3f(1, 0, 0);
+    auto const ey = tg::vec3f(0, 1, 0);
+    auto const ez = tg::vec3f(0, 0, 1);
+
+    SECTION("the canonical basis yields the identity rotation")
+    {
+        auto const q = tg::quat_f::make_from_basis(ex, ey, ez);
+        auto const v = tg::vec3f(1, 2, 3);
+        CHECK(tgtest::approx(q * v, v));
+    }
+
+    SECTION("sends the canonical basis onto the given axes")
+    {
+        // A 90-deg rotation about +z: x -> y, y -> -x, z -> z.
+        auto const q = tg::quat_f::make_from_basis(ey, -ex, ez);
+        CHECK(tgtest::approx(q * ex, ey));
+        CHECK(tgtest::approx(q * ey, -ex));
+        CHECK(tgtest::approx(q * ez, ez));
+    }
+
+    SECTION("agrees with make_rotation_z")
+    {
+        auto const quarter = tg::angle_f::make_from_degree(90);
+        auto const q = tg::quat_f::make_rotation_z(quarter);
+        // Columns of the same rotation: images of the canonical basis under q.
+        auto const from_basis = tg::quat_f::make_from_basis(q * ex, q * ey, q * ez);
+        CHECK(tgtest::approx(from_basis * ex, q * ex));
+        CHECK(tgtest::approx(from_basis * ey, q * ey));
+        CHECK(tgtest::approx(from_basis * ez, q * ez));
+    }
+}
+
 TEST("tg quat - axis and angle")
 {
     auto const axis = tg::vec3f(0, 0, 1);
