@@ -1,9 +1,9 @@
 #include "trace_stats.hh"
 
 #include <clean-core/container/map.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
-#include <instruction-tracer/report/console.hh>
 
 #include <algorithm> // std::sort: rank the table by cost, with a name tie-break for a stable order
 
@@ -126,6 +126,7 @@ cc::string row_line(row_cells const& c, column_widths const& w)
 /// which is the normal case and needs no ceremony.
 cc::string format_slow_ops(cc::span<slow_op const> ops)
 {
+    using namespace cc::console;
     if (ops.empty())
         return {};
 
@@ -296,6 +297,7 @@ stats_summary collect_stats(cc::span<trace const> traces)
 
 cc::string format_stats(stats_summary const& summary)
 {
+    using namespace cc::console;
     if (summary.rows.empty())
         return dim("no instructions recorded") + "\n";
 

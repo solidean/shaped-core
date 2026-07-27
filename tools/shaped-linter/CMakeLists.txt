@@ -19,6 +19,9 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/rules/registry.cc
     src/shaped-linter/rules/engine.cc
 
+    src/shaped-linter/report/impl/display_width.cc
+    src/shaped-linter/report/snippet.cc
+    src/shaped-linter/report/renderer.cc
     src/shaped-linter/report/reporter.cc
 )
 
@@ -43,6 +46,10 @@ if(SC_BUILD_TESTS)
         tests/lex/lexer-test.cc
 
         tests/parse/parser-test.cc
+
+        tests/report/display_width-test.cc
+        tests/report/snippet-test.cc
+        tests/report/renderer-test.cc
 
         tests/rules/default_init_assignment-test.cc
         tests/rules/engine-test.cc

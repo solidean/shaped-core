@@ -35,7 +35,6 @@ add_library(instruction-tracer-core STATIC
     src/instruction-tracer/decode/instruction_decoder.cc
     src/instruction-tracer/decode/memory_access.cc
 
-    src/instruction-tracer/report/console.cc
     src/instruction-tracer/report/html_export.cc
     src/instruction-tracer/report/mca.cc
     src/instruction-tracer/report/mca_timing_formatter.cc
@@ -78,7 +77,6 @@ if(SC_BUILD_TESTS)
         tests/debug/module_registry-test.cc
         tests/decode/instruction_decoder-test.cc
         tests/decode/memory_access-test.cc
-        tests/report/console-test.cc
         tests/report/html_export-test.cc
         tests/report/json_reader-test.cc
         tests/report/mca-test.cc

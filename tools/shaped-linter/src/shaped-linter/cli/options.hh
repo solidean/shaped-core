@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-linter/fwd.hh>
@@ -19,8 +20,9 @@ struct options
     /// --fix: apply each finding's suggested edit back to its file in place.
     bool apply_fixes = false;
 
-    /// --no-color: force plain output even on a terminal.
-    bool no_color = false;
+    /// --color auto|always|never (`--no-color` is the old spelling of `never`).
+    /// `auto` colors only when both stdout and stderr are terminals — see cc::console.
+    cc::console::color_mode color = cc::console::color_mode::automatic;
 
     /// -h / --help: main prints usage and exits 0.
     bool help = false;

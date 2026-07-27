@@ -33,9 +33,45 @@ It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only
 shaped-linter [options] <file>...
 
   --fix            apply each finding's suggested edit back to its file in place
-  --no-color       force plain output even on a terminal
+  --color <mode>   auto (default), always or never
+  --no-color       the old spelling of --color never
   -h / --help      print usage and exit
 ```
+
+`auto` colors only when stdout and stderr are both terminals, and honours `NO_COLOR` / `FORCE_COLOR`, so a redirected run carries no escapes.
+The policy is `cc::console`'s, shared with instruction-tracer and dev.py.
+`dev.py lint shaped` passes its own already-resolved decision through, since it captures the linter's output.
+
+## Output
+
+```
+[default-init-assignment] member default initializer should use assignment form (`= value`), not brace form
+  --> libs/base/clean-core/src/clean-core/thread/atomic.hh:10:27
+   |
+ 8 | struct worker
+ 9 | {
+10 |     cc::atomic<bool> _pending{false};
+   |                              ^^^^^^^
+11 |     int _retries = 3;
+   |
+  fix: replace `{false}` with `= {false}` (applied by --fix)
+  help: a data member reads better without the braces
+        consider `= false` (not applied)
+
+rule rationale
+--------------
+
+[default-init-assignment]
+  prefer a consistent assignment-form initialization `T v = value;` across the codebase; …
+
+1 finding in 1 file (1 fixable with --fix)
+```
+
+Findings print in file/line order, each rule's mandatory rationale once at the end, then a one-line summary.
+**All of that is framework-level.** A rule reports a span, a message and optionally a fix or a hint, and formats nothing itself.
+That holds for multi-line spans, several labels on one line, and a second labelled span in another file alike — see [docs/writing-a-rule.md](docs/writing-a-rule.md#what-you-do-not-write).
+
+A whole-tree run batches files across several invocations, so the rationale section and the summary repeat per batch.
 
 ## Rules
 
@@ -52,6 +88,7 @@ A finding can carry two kinds of rewrite, and the distinction is load-bearing:
 * a **`fix`** is safe to apply unattended — wherever the rule fires, applying it compiles and preserves behavior. `--fix` applies it.
 * a **`hint`** is the nicer form that only a human can sign off on, because it may fail to compile or silently change what the code means. It is **printed and never applied**, with a message saying what to weigh.
 
+In the rendered output they are two labelled lines: `fix:` says it will be applied by `--fix`, `help:` carries the hint's reasoning with each suggested form marked `(not applied)`.
 `--fix` therefore stays trustworthy across a whole-tree run, and the judgement calls still get surfaced where you can see them.
 `default-init-assignment` uses both: its fix keeps the braces (`x{0}` → `x = {0}`), while its hint offers the braceless `= 0` for a data member and the `auto v = T(0)` form for a local.
 
@@ -60,7 +97,7 @@ A finding can carry two kinds of rewrite, and the distinction is load-bearing:
 A layered pipeline, each rule declaring the highest layer it needs:
 
 ```
-source_buffer ─▶ lexer ─▶ token_stream ─▶ parser ─▶ syntax_tree ─▶ rule engine ─▶ findings ─▶ reporter
+source_buffer ─▶ lexer ─▶ token_stream ─▶ parser ─▶ syntax_tree ─▶ rule engine ─▶ findings ─▶ renderer ─▶ reporter
 ```
 
 See [docs/writing-a-rule.md](docs/writing-a-rule.md) to add a rule and [docs/architecture.md](docs/architecture.md) for how the layers fit together.
@@ -87,7 +124,7 @@ src/shaped-linter/
   lex/       source buffers, spans, tokens, the lexer
   parse/     the recursive-descent parser and syntax tree
   rules/     the rule type, registry, engine, and concrete rules
-  report/    the grouped-by-rule findings reporter
+  report/    the diagnostic renderer: snippet (source view + carets), renderer, style, reporter
   compdb/    (reserved) compile_commands.json reader
   main.cc    executable entry point
 docs/        architecture, writing a rule, coding guidelines

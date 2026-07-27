@@ -27,9 +27,9 @@ Read the scope off the node; never re-derive it in a rule.
 Every rule carries:
 
 * an `id` — a stable, greppable kebab-case slug, like a clang-tidy check name (`default-init-assignment`).
-  It is printed in brackets on every finding line (`… [default-init-assignment]`), so it is easy to grep and to silence.
+  It opens every finding (`[default-init-assignment] the message`), so it is easy to grep and to silence.
 * a `rationale` — one sentence on *why*, ideally with the preferred fix.
-  The reporter leads every group with it, and `all_rules()` asserts it is non-empty.
+  It prints once per run, in the `rule rationale` section under the findings, and `all_rules()` asserts it is non-empty.
   This mirrors the clang-tidy gate culture, where every gate carries its `why`.
 
 ## Steps
@@ -121,7 +121,43 @@ Spans are `{file_id, byte_begin, byte_end}` (half-open).
 Get text with `ctx.source.span_text(span)`; resolve to line/column happens later, in the reporter.
 
 Output is UTF-8: `main` sets the Windows console to `CP_UTF8` at startup, so the repo's typography (em dashes, `…`) and any UTF-8 in the echoed source line render correctly.
-Still, prefer a short ASCII `message` (e.g. `= value` over `= …`) — it stays clean when grepped from a log.
+Still, prefer a short ASCII `message` (e.g. `= value` over `= …`) — it stays clean when grepped from a log, and through a mirror whose encoding you do not control.
+
+#### What you do NOT write
+
+The rendering is entirely framework-side, so the fields above are the whole of a rule's output work:
+
+```
+[default-init-assignment] member default initializer should use assignment form (`= value`), not brace form
+  --> libs/base/clean-core/src/clean-core/thread/atomic.hh:10:27
+   |
+ 8 | struct worker
+ 9 | {
+10 |     cc::atomic<bool> _pending{false};
+   |                              ^^^^^^^
+11 |     int _retries = 3;
+   |
+  fix: replace `{false}` with `= {false}` (applied by --fix)
+  help: a data member reads better without the braces
+        consider `= false` (not applied)
+```
+
+The header, the location line, the excerpt with its context, the carets under exactly your `span`, the `fix:` / `help:` lines and the rationale section all come from the finding.
+Never format any of it into the `message`.
+
+#### Optional: labels, for a finding that is a relation
+
+Most findings point at one place and need nothing more.
+When a finding is only intelligible as a relation between two places, `finding` takes labels:
+
+```cpp
+    .primary_label = cc::string("declared with braces here"),
+    .secondary = {{.span = other_span, .text = cc::string("and used here")}},
+```
+
+The primary label prints next to the `^^^`; secondary spans are underlined with `---`.
+Two labels on one line become a ladder, and a secondary span in another file gets its own `::: path` block.
+All of that is [`report/snippet.cc`](../src/shaped-linter/report/snippet.cc)'s job.
 
 ### 3. Register it
 

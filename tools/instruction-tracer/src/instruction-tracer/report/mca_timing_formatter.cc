@@ -1,8 +1,8 @@
 #include "mca_timing_formatter.hh"
 
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <instruction-tracer/debug/trace_record.hh>
-#include <instruction-tracer/report/console.hh>
 #include <instruction-tracer/report/mca.hh>
 #include <instruction-tracer/report/trace_formatter.hh>
 
@@ -20,6 +20,7 @@ void append_summary(cc::string& out, mca_summary const& s)
 
 void append_bottleneck(cc::string& out, mca_bottleneck const& b)
 {
+    using namespace cc::console;
     if (!b.available)
         return;
     out += "  ";
@@ -43,6 +44,7 @@ void append_bottleneck(cc::string& out, mca_bottleneck const& b)
 
 void append_instructions(cc::string& out, trace const& t, mca_result const& r)
 {
+    using namespace cc::console;
     out += dim("  addr              uops  lat   @ret  text") + "\n";
     for (isize i = 0; i < t.instructions.size() && i < r.instructions.size(); ++i)
     {
@@ -65,6 +67,7 @@ void append_instructions(cc::string& out, trace const& t, mca_result const& r)
 
 cc::string format_mca_timing(cc::span<trace const> traces, cc::span<mca_result const> mca)
 {
+    using namespace cc::console;
     bool any_available = false;
     for (auto const& r : mca)
         if (r.available)

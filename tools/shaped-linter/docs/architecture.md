@@ -15,7 +15,7 @@ The engine builds the parse tree only when some enabled rule asks for it — che
 * **`lex/`** — `source_buffer` (owns bytes + a line index), `source_span` (`{file_id, byte_begin, byte_end}`), `source_manager` (owns all buffers, resolves spans), `token` / `token_stream`, and the `lexer`.
 * **`parse/`** — `syntax_tree` (an arena of `node`s referenced by id) and the recursive-descent `parser`.
 * **`rules/`** — `rule` / `finding` / `fix` types, the single `registry`, the `engine`, and one file per rule.
-* **`report/`** — the grouped-by-rule reporter.
+* **`report/`** — the diagnostic renderer: `snippet` (the line-numbered source view with its carets), `renderer` (a finding, and a whole run, as text), `style` (the presentation knobs), and `reporter` (the write to stdout).
 * **`compdb/`** — reserved for the `compile_commands.json` reader (not built yet).
 
 ## Spans are the backbone
@@ -23,6 +23,18 @@ The engine builds the parse tree only when some enabled rule asks for it — che
 Every token and every syntax node carries a `source_span`.
 Line/column are never stored — they are resolved lazily from the buffer, only when a finding is reported.
 This is what makes accurate fix-its possible, and it is the foundation the macro model will build on.
+
+The renderer is the one place that resolves them, which is why `source_buffer` also indexes by line (`line_count`, `line_span`, `line_text`) on top of the byte-offset lookups.
+
+## Rendering is framework work, not rule work
+
+A rule reports a span, a message and optionally a fix or a hint.
+Everything a reader sees — the `[rule-id] message` header, the `--> path:line:col` line, the numbered excerpt, the carets under the exact span, the `fix:` / `help:` lines, the rationale section, the summary — is produced by `report/` from those fields alone.
+A rule that wants to point at a second place adds a `label` to `finding::secondary`.
+The layout of two underlines on one line, of a span that runs over several lines, and of a label in another file is the renderer's problem, not the rule's.
+
+`render_snippet` and `render_report` are pure functions returning `cc::string`, and `report_style::color` is passed in rather than read from the process-global `cc::console` state.
+That is what makes the exact output testable (`tests/report/`), and keeps `--fix` free to rewrite the files afterwards.
 
 ## Macro provenance is reserved, not implemented
 
@@ -95,7 +107,7 @@ Documented so the boundary does not regress silently:
 ## Relationship to the clang-tidy gates
 
 shaped-linter is the sibling of the [clang-tidy gate framework](../../lint/) — the place for rules clang-tidy structurally cannot express (e.g. macro-placement).
-It shares one philosophy: **every rule carries a mandatory rationale**, and output is a grouped-by-rule digest that leads each group with that `why`.
+It shares one philosophy: **every rule carries a mandatory rationale**, printed once per run in the `rule rationale` section under the findings.
 It runs as `dev.py lint shaped`, and is a `dev.py check` gate (`shaped-lint`) that runs **dirty-only** — like the clang-tidy gates, so the rules adopt incrementally rather than requiring a repo-wide sweep first.
 
 See [writing-a-rule.md](writing-a-rule.md) to add a rule, and [coding-guidelines.md](coding-guidelines.md) for the conventions it follows — notably the two-layer test split (smoke tests plus a markdown corpus).

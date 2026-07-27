@@ -15,6 +15,7 @@ add_library(clean-core
     src/clean-core/common/hash.cc
     src/clean-core/common/hash128.cc
     src/clean-core/platform/native.cc
+    src/clean-core/platform/console.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/mimalloc_resource.cc
     src/clean-core/memory/node_allocation.cc
@@ -61,6 +62,7 @@ target_sources(clean-core
     src/clean-core/common/asserts.hh
 
     src/clean-core/platform/native.hh
+    src/clean-core/platform/console.hh
     src/clean-core/platform/source_location.hh
     src/clean-core/platform/stacktrace.hh
     src/clean-core/platform/win32_sanitized.hh
@@ -227,6 +229,8 @@ if(SC_BUILD_TESTS)
         tests/common/invocable-test.cc
         tests/common/macros-test.cc
         tests/common/utility-test.cc
+
+        tests/platform/console-test.cc
 
         tests/math/bit-test.cc
         tests/math/random-test.cc

@@ -1,7 +1,7 @@
 #include "trace_formatter.hh"
 
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
-#include <instruction-tracer/report/console.hh>
 
 namespace itrace
 {
@@ -46,6 +46,7 @@ void pad_to(cc::string& out, isize visible, isize width)
 
 void append_branch_note(cc::string& out, recorded_instruction const& insn)
 {
+    using namespace cc::console;
     if (insn.length == 0 || insn.next_rip == 0)
         return;
 
@@ -109,6 +110,7 @@ cc::string format_flags(u64 rflags)
 /// it "rcx=0x64" says what rcx became but never what it was.
 void append_register_dump(cc::string& out, register_snapshot const& s)
 {
+    using namespace cc::console;
     out += "\n" + dim("registers:") + "\n";
 
     for (int i = 0; i < gpr_count; ++i)
@@ -140,6 +142,7 @@ void append_register_dump(cc::string& out, register_snapshot const& s)
 
 void append_register_diff(cc::string& out, register_snapshot const& before, register_snapshot const& after)
 {
+    using namespace cc::console;
     cc::string diff;
     for (int i = 0; i < gpr_count; ++i)
     {
@@ -170,6 +173,7 @@ cc::string format_address(u64 address)
 
 cc::string format_instruction(recorded_instruction const& insn)
 {
+    using namespace cc::console;
     cc::string out;
     out += dim(cc::format("  {}  ", format_address(insn.rip)));
 
@@ -182,6 +186,7 @@ cc::string format_instruction(recorded_instruction const& insn)
 
 cc::string format_trace(trace const& t, u32 total_traces, format_options const& opts, source_cache& sources)
 {
+    using namespace cc::console;
     cc::string out;
 
     out += bold(cc::format("=== trace {}/{}: {} ===", t.index, total_traces, t.entry_symbol)) + "\n";
@@ -251,6 +256,7 @@ cc::string format_trace(trace const& t, u32 total_traces, format_options const& 
 
 cc::string format_symbol_error(symbol_error const& error)
 {
+    using namespace cc::console;
     cc::string out;
     out += red(error.message);
 

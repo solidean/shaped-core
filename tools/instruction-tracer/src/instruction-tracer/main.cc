@@ -1,4 +1,5 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/platform/win32_sanitized.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -8,7 +9,6 @@
 #include <instruction-tracer/debug/mca_runner.hh>
 #include <instruction-tracer/debug/trace_enrich.hh>
 #include <instruction-tracer/decode/instruction_decoder.hh>
-#include <instruction-tracer/report/console.hh>
 #include <instruction-tracer/report/html_export.hh>
 #include <instruction-tracer/report/mca.hh>
 #include <instruction-tracer/report/mca_timing_formatter.hh>
@@ -279,7 +279,7 @@ int main(int argc, char const* const* argv)
 
     // Resolve color before the first byte of output, including the usage error below. A parse
     // failure has no options to read, so that path auto-detects.
-    itrace::configure_console(opts.has_value() ? opts.value().color : itrace::color_mode::automatic);
+    cc::console::configure(opts.has_value() ? opts.value().color : cc::console::color_mode::automatic);
 
     if (opts.has_error())
     {

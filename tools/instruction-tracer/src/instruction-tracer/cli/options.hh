@@ -3,9 +3,9 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/string.hh>
 #include <instruction-tracer/cli/target_spec.hh>
-#include <instruction-tracer/report/console.hh>
 
 namespace itrace
 {
@@ -83,7 +83,7 @@ struct options
     bool memory_instruction_addresses = false;
 
     /// --colored / --plain; auto-detects otherwise.
-    color_mode color = color_mode::automatic;
+    cc::console::color_mode color = cc::console::color_mode::automatic;
 
     /// Set by --help; main prints usage and exits 0.
     bool help = false;

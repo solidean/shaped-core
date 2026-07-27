@@ -44,6 +44,42 @@ TEST("shaped-linter - options - no files errors")
     CHECK(parse(argv).has_error());
 }
 
+TEST("shaped-linter - options - color mode defaults to auto")
+{
+    char const* const argv[] = {"shaped-linter", "a.cc"};
+    auto const r = parse(argv);
+    REQUIRE(r.has_value());
+    CHECK(r.value().color == cc::console::color_mode::automatic);
+}
+
+TEST("shaped-linter - options - color takes its mode as a value or after an equals sign")
+{
+    char const* const separate[] = {"shaped-linter", "--color", "always", "a.cc"};
+    REQUIRE(parse(separate).has_value());
+    CHECK(parse(separate).value().color == cc::console::color_mode::always);
+
+    char const* const joined[] = {"shaped-linter", "--color=never", "a.cc"};
+    REQUIRE(parse(joined).has_value());
+    CHECK(parse(joined).value().color == cc::console::color_mode::never);
+}
+
+TEST("shaped-linter - options - no-color is the old spelling of never")
+{
+    char const* const argv[] = {"shaped-linter", "--no-color", "a.cc"};
+    auto const r = parse(argv);
+    REQUIRE(r.has_value());
+    CHECK(r.value().color == cc::console::color_mode::never);
+}
+
+TEST("shaped-linter - options - a bad or missing color mode errors")
+{
+    char const* const unknown[] = {"shaped-linter", "--color", "rainbow", "a.cc"};
+    CHECK(parse(unknown).has_error());
+
+    char const* const missing[] = {"shaped-linter", "--color"};
+    CHECK(parse(missing).has_error());
+}
+
 TEST("shaped-linter - options - double dash forces positionals")
 {
     char const* const argv[] = {"shaped-linter", "--", "--weird-name.cc"};

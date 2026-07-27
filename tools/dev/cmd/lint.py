@@ -116,7 +116,9 @@ def run_shaped_linter(
     ok = True
     for start in range(0, len(files), 200):
         batch = files[start:start + 200]
-        argv = [str(exe)]
+        # The linter's own `auto` sees a pipe (run_step captures it), so it would drop color even while we mirror to a terminal.
+        # Hand it dev.py's already-resolved decision instead.
+        argv = [str(exe), "--color", "always" if dev.console.enabled() else "never"]
         if fix:
             argv.append("--fix")
         argv += [str(f) for f in batch]

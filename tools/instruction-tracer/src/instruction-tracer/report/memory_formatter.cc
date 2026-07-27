@@ -2,9 +2,9 @@
 
 #include <clean-core/container/map.hh>
 #include <clean-core/math/bit.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <instruction-tracer/decode/memory_access.hh>
-#include <instruction-tracer/report/console.hh>
 #include <instruction-tracer/report/trace_formatter.hh>
 
 #include <algorithm> // std::sort: cachelines print in ascending address order
@@ -92,6 +92,7 @@ bool memory_view_options::includes(access_region region) const
 
 cc::string format_memory_raw(cc::span<trace const> traces, memory_view_options const& opts)
 {
+    using namespace cc::console;
     cc::string out;
     out += bold("=== memory accesses ===") + "\n";
 
@@ -129,6 +130,7 @@ cc::string format_memory_raw(cc::span<trace const> traces, memory_view_options c
 
 cc::string format_memory_cachelines(cc::span<trace const> traces, memory_view_options const& opts)
 {
+    using namespace cc::console;
     struct bucket
     {
         u64 line = 0; // address / cacheline_bytes
