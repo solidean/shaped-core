@@ -4,6 +4,21 @@
 
 namespace scl
 {
+namespace
+{
+cc::result<cc::console::color_mode> parse_color_mode(cc::string_view text)
+{
+    if (text == "auto")
+        return cc::console::color_mode::automatic;
+    if (text == "always")
+        return cc::console::color_mode::always;
+    if (text == "never")
+        return cc::console::color_mode::never;
+
+    return cc::error(cc::format("unknown color mode '{}' (auto, always or never)", text));
+}
+} // namespace
+
 cc::result<options> parse_options(cc::span<char const* const> args)
 {
     options opts;
@@ -41,7 +56,29 @@ cc::result<options> parse_options(cc::span<char const* const> args)
 
         if (arg == "--no-color")
         {
-            opts.no_color = true;
+            opts.color = cc::console::color_mode::never;
+            continue;
+        }
+
+        if (arg == "--color")
+        {
+            if (i + 1 >= args.size())
+                return cc::error("--color needs a mode (auto, always or never)");
+
+            ++i;
+            auto mode = parse_color_mode(args[i]);
+            CC_RETURN_IF_ERROR(mode);
+
+            opts.color = mode.value();
+            continue;
+        }
+
+        if (arg.starts_with("--color="))
+        {
+            auto mode = parse_color_mode(arg.subview(cc::string_view("--color=").size()));
+            CC_RETURN_IF_ERROR(mode);
+
+            opts.color = mode.value();
             continue;
         }
 
@@ -67,7 +104,8 @@ usage:
 
 options:
   --fix            apply each finding's suggested edit back to its file in place
-  --no-color       force plain output even on a terminal
+  --color <mode>   auto (default), always or never; auto colors only on a terminal
+  --no-color       the old spelling of --color never
   -h / --help      print this and exit
 
 Lints its own rules (starting with member-default-init-assignment) on shaped-core's

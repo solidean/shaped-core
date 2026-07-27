@@ -8,9 +8,9 @@
 
 namespace scl
 {
-/// One source file: owns its bytes and a line-start index, and maps a byte offset to a 1-based
-/// line/column. The text is NOT null-terminated (clean-core string semantics); do not pass `.data()`
-/// to C APIs. Construction scans the text once to build the line index.
+/// One source file: owns its bytes and a line-start index, addressable by byte offset or by 1-based line.
+/// The text is NOT null-terminated (clean-core string semantics); do not pass `.data()` to C APIs.
+/// Construction scans the text once to build the line index.
 struct source_buffer
 {
     /// A buffer over in-memory text (tests, snippets) — no file IO. `path` is used only for reporting.
@@ -26,8 +26,19 @@ struct source_buffer
     /// The 1-based line/column of a byte offset. `offset` is clamped to `[0, size]`.
     line_col line_col_at(u32 byte_offset) const;
 
-    /// The text of the line containing `byte_offset`, without its trailing newline. For reporting.
-    cc::string_view line_text(u32 byte_offset) const;
+    /// The number of lines. Always >= 1: an empty file is one empty line.
+    u32 line_count() const { return u32(_line_starts.size()); }
+
+    /// The byte range of a 1-based line, without its trailing newline.
+    /// `line` is clamped to `[1, line_count]`.
+    source_span line_span(u32 line) const;
+
+    /// The text of a 1-based line, without its trailing newline.
+    /// `line` is clamped to `[1, line_count]`.
+    cc::string_view line_text(u32 line) const;
+
+    /// The text of the line containing `byte_offset`, without its trailing newline.
+    cc::string_view line_text_at(u32 byte_offset) const;
 
 private:
     cc::string _text;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-linter/fwd.hh>
 
@@ -39,6 +40,15 @@ struct line_col
     u32 column = 1;
 
     bool operator==(line_col const&) const = default;
+};
+
+/// A span to underline in a rendered snippet, with optional text next to the underline.
+/// Empty `text` draws the underline alone.
+/// Spans in different files are fine — each file gets its own block.
+struct label
+{
+    source_span span;
+    cc::string text;
 };
 
 /// A fully resolved location for reporting: the file path plus 1-based line/column.

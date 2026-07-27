@@ -43,6 +43,44 @@ TEST("shaped-linter - source_buffer - empty and clamping")
     CHECK(b2.line_col_at(999) == lc(1, 3)); // clamped to end
 }
 
+TEST("shaped-linter - source_buffer - line-addressed access")
+{
+    auto const b = source_buffer::from_text("ab\ncde\nf", "<mem>", 0);
+
+    CHECK(b.line_count() == 3);
+    CHECK(b.line_text(1) == "ab");
+    CHECK(b.line_text(2) == "cde");
+    CHECK(b.line_text(3) == "f"); // the last line carries no trailing newline
+    CHECK(b.line_span(2).byte_begin == 3);
+    CHECK(b.line_span(2).byte_end == 6);
+
+    CHECK(b.line_text(0) == "ab"); // clamped
+    CHECK(b.line_text(99) == "f"); // clamped
+}
+
+TEST("shaped-linter - source_buffer - a trailing newline opens a last, empty line")
+{
+    auto const b = source_buffer::from_text("ab\n", "<mem>", 0);
+    CHECK(b.line_count() == 2);
+    CHECK(b.line_text(1) == "ab");
+    CHECK(b.line_text(2) == "");
+}
+
+TEST("shaped-linter - source_buffer - CRLF is not part of the line text")
+{
+    auto const b = source_buffer::from_text("ab\r\ncd", "<mem>", 0);
+    CHECK(b.line_count() == 2);
+    CHECK(b.line_text(1) == "ab");
+    CHECK(b.line_text(2) == "cd");
+}
+
+TEST("shaped-linter - source_buffer - an empty file is one empty line")
+{
+    auto const b = source_buffer::from_text("", "<mem>", 0);
+    CHECK(b.line_count() == 1);
+    CHECK(b.line_text(1) == "");
+}
+
 TEST("shaped-linter - source_buffer - span_text")
 {
     auto const b = source_buffer::from_text("hello world", "<mem>", 7);

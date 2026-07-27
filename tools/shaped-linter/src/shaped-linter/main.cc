@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <shaped-linter/cli/options.hh>
@@ -19,9 +20,9 @@ constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_findings = 2;
 
-/// Make the console interpret our output (already UTF-8 bytes from cc::print) as UTF-8, so the repo's
-/// typography and any UTF-8 in echoed source lines render instead of codepage mojibake. A no-op when
-/// output is redirected — the pipe carries the same UTF-8 bytes, which the reader decodes as UTF-8.
+/// Make the console interpret our output (already UTF-8 bytes from cc::print) as UTF-8.
+/// Without it the repo's typography and any UTF-8 in echoed source lines come out as codepage mojibake.
+/// A no-op when output is redirected — the pipe carries the same UTF-8 bytes, which the reader decodes as UTF-8.
 void enable_utf8_console()
 {
 #if defined(_WIN32)
@@ -54,17 +55,22 @@ int run(scl::options const& opts)
         return exit_ok;
     }
 
-    scl::report_findings(all, sm, {.color = !opts.no_color});
+    scl::report_findings(all, sm, {.color = cc::console::color_enabled()});
 
     if (opts.apply_fixes)
     {
+        auto fixes = 0;
+        for (auto const& f : all)
+            if (f.suggested_fix.has_value() && !f.suggested_fix.value().edits.empty())
+                ++fixes;
+
         auto const changed = scl::apply_fixes(sm, all);
         if (changed.has_error())
         {
             cc::eprintln("error applying fixes: {}", changed.error().to_string());
             return exit_usage;
         }
-        cc::println("shaped-linter: applied {} fix(es) across {} file(s)", all.size(), changed.value());
+        cc::println("shaped-linter: applied {} fix(es) across {} file(s)", fixes, changed.value());
     }
 
     return exit_findings;
@@ -76,6 +82,10 @@ int main(int argc, char const* const* argv)
     enable_utf8_console();
 
     auto opts = scl::parse_options(cc::span<char const* const>(argv, cc::isize(argc)));
+
+    // Resolve color before the first byte of output, including the usage error below.
+    // A parse failure has no options to read, so that path auto-detects.
+    cc::console::configure(opts.has_value() ? opts.value().color : cc::console::color_mode::automatic);
 
     if (opts.has_error())
     {

@@ -50,10 +50,15 @@ struct hint
     cc::vector<text_edit> edits;
 };
 
-/// One reported problem. `rule_id` points at the reporting rule's stable literal (the greppable slug).
-/// `span` is what to underline.
-/// `suggested_fix` is present when the rule can rewrite the code safely, `suggested_hint` when the better
-/// form needs a human. The two are independent: a finding may carry both, and then the fix is what lands.
+/// One reported problem.
+/// `rule_id` points at the reporting rule's stable literal (the greppable slug).
+/// `span` is what to underline; the reporter renders the surrounding source around it, so a rule never formats anything itself.
+/// `suggested_fix` is present when the rule can rewrite the code safely, `suggested_hint` when the better form needs a human.
+/// The two are independent: a finding may carry both, and then the fix is what lands.
+///
+/// `primary_label` and `secondary` are opt-in and rarely needed — the message above the snippet usually says it all.
+/// Reach for them when a finding is only intelligible as a relation between two places ("declared here" / "used here").
+/// A secondary span may live in another file, which gets its own block.
 struct finding
 {
     cc::string_view rule_id;
@@ -62,6 +67,8 @@ struct finding
     severity sev = severity::warning;
     cc::optional<fix> suggested_fix;
     cc::optional<hint> suggested_hint;
+    cc::string primary_label;
+    cc::vector<label> secondary;
 };
 
 /// The layers a rule can walk. A rule declares the highest it needs; the engine builds the parse tree

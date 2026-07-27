@@ -58,7 +58,29 @@ line_col source_buffer::line_col_at(u32 byte_offset) const
     };
 }
 
-cc::string_view source_buffer::line_text(u32 byte_offset) const
+source_span source_buffer::line_span(u32 line) const
+{
+    auto const sv = cc::string_view(_text);
+    auto const n = u32(sv.size());
+
+    auto const clamped = line < 1 ? 1 : line;
+    auto const index = clamped > line_count() ? line_count() - 1 : clamped - 1;
+    auto const begin = _line_starts[index];
+
+    // The next line starts after this line's '\n'; a trailing '\r' is not part of the text either.
+    auto end = index + 1 < line_count() ? _line_starts[index + 1] - 1 : n;
+    if (end > begin && sv[isize(end) - 1] == '\r')
+        --end;
+
+    return {.file_id = _file_id, .byte_begin = begin, .byte_end = end};
+}
+
+cc::string_view source_buffer::line_text(u32 line) const
+{
+    return span_text(line_span(line));
+}
+
+cc::string_view source_buffer::line_text_at(u32 byte_offset) const
 {
     auto const sv = cc::string_view(_text);
     auto const n = u32(sv.size());
