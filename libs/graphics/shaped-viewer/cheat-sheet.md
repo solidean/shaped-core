@@ -3,10 +3,113 @@
 Professional, RTX-enabled visualization renderer. Namespace `sv`. Depends on shaped-rendering.
 Headers are included by full path from `src/`: `#include <shaped-viewer/<name>.hh>`.
 
-> **Scope note:** shaped-viewer is an early-stage skeleton — there is no public API yet. This
-> sheet fills in as the renderer lands. Format conventions live in
-> [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+> **Scope note:** first vertical slice — a single path-traced view, blitted into a window by the
+> `view_renderer` routine. Rendering needs a ray-tracing backend (dx12 + DXR on Windows today; vulkan RT is
+> stubbed upstream). The API is present everywhere; without a backend a routine just draws nothing.
+> Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
-#include <shaped-viewer/all.hh>   // umbrella (currently just forward declarations)
+#include <shaped-viewer/all.hh>   // umbrella
 ```
+
+## Per-frame description — what to render
+
+```cpp
+sv::viewer_definition            // { cc::vector<sv::view> views; } — a whole frame's worth of views
+sv::view                         // { view_id id; vec2i size; camera; vector<scene_item> items; vector<area_light> area_lights; background; render_settings; }
+sv::view_id                      // stable identity across frames; view_id::from_string("main") — keys persistent resources
+sv::camera                       // { pos3d position; quat_d orientation; perspective_projection projection; } — double-precision pose + projection
+sv::camera::looking_at(eye, target, up=+y)     // -> camera at eye aimed at target (static factory); default projection
+sv::camera::orbiting(target, distance, azimuth, elevation)  // -> camera orbiting target, looking inward (azimuth around +y, elevation off the horizon)
+sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at target (static); cam.look_at(target, up=+y) sets it from position
+sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
+sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
+sv::render_settings              // { int samples_per_pixel, max_bounces; } — view-wide integration controls (no light/sky: those are on the view)
+sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; material_set_id materials; mat4f transform; } — triangle_mesh only for now
+sv::area_light                   // { vec2f half_extents; mat4f transform; vec3f emission; } — a local-xy rect (emits along local +z) placed by transform; one typed list per light kind on the view
+sv::background                   // { vec3f sh[16]; } — order-3 RGB spherical-harmonics environment a missed ray sees (both misses reconstruct radiance from it)
+sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
+sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — flat, per-triangle
+```
+
+## Resources by id — the managers
+
+```cpp
+sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials } with per-manager budgets
+sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
+mesh_manager::acquire(positions) -> mesh_id          // uploads a triangle list, builds its BLAS (once)
+material_manager::acquire(materials) -> material_set_id  // one pbr_material_gpu per triangle (by PrimitiveIndex)
+manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
+manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
+manager.used_bytes() / count() / evict(id)          // current residency; manual drop
+scene_resources.begin_frame(epoch)                  // reclaim + advance; view_renderer::execute calls this for you
+sv::mesh_id / material_set_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
+```
+
+The managers ride on `sv::impl::lru_pool<Id, Record>` (the reusable id-pool): it mints ids, tracks each
+record's byte size + last-used epoch, and evicts on an idle timeout or a byte budget (least-recently-used
+first, never this frame's working set).
+
+## Rendering — the view_renderer + routines
+
+```cpp
+// The view_renderer is itself a render routine: it path-traces each view and blits it into the output, on one cmd.
+sv::view_renderer::execute(cmd, def, resources, output)   // output = a sg::color_target, e.g. rt.cleared(clear_color)
+                                                          //   traces every view (transient rgba16f target) then blits the first into `output`
+                                                          //   opens the raster scope itself; caller just submits (+ presents)
+
+// The leaf routines it drives — each an sg::render_routine<> (everything that traces/draws is a routine):
+sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
+sr::blit_routine::execute(scope, src_texture)        // fullscreen-triangle blit of a texture across an open raster scope (lives in shaped-rendering)
+sv::pt_frame_constants_gpu                           // { camera_gpu; world area-light rect (center + half-edge vectors u/v + emission/normal); i32 samples_per_pixel, max_bounces; u32 seed; } — 256 bytes
+
+// Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
+sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
+
+sv::shader_package()                                 // register once on an slib::shader_library before rendering
+```
+
+The path tracer bounces each ray diffusely (cosine-weighted) and does next-event estimation toward two sources
+— the rectangular area light and the SH environment — a shadow ray each per bounce, so it converges at far
+fewer samples than a naive integrator. The environment is gathered by MIS (balance heuristic) between the NEE
+ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
+The view_renderer builds `pt_frame_constants_gpu` from the view's first `area_light` plus
+`render_settings::samples_per_pixel` / `max_bounces`. A view with an empty `area_lights` list falls back to a
+default light, so the scene is lit even without matching emissive geometry (unlike a Cornell box, whose light
+rect must match the emitter). The view's `background` (RGB SH) is packed to `background_gpu` and bound at
+b1; both misses (flat + pt) reconstruct the environment radiance an escaped ray sees via `background_radiance`.
+
+## Typical frame
+
+```cpp
+// setup (once): build the scene through the managers
+auto resources = sv::scene_resources::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
+auto mesh = resources.meshes.acquire(positions);
+auto mats = resources.materials.acquire(materials);
+
+// per frame: describe → render (trace + blit) → present, in one command list
+auto def = sv::viewer_definition{};
+auto v = sv::view{.id = sv::view_id::from_string("main"), .size = {w, h}};
+v.items.push_back({.mesh = mesh, .materials = mats});
+def.views.push_back(cc::move(v));
+
+auto rt = sc->acquire_backbuffer();
+auto cmd = ctx.create_command_list();
+sv::view_renderer::execute(*cmd, def, resources, rt.cleared(clear_color));
+ctx.submit_command_list_and_present(*sc, cc::move(cmd));
+```
+
+## Gotchas
+
+- **Ray tracing shaders compile at SM 6.8 through slib** — the payload struct needs the DXR 1.1 annotation
+  (`struct [raypayload] Payload { ... : read(...) : write(...); }`), unlike SM 6.3 examples elsewhere.
+- **The payload-access qualifiers are checked with `-Werror`** — a `read(caller)` field must actually be read
+  after the `TraceRay` (and be written on every path that can run, else "undefined"). Read all payload fields
+  into locals right after the trace, and give shadow rays their own minimal payload + miss shader (a shadow
+  ray reads only visibility) rather than reusing the surface payload.
+- **The frame-constants cbuffer is padded to 256 bytes** — a D3D12 CBV is sized in 256-byte multiples, so a
+  smaller backing buffer overruns.
+- **One mesh per view for now** — the trace binds the first item's vertex/material buffers; multi-mesh needs
+  per-instance indexing (a flagged extension). The TLAS is still built from every item.
+- **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
+  byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
