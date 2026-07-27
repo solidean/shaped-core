@@ -1,5 +1,13 @@
+#include <clean-core/common/macros.hh>
 #include <clean-core/platform/console.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+
+#include <cstdlib> // getenv / setenv / _putenv_s
+
+#ifndef CC_OS_WINDOWS
+#include <unistd.h>
+#endif
 
 using namespace cc::console;
 
@@ -11,6 +19,44 @@ struct color_scope
 {
     explicit color_scope(color_mode mode) { configure(mode); }
     ~color_scope() { configure(color_mode::never); }
+};
+
+/// `value == nullptr` removes the variable.
+void set_env(char const* name, char const* value)
+{
+#ifdef CC_OS_WINDOWS
+    _putenv_s(name, value == nullptr ? "" : value); // an empty value removes it
+#else
+    if (value == nullptr)
+        unsetenv(name);
+    else
+        setenv(name, value, 1);
+#endif
+}
+
+/// One environment variable, set for the duration of a test and restored after it.
+/// Restoring matters: a leaked NO_COLOR would silently disable color for every later test in this binary.
+struct env_scope
+{
+    env_scope(char const* name, char const* value) : _name(name)
+    {
+        auto const* const previous = std::getenv(name);
+        _had_previous = previous != nullptr;
+        if (_had_previous)
+            _previous = cc::string::create_copy_c_str_materialized(previous);
+
+        set_env(name, value);
+    }
+
+    ~env_scope() { set_env(_name, _had_previous ? _previous.c_str_if_terminated() : nullptr); }
+
+    env_scope(env_scope const&) = delete;
+    env_scope& operator=(env_scope const&) = delete;
+
+private:
+    char const* _name;
+    cc::string _previous;
+    bool _had_previous = false;
 };
 } // namespace
 
@@ -72,11 +118,33 @@ TEST("console - colorize takes the flag explicitly or from the global")
     CHECK(colorize(color::red, "x") == "x"); // follows the global
 }
 
-TEST("console - auto is off when stdout is not a terminal")
+// Whether `automatic` lands on colored depends on the runner's stdio, which a test cannot pin — under
+// Emscripten's node shim, for one, a captured stdout still reports as a terminal.
+// So these pin the two rules that hold whatever the stdio looks like.
+
+TEST("console - NO_COLOR forces plain and beats FORCE_COLOR")
 {
-    // dev.py captures this binary's output, so auto must resolve to plain here.
-    // This is the case that keeps ANSI escapes out of redirected data and CI logs.
+    env_scope const no_color("NO_COLOR", "1");
+    env_scope const force_color("FORCE_COLOR", "1");
     color_scope const scope(color_mode::automatic);
+
+    CHECK(!color_enabled());
+}
+
+TEST("console - FORCE_COLOR colors a stream that is not a terminal")
+{
+    env_scope const no_color("NO_COLOR", nullptr);
+    env_scope const force_color("FORCE_COLOR", "1");
+    color_scope const scope(color_mode::automatic);
+
+    CHECK(color_enabled());
+}
+
+TEST("console - an explicit mode ignores the environment entirely")
+{
+    env_scope const force_color("FORCE_COLOR", "1");
+    color_scope const scope(color_mode::never);
+
     CHECK(!color_enabled());
 }
 
