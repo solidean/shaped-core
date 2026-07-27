@@ -206,12 +206,12 @@ cc::result<options> parse_options(cc::span<char const* const> args)
         // Not --no- style: these are a pair overriding the same auto-detected setting.
         if (arg == "--colored")
         {
-            opts.color = color_mode::always;
+            opts.color = cc::console::color_mode::always;
             continue;
         }
         if (arg == "--plain")
         {
-            opts.color = color_mode::never;
+            opts.color = cc::console::color_mode::never;
             continue;
         }
 

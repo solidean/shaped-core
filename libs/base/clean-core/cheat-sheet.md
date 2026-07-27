@@ -521,6 +521,29 @@ cc::install_crash_handler();                        // segfault/abort/etc -> std
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 
+### Terminal color
+
+```cpp
+#include <clean-core/platform/console.hh>
+namespace ccc = cc::console;
+ccc::configure(ccc::color_mode::automatic);         // ONCE, before the first byte of output (incl. usage errors)
+                                                    // auto: NO_COLOR beats FORCE_COLOR, else stdout AND stderr
+                                                    // must be TTYs; also enables ANSI on old Windows consoles
+ccc::color_enabled()                                // bool — false until configure() runs
+
+ccc::colorize(ccc::color::red, sv)                  // cc::string — unchanged when color is off (global flag)
+ccc::colorize(ccc::color::red, sv, enabled)         // cc::string — the explicit-flag form, for pure renderers
+ccc::red(sv)                                        // cc::string — one shorthand per color, = colorize(color::x, sv)
+
+// ccc::color: bold, dim, italic, underline
+//             black, red, green, yellow, blue, magenta, cyan, white
+//             bright_black (the usual gray), bright_red, … bright_white
+//             (SGR 1-4 / 30-37 / 90-97 — no 256-color or true-color, those need a capability database)
+```
+
+The flag is process-global: a test that flips it must put it back.
+A renderer that must be testable takes its own `bool color` and uses `colorize`, rather than reading the global.
+
 ## Streams (byte I/O)
 
 ```cpp

@@ -2,8 +2,8 @@
 
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
+#include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
-#include <instruction-tracer/report/console.hh>
 #include <instruction-tracer/report/trace_stats.hh> // strip_template_args
 
 #include <algorithm> // std::sort: rank the table by traffic, with a name tie-break
@@ -143,6 +143,7 @@ memory_stats_summary collect_memory_stats(cc::span<trace const> traces, memory_v
 
 cc::string format_memory_stats(memory_stats_summary const& summary)
 {
+    using namespace cc::console;
     cc::string out;
     out += bold("=== memory stats ===") + "\n";
 
