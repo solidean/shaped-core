@@ -30,10 +30,10 @@ struct view
     tg::vec2i size = tg::vec2i(1280, 720);
 
     /// the eye this view is traced from
-    camera camera;
+    sv::camera camera;
 
     /// environment a missed ray sees
-    background background;
+    sv::background background;
 
     /// geometry to render, each with its own material
     cc::vector<scene_item> items;
