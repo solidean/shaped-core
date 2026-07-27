@@ -8,6 +8,7 @@ project(shaped-rendering LANGUAGES CXX)
 add_library(shaped-rendering
     src/shaped-rendering/shaped-rendering.cc
     src/shaped-rendering/window.cc
+    src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
     src/shaped-rendering/imgui_style.cc
@@ -26,6 +27,8 @@ target_sources(shaped-rendering
     src/shaped-rendering/fwd.hh
     src/shaped-rendering/all.hh
     src/shaped-rendering/input.hh
+    src/shaped-rendering/keyed_pipeline_cache.hh
+    src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/window.hh
     src/shaped-rendering/imgui_context.hh
     src/shaped-rendering/imgui_routine.hh
@@ -91,6 +94,8 @@ sc_add_shader_package(
     SHADERS
         imgui.hlsl:vertex:main_vs
         imgui.hlsl:fragment:main_ps
+        blit.hlsl:vertex:main_vs
+        blit.hlsl:fragment:main_ps
 )
 
 # Test executable.
@@ -142,7 +147,11 @@ if(SC_BUILD_TESTS)
     # The end-to-end imgui test drives a dx12 WARP context directly (create_dx12_context) and compiles the imgui shader through DXC, so it needs both the dx12 backend and a compiler.
     # The tests above need neither and run everywhere.
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
-        target_sources(shaped-rendering-test PRIVATE tests/imgui-routine-test.cc tests/imgui-manual-test.cc)
+        target_sources(shaped-rendering-test PRIVATE
+            tests/imgui-routine-test.cc
+            tests/imgui-manual-test.cc
+            tests/keyed-pipeline-cache-test.cc
+        )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
     endif()
 

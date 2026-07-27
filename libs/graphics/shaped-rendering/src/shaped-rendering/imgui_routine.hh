@@ -1,14 +1,13 @@
 #pragma once
 
-#include <clean-core/container/small_vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <imgui/imgui_fwd.hh>
 #include <shaped-graphics/buffer.hh>
-#include <shaped-graphics/compiled_shader.hh>
 #include <shaped-graphics/pixel_format.hh>
 #include <shaped-graphics/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/impl/imgui_texture_registry.hh>
+#include <shaped-rendering/keyed_pipeline_cache.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 namespace sr
@@ -23,7 +22,7 @@ namespace sr
 ///     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
 ///     sr::imgui_routine::execute(pass, ImGui::GetDrawData());
 ///
-/// The routine owns the GPU textures backing imgui's atlas and a pipeline per target format.
+/// The routine owns the GPU textures backing imgui's atlas and a keyed_pipeline_cache (one pipeline per target format).
 /// All of it lives behind one mutex, taken for the length of each entry point, so two threads recording imgui against the same context serialize rather than race.
 /// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
 ///
@@ -63,30 +62,20 @@ protected:
     void init_declare(sg::context& ctx) override;
 
 private:
-    struct pipeline_entry
-    {
-        sg::pixel_format format = sg::pixel_format::undefined;
-        sg::raster_pipeline_handle pipeline;
-    };
-
     /// Everything this routine mutates, in one place so the locking rule is checkable by inspection.
-    /// The shader-derived half is rebuilt by init_declare on every reload; the atlas is not.
+    /// The shader-derived group_layout is rebuilt by init_declare on every reload; the atlas is not.
     struct state
     {
         sg::binding_group_layout_handle group_layout;
-        sg::pipeline_layout_handle pipeline_layout;
-        sg::compiled_shader vertex_shader;
-        sg::compiled_shader fragment_shader;
-
-        /// One pipeline per color-target format drawn to — in practice exactly one, the swapchain's.
-        /// TODO(sg): fold into ctx.cached.acquire_raster_pipeline once pipeline_cache grows a graphics tier.
-        /// Its key already covers target formats, so this and the blocking build both go away.
-        cc::small_vector<pipeline_entry, 2> pipelines;
-
         impl::imgui_texture_registry textures;
     };
 
     cc::mutex<state> _state;
+
+    /// One pipeline per color-target format drawn to — in practice exactly one, the swapchain's.
+    /// init_declare (re)binds the build callback, which captures the layout + shaders; a broken reload
+    /// binds a callback that fails, so a stale pipeline is never served.
+    keyed_pipeline_cache<sg::pixel_format> _pipelines;
 
     /// One viewport's draw data, concatenated into a single buffer pair.
     /// Lives on the stack for the length of one execute() — under multi-viewport that call runs once per viewport per frame,
@@ -96,10 +85,6 @@ private:
         sg::buffer<ImDrawVert> vertices;
         sg::buffer<u16> indices;
     };
-
-    /// Assumes `s` is already locked.
-    /// Builds (or finds) the pipeline for `format`.
-    [[nodiscard]] static sg::raster_pipeline const* pipeline_for(state& s, sg::context& ctx, sg::pixel_format format);
 
     /// Allocates this frame's transient vertex + index buffers and records their inline uploads.
     /// The buffers are epoch-scoped: the returned handles do not own them, and they expire with the frame.

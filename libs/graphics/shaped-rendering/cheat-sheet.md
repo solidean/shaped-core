@@ -161,6 +161,58 @@ Gotchas:
   but only while `wants_mouse()`, so an app drawing its own cursor over the 3D view is left alone. Copy and
   paste reach the system clipboard.
 
+## Pipeline cache
+
+One pipeline per key, built once — the reusable form of the "small vector of {format, pipeline} plus a
+find-or-create" a routine otherwise grows. The key is almost always the render-target pixel format.
+
+```cpp
+#include <shaped-rendering/keyed_pipeline_cache.hh>
+
+sr::keyed_pipeline_cache<sg::pixel_format> pipelines;   // Pipeline defaults to sg::raster_pipeline
+
+// In init_declare, after building the layout: (re)bind the build callback + CLEAR the cache.
+pipelines.init(ctx, [layout, vs, ps](sg::context& c, sg::pixel_format format)
+                    { return c.uncached.try_create_raster_pipeline({.layout = layout, .vertex_shader = vs,
+                                                                     .fragment_shader = ps,
+                                                                     .color_targets = {{.format = format}}}); });
+
+auto pipe = pipelines.try_acquire(format);    // -> cc::result<handle>; the form for inside a rendering scope
+if (!pipe.has_error() && pipe.value())
+    scope.bind_pipeline(*pipe.value());
+
+pipelines.acquire(format);        // -> handle; throws on build failure (matches sg's create_*)
+pipelines.acquire_async(format);  // -> cc::shared_async<handle>; the fallible form, error on the async channel
+pipelines.prepare(format);        // warm the cache for `format` ahead of the draw
+```
+
+- **`init` clears the cache** — call it on every (re)load: a rebuilt layout invalidates every pipeline cached
+  against the old one, and re-`init` both drops them and rebinds the fresh callback.
+- **`handle` is `std::shared_ptr<Pipeline const>`** — for the default it IS `sg::raster_pipeline_handle`.
+- **Use `try_acquire` inside a rendering scope**, never `acquire`: an exception unwinding out past an open
+  command list would leave it unsubmitted.
+- **The build callback may run on a pool worker and concurrently for distinct keys** — capture only immutable
+  state (the layout + shaders), and do not race `init` with in-flight builds. With no pool, builds run inline.
+
+## Blit routine
+
+Sample a source texture across an open raster scope's target with a fullscreen triangle — the "draw this
+texture onto that target" primitive, built on the pipeline cache (one pipeline per target format) + a
+linear-clamp sampler.
+
+```cpp
+#include <shaped-rendering/blit_routine.hh>
+
+// Inside an already-open raster scope (the caller opens the pass on the target):
+sr::blit_routine::execute(scope, src);   // src = sg::texture_2d const&; reads the target format from the scope
+sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of the first frame
+```
+
+- **No-op if the shaders did not compile** — the same graceful path a broken shader edit takes.
+- **`execute` is fallible, never throwing**: it runs inside the caller's scope, so an exception would leave
+  their command list unsubmitted.
+- Its shaders live in `sr_shaders` (`blit.hlsl`) — no separate package to register.
+
 ## Writing a concrete routine
 
 ```cpp

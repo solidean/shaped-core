@@ -1,4 +1,5 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
 #include <imgui/imgui.h>
 #include <shaped-graphics/binding_group.hh>
@@ -81,7 +82,7 @@ sg::swapchain* swapchain_for(sg::context& ctx, ImGuiViewport* viewport)
     if (viewport->PlatformHandleRaw == nullptr)
         return nullptr;
 
-    // Fallible rather than throwing, for the same reason pipeline_for is: this runs inside the caller's frame, and a viewport that cannot get a swapchain should simply not draw.
+    // Fallible rather than throwing, for the same reason the pipeline build is: this runs inside the caller's frame, and a viewport that cannot get a swapchain should simply not draw.
     auto created = ctx.try_create_swapchain({.native_window_handle = viewport->PlatformHandleRaw, //
                                              .format = viewport_format});
     if (!created.has_value())
@@ -141,21 +142,20 @@ void imgui_routine::init_declare(sg::context& ctx)
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
 
-    _state.lock(
-        [&](state& s)
+    // A broken edit (or a context accepting no format we can produce): (re)bind a callback that fails, so
+    // init still clears every pipeline built against the old layout and execute no-ops until the next reload.
+    // The texture registry deliberately survives — the atlas has nothing to do with our shaders.
+    if (compiled_vs == nullptr || compiled_ps == nullptr)
+    {
+        _state.lock([](state& s) { s.group_layout = nullptr; });
+        _pipelines.init(ctx, [](sg::context&, sg::pixel_format) -> cc::result<sg::raster_pipeline_handle>
+                        { return cc::error(cc::any_error("imgui shaders did not compile")); });
+        return;
+    }
+
+    auto const pipeline_layout = _state.lock(
+        [&](state& s) -> sg::pipeline_layout_handle
         {
-            // A reload rebuilds the layouts below, so every pipeline built against the old ones is now stale.
-            // Dropping them here is what makes hot-reloading imgui.hlsl actually work rather than silently binding a pipeline whose root signature no longer matches.
-            // The texture registry deliberately survives — the atlas has nothing to do with our shaders.
-            s.pipelines.clear();
-            s.pipeline_layout = nullptr;
-
-            if (compiled_vs == nullptr || compiled_ps == nullptr)
-                return; // a broken edit, or a context accepting no format we can produce — execute no-ops
-
-            s.vertex_shader = *compiled_vs;
-            s.fragment_shader = *compiled_ps;
-
             // Group 0 is built from the *fragment* bindings alone.
             // That is what keeps the vertex stage's b0 out of it — inline constants must be excluded from every group layout (see pipeline_layout.hh).
             // gSampler is name-matched here as a static sampler, so it is baked into the layout and costs no per-group descriptor;
@@ -177,43 +177,32 @@ void imgui_routine::init_declare(sg::context& ctx)
             }();
             CC_ASSERT(constants_binding != nullptr, "imgui.hlsl must declare the imgui_constants cbuffer");
 
-            s.pipeline_layout = ctx.cached.acquire_pipeline_layout(
+            return ctx.cached.acquire_pipeline_layout(
                 {.groups = {s.group_layout}, .inline_constants = *constants_binding});
         });
-}
 
-sg::raster_pipeline const* imgui_routine::pipeline_for(state& s, sg::context& ctx, sg::pixel_format format)
-{
-    CC_ASSERT(!sg::is_srgb_format(format), "imgui colors are already sRGB-encoded; bind a non-srgb view of the target "
-                                           "instead");
-
-    for (auto const& e : s.pipelines)
-        if (e.format == format)
-            return e.pipeline.get();
-
-    // Blocking build — see the TODO on state::pipelines.
+    // The callback captures the layout + shaders; init clears every pipeline built against the previous ones.
     // imgui emits both windings so culling is off, and it is drawn in list order so there is no depth test.
     // Alpha blending is imgui's standard straight-alpha equation;
     // the alpha channel uses one/inv-src-alpha so compositing onto a transparent target accumulates coverage correctly rather than saturating.
-    //
-    // Fallible rather than throwing on purpose: execute() runs inside the caller's rendering scope, and an exception unwinding out of there would leave their command list unsubmitted.
-    auto pipeline = ctx.uncached.try_create_raster_pipeline(
-        {.layout = s.pipeline_layout,
-         .vertex_shader = s.vertex_shader,
-         .fragment_shader = s.fragment_shader,
-         .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
-         .topology = sg::primitive_topology::triangle_list,
-         .rasterization = {.cull = sg::cull_mode::none},
-         .color_targets
-         = {{.format = format,
-             .blend = sg::blend_state{
-                 .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
-                 .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
-    if (!pipeline.has_value())
-        return nullptr;
-
-    s.pipelines.push_back({.format = format, .pipeline = cc::move(pipeline).value()});
-    return s.pipelines.back().pipeline.get();
+    _pipelines.init(
+        ctx,
+        [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
+            sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
+        {
+            return c.uncached.try_create_raster_pipeline(
+                {.layout = layout,
+                 .vertex_shader = vertex_shader,
+                 .fragment_shader = fragment_shader,
+                 .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
+                 .topology = sg::primitive_topology::triangle_list,
+                 .rasterization = {.cull = sg::cull_mode::none},
+                 .color_targets
+                 = {{.format = format,
+                     .blend = sg::blend_state{
+                         .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
+                         .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
+        });
 }
 
 imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, ImDrawData* draw_data)
@@ -250,9 +239,15 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
     CC_ASSERT(!scope.color_formats().empty(), "imgui must be drawn into a scope with a color target");
     auto const target_format = scope.color_formats()[0];
     auto const target_size = scope.render_target_size();
+    CC_ASSERT(!sg::is_srgb_format(target_format), "imgui colors are already sRGB-encoded; bind a non-srgb view of "
+                                                  "the target instead");
 
     auto& self = acquire(cmd);
     auto& ctx = cmd.context();
+
+    // Fallible rather than throwing: execute() runs inside the caller's rendering scope, and an exception
+    // unwinding out of there would leave their command list unsubmitted.
+    auto const pipeline = self._pipelines.try_acquire(target_format);
 
     self._state.lock(
         [&](state& s)
@@ -261,18 +256,14 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
             // ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
             s.textures.service_requests(ctx, draw_data);
 
-            if (s.pipeline_layout == nullptr)
-                return; // shaders did not compile; nothing to draw until the next reload
+            if (pipeline.has_error() || pipeline.value() == nullptr)
+                return; // shaders did not compile, or this format's pipeline failed to build
             if (draw_data->TotalVtxCount == 0 || draw_data->TotalIdxCount == 0)
-                return;
-
-            auto const* const pipeline = pipeline_for(s, ctx, target_format);
-            if (pipeline == nullptr)
                 return;
 
             auto const geo = upload_geometry(cmd, draw_data);
 
-            scope.bind_pipeline(*pipeline);
+            scope.bind_pipeline(*pipeline.value());
             scope.bind_vertex_buffer(geo.vertices.as_vertex_buffer());
             scope.bind_index_buffer(geo.indices.as_index_buffer());
             scope.set_viewport(
