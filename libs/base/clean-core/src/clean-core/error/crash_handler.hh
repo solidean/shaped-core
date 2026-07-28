@@ -7,8 +7,14 @@ using crash_context_hook = void (*)() noexcept;
 
 /// Installs a process-wide handler for fatal, non-recoverable faults: segmentation faults,
 /// illegal instructions, FP exceptions, bus errors, breakpoints, and abort()/terminate().
-/// On such a fault the handler writes a short description, any registered context, and a
-/// stacktrace to stderr, then lets the process terminate with the fault's normal disposition.
+/// On such a fault the handler writes a short description, any registered context, the faulting
+/// thread's stacktrace, and — on Windows — every other thread's, then lets the process terminate
+/// with the fault's normal disposition.
+///
+/// The other threads are the point of a deadlock or a hung test, where the thread that noticed is
+/// never the one that matters. Reaching them means suspending each in turn and walking it with
+/// DbgHelp, which std::stacktrace cannot do; elsewhere only the faulting thread is reported, and a
+/// core dump carries the rest.
 ///
 /// Idempotent — installing more than once is harmless. Implemented per platform (Windows SEH
 /// plus SIGABRT, POSIX signals); a best-effort no-op where unsupported.

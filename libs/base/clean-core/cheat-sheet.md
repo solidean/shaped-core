@@ -518,6 +518,7 @@ cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards 
 
 #include <clean-core/error/crash_handler.hh>
 cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace
+                                                    // + EVERY other thread's stack (Windows; where a hang lives)
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 

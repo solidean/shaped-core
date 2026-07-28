@@ -34,6 +34,14 @@ The experience it aims for:
 - **Colored or plain, automatically.** Color when stdout and stderr are both a terminal,
   plain when either is piped, overridable with `--colored` / `--plain` and the
   `NO_COLOR` / `FORCE_COLOR` conventions.
+- **UTF-8 end to end, and never hanging over it.** dev.py forces its own stdout/stderr to
+  UTF-8 at startup, because everything on both ends of it already is: the tools set their console
+  to CP_UTF8, child pipes are decoded as UTF-8, and the run logs are written as UTF-8. Python's
+  streams are the one link that is not — redirected on Windows they fall back to the locale
+  encoding, and one unusual character in an echoed source line used to raise mid-mirror.
+  That mattered far more than the garbled character: the pump thread died, nothing drained the
+  child's pipe, and the child blocked on it forever. So the pump also swallows and *reports* every
+  per-line failure rather than dying of one — a hang is much harder to diagnose than a warning.
 
 ## The three layers
 

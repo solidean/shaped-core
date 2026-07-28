@@ -409,7 +409,11 @@ remains available for manually ASan-checking exception-free code paths.
   agent). In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.
 - `--no-configure`, `--no-build` — skip the automatic steps.
 - `--timeout SECS` (on `test`) — per-binary timeout (default 60; `0` disables). A binary that
-  exceeds it is killed and reported as failed.
+  exceeds it is killed and reported as failed — but not before it is asked where it was.
+  dev.py provokes clean-core's crash handler first and gives it two seconds to write, so the step's
+  **stderr log** holds the running test, plus a stack for every thread in the process. In a hang the
+  stack you want is under `other threads`; the faulting one is dev.py's doing and says nothing.
+  The log spells that out, because the report announces a fatal fault that never really happened.
 - `--merged-xml-report FILE` / `--no-xml-reports` (on `test`) — merge per-binary XML into one
   file / skip XML entirely. Per-binary XML is on by default and is what `test_diag` reads, so you
   usually need neither.
