@@ -1,12 +1,15 @@
-"""`check` — the pre-commit aggregator: format, crossrefs, and the test gate.
+"""`check` — the pre-commit aggregator: the lint gates, format, crossrefs, and the test gate.
 
 Each registered `dev.Check` is a named gate. `check` with no name runs them all
-(the pre-commit aggregator); `check <name>` runs a subset. A check's `run` prints
-its own banner/summary and returns ok: bool. Checks that support `--fix` apply
-unambiguous fixes (clang-format); others ignore it and only report. A
-`requires_green` check (the test suite) is the slow tail: it runs only after every
-static check passed — no point building and testing a tree that already fails a
-cheap lint — and `--no-test` skips it outright (handy for a docs-only re-check).
+(the pre-commit aggregator); `check <name>` runs a subset, always in registry
+order. A check's `run` prints its own banner/summary and returns ok: bool. Checks
+that support `--fix` apply unambiguous fixes (clang-tidy, shaped-linter,
+clang-format); others ignore it and only report. `format` is deliberately the last
+of the fixers, so a `--fix` run leaves the tree formatted rather than rewritten and
+then left ragged — see the registry comment. A `requires_green` check (the test
+suite) is the slow tail: it runs only after every static check passed — no point
+building and testing a tree that already fails a cheap lint — and `--no-test` skips
+it outright (handy for a docs-only re-check).
 
 The registry below is the project's growth point — new gates plug in here; the
 generic Check type and runner live in tools/dev/lib/quality/checks.py.
@@ -122,13 +125,19 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         )
         return dev.report.summarize_tests(records, presets, ctx.root)
 
+    # ORDER IS LOAD-BEARING: every fixing gate runs before `format`, so what they rewrite is formatted in
+    # the same pass. A fix is a byte-range edit — dropping a qualifier shortens a line and strands the
+    # continuation lines aligned under where it used to end — and clang-tidy can land a fix in a header the
+    # commit had not touched, which `format` only sees as dirty once that write has happened.
+    # `format` last is what turns `--fix` into one idempotent pass instead of "now go run format".
     return [
-        dev.Check("format", "clang-format our C++ sources (dirty-only; --all for the whole tree)",
-                  True, check_format),
         dev.Check("lint", "clang-tidy gates on the next commit's C++ (dirty-only; --all for the whole tree)",
                   True, check_lint),
         dev.Check("shaped-lint", "shaped-linter custom rules on the next commit's C++ (dirty-only; --all for the whole tree)",
                   True, check_shaped_lint),
+        dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
+                            "(dirty-only; --all for the whole tree)",
+                  True, check_format),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release (and where supported, sanitizer) presets",
@@ -144,14 +153,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     by_name = {c.name: c for c in checks}
     if args.names:
-        selected: list[dev.Check] = []
-        seen: set[str] = set()
         for name in args.names:
             if name not in by_name:
                 ctx.die(f"unknown check {name!r}. Available: {', '.join(by_name)}")
-            if name not in seen:
-                seen.add(name)
-                selected.append(by_name[name])
+        # Registry order, not the order the names were typed: the sequence is a correctness property
+        # (fixers before `format`), so `check format lint --fix` must not silently undo it.
+        wanted = set(args.names)
+        selected = [c for c in checks if c.name in wanted]
     else:
         selected = list(checks)
 

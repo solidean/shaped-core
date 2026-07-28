@@ -169,11 +169,14 @@ Its rules encode conventions this file only summarizes, and seeing them fire on
 *your* code is the fastest way to learn how they apply.
 `--fix` applies what is mechanically safe; a `hint:` is a judgement call left to you.
 
-**Before committing, run `uv run dev.py check --fix`** — the pre-commit gate:
-clang-format (dirty-only, auto-fixed), the clang-tidy gates (dirty-only), a full-repo cross-reference check, then the
-test suite across debug/default/release and (Linux/macOS) sanitizer presets
-(asserts on and off). `--no-test` skips the tests; `check crossrefs` / `check
-format` / `check lint` run a single gate; `check --list` lists them. The format check pins
+**Before committing, run `uv run dev.py check --fix`** — the pre-commit gate, in this order:
+the clang-tidy gates (dirty-only), shaped-linter (dirty-only), clang-format (dirty-only, auto-fixed),
+a full-repo cross-reference check, then the test suite across debug/default/release and (Linux/macOS)
+sanitizer presets (asserts on and off).
+**Formatting runs last of the fixers on purpose** — a lint fix is a byte-range edit, so it leaves lines
+that want reflowing, and formatting after them makes `--fix` a single finished pass.
+`--no-test` skips the tests; `check crossrefs` / `check format` / `check lint` run a single gate (always
+in that registry order, whatever order you name them in); `check --list` lists them. The format check pins
 `.clang-format`'s clang-format major version (`--allow-different-version` to
 proceed anyway).
 

@@ -39,7 +39,8 @@ shaped-linter [options] <file>...
 ```
 
 A fix is a byte-range edit, so a rewrite that shortens a line leaves the continuation lines under it aligned to where the text used to be.
-Run `uv run dev.py format` after a `--fix` sweep and clang-format puts that right.
+Run `uv run dev.py format` after a manual `--fix` sweep and clang-format puts that right.
+Under `dev.py check --fix` this is already handled: the gate runs the linters before `format` precisely so their rewrites get formatted in the same pass.
 
 `auto` colors only when stdout and stderr are both terminals, and honours `NO_COLOR` / `FORCE_COLOR`, so a redirected run carries no escapes.
 The policy is `cc::console`'s, shared with instruction-tracer and dev.py.
