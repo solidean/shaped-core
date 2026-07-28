@@ -165,15 +165,25 @@ struct parser_impl
     /// Consume exactly one declaration or statement starting at `begin`; return the index just past it.
     isize scan_one(isize begin, isize end, decl_scope scope, isize parent)
     {
-        // A namespace: descend its body as a declaration scope; skip an alias (`namespace A = B;`).
-        if (kw(begin, "namespace"))
+        // A using-directive nominates a namespace for unqualified lookup over the rest of the enclosing
+        // scope. A using-DECLARATION (`using cc::vector;`) and a type alias (`using u = cc::u32;`)
+        // nominate nothing, so requiring the `namespace` keyword is what separates the three.
+        if (kw(begin, "using") && kw(begin + 1, "namespace"))
+            return finish_using_directive(begin, end, parent);
+
+        // A namespace: emit the node, descend its body as a declaration scope; skip an alias
+        // (`namespace A = B;`). A leading `inline` belongs to the same declaration — without it the body's
+        // '{' reaches the generic scanner and reads as an initializer brace on the namespace name.
+        isize const ns_kw = (kw(begin, "inline") && kw(begin + 1, "namespace")) ? begin + 1 : begin;
+        if (kw(ns_kw, "namespace"))
         {
-            for (isize i = begin + 1; i < end && !is_eof(i); ++i)
+            for (isize i = ns_kw + 1; i < end && !is_eof(i); ++i)
             {
                 if (punct(i, "{"))
                 {
                     auto const body_close = skip_balanced(i, "{", "}") - 1; // index of the matching '}'
-                    parse_scope(i + 1, body_close, decl_scope::namespace_scope, parent);
+                    auto const id = add_namespace(begin, ns_kw, i, body_close, parent);
+                    parse_scope(i + 1, body_close, decl_scope::namespace_scope, id);
                     return body_close + 1;
                 }
                 if (punct(i, ";"))
@@ -438,6 +448,54 @@ struct parser_impl
         }
     }
 
+    /// Emit the namespace_definition for `namespace <name> { … }` and return its node id, which becomes
+    /// the parent of everything the body declares. The name is the token run between the keyword and the
+    /// '{' — empty for an anonymous namespace, and the nested-name form `a::b` is kept as written, since
+    /// being inside `cc::impl` is being inside `cc`.
+    isize add_namespace(isize stmt_begin, isize ns_kw, isize open_brace, isize body_close, isize parent)
+    {
+        isize name_begin = ns_kw + 1;
+        if (name_begin < open_brace && punct(name_begin, "[")) // `namespace [[deprecated]] a {`
+            name_begin = skip_balanced(name_begin, "[", "]");
+
+        node nn;
+        nn.kind = node_kind::namespace_definition;
+        nn.name = {.file_id = file_id}; // an anonymous namespace has no name, but the empty span is still this file's
+        if (name_begin < open_brace)
+            nn.name = source_span::join(tk(name_begin).span, tk(open_brace - 1).span);
+        nn.body = source_span::join(tk(open_brace).span, tk(body_close).span);
+        nn.span = source_span::join(tk(stmt_begin).span, tk(body_close).span);
+
+        auto const id = add_node(cc::move(nn));
+        tree.nodes[parent].children.push_back(id);
+        return id;
+    }
+
+    /// Emit the using_directive for `using namespace <name>;` starting at `begin`; return past the ';'.
+    isize finish_using_directive(isize begin, isize end, isize parent)
+    {
+        isize semi = begin + 2;
+        while (semi < end && !is_eof(semi) && !punct(semi, ";"))
+            ++semi;
+        auto const last = (semi < end && !is_eof(semi)) ? semi : semi - 1; // the ';', or all we got
+
+        node un;
+        un.kind = node_kind::using_directive;
+        un.name = {.file_id = file_id};
+        if (semi > begin + 2)
+            un.name = source_span::join(tk(begin + 2).span, tk(semi - 1).span);
+        un.span = source_span::join(tk(begin).span, tk(last).span);
+        // In force from past the ';' to the end of the enclosing scope. `tk(end)` is that scope's closer —
+        // the '}' of a namespace, record or function body, the end_of_file sentinel at file scope.
+        auto const from = un.span.byte_end;
+        auto const to = tk(end).span.byte_begin;
+        un.effect = {.file_id = file_id, .byte_begin = from, .byte_end = to > from ? to : from};
+
+        auto const id = add_node(cc::move(un));
+        tree.nodes[parent].children.push_back(id);
+        return (semi < end && punct(semi, ";")) ? semi + 1 : semi;
+    }
+
     /// `open_brace` is the record body '{'. Emit the record_definition, recurse into its body, and
     /// consume any trailing declarator up to the terminating ';'.
     isize finish_record(isize begin, isize open_brace, isize end, record_keyword rec_kw, isize rec_name_index, isize parent)
@@ -447,6 +505,7 @@ struct parser_impl
         node rn;
         rn.kind = node_kind::record_definition;
         rn.rec_keyword = rec_kw;
+        rn.name = {.file_id = file_id}; // likewise for an anonymous record
         if (rec_name_index >= 0)
             rn.name = tk(rec_name_index).span;
         rn.span = source_span::join(tk(begin).span, tk(body_close).span);

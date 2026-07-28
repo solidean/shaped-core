@@ -37,13 +37,15 @@ struct parsed
         return out;
     }
 
-    isize record_count() const
+    isize record_count() const { return nodes_of(node_kind::record_definition).size(); }
+
+    cc::vector<node const*> nodes_of(node_kind k) const
     {
-        isize n = 0;
-        for (auto const& x : tree.nodes)
-            if (x.kind == node_kind::record_definition)
-                ++n;
-        return n;
+        cc::vector<node const*> out;
+        for (auto const& n : tree.nodes)
+            if (n.kind == k)
+                out.push_back(&n);
+        return out;
     }
 
     cc::string_view text(source_span s) const { return buf->span_text(s); }
@@ -652,5 +654,90 @@ TEST("shaped-linter - parser - class and union bodies")
         auto const p = parse_text("enum class E { A = 1, B = 2 };");
         CHECK(p.brace_vars().size() == 0);
         CHECK(p.record_count() == 0);
+    }
+}
+
+TEST("shaped-linter - parser - namespace definitions")
+{
+    SECTION("a plain namespace, with its body")
+    {
+        auto const p = parse_text("namespace cc\n{\nint x = 1;\n}\n");
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() == 1);
+        CHECK(p.text(ns[0]->name) == "cc");
+        CHECK(p.text(ns[0]->body) == "{\nint x = 1;\n}");
+        CHECK(p.text(ns[0]->span) == "namespace cc\n{\nint x = 1;\n}");
+    }
+    SECTION("a nested-name namespace keeps the name as written")
+    {
+        auto const p = parse_text("namespace cc::impl { }");
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() == 1);
+        CHECK(p.text(ns[0]->name) == "cc::impl");
+    }
+    SECTION("an anonymous namespace has an empty name")
+    {
+        auto const p = parse_text("namespace { int x = 1; }");
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() == 1);
+        CHECK(ns[0]->name.empty());
+    }
+    SECTION("nesting, and the body's declarations parent to the innermost namespace")
+    {
+        auto const p = parse_text("namespace a { namespace b { struct S { int x{0}; }; } }");
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() == 2);
+        CHECK(p.text(ns[0]->name) == "a");
+        CHECK(p.text(ns[1]->name) == "b");
+        REQUIRE(ns[0]->children.size() == 1);
+        CHECK(p.tree[ns[0]->children[0]].kind == node_kind::namespace_definition);
+        REQUIRE(ns[1]->children.size() == 1);
+        CHECK(p.tree[ns[1]->children[0]].kind == node_kind::record_definition);
+    }
+    SECTION("an inline namespace is a namespace, not a brace-initialized declarator")
+    {
+        auto const p = parse_text("inline namespace v1 { int x = 1; }");
+        auto const ns = p.nodes_of(node_kind::namespace_definition);
+        REQUIRE(ns.size() == 1);
+        CHECK(p.text(ns[0]->name) == "v1");
+        CHECK(p.brace_vars().size() == 0);
+    }
+    SECTION("an alias produces no node")
+    {
+        auto const p = parse_text("namespace A = B::C;");
+        CHECK(p.nodes_of(node_kind::namespace_definition).size() == 0);
+    }
+}
+
+TEST("shaped-linter - parser - using-directives")
+{
+    SECTION("at file scope it is in force to the end of the file")
+    {
+        auto const src = cc::string_view("using namespace cc::primitive_defines;\nint x = 1;\n");
+        auto const p = parse_text(src);
+        auto const us = p.nodes_of(node_kind::using_directive);
+        REQUIRE(us.size() == 1);
+        CHECK(p.text(us[0]->name) == "cc::primitive_defines");
+        CHECK(p.text(us[0]->span) == "using namespace cc::primitive_defines;");
+        CHECK(p.text(us[0]->effect) == "\nint x = 1;\n");
+    }
+    SECTION("inside a namespace it stops at the closing brace")
+    {
+        auto const p = parse_text("namespace a { using namespace cc::primitive_defines; int x = 1; }\nint y = 2;\n");
+        auto const us = p.nodes_of(node_kind::using_directive);
+        REQUIRE(us.size() == 1);
+        CHECK(p.text(us[0]->effect) == " int x = 1; ");
+    }
+    SECTION("inside a function it stops at the body's closing brace")
+    {
+        auto const p = parse_text("void f() { using namespace cc::primitive_defines; int x = 1; }\n");
+        auto const us = p.nodes_of(node_kind::using_directive);
+        REQUIRE(us.size() == 1);
+        CHECK(p.text(us[0]->effect) == " int x = 1; ");
+    }
+    SECTION("a using-declaration and a type alias nominate nothing")
+    {
+        auto const p = parse_text("using cc::vector;\nusing my_u32 = cc::u32;\n");
+        CHECK(p.nodes_of(node_kind::using_directive).size() == 0);
     }
 }

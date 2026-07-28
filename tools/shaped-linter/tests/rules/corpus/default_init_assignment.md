@@ -24,7 +24,7 @@ rule produces — chained once per distinct rewrite, since a rule's fixes are pi
 The initializer is carried over verbatim, whatever is in it.
 
 ```cpp [default-init-assignment] fix=" = {0}" hint=" = 0"
-struct S { cc::atomic<cc::u32> x{0}; };
+struct S { cc::atomic<u32> x{0}; };
 ```
 
 ```cpp [default-init-assignment] fix=" = {nullptr}" hint=" = nullptr"

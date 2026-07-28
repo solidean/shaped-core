@@ -58,6 +58,11 @@ The parser recognizes only what the rules need: namespaces, records (`class`/`st
 Everything else is skipped as opaque.
 It walks declaration-by-declaration with a prefix-aware segment scanner that tracks bracket depth by skipping balanced groups.
 
+**Namespaces and using-directives are nodes**, because *which names are in scope here* is a scope question and rules own no scope logic.
+A `namespace_definition` carries its name as written (`cc::impl`) and its `body` span; a `using_directive` carries the namespace it nominates and an `effect` span — the bytes from past its `;` to the end of the enclosing scope, which is exactly where it is in force.
+Both are answered by testing a byte offset against a span, so a rule never walks parents.
+A namespace *alias*, a using-declaration and a type alias nominate nothing and produce no node.
+
 **The scope distinction is the whole point.** Every declaration node carries a `decl_scope` — `record_scope`, `namespace_scope`, or `function_scope` — so a rule never has to work out where it is. Only a real parse can do that, and only a real parse tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site.
 
 **One statement can declare several variables.** `int a{1}, b[2]{3}, c = 4, d;` is scanned declarator-by-declarator past each top-level `,`, re-running the brace-vs-`=`-vs-`;` decision each time, so it yields a node for `a` and `b` and nothing for `c` or `d`.

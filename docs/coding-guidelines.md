@@ -455,6 +455,8 @@ pattern, why device resets / alloc failures are *not* assertions) lives in
   clean-core, nexus, typed-geometry, sg, sr, sv and slib all already do this, so inside any of them
   `isize` / `i64` / `f32` just work. The `cc::` prefix stays right for actual clean-core *types*
   (`cc::span`, `cc::vector`, …) — the ADL-capture rule is about those, not about the primitives.
+  shaped-linter's `qualified-primitive` rule enforces this, and flags `sg::u32` just as readily — a
+  namespace that re-exports the aliases also *reaches* them, so the qualified spelling sneaks in there too.
 - **Write `sizeof(T)` bare** at call sites — no `cc::isize(sizeof(T))` armor.
   The implicit conversion to `isize` is fine; the cast is pure noise.
   If a linter complains, turn that check off in [.clang-tidy](../.clang-tidy) with a rationale comment — don't decorate every call site.

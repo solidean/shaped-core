@@ -17,7 +17,7 @@ Drive it through `dev.py`, which builds it and resolves its path — never const
 ```bash
 uv run dev.py lint shaped              # lint the first-party C++ sources
 uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh
-uv run dev.py lint shaped --fix        # apply the suggested fixes in place
+uv run dev.py lint shaped --fix        # apply the suggested fixes in place (then `dev.py format`)
 
 uv run dev.py build -t shaped-linter   # build the tool
 uv run dev.py test shaped-linter-test  # run its tests
@@ -37,6 +37,9 @@ shaped-linter [options] <file>...
   --no-color       the old spelling of --color never
   -h / --help      print usage and exit
 ```
+
+A fix is a byte-range edit, so a rewrite that shortens a line leaves the continuation lines under it aligned to where the text used to be.
+Run `uv run dev.py format` after a `--fix` sweep and clang-format puts that right.
 
 `auto` colors only when stdout and stderr are both terminals, and honours `NO_COLOR` / `FORCE_COLOR`, so a redirected run carries no escapes.
 The policy is `cc::console`'s, shared with instruction-tracer and dev.py.
@@ -80,6 +83,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 | Rule | What it enforces |
 |---|---|
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
+| `qualified-primitive` | The sized aliases (`u32`, `isize`, `byte`, …) are spelled bare, never qualified — `cc::u32`, and equally `sg::u32` through a namespace that re-exports them. |
 
 ### `fix` and `hint`
 

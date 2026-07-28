@@ -41,7 +41,7 @@ TEST("shaped-linter - apply_edits - multiple edits back-to-front")
 TEST("shaped-linter - fix round-trip - single value")
 {
     // The braces stay: `= 0` is copy-init, which an aggregate or an explicit constructor refuses.
-    CHECK(lint_and_fix("struct S { cc::atomic<cc::u32> x{0}; };") == "struct S { cc::atomic<cc::u32> x = {0}; };");
+    CHECK(lint_and_fix("struct S { cc::atomic<u32> x{0}; };") == "struct S { cc::atomic<u32> x = {0}; };");
 }
 
 TEST("shaped-linter - fix round-trip - nullptr and false")
@@ -65,13 +65,19 @@ TEST("shaped-linter - fix round-trip - keep multi-element and designated")
 TEST("shaped-linter - fix round-trip - several members at once")
 {
     CHECK(lint_and_fix("struct S {\n"
-                       "  cc::atomic<cc::i64> _top{0};\n"
+                       "  cc::atomic<i64> _top{0};\n"
                        "  cc::atomic<ring*> _ring{nullptr};\n"
                        "};")
           == "struct S {\n"
-             "  cc::atomic<cc::i64> _top = {0};\n"
+             "  cc::atomic<i64> _top = {0};\n"
              "  cc::atomic<ring*> _ring = {nullptr};\n"
              "};");
+}
+
+TEST("shaped-linter - fix round-trip - a qualified primitive loses its qualifier")
+{
+    CHECK(lint_and_fix("namespace cc { void f(cc::u32 a, ::cc::isize b, cc::byte c); }")
+          == "namespace cc { void f(u32 a, isize b, byte c); }");
 }
 
 TEST("shaped-linter - fix round-trip - a function local")
