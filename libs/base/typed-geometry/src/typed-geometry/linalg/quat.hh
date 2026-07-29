@@ -70,7 +70,6 @@ public:
     [[nodiscard]] static quat make_from_basis(vec<3, T> const& x_axis, vec<3, T> const& y_axis, vec<3, T> const& z_axis)
         requires(tg::traits::has_sqrt<T>)
     {
-        // Shepperd's method: recover the quaternion from the largest diagonal term to stay well-conditioned.
         T const m00 = x_axis.data[0];
         T const m10 = x_axis.data[1];
         T const m20 = x_axis.data[2];
