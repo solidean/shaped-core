@@ -81,9 +81,9 @@ CheckOptions:
   #
   # Naming Conventions
   #
-  # Classes: CamelCase
+  # Classes: snake_case
   - key: readability-identifier-naming.ClassCase
-    value: CamelCase
+    value: snake_case
 
   # Structs: snake_case
   - key: readability-identifier-naming.StructCase
