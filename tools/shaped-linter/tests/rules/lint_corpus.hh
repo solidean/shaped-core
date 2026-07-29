@@ -23,6 +23,15 @@
 //   ~[rule-id]  the rule must produce NO finding here
 //   fix="…"     one replacement text the PRECEDING rule produces; chain it for more
 //   hint="…"    the same, for a rewrite `--fix` does not apply (see `struct hint`)
+//   path="…"    the file name this block is linted as, for a rule that reads it (default `<memory>`)
+//
+// Inside a quoted value `\n` / `\t` / `\r` are the real characters, so a replacement that splices in a
+// whole line is still spellable on the single line a fence info string gets; any other `\x` is just `x`,
+// which is how `\"` and `\\` work.
+//
+// `path=` describes the BLOCK, not a rule, so it stands on its own and may appear anywhere in the info
+// string — at most once. Give it a name a real file could have (`x.cc`, `x.hh`): a rule that distinguishes
+// a header from a translation unit sees only the extension, never the contents.
 //
 // `fix=` binds to the annotation in front of it, and all fixes written for one rule form a SET: the
 // replacements that rule actually produced — over all its findings, all their edits, duplicates merged —
@@ -54,6 +63,7 @@ struct lint_corpus_case
     cc::string title; // the nearest preceding heading — names the section this case runs under
     i32 line = 0;     // 1-based line of the opening fence, so a failure points into the file
     cc::string source;
+    cc::string path; // what to lint the block AS; empty means the default `<memory>`
 
     cc::vector<lint_corpus_expectation> expect; // in annotation order
 };

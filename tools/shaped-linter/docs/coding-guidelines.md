@@ -41,11 +41,20 @@ void f() { g({1, 2}); }
 |------------|---------|
 | `[rule-id]` | this rule must produce one finding here — repeat the annotation for N findings |
 | `~[rule-id]` | this rule must produce **no** finding here |
-| `fix="…"` | one replacement text the **preceding** rule produces; chain it for more (`\"` / `\\` escape) |
+| `fix="…"` | one replacement text the **preceding** rule produces; chain it for more |
 | `hint="…"` | the same, over that rule's `hint` edits — the rewrites `--fix` does not apply |
+| `path="…"` | the file name the **block** is linted as, for a rule that reads it (default `<memory>`) |
+
+Inside a quoted value `\n` / `\t` / `\r` are the real characters, so a fix that splices in a whole line
+stays spellable on the one line a fence info string gets. Any other `\x` is just `x`, which is how `\"`
+and `\\` work.
 
 `fix=` binds to the annotation in front of it, which is what associates a rewrite with a rule at all —
 two rules on one block each pin their own, even when the texts are identical.
+
+`path=` is the exception: it describes the block rather than a rule, so it stands alone and may sit
+anywhere in the info string, at most once. Only the name is read, never the contents — a rule that tells
+a header from a translation unit sees the extension and nothing else.
 
 All fixes written for one rule form a **set**, and it is matched against the replacements that rule
 actually produced — over every finding, every edit, duplicates merged. Naming no fix for a rule leaves

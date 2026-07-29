@@ -117,6 +117,22 @@ Its block comment spells out which hazard rules out which rewrite — worth read
 
 Nothing in the engine reads a hint's edits; `apply_fixes` looks only at `suggested_fix`, and [`engine-test.cc`](../tests/rules/engine-test.cc) pins that.
 
+#### A fix that also has to add a line
+
+Some rewrites only compile once the file gains something shared — an include, a using-directive.
+Because "safe to apply unattended" is a promise about each fix *on its own*, the shared edit rides on **every** finding, not on the first one only.
+An **empty span** is the insertion: nothing is removed and `replacement` is spliced in at that offset.
+
+```cpp
+.suggested_fix = fix{.edits = {
+    text_edit{.span = range_to_replace, .replacement = cc::string("new text")},
+    text_edit{.span = {.file_id = fid, .byte_begin = off, .byte_end = off}, .replacement = cc::string("...\n")},
+}},
+```
+
+`collect_fix_edits` merges byte-identical edits, so N findings asking for the same line still splice it exactly once — which is why the insertion must be computed identically for every finding in the file, not relative to the one being reported.
+[`qualified_primitive.cc`](../src/shaped-linter/rules/qualified_primitive.cc) is the worked example; its `using_directive_insertion` also shows the other half of the job — deciding whether a safe offset exists at all.
+
 Spans are `{file_id, byte_begin, byte_end}` (half-open).
 Get text with `ctx.source.span_text(span)`; resolve to line/column happens later, in the reporter.
 
@@ -192,7 +208,10 @@ The corpus annotations, in short — the full specification is in [coding-guidel
 ```cpp [your-rule] [your-rule] fix=" = 1" fix=" = 2"    two findings offering exactly these two rewrites
 ```cpp [your-rule] fix=" = {0}" hint=" = 0"             the same block, pinning both channels
 ```cpp ~[your-rule]                    must stay quiet
+```cpp [your-rule] path="x.cc"         linted AS that file name, for a rule that reads it
 ```
+
+Inside a quoted value `\n` / `\t` / `\r` are the real characters, so a fix that splices in a whole line is still spellable on the single line a fence gets.
 
 Two things are easy to get wrong:
 
@@ -202,6 +221,9 @@ Two things are easy to get wrong:
 
 `hint=` is the same pin over the same rule's hint edits, tracked separately — a block may name only its fixes, only its hints, or both.
 A prose-only hint contributes no edit, so its wording is pinned by the smoke test rather than the corpus, and so is the *absence* of a hint.
+
+`path=` describes the **block**, not a rule, so it stands on its own and may appear anywhere in the info string — at most once.
+Only the name is used, never the contents: a rule that tells a header from a translation unit sees the extension and nothing else.
 
 A block is linted with `all_rules()` and the total must match exactly, so a second rule firing on your case fails until the block names it too — that is deliberate, it surfaces cross-talk.
 

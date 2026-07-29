@@ -84,7 +84,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 | Rule | What it enforces |
 |---|---|
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
-| `qualified-primitive` | The sized aliases (`u32`, `isize`, `byte`, …) are spelled bare, never qualified — `cc::u32`, and equally `sg::u32` through a namespace that re-exports them. |
+| `qualified-primitive` | The sized aliases (`u32`, `isize`, `byte`, …) are spelled bare, never qualified — `cc::u32`, and equally `sg::u32` through a namespace that re-exports them. At a `.cc`'s file scope — anonymous namespaces included — the fix adds the using-directive it needs; in a header, where that would leak into every including TU, the rule stays quiet; inside a named namespace it hints, because the answer is that library's `fwd.hh`. |
 
 ### `fix` and `hint`
 
@@ -96,6 +96,11 @@ A finding can carry two kinds of rewrite, and the distinction is load-bearing:
 In the rendered output they are two labelled lines: `fix:` says it will be applied by `--fix`, `help:` carries the hint's reasoning with each suggested form marked `(not applied)`.
 `--fix` therefore stays trustworthy across a whole-tree run, and the judgement calls still get surfaced where you can see them.
 `default-init-assignment` uses both: its fix keeps the braces (`x{0}` → `x = {0}`), while its hint offers the braceless `= 0` for a data member and the `auto v = T(0)` form for a local.
+
+A fix may carry **several edits**, applied together — that is how a rewrite which only compiles once the file also gains a line gets to be a fix rather than a hint.
+An edit with an **empty span** is an insertion.
+Because "safe to apply unattended" is a promise about each fix on its own, the shared edit rides on every finding; `collect_fix_edits` merges the byte-identical copies, so the line still lands exactly once.
+`qualified-primitive` is the worked example: at a `.cc`'s file scope it drops the qualifier *and* splices `using namespace cc::primitive_defines;` in after the leading `#…` block.
 
 ## How it works
 

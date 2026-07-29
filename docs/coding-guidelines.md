@@ -452,11 +452,25 @@ pattern, why device resets / alloc failures are *not* assertions) lives in
   ```cpp
   namespace my_lib { using namespace cc::primitive_defines; }   // in my_lib/fwd.hh
   ```
-  clean-core, nexus, typed-geometry, sg, sr, sv and slib all already do this, so inside any of them
-  `isize` / `i64` / `f32` just work. The `cc::` prefix stays right for actual clean-core *types*
+  clean-core, nexus, typed-geometry, sg, sr, sv, slib and ssc::dxc all already do this, so inside any of
+  them `isize` / `i64` / `f32` just work. The `cc::` prefix stays right for actual clean-core *types*
   (`cc::span`, `cc::vector`, …) — the ADL-capture rule is about those, not about the primitives.
   shaped-linter's `qualified-primitive` rule enforces this, and flags `sg::u32` just as readily — a
   namespace that re-exports the aliases also *reaches* them, so the qualified spelling sneaks in there too.
+
+  Outside every *named* namespace the answer depends on the file.
+  In a **`.cc`** one `using namespace cc::primitive_defines;` at the top is right, and `--fix` adds it for
+  you. That covers a test file's whole shape — a `TEST(…)` body sits at file scope, and the helper block
+  above it in an anonymous namespace is reached by the same line, because lookup there escapes outward to
+  the global namespace.
+  In a **header** it is wrong — it would leak the aliases into the global namespace of every TU that
+  includes it — so the rule says nothing there and the qualified spelling stays.
+  A **named** namespace always goes back to its own `fwd.hh`, which is a call about that library rather
+  than about one file, so the rule only ever hints.
+
+  An out-of-line definition (`cc::u64 cc::hash_of(isize n)`) is the one place both answers appear on one
+  line: everything after the qualified declarator-id is already inside `cc`, while the return type in
+  front of it is looked up at file scope.
 - **Write `sizeof(T)` bare** at call sites — no `cc::isize(sizeof(T))` armor.
   The implicit conversion to `isize` is fine; the cast is pure noise.
   If a linter complains, turn that check off in [.clang-tidy](../.clang-tidy) with a rationale comment — don't decorate every call site.

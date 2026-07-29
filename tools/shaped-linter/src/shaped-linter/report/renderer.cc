@@ -46,6 +46,25 @@ cc::string_view trim_left(cc::string_view s)
     return s.subview({.start = a, .end = s.size()});
 }
 
+/// Source text rendered for a one-line report phrase: the breaks a fix would splice in become `\n` / `\t`
+/// so they stay inside their back-ticks rather than becoming real breaks in the middle of a line.
+cc::string escaped(cc::string_view s)
+{
+    auto out = cc::string();
+    for (auto const c : s)
+    {
+        if (c == '\n')
+            out += "\\n";
+        else if (c == '\t')
+            out += "\\t";
+        else if (c == '\r')
+            out += "\\r";
+        else
+            out += c;
+    }
+    return out;
+}
+
 /// Greedy word wrap at `columns` display columns, every line prefixed by `indent`.
 /// An explicit newline in `text` stays a break.
 cc::string wrap_text(cc::string_view text, i32 columns, cc::string_view indent)
@@ -98,6 +117,17 @@ cc::string wrap_text(cc::string_view text, i32 columns, cc::string_view indent)
     return out;
 }
 
+/// One edit as a phrase: `replace `old` with `new`` normally, `insert `new`` when the span is empty.
+/// A replacement is shown escaped, so a multi-line one (a using-directive an edit splices in) stays on
+/// this line instead of tearing the report apart.
+cc::string describe_edit(text_edit const& e, source_manager const& sm)
+{
+    auto const what = escaped(trim_left(e.replacement));
+    if (e.span.byte_begin == e.span.byte_end)
+        return cc::format("insert `{}`", what);
+    return cc::format("replace `{}` with `{}`", escaped(sm.span_text(e.span)), what);
+}
+
 void append_fix(cc::string& out, fix const& f, source_manager const& sm, report_style style)
 {
     if (f.edits.empty())
@@ -107,14 +137,13 @@ void append_fix(cc::string& out, fix const& f, source_manager const& sm, report_
 
     if (f.edits.size() == 1)
     {
-        out += cc::format("  {} replace `{}` with `{}` (applied by --fix)\n", label, sm.span_text(f.edits[0].span),
-                          trim_left(f.edits[0].replacement));
+        out += cc::format("  {} {} (applied by --fix)\n", label, describe_edit(f.edits[0], sm));
         return;
     }
 
     out += cc::format("  {} {} edits (applied by --fix)\n", label, f.edits.size());
     for (auto const& e : f.edits)
-        out += cc::format("       replace `{}` with `{}`\n", sm.span_text(e.span), trim_left(e.replacement));
+        out += cc::format("       {}\n", describe_edit(e, sm));
 }
 
 /// A hint is advice: it says what to weigh and never claims to have changed anything.
@@ -123,7 +152,7 @@ void append_hint(cc::string& out, hint const& h, report_style style)
 {
     out += cc::format("  {} {}\n", cc::console::colorize(color::cyan, "help:", style.color), h.message);
     for (auto const& e : h.edits)
-        out += cc::format("        consider `{}` (not applied)\n", trim_left(e.replacement));
+        out += cc::format("        consider `{}` (not applied)\n", escaped(trim_left(e.replacement)));
 }
 
 /// A section heading, underlined to its own length.

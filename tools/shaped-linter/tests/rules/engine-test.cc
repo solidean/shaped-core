@@ -7,16 +7,12 @@ using namespace scl;
 
 namespace
 {
-/// Lint `src`, then apply the findings' suggested edits back to `src` — the whole detect-and-fix path.
-cc::string lint_and_fix(cc::string_view src)
+/// Lint `src`, then apply the findings' suggested edits back to `src` — the whole detect-and-fix path,
+/// through the same `collect_fix_edits` that `apply_fixes` uses, so its merge is part of what is pinned.
+cc::string lint_and_fix(cc::string_view src, cc::string_view path = "<memory>")
 {
-    auto const found = run_rules_on_text(src);
-    cc::vector<text_edit> edits;
-    for (auto const& f : found)
-        if (f.suggested_fix.has_value())
-            for (auto const& e : f.suggested_fix.value().edits)
-                edits.push_back({.span = e.span, .replacement = e.replacement});
-    return apply_edits(src, edits);
+    auto const found = run_rules_on_text(src, path);
+    return apply_edits(src, collect_fix_edits(found));
 }
 } // namespace
 
@@ -108,6 +104,64 @@ TEST("shaped-linter - fix round-trip - an array bound survives the rewrite")
     CHECK(lint_and_fix("struct S { T a[N]{1, 2}; };") == "struct S { T a[N] = {1, 2}; };");
     CHECK(lint_and_fix("struct S { int a[3]{0}; };") == "struct S { int a[3] = {0}; };");
     CHECK(lint_and_fix("void f() { int a[2][3]{1}; }") == "void f() { int a[2][3] = {1}; }");
+}
+
+TEST("shaped-linter - apply_edits - an empty span inserts")
+{
+    auto const edits = cc::vector<text_edit>{
+        {.span = {.file_id = 0, .byte_begin = 1, .byte_end = 1}, .replacement = "XY"},
+    };
+    CHECK(apply_edits("abc", edits) == "aXYbc");
+}
+
+TEST("shaped-linter - apply_edits - an insertion at a replacement's offset applies outside-in")
+{
+    // Both edits begin at 0. The wider one has to run first, or the overlap guard sees them out of order —
+    // which is why the sort's second key is the descending end, not the emission order.
+    auto const edits = cc::vector<text_edit>{
+        {.span = {.file_id = 0, .byte_begin = 0, .byte_end = 0}, .replacement = "I"},
+        {.span = {.file_id = 0, .byte_begin = 0, .byte_end = 1}, .replacement = "R"},
+    };
+    CHECK(apply_edits("abc", edits) == "IRbc");
+
+    auto const reversed = cc::vector<text_edit>{
+        {.span = {.file_id = 0, .byte_begin = 0, .byte_end = 1}, .replacement = "R"},
+        {.span = {.file_id = 0, .byte_begin = 0, .byte_end = 0}, .replacement = "I"},
+    };
+    CHECK(apply_edits("abc", reversed) == "IRbc"); // emission order must not change the result
+}
+
+TEST("shaped-linter - collect_fix_edits merges a byte-identical edit")
+{
+    // Three findings, each carrying the same insertion so that each fix is safe alone. The file must still
+    // gain exactly one directive.
+    auto const src = cc::string_view("#include <a.hh>\n"
+                                     "\n"
+                                     "cc::u32 f();\n"
+                                     "cc::isize g();\n"
+                                     "cc::byte h();\n");
+    CHECK(lint_and_fix(src, "x.cc")
+          == "#include <a.hh>\n"
+             "\n"
+             "using namespace cc::primitive_defines;\n"
+             "\n"
+             "u32 f();\n"
+             "isize g();\n"
+             "byte h();\n");
+}
+
+TEST("shaped-linter - fix round-trip - a file-scope qualifier brings its using-directive along")
+{
+    CHECK(lint_and_fix("#include \"hash.hh\"\n\ncc::u64 hash_of(cc::isize n);\n", "hash.cc")
+          == "#include \"hash.hh\"\n"
+             "\n"
+             "using namespace cc::primitive_defines;\n"
+             "\n"
+             "u64 hash_of(isize n);\n");
+
+    // The same source as a HEADER is left completely alone.
+    CHECK(lint_and_fix("#include \"hash.hh\"\n\ncc::u64 hash_of(cc::isize n);\n", "hash.hh")
+          == "#include \"hash.hh\"\n\ncc::u64 hash_of(cc::isize n);\n");
 }
 
 TEST("shaped-linter - apply_fixes ignores the hint channel")

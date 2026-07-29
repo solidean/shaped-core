@@ -40,6 +40,43 @@ TEST("shaped-linter - renderer - a finding is a header, a snippet and its advice
 )");
 }
 
+TEST("shaped-linter - renderer - a multi-edit fix lists each edit")
+{
+    source_manager sm;
+    sm.add_from_text("aaa\nbbb", "x.cc");
+
+    // The shape a rule produces when its rewrite only compiles once the file also gains a line: an empty
+    // span reads as an insertion, and the spliced-in newlines are escaped so the phrase stays on its line.
+    auto f = warn("my-rule", 0, 3, "thing is wrong");
+    f.suggested_fix = fix{.edits = {
+                              {.span = span_of(0, 3), .replacement = ""},
+                              {.span = span_of(4, 4), .replacement = "\nusing namespace n;\n"},
+                          }};
+
+    CHECK(render_finding(f, sm) == R"([my-rule] thing is wrong
+ --> x.cc:1:1
+  |
+1 | aaa
+  | ^^^
+2 | bbb
+  |
+  fix: 2 edits (applied by --fix)
+       replace `aaa` with ``
+       insert `\nusing namespace n;\n`
+)");
+}
+
+TEST("shaped-linter - renderer - a single insertion reads as an insertion")
+{
+    source_manager sm;
+    sm.add_from_text("aaa", "x.cc");
+
+    auto f = warn("my-rule", 0, 3, "thing is wrong");
+    f.suggested_fix = fix{.edits = {{.span = span_of(0, 0), .replacement = "X\n"}}};
+
+    CHECK(render_finding(f, sm).contains("fix: insert `X\\n` (applied by --fix)"));
+}
+
 TEST("shaped-linter - renderer - a finding without fix or hint is just the snippet")
 {
     source_manager sm;

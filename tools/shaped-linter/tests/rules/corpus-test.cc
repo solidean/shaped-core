@@ -181,7 +181,7 @@ INVOCABLE_TEST("shaped-linter - corpus cases", (lint_corpus_group const& group))
         SECTION("{} (L{})", c.title, c.line)
         {
             auto const where = cc::format("{}:{}", group.path, c.line); // the block a failure came from
-            auto const found = run_rules_on_text(c.source);
+            auto const found = c.path.empty() ? run_rules_on_text(c.source) : run_rules_on_text(c.source, c.path);
 
             // How many findings each named rule owes: one per positive annotation, none for a `~[…]`.
             auto expected_total = isize(0);
