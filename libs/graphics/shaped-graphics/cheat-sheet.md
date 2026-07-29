@@ -446,6 +446,10 @@ sg::binding                 // { cc::string name; u32 set, index, count; binding
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
+sg::merge_bindings({s0.bindings, s1.bindings, ...})  // -> cc::vector<binding>  union by name, first-seen order — one root sig must cover every stage
+sg::merge_bindings(into, from)          // void — same merge, accumulating into a cc::vector<binding> stage by stage
+sg::split_off_sampler_bindings(v)       // -> cc::vector<binding>  REMOVES the sampler bindings from v and returns them (both keep order)
+                            //   split off the samplers you bind register-wise (pipeline_layout static_samplers); leaving one in the group claims its register twice
 
 #include <shaped-graphics/compiled_shader.hh>
 sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
