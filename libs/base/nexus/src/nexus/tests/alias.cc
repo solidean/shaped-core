@@ -5,6 +5,8 @@
 
 #include <algorithm> // std::sort: stable alias/fragment order for reproducible listings
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 // Callbacks registered via NX_TEST_SETUP. Function-local static so it is initialized on first use,
@@ -19,7 +21,7 @@ cc::vector<void (*)(nx::setup&)>& setup_callbacks()
 bool section_path_less(cc::span<cc::string const> a, cc::span<cc::string const> b)
 {
     auto const n = cc::min(a.size(), b.size());
-    for (cc::isize i = 0; i < n; ++i)
+    for (isize i = 0; i < n; ++i)
         if (cc::string_view(a[i]) != cc::string_view(b[i]))
             return cc::string_view(a[i]) < cc::string_view(b[i]);
     return a.size() < b.size();

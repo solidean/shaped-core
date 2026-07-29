@@ -104,9 +104,9 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         [&](sg::submission_token& next)
         {
             sg::submission_token const t = next;
-            next = sg::submission_token(cc::u64(next) + 1);
+            next = sg::submission_token(u64(next) + 1);
 
-            cc::u64 const signal_value = cc::u64(t);
+            u64 const signal_value = u64(t);
             auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
                 .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
                 .signalSemaphoreValueCount = 1,

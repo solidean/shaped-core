@@ -14,9 +14,9 @@ struct header_scan
     cc::optional<density> jfif_density;
 };
 
-int read_be_u16(cc::span<cc::byte const> bytes, isize offset)
+int read_be_u16(cc::span<byte const> bytes, isize offset)
 {
-    return (int(cc::u8(bytes[offset])) << 8) | int(cc::u8(bytes[offset + 1]));
+    return (int(u8(bytes[offset])) << 8) | int(u8(bytes[offset + 1]));
 }
 
 density_unit density_unit_from_byte(int v)
@@ -45,7 +45,7 @@ subsampling subsampling_from_luma(int h, int v)
 
 /// Walk the JPEG marker segments up to the first scan (SOS), filling the structural fields we understand.
 /// Purely best-effort and bounds-checked: a marker we do not model is skipped by its length, and anything malformed just stops the walk early — pixel geometry still comes from the decoder.
-header_scan scan_headers(cc::span<cc::byte const> bytes)
+header_scan scan_headers(cc::span<byte const> bytes)
 {
     auto scan = header_scan{};
     auto const size = bytes.size();
@@ -53,17 +53,17 @@ header_scan scan_headers(cc::span<cc::byte const> bytes)
     auto i = isize(2); // past the SOI (FF D8), validated by the caller
     while (i + 1 < size)
     {
-        if (bytes[i] != cc::byte(0xFF))
+        if (bytes[i] != byte(0xFF))
         {
             ++i; // resync to the next marker prefix
             continue;
         }
-        while (i < size && bytes[i] == cc::byte(0xFF)) // skip fill bytes
+        while (i < size && bytes[i] == byte(0xFF)) // skip fill bytes
             ++i;
         if (i >= size)
             break;
 
-        auto const marker = int(cc::u8(bytes[i]));
+        auto const marker = int(u8(bytes[i]));
         ++i;
 
         // Standalone markers carry no length segment.
@@ -86,12 +86,12 @@ header_scan scan_headers(cc::span<cc::byte const> bytes)
         if (is_sof && seg.size() >= 6)
         {
             scan.progressive = marker == 0xC2;
-            scan.bit_depth = int(cc::u8(seg[0]));
-            auto const components = int(cc::u8(seg[5]));
+            scan.bit_depth = int(u8(seg[0]));
+            auto const components = int(u8(seg[5]));
             // Per-component: id(1), sampling(1: H<<4 | V), quant-table(1). Luma is component 0.
             if (components >= 1 && seg.size() >= 6 + 3)
             {
-                auto const sampling = int(cc::u8(seg[6 + 1]));
+                auto const sampling = int(u8(seg[6 + 1]));
                 auto const h = (sampling >> 4) & 0x0F;
                 auto const v = sampling & 0x0F;
                 scan.chroma = components == 1 ? subsampling::s444 : subsampling_from_luma(h, v);
@@ -99,12 +99,12 @@ header_scan scan_headers(cc::span<cc::byte const> bytes)
         }
         else if (marker == 0xE0 && seg.size() >= 14) // APP0 JFIF: "JFIF\0" ver(2) units(1) xdens(2) ydens(2) ...
         {
-            auto const is_jfif = seg[0] == cc::byte('J') && seg[1] == cc::byte('F') && seg[2] == cc::byte('I')
-                              && seg[3] == cc::byte('F') && seg[4] == cc::byte(0x00);
+            auto const is_jfif = seg[0] == byte('J') && seg[1] == byte('F') && seg[2] == byte('I')
+                              && seg[3] == byte('F') && seg[4] == byte(0x00);
             if (is_jfif)
             {
                 scan.jfif_density = density{
-                    .unit = density_unit_from_byte(int(cc::u8(seg[7]))),
+                    .unit = density_unit_from_byte(int(u8(seg[7]))),
                     .x = read_be_u16(seg, 8),
                     .y = read_be_u16(seg, 10),
                 };
@@ -118,9 +118,9 @@ header_scan scan_headers(cc::span<cc::byte const> bytes)
 }
 } // namespace
 
-cc::result<data> read(cc::span<cc::byte const> bytes)
+cc::result<data> read(cc::span<byte const> bytes)
 {
-    if (bytes.size() < 2 || bytes[0] != cc::byte(0xFF) || bytes[1] != cc::byte(0xD8))
+    if (bytes.size() < 2 || bytes[0] != byte(0xFF) || bytes[1] != byte(0xD8))
         return cc::error("jpg: bad SOI marker (not a JPEG)");
 
     auto decoded = babel::impl::stb_decode(bytes, 0);
@@ -149,7 +149,7 @@ cc::result<data> read(cc::read_stream& in)
     return read(bytes.value());
 }
 
-cc::result<cc::vector<cc::byte>> encode(data const& img, write_options opts)
+cc::result<cc::vector<byte>> encode(data const& img, write_options opts)
 {
     if (img.is_empty())
         return cc::error("jpg encode: empty image");

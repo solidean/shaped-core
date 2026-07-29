@@ -6,7 +6,7 @@
 
 namespace sg::backend::dx12
 {
-D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usage usage)
+D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage usage)
 {
     CC_ASSERT(size_in_bytes > 0, "buffer resource desc requires a positive size");
 
@@ -144,7 +144,7 @@ dx12_buffer::~dx12_buffer()
     release_storage();
 } // no-op if expire() already released the storage
 
-cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(cc::isize size_in_bytes,
+cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_bytes,
                                                                 sg::buffer_usage usage,
                                                                 sg::allocation_info const& alloc)
 {

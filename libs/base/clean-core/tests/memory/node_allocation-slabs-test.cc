@@ -16,7 +16,7 @@ using namespace cc::primitive_defines;
 namespace
 {
 // records `base` if not already present; returns true iff it was newly inserted
-bool track_base(cc::vector<cc::byte*>& seen, cc::byte* base)
+bool track_base(cc::vector<byte*>& seen, byte* base)
 {
     for (auto* b : seen)
         if (b == base)
@@ -26,26 +26,26 @@ bool track_base(cc::vector<cc::byte*>& seen, cc::byte* base)
 }
 
 template <class T>
-cc::byte* base_of(cc::node_allocation<T> const& n)
+byte* base_of(cc::node_allocation<T> const& n)
 {
-    return cc::node_slab_base_for_ptr(reinterpret_cast<cc::byte*>(n.ptr), cc::node_class_index_for<T>());
+    return cc::node_slab_base_for_ptr(reinterpret_cast<byte*>(n.ptr), cc::node_class_index_for<T>());
 }
 
 // usable (non-metadata-blocked) slots per slab for T's class
 template <class T>
 int usable_slots()
 {
-    return cc::popcount(cc::node_seed_local_freemaps[cc::isize(cc::node_class_index_for<T>())]);
+    return cc::popcount(cc::node_seed_local_freemaps[isize(cc::node_class_index_for<T>())]);
 }
 
 // number of slabs currently in an allocator's ring for a class (walks the public slab_base ring)
 int ring_len(cc::node_allocator& alloc, cc::node_class_index idx)
 {
-    cc::byte* const head = alloc.slabs().slab_base[cc::isize(idx)];
+    byte* const head = alloc.slabs().slab_base[isize(idx)];
     if (head == nullptr)
         return 0;
     int n = 0;
-    cc::byte* cur = head;
+    byte* cur = head;
     do
     {
         ++n;
@@ -90,13 +90,13 @@ TEST("node_allocation - bounded slab growth under churn (leak fix)")
     cc::vector<cc::node_allocation<T8B>> nodes;
     for (int i = 0; i < live; ++i)
         nodes.push_back({});
-    cc::vector<cc::byte*> seen;
+    cc::vector<byte*> seen;
 
     for (int iter = 0; iter < 20000; ++iter)
     {
         int const i = iter % live;
         nodes[i] = cc::node_allocation<T8B>::create_from(alloc, u64(iter));
-        track_base(seen, cc::node_slab_base_for_ptr(reinterpret_cast<cc::byte*>(nodes[i].ptr), idx));
+        track_base(seen, cc::node_slab_base_for_ptr(reinterpret_cast<byte*>(nodes[i].ptr), idx));
     }
 
     CHECK(seen.size() <= 8);
@@ -112,13 +112,13 @@ TEST("node_allocation - multi-slab ring reuse")
     for (int i = 0; i < usable * 3; ++i)
         nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
 
-    cc::vector<cc::byte*> seen;
+    cc::vector<byte*> seen;
     for (auto const& n : nodes)
         track_base(seen, base_of(n));
     REQUIRE(seen.size() == 3);
 
     // free every slot of the first (non-head) slab back into it, on the owner thread
-    cc::byte* const slab1 = base_of(nodes[0]);
+    byte* const slab1 = base_of(nodes[0]);
     for (int i = 0; i < usable; ++i)
         nodes[i] = {};
 
@@ -172,7 +172,7 @@ TEST("node_allocation - remote drain reclaims cross-thread frees")
     for (int i = 0; i < batch; ++i)
         nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
 
-    cc::vector<cc::byte*> seen;
+    cc::vector<byte*> seen;
     for (auto const& n : nodes)
         track_base(seen, base_of(n));
 
@@ -248,7 +248,7 @@ TEST("node_allocation - abandoned slab is adopted by a later thread")
     // producer thread fills exactly one slab, hands every (live) node to a shared vector, then exits.
     // its slab still holds live nodes -> not fully free -> orphaned to the global bin on teardown.
     cc::vector<cc::node_allocation<T8B>> shared;
-    cc::byte* producer_base = nullptr;
+    byte* producer_base = nullptr;
     std::thread(
         [&]
         {

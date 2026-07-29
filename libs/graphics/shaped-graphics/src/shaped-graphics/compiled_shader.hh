@@ -93,7 +93,7 @@ struct compiled_shader
     cc::string entry_point;
 
     /// The opaque bytecode, in `format`. An owning, shareable, immutable byte blob.
-    cc::pinned_data<cc::byte const> bytecode;
+    cc::pinned_data<byte const> bytecode;
 
     /// Reflected resource bindings — a flat list; per-set grouping is derived by the consumer.
     cc::vector<binding> bindings;

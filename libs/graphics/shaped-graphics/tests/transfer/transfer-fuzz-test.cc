@@ -8,6 +8,8 @@
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 
 // Backend-agnostic inline buffer transfer: upload / download over the public sg API, run against every
 // available backend (see tests/context/context-test.cc for the invocable/alias mechanism).
@@ -36,7 +38,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
         sg::context_handle ctx;
         std::unique_ptr<sg::command_list> cmd;
         sg::raw_buffer_handle buffer;
-        cc::vector<cc::u32> data;
+        cc::vector<u32> data;
 
         trace() = default;
         trace(trace&&) = default;
@@ -80,7 +82,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      t.ctx = ctx;
                      t.buffer = ctx->persistent.create_raw_buffer(
                          4096, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-                     t.data = cc::vector<cc::u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(cc::u32));
+                     t.data = cc::vector<u32>::create_uninitialized(t.buffer->size_in_bytes() / sizeof(u32));
 
                      // initial random data fill
                      for (auto& d : t.data)
@@ -123,7 +125,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto end = cc::max(v0, v1);
 
                      auto cnt = end - start;
-                     auto data = cc::vector<cc::u32>::create_uninitialized(cnt);
+                     auto data = cc::vector<u32>::create_uninitialized(cnt);
                      for (auto& d : data)
                          d = rng.next_u32();
 
@@ -147,7 +149,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto end = cc::max(v0, v1);
 
                      auto cnt = end - start;
-                     auto data = cc::vector<cc::u32>::create_uninitialized(cnt);
+                     auto data = cc::vector<u32>::create_uninitialized(cnt);
                      for (auto& d : data)
                          d = rng.next_u32();
 
@@ -158,7 +160,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      // any open list first so the recorded GPU order matches our reference model — an open
                      // list's inline writes would race the async copy otherwise.
                      t.ensure_submitted_cmd();
-                     ctx->upload.data_to_buffer<cc::u32>(t.buffer, cc::make_pinned_data(cc::move(data)), start);
+                     ctx->upload.data_to_buffer<u32>(t.buffer, cc::make_pinned_data(cc::move(data)), start);
                  });
 
     test->add_op(
@@ -190,7 +192,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                 t.data[dst_start + i] = t.data[src_start + i];
 
             t.ensure_open_cmd();
-            t.cmd->copy.buffer_data_region<cc::u32>(
+            t.cmd->copy.buffer_data_region<u32>(
                 {.src = t.buffer, .dst = t.buffer, .count = cnt, .src_offset = src_start, .dst_offset = dst_start});
         });
 
@@ -204,10 +206,10 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto start = cc::min(v0, v1);
                      auto end = cc::max(v0, v1);
 
-                     auto ref_data = cc::span<cc::u32>(t.data).subspan({.start = start, .end = end});
+                     auto ref_data = cc::span<u32>(t.data).subspan({.start = start, .end = end});
 
                      t.ensure_open_cmd();
-                     auto dl = t.cmd->download.data_from_buffer<cc::u32>(t.buffer, start, end - start);
+                     auto dl = t.cmd->download.data_from_buffer<u32>(t.buffer, start, end - start);
                      t.ensure_submitted_cmd();
 
                      auto dl_data = ctx->wait_for(dl).value();
@@ -237,14 +239,14 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
 
                      t.ensure_submitted_cmd();
 
-                     auto ref = cc::vector<cc::u32>::create_uninitialized(cnt);
+                     auto ref = cc::vector<u32>::create_uninitialized(cnt);
                      for (auto i = 0; i < cnt; ++i)
                          ref[i] = t.data[start + i];
 
-                     auto dl = ctx->download.data_from_buffer<cc::u32>(t.buffer, start, cnt);
+                     auto dl = ctx->download.data_from_buffer<u32>(t.buffer, start, cnt);
                      auto dl_data = ctx->wait_for(dl).value();
 
-                     CHECK(cc::isize(cnt) == dl_data.size());
+                     CHECK(isize(cnt) == dl_data.size());
                      for (auto i = 0; i < cnt; ++i)
                          CHECK(ref[i] == dl_data[i]);
                  })

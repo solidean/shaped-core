@@ -7,6 +7,8 @@
 // binding the shader doesn't touch — enough to drive the texture UAV descriptor + the dispatch barrier.
 #include "double_compute.dxil.h"
 
+using namespace cc::primitive_defines;
+
 // End-to-end texture views on WARP: a texture's as_*_view() becomes a real D3D12 SRV/UAV inside a binding
 // group, and binding one to a compute dispatch transitions it to the right layout via the barrier system.
 
@@ -78,8 +80,8 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
     shader.format = sg::shader_format::dxil;
     shader.entry_point = "main";
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 1, .z = 1};
-    shader.bytecode = cc::make_pinned_data(cc::span<cc::byte const>(
-        reinterpret_cast<cc::byte const*>(double_compute_dxil), cc::isize(sizeof(double_compute_dxil))));
+    shader.bytecode = cc::make_pinned_data(
+        cc::span<byte const>(reinterpret_cast<byte const*>(double_compute_dxil), isize(sizeof(double_compute_dxil))));
     shader.bindings.push_back(sg::binding{.name = "Output",
                                           .set = 0,
                                           .index = 0,
@@ -88,7 +90,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
     shader.bindings.push_back(
         sg::binding{.name = "Tex", .set = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_texture});
 
-    auto buf = c.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
+    auto buf = c.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
                                               sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
     auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
@@ -104,7 +106,7 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
 
     auto const typed = sg::texture_2d::from_raw(tex);
     sg::named_view const views[] = {
-        {.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()},
+        {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()},
         {.name = "Tex", .view = typed.as_readwrite_view()},
     };
     auto group = c.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
@@ -119,14 +121,14 @@ TEST("sg dx12 - compute dispatch with a bound storage texture transitions + vali
 
     auto down = c.create_command_list();
     REQUIRE(down != nullptr);
-    auto future = down->download.data_from_buffer<sg::u32>(buf, 0, count);
+    auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     c.submit_command_list(cc::move(down));
 
     auto const data = c.wait_for(future);
     REQUIRE(data.has_value());
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != cc::u32(i) * 2)
+        if (data.value()[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
 }

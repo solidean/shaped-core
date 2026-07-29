@@ -32,6 +32,8 @@
 
 #include <cstdio>
 
+using namespace cc::primitive_defines;
+
 using cc::isize;
 using cc::u64;
 
@@ -95,8 +97,7 @@ void run(bool record)
                                                          u64 acc = 0;
                                                          for (int g = 0; g < G; ++g)
                                                          {
-                                                             cc::byte* p
-                                                                 = na.allocate_node_bytes(cls, node_size, node_align);
+                                                             byte* p = na.allocate_node_bytes(cls, node_size, node_align);
                                                              acc ^= reinterpret_cast<u64>(p);
                                                              cc::node_allocation_free(p, cls);
                                                          }

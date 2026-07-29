@@ -8,7 +8,7 @@ namespace sg::backend::dx12
 cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Device* device,
                                                                        dx12_pipeline_layout_handle layout,
                                                                        sg::compiled_shader const& shader,
-                                                                       cc::span<cc::byte const> cached_pipeline)
+                                                                       cc::span<byte const> cached_pipeline)
 {
     CC_ASSERT(layout != nullptr, "compute pipeline requires a pipeline_layout");
     CC_ASSERT(shader.stage == sg::shader_stage::compute, "compute pipeline requires a compute shader");
@@ -45,14 +45,14 @@ cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Dev
     return dx12_compute_pipeline_handle(cc::move(pipeline));
 }
 
-cc::pinned_data<cc::byte const> dx12_compute_pipeline::cached_pipeline_data() const
+cc::pinned_data<byte const> dx12_compute_pipeline::cached_pipeline_data() const
 {
     ComPtr<ID3DBlob> blob;
     if (FAILED(pipeline_state->GetCachedBlob(&blob)) || blob->GetBufferSize() == 0)
         return {};
 
-    auto const bytes = cc::span<cc::byte const>(static_cast<cc::byte const*>(blob->GetBufferPointer()),
-                                                cc::isize(blob->GetBufferSize()));
-    return cc::pinned_data<cc::byte>::create_copy_of(bytes);
+    auto const bytes
+        = cc::span<byte const>(static_cast<byte const*>(blob->GetBufferPointer()), isize(blob->GetBufferSize()));
+    return cc::pinned_data<byte>::create_copy_of(bytes);
 }
 } // namespace sg::backend::dx12

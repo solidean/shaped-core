@@ -21,15 +21,15 @@ using namespace cc::primitive_defines;
 namespace
 {
 template <class T>
-cc::byte* base_of(cc::node_allocation<T> const& n)
+byte* base_of(cc::node_allocation<T> const& n)
 {
-    return cc::node_slab_base_for_ptr(reinterpret_cast<cc::byte*>(n.ptr), cc::node_class_index_for<T>());
+    return cc::node_slab_base_for_ptr(reinterpret_cast<byte*>(n.ptr), cc::node_class_index_for<T>());
 }
 
 template <class T>
-cc::byte* ring_head(cc::node_allocator const& alloc)
+byte* ring_head(cc::node_allocator const& alloc)
 {
-    return alloc.slabs().slab_base[cc::isize(cc::node_class_index_for<T>())];
+    return alloc.slabs().slab_base[isize(cc::node_class_index_for<T>())];
 }
 } // namespace
 

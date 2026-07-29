@@ -77,5 +77,5 @@ struct data
 
 /// Convenience: parse from an in-memory buffer (wraps a span_read_stream_adapter).
 [[nodiscard]] cc::result<data> read(cc::string_view text);
-[[nodiscard]] cc::result<data> read(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
 } // namespace babel::obj

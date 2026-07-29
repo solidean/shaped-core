@@ -20,7 +20,7 @@ cc::result<file_read_stream_adapter> file_read_stream_adapter::open(cc::string_v
     return p;
 }
 
-cc::result<cc::i64> file_read_stream_adapter::impl_seek_and_fill(cc::byte*& curr, cc::byte*& end, cc::i64 target)
+cc::result<i64> file_read_stream_adapter::impl_seek_and_fill(byte*& curr, byte*& end, i64 target)
 {
     if (target < 0)
         return cc::error("file stream: seek before start");
@@ -29,25 +29,25 @@ cc::result<cc::i64> file_read_stream_adapter::impl_seek_and_fill(cc::byte*& curr
     CC_RETURN_IF_ERROR(s);
     _buffer_offset = target;
 
-    auto n = _file.read(cc::span<cc::byte>(_buffer, k_buffer_size));
+    auto n = _file.read(cc::span<byte>(_buffer, k_buffer_size));
     CC_RETURN_IF_ERROR(n);
     curr = _buffer;
     end = _buffer + n.value();
     return target;
 }
 
-cc::result<cc::i64> file_read_stream_adapter::impl_flush(cc::byte*& curr,
-                                                         cc::byte*& end,
-                                                         cc::byte*& /*write_end*/, // aliases end for a read-only stream
-                                                         void* ctx,
-                                                         cc::i64 offset,
-                                                         cc::seek_dir dir,
-                                                         cc::byte* /*first_write*/)
+cc::result<i64> file_read_stream_adapter::impl_flush(byte*& curr,
+                                                     byte*& end,
+                                                     byte*& /*write_end*/, // aliases end for a read-only stream
+                                                     void* ctx,
+                                                     i64 offset,
+                                                     cc::seek_dir dir,
+                                                     byte* /*first_write*/)
 {
     using sd = cc::seek_dir;
     auto& self = *static_cast<file_read_stream_adapter*>(ctx);
-    cc::byte* const base = self._buffer;
-    cc::i64 const pos = self._buffer_offset + cc::i64(curr - base);
+    byte* const base = self._buffer;
+    i64 const pos = self._buffer_offset + i64(curr - base);
 
     switch (dir)
     {
@@ -55,12 +55,11 @@ cc::result<cc::i64> file_read_stream_adapter::impl_flush(cc::byte*& curr,
         if (offset == 0)
         {
             // plain refill: preserve the leftover [curr, end), then fill the remainder
-            cc::isize const leftover = cc::isize(end - curr);
+            isize const leftover = isize(end - curr);
             CC_ASSERT(leftover < file_read_stream_adapter::k_buffer_size, "refilling a full buffer makes no progress");
             std::memmove(base, curr, size_t(leftover));
             self._buffer_offset = pos;
-            auto n = self._file.read(
-                cc::span<cc::byte>(base + leftover, file_read_stream_adapter::k_buffer_size - leftover));
+            auto n = self._file.read(cc::span<byte>(base + leftover, file_read_stream_adapter::k_buffer_size - leftover));
             CC_RETURN_IF_ERROR(n);
             curr = base;
             end = base + leftover + n.value();
@@ -129,22 +128,19 @@ cc::result<file_write_stream_adapter> file_write_stream_adapter::append(cc::stri
     return p;
 }
 
-cc::result<cc::i64> file_write_stream_adapter::impl_write_through(cc::byte*& curr,
-                                                                  cc::byte*& end,
-                                                                  cc::byte* first_write,
-                                                                  cc::i64 pos)
+cc::result<i64> file_write_stream_adapter::impl_write_through(byte*& curr, byte*& end, byte* first_write, i64 pos)
 {
     if (first_write != nullptr && curr > first_write)
     {
-        cc::i64 const off = _buffer_offset + cc::i64(first_write - _buffer);
+        i64 const off = _buffer_offset + i64(first_write - _buffer);
         auto s = _file.seek(off);
         CC_RETURN_IF_ERROR(s);
 
-        cc::byte const* p = first_write;
-        cc::isize remaining = cc::isize(curr - first_write);
+        byte const* p = first_write;
+        isize remaining = isize(curr - first_write);
         while (remaining > 0)
         {
-            auto w = _file.write(cc::span<cc::byte const>(p, remaining));
+            auto w = _file.write(cc::span<byte const>(p, remaining));
             CC_RETURN_IF_ERROR(w);
             CC_ASSERT(w.value() > 0, "write made no progress");
             p += w.value();
@@ -159,7 +155,7 @@ cc::result<cc::i64> file_write_stream_adapter::impl_write_through(cc::byte*& cur
     return pos;
 }
 
-cc::result<cc::i64> file_write_stream_adapter::impl_reposition(cc::byte*& curr, cc::byte*& end, cc::i64 target)
+cc::result<i64> file_write_stream_adapter::impl_reposition(byte*& curr, byte*& end, i64 target)
 {
     if (target < 0)
         return cc::error("file stream: seek before start");
@@ -172,18 +168,18 @@ cc::result<cc::i64> file_write_stream_adapter::impl_reposition(cc::byte*& curr, 
     return target;
 }
 
-cc::result<cc::i64> file_write_stream_adapter::impl_flush(cc::byte*& curr,
-                                                          cc::byte*& end,
-                                                          cc::byte*& /*write_end*/, // aliases end for a write-only stream
-                                                          void* ctx,
-                                                          cc::i64 offset,
-                                                          cc::seek_dir dir,
-                                                          cc::byte* first_write)
+cc::result<i64> file_write_stream_adapter::impl_flush(byte*& curr,
+                                                      byte*& end,
+                                                      byte*& /*write_end*/, // aliases end for a write-only stream
+                                                      void* ctx,
+                                                      i64 offset,
+                                                      cc::seek_dir dir,
+                                                      byte* first_write)
 {
     using sd = cc::seek_dir;
     auto& self = *static_cast<file_write_stream_adapter*>(ctx);
-    cc::byte* const base = self._buffer;
-    cc::i64 const pos = self._buffer_offset + cc::i64(curr - base); // total bytes written logically
+    byte* const base = self._buffer;
+    i64 const pos = self._buffer_offset + i64(curr - base); // total bytes written logically
 
     switch (dir)
     {
@@ -234,39 +230,36 @@ cc::result<file_read_write_stream_adapter> file_read_write_stream_adapter::open(
     return p;
 }
 
-cc::result<cc::i64> file_read_write_stream_adapter::impl_drain(cc::byte* curr, cc::byte* first_write)
+cc::result<i64> file_read_write_stream_adapter::impl_drain(byte* curr, byte* first_write)
 {
     // persist the pending writes [first_write, curr) at their file offset (grows the file if past the end)
     if (first_write != nullptr && curr > first_write)
     {
-        cc::i64 const off = _buffer_offset + cc::i64(first_write - _buffer);
+        i64 const off = _buffer_offset + i64(first_write - _buffer);
         auto s = _file.seek(off);
         CC_RETURN_IF_ERROR(s);
 
-        cc::byte const* p = first_write;
-        cc::isize remaining = cc::isize(curr - first_write);
+        byte const* p = first_write;
+        isize remaining = isize(curr - first_write);
         while (remaining > 0)
         {
-            auto w = _file.write(cc::span<cc::byte const>(p, remaining));
+            auto w = _file.write(cc::span<byte const>(p, remaining));
             CC_RETURN_IF_ERROR(w);
             CC_ASSERT(w.value() > 0, "write made no progress");
             p += w.value();
             remaining -= w.value();
         }
     }
-    return cc::i64(0);
+    return i64(0);
 }
 
-cc::result<cc::i64> file_read_write_stream_adapter::impl_fill(cc::byte*& curr,
-                                                              cc::byte*& end,
-                                                              cc::byte*& write_end,
-                                                              cc::isize leftover)
+cc::result<i64> file_read_write_stream_adapter::impl_fill(byte*& curr, byte*& end, byte*& write_end, isize leftover)
 {
-    cc::byte* const base = _buffer;
+    byte* const base = _buffer;
     // the unconsumed read data occupies [base, base + leftover); fresh file data follows it on disk
     auto s = _file.seek(_buffer_offset + leftover);
     CC_RETURN_IF_ERROR(s);
-    auto n = _file.read(cc::span<cc::byte>(base + leftover, k_buffer_size - leftover));
+    auto n = _file.read(cc::span<byte>(base + leftover, k_buffer_size - leftover));
     CC_RETURN_IF_ERROR(n);
 
     curr = base;
@@ -275,10 +268,7 @@ cc::result<cc::i64> file_read_write_stream_adapter::impl_fill(cc::byte*& curr,
     return _buffer_offset;             // position of curr == _buffer_offset
 }
 
-cc::result<cc::i64> file_read_write_stream_adapter::impl_seek_and_fill(cc::byte*& curr,
-                                                                       cc::byte*& end,
-                                                                       cc::byte*& write_end,
-                                                                       cc::i64 target)
+cc::result<i64> file_read_write_stream_adapter::impl_seek_and_fill(byte*& curr, byte*& end, byte*& write_end, i64 target)
 {
     if (target < 0)
         return cc::error("file stream: seek before start");
@@ -287,18 +277,18 @@ cc::result<cc::i64> file_read_write_stream_adapter::impl_seek_and_fill(cc::byte*
     return this->impl_fill(curr, end, write_end, 0);
 }
 
-cc::result<cc::i64> file_read_write_stream_adapter::impl_flush(cc::byte*& curr,
-                                                               cc::byte*& end,
-                                                               cc::byte*& write_end,
-                                                               void* ctx,
-                                                               cc::i64 offset,
-                                                               cc::seek_dir dir,
-                                                               cc::byte* first_write)
+cc::result<i64> file_read_write_stream_adapter::impl_flush(byte*& curr,
+                                                           byte*& end,
+                                                           byte*& write_end,
+                                                           void* ctx,
+                                                           i64 offset,
+                                                           cc::seek_dir dir,
+                                                           byte* first_write)
 {
     using sd = cc::seek_dir;
     auto& self = *static_cast<file_read_write_stream_adapter*>(ctx);
-    cc::byte* const base = self._buffer;
-    cc::i64 const pos = self._buffer_offset + cc::i64(curr - base);
+    byte* const base = self._buffer;
+    i64 const pos = self._buffer_offset + i64(curr - base);
 
     switch (dir)
     {
@@ -307,7 +297,7 @@ cc::result<cc::i64> file_read_write_stream_adapter::impl_flush(cc::byte*& curr,
         {
             // plain flush: persist pending writes, keep any unconsumed read leftover, refill the remainder.
             // curr may sit past `end` (wrote beyond valid data), so clamp the leftover at 0.
-            cc::isize const leftover = cc::max(cc::isize(0), cc::isize(end - curr));
+            isize const leftover = cc::max(isize(0), isize(end - curr));
             CC_RETURN_IF_ERROR(self.impl_drain(curr, first_write));
             std::memmove(base, curr, size_t(leftover));
             self._buffer_offset = pos;

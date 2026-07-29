@@ -33,7 +33,7 @@ struct json_parser; // defined in json.cc; builds a document
 namespace babel::json
 {
 /// The JSON value categories.
-enum class node_kind : cc::u8
+enum class node_kind : u8
 {
     null,
     boolean,
@@ -195,5 +195,5 @@ inline ref document::root() const
 
 /// Convenience: parse from an in-memory UTF-8 buffer (wraps a span_read_stream_adapter).
 [[nodiscard]] cc::result<document> read(cc::string_view text);
-[[nodiscard]] cc::result<document> read(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<document> read(cc::span<byte const> bytes);
 } // namespace babel::json

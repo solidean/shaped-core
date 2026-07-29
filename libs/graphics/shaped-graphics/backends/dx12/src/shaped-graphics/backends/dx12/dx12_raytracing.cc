@@ -78,10 +78,10 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
     CC_ASSERT(prebuild.ResultDataMaxSizeInBytes > 0, "prebuild reported a zero-size BLAS result");
 
     // Persistent result (across-epoch) + transient scratch (recycled once its epoch retires).
-    auto const result_raw = _ctx.persistent.create_raw_buffer(cc::isize(prebuild.ResultDataMaxSizeInBytes),
+    auto const result_raw = _ctx.persistent.create_raw_buffer(isize(prebuild.ResultDataMaxSizeInBytes),
                                                               sg::buffer_usage::accel_structure_storage);
-    auto const scratch_raw = _ctx.transient.create_raw_buffer(cc::isize(prebuild.ScratchDataSizeInBytes),
-                                                              sg::buffer_usage::readwrite_buffer);
+    auto const scratch_raw
+        = _ctx.transient.create_raw_buffer(isize(prebuild.ScratchDataSizeInBytes), sg::buffer_usage::readwrite_buffer);
     auto const result = std::dynamic_pointer_cast<dx12_buffer const>(result_raw);
     auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(scratch_raw);
     CC_ASSERT(result != nullptr && scratch != nullptr, "acceleration-structure buffers are not dx12 buffers");
@@ -102,9 +102,9 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
     build_desc.Inputs = inputs;
     list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
 
-    return std::make_shared<dx12_blas>(result, cc::isize(prebuild.ResultDataMaxSizeInBytes),
-                                       cc::isize(prebuild.ScratchDataSizeInBytes),
-                                       cc::isize(prebuild.UpdateScratchDataSizeInBytes), flags, geometry_count);
+    return std::make_shared<dx12_blas>(result, isize(prebuild.ResultDataMaxSizeInBytes),
+                                       isize(prebuild.ScratchDataSizeInBytes),
+                                       isize(prebuild.UpdateScratchDataSizeInBytes), flags, geometry_count);
 }
 
 sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
@@ -247,7 +247,7 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     }
 
     // Upload the packed descs into a transient build-input buffer (copy_dst so the inline upload can write it).
-    auto const instance_bytes = cc::isize(instances.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC));
+    auto const instance_bytes = isize(instances.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC));
     auto const instance_raw = _ctx.transient.create_raw_buffer(
         instance_bytes, sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
     auto const instance_buf = std::dynamic_pointer_cast<dx12_buffer const>(instance_raw);
@@ -269,10 +269,10 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     device5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
     CC_ASSERT(prebuild.ResultDataMaxSizeInBytes > 0, "prebuild reported a zero-size TLAS result");
 
-    auto const result_raw = _ctx.persistent.create_raw_buffer(cc::isize(prebuild.ResultDataMaxSizeInBytes),
+    auto const result_raw = _ctx.persistent.create_raw_buffer(isize(prebuild.ResultDataMaxSizeInBytes),
                                                               sg::buffer_usage::accel_structure_storage);
-    auto const scratch_raw = _ctx.transient.create_raw_buffer(cc::isize(prebuild.ScratchDataSizeInBytes),
-                                                              sg::buffer_usage::readwrite_buffer);
+    auto const scratch_raw
+        = _ctx.transient.create_raw_buffer(isize(prebuild.ScratchDataSizeInBytes), sg::buffer_usage::readwrite_buffer);
     auto const result = std::dynamic_pointer_cast<dx12_buffer const>(result_raw);
     auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(scratch_raw);
     CC_ASSERT(result != nullptr && scratch != nullptr, "acceleration-structure buffers are not dx12 buffers");
@@ -294,7 +294,7 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
 
     return std::make_shared<dx12_tlas>(
-        result, cc::isize(prebuild.ResultDataMaxSizeInBytes), cc::isize(prebuild.ScratchDataSizeInBytes),
-        cc::isize(prebuild.UpdateScratchDataSizeInBytes), flags, int(instances.size()), cc::move(referenced_blases));
+        result, isize(prebuild.ResultDataMaxSizeInBytes), isize(prebuild.ScratchDataSizeInBytes),
+        isize(prebuild.UpdateScratchDataSizeInBytes), flags, int(instances.size()), cc::move(referenced_blases));
 }
 } // namespace sg::backend::dx12

@@ -34,7 +34,7 @@ constexpr int num_staging_windows = 3;
 
 // A window size is rounded up to the texture placement alignment (512) so each window's base is 512-aligned
 // — a texture copy's placed footprint must start there. Buffers are unaffected by the rounding.
-[[nodiscard]] cc::isize round_window(cc::isize bytes)
+[[nodiscard]] isize round_window(isize bytes)
 {
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
 }
@@ -90,7 +90,7 @@ private:
         if (job.copy_fence_value != dx12_copy_fence_value::none)
         {
             ensure_open_window();
-            cc::u64 const v = cc::u64(job.copy_fence_value);
+            u64 const v = u64(job.copy_fence_value);
             if (v > _open_highest_finished)
                 _open_highest_finished = v;
         }
@@ -138,17 +138,17 @@ private:
         // still pending on the direct queue, close the window now: this job's Wait then lands in a fresh
         // window that can only point at prior, already-submitted windows.
         if (_window_open && _open_highest_finished > 0
-            && cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
+            && u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
             submit_window();
 
         while (!upload.is_finished())
         {
             ensure_open_window();
-            cc::isize const avail = _sys._window_bytes - _window_used;
-            cc::isize const base = cc::isize(_current_window % cc::u64(num_staging_windows)) * _sys._window_bytes;
+            isize const avail = _sys._window_bytes - _window_used;
+            isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
             dx12_upload_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
-            cc::isize const consumed = upload.execute_next_job(*_list.Get(), alloc);
+            isize const consumed = upload.execute_next_job(*_list.Get(), alloc);
             if (consumed == 0) // window tail too small for the next aligned texture row → roll to a fresh window
             {
                 submit_window();
@@ -158,13 +158,13 @@ private:
 
             // This chunk writes the destination, so its window must first wait for the last direct-queue list
             // that used it (reverse sync). Max over the window; the submission fence is monotonic.
-            if (cc::u64(job.wait_token) > _open_max_wait_token)
-                _open_max_wait_token = cc::u64(job.wait_token);
+            if (u64(job.wait_token) > _open_max_wait_token)
+                _open_max_wait_token = u64(job.wait_token);
 
             // The window holding the upload's last byte is the one whose completion satisfies the reader wait.
             if (upload.is_finished() && job.copy_fence_value != dx12_copy_fence_value::none)
             {
-                cc::u64 const v = cc::u64(job.copy_fence_value);
+                u64 const v = u64(job.copy_fence_value);
                 if (v > _open_highest_finished)
                     _open_highest_finished = v;
             }
@@ -183,9 +183,9 @@ private:
         if (_window_open)
             return;
 
-        int const slot = int(_current_window % cc::u64(num_staging_windows));
-        if (_current_window >= cc::u64(num_staging_windows))
-            wait_for_window(_current_window - cc::u64(num_staging_windows));
+        int const slot = int(_current_window % u64(num_staging_windows));
+        if (_current_window >= u64(num_staging_windows))
+            wait_for_window(_current_window - u64(num_staging_windows));
 
         if (_allocators[slot] == nullptr) // first use of this slot: fresh allocator, ready to record
         {
@@ -263,7 +263,7 @@ private:
     // The per-slot allocators and the reused command list survive — only staging memory changes.
     void maybe_resize_staging()
     {
-        cc::isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
+        isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
         if (desired == _sys._window_bytes)
             return;
         CC_ASSERT(desired > 0, "async upload staging window must be positive");
@@ -280,15 +280,15 @@ private:
 
         _sys._staging->Unmap(0, nullptr);
         _sys._staging = cc::move(ring.value().resource);
-        _sys._mapped = static_cast<cc::byte*>(ring.value().mapped);
+        _sys._mapped = static_cast<byte*>(ring.value().mapped);
         _sys._window_bytes = desired;
     }
 
     // Blocks the actor until the copy queue has finished `window` (index). The fence is 1-based (see
     // submit_window), so window i's completion is fence value i+1 — distinct from the initial 0.
-    void wait_for_window(cc::u64 window)
+    void wait_for_window(u64 window)
     {
-        cc::u64 const target = window + 1;
+        u64 const target = window + 1;
         if (_sys._window_fence->GetCompletedValue() < target)
         {
             HRESULT const hr = _sys._window_fence->SetEventOnCompletion(target, _sys._wait_event);
@@ -301,8 +301,8 @@ private:
 
     cc::vector<dx12_async_upload_job> _pending; // received this cycle, staged in on_process
 
-    cc::u64 _current_window = 0;     // next window index to submit; slot = index % num_staging_windows
-    cc::u64 _last_signaled_copy = 0; // highest value signaled on the completion fence (monotonic)
+    u64 _current_window = 0;     // next window index to submit; slot = index % num_staging_windows
+    u64 _last_signaled_copy = 0; // highest value signaled on the completion fence (monotonic)
 
     // One command list reused across every window; one allocator per window slot, cycled and reset when
     // the window three back has completed. Owned here (not the epoch-gated pool): the copy queue does not
@@ -311,13 +311,13 @@ private:
     ComPtr<ID3D12CommandAllocator> _allocators[num_staging_windows];
 
     bool _window_open = false;
-    cc::isize _window_used = 0;         // bytes written into the open window so far
-    cc::u64 _open_highest_finished = 0; // highest completion value of uploads finished in the open window
-    cc::u64 _open_max_wait_token = 0;   // highest direct-queue token the open window's copies must wait for
+    isize _window_used = 0;         // bytes written into the open window so far
+    u64 _open_highest_finished = 0; // highest completion value of uploads finished in the open window
+    u64 _open_max_wait_token = 0;   // highest direct-queue token the open window's copies must wait for
 };
 } // namespace
 
-cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes)
+cc::result<cc::unit> dx12_upload_async_system::initialize(isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async upload staging window must be positive");
     window_bytes = round_window(window_bytes); // keep every window's base 512-aligned for texture copies
@@ -333,7 +333,7 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes
                                              D3D12_RESOURCE_STATE_GENERIC_READ, window_bytes * num_staging_windows);
     CC_RETURN_IF_ERROR(staging);
     _staging = cc::move(staging.value().resource);
-    _mapped = static_cast<cc::byte*>(staging.value().mapped);
+    _mapped = static_cast<byte*>(staging.value().mapped);
     _window_bytes = window_bytes;
     _desired_window_bytes.store(window_bytes, std::memory_order_relaxed); // no resize pending yet
 
@@ -353,9 +353,7 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(cc::isize window_bytes
     return cc::unit{};
 }
 
-void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
-                                             cc::pinned_data<cc::byte const> data,
-                                             cc::isize offset)
+void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset)
 {
     CC_ASSERT(buffer != nullptr, "async upload target buffer is null");
     auto const* const dst = dynamic_cast<dx12_buffer const*>(buffer.get());
@@ -372,8 +370,8 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
 
     // Reserve this upload's completion value and stamp the destination *before* enqueuing, so any command
     // list that reads the buffer after this call already sees a value to wait on.
-    cc::u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
-    cc::u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
+    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
     while (prev < value
            && !dst->_pending_async_upload_value.compare_exchange_weak(prev, value, std::memory_order_release,
                                                                       std::memory_order_relaxed))
@@ -396,7 +394,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer,
 }
 
 void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
-                                              cc::pinned_data<cc::byte const> data,
+                                              cc::pinned_data<byte const> data,
                                               sg::subresource_index const& subresource,
                                               sg::texture_region const& region)
 {
@@ -415,8 +413,8 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
 
     // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command
     // list that reads the texture already sees a value to wait on.
-    cc::u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
-    cc::u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
+    u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
     while (prev < value
            && !dst->_pending_async_upload_value.compare_exchange_weak(prev, value, std::memory_order_release,
                                                                       std::memory_order_relaxed))
@@ -435,7 +433,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     _actor->enqueue_message(cc::move(job));
 }
 
-void dx12_upload_async_system::set_window_bytes(cc::isize bytes)
+void dx12_upload_async_system::set_window_bytes(isize bytes)
 {
     CC_ASSERT(bytes > 0, "async upload staging window must be positive");
     // Record the request; the copy actor adopts it at the top of its next process cycle (before staging).

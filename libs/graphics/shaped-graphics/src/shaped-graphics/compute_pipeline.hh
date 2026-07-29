@@ -18,7 +18,7 @@ struct compute_pipeline_description
     /// Optional serialized PSO blob for accelerated creation (skips most shader-compile / driver work).
     /// Platform-specific and best-effort: backends may ignore it. Empty by default; obtain one from a
     /// previously-built pipeline (cached_pipeline_data below) and persist it across runs.
-    cc::pinned_data<cc::byte const> cached_pipeline = {};
+    cc::pinned_data<byte const> cached_pipeline = {};
 };
 
 /// A ready-to-run compute pipeline: a compute shader compiled against a pipeline_layout. Bound to a
@@ -36,7 +36,7 @@ public:
 
     /// The backend's serialized PSO blob, for persisting and feeding back via
     /// compute_pipeline_description::cached_pipeline. Empty if the backend doesn't support it.
-    [[nodiscard]] virtual cc::pinned_data<cc::byte const> cached_pipeline_data() const = 0;
+    [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
 
 protected:
     explicit compute_pipeline(compute_dimensions workgroup_size) : _workgroup_size(workgroup_size) {}

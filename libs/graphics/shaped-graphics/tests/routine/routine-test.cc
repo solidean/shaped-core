@@ -15,6 +15,8 @@
 // The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated into the build dir and private to this binary.
 #include <sg_test_shaders.hh>
 
+using namespace cc::primitive_defines;
+
 // Render-routine framework tests, on a dx12 WARP context (software, present on any Windows host, so they run on headless CI).
 // WARP + DXC are Windows-only, which is why this file is gated on the dx12 backend and a shader compiler in the CMakeLists.
 // Three things are proven here:
@@ -63,7 +65,7 @@ protected:
 class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
 {
 public:
-    static void execute(sg::command_list& cmd, sg::buffer<sg::u32> const& out)
+    static void execute(sg::command_list& cmd, sg::buffer<u32> const& out)
     {
         auto const& self = acquire(cmd);
         CC_ASSERT(self._pipeline != nullptr, "pattern_fill routine failed to initialize");
@@ -243,7 +245,7 @@ TEST("sg - a routine compiles a shader and dispatches it end to end")
 
     constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
     auto const out
-        = ctx->persistent.create_buffer<sg::u32>(count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        = ctx->persistent.create_buffer<u32>(count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(out.raw() != nullptr);
 
     auto disp = ctx->create_command_list();
@@ -252,15 +254,15 @@ TEST("sg - a routine compiles a shader and dispatches it end to end")
 
     // Read the result back in a second list (the buffer decays to COMMON between submits).
     auto down = ctx->create_command_list();
-    auto const future = down->download.data_from_buffer<sg::u32>(out.raw(), 0, count);
+    auto const future = down->download.data_from_buffer<u32>(out.raw(), 0, count);
     ctx->submit_command_list(cc::move(down));
 
     auto const data = ctx->wait_for(future);
     REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == cc::isize(count));
+    REQUIRE(data.value().size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != cc::u32(i) * 3u + 7u)
+        if (data.value()[i] != u32(i) * 3u + 7u)
             ok = false;
     CHECK(ok);
 }

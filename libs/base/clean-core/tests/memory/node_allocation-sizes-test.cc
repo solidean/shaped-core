@@ -294,7 +294,7 @@ TEST("node_allocation - over-aligned large nodes honor alignment")
         live.push_back(cc::move(n));
     }
     // all still valid and aligned while co-resident, then freed (dtor round-trips the aligned header)
-    for (cc::isize i = 0; i < live.size(); ++i)
+    for (isize i = 0; i < live.size(); ++i)
     {
         CHECK(cc::is_aligned(live[i].ptr, 32));
         CHECK(live[i].ptr->data[7] == u8(i));

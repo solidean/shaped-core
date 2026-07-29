@@ -15,7 +15,7 @@ namespace sg::backend::dx12
 {
 /// The D3D12_RESOURCE_DESC for a buffer of this shape. Shared by committed + placed creation and by a
 /// memory_heap's requirement query, which must all agree on the exact desc. `size_in_bytes` must be > 0.
-[[nodiscard]] D3D12_RESOURCE_DESC buffer_resource_desc(cc::isize size_in_bytes, sg::buffer_usage usage);
+[[nodiscard]] D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage usage);
 
 /// DirectX 12 implementation of sg::raw_buffer. Holds the ID3D12Resource (GPU-resident, default heap);
 /// null for an empty (size 0) buffer. For a placed buffer it also holds a handle to its backing
@@ -25,7 +25,7 @@ class dx12_buffer final : public sg::raw_buffer
 public:
     dx12_buffer(dx12_context& ctx,
                 sg::epoch created_in,
-                cc::isize size_in_bytes,
+                isize size_in_bytes,
                 sg::buffer_usage usage,
                 ComPtr<ID3D12Resource> resource,
                 sg::memory_heap_handle heap = nullptr)
@@ -62,19 +62,19 @@ public:
     // Forward: highest completion value an ASYNC upload (ctx.upload, not the inline cmd.upload) here will
     // signal on the copy queue. A later direct-queue list that reads this buffer waits for it at submit,
     // so it sees the async write.
-    mutable std::atomic<cc::u64> _pending_async_upload_value = 0;
+    mutable std::atomic<u64> _pending_async_upload_value = 0;
 
     // Reverse: highest direct-queue submission token of a command list that used this buffer. An async
     // upload here defers its copy until this token completes, so it never overwrites the buffer while an
     // earlier-submitted list still uses it. The async download (ctx.download) reuses it too: its readback
     // defers behind this token so it reads the buffer only after the last direct-queue writer has finished.
-    mutable std::atomic<cc::u64> _last_used_submission_token = 0;
+    mutable std::atomic<u64> _last_used_submission_token = 0;
 
     // Forward for the async DOWNLOAD (ctx.download): highest completion value a pending async readback here
     // will signal on the download completion fence (dx12_download_async_system::_completion_fence) once its
     // copy-queue read has finished. A later direct-queue list that WRITES this buffer waits for it at
     // submit, so it never overwrites bytes the readback is still reading. `0` == no pending async download.
-    mutable std::atomic<cc::u64> _pending_async_download_value = 0;
+    mutable std::atomic<u64> _pending_async_download_value = 0;
 
     // --- concurrent access-state tracking ------------------------------------------------------------
     // Each open command list keys its private intra-list access state by its command_list_slot. Guarded by a

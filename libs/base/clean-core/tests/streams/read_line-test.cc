@@ -6,13 +6,15 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 using namespace cc_stream_test;
 
 namespace
 {
-cc::span<cc::byte const> as_bytes(cc::string_view s)
+cc::span<byte const> as_bytes(cc::string_view s)
 {
-    return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(s.data()), s.size());
+    return cc::span<byte const>(reinterpret_cast<byte const*>(s.data()), s.size());
 }
 
 /// Drain a stream into one line per element until end of data.
@@ -86,7 +88,7 @@ TEST("read_line - CRLF endings are stripped")
 
 TEST("read_line - empty input yields no line and clears out")
 {
-    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>());
+    auto adapter = cc::span_read_stream_adapter(cc::span<byte const>());
     cc::read_stream s = adapter;
 
     auto line = cc::string("prefilled");
@@ -101,7 +103,7 @@ TEST("read_line - lines and CRLF split across buffer refills")
     // A chunked pipe forces multi-window reads; small chunks split "\r\n" across a window boundary, so the
     // trailing-'\r' strip must act on bytes already copied into out from an earlier window.
     auto const text = cc::string_view("hello\r\nfrom\na chunked\r\npipe");
-    for (auto const chunk : {cc::isize(1), cc::isize(2), cc::isize(3), cc::isize(7)})
+    for (auto const chunk : {isize(1), isize(2), isize(3), isize(7)})
     {
         mock_pipe_read_stream_adapter adapter = {as_bytes(text), chunk};
         cc::read_stream s = adapter.stream();
@@ -124,25 +126,25 @@ TEST("read_line - max_size splits a long line into bounded pieces, losing nothin
     auto line = cc::string();
 
     // "abcdefgh" (8 bytes) comes back in <=3-byte pieces; the newline is consumed only with the final piece.
-    auto r = s.read_line(line, cc::isize(3));
+    auto r = s.read_line(line, isize(3));
     REQUIRE(r.has_value());
     CHECK(r.value());
     CHECK(line == "abc");
 
-    r = s.read_line(line, cc::isize(3));
+    r = s.read_line(line, isize(3));
     REQUIRE((r.has_value() && r.value()));
     CHECK(line == "def");
 
-    r = s.read_line(line, cc::isize(3));
+    r = s.read_line(line, isize(3));
     REQUIRE((r.has_value() && r.value()));
     CHECK(line == "gh"); // stops at the newline before hitting the cap
 
     // remainder after the newline
-    r = s.read_line(line, cc::isize(3));
+    r = s.read_line(line, isize(3));
     REQUIRE((r.has_value() && r.value()));
     CHECK(line == "ij");
 
-    r = s.read_line(line, cc::isize(3));
+    r = s.read_line(line, isize(3));
     REQUIRE(r.has_value());
     CHECK(!r.value()); // end of data
 }

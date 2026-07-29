@@ -4,6 +4,8 @@
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 sg::async_compiled_shader make_failed_shader(cc::string message)
@@ -113,7 +115,7 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx) co
         cc::format("no compiler registered to build '{}' into a format this context accepts", _virtual_path));
 }
 
-cc::u64 slib::shader_asset::generation() const
+u64 slib::shader_asset::generation() const
 {
     return _state.lock([](state const& s) { return s.generation; });
 }

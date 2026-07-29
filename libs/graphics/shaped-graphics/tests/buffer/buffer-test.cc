@@ -6,6 +6,8 @@
 
 #include <variant> // std::get — raw_view is a variant; buffer views live in its raw_buffer_view arm
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 // A representative GPU element: 32 bytes, so a view_element (multiple of 4) and a uniform_element (of 16).
@@ -68,7 +70,7 @@ INVOCABLE_TEST("sg - allocates a large buffer", (sg::context_handle const& ctx))
     REQUIRE(ctx != nullptr);
 
     // A few MiB — comfortably past the inline rings, exercising a real dedicated allocation.
-    auto const size = cc::isize(8) * 1024 * 1024;
+    auto const size = isize(8) * 1024 * 1024;
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf != nullptr);
     CHECK(buf->size_in_bytes() == size);
@@ -85,20 +87,20 @@ INVOCABLE_TEST("sg - typed create_buffer<T> (persistent)", (sg::context_handle c
 
     REQUIRE(buf.raw() != nullptr);
     CHECK(buf.element_count() == 1000);
-    CHECK(buf.size_in_bytes() == 1000 * sg::isize(sizeof(particle)));
+    CHECK(buf.size_in_bytes() == 1000 * isize(sizeof(particle)));
 
     // Views infer the element type from T (no <particle> spelled) and carry the right stride / count.
     auto ro = buf.as_readonly_buffer();
     CHECK(ro.element_count == 1000);
     auto raw_ro = std::get<sg::raw_buffer_view>(ro.to_raw());
-    CHECK(raw_ro.stride_in_bytes == sg::isize(sizeof(particle)));
+    CHECK(raw_ro.stride_in_bytes == isize(sizeof(particle)));
     CHECK(raw_ro.element_count == 1000);
 
     // A storage view's byte offset must be 256-byte aligned, so the element offset must be a multiple of
     // 256 / sizeof(particle) = 8 (element 96 -> byte 3072).
     auto rw = buf.as_readwrite_buffer({.offset = 96, .size = 50});
     CHECK(rw.element_count == 50);
-    CHECK(rw.offset_in_bytes == 96 * sg::isize(sizeof(particle)));
+    CHECK(rw.offset_in_bytes == 96 * isize(sizeof(particle)));
     CHECK_ASSERTS(buf.as_readwrite_buffer({.offset = 100, .size = 50})); // byte 3200 — not 256-aligned
 }
 
@@ -126,7 +128,7 @@ INVOCABLE_TEST("sg - typed buffer<u16> as_index_buffer picks the index width", (
 {
     REQUIRE(ctx != nullptr);
 
-    sg::buffer<sg::u16> indices = ctx->persistent.create_buffer<sg::u16>(300, sg::buffer_usage::index_buffer);
+    sg::buffer<u16> indices = ctx->persistent.create_buffer<u16>(300, sg::buffer_usage::index_buffer);
 
     CHECK(indices.element_count() == 300);
     auto ib = indices.as_index_buffer();
@@ -147,14 +149,14 @@ INVOCABLE_TEST("sg - typed buffer<T> vertex-buffer subrange is in vertices of T"
     sg::buffer<particle> verts = ctx->persistent.create_buffer<particle>(100, sg::buffer_usage::vertex_buffer);
 
     auto whole = verts.as_vertex_buffer();
-    CHECK(whole.stride_in_bytes == sg::isize(sizeof(particle)));
+    CHECK(whole.stride_in_bytes == isize(sizeof(particle)));
     CHECK(whole.offset_in_bytes == 0);
 
     // Subrange: offset / size are in vertices, scaled by the stride.
     auto sub = verts.as_vertex_buffer({.offset = 10, .size = 20});
-    CHECK(sub.stride_in_bytes == sg::isize(sizeof(particle)));
-    CHECK(sub.offset_in_bytes == 10 * sg::isize(sizeof(particle)));
-    CHECK(sub.size_in_bytes == 20 * sg::isize(sizeof(particle)));
+    CHECK(sub.stride_in_bytes == isize(sizeof(particle)));
+    CHECK(sub.offset_in_bytes == 10 * isize(sizeof(particle)));
+    CHECK(sub.size_in_bytes == 20 * isize(sizeof(particle)));
 }
 
 INVOCABLE_TEST("sg - typed buffer<T>.as_uniform_buffer binds one element by index", (sg::context_handle const& ctx))
@@ -165,6 +167,6 @@ INVOCABLE_TEST("sg - typed buffer<T>.as_uniform_buffer binds one element by inde
     sg::buffer<particle> ub = ctx->persistent.create_buffer<particle>(16, sg::buffer_usage::uniform_buffer);
 
     auto v = ub.as_uniform_buffer(8); // element 8 -> byte offset 8 * sizeof(particle) = 256 (256-aligned)
-    CHECK(v.offset_in_bytes == 8 * sg::isize(sizeof(particle)));
-    CHECK(v.size_in_bytes == sg::isize(sizeof(particle)));
+    CHECK(v.offset_in_bytes == 8 * isize(sizeof(particle)));
+    CHECK(v.size_in_bytes == isize(sizeof(particle)));
 }

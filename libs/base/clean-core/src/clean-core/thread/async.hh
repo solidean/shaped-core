@@ -86,10 +86,10 @@ struct alignas(64) async_typed_node : cc::async_node_base
     [[nodiscard]] E* error_ptr() { return this->has_error() ? reinterpret_cast<E*>(this->payload()) : nullptr; }
 
 private:
-    static constexpr cc::isize max_of(cc::isize a, cc::isize b) { return a > b ? a : b; }
-    static constexpr cc::isize payload_bytes
-        = max_of(max_of(cc::isize(sizeof(T)), cc::isize(sizeof(E))), cc::isize(sizeof(impl::async_unresolved)));
-    alignas(16) cc::byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
+    static constexpr isize max_of(isize a, isize b) { return a > b ? a : b; }
+    static constexpr isize payload_bytes
+        = max_of(max_of(isize(sizeof(T)), isize(sizeof(E))), isize(sizeof(impl::async_unresolved)));
+    alignas(16) byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
 
 /// Type-erased teardown of the resolved payload: destroy a single U (the value or the error) at payload offset 0.

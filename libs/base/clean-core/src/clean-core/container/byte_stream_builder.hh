@@ -33,7 +33,7 @@ public:
     }
 
     /// Append raw bytes.
-    void add(cc::span<cc::byte const> bytes)
+    void add(cc::span<byte const> bytes)
     {
         auto const offset = _buffer.size();
         _buffer.resize_to_uninitialized(offset + bytes.size());
@@ -61,14 +61,14 @@ public:
     template <class Range>
     void add_pod_span_sized(Range const& range)
     {
-        this->add_pod(cc::u64(cc::span(range).size()));
+        this->add_pod(u64(cc::span(range).size()));
         this->add_pod_span(range);
     }
 
     /// Append a u64 length prefix, then the raw character bytes (disambiguates concatenated strings).
     void add_string(cc::string_view sv)
     {
-        this->add_pod(cc::u64(sv.size()));
+        this->add_pod(u64(sv.size()));
         this->add(sv.as_bytes());
     }
 
@@ -83,15 +83,15 @@ public:
 
     /// Append a bool as a single byte (0/1). bool lacks a unique object representation, so we never
     /// add_pod it directly.
-    void add_bool(bool b) { this->add_pod(cc::u8(b ? 1 : 0)); }
+    void add_bool(bool b) { this->add_pod(u8(b ? 1 : 0)); }
 
     /// Reset the length to zero, keeping the allocation for reuse.
     void clear() { _buffer.clear(); }
 
     /// View the accumulated bytes. Invalidated by the next mutating call.
-    [[nodiscard]] cc::span<cc::byte const> written_bytes() const { return _buffer; }
+    [[nodiscard]] cc::span<byte const> written_bytes() const { return _buffer; }
 
 private:
-    cc::vector<cc::byte> _buffer;
+    cc::vector<byte> _buffer;
 };
 } // namespace cc

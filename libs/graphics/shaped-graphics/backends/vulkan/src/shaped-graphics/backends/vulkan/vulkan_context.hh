@@ -46,7 +46,7 @@ public:
                    VkPhysicalDevice physical_device,
                    VkDevice device,
                    VkQueue queue,
-                   cc::u32 queue_family_index,
+                   u32 queue_family_index,
                    VkSemaphore epoch_timeline,
                    VkSemaphore submission_timeline,
                    VkDebugUtilsMessengerEXT debug_messenger)
@@ -67,7 +67,7 @@ public:
     // backend-typed API — prefer these when you already hold a vulkan_context
 
     [[nodiscard]] cc::result<std::unique_ptr<vulkan_command_list>> create_vulkan_command_list();
-    [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(cc::isize size_in_bytes,
+    [[nodiscard]] cc::result<vulkan_buffer_handle> create_vulkan_buffer(isize size_in_bytes,
                                                                         sg::buffer_usage usage,
                                                                         sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
@@ -88,7 +88,7 @@ public:
         return cc::result<std::unique_ptr<sg::command_list>>(create_vulkan_command_list());
     }
 
-    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(cc::isize size_in_bytes,
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
                                                                           sg::buffer_usage usage,
                                                                           sg::allocation_info const& alloc) override
     {
@@ -103,7 +103,7 @@ public:
 
     // Not implemented yet — return a not-implemented error (rather than aborting) so the sg throwing
     // façade turns it into a clean typed exception. Fill in with the real body when the path lands.
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(cc::isize) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize) override
     {
         return cc::error("vulkan memory_heap creation is not implemented yet");
     }
@@ -168,12 +168,12 @@ public:
     }
 
     // Async upload (ctx.upload) — not implemented yet.
-    void async_upload_bytes_to_buffer(sg::raw_buffer_handle, cc::pinned_data<cc::byte const>, cc::isize) override
+    void async_upload_bytes_to_buffer(sg::raw_buffer_handle, cc::pinned_data<byte const>, isize) override
     {
         CC_UNREACHABLE("vulkan async upload is not implemented yet");
     }
     void async_upload_bytes_to_texture(sg::raw_texture_handle,
-                                       cc::pinned_data<cc::byte const>,
+                                       cc::pinned_data<byte const>,
                                        sg::subresource_index const&,
                                        sg::texture_region const&) override
     {
@@ -181,7 +181,7 @@ public:
     }
 
     // Async download (ctx.download) — not implemented yet.
-    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
+    [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle, isize, isize) override
     {
         CC_UNREACHABLE("vulkan async download is not implemented yet");
     }
@@ -213,7 +213,7 @@ public:
 
     // Helper: index of a device memory type satisfying `type_bits` (from a requirements mask) and all
     // of `properties`. Returns UINT32_MAX if none matches.
-    [[nodiscard]] cc::u32 find_memory_type(cc::u32 type_bits, VkMemoryPropertyFlags properties) const;
+    [[nodiscard]] u32 find_memory_type(u32 type_bits, VkMemoryPropertyFlags properties) const;
 
     // Device-loss detection (mirror of the dx12 path; see sg::context::is_device_lost). If `r` is
     // VK_ERROR_DEVICE_LOST, records the sticky loss reason and returns true. `what` labels the failing
@@ -225,7 +225,7 @@ public:
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
     VkDevice _device = VK_NULL_HANDLE;
     VkQueue _queue = VK_NULL_HANDLE; // owned by the device, not destroyed
-    cc::u32 _queue_family_index = 0;
+    u32 _queue_family_index = 0;
 
     // Epoch machinery. The epoch timeline is signaled with the epoch value at the end of each epoch;
     // the submission timeline is a per-command-list value on the same queue (Vulkan's analog of dx12's

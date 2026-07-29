@@ -41,7 +41,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-CC_FORCE_INLINE cc::span<cc::byte const> as_bytes(char const* p, size_t n)
+CC_FORCE_INLINE cc::span<byte const> as_bytes(char const* p, size_t n)
 {
     return cc::span<char const>(p, isize(n)).as_bytes();
 }

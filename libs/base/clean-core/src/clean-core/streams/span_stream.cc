@@ -3,20 +3,15 @@
 
 namespace cc::impl
 {
-cc::result<cc::i64> span_adapter_flush(cc::byte*& curr,
-                                       cc::byte*& end,
-                                       cc::byte*& write_end,
-                                       void* ctx,
-                                       cc::i64 offset,
-                                       seek_dir dir,
-                                       cc::byte* /*first_write*/)
+cc::result<i64>
+span_adapter_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 offset, seek_dir dir, byte* /*first_write*/)
 {
     auto const& self = *static_cast<span_adapter_state const*>(ctx);
-    cc::byte* const base = self.base;
-    cc::isize const size = self.size;
-    cc::i64 const pos = cc::i64(curr - base);
+    byte* const base = self.base;
+    isize const size = self.size;
+    i64 const pos = i64(curr - base);
 
-    auto reposition = [&](cc::i64 target) -> cc::result<cc::i64>
+    auto reposition = [&](i64 target) -> cc::result<i64>
     {
         if (target < 0 || target > size)
             return cc::error("span stream: seek out of range");

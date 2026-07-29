@@ -2,6 +2,8 @@
 
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // dx12-specific transient-buffer invariant: the bump heap's 64 KiB placement granularity. The generic
 // transient contract (round-trips, independence, expiry, storage reuse, the deferred set_budget) is pinned
 // backend-agnostically in tests/transient/transient-test.cc and runs here too via the dx12 driver — this
@@ -22,7 +24,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
     auto handle = dx12::acquire_warp_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
-    c.transient.set_budget(cc::isize(512) * 1024); // applied at the next advance_epoch (see set_budget)
+    c.transient.set_budget(isize(512) * 1024); // applied at the next advance_epoch (see set_budget)
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
@@ -31,13 +33,13 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
         auto buf = c.transient.create_raw_buffer(256, usage);
         REQUIRE(buf != nullptr);
 
-        cc::byte src[256];
+        byte src[256];
         for (int i = 0; i < 256; ++i)
-            src[i] = cc::byte((i + e) & 0xFF);
+            src[i] = byte((i + e) & 0xFF);
 
         auto up = c.create_command_list();
         REQUIRE(up != nullptr);
-        up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+        up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
         c.submit_command_list(cc::move(up));
 
         auto down = c.create_command_list();
@@ -49,7 +51,7 @@ TEST("sg dx12 - transient buffer storage reused across many epochs")
         REQUIRE(bytes.has_value());
         bool matches = true;
         for (int i = 0; i < 256; ++i)
-            if (bytes.value()[i] != cc::byte((i + e) & 0xFF))
+            if (bytes.value()[i] != byte((i + e) & 0xFF))
                 matches = false;
         CHECK(matches);
 

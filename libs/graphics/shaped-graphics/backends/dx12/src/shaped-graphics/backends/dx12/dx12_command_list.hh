@@ -134,18 +134,16 @@ public:
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
-    void upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
-                                cc::span<cc::byte const> data,
-                                cc::isize offset_in_bytes) override;
+    void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
 
     void upload_bytes_to_texture(sg::raw_texture_handle texture,
-                                 cc::span<cc::byte const> pixels,
+                                 cc::span<byte const> pixels,
                                  sg::subresource_index const& subresource,
                                  sg::texture_region const& region) override;
 
     [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle buffer,
-                                                              cc::isize offset_in_bytes,
-                                                              cc::isize size_in_bytes) override;
+                                                              isize offset_in_bytes,
+                                                              isize size_in_bytes) override;
 
     [[nodiscard]] sg::bytes_future download_bytes_from_texture(sg::raw_texture_handle texture,
                                                                sg::subresource_index const& subresource,
@@ -153,9 +151,9 @@ protected:
 
     void copy_buffer_region(sg::raw_buffer_handle src,
                             sg::raw_buffer_handle dst,
-                            cc::isize src_offset_in_bytes,
-                            cc::isize dst_offset_in_bytes,
-                            cc::isize size_in_bytes) override;
+                            isize src_offset_in_bytes,
+                            isize dst_offset_in_bytes,
+                            isize size_in_bytes) override;
 
     // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
@@ -165,7 +163,7 @@ protected:
                                              cc::span<sg::array_buffer_access const> elements) override;
     void compute_declare_array_texture_access(cc::string_view binding_name,
                                               cc::span<sg::array_texture_access const> elements) override;
-    void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
+    void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
 
     // Raster rendering scope (reached through cmd.raster). Bodies in dx12_command_list.raster.cc.
     void raster_begin_rendering(sg::rendering_info const& info) override;
@@ -180,9 +178,9 @@ protected:
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
-    void raster_set_stencil_reference(sg::u32 reference) override;
+    void raster_set_stencil_reference(u32 reference) override;
     void raster_set_blend_constants(tg::vec4f constants) override;
-    void raster_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) override;
+    void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
 

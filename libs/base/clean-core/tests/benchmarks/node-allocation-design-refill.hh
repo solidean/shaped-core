@@ -10,5 +10,8 @@
 // real allocator cannot hit. It never actually fires in the timed loop (the batch fits one slab).
 namespace bench_design
 {
-cc::byte* cold_refill(cc::byte* base);
-}
+// Vocabulary types (i32/u32/u64/isize/byte/...) available bare inside bench_design, not leaked globally.
+using namespace cc::primitive_defines;
+
+byte* cold_refill(byte* base);
+} // namespace bench_design

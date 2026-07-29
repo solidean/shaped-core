@@ -4,6 +4,8 @@
 #include <shaped-graphics/context.hh>
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 // Backend-agnostic sg API tests. Each is an INVOCABLE_TEST taking a live context, so it runs against every
 // available backend: the per-backend entry driver (tests/backends/<backend>-entry.cc) creates a context and
 // invokes all of these. An alias (tests/backends/backends.cc) makes each runnable by its own name across
@@ -50,8 +52,8 @@ INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
 
     auto const before = ctx->current_epoch();
     ctx->advance_epoch_and_wait_for_idle();
-    CHECK(cc::u64(ctx->current_epoch()) > cc::u64(before));
-    CHECK(cc::u64(ctx->completed_epoch()) >= cc::u64(before)); // the epoch we started in is now done
+    CHECK(u64(ctx->current_epoch()) > u64(before));
+    CHECK(u64(ctx->completed_epoch()) >= u64(before)); // the epoch we started in is now done
 }
 
 INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle const& ctx))
@@ -64,9 +66,9 @@ INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::conte
     {
         auto const closing = ctx->current_epoch();
         ctx->advance_epoch(0); // fully drain the GPU
-        CHECK(cc::u64(ctx->current_epoch()) > cc::u64(closing));
-        CHECK(cc::u64(ctx->completed_epoch()) >= cc::u64(closing));
-        CHECK(cc::u64(ctx->completed_epoch()) < cc::u64(ctx->current_epoch()));
+        CHECK(u64(ctx->current_epoch()) > u64(closing));
+        CHECK(u64(ctx->completed_epoch()) >= u64(closing));
+        CHECK(u64(ctx->completed_epoch()) < u64(ctx->current_epoch()));
     }
 }
 
@@ -78,5 +80,5 @@ INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_han
     ctx->process_completed_epochs();
     ctx->wait_for_next_inflight_epoch();
     ctx->wait_for_epoch(ctx->completed_epoch());
-    CHECK(cc::u64(ctx->completed_epoch()) <= cc::u64(ctx->current_epoch()));
+    CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
 }

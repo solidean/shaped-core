@@ -50,7 +50,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_context::create_dx12_pipeline_layou
 
 cc::result<dx12_compute_pipeline_handle> dx12_context::create_dx12_compute_pipeline(sg::compiled_shader const& shader,
                                                                                     dx12_pipeline_layout_handle layout,
-                                                                                    cc::span<cc::byte const> cached_pipeline,
+                                                                                    cc::span<byte const> cached_pipeline,
                                                                                     sg::lifetime_scope scope)
 {
     require_persistent(scope);

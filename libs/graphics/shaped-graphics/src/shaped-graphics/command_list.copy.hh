@@ -12,11 +12,11 @@ namespace sg
 /// optional and default to 0.
 struct buffer_bytes_copy
 {
-    raw_buffer_handle src;             ///< copy source; must not be null; needs buffer_usage::copy_src
-    raw_buffer_handle dst;             ///< copy destination; must not be null; needs buffer_usage::copy_dst
-    cc::isize size_in_bytes;           ///< bytes to copy; 0 is a valid no-op
-    cc::isize src_offset_in_bytes = 0; ///< byte offset into src
-    cc::isize dst_offset_in_bytes = 0; ///< byte offset into dst
+    raw_buffer_handle src;         ///< copy source; must not be null; needs buffer_usage::copy_src
+    raw_buffer_handle dst;         ///< copy destination; must not be null; needs buffer_usage::copy_dst
+    isize size_in_bytes;           ///< bytes to copy; 0 is a valid no-op
+    isize src_offset_in_bytes = 0; ///< byte offset into src
+    isize dst_offset_in_bytes = 0; ///< byte offset into dst
 };
 
 /// Typed variant in units of T (cmd.copy.buffer_data_region<T>) — count and offsets are in elements
@@ -27,9 +27,9 @@ struct buffer_data_copy
 {
     raw_buffer_handle src;
     raw_buffer_handle dst;
-    cc::isize count;          ///< number of T elements to copy
-    cc::isize src_offset = 0; ///< element offset into src
-    cc::isize dst_offset = 0; ///< element offset into dst
+    isize count;          ///< number of T elements to copy
+    isize src_offset = 0; ///< element offset into src
+    isize dst_offset = 0; ///< element offset into dst
 };
 
 /// Device→device copy facade for a command list, reached as `cmd.copy`.
@@ -52,7 +52,7 @@ public:
     void buffer_data_region(buffer_data_copy<T> args)
     {
         static_assert(std::is_trivially_copyable_v<T>, "copy element type must be trivially copyable");
-        auto const stride = cc::isize(sizeof(T));
+        auto const stride = isize(sizeof(T));
         buffer_bytes_region({.src = cc::move(args.src),
                              .dst = cc::move(args.dst),
                              .size_in_bytes = args.count * stride,

@@ -27,9 +27,9 @@ struct overridden
     friend u64 hash(overridden const& x) { return x.v; }
 };
 
-cc::span<cc::byte const> bytes_of(char const* s, isize n)
+cc::span<byte const> bytes_of(char const* s, isize n)
 {
-    return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(s), n);
+    return cc::span<byte const>(reinterpret_cast<byte const*>(s), n);
 }
 } // namespace
 
@@ -106,7 +106,7 @@ TEST("hash - finalize")
 
 TEST("hash - make_hash_of_bytes known answers (XXH3-64, v0.8.3)")
 {
-    cc::span<cc::byte const> const empty;
+    cc::span<byte const> const empty;
     CHECK(cc::make_hash_of_bytes(empty, 0) == 0x2d06800538d394c2ull);
     CHECK(cc::make_hash_of_bytes(bytes_of("abc", 3), 0) == 0x78af5f94892f3950ull);
     CHECK(cc::make_hash_of_bytes(bytes_of("hello world", 11), 0) == 0xd447b1ea40e6988bull);

@@ -23,7 +23,7 @@ struct json_parser
     cc::read_stream* in = nullptr;
 
     // current buffered window and our position within it; base_offset counts bytes consumed before the window
-    cc::span<cc::byte const> window;
+    cc::span<byte const> window;
     isize wpos = 0;
     i64 base_offset = 0;
 
@@ -450,7 +450,7 @@ cc::result<document> read(cc::read_stream& in)
     return parser.parse();
 }
 
-cc::result<document> read(cc::span<cc::byte const> bytes)
+cc::result<document> read(cc::span<byte const> bytes)
 {
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
@@ -459,6 +459,6 @@ cc::result<document> read(cc::span<cc::byte const> bytes)
 
 cc::result<document> read(cc::string_view text)
 {
-    return read(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(text.data()), text.size()));
+    return read(cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size()));
 }
 } // namespace babel::json

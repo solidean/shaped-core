@@ -66,11 +66,11 @@ char const* vk_result_name(VkResult r)
     }
 }
 
-cc::u32 vulkan_context::find_memory_type(cc::u32 type_bits, VkMemoryPropertyFlags properties) const
+u32 vulkan_context::find_memory_type(u32 type_bits, VkMemoryPropertyFlags properties) const
 {
     VkPhysicalDeviceMemoryProperties mem = {};
     vkGetPhysicalDeviceMemoryProperties(_physical_device, &mem);
-    for (cc::u32 i = 0; i < mem.memoryTypeCount; ++i)
+    for (u32 i = 0; i < mem.memoryTypeCount; ++i)
         if ((type_bits & (1u << i)) && (mem.memoryTypes[i].propertyFlags & properties) == properties)
             return i;
     return UINT32_MAX;

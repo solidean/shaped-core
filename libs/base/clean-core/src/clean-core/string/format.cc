@@ -2,23 +2,25 @@
 
 #include <charconv>
 
+using namespace cc::primitive_defines;
+
 // This is the ONLY translation unit that includes <charconv>: it is the seam where value→text happens.
 // A vendored number-formatting backend would replace just the chars_* definitions here.
 
 namespace
 {
 // span-backed sink write: copy what fits, but always count the would-be length (snprintf semantics)
-void span_sink_write(void* ctx, char const* data, cc::isize size)
+void span_sink_write(void* ctx, char const* data, isize size)
 {
     auto& st = *static_cast<cc::impl::format_span_sink_state*>(ctx);
-    cc::isize const room = st.total < st.capacity ? st.capacity - st.total : 0;
-    cc::isize const n = size < room ? size : room;
-    for (cc::isize i = 0; i < n; ++i)
+    isize const room = st.total < st.capacity ? st.capacity - st.total : 0;
+    isize const n = size < room ? size : room;
+    for (isize i = 0; i < n; ++i)
         st.data[st.total + i] = data[i];
     st.total += size;
 }
 
-void string_sink_write(void* ctx, char const* data, cc::isize size)
+void string_sink_write(void* ctx, char const* data, isize size)
 {
     auto& s = *static_cast<cc::string*>(ctx);
     if (size > 0)
@@ -26,7 +28,7 @@ void string_sink_write(void* ctx, char const* data, cc::isize size)
 }
 
 // shared float text production via std::to_chars; mode is 's' (shortest), 'f', 'e', or 'g'
-cc::isize format_chars_from_float_impl(char* first, char* last, char mode, double v, float vf, bool is_double, cc::isize precision)
+isize format_chars_from_float_impl(char* first, char* last, char mode, double v, float vf, bool is_double, isize precision)
 {
     std::to_chars_result r;
     if (mode == 's') // shortest round-trip
@@ -40,7 +42,7 @@ cc::isize format_chars_from_float_impl(char* first, char* last, char mode, doubl
                       : std::to_chars(first, last, vf, fmt, int(precision));
     }
     CC_ASSERT(r.ec == std::errc(), "cc::format: float buffer too small");
-    return cc::isize(r.ptr - first);
+    return isize(r.ptr - first);
 }
 
 char float_mode_of(char presentation)
@@ -48,7 +50,7 @@ char float_mode_of(char presentation)
     return presentation == '\0' ? 's' : char(cc::to_lower(presentation));
 }
 
-cc::isize float_precision_of(char mode, cc::isize precision)
+isize float_precision_of(char mode, isize precision)
 {
     // f/e/g default to 6 digits of precision (matching std::format); shortest mode ignores precision
     if ((mode == 'f' || mode == 'e' || mode == 'g') && precision < 0)
@@ -58,16 +60,16 @@ cc::isize float_precision_of(char mode, cc::isize precision)
 
 // inserts `sep` every `group` digits (counting from the right) into `digits`, writing the result to `out`.
 // returns the grouped length. e.g. group_digits(out, "1232453", '\'', 3) -> "1'232'453" (length 9)
-cc::isize group_digits(cc::span<char> out, cc::string_view digits, char sep, int group)
+isize group_digits(cc::span<char> out, cc::string_view digits, char sep, int group)
 {
-    cc::isize const dn = digits.size();
-    cc::isize const seps = dn > 0 ? (dn - 1) / group : 0;
-    cc::isize const total = dn + seps;
+    isize const dn = digits.size();
+    isize const seps = dn > 0 ? (dn - 1) / group : 0;
+    isize const total = dn + seps;
     CC_ASSERT(total <= out.size(), "cc::format: grouping buffer too small");
 
-    cc::isize oi = total;
+    isize oi = total;
     int count = 0;
-    for (cc::isize i = dn; i-- > 0;)
+    for (isize i = dn; i-- > 0;)
     {
         if (count == group)
         {
@@ -81,13 +83,13 @@ cc::isize group_digits(cc::span<char> out, cc::string_view digits, char sep, int
 }
 
 // shared float rendering for both float and double; `n` is the seam-produced length in `buf`
-void format_float_common(cc::format_sink const& sink, cc::impl::format_spec const& spec, char* buf, cc::isize n)
+void format_float_common(cc::format_sink const& sink, cc::impl::format_spec const& spec, char* buf, isize n)
 {
     using namespace cc::impl;
 
     // uppercase variants: uppercase the seam output (affects e/E and inf/nan), then split sign
     if (spec.presentation == 'F' || spec.presentation == 'E' || spec.presentation == 'G')
-        for (cc::isize i = 0; i < n; ++i)
+        for (isize i = 0; i < n; ++i)
             buf[i] = cc::to_upper(buf[i]);
 
     cc::string_view all(buf, n);
@@ -102,15 +104,15 @@ void format_float_common(cc::format_sink const& sink, cc::impl::format_spec cons
     char gbuf[cc::impl::format_chars_float_max * 2];
     if (spec.group != '\0')
     {
-        cc::isize k = 0;
+        isize k = 0;
         while (k < all.size() && cc::is_digit(all[k]))
             ++k;
         if (k > 0)
         {
-            cc::isize const gi = group_digits(cc::span<char>(gbuf, cc::isize(sizeof gbuf)),
-                                              all.subview({.offset = 0, .size = k}), spec.group, 3);
+            isize const gi = group_digits(cc::span<char>(gbuf, isize(sizeof gbuf)),
+                                          all.subview({.offset = 0, .size = k}), spec.group, 3);
             cc::string_view const rest = all.subview(k);
-            for (cc::isize i = 0; i < rest.size(); ++i)
+            for (isize i = 0; i < rest.size(); ++i)
                 gbuf[gi + i] = rest[i];
             all = cc::string_view(gbuf, gi + rest.size());
         }

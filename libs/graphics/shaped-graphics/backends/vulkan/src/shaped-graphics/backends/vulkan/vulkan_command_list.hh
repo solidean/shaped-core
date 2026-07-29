@@ -36,18 +36,18 @@ public:
 
 protected:
     // TODO: inline buffer transfer for the vulkan backend (see the dx12 backend for the reference impl).
-    void upload_bytes_to_buffer(sg::raw_buffer_handle, cc::span<cc::byte const>, cc::isize) override
+    void upload_bytes_to_buffer(sg::raw_buffer_handle, cc::span<byte const>, isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer upload is not implemented yet");
     }
     void upload_bytes_to_texture(sg::raw_texture_handle,
-                                 cc::span<cc::byte const>,
+                                 cc::span<byte const>,
                                  sg::subresource_index const&,
                                  sg::texture_region const&) override
     {
         CC_UNREACHABLE("vulkan inline texture upload is not implemented yet");
     }
-    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle, cc::isize, cc::isize) override
+    [[nodiscard]] sg::bytes_future download_bytes_from_buffer(sg::raw_buffer_handle, isize, isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer download is not implemented yet");
     }
@@ -57,7 +57,7 @@ protected:
     {
         CC_UNREACHABLE("vulkan inline texture download is not implemented yet");
     }
-    void copy_buffer_region(sg::raw_buffer_handle, sg::raw_buffer_handle, cc::isize, cc::isize, cc::isize) override
+    void copy_buffer_region(sg::raw_buffer_handle, sg::raw_buffer_handle, isize, isize, isize) override
     {
         CC_UNREACHABLE("vulkan inline buffer copy is not implemented yet");
     }
@@ -80,7 +80,7 @@ protected:
     {
         CC_UNREACHABLE("vulkan compute declare_array_texture_access is not implemented yet");
     }
-    void compute_set_inline_constants(cc::span<cc::byte const>, cc::optional<cc::isize>) override
+    void compute_set_inline_constants(cc::span<byte const>, cc::optional<isize>) override
     {
         CC_UNREACHABLE("vulkan compute set_inline_constants is not implemented yet");
     }
@@ -112,9 +112,9 @@ protected:
         CC_UNREACHABLE("vulkan raster draw is not implemented yet");
     }
     void raster_set_scissor(tg::aabb2i const&) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
-    void raster_set_stencil_reference(sg::u32) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
+    void raster_set_stencil_reference(u32) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
     void raster_set_blend_constants(tg::vec4f) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
-    void raster_set_inline_constants(cc::span<cc::byte const>, cc::optional<cc::isize>) override
+    void raster_set_inline_constants(cc::span<byte const>, cc::optional<isize>) override
     {
         CC_UNREACHABLE("vulkan raster draw is not implemented yet");
     }

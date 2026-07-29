@@ -38,7 +38,7 @@ std::string temp_path(char const* name)
 
 // --- cc single-byte fast path: straight through the exposed window, refill/drain only when it fills --------
 
-inline void cc_put(cc::seekable_write_stream& s, cc::byte b)
+inline void cc_put(cc::seekable_write_stream& s, byte b)
 {
     auto w = s.writable_bytes();
     if (w.empty())
@@ -50,7 +50,7 @@ inline void cc_put(cc::seekable_write_stream& s, cc::byte b)
     s.produce(1);
 }
 
-inline cc::byte cc_get(cc::seekable_read_stream& s)
+inline byte cc_get(cc::seekable_read_stream& s)
 {
     auto r = s.ready_bytes();
     if (r.empty())
@@ -58,14 +58,14 @@ inline cc::byte cc_get(cc::seekable_read_stream& s)
         (void)s.flush();
         r = s.ready_bytes();
     }
-    cc::byte const b = r[0];
+    byte const b = r[0];
     s.consume(1);
     return b;
 }
 
 // --- one pass = open, transfer `total_bytes`, close. chunk == 1 is byte-at-a-time, else bulk of `chunk`. ----
 
-u64 cc_write(cc::string_view path, cc::span<cc::byte const> chunk, isize chunk_n)
+u64 cc_write(cc::string_view path, cc::span<byte const> chunk, isize chunk_n)
 {
     auto a = cc::file_write_stream_adapter::create(path);
     CC_ASSERT(a.has_value(), "open for write failed");
@@ -75,7 +75,7 @@ u64 cc_write(cc::string_view path, cc::span<cc::byte const> chunk, isize chunk_n
     if (chunk_n == 1)
         for (isize i = 0; i < total_bytes; ++i)
         {
-            cc_put(s, cc::byte(i));
+            cc_put(s, byte(i));
             acc ^= u64(i);
         }
     else
@@ -109,7 +109,7 @@ u64 std_write(std::string const& path, char const* chunk, isize chunk_n)
     return acc;
 }
 
-u64 cc_read(cc::string_view path, cc::span<cc::byte> chunk, isize chunk_n)
+u64 cc_read(cc::string_view path, cc::span<byte> chunk, isize chunk_n)
 {
     auto a = cc::file_read_stream_adapter::open(path);
     CC_ASSERT(a.has_value(), "open for read failed");
@@ -173,7 +173,7 @@ cc::string granularity_label(isize chunk_n)
 void run()
 {
     paths const p;
-    auto cc_buf = cc::vector<cc::byte>::create_filled(max_chunk, cc::byte(0xA5));
+    auto cc_buf = cc::vector<byte>::create_filled(max_chunk, byte(0xA5));
     // std path takes a char*; char aliases anything, so the std side reuses cc_buf rather than a second buffer.
     char* const std_buf = reinterpret_cast<char*>(cc_buf.data());
 
@@ -190,8 +190,8 @@ void run()
 
     for (isize const chunk_n : chunks)
     {
-        auto const cc_chunk = cc::span<cc::byte const>(cc_buf).first_n(chunk_n);
-        auto const cc_chunk_mut = cc::span<cc::byte>(cc_buf).first_n(chunk_n);
+        auto const cc_chunk = cc::span<byte const>(cc_buf).first_n(chunk_n);
+        auto const cc_chunk_mut = cc::span<byte>(cc_buf).first_n(chunk_n);
 
         double const cc_w = mbps(bench::measure_units_per_sec(
             double(total_bytes), [&] { return cc_write(p.cc_view(), cc_chunk, chunk_n); }));

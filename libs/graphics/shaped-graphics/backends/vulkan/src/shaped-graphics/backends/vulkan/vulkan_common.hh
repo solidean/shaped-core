@@ -20,6 +20,6 @@ namespace sg::backend::vulkan
                                        char const* what,
                                        cc::source_location site = cc::source_location::current())
 {
-    return cc::error(cc::format("{} ({} = {})", what, vk_result_name(r), cc::i32(r)), site);
+    return cc::error(cc::format("{} ({} = {})", what, vk_result_name(r), i32(r)), site);
 }
 } // namespace sg::backend::vulkan

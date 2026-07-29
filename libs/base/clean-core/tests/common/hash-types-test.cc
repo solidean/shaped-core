@@ -20,7 +20,7 @@ TEST("hash types - string and string_view hash equally (heterogeneous)")
     cc::string_view const sv = "hello world";
     CHECK(cc::make_hash(s) == cc::make_hash(sv));
 
-    auto const raw = cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>("hello world"), 11);
+    auto const raw = cc::span<byte const>(reinterpret_cast<byte const*>("hello world"), 11);
     CHECK(cc::make_hash(s) == cc::make_hash_of_bytes(raw));
 
     cc::string const other = "hello worle";

@@ -47,7 +47,7 @@ vulkan_buffer::~vulkan_buffer()
     }
 }
 
-cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(cc::isize size_in_bytes,
+cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size_in_bytes,
                                                                       sg::buffer_usage usage,
                                                                       sg::allocation_info const& alloc)
 {
@@ -77,7 +77,7 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(cc::isize 
         vkGetBufferMemoryRequirements(_device, buffer, &req);
 
         // GPU-resident: sg exposes no host-visible buffers.
-        cc::u32 const type = find_memory_type(cc::u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        u32 const type = find_memory_type(u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (type == UINT32_MAX)
         {
             vkDestroyBuffer(_device, buffer, nullptr);

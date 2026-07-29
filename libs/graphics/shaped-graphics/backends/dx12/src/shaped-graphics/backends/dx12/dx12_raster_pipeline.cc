@@ -213,14 +213,14 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     return dx12_raster_pipeline_handle(cc::move(pipeline));
 }
 
-cc::pinned_data<cc::byte const> dx12_raster_pipeline::cached_pipeline_data() const
+cc::pinned_data<byte const> dx12_raster_pipeline::cached_pipeline_data() const
 {
     ComPtr<ID3DBlob> blob;
     if (FAILED(pipeline_state->GetCachedBlob(&blob)) || blob->GetBufferSize() == 0)
         return {};
 
-    auto const bytes = cc::span<cc::byte const>(static_cast<cc::byte const*>(blob->GetBufferPointer()),
-                                                cc::isize(blob->GetBufferSize()));
-    return cc::pinned_data<cc::byte>::create_copy_of(bytes);
+    auto const bytes
+        = cc::span<byte const>(static_cast<byte const*>(blob->GetBufferPointer()), isize(blob->GetBufferSize()));
+    return cc::pinned_data<byte>::create_copy_of(bytes);
 }
 } // namespace sg::backend::dx12

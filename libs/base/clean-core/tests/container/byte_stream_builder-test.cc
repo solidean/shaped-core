@@ -2,15 +2,17 @@
 #include <clean-core/container/byte_stream_builder.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 TEST("byte_stream_builder - basic append + determinism")
 {
     cc::byte_stream_builder a;
-    a.add_pod(cc::i32(42));
+    a.add_pod(i32(42));
     a.add_string("shaped");
     a.add_bool(true);
 
     cc::byte_stream_builder b;
-    b.add_pod(cc::i32(42));
+    b.add_pod(i32(42));
     b.add_string("shaped");
     b.add_bool(true);
 
@@ -19,7 +21,7 @@ TEST("byte_stream_builder - basic append + determinism")
 
     // a different value diverges
     cc::byte_stream_builder c;
-    c.add_pod(cc::i32(43));
+    c.add_pod(i32(43));
     c.add_string("shaped");
     c.add_bool(true);
     CHECK(cc::hash128::create(a.written_bytes(), 0) != cc::hash128::create(c.written_bytes(), 0));
@@ -50,7 +52,7 @@ TEST("byte_stream_builder - pod span sized vs unsized")
     sized.add_pod_span_sized(cc::span<int const>(data, 3));
 
     // sized carries a u64 count prefix, so it is strictly longer
-    CHECK(sized.written_bytes().size() == raw.written_bytes().size() + cc::isize(sizeof(cc::u64)));
+    CHECK(sized.written_bytes().size() == raw.written_bytes().size() + isize(sizeof(u64)));
 }
 
 TEST("byte_stream_builder - clear reuses the buffer")
@@ -69,10 +71,10 @@ TEST("byte_stream_builder - clear reuses the buffer")
 TEST("byte_stream_builder - optional presence")
 {
     cc::byte_stream_builder some;
-    some.add_optional(cc::optional<cc::i32>(7));
+    some.add_optional(cc::optional<i32>(7));
 
     cc::byte_stream_builder none;
-    none.add_optional(cc::optional<cc::i32>(cc::nullopt));
+    none.add_optional(cc::optional<i32>(cc::nullopt));
 
     CHECK(cc::hash128::create(some.written_bytes(), 0) != cc::hash128::create(none.written_bytes(), 0));
 }

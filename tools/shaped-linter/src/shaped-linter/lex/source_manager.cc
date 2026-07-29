@@ -23,7 +23,7 @@ cc::result<source_buffer const*> source_manager::add_from_file(cc::string_view p
     auto size = stream.size();
     CC_RETURN_IF_ERROR(size);
 
-    auto bytes = cc::vector<cc::byte>::create_defaulted(size.value());
+    auto bytes = cc::vector<byte>::create_defaulted(size.value());
     CC_RETURN_IF_ERROR(stream.read_exact(bytes));
 
     auto text = cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size()));

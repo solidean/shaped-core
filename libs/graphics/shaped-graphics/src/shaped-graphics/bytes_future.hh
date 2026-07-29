@@ -72,7 +72,7 @@ public:
     /// Backs a future by a destination `data` (bytes plus the owner that keeps them alive), with
     /// completion tracked by `waiter`. The backend fills `data` before signaling the waiter ready.
     /// `data` may be empty. This is the single seam a future-provided-destination download reuses.
-    bytes_future(cc::pinned_data<cc::byte const> data, std::shared_ptr<bytes_waiter> waiter)
+    bytes_future(cc::pinned_data<byte const> data, std::shared_ptr<bytes_waiter> waiter)
       : _data(cc::move(data)), _waiter(cc::move(waiter))
     {
     }
@@ -89,16 +89,16 @@ public:
     /// The result bytes if ready (polls), else nullopt. The returned pinned_data keeps the bytes alive
     /// on its own, so it stays valid even past this future's lifetime. To block until delivered, use
     /// ctx.wait_for(future).
-    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> try_get_bytes() const;
+    [[nodiscard]] cc::optional<cc::pinned_data<byte const>> try_get_bytes() const;
 
     // members
 private:
     /// Blocks until ready, then returns the bytes. Returns nullopt if invalid or if blocking cannot
     /// make progress (the recording list is not yet submitted, or the download was cancelled). Reached
     /// only through context::wait_for — a blocking wait is a context-level effect, not a future method.
-    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_get_bytes() const;
+    [[nodiscard]] cc::optional<cc::pinned_data<byte const>> wait_get_bytes() const;
 
-    cc::pinned_data<cc::byte const> _data; // destination bytes + owner; valid once the waiter is ready
+    cc::pinned_data<byte const> _data; // destination bytes + owner; valid once the waiter is ready
     std::shared_ptr<bytes_waiter> _waiter;
 };
 

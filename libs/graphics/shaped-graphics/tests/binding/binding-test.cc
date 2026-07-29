@@ -10,6 +10,8 @@
 #include <memory>
 #include <type_traits>
 
+using namespace cc::primitive_defines;
+
 // The bind-path handles are shared_ptr to immutable backend objects.
 static_assert(std::is_same_v<sg::binding_group_layout_handle, std::shared_ptr<sg::binding_group_layout const>>);
 static_assert(std::is_same_v<sg::pipeline_layout_handle, std::shared_ptr<sg::pipeline_layout const>>);
@@ -23,15 +25,15 @@ namespace
 {
 struct test_buffer final : sg::raw_buffer
 {
-    test_buffer(cc::isize size_in_bytes, sg::buffer_usage usage) : sg::raw_buffer(size_in_bytes, usage) {}
+    test_buffer(isize size_in_bytes, sg::buffer_usage usage) : sg::raw_buffer(size_in_bytes, usage) {}
 };
 
 struct particle
 {
-    sg::u32 a, b, c, d;
+    u32 a, b, c, d;
 };
 
-std::shared_ptr<test_buffer> make_buffer(sg::isize size, sg::buffer_usage usage)
+std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usage usage)
 {
     return std::make_shared<test_buffer>(size, usage);
 }

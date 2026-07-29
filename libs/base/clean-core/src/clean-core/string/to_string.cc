@@ -2,6 +2,8 @@
 
 #include <charconv>
 
+using namespace cc::primitive_defines;
+
 // Numbers go straight through std::to_chars into a small stack buffer; the result is copied into a cc::string
 // (whose SSO means none of these allocate in practice). No cc::format / std::format overhead on this path.
 
@@ -12,7 +14,7 @@ cc::string integer_to_string(T v)
 {
     char buf[24]; // 64-bit decimal: up to 20 digits + sign
     auto const r = std::to_chars(buf, buf + sizeof(buf), v);
-    return cc::string(buf, cc::isize(r.ptr - buf));
+    return cc::string(buf, isize(r.ptr - buf));
 }
 
 template <class T>
@@ -20,7 +22,7 @@ cc::string float_to_string(T v)
 {
     char buf[64]; // ample for shortest round-trip of float/double
     auto const r = std::to_chars(buf, buf + sizeof(buf), v);
-    return cc::string(buf, cc::isize(r.ptr - buf));
+    return cc::string(buf, isize(r.ptr - buf));
 }
 } // namespace
 
@@ -30,7 +32,7 @@ cc::string cc::to_string(void const* ptr)
     buf[0] = '0';
     buf[1] = 'x';
     auto const r = std::to_chars(buf + 2, buf + sizeof(buf), reinterpret_cast<uintptr_t>(ptr), 16);
-    return cc::string(buf, cc::isize(r.ptr - buf));
+    return cc::string(buf, isize(r.ptr - buf));
 }
 
 cc::string cc::to_string(bool b)

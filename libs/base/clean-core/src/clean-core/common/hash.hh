@@ -79,9 +79,9 @@ struct hash_trait<T*>
     [[nodiscard]] static u64 hash(T* p) { return reinterpret_cast<u64>(p); }
 };
 template <>
-struct hash_trait<cc::nullptr_t>
+struct hash_trait<nullptr_t>
 {
-    [[nodiscard]] static constexpr u64 hash(cc::nullptr_t) { return 0; }
+    [[nodiscard]] static constexpr u64 hash(nullptr_t) { return 0; }
 };
 } // namespace cc::custom
 
@@ -122,7 +122,7 @@ namespace cc
 /// 64-bit XXH3 hash of a byte range (the 64-bit sibling of hash128::create). Stable for a given
 /// (data, seed); a seed of 0 selects XXH3's unseeded variant. The workhorse behind byte-range hashes
 /// such as strings; <xxhash.h> stays private to hash.cc.
-[[nodiscard]] CC_PURE u64 make_hash_of_bytes(cc::span<cc::byte const> data, u64 seed = 0);
+[[nodiscard]] CC_PURE u64 make_hash_of_bytes(cc::span<byte const> data, u64 seed = 0);
 
 // --- make_hash / make_hash_finalized --------------------------------------------------------------
 

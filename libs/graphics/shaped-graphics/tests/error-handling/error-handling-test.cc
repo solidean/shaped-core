@@ -11,6 +11,8 @@
 #include <shaped-graphics/raw_texture.hh>
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 // Goal of this topic (see docs/error-handling.md): pin that every backend's PUBLIC entry point performs
 // its cheap contract validation, so it can't be silently dropped. Each test is an INVOCABLE_TEST run
 // against every available backend (see tests/backends/backends.cc).
@@ -56,15 +58,15 @@ INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bou
     auto buf = ctx->persistent.create_raw_buffer(256, copy_both);
     REQUIRE(buf != nullptr);
 
-    CHECK_ASSERTS(sg::buffer<cc::u32[4]>::from_raw(buf).as_uniform_buffer()); // lacks uniform_buffer usage
-    CHECK_ASSERTS(sg::buffer<cc::u32>::from_raw(buf).as_readonly_buffer());   // lacks readonly_buffer usage
-    CHECK_ASSERTS(sg::buffer<cc::u32>::from_raw(buf).as_readwrite_buffer());  // lacks readwrite_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(buf).as_uniform_buffer()); // lacks uniform_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readonly_buffer());   // lacks readonly_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readwrite_buffer());  // lacks readwrite_buffer usage
 
     // A readonly buffer accepts a readonly view but must still reject an out-of-range or negative range.
     auto ro = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readonly_buffer);
     REQUIRE(ro != nullptr);
-    CHECK_ASSERTS(sg::buffer<cc::u32>::from_raw(ro).as_readonly_buffer({.offset = 0, .size = 1024})); // 1024 * 4 > 256 bytes
-    CHECK_ASSERTS(sg::buffer<cc::u32>::from_raw(ro).as_readonly_buffer({.offset = -1, .size = 1})); // negative offset
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(ro).as_readonly_buffer({.offset = 0, .size = 1024})); // 1024 * 4 > 256 bytes
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(ro).as_readonly_buffer({.offset = -1, .size = 1}));   // negative offset
 }
 
 INVOCABLE_TEST("sg error handling - uniform view requires 256-byte-aligned offset", (sg::context_handle const& ctx))
@@ -75,7 +77,7 @@ INVOCABLE_TEST("sg error handling - uniform view requires 256-byte-aligned offse
     REQUIRE(ub != nullptr);
 
     // A uniform block offset must be 256-byte aligned (element 8 of a 16-byte block -> byte 128).
-    CHECK_ASSERTS(sg::buffer<cc::u32[4]>::from_raw(ub).as_uniform_buffer(8));
+    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(ub).as_uniform_buffer(8));
 }
 
 INVOCABLE_TEST("sg error handling - texture creation validates its shape", (sg::context_handle const& ctx))
@@ -108,8 +110,8 @@ INVOCABLE_TEST("sg error handling - inline upload validates its arguments", (sg:
     REQUIRE(dst != nullptr);
     REQUIRE(no_dst != nullptr);
 
-    cc::byte payload[16] = {};
-    auto const bytes = cc::span<cc::byte const>(payload, 16);
+    byte payload[16] = {};
+    auto const bytes = cc::span<byte const>(payload, 16);
 
     auto cmd = ctx->create_command_list();
 
@@ -215,15 +217,14 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     REQUIRE(buf != nullptr);
 
     // A view bound to a name the layout does not declare.
-    sg::named_view const unknown_name
-        = {.name = "Nope", .view = sg::buffer<cc::u32>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const unknown_name = {.name = "Nope", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&unknown_name, 1)),
                     sg::binding_group_exception);
     // The fallible core surfaces the same failure as an error rather than throwing.
     CHECK(ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&unknown_name, 1)).has_error());
 
     // A read-only view bound to a read-write binding: right name, wrong kind.
-    sg::named_view const wrong_kind = {.name = "Data", .view = sg::buffer<cc::u32>::from_raw(buf).as_readonly_buffer()};
+    sg::named_view const wrong_kind = {.name = "Data", .view = sg::buffer<u32>::from_raw(buf).as_readonly_buffer()};
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&wrong_kind, 1)),
                     sg::binding_group_exception);
 

@@ -12,7 +12,7 @@ struct executed_operation
 {
     /// Per-step generator state, rolled for every operation. If the operation consumes a cc::random&,
     /// that generator is reconstructed via cc::random::from_state(state), which makes runs replayable.
-    cc::u64 state = 0;
+    u64 state = 0;
 
     op_index operation = op_index::invalid;
 

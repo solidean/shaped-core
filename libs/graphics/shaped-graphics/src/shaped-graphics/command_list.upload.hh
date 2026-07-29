@@ -44,7 +44,7 @@ public:
     /// The source bytes are copied immediately: safe to mutate or free them once this returns.
     /// The write is visible to later commands in the same list. Empty span = no-op.
     /// TODO: version with pinned_data that tries to copy it in parallel and blocks on submit?
-    void bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, isize offset_in_bytes = 0);
+    void bytes_to_buffer(raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes = 0);
 
     /// Uploads a trivially-copyable contiguous range. `offset_in_elements` counts the range's value type.
     /// See bytes_to_buffer for the contract.
@@ -74,7 +74,7 @@ public:
     /// Preconditions: the subresource exists; `region` is in bounds and block-aligned for a block-compressed format.
     /// `pixels.size()` equals the box's tightly-packed byte size (rows = height-in-blocks, row bytes = width-in-blocks × block-bytes).
     void bytes_to_texture(raw_texture_handle texture,
-                          cc::span<cc::byte const> pixels,
+                          cc::span<byte const> pixels,
                           subresource_index const& subresource = {},
                           cc::optional<texture_region> region = {});
 

@@ -44,9 +44,9 @@ struct dx12_async_download_job
     std::shared_ptr<dx12_texture const> texture_source; // read source texture, or empty for a buffer read
     dx12_texture_footprint footprint;                   // the texture region's copy footprint (texture reads)
     bool is_texture = false;                            // discriminant: texture read vs buffer read
-    cc::isize src_offset = 0;
-    cc::isize size = 0;
-    cc::span<cc::byte> dst;                             // destination bytes (valid while `pin` is)
+    isize src_offset = 0;
+    isize size = 0;
+    cc::span<byte> dst;                                 // destination bytes (valid while `pin` is)
     std::weak_ptr<void const> pin;                      // future's pin; expired == caller cancelled
     std::shared_ptr<dx12_async_download_waiter> waiter; // marked ready after the memcpy
     dx12_download_fence_value completion_value = dx12_download_fence_value::none; // reverse-sync value for this read
@@ -82,13 +82,13 @@ public:
     /// Creates its own COPY queue, persistently maps the READBACK staging buffer (three windows of
     /// `window_bytes` > 0), the window fence, the completion fence, and the actor's wait event, then starts
     /// the copy actor. Called once during context bring-up. Returns a dx12 error on failure.
-    [[nodiscard]] cc::result<cc::unit> initialize(cc::isize window_bytes);
+    [[nodiscard]] cc::result<cc::unit> initialize(isize window_bytes);
 
     /// Records an async readback of [offset, offset+size) from `buffer` and returns the pending future.
     /// Reserves a completion value, stamps the buffer so a later direct-queue writer waits on it, and hands
     /// the job to the actor. A zero-size read returns an already-ready, empty future. Preconditions: buffer
     /// non-null, a dx12 buffer, not expired, copy_src usage, in bounds.
-    [[nodiscard]] sg::bytes_future download_buffer(sg::raw_buffer_handle buffer, cc::isize offset, cc::isize size);
+    [[nodiscard]] sg::bytes_future download_buffer(sg::raw_buffer_handle buffer, isize offset, isize size);
 
     /// Records an async readback of one region of `texture` and returns the pending future of tightly-packed
     /// bytes. The texture must be in the COMMON layout on the copy queue; a large region packs across
@@ -100,7 +100,7 @@ public:
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the
     /// change is picked up before the next download is staged, so in-flight downloads are unaffected.
-    void set_window_bytes(cc::isize bytes);
+    void set_window_bytes(isize bytes);
 
     /// Shuts the actor down (draining queued readbacks and waiting for its copy queue to idle), then
     /// releases the copy queue and unmaps + releases the staging buffer.
@@ -118,8 +118,8 @@ public:
     // libs/graphics/shaped-graphics/docs/concepts/download.async.md). Created in initialize.
     ComPtr<ID3D12CommandQueue> _copy_queue;
     ComPtr<ID3D12Resource> _staging;
-    cc::byte* _mapped = nullptr;
-    cc::isize _window_bytes = 0;
+    byte* _mapped = nullptr;
+    isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's read done
     // Async-download completion fence, owned here (the copy queue that signals it is shared, but this fence
     // is download-only). Signaled by the copy queue up to the highest finished read value each window; a
@@ -131,12 +131,12 @@ public:
 
     // A pending set_window_bytes request; the actor compares it to _window_bytes at the top of each
     // process cycle and rebuilds staging when they differ. Written by any thread, read by the actor.
-    std::atomic<cc::isize> _desired_window_bytes = 0;
+    std::atomic<isize> _desired_window_bytes = 0;
 
 private:
     // Reserved on the caller thread (fetch_add), handed out as dx12_download_fence_value; the actor's
     // windows signal the context completion fence up to the highest finished read value.
-    std::atomic<cc::u64> _next_download_value = 0;
+    std::atomic<u64> _next_download_value = 0;
 
     cc::unique_ptr<cc::threaded_actor<dx12_async_download_job>> _actor;
 };

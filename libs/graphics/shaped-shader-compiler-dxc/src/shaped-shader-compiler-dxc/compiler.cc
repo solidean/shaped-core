@@ -105,7 +105,7 @@ cc::result<preprocessed_source> compiler::preprocess(shader_description const& d
         return impl::dxc_error(hr, "GetOutput(DXC_OUT_HLSL)");
 
     preprocessed_source out;
-    out.source = cc::string(reinterpret_cast<char const*>(hlsl->GetBufferPointer()), cc::isize(hlsl->GetBufferSize()));
+    out.source = cc::string(reinterpret_cast<char const*>(hlsl->GetBufferPointer()), isize(hlsl->GetBufferSize()));
     out.warnings = impl::dxc_diagnostics(result);
     return out;
 }
@@ -134,8 +134,8 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
     shader.stage = desc.stage;
     shader.format = sg::shader_format::dxil;
     shader.entry_point = desc.entry_point;
-    auto const bytes = cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(object->GetBufferPointer()),
-                                                cc::isize(object->GetBufferSize()));
+    auto const bytes = cc::span<byte const>(reinterpret_cast<byte const*>(object->GetBufferPointer()),
+                                            isize(object->GetBufferSize()));
     shader.bytecode = cc::make_pinned_data(bytes);
     shader.bindings = cc::move(reflected.value().bindings);
     shader.workgroup_size = reflected.value().workgroup_size;

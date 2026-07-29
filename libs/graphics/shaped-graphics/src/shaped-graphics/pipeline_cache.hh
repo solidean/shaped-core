@@ -46,7 +46,7 @@ public:
         std::shared_ptr<cc::key_value_provider<cc::hash128, async_raytracing_pipeline>> provider);
 
     /// Convenience: give every cache a default in-memory tier (up to max_entries each).
-    void add_default_in_memory_providers(cc::isize max_entries = 4096);
+    void add_default_in_memory_providers(isize max_entries = 4096);
 
     // acquire (get-or-create)
 public:

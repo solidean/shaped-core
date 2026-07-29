@@ -18,9 +18,9 @@ namespace sg::backend::dx12
 struct dx12_upload_allocation
 {
     ID3D12Resource* buffer = nullptr;
-    cc::byte* base = nullptr;
-    cc::isize offset = 0;
-    cc::isize size = 0;
+    byte* base = nullptr;
+    isize offset = 0;
+    isize size = 0;
 };
 
 /// Records the copy commands that stage one resource's bytes through the inline UPLOAD ring buffer,
@@ -31,7 +31,7 @@ struct dx12_resource_upload
     virtual ~dx12_resource_upload() = default;
 
     /// Total ring-buffer bytes this upload needs.
-    [[nodiscard]] virtual cc::isize total_bytes() const = 0;
+    [[nodiscard]] virtual isize total_bytes() const = 0;
 
     /// Records any state transition the destination needs before the copy.
     virtual void prepare(dx12_command_list& cmd) = 0;
@@ -41,8 +41,8 @@ struct dx12_resource_upload
 
     /// Copies the next chunk into the allocation window and records the GPU copy. Returns bytes
     /// consumed from the window (0 if it is too small to make progress).
-    [[nodiscard]] virtual cc::isize execute_next_job(ID3D12GraphicsCommandList& list,
-                                                     dx12_upload_allocation const& alloc) = 0;
+    [[nodiscard]] virtual isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc)
+        = 0;
 };
 
 /// Buffer upload: copies `data` into `dst` at `dst_offset` via CopyBufferRegion. Resumable — each
@@ -52,22 +52,22 @@ struct dx12_resource_upload
 /// so they need only outlive the calls that consume them.
 struct dx12_buffer_upload final : dx12_resource_upload
 {
-    dx12_buffer_upload(dx12_buffer const& dst, cc::isize dst_offset, cc::span<cc::byte const> data)
+    dx12_buffer_upload(dx12_buffer const& dst, isize dst_offset, cc::span<byte const> data)
       : dx12_buffer_upload(dst._resource.Get(), dst_offset, data)
     {
     }
 
     // Raw-resource overload: the async path holds only the ID3D12Resource* (kept alive by the job's
     // buffer handle), not a dx12_buffer reference.
-    dx12_buffer_upload(ID3D12Resource* dst, cc::isize dst_offset, cc::span<cc::byte const> data)
+    dx12_buffer_upload(ID3D12Resource* dst, isize dst_offset, cc::span<byte const> data)
       : _dst(dst), _dst_offset(dst_offset), _data(data)
     {
     }
 
-    [[nodiscard]] cc::isize total_bytes() const override { return _data.size(); }
+    [[nodiscard]] isize total_bytes() const override { return _data.size(); }
 
     /// Bytes staged and recorded so far.
-    [[nodiscard]] cc::isize consumed() const { return _consumed; }
+    [[nodiscard]] isize consumed() const { return _consumed; }
 
     // Buffers rely on D3D12 implicit state promotion/decay for copies, so no barrier is needed.
     // TODO: global-barrier placeholder — a real per-resource state-tracking barrier system lands later.
@@ -75,10 +75,10 @@ struct dx12_buffer_upload final : dx12_resource_upload
 
     [[nodiscard]] bool is_finished() const override { return _consumed == _data.size(); }
 
-    [[nodiscard]] cc::isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc) override
+    [[nodiscard]] isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc) override
     {
-        cc::isize const remaining = _data.size() - _consumed;
-        cc::isize const n = remaining < alloc.size ? remaining : alloc.size;
+        isize const remaining = _data.size() - _consumed;
+        isize const n = remaining < alloc.size ? remaining : alloc.size;
         CC_ASSERT(n > 0, "upload allocation too small to make progress");
         std::memcpy(alloc.base + alloc.offset, _data.data() + _consumed, std::size_t(n));
         list.CopyBufferRegion(_dst, UINT64(_dst_offset + _consumed), alloc.buffer, UINT64(alloc.offset), UINT64(n));
@@ -88,9 +88,9 @@ struct dx12_buffer_upload final : dx12_resource_upload
 
 private:
     ID3D12Resource* _dst = nullptr;
-    cc::isize _dst_offset = 0;
-    cc::span<cc::byte const> _data;
-    cc::isize _consumed = 0;
+    isize _dst_offset = 0;
+    cc::span<byte const> _data;
+    isize _consumed = 0;
 };
 
 /// Texture upload: stages the region's rows — each padded to the D3D12 row-pitch alignment (256) — into
@@ -104,41 +104,41 @@ private:
 /// unsupported (a very wide 1D texture). Layout barriers are the driver's job, so `prepare` is a no-op.
 struct dx12_texture_upload final : dx12_resource_upload
 {
-    dx12_texture_upload(ID3D12Resource* dst, dx12_texture_footprint const& fp, cc::span<cc::byte const> data)
+    dx12_texture_upload(ID3D12Resource* dst, dx12_texture_footprint const& fp, cc::span<byte const> data)
       : _dst(dst), _fp(fp), _data(data)
     {
     }
 
-    [[nodiscard]] cc::isize total_bytes() const override { return _fp.staged_size(); }
+    [[nodiscard]] isize total_bytes() const override { return _fp.staged_size(); }
     void prepare(dx12_command_list&) override {}
     [[nodiscard]] bool is_finished() const override { return _rows_done >= total_rows(); }
 
     /// Staged bytes not yet recorded (padded). The inline driver reserves this (+ one placement alignment of
     /// slack for the self-alignment) so a fits-before-the-seam region lands in a single reservation.
-    [[nodiscard]] cc::isize remaining_bytes() const { return (total_rows() - _rows_done) * _fp.padded_pitch; }
+    [[nodiscard]] isize remaining_bytes() const { return (total_rows() - _rows_done) * _fp.padded_pitch; }
 
-    [[nodiscard]] cc::isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc) override
+    [[nodiscard]] isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc) override
     {
         CC_ASSERT(!is_finished(), "texture upload already finished");
 
         // Self-align the window to the 512-byte placement alignment; the waste counts as consumed bytes.
-        cc::isize const aligned = align_up(alloc.offset, texture_placement_alignment);
-        cc::isize const waste = aligned - alloc.offset;
+        isize const aligned = align_up(alloc.offset, texture_placement_alignment);
+        isize const waste = aligned - alloc.offset;
         if (waste >= alloc.size)
             return 0; // no room past the alignment — caller wraps / rolls the window
-        cc::isize const max_rows = (alloc.size - waste) / _fp.padded_pitch;
+        isize const max_rows = (alloc.size - waste) / _fp.padded_pitch;
         if (max_rows == 0)
             return 0; // window can't fit one padded row after alignment
 
         int const slice = int(_rows_done / _fp.rows);
         int const row = int(_rows_done % _fp.rows);
         dx12_texture_copy_chunk const chunk = next_texture_copy_chunk(_fp, slice, row, max_rows);
-        cc::isize const n = chunk.staging_rows();
+        isize const n = chunk.staging_rows();
 
         // Copy each tightly-packed source row into the padded staging layout (rows are contiguous across the
         // chunk's slices in both the source and the staging buffer, so one flat loop covers both shapes).
-        cc::byte* const base = alloc.base + aligned;
-        for (cc::isize i = 0; i < n; ++i)
+        byte* const base = alloc.base + aligned;
+        for (isize i = 0; i < n; ++i)
             std::memcpy(base + i * _fp.padded_pitch, _data.data() + (_rows_done + i) * _fp.row_bytes,
                         std::size_t(_fp.row_bytes));
 
@@ -169,12 +169,12 @@ struct dx12_texture_upload final : dx12_resource_upload
     }
 
 private:
-    [[nodiscard]] cc::isize total_rows() const { return cc::isize(_fp.rows) * cc::isize(_fp.depth_slices); }
-    [[nodiscard]] static cc::isize align_up(cc::isize v, cc::isize a) { return (v + a - 1) / a * a; }
+    [[nodiscard]] isize total_rows() const { return isize(_fp.rows) * isize(_fp.depth_slices); }
+    [[nodiscard]] static isize align_up(isize v, isize a) { return (v + a - 1) / a * a; }
 
     ID3D12Resource* _dst = nullptr;
     dx12_texture_footprint _fp;
-    cc::span<cc::byte const> _data;
-    cc::isize _rows_done = 0; // padded staging rows recorded so far (flat over slices)
+    cc::span<byte const> _data;
+    isize _rows_done = 0; // padded staging rows recorded so far (flat over slices)
 };
 } // namespace sg::backend::dx12

@@ -107,57 +107,57 @@ cc::result<native_file> native_file::open(cc::string_view path, file_mode mode)
     HANDLE const h = ::CreateFileW(reinterpret_cast<wchar_t const*>(wpath.data()), access, share, nullptr, disposition,
                                    FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
-        return cc::error(cc::format("failed to open '{}' (win32 error {})", path, cc::u32(::GetLastError())));
+        return cc::error(cc::format("failed to open '{}' (win32 error {})", path, u32(::GetLastError())));
 
     native_file f;
     f._handle = h;
     return f;
 }
 
-cc::result<cc::isize> native_file::read(cc::span<cc::byte> dst)
+cc::result<isize> native_file::read(cc::span<byte> dst)
 {
     CC_ASSERT(this->is_open(), "read on a closed file");
     if (dst.empty())
-        return cc::isize(0);
+        return isize(0);
 
-    DWORD const want = dst.size() > cc::isize(0xFFFF'FFFF) ? 0xFFFF'FFFFu : DWORD(dst.size());
+    DWORD const want = dst.size() > isize(0xFFFF'FFFF) ? 0xFFFF'FFFFu : DWORD(dst.size());
     DWORD got = 0;
     if (!::ReadFile(_handle, dst.data(), want, &got, nullptr))
-        return cc::error(cc::format("ReadFile failed (win32 error {})", cc::u32(::GetLastError())));
-    return cc::isize(got); // 0 => end of file
+        return cc::error(cc::format("ReadFile failed (win32 error {})", u32(::GetLastError())));
+    return isize(got); // 0 => end of file
 }
 
-cc::result<cc::isize> native_file::write(cc::span<cc::byte const> src)
+cc::result<isize> native_file::write(cc::span<byte const> src)
 {
     CC_ASSERT(this->is_open(), "write on a closed file");
     if (src.empty())
-        return cc::isize(0);
+        return isize(0);
 
-    DWORD const want = src.size() > cc::isize(0xFFFF'FFFF) ? 0xFFFF'FFFFu : DWORD(src.size());
+    DWORD const want = src.size() > isize(0xFFFF'FFFF) ? 0xFFFF'FFFFu : DWORD(src.size());
     DWORD put = 0;
     if (!::WriteFile(_handle, src.data(), want, &put, nullptr))
-        return cc::error(cc::format("WriteFile failed (win32 error {})", cc::u32(::GetLastError())));
-    return cc::isize(put);
+        return cc::error(cc::format("WriteFile failed (win32 error {})", u32(::GetLastError())));
+    return isize(put);
 }
 
-cc::result<cc::i64> native_file::seek(cc::i64 absolute_offset)
+cc::result<i64> native_file::seek(i64 absolute_offset)
 {
     CC_ASSERT(this->is_open(), "seek on a closed file");
     LARGE_INTEGER dist;
     dist.QuadPart = absolute_offset;
     LARGE_INTEGER out;
     if (!::SetFilePointerEx(_handle, dist, &out, FILE_BEGIN))
-        return cc::error(cc::format("SetFilePointerEx failed (win32 error {})", cc::u32(::GetLastError())));
-    return cc::i64(out.QuadPart);
+        return cc::error(cc::format("SetFilePointerEx failed (win32 error {})", u32(::GetLastError())));
+    return i64(out.QuadPart);
 }
 
-cc::result<cc::i64> native_file::size()
+cc::result<i64> native_file::size()
 {
     CC_ASSERT(this->is_open(), "size on a closed file");
     LARGE_INTEGER sz;
     if (!::GetFileSizeEx(_handle, &sz))
-        return cc::error(cc::format("GetFileSizeEx failed (win32 error {})", cc::u32(::GetLastError())));
-    return cc::i64(sz.QuadPart);
+        return cc::error(cc::format("GetFileSizeEx failed (win32 error {})", u32(::GetLastError())));
+    return i64(sz.QuadPart);
 }
 
 #else
@@ -208,46 +208,46 @@ cc::result<native_file> native_file::open(cc::string_view path, file_mode mode)
     return f;
 }
 
-cc::result<cc::isize> native_file::read(cc::span<cc::byte> dst)
+cc::result<isize> native_file::read(cc::span<byte> dst)
 {
     CC_ASSERT(this->is_open(), "read on a closed file");
     if (dst.empty())
-        return cc::isize(0);
+        return isize(0);
 
     auto const n = ::read(_fd, dst.data(), size_t(dst.size()));
     if (n < 0)
         return cc::error(cc::format("read failed ({})", std::strerror(errno)));
-    return cc::isize(n); // 0 => end of file
+    return isize(n); // 0 => end of file
 }
 
-cc::result<cc::isize> native_file::write(cc::span<cc::byte const> src)
+cc::result<isize> native_file::write(cc::span<byte const> src)
 {
     CC_ASSERT(this->is_open(), "write on a closed file");
     if (src.empty())
-        return cc::isize(0);
+        return isize(0);
 
     auto const n = ::write(_fd, src.data(), size_t(src.size()));
     if (n < 0)
         return cc::error(cc::format("write failed ({})", std::strerror(errno)));
-    return cc::isize(n);
+    return isize(n);
 }
 
-cc::result<cc::i64> native_file::seek(cc::i64 absolute_offset)
+cc::result<i64> native_file::seek(i64 absolute_offset)
 {
     CC_ASSERT(this->is_open(), "seek on a closed file");
     auto const p = ::lseek(_fd, off_t(absolute_offset), SEEK_SET);
     if (p < 0)
         return cc::error(cc::format("lseek failed ({})", std::strerror(errno)));
-    return cc::i64(p);
+    return i64(p);
 }
 
-cc::result<cc::i64> native_file::size()
+cc::result<i64> native_file::size()
 {
     CC_ASSERT(this->is_open(), "size on a closed file");
     struct stat st;
     if (::fstat(_fd, &st) != 0)
         return cc::error(cc::format("fstat failed ({})", std::strerror(errno)));
-    return cc::i64(st.st_size);
+    return i64(st.st_size);
 }
 
 #endif

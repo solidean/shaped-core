@@ -69,12 +69,12 @@ public:
     /// whose layout declares inline_constants must be bound first. `offset` unset => full replace, and
     /// `data.size()` must equal the declared block_size; a value => partial update at that byte offset.
     /// Both `data.size()` and `offset` must be multiples of 4.
-    void set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset = {});
+    void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
 
     /// POD convenience: bit-copies `value` as the inline-constants payload. `T` must be trivially
     /// copyable with a size that is a multiple of 4 bytes.
     template <class T>
-    void set_inline_constants(T const& value, cc::optional<cc::isize> offset = {})
+    void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
         static_assert(std::is_trivially_copyable_v<T>, "inline-constants payload must be trivially copyable");
         static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");

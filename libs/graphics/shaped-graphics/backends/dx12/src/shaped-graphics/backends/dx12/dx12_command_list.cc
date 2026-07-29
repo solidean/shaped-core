@@ -43,8 +43,8 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     // Forward cross-queue sync: if an async upload (ctx.upload) is still writing this buffer on the copy
     // queue, the direct queue must wait for that copy before this list runs. Fold its completion value into
     // _required_copy_wait (idempotent max); the single wait is issued at submit.
-    cc::u64 const async_v = buffer->_pending_async_upload_value.load(std::memory_order_acquire);
-    if (async_v > cc::u64(_required_copy_wait))
+    u64 const async_v = buffer->_pending_async_upload_value.load(std::memory_order_acquire);
+    if (async_v > u64(_required_copy_wait))
         _required_copy_wait = dx12_copy_fence_value(async_v);
 
     // Reverse cross-queue sync for ctx.download: if this op WRITES a buffer an async readback is still
@@ -52,8 +52,8 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     // Only writes conflict (two reads don't), so fold the download value only for a write access.
     if (sg::is_unordered_write(access))
     {
-        cc::u64 const dl_v = buffer->_pending_async_download_value.load(std::memory_order_acquire);
-        if (dl_v > cc::u64(_required_download_wait))
+        u64 const dl_v = buffer->_pending_async_download_value.load(std::memory_order_acquire);
+        if (dl_v > u64(_required_download_wait))
             _required_download_wait = dx12_download_fence_value(dl_v);
     }
 
@@ -83,13 +83,13 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     // Cross-queue forward waits, mirroring track_buffer_access: if a ctx.upload wrote this texture on the
     // copy queue, this list must wait for that copy; and if this access WRITES and a ctx.download is still
     // reading it, wait for the readback first. Both fold into a single per-list wait issued at submit.
-    cc::u64 const async_up = texture->_pending_async_upload_value.load(std::memory_order_acquire);
-    if (async_up > cc::u64(_required_copy_wait))
+    u64 const async_up = texture->_pending_async_upload_value.load(std::memory_order_acquire);
+    if (async_up > u64(_required_copy_wait))
         _required_copy_wait = dx12_copy_fence_value(async_up);
     if (sg::is_unordered_write(access))
     {
-        cc::u64 const async_dl = texture->_pending_async_download_value.load(std::memory_order_acquire);
-        if (async_dl > cc::u64(_required_download_wait))
+        u64 const async_dl = texture->_pending_async_download_value.load(std::memory_order_acquire);
+        if (async_dl > u64(_required_download_wait))
             _required_download_wait = dx12_download_fence_value(async_dl);
     }
 
@@ -185,20 +185,20 @@ void dx12_command_list::compute_bind_group(int set, sg::binding_group const& gro
         _list->SetComputeRootDescriptorTable(UINT(gslot.sampler_root_param), dg->sampler_table_start);
 }
 
-void dx12_command_list::compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+void dx12_command_list::compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
 {
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before setting inline constants");
     CC_ASSERT(_bound_pipeline_layout->inline_constants_root_param >= 0, "the bound pipeline layout declares no "
                                                                         "inline_constants block");
     CC_ASSERT(data.size() % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
 
-    cc::isize const off = offset.value_or(0);
+    isize const off = offset.value_or(0);
     CC_ASSERT(off >= 0 && off % 4 == 0, "inline-constants offset must be non-negative and a multiple of 4");
     if (offset.has_value())
-        CC_ASSERT(off + data.size() <= cc::isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
+        CC_ASSERT(off + data.size() <= isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
                   "partial inline-constants update exceeds the declared block size");
     else
-        CC_ASSERT(data.size() == cc::isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
+        CC_ASSERT(data.size() == isize(_bound_pipeline_layout->inline_constants_num_32bit) * 4,
                   "full inline-constants replace must match the declared block size");
 
     _list->SetComputeRoot32BitConstants(UINT(_bound_pipeline_layout->inline_constants_root_param),
@@ -268,8 +268,8 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
                                                  int depth)
 {
     CC_ASSERT(width >= 1 && height >= 1 && depth >= 1, "dispatch_rays dimensions must be >= 1");
-    CC_ASSERT(cc::i64(width) * cc::i64(height) * cc::i64(depth) <= (cc::i64(1) << 30), "dispatch_rays exceeds the 2^30 "
-                                                                                       "total-thread limit");
+    CC_ASSERT(i64(width) * i64(height) * i64(depth) <= (i64(1) << 30), "dispatch_rays exceeds the 2^30 "
+                                                                       "total-thread limit");
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a raytracing pipeline before dispatch_rays");
 
     auto const* dt = dynamic_cast<dx12_raytracing_shader_table const*>(&table);
@@ -332,8 +332,8 @@ void dx12_command_list::compute_declare_array_texture_access(cc::string_view bin
 }
 
 void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
-                                               cc::span<cc::byte const> data,
-                                               cc::isize offset_in_bytes)
+                                               cc::span<byte const> data,
+                                               isize offset_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "upload target buffer is null");
     auto const dst = std::dynamic_pointer_cast<dx12_buffer const>(buffer);
@@ -353,8 +353,8 @@ void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
 }
 
 sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_handle buffer,
-                                                               cc::isize offset_in_bytes,
-                                                               cc::isize size_in_bytes)
+                                                               isize offset_in_bytes,
+                                                               isize size_in_bytes)
 {
     CC_ASSERT(buffer != nullptr, "download source buffer is null");
     auto const src = std::dynamic_pointer_cast<dx12_buffer const>(buffer);
@@ -377,7 +377,7 @@ sg::bytes_future dx12_command_list::download_bytes_from_buffer(sg::raw_buffer_ha
 }
 
 void dx12_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture,
-                                                cc::span<cc::byte const> pixels,
+                                                cc::span<byte const> pixels,
                                                 sg::subresource_index const& subresource,
                                                 sg::texture_region const& region)
 {
@@ -422,9 +422,9 @@ sg::bytes_future dx12_command_list::download_bytes_from_texture(sg::raw_texture_
 
 void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
                                            sg::raw_buffer_handle dst,
-                                           cc::isize src_offset_in_bytes,
-                                           cc::isize dst_offset_in_bytes,
-                                           cc::isize size_in_bytes)
+                                           isize src_offset_in_bytes,
+                                           isize dst_offset_in_bytes,
+                                           isize size_in_bytes)
 {
     CC_ASSERT(src != nullptr, "copy source buffer is null");
     CC_ASSERT(dst != nullptr, "copy dest buffer is null");
@@ -535,12 +535,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // copy queue's completion fence before executing, so the copy is visible. Over-waiting on a higher
             // value is safe; a stale/already-signaled value returns immediately.
             if (cmd->_required_copy_wait != dx12_copy_fence_value::none)
-                _queue->Wait(_upload_async._completion_fence.Get(), cc::u64(cmd->_required_copy_wait));
+                _queue->Wait(_upload_async._completion_fence.Get(), u64(cmd->_required_copy_wait));
 
             // Symmetric reverse sync: if this list WRITES a buffer an async readback is still reading, wait
             // on the download completion fence first, so the write never overwrites bytes the read consumes.
             if (cmd->_required_download_wait != dx12_download_fence_value::none)
-                _queue->Wait(_download_async._completion_fence.Get(), cc::u64(cmd->_required_download_wait));
+                _queue->Wait(_download_async._completion_fence.Get(), u64(cmd->_required_download_wait));
 
             ID3D12CommandList* lists[] = {cmd->_list.Get()};
             _queue->ExecuteCommandLists(1, lists);
@@ -549,8 +549,8 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // queue submission and signal order. (The queue is free-threaded, but out-of-order signals would
             // move the fence's completed value backwards and break is_submission_complete.)
             sg::submission_token const t = next;
-            next = sg::submission_token(cc::u64(next) + 1);
-            HRESULT const sig = _queue->Signal(_submission_fence.Get(), cc::u64(t));
+            next = sg::submission_token(u64(next) + 1);
+            HRESULT const sig = _queue->Signal(_submission_fence.Get(), u64(t));
             // Record device loss here but don't throw inside the lock; the throw happens after it releases.
             if (FAILED(sig) && !note_device_removed_if_lost(sig, "queue Signal"))
                 CC_ASSERT(false, "ID3D12CommandQueue::Signal failed");
@@ -570,11 +570,11 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // behind this list (the reverse per-resource cross-queue sync). Reuses the access tracker's touched-buffer
     // set. Done after submit returns the token — the caller then issues the async upload, which reads this
     // stamp, so the ordering holds.
-    auto const stamp_token = [token](std::atomic<cc::u64>& stamp)
+    auto const stamp_token = [token](std::atomic<u64>& stamp)
     {
-        cc::u64 prev = stamp.load(std::memory_order_relaxed);
-        while (prev < cc::u64(token)
-               && !stamp.compare_exchange_weak(prev, cc::u64(token), std::memory_order_release, std::memory_order_relaxed))
+        u64 prev = stamp.load(std::memory_order_relaxed);
+        while (prev < u64(token)
+               && !stamp.compare_exchange_weak(prev, u64(token), std::memory_order_release, std::memory_order_relaxed))
         {
             // CAS retries; `prev` is refreshed with the current value each time.
         }

@@ -39,9 +39,9 @@ static_assert(sizeof(imgui_ortho_constants) == 16, "must match imgui.hlsl's imgu
 /// so a buffer reused across uploads would be rewritten while a copy was still reading it.
 ///
 /// `pixels` must cover the rect: offset + size within the image, pitch >= image width * bytes_per_pixel.
-[[nodiscard]] cc::pinned_data<cc::byte const> pack_texture_rect(cc::byte const* pixels,
-                                                                isize pitch,
-                                                                isize bytes_per_pixel,
-                                                                tg::pos2i offset,
-                                                                tg::vec2i size);
+[[nodiscard]] cc::pinned_data<byte const> pack_texture_rect(byte const* pixels,
+                                                            isize pitch,
+                                                            isize bytes_per_pixel,
+                                                            tg::pos2i offset,
+                                                            tg::vec2i size);
 } // namespace sr::impl

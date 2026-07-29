@@ -15,14 +15,14 @@ namespace
 /// stbi_write_*_to_func sink: append `size` encoded bytes into the cc::vector behind `context`.
 void append_to_vector(void* context, void* data, int size)
 {
-    auto& out = *static_cast<cc::vector<cc::byte>*>(context);
+    auto& out = *static_cast<cc::vector<byte>*>(context);
     auto const old = out.size();
     out.resize_to_uninitialized(old + size);
     std::memcpy(out.data() + old, data, size_t(size));
 }
 
 /// Validate a pixel buffer against its claimed geometry — shared by both encoders.
-cc::result<cc::unit> check_encode_inputs(cc::span<cc::byte const> pixels, int width, int height, int channels)
+cc::result<cc::unit> check_encode_inputs(cc::span<byte const> pixels, int width, int height, int channels)
 {
     if (width <= 0 || height <= 0)
         return cc::error(cc::format("image encode: non-positive dimensions {}x{}", width, height));
@@ -37,7 +37,7 @@ cc::result<cc::unit> check_encode_inputs(cc::span<cc::byte const> pixels, int wi
 }
 } // namespace
 
-cc::result<stb_image> stb_decode(cc::span<cc::byte const> bytes, int req_channels)
+cc::result<stb_image> stb_decode(cc::span<byte const> bytes, int req_channels)
 {
     if (bytes.empty())
         return cc::error("image decode: empty input");
@@ -60,11 +60,11 @@ cc::result<stb_image> stb_decode(cc::span<cc::byte const> bytes, int req_channel
     return cc::move(result);
 }
 
-cc::result<cc::vector<cc::byte>> stb_encode_png(cc::span<cc::byte const> pixels, int width, int height, int channels)
+cc::result<cc::vector<byte>> stb_encode_png(cc::span<byte const> pixels, int width, int height, int channels)
 {
     CC_RETURN_IF_ERROR(check_encode_inputs(pixels, width, height, channels));
 
-    auto out = cc::vector<cc::byte>();
+    auto out = cc::vector<byte>();
     auto const stride = width * channels; // tightly packed
     auto const ok = stbi_write_png_to_func(&append_to_vector, &out, width, height, channels, pixels.data(), stride);
     if (ok == 0)
@@ -72,11 +72,7 @@ cc::result<cc::vector<cc::byte>> stb_encode_png(cc::span<cc::byte const> pixels,
     return cc::move(out);
 }
 
-cc::result<cc::vector<cc::byte>> stb_encode_jpg(cc::span<cc::byte const> pixels,
-                                                int width,
-                                                int height,
-                                                int channels,
-                                                int quality)
+cc::result<cc::vector<byte>> stb_encode_jpg(cc::span<byte const> pixels, int width, int height, int channels, int quality)
 {
     CC_RETURN_IF_ERROR(check_encode_inputs(pixels, width, height, channels));
 
@@ -84,7 +80,7 @@ cc::result<cc::vector<cc::byte>> stb_encode_jpg(cc::span<cc::byte const> pixels,
     if (quality < 1 || quality > 100)
         return cc::error(cc::format("jpg encode: quality {} out of range 1..100", quality));
 
-    auto out = cc::vector<cc::byte>();
+    auto out = cc::vector<byte>();
     auto const ok = stbi_write_jpg_to_func(&append_to_vector, &out, width, height, channels, pixels.data(), quality);
     if (ok == 0)
         return cc::error("jpg encode failed");

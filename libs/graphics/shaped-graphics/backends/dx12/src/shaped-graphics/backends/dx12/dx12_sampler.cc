@@ -66,7 +66,7 @@ namespace
     CC_UNREACHABLE("unhandled compare_op");
 }
 
-[[nodiscard]] UINT clamp_anisotropy(sg::u32 a)
+[[nodiscard]] UINT clamp_anisotropy(u32 a)
 {
     return UINT(a < 1 ? 1 : (a > 16 ? 16 : a)); // D3D12 caps MaxAnisotropy at 16
 }

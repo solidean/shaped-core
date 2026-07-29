@@ -23,7 +23,7 @@ namespace sg
 {
 /// What happens to a target's contents at the start of a rendering scope.
 /// Set through the view's .cleared() / .preserved() / .discarded() members, not by hand.
-enum class target_op : cc::u8
+enum class target_op : u8
 {
     preserve, ///< keep the existing contents
     clear,    ///< clear to a value before rendering
@@ -46,7 +46,7 @@ struct depth_stencil_target
     depth_stencil_view view;
     target_op op = target_op::preserve;
     float clear_depth = 1.0f; ///< used only when op == clear
-    cc::u8 clear_stencil = 0; ///< used only when op == clear
+    u8 clear_stencil = 0;     ///< used only when op == clear
 };
 
 /// The region of the target(s) rendering maps to, plus the depth range.
@@ -146,10 +146,10 @@ public:
     /// Sets the constant RGBA blend factor that referencing factors use.
     void set_blend_constants(tg::vec4f constants);
     /// Writes inline constants into the bound pipeline layout's inline_constants block.
-    void set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset = {});
+    void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
     /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
-    void set_inline_constants(T const& value, cc::optional<cc::isize> offset = {})
+    void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
         static_assert(std::is_trivially_copyable_v<T>, "inline-constants payload must be trivially copyable");
         static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
@@ -200,10 +200,10 @@ public:
     /// Sets the constant RGBA factor blend factors that reference it use.
     void set_blend_constants(tg::vec4f constants);
     /// Writes inline constants into the bound pipeline layout's inline_constants block (see cmd.compute).
-    void set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset = {});
+    void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
     /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
-    void set_inline_constants(T const& value, cc::optional<cc::isize> offset = {})
+    void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
         static_assert(std::is_trivially_copyable_v<T>, "inline-constants payload must be trivially copyable");
         static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
@@ -260,10 +260,10 @@ public:
     /// Sets the constant RGBA factor blend factors that reference it use.
     void set_blend_constants(tg::vec4f constants);
     /// Writes inline constants into the bound pipeline layout's inline_constants block (see cmd.compute).
-    void set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset = {});
+    void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
     /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
-    void set_inline_constants(T const& value, cc::optional<cc::isize> offset = {})
+    void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
         static_assert(std::is_trivially_copyable_v<T>, "inline-constants payload must be trivially copyable");
         static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");

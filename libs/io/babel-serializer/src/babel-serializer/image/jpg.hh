@@ -60,12 +60,12 @@ struct data
     bool progressive = false;                  // SOF2 vs baseline SOF0 (native)
     subsampling chroma = subsampling::unknown; // native, from SOF sampling factors
     cc::optional<density> jfif_density;        // native, APP0 JFIF
-    cc::vector<cc::byte> pixels;               // row-major, top-left origin, tightly packed
+    cc::vector<byte> pixels;                   // row-major, top-left origin, tightly packed
 
     // --- designed now, [todo] populate via more of the native marker walker (stb exposes none of these) ---
-    cc::vector<cc::byte> icc_profile; // APP2 ICC_PROFILE, reassembled across markers in order
-    cc::vector<cc::byte> exif;        // APP1 Exif block, verbatim
-    cc::vector<cc::string> comments;  // COM markers
+    cc::vector<byte> icc_profile;    // APP2 ICC_PROFILE, reassembled across markers in order
+    cc::vector<byte> exif;           // APP1 Exif block, verbatim
+    cc::vector<cc::string> comments; // COM markers
 
     [[nodiscard]] bool is_empty() const { return width <= 0 || height <= 0; }
 };
@@ -74,7 +74,7 @@ struct data
 // -------------------------------------------------------------------------------------------------
 
 /// Decode a whole JPEG buffer. Errors on a bad SOI marker or a decode failure.
-[[nodiscard]] cc::result<data> read(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
 
 /// Convenience: slurp the stream to end, then decode.
 [[nodiscard]] cc::result<data> read(cc::read_stream& in);
@@ -89,7 +89,7 @@ struct write_options
 };
 
 /// Encode `img`'s pixels to JPEG file bytes. Metadata fields stb cannot emit are ignored (see the header note).
-[[nodiscard]] cc::result<cc::vector<cc::byte>> encode(data const& img, write_options opts = {});
+[[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});
 
 /// Encode and write to a stream.
 [[nodiscard]] cc::result<cc::unit> write(cc::write_stream& out, data const& img, write_options opts = {});

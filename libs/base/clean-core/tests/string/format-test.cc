@@ -4,6 +4,8 @@
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // =========================================================================================================
 // Compile-time checks for the grammar parser and the type classifier (run during compilation).
 // =========================================================================================================
@@ -15,7 +17,7 @@ constexpr cc::impl::format_spec test_parse(cc::string_view s)
     return cc::impl::format_parse_spec(s);
 }
 
-consteval cc::isize first_field_index(cc::string_view s)
+consteval isize first_field_index(cc::string_view s)
 {
     cc::impl::format_index_state ix;
     return cc::impl::format_parse_field(s, 0, ix).arg_index;
@@ -226,8 +228,8 @@ TEST("format - floats")
 TEST("format - pointer and byte")
 {
     CHECK(cc::format("{}", static_cast<void*>(nullptr)) == "0x0");
-    CHECK(cc::format("{}", cc::byte{0xff}) == "0xFF");
-    CHECK(cc::format("{:x}", cc::byte{0xab}) == "ab");
+    CHECK(cc::format("{}", byte{0xff}) == "0xFF");
+    CHECK(cc::format("{:x}", byte{0xab}) == "ab");
 }
 
 TEST("format - format_append")
@@ -252,13 +254,13 @@ TEST("format - string::appendf")
 TEST("format - format_to (non-allocating)")
 {
     char buf[16];
-    cc::isize const n = cc::format_to(cc::span<char>(buf, 16), "{}-{}", 12, 345);
+    isize const n = cc::format_to(cc::span<char>(buf, 16), "{}-{}", 12, 345);
     CHECK(n == 6);
     CHECK(cc::string_view(buf, n) == "12-345");
 
     // truncation: returns the would-be length, writes only what fits
     char small[3];
-    cc::isize const m = cc::format_to(cc::span<char>(small, 3), "{}", 12345);
+    isize const m = cc::format_to(cc::span<char>(small, 3), "{}", 12345);
     CHECK(m == 5);
     CHECK(cc::string_view(small, 3) == "123");
 }

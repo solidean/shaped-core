@@ -4,6 +4,8 @@
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // static assertions for triviality
 static_assert(std::is_trivially_copyable_v<cc::span<int>>, "span should be trivially copyable");
 static_assert(std::is_trivially_copyable_v<cc::fixed_span<int, 5>>, "fixed_span should be trivially copyable");
@@ -745,7 +747,7 @@ TEST("span - size_bytes")
 {
     int data[] = {1, 2, 3, 4};
     auto const s = cc::span<int>{data, 4};
-    CHECK(s.size_bytes() == 4 * cc::isize(sizeof(int)));
+    CHECK(s.size_bytes() == 4 * isize(sizeof(int)));
     CHECK(cc::span<int>{}.size_bytes() == 0);
 }
 
@@ -798,9 +800,9 @@ TEST("span - reinterpret_as / bytes")
         int x = 0;
         auto const s = cc::span<int>{&x, 1};
         auto const bytes = s.as_mutable_bytes();
-        CHECK(bytes.size() == cc::isize(sizeof(int)));
+        CHECK(bytes.size() == isize(sizeof(int)));
         for (auto& b : bytes)
-            b = cc::byte{0xFF};
+            b = byte{0xFF};
         CHECK(x == -1); // all bits set
     }
 
@@ -809,15 +811,15 @@ TEST("span - reinterpret_as / bytes")
         int const data[] = {1, 2, 3};
         auto const s = cc::span<int const>{data, 3};
         auto const bytes = s.as_bytes();
-        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<byte const> const>);
         CHECK(bytes.size() == 12);
     }
 }
 
 TEST("span - try_reinterpret_as")
 {
-    cc::byte buf[8] = {};
-    auto const s = cc::span<cc::byte>{buf, 8};
+    byte buf[8] = {};
+    auto const s = cc::span<byte>{buf, 8};
 
     SECTION("divisible succeeds")
     {
@@ -839,16 +841,16 @@ TEST("span - free as_bytes / as_mutable_bytes")
     {
         cc::vector<int> v = {1, 2, 3};
         auto const bytes = cc::as_bytes(v);
-        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
-        CHECK(bytes.size() == 3 * cc::isize(sizeof(int)));
+        static_assert(std::is_same_v<decltype(bytes), cc::span<byte const> const>);
+        CHECK(bytes.size() == 3 * isize(sizeof(int)));
     }
 
     SECTION("const container yields span<byte const>")
     {
         cc::vector<int> const v = {1, 2};
         auto const bytes = cc::as_bytes(v);
-        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
-        CHECK(bytes.size() == 2 * cc::isize(sizeof(int)));
+        static_assert(std::is_same_v<decltype(bytes), cc::span<byte const> const>);
+        CHECK(bytes.size() == 2 * isize(sizeof(int)));
     }
 
     SECTION("string_view yields its chars as bytes")
@@ -856,16 +858,16 @@ TEST("span - free as_bytes / as_mutable_bytes")
         cc::string_view const sv = "abc";
         auto const bytes = cc::as_bytes(sv);
         CHECK(bytes.size() == 3);
-        CHECK(bytes[0] == cc::byte('a'));
+        CHECK(bytes[0] == byte('a'));
     }
 
     SECTION("as_mutable_bytes writes through")
     {
         cc::vector<int> v = {0};
         auto const bytes = cc::as_mutable_bytes(v);
-        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte> const>);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<byte> const>);
         for (auto& b : bytes)
-            b = cc::byte{0xFF};
+            b = byte{0xFF};
         CHECK(v[0] == -1); // all bits set
     }
 }

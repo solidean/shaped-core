@@ -60,7 +60,7 @@ struct dx12_download_copy_job
 
     /// The reserving epoch's outstanding-copy counter. Held until this job is drained (or its list is
     /// dropped); the epoch's ring span frees once the counter reaches zero.
-    std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
+    std::shared_ptr<std::atomic<isize>> epoch_copies;
 };
 
 /// Inline READBACK path: copies GPU buffer bytes back to the host through a persistently-mapped
@@ -83,15 +83,12 @@ public:
     /// Creates + persistently maps the READBACK ring buffer (capacity bytes, > 0), creates the actor's
     /// wait event, and starts the download actor. Called once during context bring-up. Returns a dx12
     /// error if a resource could not be created.
-    [[nodiscard]] cc::result<cc::unit> initialize(cc::isize capacity);
+    [[nodiscard]] cc::result<cc::unit> initialize(isize capacity);
 
     /// Records a readback of [offset, offset+size) from `src` and returns the pending future. Appends
     /// the deferred copy (token-less) to `cmd`; the context stamps + enqueues it at submit. A zero-size
     /// read returns an already-ready, empty future.
-    [[nodiscard]] sg::bytes_future download_buffer(dx12_command_list& cmd,
-                                                   dx12_buffer const& src,
-                                                   cc::isize offset,
-                                                   cc::isize size);
+    [[nodiscard]] sg::bytes_future download_buffer(dx12_command_list& cmd, dx12_buffer const& src, isize offset, isize size);
 
     /// Records a readback of one texture region (per `fp`) from `src`, packing it into 512-aligned readback
     /// windows row/slice-wise (a region larger than the free ring, or one straddling the seam, splits into
@@ -115,7 +112,7 @@ public:
     void on_epoch_advance(sg::epoch closed);
 
     /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
-    void set_budget(cc::isize capacity);
+    void set_budget(isize capacity);
 
     /// Applies a pending set_budget at an epoch boundary: drains every in-flight epoch, then waits for the
     /// download actor to finish every outstanding readback copy (each reads the *old* ring) before dropping
@@ -127,7 +124,7 @@ public:
 
     /// Releases one outstanding copy from `epoch_copies` and reclaims any now-fully-drained epochs.
     /// Called by the actor after each copy.
-    void on_copy_done(std::shared_ptr<std::atomic<cc::isize>> const& epoch_copies);
+    void on_copy_done(std::shared_ptr<std::atomic<isize>> const& epoch_copies);
 
     /// Shuts the actor down (draining pending copies), then unmaps + releases the ring buffer.
     void shutdown();
@@ -143,24 +140,24 @@ public:
     /// A snapshot of the ring's logical cursors and physical capacity.
     struct debug_cursor_snapshot
     {
-        cc::u64 next_pos = 0;
-        cc::u64 freed_pos = 0;
-        cc::isize capacity = 0;
+        u64 next_pos = 0;
+        u64 freed_pos = 0;
+        isize capacity = 0;
     };
     [[nodiscard]] debug_cursor_snapshot debug_cursor();
 
     /// Repositions the logical cursor at `pos` (so the next reserve starts at physical `pos % capacity`)
     /// on an already-drained ring: sets next_pos == freed_pos == pos and clears checkpoints, so the ring
     /// reads as empty at that seam-relative position. Call only after a full drain (no outstanding copies).
-    void debug_set_cursor(cc::u64 pos);
+    void debug_set_cursor(u64 pos);
 
 private:
     /// A one-shot span reservation (see reserve_span): the start cursor of `total` contiguous logical bytes
     /// (may wrap the seam) plus the open epoch's copy counter its chunks are accounted against.
     struct span_reservation
     {
-        cc::u64 start = 0;
-        std::shared_ptr<std::atomic<cc::isize>> epoch_copies;
+        u64 start = 0;
+        std::shared_ptr<std::atomic<isize>> epoch_copies;
     };
 
     /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
@@ -169,11 +166,11 @@ private:
     /// account_pending_copy per window that yields a pushed copy job (a self-aligning texture readback can
     /// hit a seam tail that makes no progress, which must not be counted). `total` must fit the capacity;
     /// blocks on the reclaim watermark when space is held by earlier, still-in-flight epochs.
-    span_reservation reserve_span(cc::isize total);
+    span_reservation reserve_span(isize total);
 
     /// Counts one copy against the open epoch's tally (`epoch_copies`) and the global drain gate. Call
     /// exactly once per pushed dx12_download_copy_job; on_copy_done / discard_unsubmitted release it.
-    void account_pending_copy(std::shared_ptr<std::atomic<cc::isize>> const& epoch_copies);
+    void account_pending_copy(std::shared_ptr<std::atomic<isize>> const& epoch_copies);
 
     /// Blocks the calling thread until the actor has drained every outstanding readback copy (i.e. every
     /// reserve has been matched by an on_copy_done or a discard). Used by apply_pending_budget before it
@@ -185,16 +182,16 @@ private:
     struct epoch_checkpoint
     {
         sg::epoch epoch_id = sg::epoch::invalid;
-        cc::u64 end_pos = 0;
-        std::shared_ptr<std::atomic<cc::isize>> outstanding;
+        u64 end_pos = 0;
+        std::shared_ptr<std::atomic<isize>> outstanding;
     };
 
     struct ring_state
     {
-        cc::u64 next_pos = 0;                                         // logical bump cursor over the u64 space
-        std::shared_ptr<std::atomic<cc::isize>> current_epoch_copies; // counter for the open epoch
-        cc::vector<epoch_checkpoint> checkpoints;                     // FIFO, oldest epoch at the front
-        cc::isize pending_capacity = 0; // a set_budget awaiting the next boundary (0 = none)
+        u64 next_pos = 0;                                         // logical bump cursor over the u64 space
+        std::shared_ptr<std::atomic<isize>> current_epoch_copies; // counter for the open epoch
+        cc::vector<epoch_checkpoint> checkpoints;                 // FIFO, oldest epoch at the front
+        isize pending_capacity = 0;                               // a set_budget awaiting the next boundary (0 = none)
 
         /// Advances `sys`'s free watermark over every leading checkpoint whose copies have all drained,
         /// then wakes waiting reservers. Only reachable while the `_ring` lock is held (it takes a
@@ -205,16 +202,16 @@ private:
     dx12_context& _ctx;
 
     ComPtr<ID3D12Resource> _buffer;
-    cc::byte* _mapped = nullptr;
-    cc::isize _capacity = 0;
+    byte* _mapped = nullptr;
+    isize _capacity = 0;
     HANDLE _wait_event = nullptr;
 
-    std::atomic<cc::u64> _freed_pos = 0; // reclaim watermark; advanced by reclaim, waited on by reserve
+    std::atomic<u64> _freed_pos = 0; // reclaim watermark; advanced by reclaim, waited on by reserve
 
     // Total readback copies reserved but not yet drained (across all epochs). Bumped in reserve, dropped
     // in on_copy_done / discard; a resize waits on it reaching zero to know the actor no longer reads the
     // old ring. A single global counter makes wait_until_idle race-free (unlike polling per-epoch state).
-    std::atomic<cc::isize> _outstanding = 0;
+    std::atomic<isize> _outstanding = 0;
 
     cc::mutex<ring_state> _ring;
 

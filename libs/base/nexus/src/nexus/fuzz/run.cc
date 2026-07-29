@@ -21,7 +21,7 @@ constexpr int random_producer = -1;
 struct logical_step
 {
     op_index op = op_index::invalid;
-    cc::u64 state = 0;
+    u64 state = 0;
     bool result_must_be_true = false;
     cc::vector<int> arg_producers; // random_producer or an index into the step list
 };

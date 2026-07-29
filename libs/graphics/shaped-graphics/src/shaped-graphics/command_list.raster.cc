@@ -35,11 +35,11 @@ color_target render_target_view::discarded() &&
 
 // Depth-stencil-target builders.
 
-depth_stencil_target depth_stencil_view::cleared(float depth, cc::u8 stencil) const&
+depth_stencil_target depth_stencil_view::cleared(float depth, u8 stencil) const&
 {
     return {.view = *this, .op = target_op::clear, .clear_depth = depth, .clear_stencil = stencil};
 }
-depth_stencil_target depth_stencil_view::cleared(float depth, cc::u8 stencil) &&
+depth_stencil_target depth_stencil_view::cleared(float depth, u8 stencil) &&
 {
     return {.view = cc::move(*this), .op = target_op::clear, .clear_depth = depth, .clear_stencil = stencil};
 }
@@ -102,8 +102,7 @@ void rendering_scope::bind_vertex_buffers(cc::span<vertex_buffer_view const> vie
 }
 void rendering_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot,
-                                    cc::span<vertex_buffer_view const>(views.begin(), cc::isize(views.size())));
+    _cmd.raster_bind_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
 }
 void rendering_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
 {
@@ -129,7 +128,7 @@ void rendering_scope::set_blend_constants(tg::vec4f constants)
 {
     _cmd.raster_set_blend_constants(constants);
 }
-void rendering_scope::set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+void rendering_scope::set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
 {
     _cmd.raster_set_inline_constants(data, offset);
 }
@@ -174,8 +173,7 @@ void command_list_raster_scope::bind_vertex_buffers(cc::span<vertex_buffer_view 
 }
 void command_list_raster_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot,
-                                    cc::span<vertex_buffer_view const>(views.begin(), cc::isize(views.size())));
+    _cmd.raster_bind_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
 }
 void command_list_raster_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
 {
@@ -201,7 +199,7 @@ void command_list_raster_scope::set_blend_constants(tg::vec4f constants)
 {
     _cmd.raster_set_blend_constants(constants);
 }
-void command_list_raster_scope::set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+void command_list_raster_scope::set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
 {
     _cmd.raster_set_inline_constants(data, offset);
 }
@@ -228,8 +226,7 @@ void command_list_raster_manual_scope::bind_vertex_buffers(cc::span<vertex_buffe
 }
 void command_list_raster_manual_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot,
-                                    cc::span<vertex_buffer_view const>(views.begin(), cc::isize(views.size())));
+    _cmd.raster_bind_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
 }
 void command_list_raster_manual_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
 {
@@ -255,7 +252,7 @@ void command_list_raster_manual_scope::set_blend_constants(tg::vec4f constants)
 {
     _cmd.raster_set_blend_constants(constants);
 }
-void command_list_raster_manual_scope::set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+void command_list_raster_manual_scope::set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
 {
     _cmd.raster_set_inline_constants(data, offset);
 }

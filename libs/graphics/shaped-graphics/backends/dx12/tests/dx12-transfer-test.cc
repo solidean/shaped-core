@@ -2,6 +2,8 @@
 
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // Inline buffer transfer: upload / download over the inline UPLOAD / READBACK ring buffers, on WARP
 // so they run on headless CI. See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md and
 // libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
@@ -23,13 +25,13 @@ TEST("sg dx12 - buffer upload then download round-trips")
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
-        src[i] = cc::byte(i);
+        src[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     c.submit_command_list(cc::move(up));
 
     auto down = c.create_command_list();
@@ -43,7 +45,7 @@ TEST("sg dx12 - buffer upload then download round-trips")
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != cc::byte(i))
+        if (bytes.value()[i] != byte(i))
             matches = false;
     CHECK(matches);
 }
@@ -54,7 +56,7 @@ TEST("sg dx12 - typed upload/download convenience")
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
-    auto buf = c.persistent.create_raw_buffer(cc::isize(4) * sizeof(int),
+    auto buf = c.persistent.create_raw_buffer(isize(4) * sizeof(int),
                                               sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
@@ -87,7 +89,7 @@ TEST("sg dx12 - empty transfers")
 
     auto cmd = c.create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>()); // no-op
+    cmd->upload.bytes_to_buffer(buf, cc::span<byte const>()); // no-op
     auto future = cmd->download.bytes_from_buffer(buf, 0, 0);
     CHECK(future.is_valid());
     CHECK(future.is_ready()); // zero-size read is immediately ready
@@ -106,13 +108,13 @@ TEST("sg dx12 - partial download with offset")
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
-        src[i] = cc::byte(i);
+        src[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     c.submit_command_list(cc::move(up));
 
     auto down = c.create_command_list();
@@ -125,7 +127,7 @@ TEST("sg dx12 - partial download with offset")
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != cc::byte(64 + i))
+        if (bytes.value()[i] != byte(64 + i))
             matches = false;
     CHECK(matches);
 }
@@ -139,18 +141,18 @@ TEST("sg dx12 - multiple uploads in one list, last writer wins")
     auto buf = c.persistent.create_raw_buffer(16, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    cc::byte first[16];
-    cc::byte second[16];
+    byte first[16];
+    byte second[16];
     for (int i = 0; i < 16; ++i)
     {
-        first[i] = cc::byte(0xAA);
-        second[i] = cc::byte(0xBB);
+        first[i] = byte(0xAA);
+        second[i] = byte(0xBB);
     }
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 16));
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(second, 16)); // overwrites
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(first, 16));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(second, 16)); // overwrites
     c.submit_command_list(cc::move(up));
 
     auto down = c.create_command_list();
@@ -162,7 +164,7 @@ TEST("sg dx12 - multiple uploads in one list, last writer wins")
     REQUIRE(bytes.has_value());
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
-        if (bytes.value()[i] != cc::byte(0xBB))
+        if (bytes.value()[i] != byte(0xBB))
             all_second = false;
     CHECK(all_second);
 }
@@ -176,13 +178,13 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
-        src[i] = cc::byte(i);
+        src[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     c.submit_command_list(cc::move(up));
 
     {
@@ -203,7 +205,7 @@ TEST("sg dx12 - dropping a download future is safe and reclaims ring space")
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
     CHECK(bytes.value().size() == 256);
-    CHECK(bytes.value()[100] == cc::byte(100));
+    CHECK(bytes.value()[100] == byte(100));
 }
 
 TEST("sg dx12 - inline transfer reused across epochs")
@@ -217,13 +219,13 @@ TEST("sg dx12 - inline transfer reused across epochs")
 
     for (int e = 0; e < 4; ++e)
     {
-        cc::byte src[1024];
+        byte src[1024];
         for (int i = 0; i < 1024; ++i)
-            src[i] = cc::byte((i + e) & 0xFF);
+            src[i] = byte((i + e) & 0xFF);
 
         auto up = c.create_command_list();
         REQUIRE(up != nullptr);
-        up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 1024));
+        up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 1024));
         c.submit_command_list(cc::move(up));
 
         auto down = c.create_command_list();
@@ -235,7 +237,7 @@ TEST("sg dx12 - inline transfer reused across epochs")
         REQUIRE(bytes.has_value());
         bool matches = true;
         for (int i = 0; i < 1024; ++i)
-            if (bytes.value()[i] != cc::byte((i + e) & 0xFF))
+            if (bytes.value()[i] != byte((i + e) & 0xFF))
                 matches = false;
         CHECK(matches);
 
@@ -258,18 +260,18 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
     REQUIRE(buf_a != nullptr);
     REQUIRE(buf_b != nullptr);
 
-    cc::byte src_a[128];
-    cc::byte src_b[128];
+    byte src_a[128];
+    byte src_b[128];
     for (int i = 0; i < 128; ++i)
     {
-        src_a[i] = cc::byte(0xA0 + (i & 0xF));
-        src_b[i] = cc::byte(0xB0 + (i & 0xF));
+        src_a[i] = byte(0xA0 + (i & 0xF));
+        src_b[i] = byte(0xB0 + (i & 0xF));
     }
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf_a, cc::span<cc::byte const>(src_a, 128));
-    up->upload.bytes_to_buffer(buf_b, cc::span<cc::byte const>(src_b, 128));
+    up->upload.bytes_to_buffer(buf_a, cc::span<byte const>(src_a, 128));
+    up->upload.bytes_to_buffer(buf_b, cc::span<byte const>(src_b, 128));
     c.submit_command_list(cc::move(up));
 
     // Two lists open at once; A reserves its ring window first, then B reserves the next window.
@@ -292,9 +294,9 @@ TEST("sg dx12 - interleaved downloads submitted out of allocation order")
     bool ok_b = true;
     for (int i = 0; i < 128; ++i)
     {
-        if (bytes_a.value()[i] != cc::byte(0xA0 + (i & 0xF)))
+        if (bytes_a.value()[i] != byte(0xA0 + (i & 0xF)))
             ok_a = false;
-        if (bytes_b.value()[i] != cc::byte(0xB0 + (i & 0xF)))
+        if (bytes_b.value()[i] != byte(0xB0 + (i & 0xF)))
             ok_b = false;
     }
     CHECK(ok_a);
@@ -313,13 +315,13 @@ TEST("sg dx12 - dropping a recording list cancels its downloads")
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
-        src[i] = cc::byte(i);
+        src[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     c.submit_command_list(cc::move(up));
 
     // Record a download, then drop the list without submitting → the future is cancelled.
@@ -341,5 +343,5 @@ TEST("sg dx12 - dropping a recording list cancels its downloads")
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[100] == cc::byte(100));
+    CHECK(bytes.value()[100] == byte(100));
 }

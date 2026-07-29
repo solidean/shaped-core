@@ -70,8 +70,8 @@ public:
     void shutdown();
 
     // Introspection for tests and future stats.
-    [[nodiscard]] cc::isize free_allocator_count(D3D12_COMMAND_LIST_TYPE queue);
-    [[nodiscard]] cc::isize free_command_list_count(D3D12_COMMAND_LIST_TYPE queue);
+    [[nodiscard]] isize free_allocator_count(D3D12_COMMAND_LIST_TYPE queue);
+    [[nodiscard]] isize free_command_list_count(D3D12_COMMAND_LIST_TYPE queue);
 
 private:
     dx12_context& _ctx; // creating context — outlives this pool

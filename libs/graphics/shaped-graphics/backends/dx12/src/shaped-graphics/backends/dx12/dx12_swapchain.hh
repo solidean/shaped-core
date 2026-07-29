@@ -56,7 +56,7 @@ private:
     struct backbuffer
     {
         dx12_texture_handle texture;
-        cc::u64 frame_fence_value = 0;
+        u64 frame_fence_value = 0;
     };
 
     // Blocks until the GPU has finished every present submitted so far (present fence reaches _fence_value),
@@ -86,7 +86,7 @@ private:
     // Present timeline on the context's direct queue: signaled after each Present so the next acquire of a
     // given back-buffer index waits for its prior frame to finish.
     ComPtr<ID3D12Fence> _present_fence;
-    cc::u64 _fence_value = 0;
+    u64 _fence_value = 0;
     HANDLE _fence_event = nullptr;
 
     tg::vec2i _size;                                   // current back-buffer resolution (tracks auto-resize)

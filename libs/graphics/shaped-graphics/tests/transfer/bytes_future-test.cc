@@ -4,6 +4,8 @@
 
 #include <memory>
 
+using namespace cc::primitive_defines;
+
 // Backend-agnostic tests for the sg download-result vocabulary (no GPU needed). Only the non-blocking
 // polls live on the future; the blocking wait is ctx.wait_for(future), covered in the context-driven
 // suites (tests/transfer, backends/dx12/tests). Backend readback / actor completion is exercised there.
@@ -18,8 +20,8 @@ TEST("sg bytes_future - default is invalid")
 
 TEST("sg bytes_future - ready waiter yields its bytes")
 {
-    cc::byte const src[] = {cc::byte(10), cc::byte(20), cc::byte(30)};
-    auto const data = cc::pinned_data<cc::byte>::create_copy_of(src);
+    byte const src[] = {byte(10), byte(20), byte(30)};
+    auto const data = cc::pinned_data<byte>::create_copy_of(src);
 
     sg::bytes_future f(data, std::make_shared<sg::ready_bytes_waiter>());
     CHECK(f.is_valid());
@@ -28,7 +30,7 @@ TEST("sg bytes_future - ready waiter yields its bytes")
     auto const got = f.try_get_bytes();
     REQUIRE(got.has_value());
     CHECK(got.value().size() == 3);
-    CHECK(got.value()[1] == cc::byte(20));
+    CHECK(got.value()[1] == byte(20));
 }
 
 TEST("sg data_future - typed view over the bytes")

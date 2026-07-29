@@ -234,7 +234,7 @@ void dx12_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg::
         auto const& v = views[i];
         CC_ASSERT(v.buffer != nullptr, "vertex_buffer_view has no buffer");
         auto buf = as_dx12_buffer(v.buffer);
-        cc::isize const size = v.size_in_bytes < 0 ? (buf->size_in_bytes() - v.offset_in_bytes) : v.size_in_bytes;
+        isize const size = v.size_in_bytes < 0 ? (buf->size_in_bytes() - v.offset_in_bytes) : v.size_in_bytes;
 
         D3D12_VERTEX_BUFFER_VIEW vbv = {};
         vbv.BufferLocation = buf->gpu_virtual_address() + UINT64(v.offset_in_bytes);
@@ -256,7 +256,7 @@ void dx12_command_list::raster_bind_index_buffer(sg::index_buffer_view const& vi
 {
     CC_ASSERT(view.buffer != nullptr, "index_buffer_view has no buffer");
     auto buf = as_dx12_buffer(view.buffer);
-    cc::isize const size = view.size_in_bytes < 0 ? (buf->size_in_bytes() - view.offset_in_bytes) : view.size_in_bytes;
+    isize const size = view.size_in_bytes < 0 ? (buf->size_in_bytes() - view.offset_in_bytes) : view.size_in_bytes;
 
     D3D12_INDEX_BUFFER_VIEW ibv = {};
     ibv.BufferLocation = buf->gpu_virtual_address() + UINT64(view.offset_in_bytes);
@@ -279,7 +279,7 @@ void dx12_command_list::raster_set_scissor(tg::aabb2i const& rect)
     _list->RSSetScissorRects(1, &r);
 }
 
-void dx12_command_list::raster_set_stencil_reference(sg::u32 reference)
+void dx12_command_list::raster_set_stencil_reference(u32 reference)
 {
     _list->OMSetStencilRef(UINT(reference));
 }
@@ -289,20 +289,20 @@ void dx12_command_list::raster_set_blend_constants(tg::vec4f constants)
     _list->OMSetBlendFactor(constants.data);
 }
 
-void dx12_command_list::raster_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset)
+void dx12_command_list::raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
 {
     CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before setting inline constants");
     CC_ASSERT(_bound_raster_layout->inline_constants_root_param >= 0, "the bound pipeline layout declares no "
                                                                       "inline_constants block");
     CC_ASSERT(data.size() % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
 
-    cc::isize const off = offset.value_or(0);
+    isize const off = offset.value_or(0);
     CC_ASSERT(off >= 0 && off % 4 == 0, "inline-constants offset must be non-negative and a multiple of 4");
     if (offset.has_value())
-        CC_ASSERT(off + data.size() <= cc::isize(_bound_raster_layout->inline_constants_num_32bit) * 4,
+        CC_ASSERT(off + data.size() <= isize(_bound_raster_layout->inline_constants_num_32bit) * 4,
                   "partial inline-constants update exceeds the declared block size");
     else
-        CC_ASSERT(data.size() == cc::isize(_bound_raster_layout->inline_constants_num_32bit) * 4,
+        CC_ASSERT(data.size() == isize(_bound_raster_layout->inline_constants_num_32bit) * 4,
                   "full inline-constants replace must match the declared block size");
 
     _list->SetGraphicsRoot32BitConstants(UINT(_bound_raster_layout->inline_constants_root_param), UINT(data.size() / 4),

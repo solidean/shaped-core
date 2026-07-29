@@ -16,7 +16,7 @@
 
 namespace cc::impl
 {
-enum class file_mode : cc::u8
+enum class file_mode : u8
 {
     read,           // open an existing file for reading
     write_truncate, // create or truncate a file for writing
@@ -40,17 +40,17 @@ public:
 
     /// Read up to dst.size() bytes at the current position; returns the count read (0 == end-of-file). Short
     /// reads are normal.
-    [[nodiscard]] cc::result<cc::isize> read(cc::span<cc::byte> dst);
+    [[nodiscard]] cc::result<isize> read(cc::span<byte> dst);
 
     /// Write up to src.size() bytes at the current position; returns the count written. Short writes are
     /// possible — callers loop.
-    [[nodiscard]] cc::result<cc::isize> write(cc::span<cc::byte const> src);
+    [[nodiscard]] cc::result<isize> write(cc::span<byte const> src);
 
     /// Move the file pointer to an absolute offset from the start; returns the new position.
-    [[nodiscard]] cc::result<cc::i64> seek(cc::i64 absolute_offset);
+    [[nodiscard]] cc::result<i64> seek(i64 absolute_offset);
 
     /// Current total size of the file in bytes (independent of the file pointer).
-    [[nodiscard]] cc::result<cc::i64> size();
+    [[nodiscard]] cc::result<i64> size();
 
     [[nodiscard]] bool is_open() const;
 

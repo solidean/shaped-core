@@ -21,7 +21,7 @@
 namespace cc::impl
 {
 /// Access capability of a stream.
-enum class stream_access : cc::u8
+enum class stream_access : u8
 {
     read,
     write,
@@ -69,13 +69,13 @@ struct stream_no_first_write
 };
 
 template <stream_access Access>
-using stream_first_write_t = std::conditional_t<stream_can_write(Access), cc::byte*, stream_no_first_write>;
+using stream_first_write_t = std::conditional_t<stream_can_write(Access), byte*, stream_no_first_write>;
 
 /// Present only on a read_write stream: the write-capacity end, distinct from `_end` (the read/valid end).
 /// On every other stream the write bound is just `_end`, so this is zero-sized.
 template <stream_access Access>
 using stream_write_end_t
-    = std::conditional_t<stream_can_read(Access) && stream_can_write(Access), cc::byte*, stream_no_first_write>;
+    = std::conditional_t<stream_can_read(Access) && stream_can_write(Access), byte*, stream_no_first_write>;
 
 /// The single templated stream engine; the six public stream types in <clean-core/streams/stream.hh> inherit
 /// the matching instantiation and pull in its capability-relevant methods. Members/methods gated by params.
@@ -93,7 +93,7 @@ public:
 
     /// Bind a stream to an adapter's window + flush callback. Called by adapters; `context` must outlive the
     /// stream. curr/end delimit the initial window (equal for a buffered adapter, full for a span).
-    stream(cc::byte* curr, cc::byte* end, stream_flush_fn flush, void* context)
+    stream(byte* curr, byte* end, stream_flush_fn flush, void* context)
       : _curr(curr), _end(end), _flush(flush), _context(context)
     {
         // a read_write stream's write capacity starts at the initial window end; the first flush refines it
@@ -123,20 +123,20 @@ public:
 public:
     /// Plain flush: refill the read window / write through pending bytes. Returns the position of curr if
     /// the source tracks one, else -1; a cc::result error on I/O failure.
-    cc::result<cc::i64> flush() { return this->impl_flush(0, seek_dir::relative); }
+    cc::result<i64> flush() { return this->impl_flush(0, seek_dir::relative); }
 
     // reading
 public:
     /// Bytes buffered and ready to read right now, without another flush: [curr, end).
-    [[nodiscard]] cc::span<cc::byte const> ready_bytes() const
+    [[nodiscard]] cc::span<byte const> ready_bytes() const
         requires(can_read)
     {
         CC_ASSERT(this->is_valid(), "ready_bytes on invalid stream");
-        return cc::span<cc::byte const>(_curr, _end);
+        return cc::span<byte const>(_curr, _end);
     }
 
     /// Consume n of the ready_bytes() (advance the read cursor). No I/O. Precondition: 0 <= n <= ready_bytes().size().
-    void consume(cc::isize n)
+    void consume(isize n)
         requires(can_read)
     {
         CC_ASSERT(this->is_valid(), "consume on invalid stream");
@@ -169,11 +169,11 @@ public:
 
     /// Read up to dst.size() bytes into dst, returning the count read (0 only at end-of-data). Refills the
     /// buffer as needed.
-    cc::result<cc::isize> read(cc::span<cc::byte> dst)
+    cc::result<isize> read(cc::span<byte> dst)
         requires(can_read)
     {
         CC_ASSERT(this->is_valid(), "read on invalid stream");
-        cc::isize total = 0;
+        isize total = 0;
         while (total < dst.size())
         {
             if (_curr == _end)
@@ -182,7 +182,7 @@ public:
                 if (_curr == _end)
                     break; // genuine end of data
             }
-            auto const n = cc::min(dst.size() - total, cc::isize(_end - _curr));
+            auto const n = cc::min(dst.size() - total, isize(_end - _curr));
             std::memcpy(dst.data() + total, _curr, size_t(n));
             _curr += n;
             total += n;
@@ -191,7 +191,7 @@ public:
     }
 
     /// Read exactly dst.size() bytes into dst; errors if the stream ends short.
-    cc::result<cc::unit> read_exact(cc::span<cc::byte> dst)
+    cc::result<cc::unit> read_exact(cc::span<byte> dst)
         requires(can_read)
     {
         auto n = this->read(dst);
@@ -208,8 +208,7 @@ public:
     {
         static_assert(std::is_trivially_copyable_v<T>, "read_pod needs a trivially-copyable T");
         T value;
-        CC_RETURN_IF_ERROR(
-            this->read_exact(cc::span<cc::byte>(reinterpret_cast<cc::byte*>(&value), cc::isize(sizeof(T)))));
+        CC_RETURN_IF_ERROR(this->read_exact(cc::span<byte>(reinterpret_cast<byte*>(&value), isize(sizeof(T)))));
         return value;
     }
 
@@ -220,16 +219,16 @@ public:
     /// This pushes each ready window straight into the result and refills — there is never a double copy.
     /// When the source can report its remaining size, the buffer is sized exactly once up front and filled with stable appends, so the common case is a single precise allocation.
     /// That covers any seekable stream, and any non-seekable one whose adapter still tracks position (most real streams).
-    cc::result<cc::vector<cc::byte>> read_all()
+    cc::result<cc::vector<byte>> read_all()
         requires(can_read)
     {
         CC_ASSERT(this->is_valid(), "read_all on invalid stream");
 
-        auto out = cc::vector<cc::byte>();
+        auto out = cc::vector<byte>();
         auto const hint = this->impl_remaining_hint(); // exact remaining bytes if the source can report them
         auto const precise = hint.has_value();
         if (precise)
-            out.reserve_back(cc::isize(hint.value()));
+            out.reserve_back(isize(hint.value()));
 
         while (true)
         {
@@ -259,7 +258,7 @@ public:
     /// `max_size` bounds the bytes appended to `out`; `cc::nullopt` (the default) reads a line in full, so a pathological newline-free input can grow `out` up to the whole stream.
     /// When set and a line is longer, the call returns true with `out.size() == *max_size`, and the rest of the line (including its newline) stays buffered for the next call.
     /// No data is lost, but a long line comes back in pieces.
-    cc::result<bool> read_line(cc::string& out, cc::optional<cc::isize> max_size = cc::nullopt)
+    cc::result<bool> read_line(cc::string& out, cc::optional<isize> max_size = cc::nullopt)
         requires(can_read)
     {
         CC_ASSERT(this->is_valid(), "read_line on invalid stream");
@@ -280,8 +279,8 @@ public:
             read_any = true;
 
             auto const* const base = reinterpret_cast<char const*>(window.data());
-            auto newline = cc::isize(-1);
-            for (auto i = cc::isize(0); i < window.size(); ++i)
+            auto newline = isize(-1);
+            for (auto i = isize(0); i < window.size(); ++i)
                 if (base[i] == '\n')
                 {
                     newline = i;
@@ -289,7 +288,7 @@ public:
                 }
 
             // How many bytes of this window we may still append before hitting max_size.
-            auto const budget = max_size.has_value() ? max_size.value() - out.size() : cc::isize(-1);
+            auto const budget = max_size.has_value() ? max_size.value() - out.size() : isize(-1);
             auto const capped = max_size.has_value() && budget <= (newline >= 0 ? newline : window.size());
             if (capped)
             {
@@ -318,16 +317,16 @@ public:
 public:
     /// The free buffer space you can write into right now, before a flush: [curr, write_end). Write into it,
     /// then produce(n). (This is NOT a flush — no I/O; it just exposes the buffer.)
-    [[nodiscard]] cc::span<cc::byte> writable_bytes() const
+    [[nodiscard]] cc::span<byte> writable_bytes() const
         requires(can_write)
     {
         CC_ASSERT(this->is_valid(), "writable_bytes on invalid stream");
-        return cc::span<cc::byte>(_curr, this->impl_write_bound());
+        return cc::span<byte>(_curr, this->impl_write_bound());
     }
 
     /// Mark n bytes (written into writable_bytes()) as produced (advance the write cursor). No I/O.
     /// Precondition: 0 <= n <= writable_bytes().size().
-    void produce(cc::isize n)
+    void produce(isize n)
         requires(can_write)
     {
         CC_ASSERT(this->is_valid(), "produce on invalid stream");
@@ -338,11 +337,11 @@ public:
     }
 
     /// Write all bytes of src, draining as needed. Errors if a bounded sink runs out of space.
-    cc::result<cc::unit> write(cc::span<cc::byte const> src)
+    cc::result<cc::unit> write(cc::span<byte const> src)
         requires(can_write)
     {
         CC_ASSERT(this->is_valid(), "write on invalid stream");
-        cc::isize total = 0;
+        isize total = 0;
         while (total < src.size())
         {
             if (_curr == this->impl_write_bound())
@@ -351,7 +350,7 @@ public:
                 if (_curr == this->impl_write_bound())
                     return cc::error("write: sink is full");
             }
-            auto const n = cc::min(src.size() - total, cc::isize(this->impl_write_bound() - _curr));
+            auto const n = cc::min(src.size() - total, isize(this->impl_write_bound() - _curr));
             if (_first_write == nullptr)
                 _first_write = _curr;
             std::memcpy(_curr, src.data() + total, size_t(n));
@@ -373,14 +372,14 @@ public:
     // seeking (seekable streams only; O(1) or O(log n) by contract)
 public:
     /// Seek to an absolute byte offset from the start. Returns the new position.
-    cc::result<cc::i64> seek_to(cc::i64 offset)
+    cc::result<i64> seek_to(i64 offset)
         requires(is_seekable)
     {
         return this->impl_flush(offset, seek_dir::begin);
     }
 
     /// Seek by a signed delta from the current position. Returns the new position.
-    cc::result<cc::i64> skip(cc::i64 delta)
+    cc::result<i64> skip(i64 delta)
         requires(is_seekable)
     {
         return this->impl_flush(delta, seek_dir::relative);
@@ -388,28 +387,28 @@ public:
 
     /// Seek to `offset` bytes relative to the end (offset <= 0 addresses within the data). Returns the new
     /// position.
-    cc::result<cc::i64> seek_from_end(cc::i64 offset)
+    cc::result<i64> seek_from_end(i64 offset)
         requires(is_seekable)
     {
         return this->impl_flush(offset, seek_dir::end);
     }
 
     /// Current absolute position (bytes from start). Does not disturb the buffer.
-    cc::result<cc::i64> position()
+    cc::result<i64> position()
         requires(is_seekable)
     {
         return this->impl_flush(0, seek_dir::dry_relative);
     }
 
     /// Total size of the underlying data. Does not disturb the buffer.
-    cc::result<cc::i64> size()
+    cc::result<i64> size()
         requires(is_seekable)
     {
         return this->impl_flush(0, seek_dir::dry_end);
     }
 
     /// Bytes between the current position and the end. Does not disturb the buffer.
-    cc::result<cc::i64> remaining_bytes()
+    cc::result<i64> remaining_bytes()
         requires(is_seekable)
     {
         auto p = this->impl_flush(0, seek_dir::dry_relative);
@@ -488,14 +487,14 @@ private:
 
     // The write boundary: the separate _write_end for a read_write stream, otherwise _end itself (writes on a
     // write-only stream already use _end as their capacity). Two overloads so flush can update it by reference.
-    [[nodiscard]] cc::byte* impl_write_bound() const
+    [[nodiscard]] byte* impl_write_bound() const
     {
         if constexpr (can_read && can_write)
             return _write_end;
         else
             return _end;
     }
-    [[nodiscard]] cc::byte*& impl_write_bound_ref()
+    [[nodiscard]] byte*& impl_write_bound_ref()
     {
         if constexpr (can_read && can_write)
             return _write_end;
@@ -508,7 +507,7 @@ private:
     /// A dry_relative probe is safe on any stream (try_as_seekable uses the same one to detect seekability).
     /// A real position (>= 0) means the source tracks position, so the dry_end probe that follows is safe too.
     /// A genuinely non-seekable source returns -1, and we bail.
-    cc::optional<cc::i64> impl_remaining_hint()
+    cc::optional<i64> impl_remaining_hint()
         requires(can_read)
     {
         auto const pos = this->impl_flush(0, seek_dir::dry_relative);
@@ -520,10 +519,10 @@ private:
         return end.value() - pos.value();
     }
 
-    cc::result<cc::i64> impl_flush(cc::i64 offset, seek_dir dir)
+    cc::result<i64> impl_flush(i64 offset, seek_dir dir)
     {
         CC_ASSERT(this->is_valid(), "flush on invalid stream");
-        cc::byte* fw = nullptr;
+        byte* fw = nullptr;
         if constexpr (can_write)
             fw = _first_write;
 
@@ -567,8 +566,8 @@ private:
 
     // members
 private:
-    cc::byte* _curr = nullptr;
-    cc::byte* _end = nullptr;
+    byte* _curr = nullptr;
+    byte* _end = nullptr;
     stream_flush_fn _flush = nullptr;
     void* _context = nullptr;
     [[no_unique_address]] stream_first_write_t<Access> _first_write = {};

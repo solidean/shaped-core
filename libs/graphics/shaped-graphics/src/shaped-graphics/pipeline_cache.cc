@@ -60,7 +60,7 @@ void pipeline_cache::add_raytracing_pipeline_provider(
     _raytracing_cache.add_provider(cc::move(provider));
 }
 
-void pipeline_cache::add_default_in_memory_providers(cc::isize max_entries)
+void pipeline_cache::add_default_in_memory_providers(isize max_entries)
 {
     _binding_group_layout_cache.add_default_in_memory_provider(max_entries);
     _pipeline_layout_cache.add_default_in_memory_provider(max_entries);
@@ -80,7 +80,7 @@ cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding co
                                                              cc::span<named_sampler const> static_samplers) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_pod(cc::u64(bindings.size()));
+    b.add_pod(u64(bindings.size()));
     for (auto const& bnd : bindings)
     {
         b.add_string(bnd.name);
@@ -90,7 +90,7 @@ cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding co
         b.add_pod(bnd.type);
         b.add_optional(bnd.block_size);
     }
-    b.add_pod(cc::u64(static_samplers.size()));
+    b.add_pod(u64(static_samplers.size()));
     for (auto const& ns : static_samplers)
     {
         b.add_string(ns.name);
@@ -102,12 +102,12 @@ cc::hash128 pipeline_cache::compute_binding_group_layout_key(cc::span<binding co
 cc::hash128 pipeline_cache::compute_pipeline_layout_key(pipeline_layout_description const& desc) const
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_pod(cc::u64(desc.groups.size()));
+    b.add_pod(u64(desc.groups.size()));
     for (auto const& g : desc.groups)
         // group-layout identity — pointer is stable because cached group layouts are shared/persistent
-        b.add_pod(reinterpret_cast<cc::u64>(g.get()));
+        b.add_pod(reinterpret_cast<u64>(g.get()));
     // pipeline-level static samplers change the root signature, so they are part of the identity
-    b.add_pod(cc::u64(desc.static_samplers.size()));
+    b.add_pod(u64(desc.static_samplers.size()));
     for (auto const& bs : desc.static_samplers)
     {
         b.add_pod(bs.binding.set);
@@ -139,7 +139,7 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
     b.add_string(desc.shader.compiler.signature);
     // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent, and it
     // transitively covers its group layouts
-    b.add_pod(reinterpret_cast<cc::u64>(desc.layout.get()));
+    b.add_pod(reinterpret_cast<u64>(desc.layout.get()));
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
@@ -147,7 +147,7 @@ cc::hash128 pipeline_cache::compute_raytracing_pipeline_key(raytracing_pipeline_
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent
-    b.add_pod(reinterpret_cast<cc::u64>(desc.layout.get()));
+    b.add_pod(reinterpret_cast<u64>(desc.layout.get()));
 
     auto add_shader = [&b](compiled_shader const& s)
     {
@@ -162,16 +162,16 @@ cc::hash128 pipeline_cache::compute_raytracing_pipeline_key(raytracing_pipeline_
             add_shader(s.value());
     };
 
-    b.add_pod(cc::u64(desc.raygen_shaders.size()));
+    b.add_pod(u64(desc.raygen_shaders.size()));
     for (auto const& s : desc.raygen_shaders)
         add_shader(s);
-    b.add_pod(cc::u64(desc.miss_shaders.size()));
+    b.add_pod(u64(desc.miss_shaders.size()));
     for (auto const& s : desc.miss_shaders)
         add_shader(s);
-    b.add_pod(cc::u64(desc.callable_shaders.size()));
+    b.add_pod(u64(desc.callable_shaders.size()));
     for (auto const& s : desc.callable_shaders)
         add_shader(s);
-    b.add_pod(cc::u64(desc.hit_shaders.size()));
+    b.add_pod(u64(desc.hit_shaders.size()));
     for (auto const& h : desc.hit_shaders)
     {
         add_optional_shader(h.closest_hit);

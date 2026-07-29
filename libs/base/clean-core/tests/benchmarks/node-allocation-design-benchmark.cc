@@ -81,22 +81,22 @@ constexpr isize next_pow2(isize v)
 }
 
 // aligned slab storage via mimalloc (alignment == size, so ptr & ~(size-1) recovers the base)
-cc::byte* alloc_slab(isize size)
+byte* alloc_slab(isize size)
 {
-    cc::byte* p = nullptr;
+    byte* p = nullptr;
     cc::default_memory_resource->allocate_bytes(&p, size, size, size, cc::default_memory_resource->userdata);
     return p;
 }
-void free_slab(cc::byte* p, isize size)
+void free_slab(byte* p, isize size)
 {
     cc::default_memory_resource->deallocate_bytes(p, size, size, cc::default_memory_resource->userdata);
 }
 
 // per-thread owner tokens for the step2 variants
-thread_local cc::i16 g_tls_owner = 0;
+thread_local i16 g_tls_owner = 0;
 CC_FORCE_INLINE u64 tls_token()
 {
-    return u64(cc::u16(g_tls_owner));
+    return u64(u16(g_tls_owner));
 }
 CC_FORCE_INLINE u64 teb_token()
 {
@@ -123,7 +123,7 @@ struct VarAtomic
     static constexpr isize SLAB = next_pow2(DATA_OFF + 64 * Size);
     static constexpr isize MASK = SLAB - 1;
     static constexpr int LOG = log2i(Size);
-    cc::byte* base = nullptr;
+    byte* base = nullptr;
 
     void hydrate()
     {
@@ -132,9 +132,9 @@ struct VarAtomic
     }
     void teardown() { free_slab(base, SLAB); }
 
-    CC_FORCE_INLINE cc::byte* alloc()
+    CC_FORCE_INLINE byte* alloc()
     {
-        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
         u64 v = cc::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).load(cc::memory_order_relaxed);
         if (v == 0) [[unlikely]] // opaque refill (never hit: batch fits the slab) -- defeats base-hoisting
         {
@@ -146,9 +146,9 @@ struct VarAtomic
         cc::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_and(~(u64(1) << slot), cc::memory_order_relaxed); // lock and
         return b + DATA_OFF + (isize(slot) << LOG);
     }
-    CC_FORCE_INLINE void free(cc::byte* p)
+    CC_FORCE_INLINE void free(byte* p)
     {
-        auto* b = reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
+        auto* b = reinterpret_cast<byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
         int const slot = int((p - b - DATA_OFF) >> LOG);
         cc::atomic_ref<u64>(*reinterpret_cast<u64*>(b)).fetch_or(u64(1) << slot, cc::memory_order_relaxed); // lock or
     }
@@ -161,7 +161,7 @@ struct VarSingle
     static constexpr isize SLAB = next_pow2(DATA_OFF + 64 * Size);
     static constexpr isize MASK = SLAB - 1;
     static constexpr int LOG = log2i(Size);
-    cc::byte* base = nullptr;
+    byte* base = nullptr;
 
     void hydrate()
     {
@@ -170,9 +170,9 @@ struct VarSingle
     }
     void teardown() { free_slab(base, SLAB); }
 
-    CC_FORCE_INLINE cc::byte* alloc()
+    CC_FORCE_INLINE byte* alloc()
     {
-        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
         u64 v = *reinterpret_cast<u64*>(b);
         if (v == 0) [[unlikely]] // opaque refill -- defeats base-hoisting so base is reloaded per alloc
         {
@@ -184,9 +184,9 @@ struct VarSingle
         *reinterpret_cast<u64*>(b) = v & ~(u64(1) << slot); // plain and
         return b + DATA_OFF + (isize(slot) << LOG);
     }
-    CC_FORCE_INLINE void free(cc::byte* p)
+    CC_FORCE_INLINE void free(byte* p)
     {
-        auto* b = reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
+        auto* b = reinterpret_cast<byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
         int const slot = int((p - b - DATA_OFF) >> LOG);
         *reinterpret_cast<u64*>(b) |= u64(1) << slot; // plain or
     }
@@ -202,10 +202,10 @@ struct VarStep1
     static constexpr isize SLAB = next_pow2(DATA_OFF + 64 * Size);
     static constexpr isize MASK = SLAB - 1;
     static constexpr int LOG = log2i(Size);
-    cc::byte* base = nullptr;
+    byte* base = nullptr;
 
-    static CC_FORCE_INLINE u64& local(cc::byte* b) { return *reinterpret_cast<u64*>(b); }
-    static CC_FORCE_INLINE u64& remote(cc::byte* b) { return *reinterpret_cast<u64*>(b + REMOTE_OFF); }
+    static CC_FORCE_INLINE u64& local(byte* b) { return *reinterpret_cast<u64*>(b); }
+    static CC_FORCE_INLINE u64& remote(byte* b) { return *reinterpret_cast<u64*>(b + REMOTE_OFF); }
 
     void hydrate()
     {
@@ -215,11 +215,11 @@ struct VarStep1
     }
     void teardown() { free_slab(base, SLAB); }
 
-    CC_FORCE_INLINE cc::byte* alloc()
+    CC_FORCE_INLINE byte* alloc()
     {
-        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
-        u64 v = local(b);   // plain load
-        if (v == 0)         // local empty: drain remote (one atomic), else opaque refill (reloads base per alloc)
+        byte* b = base;   // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        u64 v = local(b); // plain load
+        if (v == 0)       // local empty: drain remote (one atomic), else opaque refill (reloads base per alloc)
         {
             v = cc::atomic_ref<u64>(remote(b)).exchange(0, cc::memory_order_relaxed);
             if (v == 0) [[unlikely]]
@@ -233,9 +233,9 @@ struct VarStep1
         local(b) = v & ~(u64(1) << slot); // plain and
         return b + DATA_OFF + (isize(slot) << LOG);
     }
-    CC_FORCE_INLINE void free(cc::byte* p)
+    CC_FORCE_INLINE void free(byte* p)
     {
-        auto* b = reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
+        auto* b = reinterpret_cast<byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
         int const slot = int((p - b - DATA_OFF) >> LOG);
         cc::atomic_ref<u64>(remote(b)).fetch_or(u64(1) << slot, cc::memory_order_relaxed); // lock or (always)
     }
@@ -252,11 +252,11 @@ struct VarStep2
     static constexpr isize SLAB = next_pow2(DATA_OFF + 64 * Size);
     static constexpr isize MASK = SLAB - 1;
     static constexpr int LOG = log2i(Size);
-    cc::byte* base = nullptr;
+    byte* base = nullptr;
 
-    static CC_FORCE_INLINE u64& local(cc::byte* b) { return *reinterpret_cast<u64*>(b); }
-    static CC_FORCE_INLINE u64& remote(cc::byte* b) { return *reinterpret_cast<u64*>(b + REMOTE_OFF); }
-    static CC_FORCE_INLINE u64& owner(cc::byte* b) { return *reinterpret_cast<u64*>(b + OWNER_OFF); }
+    static CC_FORCE_INLINE u64& local(byte* b) { return *reinterpret_cast<u64*>(b); }
+    static CC_FORCE_INLINE u64& remote(byte* b) { return *reinterpret_cast<u64*>(b + REMOTE_OFF); }
+    static CC_FORCE_INLINE u64& owner(byte* b) { return *reinterpret_cast<u64*>(b + OWNER_OFF); }
     static CC_FORCE_INLINE u64 my_token() { return Teb ? teb_token() : tls_token(); }
 
     void hydrate()
@@ -268,9 +268,9 @@ struct VarStep2
     }
     void teardown() { free_slab(base, SLAB); }
 
-    CC_FORCE_INLINE cc::byte* alloc()
+    CC_FORCE_INLINE byte* alloc()
     {
-        cc::byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
+        byte* b = base; // reload the current slab once per alloc (mirrors the real slab_base[idx] load)
         u64 v = local(b);
         if (v == 0) // local empty: drain remote, else opaque refill (reloads base per alloc)
         {
@@ -286,9 +286,9 @@ struct VarStep2
         local(b) = v & ~(u64(1) << slot);
         return b + DATA_OFF + (isize(slot) << LOG);
     }
-    CC_FORCE_INLINE void free(cc::byte* p)
+    CC_FORCE_INLINE void free(byte* p)
     {
-        auto* b = reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
+        auto* b = reinterpret_cast<byte*>(reinterpret_cast<u64>(p) & ~u64(MASK));
         int const slot = int((p - b - DATA_OFF) >> LOG);
         u64 const bit = u64(1) << slot;
         if (owner(b) == my_token()) // owner: non-atomic local free (predicted-taken single-thread)
@@ -305,13 +305,13 @@ struct VarResource
     cc::memory_resource const* res = nullptr;
     void hydrate() {}
     void teardown() {}
-    CC_FORCE_INLINE cc::byte* alloc()
+    CC_FORCE_INLINE byte* alloc()
     {
-        cc::byte* p = nullptr;
+        byte* p = nullptr;
         res->allocate_bytes(&p, Size, Size, 8, res->userdata);
         return p;
     }
-    CC_FORCE_INLINE void free(cc::byte* p) { res->deallocate_bytes(p, Size, 8, res->userdata); }
+    CC_FORCE_INLINE void free(byte* p) { res->deallocate_bytes(p, Size, 8, res->userdata); }
 };
 
 // node: the REAL shipped cc::node_allocator, not an inline mock. Same batch pattern, so it should track the
@@ -326,8 +326,8 @@ struct VarNode
     cc::node_allocator* na = nullptr;
     void hydrate() { na = &cc::default_node_allocator(); }
     void teardown() {}
-    CC_FORCE_INLINE cc::byte* alloc() { return na->allocate_node_bytes(IDX, Size, 8); }
-    CC_FORCE_INLINE void free(cc::byte* p) { cc::node_allocation_free(p, IDX); }
+    CC_FORCE_INLINE byte* alloc() { return na->allocate_node_bytes(IDX, Size, 8); }
+    CC_FORCE_INLINE void free(byte* p) { cc::node_allocation_free(p, IDX); }
 };
 
 // --- harness --------------------------------------------------------------------------------------------
@@ -335,7 +335,7 @@ struct VarNode
 template <class Var>
 double one_run(Var& v, u64& acc)
 {
-    cc::byte* nodes[batch_n] = {};
+    byte* nodes[batch_n] = {};
     auto const t0 = clock::now();
     for (isize it = 0; it < iters; ++it)
     {
@@ -343,7 +343,7 @@ double one_run(Var& v, u64& acc)
             nodes[i] = v.alloc();
         for (isize i = 0; i < batch_n; ++i)
         {
-            cc::byte* const p = nodes[free_order[i]];
+            byte* const p = nodes[free_order[i]];
             acc ^= reinterpret_cast<u64>(p);
             v.free(p);
         }
@@ -358,7 +358,7 @@ void measure(char const* name, isize size, Var& v)
     v.hydrate();
 
     // warmup: reach steady state (local/remote migration) and warm caches
-    cc::byte* nodes[batch_n] = {};
+    byte* nodes[batch_n] = {};
     u64 acc = 0;
     for (int w = 0; w < warmup_iters; ++w)
     {
@@ -389,14 +389,14 @@ void measure(char const* name, isize size, Var& v)
 // allocator actually compiles to the step2_tls_diff design it was chosen from (not just claims to).
 // Kept alive by references from the TEST (TU-local + noinline would otherwise be dead-code-eliminated).
 template <class Var>
-CC_DONT_INLINE u64 design_hotloop_probe(Var& v, cc::byte** nodes, int const* free_perm)
+CC_DONT_INLINE u64 design_hotloop_probe(Var& v, byte** nodes, int const* free_perm)
 {
     for (isize i = 0; i < batch_n; ++i)
         nodes[i] = v.alloc();
     u64 acc = 0;
     for (isize i = 0; i < batch_n; ++i)
     {
-        cc::byte* const p = nodes[free_perm[i]];
+        byte* const p = nodes[free_perm[i]];
         acc ^= reinterpret_cast<u64>(p);
         v.free(p);
     }
@@ -479,7 +479,7 @@ TEST("bench-node-design (fast-path variants)", nx::config::manual)
     //   dev.py assembly show 'design_hotloop_probe<...VarStep2<16,true,false>...>'
     //   dev.py assembly show 'design_hotloop_probe<...VarNode<16>...>'
     {
-        cc::byte* probe_nodes[batch_n] = {};
+        byte* probe_nodes[batch_n] = {};
         VarStep2<16, true, false> vm;
         vm.hydrate();
         bench::sink ^= design_hotloop_probe(vm, probe_nodes, free_order);

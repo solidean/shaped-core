@@ -7,6 +7,8 @@
 #include <thread>
 #endif
 
+using namespace cc::primitive_defines;
+
 // Isolated tests for cc::shared_ptr / cc::weak_ptr. Two layouts are exercised: the default trailing-control
 // traits (cc::default_shared_traits, used by shared_ptr<T> with no Traits) and a custom INTRUSIVE traits whose
 // counts are members of the node — the shape cc::async will use. The intrusive test types deliberately tear
@@ -40,8 +42,8 @@ struct node_base
     static inline int freed = 0;
     static void reset() { payload_torn = freed = 0; }
 
-    cc::atomic<cc::u32> strong = {0};
-    cc::atomic<cc::u32> weak = {0};
+    cc::atomic<u32> strong = {0};
+    cc::atomic<u32> weak = {0};
     cc::node_class_index cls = {}; // concrete size class, stashed so free frees the right (derived) size
 
     virtual void teardown_payload() = 0; // destroy the payload only; leaves the counts alive for weak refs
@@ -52,7 +54,7 @@ protected:
 
 struct node_derived : node_base
 {
-    cc::u64 padding[6] = {}; // distinctly larger size class than the base
+    u64 padding[6] = {}; // distinctly larger size class than the base
     int value;
 
     explicit node_derived(int v) : value(v) { cls = cc::node_class_index_for<node_derived>(); }
@@ -64,8 +66,8 @@ struct node_traits
     static constexpr bool supports_weak = true;
 
     // intrusive: the node IS the object, so no extra control storage
-    static constexpr cc::isize node_size(cc::isize psize, cc::isize) { return psize; }
-    static constexpr cc::isize node_align(cc::isize palign) { return palign; }
+    static constexpr isize node_size(isize psize, isize) { return psize; }
+    static constexpr isize node_align(isize palign) { return palign; }
 
     static void init_control(node_base* p)
     {
@@ -81,7 +83,7 @@ struct node_traits
     static bool release_weak(node_base* p) { return p->weak.fetch_sub(1, cc::memory_order_acq_rel) == 1; }
     static bool try_lock_strong(node_base* p)
     {
-        cc::u32 cur = p->strong.load(cc::memory_order_relaxed);
+        u32 cur = p->strong.load(cc::memory_order_relaxed);
         while (cur != 0)
             if (p->strong.compare_exchange_weak(cur, cur + 1, cc::memory_order_acq_rel, cc::memory_order_relaxed))
                 return true;
@@ -91,7 +93,7 @@ struct node_traits
     static void free_storage(node_base* p)
     {
         ++node_base::freed;
-        cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), p->cls); // stashed concrete class, not the base's
+        cc::node_allocation_free(reinterpret_cast<byte*>(p), p->cls); // stashed concrete class, not the base's
     }
 };
 
@@ -106,7 +108,7 @@ struct only_strong
     static inline int freed = 0;
     static void reset() { torn = freed = 0; }
 
-    cc::atomic<cc::u32> strong = {0};
+    cc::atomic<u32> strong = {0};
     int value;
     explicit only_strong(int v) : value(v) {}
 };
@@ -114,8 +116,8 @@ struct only_strong
 struct only_strong_traits
 {
     static constexpr bool supports_weak = false;
-    static constexpr cc::isize node_size(cc::isize psize, cc::isize) { return psize; }
-    static constexpr cc::isize node_align(cc::isize palign) { return palign; }
+    static constexpr isize node_size(isize psize, isize) { return psize; }
+    static constexpr isize node_align(isize palign) { return palign; }
     static void init_control(only_strong* p) { p->strong.store(1, cc::memory_order_relaxed); }
     static void inc_strong(only_strong* p) { p->strong.fetch_add(1, cc::memory_order_relaxed); }
     static cc::shared_release release_strong(only_strong* p)
@@ -131,7 +133,7 @@ struct only_strong_traits
     static void free_storage(only_strong* p)
     {
         ++only_strong::freed;
-        cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), cc::node_class_index_for<only_strong>());
+        cc::node_allocation_free(reinterpret_cast<byte*>(p), cc::node_class_index_for<only_strong>());
     }
 };
 } // namespace
@@ -418,11 +420,11 @@ TEST("shared_ptr - strong-only traits: no weak, destroy + free together")
 // handles that use it. strong lives in the high 32 bits, weak in the low 32.
 namespace
 {
-cc::u64 strong_of(cc::atomic<cc::u64> const& c)
+u64 strong_of(cc::atomic<u64> const& c)
 {
     return c.load() >> 32;
 }
-cc::u64 weak_of(cc::atomic<cc::u64> const& c)
+u64 weak_of(cc::atomic<u64> const& c)
 {
     return c.load() & 0xFFFF'FFFF;
 }
@@ -431,9 +433,9 @@ cc::u64 weak_of(cc::atomic<cc::u64> const& c)
 TEST("fused_refcount - init, inc, and the half layout")
 {
     using fr = cc::fused_refcount;
-    static_assert(fr::sole_owner == ((cc::u64(1) << 32) | 1));
+    static_assert(fr::sole_owner == ((u64(1) << 32) | 1));
 
-    cc::atomic<cc::u64> c = {0};
+    cc::atomic<u64> c = {0};
     fr::init(c);
     CHECK(c.load() == fr::sole_owner);
     CHECK(strong_of(c) == 1);
@@ -451,7 +453,7 @@ TEST("fused_refcount - init, inc, and the half layout")
 TEST("fused_refcount - release_strong reports destroy/free per the protocol")
 {
     using fr = cc::fused_refcount;
-    cc::atomic<cc::u64> c = {0};
+    cc::atomic<u64> c = {0};
 
     // (2,2): not the last strong -> nothing to do.
     fr::init(c);
@@ -512,7 +514,7 @@ struct race_node
         freed_during_teardown = 0;
     }
 
-    cc::atomic<cc::u64> counts = {0};
+    cc::atomic<u64> counts = {0};
 
     void teardown_payload()
     {
@@ -530,8 +532,8 @@ private:
 struct race_traits
 {
     static constexpr bool supports_weak = true;
-    static constexpr cc::isize node_size(cc::isize psize, cc::isize) { return psize; }
-    static constexpr cc::isize node_align(cc::isize palign) { return palign; }
+    static constexpr isize node_size(isize psize, isize) { return psize; }
+    static constexpr isize node_align(isize palign) { return palign; }
 
     static void init_control(race_node* p) { cc::fused_refcount::init(p->counts); }
     static void inc_strong(race_node* p) { cc::fused_refcount::inc_strong(p->counts); }
@@ -545,7 +547,7 @@ struct race_traits
         if (race_node::tearing.load(cc::memory_order_acquire))
             race_node::freed_during_teardown.fetch_add(1, cc::memory_order_relaxed);
         race_node::freed.fetch_add(1, cc::memory_order_relaxed);
-        cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), cc::node_class_index_for<race_node>());
+        cc::node_allocation_free(reinterpret_cast<byte*>(p), cc::node_class_index_for<race_node>());
     }
 };
 } // namespace
@@ -590,7 +592,7 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
 TEST("fused_refcount - try_lock_strong follows the high half only")
 {
     using fr = cc::fused_refcount;
-    cc::atomic<cc::u64> c = {0};
+    cc::atomic<u64> c = {0};
     fr::init(c);
 
     CHECK(fr::try_lock_strong(c)); // strong > 0 -> upgrade succeeds

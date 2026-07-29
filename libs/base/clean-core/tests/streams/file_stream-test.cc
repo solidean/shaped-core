@@ -9,6 +9,8 @@
 #include <string>
 #include <type_traits>
 
+using namespace cc::primitive_defines;
+
 using namespace cc_stream_test;
 
 // File adapters convert implicitly to their natural seekable stream and to any legal narrowing (incl. the
@@ -42,25 +44,25 @@ struct temp_file
     }
 };
 
-cc::vector<cc::byte> make_pattern(cc::isize n)
+cc::vector<byte> make_pattern(isize n)
 {
-    auto v = cc::vector<cc::byte>::create_defaulted(n);
-    for (cc::isize i = 0; i < n; ++i)
-        v[i] = cc::byte((i * 7 + 3) & 0xFF);
+    auto v = cc::vector<byte>::create_defaulted(n);
+    for (isize i = 0; i < n; ++i)
+        v[i] = byte((i * 7 + 3) & 0xFF);
     return v;
 }
 
 // n bytes starting at `start` (mod 256) — distinct, easy-to-compare content.
-cc::vector<cc::byte> make_bytes(cc::isize n, int start)
+cc::vector<byte> make_bytes(isize n, int start)
 {
-    auto v = cc::vector<cc::byte>::create_defaulted(n);
-    for (cc::isize i = 0; i < n; ++i)
-        v[i] = cc::byte((start + int(i)) & 0xFF);
+    auto v = cc::vector<byte>::create_defaulted(n);
+    for (isize i = 0; i < n; ++i)
+        v[i] = byte((start + int(i)) & 0xFF);
     return v;
 }
 
 // Write `bytes` to `path` through a file_write_stream_adapter, flushing and closing before returning.
-void write_file(cc::string_view path, cc::span<cc::byte const> bytes)
+void write_file(cc::string_view path, cc::span<byte const> bytes)
 {
     auto wpr = cc::file_write_stream_adapter::create(path);
     REQUIRE(wpr.has_value());
@@ -71,13 +73,13 @@ void write_file(cc::string_view path, cc::span<cc::byte const> bytes)
 }
 
 // Read the whole file back into a vector (via file_read_stream_adapter).
-cc::vector<cc::byte> read_whole(cc::string_view path)
+cc::vector<byte> read_whole(cc::string_view path)
 {
     auto rpr = cc::file_read_stream_adapter::open(path);
     REQUIRE(rpr.has_value());
     auto rs = rpr.value().stream();
     auto const n = rs.size().value();
-    auto out = cc::vector<cc::byte>::create_defaulted(n);
+    auto out = cc::vector<byte>::create_defaulted(n);
     REQUIRE(rs.read_exact(out).has_value());
     return out;
 }
@@ -96,7 +98,7 @@ TEST("file_stream - write then read round-trip across many buffers")
 
     CHECK(rs.size().value() == 10000);
 
-    auto out = cc::vector<cc::byte>::create_defaulted(10000);
+    auto out = cc::vector<byte>::create_defaulted(10000);
     REQUIRE(rs.read_exact(out).has_value());
     CHECK(bytes_equal(out, pattern));
 
@@ -118,7 +120,7 @@ TEST("file_stream - write buffer exactly full")
     auto rs = rpr.value().stream();
     CHECK(rs.size().value() == cc::file_write_stream_adapter::k_buffer_size);
 
-    auto out = cc::vector<cc::byte>::create_defaulted(pattern.size());
+    auto out = cc::vector<byte>::create_defaulted(pattern.size());
     REQUIRE(rs.read_exact(out).has_value());
     CHECK(bytes_equal(out, pattern));
 }
@@ -126,7 +128,7 @@ TEST("file_stream - write buffer exactly full")
 TEST("file_stream - zero-byte file is immediately at end")
 {
     temp_file tf("cc-stream-empty.tmp");
-    write_file(tf.view(), cc::span<cc::byte const>());
+    write_file(tf.view(), cc::span<byte const>());
 
     auto rpr = cc::file_read_stream_adapter::open(tf.view());
     REQUIRE(rpr.has_value());
@@ -135,7 +137,7 @@ TEST("file_stream - zero-byte file is immediately at end")
     CHECK(rs.size().value() == 0);
     CHECK(rs.at_end().value());
 
-    auto out = cc::vector<cc::byte>::create_defaulted(16);
+    auto out = cc::vector<byte>::create_defaulted(16);
     CHECK(rs.read(out).value() == 0);
 }
 
@@ -152,13 +154,13 @@ TEST("file_stream - partial consume then refill preserves the leftover")
     // fill the buffer, then consume only a little of it via the low-level window
     REQUIRE(rs.flush().has_value());
     CHECK(rs.ready_bytes().size() == cc::file_read_stream_adapter::k_buffer_size);
-    CHECK(bytes_equal(rs.ready_bytes().first_n(10), cc::span<cc::byte const>(pattern).first_n(10)));
+    CHECK(bytes_equal(rs.ready_bytes().first_n(10), cc::span<byte const>(pattern).first_n(10)));
     rs.consume(10);
 
     // reading the rest crosses the buffer boundary; the leftover from the first fill must be preserved
-    auto rest = cc::vector<cc::byte>::create_defaulted(6000 - 10);
+    auto rest = cc::vector<byte>::create_defaulted(6000 - 10);
     REQUIRE(rs.read_exact(rest).has_value());
-    CHECK(bytes_equal(rest, cc::span<cc::byte const>(pattern).subspan(cc::offset_size{.offset = 10, .size = 6000 - 10})));
+    CHECK(bytes_equal(rest, cc::span<byte const>(pattern).subspan(cc::offset_size{.offset = 10, .size = 6000 - 10})));
 }
 
 TEST("file_stream - seek past end reads as end-of-file")
@@ -173,14 +175,14 @@ TEST("file_stream - seek past end reads as end-of-file")
 
     // absolute seek within the file
     REQUIRE(rs.seek_to(90).value() == 90);
-    auto tail = cc::vector<cc::byte>::create_defaulted(10);
+    auto tail = cc::vector<byte>::create_defaulted(10);
     CHECK(rs.read(tail).value() == 10);
-    CHECK(bytes_equal(tail, cc::span<cc::byte const>(pattern).subspan(cc::offset_size{.offset = 90, .size = 10})));
+    CHECK(bytes_equal(tail, cc::span<byte const>(pattern).subspan(cc::offset_size{.offset = 90, .size = 10})));
 
     // seeking past the end is allowed; the next read yields nothing
     REQUIRE(rs.seek_to(1000).value() == 1000);
     CHECK(rs.at_end().value());
-    auto out = cc::vector<cc::byte>::create_defaulted(4);
+    auto out = cc::vector<byte>::create_defaulted(4);
     CHECK(rs.read(out).value() == 0);
 }
 
@@ -216,9 +218,9 @@ TEST("file_stream - write open overwrites without truncating")
 
     auto const got = read_whole(tf.view());
     REQUIRE(got.size() == 100); // still the original length
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).first_n(10), head));
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).subspan(cc::offset_size{.offset = 10, .size = 90}),
-                      cc::span<cc::byte const>(original).subspan(cc::offset_size{.offset = 10, .size = 90})));
+    CHECK(bytes_equal(cc::span<byte const>(got).first_n(10), head));
+    CHECK(bytes_equal(cc::span<byte const>(got).subspan(cc::offset_size{.offset = 10, .size = 90}),
+                      cc::span<byte const>(original).subspan(cc::offset_size{.offset = 10, .size = 90})));
 }
 
 TEST("file_stream - write append grows an existing file")
@@ -238,8 +240,8 @@ TEST("file_stream - write append grows an existing file")
 
     auto const got = read_whole(tf.view());
     REQUIRE(got.size() == 70);
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).first_n(50), original));
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).subspan(cc::offset_size{.offset = 50, .size = 20}), extra));
+    CHECK(bytes_equal(cc::span<byte const>(got).first_n(50), original));
+    CHECK(bytes_equal(cc::span<byte const>(got).subspan(cc::offset_size{.offset = 50, .size = 20}), extra));
 }
 
 TEST("file_stream - read_write can read the whole file")
@@ -252,7 +254,7 @@ TEST("file_stream - read_write can read the whole file")
     REQUIRE(rw.has_value());
     auto s = rw.value().stream();
     CHECK(s.size().value() == 300);
-    auto out = cc::vector<cc::byte>::create_defaulted(300);
+    auto out = cc::vector<byte>::create_defaulted(300);
     REQUIRE(s.read_exact(out).has_value());
     CHECK(bytes_equal(out, original));
 }
@@ -274,7 +276,7 @@ TEST("file_stream - read_write overwrites in place")
     }
 
     auto expected = original; // deep copy, then patch the overwritten range
-    for (cc::isize i = 0; i < marker.size(); ++i)
+    for (isize i = 0; i < marker.size(); ++i)
         expected[50 + i] = marker[i];
 
     auto const got = read_whole(tf.view());
@@ -300,8 +302,8 @@ TEST("file_stream - read_write grows while writing past the end")
 
     auto const got = read_whole(tf.view());
     REQUIRE(got.size() == 120); // grew by 20
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).first_n(90), cc::span<cc::byte const>(original).first_n(90)));
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).subspan(cc::offset_size{.offset = 90, .size = 30}), tail));
+    CHECK(bytes_equal(cc::span<byte const>(got).first_n(90), cc::span<byte const>(original).first_n(90)));
+    CHECK(bytes_equal(cc::span<byte const>(got).subspan(cc::offset_size{.offset = 90, .size = 30}), tail));
 }
 
 TEST("file_stream - read_write appends at EOF via seek-to-end then write")
@@ -324,6 +326,6 @@ TEST("file_stream - read_write appends at EOF via seek-to-end then write")
 
     auto const got = read_whole(tf.view());
     REQUIRE(got.size() == 55);
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).first_n(40), original));
-    CHECK(bytes_equal(cc::span<cc::byte const>(got).subspan(cc::offset_size{.offset = 40, .size = 15}), extra));
+    CHECK(bytes_equal(cc::span<byte const>(got).first_n(40), original));
+    CHECK(bytes_equal(cc::span<byte const>(got).subspan(cc::offset_size{.offset = 40, .size = 15}), extra));
 }

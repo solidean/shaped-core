@@ -36,7 +36,7 @@ struct markdown_parser; // defined in markdown.cc; builds a document
 namespace babel::markdown
 {
 /// The block kinds this reader produces. Leaves carry text; containers carry children.
-enum class node_kind : cc::u8
+enum class node_kind : u8
 {
     document,       // the root; children are the top-level blocks
     heading,        // level 1..6; text is the heading content, `#` markers stripped
@@ -202,5 +202,5 @@ inline ref document::node_at(i32 index) const
 
 /// Convenience: parse from an in-memory UTF-8 buffer (wraps a span_read_stream_adapter).
 [[nodiscard]] cc::result<document> read(cc::string_view text);
-[[nodiscard]] cc::result<document> read(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<document> read(cc::span<byte const> bytes);
 } // namespace babel::markdown

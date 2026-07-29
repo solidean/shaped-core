@@ -221,7 +221,7 @@ void dx12_swapchain::fail(HRESULT hr, char const* what)
     _ctx.note_device_removed_if_lost(hr, what);
     if (_ctx.is_device_lost())
         throw sg::device_lost_exception(_ctx.device_loss_reason());
-    throw sg::exception(cc::format("{} (hr=0x{:08X})", what, cc::u32(hr)));
+    throw sg::exception(cc::format("{} (hr=0x{:08X})", what, u32(hr)));
 }
 
 dx12_swapchain::~dx12_swapchain()

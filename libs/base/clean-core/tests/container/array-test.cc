@@ -5,6 +5,8 @@
 
 #include <vector>
 
+using namespace cc::primitive_defines;
+
 
 namespace
 {
@@ -107,13 +109,12 @@ struct CountingResource : cc::memory_resource
 {
     int allocations = 0;
     int deallocations = 0;
-    cc::isize total_allocated_bytes = 0;
-    cc::isize total_deallocated_bytes = 0;
+    isize total_allocated_bytes = 0;
+    isize total_deallocated_bytes = 0;
 
     CountingResource()
     {
-        allocate_bytes = [](cc::byte** out_ptr, cc::isize min_bytes, cc::isize max_bytes, cc::isize alignment,
-                            void* userdata) -> cc::isize
+        allocate_bytes = [](byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata) -> cc::isize
         {
             CC_UNUSED(max_bytes); // the resource interface fixes the signature; this size hint is unused here
             auto* self = static_cast<CountingResource*>(userdata);
@@ -124,12 +125,12 @@ struct CountingResource : cc::memory_resource
                 return 0;
             }
             // Allocate exactly min_bytes (not using max_bytes for size class rounding)
-            *out_ptr = static_cast<cc::byte*>(::operator new(min_bytes, std::align_val_t(alignment)));
+            *out_ptr = static_cast<byte*>(::operator new(min_bytes, std::align_val_t(alignment)));
             self->total_allocated_bytes += min_bytes;
             return min_bytes;
         };
 
-        deallocate_bytes = [](cc::byte* p, cc::isize bytes, cc::isize alignment, void* userdata)
+        deallocate_bytes = [](byte* p, isize bytes, isize alignment, void* userdata)
         {
             auto* self = static_cast<CountingResource*>(userdata);
             ++self->deallocations;

@@ -46,7 +46,7 @@ template <class ReflectionT>
 [[nodiscard]] cc::result<cc::vector<sg::binding>> reflect_bindings(ReflectionT* reflection, UINT bound_resources)
 {
     cc::vector<sg::binding> bindings;
-    bindings.reserve(cc::isize(bound_resources));
+    bindings.reserve(isize(bound_resources));
     for (UINT i = 0; i < bound_resources; ++i)
     {
         D3D12_SHADER_INPUT_BIND_DESC bd = {};
@@ -74,7 +74,7 @@ template <class ReflectionT>
             {
                 D3D12_SHADER_BUFFER_DESC cb_desc = {};
                 if (SUCCEEDED(cb->GetDesc(&cb_desc)))
-                    b.block_size = cc::isize(cb_desc.Size);
+                    b.block_size = isize(cb_desc.Size);
             }
         }
 

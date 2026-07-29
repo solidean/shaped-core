@@ -8,9 +8,7 @@
 
 namespace sg
 {
-bytes_future context_download_scope::bytes_from_buffer(raw_buffer_handle buffer,
-                                                       cc::isize offset_in_bytes,
-                                                       cc::isize size_in_bytes)
+bytes_future context_download_scope::bytes_from_buffer(raw_buffer_handle buffer, isize offset_in_bytes, isize size_in_bytes)
 {
     return _ctx.async_download_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
@@ -25,16 +23,16 @@ bytes_future context_download_scope::bytes_from_texture(raw_texture_handle textu
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
     if (box.is_empty()) // no copy — a ready, empty future
-        return bytes_future(cc::pinned_data<cc::byte const>(), std::make_shared<ready_bytes_waiter>());
+        return bytes_future(cc::pinned_data<byte const>(), std::make_shared<ready_bytes_waiter>());
     return _ctx.async_download_bytes_from_texture(cc::move(texture), subresource, box);
 }
 
-void context_download_scope::set_async_window_size(cc::isize bytes)
+void context_download_scope::set_async_window_size(isize bytes)
 {
     _ctx.set_async_download_window_bytes(bytes);
 }
 
-void context_download_scope::set_budget(cc::isize bytes)
+void context_download_scope::set_budget(isize bytes)
 {
     _ctx.set_inline_download_budget(bytes);
 }

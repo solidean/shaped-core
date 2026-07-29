@@ -340,7 +340,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
         CC_ASSERT(resource != nullptr, "uniform buffer view over an empty buffer");
         D3D12_CONSTANT_BUFFER_VIEW_DESC desc = {};
         desc.BufferLocation = resource->GetGPUVirtualAddress() + UINT64(view.offset_in_bytes);
-        desc.SizeInBytes = UINT((view.size_in_bytes + 255) & ~cc::isize(255)); // CBV size is 256-aligned
+        desc.SizeInBytes = UINT((view.size_in_bytes + 255) & ~isize(255)); // CBV size is 256-aligned
         device->CreateConstantBufferView(&desc, dst);
         return;
     }

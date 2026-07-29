@@ -4,15 +4,13 @@
 
 namespace sg
 {
-void command_list_upload_scope::bytes_to_buffer(raw_buffer_handle buffer,
-                                                cc::span<cc::byte const> data,
-                                                cc::isize offset_in_bytes)
+void command_list_upload_scope::bytes_to_buffer(raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes)
 {
     _cmd.upload_bytes_to_buffer(cc::move(buffer), data, offset_in_bytes);
 }
 
 void command_list_upload_scope::bytes_to_texture(raw_texture_handle texture,
-                                                 cc::span<cc::byte const> pixels,
+                                                 cc::span<byte const> pixels,
                                                  subresource_index const& subresource,
                                                  cc::optional<texture_region> region)
 {

@@ -19,7 +19,7 @@ public:
     /// One DXR shader identifier — D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES (32) opaque bytes.
     struct shader_identifier
     {
-        cc::byte bytes[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+        byte bytes[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
     };
 
     /// Builds the state object from `desc` (its shaders + limits) against `layout`'s root signature.
@@ -29,7 +29,7 @@ public:
                                                                             sg::raytracing_pipeline_description const& desc);
 
     /// State-object cached blobs are a later optimization — empty for now.
-    [[nodiscard]] cc::pinned_data<cc::byte const> cached_pipeline_data() const override;
+    [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
 
     dx12_pipeline_layout_handle layout;
     ComPtr<ID3D12StateObject> state_object;

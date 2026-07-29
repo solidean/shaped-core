@@ -120,12 +120,12 @@ struct dx12_descriptor_heap
     struct epoch_checkpoint
     {
         sg::epoch epoch_id = sg::epoch::invalid;
-        cc::u64 end_pos = 0;
+        u64 end_pos = 0;
     };
     struct ring_state
     {
-        cc::u64 next_pos = 0;                     // logical bump cursor over the transient region
-        cc::u64 freed_pos = 0;                    // everything logically below this is reclaimable
+        u64 next_pos = 0;                         // logical bump cursor over the transient region
+        u64 freed_pos = 0;                        // everything logically below this is reclaimable
         cc::vector<epoch_checkpoint> checkpoints; // FIFO, oldest epoch at the front
     };
     cc::mutex<ring_state> transient_ring;

@@ -44,7 +44,7 @@ public:
     /// buffer_usage::copy_dst. An empty pin is a no-op. Precondition: offset_in_bytes + data.size() <=
     /// buffer size. Build the pin with cc::make_pinned_data / cc::as_pinned_data; that pin is what keeps
     /// the upload zero-copy, which is why it is passed rather than a plain span.
-    void bytes_to_buffer(raw_buffer_handle buffer, cc::pinned_data<cc::byte const> data, isize offset_in_bytes = 0);
+    void bytes_to_buffer(raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset_in_bytes = 0);
 
     /// Streams a trivially-copyable pinned range, re-viewing the SAME pin as bytes (no copy).
     /// `offset_in_elements` is in elements of T. See bytes_to_buffer.
@@ -60,7 +60,7 @@ public:
     /// cmd.upload.bytes_to_texture). The pin keeps the source alive until the copy consumes it; a later
     /// command list that reads the texture waits on the copy automatically. Needs texture_usage::copy_dst.
     void bytes_to_texture(raw_texture_handle texture,
-                          cc::pinned_data<cc::byte const> data,
+                          cc::pinned_data<byte const> data,
                           subresource_index const& subresource = {},
                           cc::optional<texture_region> region = {});
 
