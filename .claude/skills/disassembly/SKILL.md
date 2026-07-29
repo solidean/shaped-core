@@ -1,6 +1,6 @@
 ---
 name: disassembly
-description: Inspect the optimizer's actual codegen for shaped-core with `dev.py assembly` — search built symbols, disassemble a function (a local godbolt over the object files), and trace what a function really executed at run time. Use when you need to confirm what machine code a function compiled to, or which path it actually took.
+description: Inspect the optimizer's actual codegen with `dev.py assembly` — search built symbols, disassemble a function (a local godbolt over the object files), and trace what a function really executed at run time. Works on shaped-core's presets and, via --build-dir/--objects/--exe, on any other project's build. Use when you need to confirm what machine code a function compiled to, or which path it actually took.
 when_to_use: "disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt", "why is X slower/faster", "attribute a perf delta to a cause", "is this microbenchmark representative", "does the real code match the benchmark mock", "which branch was taken", "where did that indirect call go", "what did it actually execute", "trace instructions", "how many instructions"
 allowed-tools: Bash mcp__repo_tools__repo_search Read
 ---
@@ -20,9 +20,9 @@ diff its disassembly against the mock's; the mock is usually the optimistic one
 (it hoists / folds / DCEs what the real code can't).
 
 ```bash
-uv run dev.py assembly search <pattern> [--preset P] [--target T] [--regex] [--all] [--limit N]
-uv run dev.py assembly show   <symbol>  [--preset P] [--target T] [--source] [--att] [--bytes]
-uv run dev.py assembly trace  --target T (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--mca-cpu C] [--html P] -- <args>
+uv run dev.py assembly search <pattern> [--preset P | --build-dir D | --objects P] [--target T] [--regex] [--all] [--limit N]
+uv run dev.py assembly show   <symbol>  [--preset P | --build-dir D | --objects P] [--target T] [--source] [--att] [--bytes]
+uv run dev.py assembly trace  (--target T | --exe P) [--cwd D] (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--mca-cpu C] [--html P] -- <args>
 ```
 
 **`search`/`show` are static — `trace` is dynamic.** When the question is "what *did* it do" rather
@@ -73,6 +73,14 @@ host). Best viewed in `--html` (timing toggle, side boxes, a pipeline waterfall)
 source view with executed-line highlighting, and the `llvm-mca` timing views when available — to one
 self-contained `.html` file for a browser. It forces a full capture and replaces stdout with a
 one-line summary.
+
+**It is not limited to shaped-core.** `--build-dir D` / `--objects P` point `search`/`show` at any
+build tree (an object file or a directory; no preset is resolved, nothing is configured or built),
+and `trace --exe P` traces any executable — the tracer binary still comes from a shaped-core build.
+Targets outside a CMake tree group by the object's directory relative to the scan root, so
+`--target` still filters. Relative paths — `--build-dir`, `--objects`, `--exe`, `--cwd`, `--html` —
+are relative to *your* current directory, and `--cwd` defaults to the traced exe's own directory.
+Details: [Other projects](../../../docs/guides/disassembly.md#other-projects).
 
 ## The loop
 

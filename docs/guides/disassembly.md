@@ -18,6 +18,9 @@ uv run dev.py assembly trace --target T --symbol S -- <args>   # what one invoca
 answers the **dynamic** one: which branch a real invocation took, where an indirect call landed,
 how many instructions it retired, and which memory it actually touched.
 
+None of this is specific to shaped-core: `--build-dir` / `--objects` point `search`/`show` at any
+build tree, and `trace --exe` traces any executable — see [Other projects](#other-projects).
+
 ## Why object files (and why that's fine)
 
 The tool reads **`.obj` files**, not the linked `.exe`/`.dll`. On Windows the
@@ -192,6 +195,58 @@ replaces stdout with a one-line summary. See the tracer's
 uv run dev.py assembly trace --target clean-core-test \
     --symbol single_lazy_probe --skip 2 --html probe.html -- "bench-async (single-thread drive)"
 ```
+
+## Other projects
+
+Nothing about the machinery is shaped-core-specific — objects are objects, and the tracer takes a
+path to an `.exe`.
+Three flags open all of it up to any other project, whatever built it:
+
+```bash
+# any build tree, grouped by target
+uv run dev.py assembly search "render::" --build-dir D:/proj/out/build/msvc-release
+uv run dev.py assembly search "operator new" --objects D:/proj/obj,D:/other/obj
+
+# a single object file
+uv run dev.py assembly show "foo::bar" --objects D:/proj/obj/mylib.dir/foo.obj
+
+# any executable, with its own arguments
+uv run dev.py assembly trace --exe D:/proj/out/bin/app.exe --symbol "render::draw" \
+    --skip 50 --sections stats,cachelines -- --scene foo.json
+```
+
+`--build-dir` (one tree) and `--objects` (a directory or a single `.obj`/`.o`, comma-list and
+repeatable) both switch `search`/`show` into **external mode**: no `CMakePresets.json` is read, no
+CMake discovery runs, nothing is configured or built.
+They therefore don't combine with `--preset`, which would silently do nothing — that's an error.
+
+**Target grouping degrades gracefully.** A CMake tree still names targets exactly, from the
+`.../CMakeFiles/<target>.dir/...` path segment.
+Anything else — MSBuild, cargo, a hand-rolled makefile — groups by the object's directory relative
+to the scan root, so an MSBuild tree lists `WPFDXInterop/samples/D3D11Image/x64/Debug` rather than
+one undifferentiated bucket, and `--target "WPFDXInterop/*"` still filters it.
+
+**`trace --exe` skips the build**, because there is nothing here that could build it, and
+`--target` / `--exe` are mutually exclusive.
+`instruction-tracer` itself is still built and located from *this* repo's preset — it is our tool,
+and the preset only decides which build of it runs.
+The debuggee's working directory defaults to the exe's own directory (an external app resolves its
+DLLs and data relative to itself); `--cwd PATH` overrides it.
+Instead of guessing from a preset name, the PDB check is direct: `trace` warns when no `.pdb` sits
+beside the exe, since without one the trace degrades to raw addresses.
+
+**Relative paths in `--build-dir`, `--objects`, `--exe`, `--cwd` and `--html` resolve against your
+current directory**, not the shaped-core root — so you can `cd` into the other project and type
+short paths.
+That is the *only* thing the working directory decides: `dev.py` never infers which project it is
+looking at from where you stand, and never changes directory itself.
+
+**Finding LLVM.** `llvm-nm` / `llvm-objdump` are looked up in the env override, then `PATH`, then
+beside the compiler recorded in the scanned tree's `CMakeCache.txt`, and finally beside the one in
+this repo's default preset.
+That last fallback is what makes an MSVC-built or non-CMake tree work on Windows, where LLVM's
+`bin/` is usually off `PATH`.
+`LLVM_NM` / `LLVM_OBJDUMP` / `LLVM_MCA` override all of it.
 
 ## Limitations
 

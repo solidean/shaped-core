@@ -3,10 +3,10 @@
 Records what optimized x64 code **actually executed** — the retired instructions of a real
 invocation, with the branches it really took and the indirect calls it really made.
 
-`dev.py assembly` (the [disassembly](../../.claude/skills/disassembly/SKILL.md) skill) answers the
-static question: what *might* this code do. This answers the dynamic one. It launches a program
-under the Win32 debug API, breakpoints a symbol, skips the warm-up hits, then single-steps one
-invocation and prints it.
+`dev.py assembly` (guide: [docs/guides/disassembly.md](../../docs/guides/disassembly.md); skill:
+[disassembly](../../.claude/skills/disassembly/SKILL.md)) answers the static question: what *might*
+this code do. This answers the dynamic one. It launches a program under the Win32 debug API,
+breakpoints a symbol, skips the warm-up hits, then single-steps one invocation and prints it.
 
 It is deliberately not a general debugger. The narrow scope is what makes a few hundred lines of
 debug loop preferable to DynamoRIO or Pin.
@@ -34,14 +34,31 @@ process runs just the test that exercises the code you care about.
 workflow: `search` finds a symbol, `show` disassembles it statically, `trace` shows what it really
 did.
 
+### Another project's binary
+
+Nothing in the tracer knows about shaped-core — it takes a path to an `.exe` and reads its PDB at
+run time. `--exe` exposes that through `dev.py`, in place of `--target`:
+
+```bash
+uv run dev.py assembly trace --exe D:/proj/out/bin/app.exe \
+    --symbol "render::draw" --skip 50 --stats -- --scene foo.json
+```
+
+The traced binary is yours to build; `dev.py` still builds and locates the tracer itself.
+The debuggee runs in the exe's own directory by default, so its DLLs and relative data paths
+resolve — `--cwd PATH` overrides that.
+A relative `--exe` / `--cwd` / `--html` is relative to *your* current directory, not the repo.
+See [Other projects](../../docs/guides/disassembly.md#other-projects) for the `search`/`show` half.
+
 ## Usage
 
-`dev.py assembly trace` mirrors the flags below, with two differences: `--target` there names the
-*build target* to trace (this tool's `--exe`), and the tracer's `--target` spec is spelled `--spec`.
+`dev.py assembly trace` mirrors the flags below, with two differences: `--target` there names a
+*build target* of this repo to trace (`--exe` takes an arbitrary path instead, exactly like this
+tool's `--exe`), and the tracer's `--target` spec is spelled `--spec`.
 Flags you omit are not passed at all, so the defaults documented here are the only ones.
 
 ```
-uv run dev.py assembly trace --target <build-target>
+uv run dev.py assembly trace (--target <build-target> | --exe <path>)
                              (--symbol <name> | --address <hex> | --spec <spec>)
                              [options] [-- <args passed to the debuggee>]
 ```
