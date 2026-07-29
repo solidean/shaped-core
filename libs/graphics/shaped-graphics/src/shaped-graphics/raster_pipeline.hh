@@ -69,7 +69,7 @@ struct raster_pipeline_description
     /// Optional serialized PSO blob for accelerated creation (skips most driver work). Platform-specific
     /// and best-effort: backends may ignore it. Obtain one from a previously-built pipeline via
     /// `cached_pipeline_data()` and persist it across runs.
-    cc::pinned_data<cc::byte const> cached_pipeline = {};
+    cc::pinned_data<byte const> cached_pipeline = {};
 };
 
 /// A ready-to-draw raster (graphics) pipeline: vertex + fragment shaders compiled against a
@@ -85,7 +85,7 @@ public:
 
     /// The backend's serialized PSO blob, for persisting and feeding back via
     /// raster_pipeline_description::cached_pipeline. Empty if the backend doesn't support it.
-    [[nodiscard]] virtual cc::pinned_data<cc::byte const> cached_pipeline_data() const = 0;
+    [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
 
 protected:
     raster_pipeline() = default;

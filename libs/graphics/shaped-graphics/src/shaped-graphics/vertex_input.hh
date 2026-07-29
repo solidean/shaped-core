@@ -48,15 +48,15 @@ struct vertex_attribute
     cc::string semantic;    ///< HLSL semantic (e.g. "POSITION") the input is matched by
     u32 semantic_index = 0; ///< semantic index (matrix rows / arrays)
     vertex_attribute_format format = vertex_attribute_format::vec3f;
-    cc::isize offset = 0; ///< byte offset of this attribute within its vertex
-    int slot = 0;         ///< index of the bound vertex buffer this attribute reads from
+    isize offset = 0; ///< byte offset of this attribute within its vertex
+    int slot = 0;     ///< index of the bound vertex buffer this attribute reads from
 };
 
 /// One bound vertex buffer: the stride between consecutive vertices and whether it advances per vertex
 /// or per instance.
 struct vertex_input_slot
 {
-    cc::isize stride = 0;      ///< bytes between consecutive elements in this buffer
+    isize stride = 0;          ///< bytes between consecutive elements in this buffer
     bool per_instance = false; ///< false: advance per vertex; true: advance per instance
 };
 
@@ -78,7 +78,7 @@ struct vertex_input_layout
 /// assigns it), and whether it is a per-instance buffer. The value a `vertex_layout_of<V>` returns.
 struct vertex_type_layout
 {
-    cc::isize stride = 0;
+    isize stride = 0;
     bool per_instance = false;
     cc::vector<vertex_attribute> attributes;
 };

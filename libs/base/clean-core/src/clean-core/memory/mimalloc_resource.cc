@@ -5,6 +5,8 @@
 #include <clean-core/common/utility.hh>
 #include <mimalloc.h>
 
+using namespace cc::primitive_defines;
+
 // mimalloc-backed implementation of cc::default_memory_resource. mimalloc is a fast
 // general-purpose allocator; routing the default resource through it speeds up every
 // non-node allocation (cc::vector, cc::string, ...). The <mimalloc.h> dependency is
@@ -15,11 +17,7 @@
 
 namespace
 {
-cc::isize mi_try_allocate_bytes(cc::byte** out_ptr,
-                                cc::isize min_bytes,
-                                cc::isize max_bytes,
-                                cc::isize alignment,
-                                void* userdata)
+isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
     CC_UNUSED(userdata);
 
@@ -34,7 +32,7 @@ cc::isize mi_try_allocate_bytes(cc::byte** out_ptr,
     }
 
     void* p = mi_malloc_aligned(static_cast<size_t>(min_bytes), static_cast<size_t>(alignment));
-    *out_ptr = static_cast<cc::byte*>(p);
+    *out_ptr = static_cast<byte*>(p);
     if (p == nullptr)
     {
         return -1;
@@ -42,11 +40,11 @@ cc::isize mi_try_allocate_bytes(cc::byte** out_ptr,
 
     // Report mimalloc's actual usable size (size-class rounding), clamped into
     // [min_bytes, max_bytes] so containers can claim the extra capacity for free.
-    cc::isize const usable = static_cast<cc::isize>(mi_usable_size(p));
+    isize const usable = static_cast<isize>(mi_usable_size(p));
     return usable < max_bytes ? usable : max_bytes;
 }
 
-cc::isize mi_allocate_bytes(cc::byte** out_ptr, cc::isize min_bytes, cc::isize max_bytes, cc::isize alignment, void* userdata)
+isize mi_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
     auto const result = mi_try_allocate_bytes(out_ptr, min_bytes, max_bytes, alignment, userdata);
     CC_ASSERTF(min_bytes == 0 || result >= 0, "allocation failed: requested [{}, {}] bytes with alignment {}",
@@ -54,7 +52,7 @@ cc::isize mi_allocate_bytes(cc::byte** out_ptr, cc::isize min_bytes, cc::isize m
     return result;
 }
 
-void mi_deallocate_bytes(cc::byte* p, cc::isize bytes, cc::isize alignment, void* userdata)
+void mi_deallocate_bytes(byte* p, isize bytes, isize alignment, void* userdata)
 {
     CC_UNUSED(bytes);
     CC_UNUSED(alignment);
@@ -64,12 +62,7 @@ void mi_deallocate_bytes(cc::byte* p, cc::isize bytes, cc::isize alignment, void
     mi_free(p);
 }
 
-cc::isize mi_try_resize_bytes_in_place(cc::byte* p,
-                                       cc::isize old_bytes,
-                                       cc::isize min_bytes,
-                                       cc::isize max_bytes,
-                                       cc::isize alignment,
-                                       void* userdata)
+isize mi_try_resize_bytes_in_place(byte* p, isize old_bytes, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
     CC_UNUSED(old_bytes);
     CC_UNUSED(userdata);
@@ -87,7 +80,7 @@ cc::isize mi_try_resize_bytes_in_place(cc::byte* p,
     // excludes the padding region, so reporting capacity up to it keeps writes
     // inside the user block and leaves mimalloc's overflow canary intact. This
     // matches mi_expand's release semantics exactly while also working in debug.
-    cc::isize const usable = static_cast<cc::isize>(mi_usable_size(p));
+    isize const usable = static_cast<isize>(mi_usable_size(p));
     if (min_bytes > usable)
     {
         return -1;

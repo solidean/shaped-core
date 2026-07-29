@@ -15,7 +15,7 @@ using namespace cc::primitive_defines;
 
 namespace babel::json
 {
-enum class node_kind : cc::u8;
+enum class node_kind : u8;
 struct node;
 class document;
 struct ref;
@@ -23,7 +23,7 @@ struct ref;
 
 namespace babel::markdown
 {
-enum class node_kind : cc::u8;
+enum class node_kind : u8;
 struct node;
 class document;
 struct ref;
@@ -39,7 +39,7 @@ struct data;
 
 namespace babel::sqlite
 {
-enum class column_kind : cc::u8;
+enum class column_kind : u8;
 struct row;
 class statement;
 class database;

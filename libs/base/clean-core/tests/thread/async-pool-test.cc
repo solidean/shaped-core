@@ -12,6 +12,8 @@
 #include <thread>
 #endif
 
+using namespace cc::primitive_defines;
+
 // cc::async_thread_pool's own tests. Deliberately NOT gated on CC_HAS_THREADS as a whole: the pool exists on
 // every platform and falls back to driving graphs inline on the caller (see async_thread_pool.hh), so these
 // pin that a pool-shaped API gives pool-shaped ANSWERS with or without threads — which is the only claim the
@@ -27,14 +29,14 @@ namespace
 // correct drive returns 2^d — a compact whole-graph workload to run on a pool. The sum alone proves every leaf
 // ran exactly once, so there is no leaf-execution counter here (a shared counter would be a data race across
 // the pool's worker threads, and redundant).
-cc::shared_async<cc::i64> build_sum_tree(int depth)
+cc::shared_async<i64> build_sum_tree(int depth)
 {
     if (depth == 0)
-        return cc::make_async_lazy<cc::i64>([] { return cc::i64(1); });
+        return cc::make_async_lazy<i64>([] { return i64(1); });
 
     auto left = build_sum_tree(depth - 1);
     auto right = build_sum_tree(depth - 1);
-    return cc::make_async_lazy([](cc::i64 l, cc::i64 r) { return l + r; }, left, right);
+    return cc::make_async_lazy([](i64 l, i64 r) { return l + r; }, left, right);
 }
 
 } // namespace
@@ -46,7 +48,7 @@ TEST("async - a dependency tree drives correctly on a thread pool")
     int const depth = 10; // 1024 leaves
     auto root = build_sum_tree(depth);
 
-    CHECK(pool.blocking_get(root) == (cc::i64(1) << depth));
+    CHECK(pool.blocking_get(root) == (i64(1) << depth));
 }
 
 TEST("async - many independent asyncs fan out across the pool")
@@ -56,27 +58,26 @@ TEST("async - many independent asyncs fan out across the pool")
     // one root that sums 64 independent children via a two-phase frame (creates + requires them, then reads
     // them) — the children fan out across the pool's workers
     int const n = 64;
-    auto root = cc::make_async_lazy<cc::i64>(
-        [n, step = 0,
-         kids = cc::vector<cc::shared_async<cc::i64>>()](async_context<cc::i64>& actx) mutable -> cc::async_step_status
+    auto root = cc::make_async_lazy<i64>(
+        [n, step = 0, kids = cc::vector<cc::shared_async<i64>>()](async_context<i64>& actx) mutable -> cc::async_step_status
         {
             if (step++ == 0)
             {
                 for (int i = 0; i < n; ++i)
                 {
-                    auto k = cc::make_async_lazy([i] { return cc::i64(i); });
+                    auto k = cc::make_async_lazy([i] { return i64(i); });
                     (void)actx.require(k);
                     kids.push_back(cc::move(k));
                 }
                 return actx.wait_for_dependencies();
             }
-            cc::i64 sum = 0;
+            i64 sum = 0;
             for (auto const& k : kids)
                 sum += *k->value_ptr();
             return actx.success(sum);
         });
 
-    CHECK(pool.blocking_get(root) == cc::i64(n) * (n - 1) / 2);
+    CHECK(pool.blocking_get(root) == i64(n) * (n - 1) / 2);
 }
 
 // Gated: the whole point is that a SECOND thread supplies the value the first is parked on. With one thread
@@ -136,8 +137,8 @@ TEST("async - two pools coexist and drive independent graphs")
     auto root_a = build_sum_tree(8); // 256 leaves
     auto root_b = build_sum_tree(9); // 512 leaves
 
-    CHECK(pool_a.blocking_get(root_a) == (cc::i64(1) << 8));
-    CHECK(pool_b.blocking_get(root_b) == (cc::i64(1) << 9));
+    CHECK(pool_a.blocking_get(root_a) == (i64(1) << 8));
+    CHECK(pool_b.blocking_get(root_b) == (i64(1) << 9));
 }
 
 TEST("async - stress: many small graphs on a pool")
@@ -147,7 +148,7 @@ TEST("async - stress: many small graphs on a pool")
     for (int iter = 0; iter < 200; ++iter)
     {
         auto root = build_sum_tree(6); // 64 leaves
-        CHECK(pool.blocking_get(root) == (cc::i64(1) << 6));
+        CHECK(pool.blocking_get(root) == (i64(1) << 6));
     }
 }
 
@@ -166,10 +167,10 @@ struct counted
 {
     static inline cc::atomic<int> live = {0};
 
-    cc::i64 v = 0;
+    i64 v = 0;
 
     counted() { live.fetch_add(1, cc::memory_order_relaxed); }
-    explicit counted(cc::i64 x) : v(x) { live.fetch_add(1, cc::memory_order_relaxed); }
+    explicit counted(i64 x) : v(x) { live.fetch_add(1, cc::memory_order_relaxed); }
     counted(counted const& o) : v(o.v) { live.fetch_add(1, cc::memory_order_relaxed); }
     counted(counted&& o) noexcept : v(o.v) { live.fetch_add(1, cc::memory_order_relaxed); }
     counted& operator=(counted const&) = delete;
@@ -249,7 +250,7 @@ TEST("async - the wake protocol survives workers repeatedly draining to empty")
     for (int iter = 0; iter < 400; ++iter)
     {
         auto root = build_sum_tree(3); // tiny: finishes fast, so the pool goes idle between iterations
-        CHECK(pool.blocking_get(root) == (cc::i64(1) << 3));
+        CHECK(pool.blocking_get(root) == (i64(1) << 3));
     }
 }
 
@@ -261,8 +262,8 @@ TEST("async - a pool with one worker still wakes for injected work")
 
     for (int iter = 0; iter < 200; ++iter)
     {
-        auto root = cc::make_async_lazy([iter] { return cc::i64(iter); });
-        CHECK(pool.blocking_get(root) == cc::i64(iter));
+        auto root = cc::make_async_lazy([iter] { return i64(iter); });
+        CHECK(pool.blocking_get(root) == i64(iter));
     }
 }
 
@@ -309,11 +310,11 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
     cc::async_thread_pool pool(4);
     cc::scoped_default_async_pool as_default(pool);
 
-    cc::i64 const expected = cc::i64(1) << 6;
+    i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
     {
         auto shared = build_sum_tree(6); // 64 leaves, reachable from the pool root and from root_st
-        auto root_st = cc::make_async_lazy([](cc::i64 v) { return v; }, shared);
+        auto root_st = cc::make_async_lazy([](i64 v) { return v; }, shared);
 
         shared->schedule_on(pool); // the multi-threaded call drives the shared subtree
 
@@ -344,12 +345,12 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
     cc::async_thread_pool pool(4);
     cc::scoped_default_async_pool as_default(pool);
 
-    cc::i64 const expected = cc::i64(1) << 6;
+    i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
     {
         auto shared = build_sum_tree(6); // 64 leaves, reachable from both roots
-        auto root_mt = cc::make_async_lazy([](cc::i64 v) { return v; }, shared);
-        auto root_st = cc::make_async_lazy([](cc::i64 v) { return v; }, shared);
+        auto root_mt = cc::make_async_lazy([](i64 v) { return v; }, shared);
+        auto root_st = cc::make_async_lazy([](i64 v) { return v; }, shared);
 
         root_mt->schedule_on(pool); // the multi-threaded call
 

@@ -5,6 +5,8 @@
 
 #include <type_traits>
 
+using namespace cc::primitive_defines;
+
 // ============================================================================
 // Compile-time trait checks
 // ============================================================================
@@ -107,7 +109,7 @@ TEST("fixed_array - contiguous storage")
     SECTION("operator[] uses contiguous addresses")
     {
         cc::fixed_array<int, 5> a = {10, 20, 30, 40, 50};
-        for (cc::isize i = 0; i < a.size(); ++i)
+        for (isize i = 0; i < a.size(); ++i)
         {
             CHECK(&a[i] == a.data() + i);
         }

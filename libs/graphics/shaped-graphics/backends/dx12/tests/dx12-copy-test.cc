@@ -2,6 +2,8 @@
 
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // Device→device buffer copy: cmd.copy.buffer_bytes_region / buffer_data_region, on WARP. These tests
 // split upload → copy → download across separate command lists; recording all three in one list is also
 // correct now (dx12_command_list::record_transfer_barrier orders them) — the backend-agnostic tests
@@ -23,13 +25,13 @@ TEST("sg dx12 - buffer copy round-trips")
     REQUIRE(src != nullptr);
     REQUIRE(dst != nullptr);
 
-    cc::byte pattern[256];
+    byte pattern[256];
     for (int i = 0; i < 256; ++i)
-        pattern[i] = cc::byte(i);
+        pattern[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(src, cc::span<cc::byte const>(pattern, 256));
+    up->upload.bytes_to_buffer(src, cc::span<byte const>(pattern, 256));
     c.submit_command_list(cc::move(up));
 
     auto cp = c.create_command_list();
@@ -47,7 +49,7 @@ TEST("sg dx12 - buffer copy round-trips")
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != cc::byte(i))
+        if (bytes.value()[i] != byte(i))
             matches = false;
     CHECK(matches);
 }
@@ -63,13 +65,13 @@ TEST("sg dx12 - buffer copy with offsets")
     REQUIRE(src != nullptr);
     REQUIRE(dst != nullptr);
 
-    cc::byte pattern[256];
+    byte pattern[256];
     for (int i = 0; i < 256; ++i)
-        pattern[i] = cc::byte(i);
+        pattern[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(src, cc::span<cc::byte const>(pattern, 256));
+    up->upload.bytes_to_buffer(src, cc::span<byte const>(pattern, 256));
     c.submit_command_list(cc::move(up));
 
     // Copy src[64,128) into dst[128,192).
@@ -89,7 +91,7 @@ TEST("sg dx12 - buffer copy with offsets")
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != cc::byte(64 + i))
+        if (bytes.value()[i] != byte(64 + i))
             matches = false;
     CHECK(matches);
 }
@@ -100,7 +102,7 @@ TEST("sg dx12 - typed buffer_data_region copy")
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
-    auto const bytes = cc::isize(4) * sizeof(int);
+    auto const bytes = isize(4) * sizeof(int);
     auto src = c.persistent.create_raw_buffer(bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     auto dst = c.persistent.create_raw_buffer(bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(src != nullptr);
@@ -135,7 +137,7 @@ TEST("sg dx12 - typed buffer_data_region copy with element offsets")
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
-    auto const bytes = cc::isize(8) * sizeof(int);
+    auto const bytes = isize(8) * sizeof(int);
     auto src = c.persistent.create_raw_buffer(bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     auto dst = c.persistent.create_raw_buffer(bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(src != nullptr);
@@ -175,13 +177,13 @@ TEST("sg dx12 - same-buffer non-overlapping copy")
     auto buf = c.persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    cc::byte pattern[256];
+    byte pattern[256];
     for (int i = 0; i < 256; ++i)
-        pattern[i] = cc::byte(i);
+        pattern[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(pattern, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(pattern, 256));
     c.submit_command_list(cc::move(up));
 
     // Copy [0,64) → [128,192) within the same buffer (ranges do not overlap).
@@ -201,7 +203,7 @@ TEST("sg dx12 - same-buffer non-overlapping copy")
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != cc::byte(i))
+        if (bytes.value()[i] != byte(i))
             matches = false;
     CHECK(matches);
 }

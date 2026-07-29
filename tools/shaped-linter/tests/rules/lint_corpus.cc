@@ -69,10 +69,11 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             continue;
         }
 
-        // fix="…" / hint="…", with \" and \\ escapes. Both pin a replacement text and bind identically;
-        // they differ only in which of the rule's two rewrite channels they read.
+        // key="…", with \" and \\ escapes. `fix=` / `hint=` pin a replacement text and bind identically,
+        // differing only in which of the rule's two rewrite channels they read; `path=` describes the
+        // block itself and binds to no rule at all.
         auto matched_keyword = cc::string_view();
-        for (auto const kw : {cc::string_view("fix="), cc::string_view("hint=")})
+        for (auto const kw : {cc::string_view("fix="), cc::string_view("hint="), cc::string_view("path=")})
             if (n - i >= kw.size() && info.subview({.start = i, .end = i + kw.size()}) == kw)
                 matched_keyword = kw;
 
@@ -87,11 +88,26 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             }
             ++i;
 
+            // `\n` / `\t` / `\r` become the real character — a replacement that splices in a whole line
+            // has to be spellable on the one line a fence info string gets. Any other `\x` is just `x`,
+            // which is what makes `\"` and `\\` work.
             auto value = cc::string();
             while (i < n && info[i] != '"')
             {
                 if (info[i] == '\\' && i + 1 < n)
+                {
                     ++i;
+                    if (info[i] == 'n')
+                        value += '\n';
+                    else if (info[i] == 't')
+                        value += '\t';
+                    else if (info[i] == 'r')
+                        value += '\r';
+                    else
+                        value += info[i];
+                    ++i;
+                    continue;
+                }
                 value += info[i];
                 ++i;
             }
@@ -101,6 +117,22 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
                 return false;
             }
             ++i; // the closing quote
+
+            if (label == "path")
+            {
+                if (!out.path.empty())
+                {
+                    what = cc::string("a block has only one `path=`");
+                    return false;
+                }
+                if (value.empty())
+                {
+                    what = cc::string("`path=` must name a file");
+                    return false;
+                }
+                out.path = cc::move(value);
+                continue;
+            }
 
             // A fix or hint belongs to the rule in front of it — that is what associates it with a rule at
             // all, and what lets two rules on one block each pin their own rewrite.

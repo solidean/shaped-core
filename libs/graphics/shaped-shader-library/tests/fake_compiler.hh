@@ -13,6 +13,9 @@
 /// is exercised separately.
 namespace slib_test
 {
+// Vocabulary types (i32/u32/u64/isize/byte/...) available bare inside slib_test, not leaked globally.
+using namespace cc::primitive_defines;
+
 /// Text that makes the fake compiler fail, standing in for a shader that does not build.
 inline constexpr cc::string_view k_broken_source = "!!broken!!";
 
@@ -38,7 +41,7 @@ public:
             if (at < 0)
                 return source;
 
-            auto const path_begin = at + cc::isize(cc::string_view("#include \"").size());
+            auto const path_begin = at + isize(cc::string_view("#include \"").size());
             auto const path_end = source.subview(path_begin).find('"');
             if (path_end < 0)
                 return cc::error("unterminated #include");
@@ -66,8 +69,7 @@ public:
         shader.stage = desc.stage;
         shader.format = _format;
         shader.entry_point = desc.entry_point;
-        shader.bytecode
-            = cc::pinned_data<cc::byte const>(cc::pinned_data<cc::byte>::create_copy_of(desc.source.as_bytes()));
+        shader.bytecode = cc::pinned_data<byte const>(cc::pinned_data<byte>::create_copy_of(desc.source.as_bytes()));
         shader.compiler = sg::compiler_info{.name = "fake", .version = "1", .signature = desc.entry_point};
         return cc::make_async_from_value(cc::move(shader));
     }
@@ -78,15 +80,15 @@ public:
         return cc::string_view(reinterpret_cast<char const*>(shader.bytecode.data()), shader.bytecode.size());
     }
 
-    [[nodiscard]] cc::i64 compile_count() const { return _compile_count.load(); }
-    [[nodiscard]] cc::i64 preprocess_count() const { return _preprocess_count.load(); }
+    [[nodiscard]] i64 compile_count() const { return _compile_count.load(); }
+    [[nodiscard]] i64 preprocess_count() const { return _preprocess_count.load(); }
 
 private:
     slib::shader_language _language;
     sg::shader_format _format;
 
     // Mutable so the const compile path can count; the tests read these to prove laziness and caching.
-    mutable cc::atomic<cc::i64> _compile_count = {0};
-    mutable cc::atomic<cc::i64> _preprocess_count = {0};
+    mutable cc::atomic<i64> _compile_count = {0};
+    mutable cc::atomic<i64> _preprocess_count = {0};
 };
 } // namespace slib_test

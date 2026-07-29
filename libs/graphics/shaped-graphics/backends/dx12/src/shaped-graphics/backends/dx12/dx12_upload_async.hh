@@ -29,8 +29,8 @@ struct dx12_async_upload_job
     std::weak_ptr<dx12_texture const> texture_target; // destination texture, or empty for a buffer copy
     dx12_texture_footprint footprint;                 // the texture region's copy footprint (texture copies)
     bool is_texture = false;                          // discriminant: texture copy vs buffer copy
-    cc::isize dst_offset = 0;                         // destination byte offset (buffer copies)
-    cc::pinned_data<cc::byte const> src;              // source bytes + their pin
+    isize dst_offset = 0;                             // destination byte offset (buffer copies)
+    cc::pinned_data<byte const> src;                  // source bytes + their pin
     dx12_copy_fence_value copy_fence_value = dx12_copy_fence_value::none; // completion value for this upload
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
@@ -60,12 +60,12 @@ public:
     /// Creates its own COPY queue, persistently maps the UPLOAD staging buffer (three windows of
     /// `window_bytes` > 0), the staging fence, the completion fence, and the actor's wait event, then starts
     /// the copy actor. Called once during context bring-up. Returns a dx12 error on failure.
-    [[nodiscard]] cc::result<cc::unit> initialize(cc::isize window_bytes);
+    [[nodiscard]] cc::result<cc::unit> initialize(isize window_bytes);
 
     /// Records an async upload of `data` into `buffer` at `offset`. Reserves a completion value, stamps
     /// the buffer so later direct-queue readers wait on it, and hands the job to the actor. Empty data is
     /// a no-op. Preconditions: buffer non-null, a dx12 buffer, not expired, copy_dst usage, in bounds.
-    void upload_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<cc::byte const> data, cc::isize offset);
+    void upload_buffer(sg::raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset);
 
     /// Records an async upload of `data` (tightly packed) into one region of `texture`. Reserves a
     /// completion value + stamps the texture (later direct-queue readers wait on it), and hands the job to
@@ -73,14 +73,14 @@ public:
     /// left in a shader/attachment layout by a prior direct-queue op); a large region packs across staging
     /// windows row/slice-wise. Preconditions: non-null, a dx12 texture, not expired, copy_dst usage, data == region size.
     void upload_texture(sg::raw_texture_handle texture,
-                        cc::pinned_data<cc::byte const> data,
+                        cc::pinned_data<byte const> data,
                         sg::subresource_index const& subresource,
                         sg::texture_region const& region);
 
     /// Requests a new staging window size in bytes (> 0), applied by the copy actor between windows: it
     /// drains every in-flight window, then rebuilds the staging buffer at `bytes * 3`. Thread-safe; the
     /// change is picked up before the next upload is staged, so in-flight uploads are unaffected.
-    void set_window_bytes(cc::isize bytes);
+    void set_window_bytes(isize bytes);
 
     /// Shuts the actor down (draining queued copies and waiting for its copy queue to idle), then releases
     /// the copy queue and unmaps + releases the staging buffer.
@@ -99,8 +99,8 @@ public:
     // libs/graphics/shaped-graphics/docs/concepts/download.async.md). Created in initialize.
     ComPtr<ID3D12CommandQueue> _copy_queue;
     ComPtr<ID3D12Resource> _staging;
-    cc::byte* _mapped = nullptr;
-    cc::isize _window_bytes = 0;
+    byte* _mapped = nullptr;
+    isize _window_bytes = 0;
     ComPtr<ID3D12Fence> _window_fence; // per-window monotonic timeline: window reuse + one window's copy done
     // Async-upload completion fence, owned here (the copy queue that signals it is shared, but this fence
     // is upload-only). Signaled by the copy queue up to the highest finished upload value each window; a
@@ -112,12 +112,12 @@ public:
 
     // A pending set_window_bytes request; the actor compares it to _window_bytes at the top of each
     // process cycle and rebuilds staging when they differ. Written by any thread, read by the actor.
-    std::atomic<cc::isize> _desired_window_bytes = 0;
+    std::atomic<isize> _desired_window_bytes = 0;
 
 private:
     // Reserved on the caller thread (fetch_add), handed out as dx12_copy_fence_value; the actor's
     // windows signal the context completion fence up to the highest finished value.
-    std::atomic<cc::u64> _next_copy_value = 0;
+    std::atomic<u64> _next_copy_value = 0;
 
     cc::unique_ptr<cc::threaded_actor<dx12_async_upload_job>> _actor;
 };

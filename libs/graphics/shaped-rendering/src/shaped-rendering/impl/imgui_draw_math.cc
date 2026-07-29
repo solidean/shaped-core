@@ -44,11 +44,11 @@ cc::optional<tg::aabb2i> compute_scissor(tg::aabb2f const& clip_rect,
     return clamped;
 }
 
-cc::pinned_data<cc::byte const> pack_texture_rect(cc::byte const* pixels,
-                                                  isize pitch,
-                                                  isize bytes_per_pixel,
-                                                  tg::pos2i offset,
-                                                  tg::vec2i size)
+cc::pinned_data<byte const> pack_texture_rect(byte const* pixels,
+                                              isize pitch,
+                                              isize bytes_per_pixel,
+                                              tg::pos2i offset,
+                                              tg::vec2i size)
 {
     CC_ASSERT(pixels != nullptr, "source pixels must not be null");
     CC_ASSERT(size[0] > 0 && size[1] > 0, "rect must be non-empty");
@@ -56,7 +56,7 @@ cc::pinned_data<cc::byte const> pack_texture_rect(cc::byte const* pixels,
     CC_ASSERT(bytes_per_pixel > 0 && pitch >= (offset[0] + size[0]) * bytes_per_pixel, "rect must fit the pitch");
 
     auto const row_bytes = isize(size[0]) * bytes_per_pixel;
-    auto packed = cc::pinned_data<cc::byte>::create_uninitialized(row_bytes * isize(size[1]));
+    auto packed = cc::pinned_data<byte>::create_uninitialized(row_bytes * isize(size[1]));
 
     for (auto y = 0; y < size[1]; ++y)
     {

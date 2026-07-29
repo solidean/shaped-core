@@ -172,7 +172,7 @@ public:
     /// Blocks until a download future is delivered, then returns its bytes (nullopt if invalid,
     /// unsubmitted, or cancelled). The only completion guarantee for a download — advance_epoch* drain
     /// GPU work but not the readback actor. Waitable once submitted; safe to call from any thread.
-    [[nodiscard]] cc::optional<cc::pinned_data<cc::byte const>> wait_for(bytes_future const& future)
+    [[nodiscard]] cc::optional<cc::pinned_data<byte const>> wait_for(bytes_future const& future)
     {
         drive_transfers_until_ready(future);
         return future.wait_get_bytes();
@@ -242,13 +242,13 @@ protected:
     /// list that reads the buffer automatically waits on the copy. Empty data is a no-op. Buffer must
     /// have buffer_usage::copy_dst; offset_in_bytes + data.size() must be within the buffer.
     virtual void async_upload_bytes_to_buffer(raw_buffer_handle buffer,
-                                              cc::pinned_data<cc::byte const> data,
+                                              cc::pinned_data<byte const> data,
                                               isize offset_in_bytes) = 0;
 
     /// Streams tightly-packed `data` into one region of `texture` off the frame path (reached via
     /// ctx.upload). See libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
     virtual void async_upload_bytes_to_texture(raw_texture_handle texture,
-                                               cc::pinned_data<cc::byte const> data,
+                                               cc::pinned_data<byte const> data,
                                                subresource_index const& subresource,
                                                texture_region const& region) = 0;
 

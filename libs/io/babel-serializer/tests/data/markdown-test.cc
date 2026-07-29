@@ -7,6 +7,8 @@
 
 #include <cstring> // std::memmove, std::memcpy
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 namespace md = babel::markdown;
@@ -16,8 +18,8 @@ namespace md = babel::markdown;
 class chunked_reader
 {
 public:
-    chunked_reader(cc::string_view data, cc::isize chunk)
-      : _data(reinterpret_cast<cc::byte const*>(data.data()), data.size()), _chunk(chunk)
+    chunked_reader(cc::string_view data, isize chunk)
+      : _data(reinterpret_cast<byte const*>(data.data()), data.size()), _chunk(chunk)
     {
     }
     chunked_reader(chunked_reader&&) = delete;
@@ -26,20 +28,15 @@ public:
     [[nodiscard]] cc::read_stream stream() { return cc::read_stream(_buffer, _buffer, &impl_flush, this); }
 
 private:
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& /*write_end*/,
-                                          void* ctx,
-                                          cc::i64 /*off*/,
-                                          cc::seek_dir /*dir*/,
-                                          cc::byte* /*fw*/)
+    static cc::result<i64>
+    impl_flush(byte*& curr, byte*& end, byte*& /*write_end*/, void* ctx, i64 /*off*/, cc::seek_dir /*dir*/, byte* /*fw*/)
     {
         auto& self = *static_cast<chunked_reader*>(ctx);
         auto* const base = self._buffer;
-        auto const leftover = cc::isize(end - curr);
+        auto const leftover = isize(end - curr);
         std::memmove(base, curr, size_t(leftover));
 
-        auto const room = cc::isize(sizeof(self._buffer)) - leftover;
+        auto const room = isize(sizeof(self._buffer)) - leftover;
         auto const want = cc::min(self._chunk, room);
         auto const avail = self._data.size() - self._pos;
         auto const n = cc::min(want, avail);
@@ -49,13 +46,13 @@ private:
 
         curr = base;
         end = base + leftover + n;
-        return cc::i64(-1); // no meaningful position
+        return i64(-1); // no meaningful position
     }
 
-    cc::span<cc::byte const> _data;
-    cc::isize _chunk;
-    cc::isize _pos = 0;
-    cc::byte _buffer[8];
+    cc::span<byte const> _data;
+    isize _chunk;
+    isize _pos = 0;
+    byte _buffer[8];
 };
 
 /// The first block of a kind, in document order; an invalid ref when there is none.
@@ -298,7 +295,7 @@ TEST("markdown - parsing over a chunked stream matches in-memory")
     auto const text = cc::string_view("# title\n\nsome text\n\n```cpp x\nint v{};\n```\n\n- a\n- b\n");
     auto const want = md::read(text).value();
 
-    for (auto const chunk : {cc::isize(1), cc::isize(3), cc::isize(7)})
+    for (auto const chunk : {isize(1), isize(3), isize(7)})
     {
         chunked_reader reader = {text, chunk};
         auto stream = reader.stream();

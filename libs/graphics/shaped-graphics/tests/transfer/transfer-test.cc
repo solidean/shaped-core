@@ -8,6 +8,8 @@
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 // Backend-agnostic inline buffer transfer: upload / download over the public sg API, run against every
 // available backend (see tests/context/context-test.cc for the invocable/alias mechanism). These pin the
 // CPU↔GPU contract sg promises; per-backend mechanics (ring reclaim, actor cancellation) live with the
@@ -16,9 +18,9 @@
 namespace
 {
 // Fills a byte pattern; value(i) keeps producer/checker in sync.
-auto pattern = [](int i) { return cc::byte(i & 0xFF); };
+auto pattern = [](int i) { return byte(i & 0xFF); };
 
-sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
+sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     CC_ASSERT(buf != nullptr, "transfer test buffer allocation failed");
@@ -31,14 +33,14 @@ INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::con
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(i);
 
     // Single command list: the backend must order the download read after the upload write.
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    cmd->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     auto future = cmd->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -57,13 +59,13 @@ INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_ha
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(i);
 
     auto up = ctx->create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
@@ -80,7 +82,7 @@ INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_ha
 INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const buf = make_transfer_buffer(ctx, cc::isize(4) * sizeof(int));
+    auto const buf = make_transfer_buffer(ctx, isize(4) * sizeof(int));
 
     int const in[4] = {5, 6, 7, 8};
     auto cmd = ctx->create_command_list();
@@ -143,13 +145,13 @@ INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::contex
     auto const buf = make_transfer_buffer(ctx, 256);
 
     // Upload only the middle 128 bytes; download exactly that window back.
-    cc::byte mid[128];
+    byte mid[128];
     for (int i = 0; i < 128; ++i)
         mid[i] = pattern(0x40 + i);
 
     auto up = ctx->create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(mid, 128), 64);
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(mid, 128), 64);
     ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
@@ -172,18 +174,18 @@ INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::conte
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 16);
 
-    cc::byte first[16];
-    cc::byte second[16];
+    byte first[16];
+    byte second[16];
     for (int i = 0; i < 16; ++i)
     {
-        first[i] = cc::byte(0xAA);
-        second[i] = cc::byte(0xBB);
+        first[i] = byte(0xAA);
+        second[i] = byte(0xBB);
     }
 
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(first, 16));
-    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(second, 16)); // overwrites
+    cmd->upload.bytes_to_buffer(buf, cc::span<byte const>(first, 16));
+    cmd->upload.bytes_to_buffer(buf, cc::span<byte const>(second, 16)); // overwrites
     auto future = cmd->download.bytes_from_buffer(buf, 0, 16);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -191,7 +193,7 @@ INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::conte
     REQUIRE(bytes.has_value());
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
-        if (bytes.value()[i] != cc::byte(0xBB))
+        if (bytes.value()[i] != byte(0xBB))
             all_second = false;
     CHECK(all_second);
 }
@@ -203,7 +205,7 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
 
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>()); // no-op
+    cmd->upload.bytes_to_buffer(buf, cc::span<byte const>()); // no-op
     auto future = cmd->download.bytes_from_buffer(buf, 0, 0);
     CHECK(future.is_valid());
     CHECK(future.is_ready()); // zero-size read is immediately ready
@@ -223,13 +225,13 @@ INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch adv
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(i);
 
     auto up = ctx->create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
@@ -259,7 +261,7 @@ INVOCABLE_TEST("sg - wait_for on an invalid future yields nullopt", (sg::context
 INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const buf = make_transfer_buffer(ctx, cc::isize(8) * sizeof(int));
+    auto const buf = make_transfer_buffer(ctx, isize(8) * sizeof(int));
 
     int const in[8] = {10, 20, 30, 40, 50, 60, 70, 80};
     auto cmd = ctx->create_command_list();

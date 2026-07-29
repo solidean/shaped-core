@@ -9,6 +9,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/check.hh>
 #include <nexus/tests/section.hh>
 
@@ -179,7 +180,7 @@ bool scope_allows(cc::span<test_section* const> curr_section,
     auto const path = curr_section.subspan(1);
 
     auto const check_size = cc::min(path.size(), filter.size());
-    for (cc::isize i = 0; i < check_size; ++i)
+    for (isize i = 0; i < check_size; ++i)
     {
         if (path[i]->name != filter[i])
             return false;

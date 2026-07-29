@@ -5,6 +5,8 @@
 
 #include <cstring>
 
+using namespace cc::primitive_defines;
+
 TEST("string - SSO behavior")
 {
     SECTION("small strings stay in SSO mode")
@@ -59,7 +61,7 @@ TEST("string - SSO behavior")
     {
         cc::string s = cc::string::create_filled(39, 'a');
         CHECK(s.size() == 39);
-        for (cc::isize i = 0; i < 39; ++i)
+        for (isize i = 0; i < 39; ++i)
         {
             CHECK(s[i] == 'a');
         }
@@ -69,7 +71,7 @@ TEST("string - SSO behavior")
     {
         cc::string s = cc::string::create_filled(40, 'b');
         CHECK(s.size() == 40);
-        for (cc::isize i = 0; i < 40; ++i)
+        for (isize i = 0; i < 40; ++i)
         {
             CHECK(s[i] == 'b');
         }
@@ -119,7 +121,7 @@ TEST("string - construction")
     SECTION("pointer + size construction - large")
     {
         char const* str = "this is a very long string that exceeds SSO capacity for sure";
-        cc::string s = cc::string(str, cc::isize(std::strlen(str)));
+        cc::string s = cc::string(str, isize(std::strlen(str)));
         CHECK(s.size() == std::strlen(str));
         CHECK(s == cc::string_view{str});
     }
@@ -189,7 +191,7 @@ TEST("string - factory methods")
     {
         auto s = cc::string::create_filled(10, 'x');
         CHECK(s.size() == 10);
-        for (cc::isize i = 0; i < 10; ++i)
+        for (isize i = 0; i < 10; ++i)
         {
             CHECK(s[i] == 'x');
         }
@@ -199,7 +201,7 @@ TEST("string - factory methods")
     {
         auto s = cc::string::create_filled(50, 'y');
         CHECK(s.size() == 50);
-        for (cc::isize i = 0; i < 50; ++i)
+        for (isize i = 0; i < 50; ++i)
         {
             CHECK(s[i] == 'y');
         }
@@ -216,7 +218,7 @@ TEST("string - factory methods")
         auto s = cc::string::create_uninitialized(10);
         CHECK(s.size() == 10);
         // Fill it to make it valid
-        for (cc::isize i = 0; i < 10; ++i)
+        for (isize i = 0; i < 10; ++i)
             s[i] = 'a';
         CHECK(s[0] == 'a');
     }
@@ -226,7 +228,7 @@ TEST("string - factory methods")
         auto s = cc::string::create_uninitialized(50);
         CHECK(s.size() == 50);
         // Fill it to make it valid
-        for (cc::isize i = 0; i < 50; ++i)
+        for (isize i = 0; i < 50; ++i)
             s[i] = 'b';
         CHECK(s[0] == 'b');
     }
@@ -787,7 +789,7 @@ TEST("string - special cases")
             s.push_back('a');
         }
         CHECK(s.size() == 50);
-        for (cc::isize i = 0; i < 50; ++i)
+        for (isize i = 0; i < 50; ++i)
         {
             CHECK(s[i] == 'a');
         }
@@ -1026,9 +1028,9 @@ TEST("string - as_span / as_bytes")
         CHECK(chars.size() == 5);
 
         auto const bytes = s.as_bytes();
-        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<byte const> const>);
         CHECK(bytes.size() == 5);
-        CHECK(bytes[0] == cc::byte('h'));
+        CHECK(bytes[0] == byte('h'));
     }
 
     SECTION("as_mutable_span writes through")
@@ -1041,7 +1043,7 @@ TEST("string - as_span / as_bytes")
     SECTION("as_mutable_bytes writes through")
     {
         cc::string s = cc::string("hello");
-        s.as_mutable_bytes()[4] = cc::byte('O');
+        s.as_mutable_bytes()[4] = byte('O');
         CHECK(s == cc::string_view{"hellO"});
     }
 
@@ -1055,9 +1057,9 @@ TEST("string - as_span / as_bytes")
 
 TEST("string - resize and capacity")
 {
-    auto const all_equal = [](cc::string const& s, cc::isize begin, cc::isize end, char c)
+    auto const all_equal = [](cc::string const& s, isize begin, isize end, char c)
     {
-        for (cc::isize i = begin; i < end; ++i)
+        for (isize i = begin; i < end; ++i)
             if (s[i] != c)
                 return false;
         return true;
@@ -1065,7 +1067,7 @@ TEST("string - resize and capacity")
 
     // The inline SSO capacity, derived the same way as cc::string::small_capacity: the allocation header's four pointers and one isize fill the space before custom_resource, minus one byte for the size tag.
     // 39 on 64-bit, fewer where pointers are smaller (23 on wasm32).
-    cc::isize const small_capacity = cc::isize(4 * sizeof(void*) + sizeof(cc::isize) - 1);
+    isize const small_capacity = isize(4 * sizeof(void*) + sizeof(isize) - 1);
 
     SECTION("resize_to_uninitialized grows within SSO, preserving existing bytes")
     {
@@ -1116,7 +1118,7 @@ TEST("string - resize and capacity")
         s.resize_to_uninitialized(64);
         CHECK(!s.is_small());
         CHECK(s.size() == 64);
-        CHECK(s.subview({.start = cc::isize(0), .end = cc::isize(5)}) == cc::string_view{"hello"});
+        CHECK(s.subview({.start = isize(0), .end = isize(5)}) == cc::string_view{"hello"});
     }
 
     SECTION("resize_down_to on a heap string stays heap")

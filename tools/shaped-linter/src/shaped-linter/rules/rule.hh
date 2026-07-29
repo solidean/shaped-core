@@ -21,17 +21,22 @@ enum class severity : u8
 };
 
 /// Replace the bytes of `span` with `replacement`. The unit of an automatic fix.
+/// An EMPTY span is an insertion at that offset — nothing is removed and `replacement` is spliced in.
 struct text_edit
 {
     source_span span;
     cc::string replacement;
 };
 
-/// A suggested fix: one or more edits applied together. A single edit today; the vector future-proofs
-/// multi-edit rewrites.
+/// A suggested fix: one or more edits applied together.
 ///
 /// A fix must be safe to apply unattended: wherever the rule fires, applying it compiles and preserves
 /// behavior. A rewrite that is a judgement call belongs in a `hint` instead.
+///
+/// That contract is per-fix, which is what the second edit is usually for: a rewrite that only compiles
+/// once the file also gains an include or a using-directive carries BOTH edits on every finding, rather
+/// than putting the shared one on the first finding alone. `collect_fix_edits` merges the byte-identical
+/// copies, so the shared line still lands exactly once however many findings asked for it.
 struct fix
 {
     cc::vector<text_edit> edits;

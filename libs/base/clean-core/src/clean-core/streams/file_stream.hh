@@ -33,7 +33,7 @@ namespace cc
 class file_read_stream_adapter
 {
 public:
-    static constexpr cc::isize k_buffer_size = 4096;
+    static constexpr isize k_buffer_size = 4096;
 
     /// Open an existing file for reading.
     [[nodiscard]] static cc::result<file_read_stream_adapter> open(cc::string_view path);
@@ -61,18 +61,13 @@ public:
 private:
     file_read_stream_adapter() = default;
 
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& write_end,
-                                          void* ctx,
-                                          cc::i64 offset,
-                                          cc::seek_dir dir,
-                                          cc::byte* first_write);
-    cc::result<cc::i64> impl_seek_and_fill(cc::byte*& curr, cc::byte*& end, cc::i64 target);
+    static cc::result<i64>
+    impl_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 offset, cc::seek_dir dir, byte* first_write);
+    cc::result<i64> impl_seek_and_fill(byte*& curr, byte*& end, i64 target);
 
     cc::impl::native_file _file;
-    cc::i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
-    cc::byte _buffer[k_buffer_size];
+    i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
+    byte _buffer[k_buffer_size];
 };
 
 /// Buffered write adapter over a file. Hands out a seekable_write_stream. Unbounded: a write-flush always
@@ -80,7 +75,7 @@ private:
 class file_write_stream_adapter
 {
 public:
-    static constexpr cc::isize k_buffer_size = 4096;
+    static constexpr isize k_buffer_size = 4096;
 
     /// Create or truncate a file for writing (the stream starts at offset 0).
     [[nodiscard]] static cc::result<file_write_stream_adapter> create(cc::string_view path);
@@ -113,19 +108,14 @@ public:
 private:
     file_write_stream_adapter() = default;
 
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& write_end,
-                                          void* ctx,
-                                          cc::i64 offset,
-                                          cc::seek_dir dir,
-                                          cc::byte* first_write);
-    cc::result<cc::i64> impl_write_through(cc::byte*& curr, cc::byte*& end, cc::byte* first_write, cc::i64 pos);
-    cc::result<cc::i64> impl_reposition(cc::byte*& curr, cc::byte*& end, cc::i64 target);
+    static cc::result<i64>
+    impl_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 offset, cc::seek_dir dir, byte* first_write);
+    cc::result<i64> impl_write_through(byte*& curr, byte*& end, byte* first_write, i64 pos);
+    cc::result<i64> impl_reposition(byte*& curr, byte*& end, i64 target);
 
     cc::impl::native_file _file;
-    cc::i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
-    cc::byte _buffer[k_buffer_size];
+    i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
+    byte _buffer[k_buffer_size];
 };
 
 /// Buffered read+write adapter over a file. Hands out a seekable_read_write_stream: seekable reads, in-place
@@ -135,7 +125,7 @@ private:
 class file_read_write_stream_adapter
 {
 public:
-    static constexpr cc::isize k_buffer_size = 4096;
+    static constexpr isize k_buffer_size = 4096;
 
     /// Open an existing file for reading and writing.
     [[nodiscard]] static cc::result<file_read_write_stream_adapter> open(cc::string_view path);
@@ -162,19 +152,14 @@ public:
 private:
     file_read_write_stream_adapter() = default;
 
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& write_end,
-                                          void* ctx,
-                                          cc::i64 offset,
-                                          cc::seek_dir dir,
-                                          cc::byte* first_write);
-    cc::result<cc::i64> impl_drain(cc::byte* curr, cc::byte* first_write);
-    cc::result<cc::i64> impl_fill(cc::byte*& curr, cc::byte*& end, cc::byte*& write_end, cc::isize leftover);
-    cc::result<cc::i64> impl_seek_and_fill(cc::byte*& curr, cc::byte*& end, cc::byte*& write_end, cc::i64 target);
+    static cc::result<i64>
+    impl_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 offset, cc::seek_dir dir, byte* first_write);
+    cc::result<i64> impl_drain(byte* curr, byte* first_write);
+    cc::result<i64> impl_fill(byte*& curr, byte*& end, byte*& write_end, isize leftover);
+    cc::result<i64> impl_seek_and_fill(byte*& curr, byte*& end, byte*& write_end, i64 target);
 
     cc::impl::native_file _file;
-    cc::i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
-    cc::byte _buffer[k_buffer_size];
+    i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
+    byte _buffer[k_buffer_size];
 };
 } // namespace cc

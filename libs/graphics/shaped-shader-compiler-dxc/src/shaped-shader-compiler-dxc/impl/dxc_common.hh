@@ -8,11 +8,19 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-#include <d3d12shader.h> // ID3D12ShaderReflection (from the Windows SDK)
-#include <dxc/dxcapi.h>  // DXC C ABI (from extern/dxc/.install)
-#include <wrl/client.h>
+#include <shaped-shader-compiler-dxc/fwd.hh> // also what puts the bare sized aliases in scope inside ssc::dxc
 
 #include <string>
+
+// The DXC / COM headers reach <rpcndr.h> through <unknwn.h>, which WIN32_LEAN_AND_MEAN does not stop — so
+// the `byte` rename is repeated over them here. See win32_sanitized.hh for why it is needed.
+// <string> stays above the bracket: a C++ header parsed under the macro would lose `std::byte`.
+#define byte win_byte_override
+#include <d3d12shader.h>    // ID3D12ShaderReflection (from the Windows SDK)
+#include <dxc/dxcapi.h>     // DXC C ABI (from extern/dxc/.install)
+#include <wrl/client.h>     // ComPtr
+#include <wrl/implements.h> // RuntimeClass, for the IDxcIncludeHandler implementations
+#undef byte
 
 namespace ssc::dxc::impl
 {
@@ -23,7 +31,7 @@ using Microsoft::WRL::ComPtr;
                                     char const* what,
                                     cc::source_location site = cc::source_location::current())
 {
-    return cc::error(cc::format("{} (hr=0x{:08X})", what, cc::u32(hr)), site);
+    return cc::error(cc::format("{} (hr=0x{:08X})", what, u32(hr)), site);
 }
 
 /// UTF-8 view -> wide string, for DXC's LPCWSTR argument vector.
@@ -46,7 +54,7 @@ using Microsoft::WRL::ComPtr;
     int const n = ::WideCharToMultiByte(CP_UTF8, 0, s, len, nullptr, 0, nullptr, nullptr);
     std::string tmp(size_t(n), '\0');
     ::WideCharToMultiByte(CP_UTF8, 0, s, len, tmp.data(), n, nullptr, nullptr);
-    return cc::string(tmp.data(), cc::isize(n));
+    return cc::string(tmp.data(), isize(n));
 }
 
 /// A source blob kept alive alongside the DxcBuffer that points into it. The buffer is only valid
@@ -75,7 +83,7 @@ struct source_blob
     ComPtr<IDxcBlobUtf8> errors;
     if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errors.GetAddressOf()), nullptr)) && errors
         && errors->GetStringLength() > 0)
-        return cc::string(errors->GetStringPointer(), cc::isize(errors->GetStringLength()));
+        return cc::string(errors->GetStringPointer(), isize(errors->GetStringLength()));
     return {};
 }
 } // namespace ssc::dxc::impl

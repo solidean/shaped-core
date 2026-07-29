@@ -9,7 +9,7 @@ namespace sg::backend::dx12
 {
 namespace
 {
-[[nodiscard]] cc::isize align_up(cc::isize v, cc::isize a)
+[[nodiscard]] isize align_up(isize v, isize a)
 {
     return (v + a - 1) / a * a;
 }
@@ -41,7 +41,7 @@ dx12_texture_footprint compute_texture_footprint(sg::texture_description const& 
     CC_ASSERT(w > 0 && h > 0 && d > 0, "texture copy region must be non-empty");
 
     int const block = sg::format_block_extent(desc.format); // 1 (uncompressed) or 4 (block-compressed)
-    cc::isize const block_bytes = sg::format_block_size(desc.format);
+    isize const block_bytes = sg::format_block_size(desc.format);
     CC_ASSERT(block_bytes > 0, "texture format has no defined block size");
     if (block > 1)
     {
@@ -54,7 +54,7 @@ dx12_texture_footprint compute_texture_footprint(sg::texture_description const& 
     dx12_texture_footprint fp;
     fp.format = to_dxgi_format(desc.format);
     // D3D12 subresource index = mip + slice*mipLevels (+ plane*mipLevels*slices; plane 0 for color).
-    fp.subresource = cc::u32(sub.mip_level) + cc::u32(sub.array_layer) * cc::u32(desc.mip_levels);
+    fp.subresource = u32(sub.mip_level) + u32(sub.array_layer) * u32(desc.mip_levels);
     fp.x = ox;
     fp.y = oy;
     fp.z = oz;
@@ -68,15 +68,12 @@ dx12_texture_footprint compute_texture_footprint(sg::texture_description const& 
     fp.rows = (h + block - 1) / block;
     fp.depth_slices = d;
     fp.block_extent = block;
-    fp.row_bytes = cc::isize(blocks_wide) * block_bytes;
+    fp.row_bytes = isize(blocks_wide) * block_bytes;
     fp.padded_pitch = align_up(fp.row_bytes, texture_row_pitch_alignment);
     return fp;
 }
 
-dx12_texture_copy_chunk next_texture_copy_chunk(dx12_texture_footprint const& fp,
-                                                int slice,
-                                                int row,
-                                                cc::isize max_staging_rows)
+dx12_texture_copy_chunk next_texture_copy_chunk(dx12_texture_footprint const& fp, int slice, int row, isize max_staging_rows)
 {
     CC_ASSERT(max_staging_rows >= 1, "a texture copy chunk needs room for at least one padded row");
     CC_ASSERT(slice >= 0 && slice < fp.depth_slices, "chunk cursor slice out of range");
@@ -84,11 +81,11 @@ dx12_texture_copy_chunk next_texture_copy_chunk(dx12_texture_footprint const& fp
 
     dx12_texture_copy_chunk chunk;
     chunk.slice_start = slice;
-    if (row == 0 && max_staging_rows >= cc::isize(fp.rows))
+    if (row == 0 && max_staging_rows >= isize(fp.rows))
     {
         // At a slice boundary with room for at least one full slice: batch as many whole slices as fit, so a
         // copy that fits its window is a single CopyTextureRegion (a 3D copy stays one chunk when it all fits).
-        int const slices = int(cc::min(max_staging_rows / cc::isize(fp.rows), cc::isize(fp.depth_slices - slice)));
+        int const slices = int(cc::min(max_staging_rows / isize(fp.rows), isize(fp.depth_slices - slice)));
         chunk.slice_count = slices;
         chunk.row_start = 0;
         chunk.row_count = fp.rows;
@@ -98,7 +95,7 @@ dx12_texture_copy_chunk next_texture_copy_chunk(dx12_texture_footprint const& fp
         // Mid-slice, or a slice that does not fit whole: a partial block-row run within the current slice.
         chunk.slice_count = 1;
         chunk.row_start = row;
-        chunk.row_count = int(cc::min(max_staging_rows, cc::isize(fp.rows - row)));
+        chunk.row_count = int(cc::min(max_staging_rows, isize(fp.rows - row)));
     }
     return chunk;
 }

@@ -13,6 +13,8 @@
 #include <clean-core/platform/win32_sanitized.hh>
 #endif
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 // 0 = ran clean (no findings), 1 = bad usage / IO error, 2 = findings reported.
@@ -81,7 +83,7 @@ int main(int argc, char const* const* argv)
 {
     enable_utf8_console();
 
-    auto opts = scl::parse_options(cc::span<char const* const>(argv, cc::isize(argc)));
+    auto opts = scl::parse_options(cc::span<char const* const>(argv, isize(argc)));
 
     // Resolve color before the first byte of output, including the usage error below.
     // A parse failure has no options to read, so that path auto-detects.

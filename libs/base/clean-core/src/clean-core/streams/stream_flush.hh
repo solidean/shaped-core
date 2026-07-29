@@ -44,7 +44,7 @@ namespace cc
 {
 /// Where a seek offset is measured from. The dry_* variants only compute the resulting global position; they
 /// never move curr/end or disturb the buffer.
-enum class seek_dir : cc::u8
+enum class seek_dir : u8
 {
     begin,        // seek to `offset` bytes from the start
     relative,     // seek `offset` bytes from the current position; (relative, 0) is the plain flush
@@ -56,6 +56,6 @@ enum class seek_dir : cc::u8
 
 /// The type-erased refill / drain / seek callback every stream adapter supplies. See the header comment above
 /// (and libs/base/clean-core/docs/writing-a-stream.md) for the full contract.
-using stream_flush_fn = cc::function_ptr<cc::result<
-    cc::i64>(cc::byte*& curr, cc::byte*& end, cc::byte*& write_end, void* ctx, cc::i64 seek_offset, seek_dir dir, cc::byte* first_write)>;
+using stream_flush_fn = cc::function_ptr<
+    cc::result<i64>(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 seek_offset, seek_dir dir, byte* first_write)>;
 } // namespace cc

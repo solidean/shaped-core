@@ -35,14 +35,14 @@ struct raytracing_pipeline_description
     cc::vector<hit_shader> hit_shaders;
 
     /// Maximum TraceRay recursion depth the pipeline may reach (>= 1). Keep it as low as the shaders need.
-    cc::u32 max_recursion_depth = 1;
+    u32 max_recursion_depth = 1;
     /// Maximum ray-payload size in bytes (the inout struct passed through TraceRay).
-    cc::isize max_payload_size = 0;
+    isize max_payload_size = 0;
     /// Maximum hit-attribute size in bytes (8 fits the built-in barycentrics of triangle intersection).
-    cc::isize max_attribute_size = 8;
+    isize max_attribute_size = 8;
 
     /// Optional serialized state-object blob for accelerated creation. Best-effort; backends may ignore it.
-    cc::pinned_data<cc::byte const> cached_pipeline = {};
+    cc::pinned_data<byte const> cached_pipeline = {};
 
     /// Registers a raygen shader; asserts `shader.stage == raygen`. Returns its handle.
     [[nodiscard]] raygen_shader_handle add_raygen_shader(compiled_shader shader);
@@ -64,7 +64,7 @@ public:
 
     /// The backend's serialized state-object blob, for persisting and feeding back via
     /// raytracing_pipeline_description::cached_pipeline. Empty if the backend doesn't support it.
-    [[nodiscard]] virtual cc::pinned_data<cc::byte const> cached_pipeline_data() const = 0;
+    [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;
 
 protected:
     raytracing_pipeline() = default;

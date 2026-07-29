@@ -16,19 +16,19 @@ namespace
 // imgui's free callback gets only a pointer, but cc::memory_resource needs the size back.
 // So each block carries its byte count in a header immediately before the pointer imgui sees.
 // The header is a full `alignment` bytes rather than sizeof(isize), which is what keeps the returned pointer aligned — imgui allocates types up to 16-byte alignment.
-constexpr auto imgui_alloc_alignment = cc::isize(16);
-static_assert(imgui_alloc_alignment >= cc::isize(sizeof(cc::isize)), "the header must fit in one alignment unit");
+constexpr auto imgui_alloc_alignment = isize(16);
+static_assert(imgui_alloc_alignment >= isize(sizeof(isize)), "the header must fit in one alignment unit");
 
 void* imgui_alloc(size_t size, void*)
 {
-    auto const total = cc::isize(size) + imgui_alloc_alignment;
+    auto const total = isize(size) + imgui_alloc_alignment;
 
-    cc::byte* base = nullptr;
+    byte* base = nullptr;
     auto const& res = *cc::default_memory_resource;
     (void)res.allocate_bytes(&base, total, total, imgui_alloc_alignment, res.userdata);
     CC_ASSERT(base != nullptr, "imgui allocation failed");
 
-    *reinterpret_cast<cc::isize*>(base) = total;
+    *reinterpret_cast<isize*>(base) = total;
     return base + imgui_alloc_alignment;
 }
 
@@ -37,8 +37,8 @@ void imgui_free(void* ptr, void*)
     if (ptr == nullptr)
         return; // imgui frees null freely
 
-    auto* const base = reinterpret_cast<cc::byte*>(ptr) - imgui_alloc_alignment;
-    auto const total = *reinterpret_cast<cc::isize*>(base);
+    auto* const base = reinterpret_cast<byte*>(ptr) - imgui_alloc_alignment;
+    auto const total = *reinterpret_cast<isize*>(base);
 
     auto const& res = *cc::default_memory_resource;
     res.deallocate_bytes(base, total, imgui_alloc_alignment, res.userdata);

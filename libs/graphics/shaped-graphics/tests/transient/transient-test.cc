@@ -10,6 +10,8 @@
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 // Backend-agnostic tests for the transient lifetime scope (ctx->transient): per-epoch scratch buffers, the
 // shared bump-allocated heap and its deferred budget, and transient binding-group instantiation. Each is an
 // INVOCABLE_TEST run against every available backend (see tests/context/context-test.cc for the mechanism).
@@ -19,7 +21,7 @@
 
 namespace
 {
-auto pattern = [](int i) { return cc::byte(i & 0xFF); };
+auto pattern = [](int i) { return byte(i & 0xFF); };
 
 sg::buffer_usage const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
@@ -31,14 +33,14 @@ bool transient_round_trip(sg::context_handle const& ctx, int seed)
     if (!buf)
         return false;
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(seed + i);
 
     auto up = ctx->create_command_list();
     if (!up)
         return false;
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
@@ -58,7 +60,7 @@ bool transient_round_trip(sg::context_handle const& ctx, int seed)
 
 struct particle
 {
-    sg::u32 a, b, c, d;
+    u32 a, b, c, d;
 };
 } // namespace
 
@@ -98,18 +100,18 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     REQUIRE(a != nullptr);
     REQUIRE(b != nullptr);
 
-    cc::byte src_a[128];
-    cc::byte src_b[128];
+    byte src_a[128];
+    byte src_b[128];
     for (int i = 0; i < 128; ++i)
     {
-        src_a[i] = cc::byte(0xA0 + (i & 0xF));
-        src_b[i] = cc::byte(0xB0 + (i & 0xF));
+        src_a[i] = byte(0xA0 + (i & 0xF));
+        src_b[i] = byte(0xB0 + (i & 0xF));
     }
 
     auto up = ctx->create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(a, cc::span<cc::byte const>(src_a, 128));
-    up->upload.bytes_to_buffer(b, cc::span<cc::byte const>(src_b, 128));
+    up->upload.bytes_to_buffer(a, cc::span<byte const>(src_a, 128));
+    up->upload.bytes_to_buffer(b, cc::span<byte const>(src_b, 128));
     ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
@@ -125,9 +127,9 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     bool ok = true;
     for (int i = 0; i < 128; ++i)
     {
-        if (bytes_a.value()[i] != cc::byte(0xA0 + (i & 0xF)))
+        if (bytes_a.value()[i] != byte(0xA0 + (i & 0xF)))
             ok = false;
-        if (bytes_b.value()[i] != cc::byte(0xB0 + (i & 0xF)))
+        if (bytes_b.value()[i] != byte(0xB0 + (i & 0xF)))
             ok = false;
     }
     CHECK(ok);
@@ -168,14 +170,14 @@ INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::co
 
     CHECK(transient_round_trip(ctx, 0)); // epoch 0 on the default budget (heap created here)
 
-    ctx->transient.set_budget(cc::isize(512) * 1024);
+    ctx->transient.set_budget(isize(512) * 1024);
     for (int e = 1; e <= 4; ++e)
     {
         ctx->advance_epoch(2); // first advance drains + resizes to the pending 512 KiB
         CHECK(transient_round_trip(ctx, e));
     }
 
-    ctx->transient.set_budget(cc::isize(2) * 1024 * 1024);
+    ctx->transient.set_budget(isize(2) * 1024 * 1024);
     for (int e = 5; e <= 8; ++e)
     {
         ctx->advance_epoch(2);
@@ -189,9 +191,9 @@ INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (
 {
     REQUIRE(ctx != nullptr);
 
-    ctx->transient.set_budget(cc::isize(1) * 1024 * 1024);
-    ctx->transient.set_budget(cc::isize(256) * 1024);
-    ctx->transient.set_budget(cc::isize(768) * 1024); // last write wins at the next advance
+    ctx->transient.set_budget(isize(1) * 1024 * 1024);
+    ctx->transient.set_budget(isize(256) * 1024);
+    ctx->transient.set_budget(isize(768) * 1024); // last write wins at the next advance
 
     ctx->advance_epoch_and_wait_for_idle();
     CHECK(transient_round_trip(ctx, 3));

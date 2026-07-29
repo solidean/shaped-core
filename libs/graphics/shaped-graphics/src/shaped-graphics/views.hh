@@ -21,7 +21,7 @@ namespace sg
 /// A view's element (`readonly`/`readwrite`) or block (`uniform`) type. GPUs load at 4-byte (DWORD)
 /// alignment, so it must be `byte` (the raw / byte-addressed path) or a multiple of 4 bytes.
 template <class T>
-concept view_element = std::is_same_v<T, cc::byte> || (sizeof(T) % 4 == 0);
+concept view_element = std::is_same_v<T, byte> || (sizeof(T) % 4 == 0);
 
 /// Placement rules a uniform (constant) buffer view must satisfy: its byte offset is a multiple of
 /// `uniform_buffer_offset_alignment`, and its size a multiple of 16 (std140 packing) and at most
@@ -232,7 +232,7 @@ struct readonly_buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        constexpr bool is_raw = std::is_same_v<T, cc::byte>;
+        constexpr bool is_raw = std::is_same_v<T, byte>;
         return raw_buffer_view{
             .access = access,
             .shape = is_raw ? view_shape::raw : view_shape::structured,
@@ -260,7 +260,7 @@ struct readwrite_buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        constexpr bool is_raw = std::is_same_v<T, cc::byte>;
+        constexpr bool is_raw = std::is_same_v<T, byte>;
         return raw_buffer_view{
             .access = access,
             .shape = is_raw ? view_shape::raw : view_shape::structured,
@@ -341,7 +341,7 @@ struct buffer_view
         _assert_element_matches();
         return {.buffer = buffer,
                 .offset_in_bytes = offset_in_bytes,
-                .element_count = std::is_same_v<T, cc::byte> ? size_in_bytes : element_count};
+                .element_count = std::is_same_v<T, byte> ? size_in_bytes : element_count};
     }
     [[nodiscard]] readwrite_buffer_view<T> as_readwrite() const
     {
@@ -349,7 +349,7 @@ struct buffer_view
         _assert_element_matches();
         return {.buffer = buffer,
                 .offset_in_bytes = offset_in_bytes,
-                .element_count = std::is_same_v<T, cc::byte> ? size_in_bytes : element_count};
+                .element_count = std::is_same_v<T, byte> ? size_in_bytes : element_count};
     }
     // uniform only where T obeys the uniform block rules (U = T defers so buffer_view<T> stays valid for a
     // non-uniform T — naming uniform_buffer_view<T> there would be ill-formed).
@@ -389,7 +389,7 @@ private:
     // bug, so it asserts even through `try_as_*` (which only tolerates the runtime access-class variance).
     void _assert_element_matches() const
     {
-        if constexpr (std::is_same_v<T, cc::byte>)
+        if constexpr (std::is_same_v<T, byte>)
             CC_ASSERT(shape == view_shape::raw, "recovering a buffer_view<byte> needs a raw (byte-addressed) view");
         else
         {
@@ -671,8 +671,8 @@ public:
 
     // Bind as a rendering-scope target, choosing what happens to its contents at pass start. `&&`
     // overloads move the view into the target; the `const&` overloads copy. See command_list.raster.hh.
-    [[nodiscard]] depth_stencil_target cleared(float depth, cc::u8 stencil = 0) const&;
-    [[nodiscard]] depth_stencil_target cleared(float depth, cc::u8 stencil = 0) &&;
+    [[nodiscard]] depth_stencil_target cleared(float depth, u8 stencil = 0) const&;
+    [[nodiscard]] depth_stencil_target cleared(float depth, u8 stencil = 0) &&;
     [[nodiscard]] depth_stencil_target preserved() const&;
     [[nodiscard]] depth_stencil_target preserved() &&;
     [[nodiscard]] depth_stencil_target discarded() const&;

@@ -11,6 +11,8 @@
 
 #include <memory>
 
+using namespace cc::primitive_defines;
+
 // The imgui routine end to end on a dx12 WARP device: build a frame of real imgui draw data, service the texture protocol, record the draws into an offscreen target, and read the pixels back.
 //
 // No window and no swapchain are involved — the target is a plain rgba8 texture with copy_src, which is how the repo's other raster tests run headless on CI.
@@ -56,7 +58,7 @@ struct imgui_fixture
         ctx->advance_epoch_and_wait_for_idle();
     }
 
-    [[nodiscard]] cc::pinned_data<cc::byte const> read_back()
+    [[nodiscard]] cc::pinned_data<byte const> read_back()
     {
         auto cmd = ctx->create_command_list();
         auto const future = cmd->download.bytes_from_texture(target.raw());
@@ -97,18 +99,18 @@ std::unique_ptr<imgui_fixture> make_fixture()
 }
 
 /// True if any pixel differs from the cleared background — i.e. imgui actually drew something.
-[[nodiscard]] bool any_pixel_drawn(cc::span<cc::byte const> pixels)
+[[nodiscard]] bool any_pixel_drawn(cc::span<byte const> pixels)
 {
-    for (auto i = cc::isize(0); i + 3 < pixels.size(); i += 4)
-        if (pixels[i] != cc::byte(0) || pixels[i + 1] != cc::byte(0) || pixels[i + 2] != cc::byte(0))
+    for (auto i = isize(0); i + 3 < pixels.size(); i += 4)
+        if (pixels[i] != byte(0) || pixels[i + 1] != byte(0) || pixels[i + 2] != byte(0))
             return true;
     return false;
 }
 
 /// Red channel of the pixel at (x, y).
-[[nodiscard]] cc::byte pixel_at(cc::span<cc::byte const> pixels, int x, int y)
+[[nodiscard]] byte pixel_at(cc::span<byte const> pixels, int x, int y)
 {
-    return pixels[(cc::isize(y) * target_width + x) * 4];
+    return pixels[(isize(y) * target_width + x) * 4];
 }
 
 void draw_test_window()
@@ -129,16 +131,16 @@ TEST("sr::imgui_routine - draws a window into an offscreen target")
 
     f->frame(&draw_test_window);
     auto const pixels = f->read_back();
-    REQUIRE(pixels.size() == cc::isize(target_width) * cc::isize(target_height) * 4);
+    REQUIRE(pixels.size() == isize(target_width) * isize(target_height) * 4);
 
     // Deliberately not a golden-image comparison: that would break on every imgui version bump without catching anything these checks do not.
     CHECK(any_pixel_drawn(pixels));
 
     // Inside the window imgui was told to draw, the clear color must be gone.
-    CHECK(pixel_at(pixels, 100, 100) != cc::byte(0));
+    CHECK(pixel_at(pixels, 100, 100) != byte(0));
 
     // Far outside it, the clear color must survive — which is what proves the scissor is doing its job rather than the whole target being painted.
-    CHECK(pixel_at(pixels, 250, 250) == cc::byte(0));
+    CHECK(pixel_at(pixels, 250, 250) == byte(0));
 }
 
 TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target")
@@ -158,14 +160,14 @@ TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target
 
     f->frame(draw_box);
     auto const centered = f->read_back();
-    CHECK(pixel_at(centered, 125, 125) != cc::byte(0));
-    CHECK(pixel_at(centered, 85, 95) == cc::byte(0));
+    CHECK(pixel_at(centered, 125, 125) != byte(0));
+    CHECK(pixel_at(centered, 85, 95) == byte(0));
 
     // Same geometry, but the target's top-left is now at (40, 30) in imgui space — so it must land 40 left and 30 up from where it did, and vacate where it was.
     f->frame(draw_box, tg::pos2f(40.0f, 30.0f));
     auto const shifted = f->read_back();
-    CHECK(pixel_at(shifted, 85, 95) != cc::byte(0));
-    CHECK(pixel_at(shifted, 125, 125) == cc::byte(0));
+    CHECK(pixel_at(shifted, 85, 95) != byte(0));
+    CHECK(pixel_at(shifted, 125, 125) == byte(0));
 }
 
 TEST("sr::imgui_routine - a shader reload keeps drawing")
@@ -194,6 +196,6 @@ TEST("sr::imgui_routine - an empty frame records nothing and does not assert")
     f->frame([] {}); // no windows at all
 
     auto const pixels = f->read_back();
-    REQUIRE(pixels.size() == cc::isize(target_width) * cc::isize(target_height) * 4);
+    REQUIRE(pixels.size() == isize(target_width) * isize(target_height) * 4);
     CHECK(!any_pixel_drawn(pixels)); // still the clear color
 }

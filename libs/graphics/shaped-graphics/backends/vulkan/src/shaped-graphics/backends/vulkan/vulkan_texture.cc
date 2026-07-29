@@ -193,8 +193,8 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     CC_ASSERT(alloc.is_dedicated(), "placed textures (non-null memory_heap) not implemented yet");
 
     // Extent + layer count derived from the shape: depth only for 3D; a cube is 6 layers per cube.
-    cc::u32 const height = desc.dimension == sg::texture_dimension::d1 ? 1u : cc::u32(desc.height);
-    cc::u32 const depth = desc.dimension == sg::texture_dimension::d3 ? cc::u32(desc.depth) : 1u;
+    u32 const height = desc.dimension == sg::texture_dimension::d1 ? 1u : u32(desc.height);
+    u32 const depth = desc.dimension == sg::texture_dimension::d3 ? u32(desc.depth) : 1u;
     int layers = desc.array_layers.value_or(1);
     if (desc.is_cube)
         layers *= 6;
@@ -204,9 +204,9 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
         .flags = VkImageCreateFlags(desc.is_cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0),
         .imageType = to_vk_image_type(desc.dimension),
         .format = to_vk_format(desc.format),
-        .extent = {cc::u32(desc.width), height, depth},
-        .mipLevels = cc::u32(desc.mip_levels),
-        .arrayLayers = cc::u32(layers),
+        .extent = {u32(desc.width), height, depth},
+        .mipLevels = u32(desc.mip_levels),
+        .arrayLayers = u32(layers),
         .samples = VkSampleCountFlagBits(desc.sample_count), // enum values equal the sample counts
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = to_vk_image_usage(desc.usage),
@@ -222,7 +222,7 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     vkGetImageMemoryRequirements(_device, image, &req);
 
     // GPU-resident: sg exposes no host-visible textures.
-    cc::u32 const type = find_memory_type(cc::u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    u32 const type = find_memory_type(u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (type == UINT32_MAX)
     {
         vkDestroyImage(_device, image, nullptr);

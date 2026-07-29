@@ -42,7 +42,7 @@ TEST("shaped-linter - default-init - positive fixes")
 {
     SECTION("a single value keeps its braces")
     {
-        expect_single("struct S { cc::atomic<cc::u32> x{0}; };", " = {0}");
+        expect_single("struct S { cc::atomic<u32> x{0}; };", " = {0}");
     }
     SECTION("nullptr keeps its braces")
     {

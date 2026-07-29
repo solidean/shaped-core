@@ -4,11 +4,13 @@
 #include <clean-core/streams/stream.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
-cc::span<cc::byte const> as_bytes(cc::string_view s)
+cc::span<byte const> as_bytes(cc::string_view s)
 {
-    return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(s.data()), s.size());
+    return cc::span<byte const>(reinterpret_cast<byte const*>(s.data()), s.size());
 }
 } // namespace
 

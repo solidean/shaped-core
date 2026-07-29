@@ -186,8 +186,8 @@ private:
     // The wake state. There is deliberately no counter of claimable tasks here: a worker's scan of the deques
     // already answers "is there work", authoritatively and without shared writes, so a counter would be a
     // hot-path RMW serving a cold-path question. See the protocol block in the .cc.
-    alignas(64) cc::atomic<cc::i64> _wake_epoch = {0}; // bumped only when a sleeper actually needs waking
-    cc::atomic<int> _sleepers = {0};                   // workers blocked on (or committing to) _wait_cv
+    alignas(64) cc::atomic<i64> _wake_epoch = {0}; // bumped only when a sleeper actually needs waking
+    cc::atomic<int> _sleepers = {0};               // workers blocked on (or committing to) _wait_cv
     cc::atomic<bool> _stop = {false};
     std::mutex _wait_m;
     std::condition_variable _wait_cv;

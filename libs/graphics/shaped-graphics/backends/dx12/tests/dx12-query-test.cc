@@ -3,6 +3,8 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // GPU queries: cmd.query.record_gpu_timestamp, resolved + read back at submit, on WARP. Covers the
 // round-trip, heap rollover across leases, and the dropped-list path.
 
@@ -79,7 +81,7 @@ TEST("sg dx12 - timestamp heap rollover across leases")
 
     // Sample across the heap boundary: last slot of heap 0, first slot of heap 1, and the final slot.
     int const sample[] = {0, per_heap - 1, per_heap, n - 1};
-    cc::u64 prev = 0;
+    u64 prev = 0;
     bool first = true;
     for (int const idx : sample)
     {

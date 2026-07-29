@@ -39,7 +39,7 @@ struct image
     int height = 0;
     int channels = 0; // 1 grey / 2 grey+alpha / 3 rgb / 4 rgba
     component comp = component::u8;
-    cc::vector<cc::byte> pixels;
+    cc::vector<byte> pixels;
 
     [[nodiscard]] bool is_empty() const { return width <= 0 || height <= 0; }
 
@@ -54,10 +54,10 @@ struct image
 // -------------------------------------------------------------------------------------------------
 
 /// Sniff the container format from the leading magic bytes. Errors if it matches no supported format.
-[[nodiscard]] cc::result<format> detect_format(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<format> detect_format(cc::span<byte const> bytes);
 
 /// Decode any supported image, auto-detecting the format and delegating to the matching low-level codec.
-[[nodiscard]] cc::result<image> read(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<image> read(cc::span<byte const> bytes);
 
 /// Convenience: slurp the stream to end, then decode.
 [[nodiscard]] cc::result<image> read(cc::read_stream& in);
@@ -72,7 +72,7 @@ struct write_options
 };
 
 /// Encode `img` to `fmt`'s file bytes, delegating to the matching low-level codec.
-[[nodiscard]] cc::result<cc::vector<cc::byte>> encode(image const& img, format fmt, write_options opts = {});
+[[nodiscard]] cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts = {});
 
 /// Encode and write to a stream.
 [[nodiscard]] cc::result<cc::unit> write(cc::write_stream& out, image const& img, format fmt, write_options opts = {});

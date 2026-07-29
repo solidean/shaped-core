@@ -5,6 +5,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 
+using namespace cc::primitive_defines;
+
 // Inline texture copy on WARP: upload tightly-packed pixels into a texture, read them back, and verify
 // the round-trip — exercising the 256/512 row/placement padding, the region path, block-compressed
 // formats, and the copy_dst/copy_src layout barriers the copy drives.
@@ -110,7 +112,7 @@ TEST("sg dx12 - texture upload/download round-trip pads + un-pads rows")
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(sizeof(src)));
+    REQUIRE(bytes.value().size() == isize(sizeof(src)));
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
@@ -180,7 +182,7 @@ TEST("sg dx12 - async texture upload/download round-trip on the copy queue")
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(sizeof(src)));
+    REQUIRE(bytes.value().size() == isize(sizeof(src)));
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
@@ -282,8 +284,8 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
     // A ring that holds the region + its staging slack (tight 768 + padded 256 + 512 alignment = 1536).
     // Parking the cursor 512 bytes before the seam forces the 768-byte region to split — 2 padded rows
     // before the seam, 1 after.
-    constexpr cc::isize ring_bytes = 2048;
-    constexpr cc::isize park = ring_bytes - 512; // 512 < 768 staged -> the region cannot fit before the seam
+    constexpr isize ring_bytes = 2048;
+    constexpr isize park = ring_bytes - 512; // 512 < 768 staged -> the region cannot fit before the seam
     auto ctx_r = sg::create_dx12_context({.use_warp = true, .upload_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
@@ -298,9 +300,9 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
         src[i] = float(i) + 0.5f;
 
     ctx->advance_epoch_and_wait_for_idle(); // drain, then park the ring cursor just before the seam
-    c._upload_inline.debug_set_cursor(cc::u64(park));
+    c._upload_inline.debug_set_cursor(u64(park));
     auto const before = c._upload_inline.debug_cursor();
-    REQUIRE(ring_bytes - cc::isize(before.next_pos % cc::u64(ring_bytes)) < 768); // setup forces a seam wrap
+    REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
 
     // The staged region straddles the seam; a byte-exact round-trip below proves the split copy is correct.
     auto up = ctx->create_command_list();
@@ -322,8 +324,8 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
 
 TEST("sg dx12 - inline texture download splits across the ring seam")
 {
-    constexpr cc::isize ring_bytes = 2048; // >= tight 768 + padded 256 + 512 alignment slack
-    constexpr cc::isize park = ring_bytes - 512;
+    constexpr isize ring_bytes = 2048; // >= tight 768 + padded 256 + 512 alignment slack
+    constexpr isize park = ring_bytes - 512;
     auto ctx_r = sg::create_dx12_context({.use_warp = true, .download_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
@@ -342,9 +344,9 @@ TEST("sg dx12 - inline texture download splits across the ring seam")
     ctx->submit_command_list(cc::move(up));
 
     ctx->advance_epoch_and_wait_for_idle(); // drain, then park the readback ring cursor just before the seam
-    c._download_inline.debug_set_cursor(cc::u64(park));
+    c._download_inline.debug_set_cursor(u64(park));
     auto const before = c._download_inline.debug_cursor();
-    REQUIRE(ring_bytes - cc::isize(before.next_pos % cc::u64(ring_bytes)) < 768); // setup forces a seam wrap
+    REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
 
     auto down = ctx->create_command_list();
     auto fut = down->download.bytes_from_texture(tex.value()); // the seam-straddling readback splits here
@@ -382,7 +384,7 @@ TEST("sg dx12 - async texture copy splits across staging windows")
 
     auto const bytes = ctx->wait_for(fut);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(sizeof(src)));
+    REQUIRE(bytes.value().size() == isize(sizeof(src)));
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
@@ -442,13 +444,13 @@ TEST("sg dx12 - block-compressed texture round-trips whole blocks")
     auto tex = c.persistent.create_raw_texture(copy_desc(sg::pixel_format::bc1_rgba_unorm, 8, 8));
     REQUIRE(tex != nullptr);
 
-    cc::byte src[32];
+    byte src[32];
     for (int i = 0; i < 32; ++i)
-        src[i] = cc::byte(i * 7 + 1);
+        src[i] = byte(i * 7 + 1);
 
     auto cmd = c.create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_texture(tex, cc::span<cc::byte const>(src, 32));
+    cmd->upload.bytes_to_texture(tex, cc::span<byte const>(src, 32));
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 

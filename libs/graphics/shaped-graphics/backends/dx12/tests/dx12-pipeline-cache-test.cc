@@ -7,6 +7,8 @@
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See dx12-compute-test.cc.
 #include "double_compute.dxil.h"
 
+using namespace cc::primitive_defines;
+
 // Exercises the sg-level built-in cache (ctx.cached) end to end on WARP: group-layout and pipeline-layout
 // acquire each dedup to one handle, compute-pipeline acquire dedups to one async node, the async resolves
 // (driven inline here — no pool installed), and the cached pipeline actually dispatches correctly.
@@ -22,8 +24,8 @@ sg::compiled_shader make_double_shader()
     shader.format = sg::shader_format::dxil;
     shader.entry_point = "main";
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 1, .z = 1};
-    shader.bytecode = cc::make_pinned_data(cc::span<cc::byte const>(
-        reinterpret_cast<cc::byte const*>(double_compute_dxil), cc::isize(sizeof(double_compute_dxil))));
+    shader.bytecode = cc::make_pinned_data(
+        cc::span<byte const>(reinterpret_cast<byte const*>(double_compute_dxil), isize(sizeof(double_compute_dxil))));
     shader.bindings.push_back(sg::binding{
         .name = "Output",
         .set = 0,
@@ -69,11 +71,11 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
 
     // End-to-end: dispatch with the cached pipeline and read the result back.
     constexpr int count = 256; // multiple of the 64-thread workgroup
-    auto buf = ctx.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(sg::u32)),
+    auto buf = ctx.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
 
-    sg::named_view const out = {.name = "Output", .view = sg::buffer<sg::u32>::from_raw(buf).as_readwrite_buffer()};
+    sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
     auto group = ctx.persistent.create_binding_group(group_layout1, cc::span<sg::named_view const>(&out, 1));
     REQUIRE(group != nullptr);
 
@@ -84,15 +86,15 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     ctx.submit_command_list(cc::move(disp));
 
     auto down = ctx.create_command_list();
-    auto future = down->download.data_from_buffer<sg::u32>(buf, 0, count);
+    auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
     auto const data = ctx.wait_for(future);
     REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == cc::isize(count));
+    REQUIRE(data.value().size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != cc::u32(i) * 2)
+        if (data.value()[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
 }
@@ -192,7 +194,7 @@ TEST("sg pipeline_cache - inline constants participate in the pipeline-layout ke
 
     // Same group layout, but an inline-constants block adds a 32-bit-constants root parameter that changes
     // the root signature — so it (and its block_size) must be part of the pipeline-layout key.
-    auto make_desc = [&](cc::isize block_size)
+    auto make_desc = [&](isize block_size)
     {
         sg::pipeline_layout_description d;
         d.groups = {gl};

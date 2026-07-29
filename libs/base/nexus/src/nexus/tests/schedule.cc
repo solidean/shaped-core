@@ -2,9 +2,12 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 
 #include <iostream>    // std::cout: console output
 #include <string_view> // std::string_view: streams a cc::string into std::ostream
+
+using namespace cc::primitive_defines;
 
 namespace
 {
@@ -19,7 +22,7 @@ bool same_path(cc::span<cc::string const> a, cc::span<cc::string const> b)
 {
     if (a.size() != b.size())
         return false;
-    for (cc::isize i = 0; i < a.size(); ++i)
+    for (isize i = 0; i < a.size(); ++i)
         if (cc::string_view(a[i]) != cc::string_view(b[i]))
             return false;
     return true;
@@ -131,8 +134,8 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         }
 
         // Regular filter argument - split by comma for Catch2 compatibility
-        cc::isize start = 0;
-        for (cc::isize end = arg.find(','); end >= 0; end = arg.find(',', start))
+        isize start = 0;
+        for (isize end = arg.find(','); end >= 0; end = arg.find(',', start))
         {
             if (auto const filter = arg.subview({.start = start, .end = end}); !filter.empty())
                 config.filters.emplace_back(filter);

@@ -5,6 +5,8 @@
 #include <shaped-graphics/fwd.hh> // sg::submission_token
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 // Backend-agnostic command-list lifecycle: create → submit / drop, epoch stamping, and submission-token
 // completion. Run against every available backend (see tests/context/context-test.cc for the mechanism).
 
@@ -71,7 +73,7 @@ INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_han
     auto const second = ctx->submit_command_list(cc::move(b));
 
     // Distinct submissions get distinct, monotonically increasing tokens.
-    CHECK(cc::u64(second) > cc::u64(first));
+    CHECK(u64(second) > u64(first));
 
     ctx->advance_epoch_and_wait_for_idle();
     CHECK(ctx->is_submission_complete(first));

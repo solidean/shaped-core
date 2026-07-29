@@ -8,8 +8,8 @@
 namespace sg
 {
 bytes_future command_list_download_scope::bytes_from_buffer(raw_buffer_handle buffer,
-                                                            cc::isize offset_in_bytes,
-                                                            cc::isize size_in_bytes)
+                                                            isize offset_in_bytes,
+                                                            isize size_in_bytes)
 {
     return _cmd.download_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
@@ -24,7 +24,7 @@ bytes_future command_list_download_scope::bytes_from_texture(raw_texture_handle 
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
     if (box.is_empty()) // no copy — a ready, empty future
-        return bytes_future(cc::pinned_data<cc::byte const>(), std::make_shared<ready_bytes_waiter>());
+        return bytes_future(cc::pinned_data<byte const>(), std::make_shared<ready_bytes_waiter>());
     return _cmd.download_bytes_from_texture(cc::move(texture), subresource, box);
 }
 } // namespace sg

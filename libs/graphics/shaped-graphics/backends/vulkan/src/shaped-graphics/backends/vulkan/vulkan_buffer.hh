@@ -14,7 +14,7 @@ class vulkan_buffer final : public sg::raw_buffer
 public:
     vulkan_buffer(vulkan_context& ctx,
                   sg::epoch created_in,
-                  cc::isize size_in_bytes,
+                  isize size_in_bytes,
                   sg::buffer_usage usage,
                   VkBuffer buffer,
                   VkDeviceMemory memory)

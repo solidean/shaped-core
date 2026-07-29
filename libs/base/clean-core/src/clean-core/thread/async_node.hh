@@ -27,7 +27,7 @@ namespace cc
 // ============================================================================
 
 /// Distinguishes an ordinary error from a cancellation on the async failure channel.
-enum class async_error_kind : cc::u8
+enum class async_error_kind : u8
 {
     error,
     cancelled,
@@ -76,7 +76,7 @@ private:
 // ============================================================================
 
 /// What a compute frame reports after one step, once T has been stripped away for the base poll loop.
-enum class async_step_status : cc::u8
+enum class async_step_status : u8
 {
     produced_value, // frame finished; typed value stored in the derived node
     produced_error, // frame finished on the failure channel; error stored in the base node
@@ -101,8 +101,8 @@ struct async_node_traits
     static constexpr bool supports_weak = true;
 
     // intrusive: the node IS the async node, control included; free by the concrete class stashed in the node
-    static constexpr cc::isize node_size(cc::isize payload_size, cc::isize) { return payload_size; }
-    static constexpr cc::isize node_align(cc::isize payload_align) { return payload_align; }
+    static constexpr isize node_size(isize payload_size, isize) { return payload_size; }
+    static constexpr isize node_align(isize payload_align) { return payload_align; }
 
     static void init_control(async_node_base* p);
     static void inc_strong(async_node_base* p);
@@ -237,10 +237,10 @@ namespace impl
 /// are free; bit 1 is the subscribed flag. This proxy edits the packed word in place.
 struct async_dep_entry
 {
-    cc::u64* _word;
+    u64* _word;
 
-    static constexpr cc::u64 subscribed_bit = 0x2;
-    static constexpr cc::u64 dep_mask = ~cc::u64(0x3F); // clear the low 6 tag bits to recover the 64-aligned dep
+    static constexpr u64 subscribed_bit = 0x2;
+    static constexpr u64 dep_mask = ~u64(0x3F); // clear the low 6 tag bits to recover the 64-aligned dep
 
     [[nodiscard]] async_node_base* dep() const { return reinterpret_cast<async_node_base*>(*_word & dep_mask); }
     [[nodiscard]] bool subscribed() const { return (*_word & subscribed_bit) != 0; }
@@ -257,7 +257,7 @@ struct async_dep_entry
 /// intrusively linked; _dep packs the dependency + subscribed bit exactly like a single-mode head.
 struct async_dep_list_node
 {
-    cc::u64 _dep; // 64-aligned async_node_base* in the high bits, subscribed in bit 1
+    u64 _dep; // 64-aligned async_node_base* in the high bits, subscribed in bit 1
     async_dep_list_node* _next;
 };
 
@@ -295,13 +295,13 @@ struct async_dep_head
 
     [[nodiscard]] bool empty() const { return _head == 0; }
 
-    [[nodiscard]] cc::isize count() const
+    [[nodiscard]] isize count() const
     {
         if (_head == 0)
             return 0;
         if ((_head & tag_is_list) == 0)
             return 1;
-        cc::isize n = 0;
+        isize n = 0;
         for (auto* p = list_head(); p != nullptr; p = p->_next)
             ++n;
         return n;
@@ -312,7 +312,7 @@ struct async_dep_head
     {
         if (_head == 0)
             return nullptr;
-        cc::u64 const word = (_head & tag_is_list) == 0 ? _head : list_head()->_dep;
+        u64 const word = (_head & tag_is_list) == 0 ? _head : list_head()->_dep;
         return reinterpret_cast<async_node_base*>(word & async_dep_entry::dep_mask);
     }
 
@@ -357,17 +357,17 @@ struct async_dep_head
     }
 
 private:
-    static constexpr cc::u64 tag_is_list = 0x1;
+    static constexpr u64 tag_is_list = 0x1;
 
     [[nodiscard]] async_dep_list_node* list_head() const
     {
         return reinterpret_cast<async_dep_list_node*>(_head & ~tag_is_list);
     }
-    void set_list_head(async_dep_list_node* n) { _head = reinterpret_cast<cc::u64>(n) | tag_is_list; }
+    void set_list_head(async_dep_list_node* n) { _head = reinterpret_cast<u64>(n) | tag_is_list; }
     void normalize();         // collapse a 0/1-entry list back to empty/single mode
     void remove_ready_slow(); // non-empty scan behind remove_ready's inline empty-guard
 
-    cc::u64 _head = 0;
+    u64 _head = 0;
 };
 
 // ============================================================================
@@ -443,7 +443,7 @@ struct async_cont_head
     /// Remove `dependent`, and prune any entries whose dependent has since expired.
     void remove(async_node_base* dependent);
     /// Number of live weak dependents (latches excluded).
-    [[nodiscard]] cc::isize count() const;
+    [[nodiscard]] isize count() const;
 
     /// Fire every entry: schedule each still-live dependent, call each latch. Call on a stolen (local)
     /// head only — never while holding the node lock, since scheduling a dependent takes its lock. Does not
@@ -451,7 +451,7 @@ struct async_cont_head
     void notify_all();
 
 private:
-    static constexpr cc::u64 tag_is_list = 0x1;
+    static constexpr u64 tag_is_list = 0x1;
 
     // inline mode (bit0 == 0, _head != 0): the 64-aligned dependent, on which we hold one weak count by hand
     [[nodiscard]] async_node_base* inline_dep() const { return reinterpret_cast<async_node_base*>(_head); }
@@ -459,14 +459,14 @@ private:
     {
         return reinterpret_cast<async_cont_cell*>(_head & ~tag_is_list);
     }
-    void set_list_head(async_cont_cell* c) { _head = reinterpret_cast<cc::u64>(c) | tag_is_list; }
+    void set_list_head(async_cont_cell* c) { _head = reinterpret_cast<u64>(c) | tag_is_list; }
 
     void spill_inline(); // move the inline entry into a fresh 1-cell list (2nd dependent, or any latch)
     void release_inline() { auto const w = async_node_weak::adopt(inline_dep()); } // dtor pays our dec_weak
     void normalize(); // collapse an emptied list back to empty
     void clear();     // release the inline ref, or free the whole spill list
 
-    cc::u64 _head = 0;
+    u64 _head = 0;
 };
 
 /// The node's transient scratch while it is UNRESOLVED: the compute frame, the not-ready dependency set, and
@@ -482,7 +482,7 @@ struct async_unresolved
     /// F, so async_node_base owns this slot's lifetime (install_frame builds it, ops->frame_destroy ends it)
     /// and ~async_unresolved deliberately leaves it alone. Empty for a frameless (manual/push) node. A closure
     /// too big for 32 B falls back to an 8 B cc::unique_function stored here instead.
-    alignas(16) cc::byte frame[32];
+    alignas(16) byte frame[32];
     async_dep_head deps;   // 8
     async_cont_head conts; // 8
     // Default special members: default ctor births an empty arm (the frame slot is left raw); the
@@ -501,7 +501,7 @@ static_assert(sizeof(async_unresolved) == 48, "the unresolved arm must stay 48 B
 
 /// Lifecycle state of a node. Transitions are CAS-based so a dependency completing and scheduling a node can
 /// never be lost against that node parking itself (the classic block-vs-wake race).
-enum class async_node_state : cc::u8
+enum class async_node_state : u8
 {
     cold,             // 0  created, never scheduled, compute not started
     scheduled,        // 1  runnable and (logically) queued
@@ -593,10 +593,10 @@ public:
     // debug/introspection (used by tests) — racy on a live node; call only when it is quiescent (single-threaded)
 public:
     /// Number of not-ready dependencies currently tracked. Only meaningful between polls (unresolved arm).
-    [[nodiscard]] cc::isize pending_dependency_count() const { return is_ready() ? 0 : deps().count(); }
+    [[nodiscard]] isize pending_dependency_count() const { return is_ready() ? 0 : deps().count(); }
     /// Number of installed wakeup continuations (may count entries whose dependent has since expired).
     /// Zero once ready — the continuation head is stolen at completion (the payload then holds value/error).
-    [[nodiscard]] cc::isize continuation_count() const { return is_ready() ? 0 : conts().count(); }
+    [[nodiscard]] isize continuation_count() const { return is_ready() ? 0 : conts().count(); }
 
     // scheduling / driving
 public:
@@ -649,10 +649,10 @@ public:
 protected:
     using frame_type = cc::unique_function<async_step_status(async_context_base&)>;
 
-    static constexpr cc::isize payload_offset = 16; // == sizeof(async_node_base); asserted below the class
+    static constexpr isize payload_offset = 16; // == sizeof(async_node_base); asserted below the class
 
-    [[nodiscard]] cc::byte* payload() { return reinterpret_cast<cc::byte*>(this) + payload_offset; }
-    [[nodiscard]] cc::byte const* payload() const { return reinterpret_cast<cc::byte const*>(this) + payload_offset; }
+    [[nodiscard]] byte* payload() { return reinterpret_cast<byte*>(this) + payload_offset; }
+    [[nodiscard]] byte const* payload() const { return reinterpret_cast<byte const*>(this) + payload_offset; }
 
     // unresolved arm (active while not ready)
     [[nodiscard]] impl::async_unresolved& unresolved() { return *reinterpret_cast<impl::async_unresolved*>(payload()); }
@@ -798,7 +798,7 @@ protected:
     /// bits never change afterwards (free_storage reads them at weak 0), so teardown_payload never clears them.
     void set_ops(async_type_ops const* ops)
     {
-        _state_and_ops.store(reinterpret_cast<cc::u64>(ops), cc::memory_order_relaxed); // state cold, wake/lock clear
+        _state_and_ops.store(reinterpret_cast<u64>(ops), cc::memory_order_relaxed); // state cold, wake/lock clear
     }
 
     /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain
@@ -807,7 +807,7 @@ protected:
     /// 32-aligned (bits 0..4 free); wake/lock start clear.
     void init_control_word(async_type_ops const* ops, async_node_state state)
     {
-        _state_and_ops.store(reinterpret_cast<cc::u64>(ops) | (cc::u64(state) << state_shift), cc::memory_order_relaxed);
+        _state_and_ops.store(reinterpret_cast<u64>(ops) | (u64(state) << state_shift), cc::memory_order_relaxed);
     }
 
     /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
@@ -835,11 +835,11 @@ private:
 
     // packed control word (_state_and_ops) — the low 5 bits tag the 32-aligned ops pointer
 private:
-    static constexpr cc::u64 lock_bit = 0x1;  // bit 0: the spinlock
-    static constexpr cc::u64 wake_bit = 0x2;  // bit 1: re-poll requested for a running node
-    static constexpr cc::u64 state_shift = 2; // bits 2..4: async_node_state (7 values)
-    static constexpr cc::u64 state_mask = cc::u64(0x7) << state_shift;
-    static constexpr cc::u64 ops_mask = ~cc::u64(0x1F); // bits 5..63: the 32-aligned async_type_ops pointer
+    static constexpr u64 lock_bit = 0x1;  // bit 0: the spinlock
+    static constexpr u64 wake_bit = 0x2;  // bit 1: re-poll requested for a running node
+    static constexpr u64 state_shift = 2; // bits 2..4: async_node_state (7 values)
+    static constexpr u64 state_mask = u64(0x7) << state_shift;
+    static constexpr u64 ops_mask = ~u64(0x1F); // bits 5..63: the 32-aligned async_type_ops pointer
 
     static bool is_ready_state(async_node_state s)
     {
@@ -886,13 +886,13 @@ private:
 
     void store_state(async_node_state s) // under lock (or at construction): set state, preserve ops/lock/wake
     {
-        cc::u64 const w = _state_and_ops.load(cc::memory_order_relaxed);
-        _state_and_ops.store((w & ~state_mask) | (cc::u64(s) << state_shift), cc::memory_order_release);
+        u64 const w = _state_and_ops.load(cc::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask) | (u64(s) << state_shift), cc::memory_order_release);
     }
     void store_state_clear_wake(async_node_state s) // under lock: set state and clear the wake bit together
     {
-        cc::u64 const w = _state_and_ops.load(cc::memory_order_relaxed);
-        _state_and_ops.store((w & ~state_mask & ~wake_bit) | (cc::u64(s) << state_shift), cc::memory_order_release);
+        u64 const w = _state_and_ops.load(cc::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask & ~wake_bit) | (u64(s) << state_shift), cc::memory_order_release);
     }
     void set_wake()
     {
@@ -926,7 +926,7 @@ private:
     /// strong owners' collective one) in the low half. Born 1/1 by init_control. Fused into one word (offset 0)
     /// so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the
     /// sole owner — see cc::fused_refcount. The state/lock live in a separate word.
-    cc::atomic<cc::u64> _counts = {0};
+    cc::atomic<u64> _counts = {0};
 
     /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits
     /// 2..4, the wake-pending flag in bit 1, and the spinlock in bit 0. Folding lock + state + wake in with the
@@ -937,7 +937,7 @@ private:
     /// lock RMWs. Deliberate: nearly all is_ready() calls target already-resolved nodes, which take no lock
     /// (completion is done) — no contention there. If a hot pre-completion is_ready() path ever contends,
     /// steal the MSB of _counts' weak half for a dedicated ready bit instead.
-    cc::atomic<cc::u64> _state_and_ops = {0};
+    cc::atomic<u64> _state_and_ops = {0};
 
     // No further members: this is a 16 B header. The payload (unresolved scratch ⊍ resolved value/error, incl.
     // the compute frame) is raw storage declared by the derived async_typed_node<T> at offset 16, via payload().
@@ -980,6 +980,6 @@ inline void impl::async_node_traits::free_storage(async_node_base* p)
 {
     async_type_ops const* ops = p->ops();
     CC_ASSERT(ops != nullptr, "async node freed without ops (must be created via make_async_* / make_shared)");
-    cc::node_allocation_free(reinterpret_cast<cc::byte*>(p), ops->class_index);
+    cc::node_allocation_free(reinterpret_cast<byte*>(p), ops->class_index);
 }
 } // namespace cc

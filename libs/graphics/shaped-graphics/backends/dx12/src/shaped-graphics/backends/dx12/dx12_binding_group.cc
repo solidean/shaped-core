@@ -79,14 +79,14 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
 
     // Match each provided view to a view slot by name, validate it, and create its descriptor.
     cc::vector<char> view_filled;
-    for (cc::isize i = 0; i < layout->view_slots.size(); ++i)
+    for (isize i = 0; i < layout->view_slots.size(); ++i)
         view_filled.push_back(char(0));
 
     int const view_base = group->table.offset;
     for (auto const& nv : views)
     {
-        cc::isize slot_index = -1;
-        for (cc::isize i = 0; i < layout->view_slots.size(); ++i)
+        isize slot_index = -1;
+        for (isize i = 0; i < layout->view_slots.size(); ++i)
             if (layout->view_slots[i].binding.name == nv.name)
             {
                 slot_index = i;
@@ -137,14 +137,14 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     // Match each provided dynamic sampler to a sampler slot by name and create its descriptor. Static
     // samplers live in the root signature, so they are not (and must not be) provided here.
     cc::vector<char> sampler_filled;
-    for (cc::isize i = 0; i < layout->sampler_slots.size(); ++i)
+    for (isize i = 0; i < layout->sampler_slots.size(); ++i)
         sampler_filled.push_back(char(0));
 
     int const sampler_base = group->sampler_table.offset;
     for (auto const& ns : samplers)
     {
-        cc::isize slot_index = -1;
-        for (cc::isize i = 0; i < layout->sampler_slots.size(); ++i)
+        isize slot_index = -1;
+        for (isize i = 0; i < layout->sampler_slots.size(); ++i)
             if (layout->sampler_slots[i].binding.name == ns.name)
             {
                 slot_index = i;
@@ -163,11 +163,11 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     }
 
     // Every declared view and dynamic sampler must be provided (no null / default descriptors yet).
-    for (cc::isize i = 0; i < view_filled.size(); ++i)
+    for (isize i = 0; i < view_filled.size(); ++i)
         if (view_filled[i] == char(0))
             return cc::error(
                 cc::format("binding_group: binding '{}' was not provided", layout->view_slots[i].binding.name));
-    for (cc::isize i = 0; i < sampler_filled.size(); ++i)
+    for (isize i = 0; i < sampler_filled.size(); ++i)
         if (sampler_filled[i] == char(0))
             return cc::error(
                 cc::format("binding_group: sampler '{}' was not provided", layout->sampler_slots[i].binding.name));

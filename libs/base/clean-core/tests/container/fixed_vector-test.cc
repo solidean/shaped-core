@@ -3,11 +3,13 @@
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // Packing: the size field uses the smallest unsigned type that fits N and fills the tail padding next to
 // the aligned storage — u8 for fixed_vector<u8,10>, u16 for fixed_vector<u8,300>, u64 for fixed_vector<u64,2>.
-static_assert(sizeof(cc::fixed_vector<cc::u8, 10>) == 11, "u8/10 -> 1-byte size field, no padding");
-static_assert(sizeof(cc::fixed_vector<cc::u8, 300>) == 302, "u8/300 -> u16 size field");
-static_assert(sizeof(cc::fixed_vector<cc::u64, 2>) == 24, "u64/2 -> u64 size field fills the 8-byte padding");
+static_assert(sizeof(cc::fixed_vector<u8, 10>) == 11, "u8/10 -> 1-byte size field, no padding");
+static_assert(sizeof(cc::fixed_vector<u8, 300>) == 302, "u8/300 -> u16 size field");
+static_assert(sizeof(cc::fixed_vector<u64, 2>) == 24, "u64/2 -> u64 size field fills the 8-byte padding");
 
 namespace
 {

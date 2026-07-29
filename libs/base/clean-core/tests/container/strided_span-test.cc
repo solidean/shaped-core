@@ -3,6 +3,8 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // static assertions for triviality
 static_assert(std::is_trivially_copyable_v<cc::strided_span<int>>, "strided_span should be trivially copyable");
 static_assert(std::is_trivially_copyable_v<cc::strided_iterator<int>>, "strided_iterator should be trivially copyable");
@@ -35,7 +37,7 @@ TEST("strided_span - construction")
     SECTION("pointer + size + stride construction")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         CHECK(s.start_ptr() == data);
         CHECK(s.size() == 5);
         CHECK(s.stride_bytes() == sizeof(int));
@@ -145,7 +147,7 @@ TEST("strided_span - element access")
     SECTION("operator[] with contiguous data")
     {
         int data[] = {10, 20, 30, 40, 50};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         CHECK(s[0] == 10);
         CHECK(s[1] == 20);
         CHECK(s[2] == 30);
@@ -156,7 +158,7 @@ TEST("strided_span - element access")
     SECTION("operator[] - mutation")
     {
         int data[] = {10, 20, 30, 40, 50};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         s[2] = 99;
         CHECK(data[2] == 99);
         CHECK(s[2] == 99);
@@ -166,7 +168,7 @@ TEST("strided_span - element access")
     {
         // Simulate interleaved data: every other int
         int data[] = {1, 0, 2, 0, 3, 0, 4, 0, 5, 0};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(2 * sizeof(int))};
         CHECK(s[0] == 1);
         CHECK(s[1] == 2);
         CHECK(s[2] == 3);
@@ -177,28 +179,28 @@ TEST("strided_span - element access")
     SECTION("front")
     {
         int data[] = {10, 20, 30};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         CHECK(s.front() == 10);
     }
 
     SECTION("back")
     {
         int data[] = {10, 20, 30};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         CHECK(s.back() == 30);
     }
 
     SECTION("back with custom stride")
     {
         int data[] = {1, 0, 2, 0, 3, 0};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(2 * sizeof(int))};
         CHECK(s.back() == 3);
     }
 
     SECTION("start_ptr")
     {
         int data[] = {10, 20, 30};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         CHECK(s.start_ptr() == data);
     }
 }
@@ -220,13 +222,13 @@ TEST("strided_span - interleaved data scenario")
         };
 
         // View just the x coordinates
-        auto x_coords = cc::strided_span<float>{&vertices[0].x, 3, static_cast<cc::isize>(sizeof(Vertex))};
+        auto x_coords = cc::strided_span<float>{&vertices[0].x, 3, static_cast<isize>(sizeof(Vertex))};
         CHECK(x_coords[0] == 1.0f);
         CHECK(x_coords[1] == 4.0f);
         CHECK(x_coords[2] == 7.0f);
 
         // View just the colors
-        auto colors = cc::strided_span<int>{&vertices[0].color, 3, static_cast<cc::isize>(sizeof(Vertex))};
+        auto colors = cc::strided_span<int>{&vertices[0].color, 3, static_cast<isize>(sizeof(Vertex))};
         CHECK(colors[0] == 10);
         CHECK(colors[1] == 20);
         CHECK(colors[2] == 30);
@@ -242,7 +244,7 @@ TEST("strided_span - iterators")
     SECTION("begin/end with contiguous data")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         auto it = s.begin();
         CHECK(*it == 1);
         ++it;
@@ -252,7 +254,7 @@ TEST("strided_span - iterators")
     SECTION("range-based for loop")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
 
         int sum = 0;
         for (auto const& val : s)
@@ -265,7 +267,7 @@ TEST("strided_span - iterators")
     SECTION("range-based for loop - mutation")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
 
         for (auto& val : s)
         {
@@ -282,7 +284,7 @@ TEST("strided_span - iterators")
     SECTION("range-based for loop with custom stride")
     {
         int data[] = {1, 0, 2, 0, 3, 0, 4, 0, 5, 0};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(2 * sizeof(int))};
 
         int sum = 0;
         for (auto const& val : s)
@@ -312,7 +314,7 @@ TEST("strided_span - queries")
     SECTION("size and empty")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         CHECK(s.size() == 5);
         CHECK(!s.empty());
 
@@ -324,10 +326,10 @@ TEST("strided_span - queries")
     SECTION("stride_bytes")
     {
         int data[] = {1, 2, 3};
-        auto const s1 = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s1 = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         CHECK(s1.stride_bytes() == sizeof(int));
 
-        auto const s2 = cc::strided_span<int>{data, 3, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s2 = cc::strided_span<int>{data, 3, static_cast<isize>(2 * sizeof(int))};
         CHECK(s2.stride_bytes() == 2 * sizeof(int));
 
         auto const s3 = cc::strided_span<int>::create_from_repeated(data[0], 5);
@@ -351,14 +353,14 @@ TEST("strided_span - queries")
     SECTION("is_contiguous - stride == sizeof(T)")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         CHECK(s.is_contiguous());
     }
 
     SECTION("is_contiguous - stride != sizeof(T)")
     {
         int data[] = {1, 0, 2, 0, 3, 0};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(2 * sizeof(int))};
         CHECK(!s.is_contiguous());
     }
 
@@ -375,11 +377,11 @@ TEST("strided_span - operations")
     SECTION("reversed with contiguous data")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         auto const rev = s.reversed();
 
         CHECK(rev.size() == 5);
-        CHECK(rev.stride_bytes() == -static_cast<cc::isize>(sizeof(int)));
+        CHECK(rev.stride_bytes() == -static_cast<isize>(sizeof(int)));
         CHECK(rev[0] == 5);
         CHECK(rev[1] == 4);
         CHECK(rev[2] == 3);
@@ -390,7 +392,7 @@ TEST("strided_span - operations")
     SECTION("reversed iteration")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         auto const rev = s.reversed();
 
         cc::vector<int> collected;
@@ -410,11 +412,11 @@ TEST("strided_span - operations")
     SECTION("reversed with custom stride")
     {
         int data[] = {1, 0, 2, 0, 3, 0};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(2 * sizeof(int))};
         auto const rev = s.reversed();
 
         CHECK(rev.size() == 3);
-        CHECK(rev.stride_bytes() == -static_cast<cc::isize>(2 * sizeof(int)));
+        CHECK(rev.stride_bytes() == -static_cast<isize>(2 * sizeof(int)));
         CHECK(rev[0] == 3);
         CHECK(rev[1] == 2);
         CHECK(rev[2] == 1);
@@ -430,11 +432,11 @@ TEST("strided_span - operations")
     SECTION("double reverse")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         auto const rev = s.reversed().reversed();
 
         CHECK(rev.size() == 5);
-        CHECK(rev.stride_bytes() == static_cast<cc::isize>(sizeof(int)));
+        CHECK(rev.stride_bytes() == static_cast<isize>(sizeof(int)));
         CHECK(rev[0] == 1);
         CHECK(rev[1] == 2);
         CHECK(rev[2] == 3);
@@ -448,7 +450,7 @@ TEST("strided_span - try_as_span conversion")
     SECTION("contiguous conversion succeeds")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{data, 5, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 5, static_cast<isize>(sizeof(int))};
         auto const maybe_span = s.try_as_span();
 
         CHECK(maybe_span.has_value());
@@ -462,7 +464,7 @@ TEST("strided_span - try_as_span conversion")
     SECTION("non-contiguous conversion fails")
     {
         int data[] = {1, 0, 2, 0, 3, 0};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(2 * sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(2 * sizeof(int))};
         auto const maybe_span = s.try_as_span();
 
         CHECK(!maybe_span.has_value());
@@ -505,7 +507,7 @@ TEST("strided_span - const correctness")
     SECTION("strided_span<T const> from const data")
     {
         int const data[] = {1, 2, 3};
-        auto const s = cc::strided_span<int const>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int const>{data, 3, static_cast<isize>(sizeof(int))};
         CHECK(s[0] == 1);
         // s[0] = 99; // should not compile
     }
@@ -513,7 +515,7 @@ TEST("strided_span - const correctness")
     SECTION("strided_span<T const> from mutable data")
     {
         int data[] = {1, 2, 3};
-        auto const s = cc::strided_span<int const>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int const>{data, 3, static_cast<isize>(sizeof(int))};
         CHECK(s[0] == 1);
         // s[0] = 99; // should not compile
         data[0] = 99; // but we can still mutate through original pointer
@@ -523,7 +525,7 @@ TEST("strided_span - const correctness")
     SECTION("const strided_span<T> still allows mutation")
     {
         int data[] = {1, 2, 3};
-        auto const s = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         s[0] = 99; // const span, but T is mutable
         CHECK(data[0] == 99);
     }
@@ -534,7 +536,7 @@ TEST("strided_span - copy and move")
     SECTION("copy construction")
     {
         int data[] = {1, 2, 3};
-        auto const s1 = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto const s1 = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         auto const s2 = s1;
         CHECK(s2.start_ptr() == data);
         CHECK(s2.size() == 3);
@@ -547,8 +549,8 @@ TEST("strided_span - copy and move")
     {
         int data1[] = {1, 2, 3};
         int data2[] = {4, 5, 6, 7};
-        auto s1 = cc::strided_span<int>{data1, 3, static_cast<cc::isize>(sizeof(int))};
-        auto s2 = cc::strided_span<int>{data2, 4, static_cast<cc::isize>(sizeof(int))};
+        auto s1 = cc::strided_span<int>{data1, 3, static_cast<isize>(sizeof(int))};
+        auto s2 = cc::strided_span<int>{data2, 4, static_cast<isize>(sizeof(int))};
         s2 = s1;
         CHECK(s2.start_ptr() == data1);
         CHECK(s2.size() == 3);
@@ -557,7 +559,7 @@ TEST("strided_span - copy and move")
     SECTION("move construction")
     {
         int data[] = {1, 2, 3};
-        auto s1 = cc::strided_span<int>{data, 3, static_cast<cc::isize>(sizeof(int))};
+        auto s1 = cc::strided_span<int>{data, 3, static_cast<isize>(sizeof(int))};
         auto const s2 = cc::move(s1);
         CHECK(s2.start_ptr() == data);
         CHECK(s2.size() == 3);
@@ -567,8 +569,8 @@ TEST("strided_span - copy and move")
     {
         int data1[] = {1, 2, 3};
         int data2[] = {4, 5, 6, 7};
-        auto s1 = cc::strided_span<int>{data1, 3, static_cast<cc::isize>(sizeof(int))};
-        auto s2 = cc::strided_span<int>{data2, 4, static_cast<cc::isize>(sizeof(int))};
+        auto s1 = cc::strided_span<int>{data1, 3, static_cast<isize>(sizeof(int))};
+        auto s2 = cc::strided_span<int>{data2, 4, static_cast<isize>(sizeof(int))};
         s2 = cc::move(s1);
         CHECK(s2.start_ptr() == data1);
         CHECK(s2.size() == 3);
@@ -581,7 +583,7 @@ TEST("strided_span - negative stride")
     {
         int data[] = {1, 2, 3, 4, 5};
         // Start at end, stride backwards
-        auto const s = cc::strided_span<int>{&data[4], 5, -static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{&data[4], 5, -static_cast<isize>(sizeof(int))};
         CHECK(s[0] == 5);
         CHECK(s[1] == 4);
         CHECK(s[2] == 3);
@@ -592,7 +594,7 @@ TEST("strided_span - negative stride")
     SECTION("negative stride iteration")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{&data[4], 5, -static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{&data[4], 5, -static_cast<isize>(sizeof(int))};
 
         cc::vector<int> collected;
         for (auto const& val : s)
@@ -611,7 +613,7 @@ TEST("strided_span - negative stride")
     SECTION("negative stride is not contiguous")
     {
         int data[] = {1, 2, 3, 4, 5};
-        auto const s = cc::strided_span<int>{&data[4], 5, -static_cast<cc::isize>(sizeof(int))};
+        auto const s = cc::strided_span<int>{&data[4], 5, -static_cast<isize>(sizeof(int))};
         CHECK(!s.is_contiguous());
     }
 }

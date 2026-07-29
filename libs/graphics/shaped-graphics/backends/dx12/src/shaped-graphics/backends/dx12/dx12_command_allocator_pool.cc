@@ -109,13 +109,13 @@ void dx12_command_allocator_pool::shutdown()
             });
 }
 
-cc::isize dx12_command_allocator_pool::free_allocator_count(D3D12_COMMAND_LIST_TYPE queue)
+isize dx12_command_allocator_pool::free_allocator_count(D3D12_COMMAND_LIST_TYPE queue)
 {
     CC_ASSERT(int(queue) >= 0 && int(queue) < queue_count, "invalid queue type");
     return _by_queue[int(queue)].lock([](per_queue_pool& p) { return p.free_allocators.size(); });
 }
 
-cc::isize dx12_command_allocator_pool::free_command_list_count(D3D12_COMMAND_LIST_TYPE queue)
+isize dx12_command_allocator_pool::free_command_list_count(D3D12_COMMAND_LIST_TYPE queue)
 {
     CC_ASSERT(int(queue) >= 0 && int(queue) < queue_count, "invalid queue type");
     return _by_queue[int(queue)].lock([](per_queue_pool& p) { return p.free_lists.size(); });

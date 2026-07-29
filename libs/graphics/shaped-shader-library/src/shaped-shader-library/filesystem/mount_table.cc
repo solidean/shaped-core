@@ -6,6 +6,8 @@
 
 #include <memory>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 /// One watch over several mounts. The child sinks all fire the same slot, so cancelling that one slot is
@@ -32,9 +34,9 @@ struct mount_subscription final : slib::watch_subscription::impl_base
 /// Folds a mount's salt into a revision it served. Without this, a file that starts being served by a
 /// *different* mount — a source file appearing over an embedded one — could report the revision the old
 /// mount happened to give it and read as unchanged. Never yields `none`, so an existing file stays existing.
-slib::file_revision mix_revision(cc::u64 salt, slib::file_revision revision)
+slib::file_revision mix_revision(u64 salt, slib::file_revision revision)
 {
-    auto const mixed = cc::make_hash_finalized(salt, cc::u64(revision));
+    auto const mixed = cc::make_hash_finalized(salt, u64(revision));
     return slib::file_revision(mixed == 0 ? 1 : mixed);
 }
 } // namespace
@@ -69,7 +71,7 @@ void slib::mount_table::mount(cc::string_view virtual_dir, filesystem_handle fs)
         });
 }
 
-cc::isize slib::mount_table::mount_count() const
+isize slib::mount_table::mount_count() const
 {
     return _state.lock([](state const& s) { return s.mounts.size(); });
 }

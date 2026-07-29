@@ -74,7 +74,7 @@ bool debug_utils_extension_available()
 }
 
 // First queue family with graphics support. Returns false if the device has none.
-bool find_graphics_queue_family(VkPhysicalDevice dev, cc::u32& out_index)
+bool find_graphics_queue_family(VkPhysicalDevice dev, u32& out_index)
 {
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
@@ -134,7 +134,7 @@ int device_type_rank(VkPhysicalDeviceType type, bool prefer_software)
 struct selected_physical_device
 {
     VkPhysicalDevice device;
-    cc::u32 queue_family;
+    u32 queue_family;
 };
 
 // Highest-ranked physical device that exposes a graphics queue, or nullopt if none qualifies (no
@@ -150,7 +150,7 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
     int best_rank = -1;
     for (auto device : devices)
     {
-        cc::u32 family = 0;
+        u32 family = 0;
         if (!find_graphics_queue_family(device, family))
             continue;
 
@@ -187,7 +187,7 @@ bool timeline_semaphore_supported(VkPhysicalDevice dev)
 
 // Creates a timeline semaphore starting at `initial_value`. The epoch/submission timelines are read
 // with vkGetSemaphoreCounterValue and waited on with vkWaitSemaphores — no host event needed.
-VkResult create_timeline_semaphore(VkDevice device, cc::u64 initial_value, VkSemaphore& out)
+VkResult create_timeline_semaphore(VkDevice device, u64 initial_value, VkSemaphore& out)
 {
     auto const type_info = VkSemaphoreTypeCreateInfo{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
@@ -233,9 +233,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pNext = enable_validation ? &dbg_info : nullptr, // catches messages during instance create/destroy too
         .pApplicationInfo = &app,
-        .enabledLayerCount = cc::u32(layers.size()),
+        .enabledLayerCount = u32(layers.size()),
         .ppEnabledLayerNames = layers.data(),
-        .enabledExtensionCount = cc::u32(extensions.size()),
+        .enabledExtensionCount = u32(extensions.size()),
         .ppEnabledExtensionNames = extensions.data(),
     };
 
@@ -306,7 +306,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // Two direct-queue timeline semaphores: the epoch timeline (drives reclamation) and the submission
     // timeline (per-list completion). Each starts at first-1 so nothing reads as complete before use.
     VkSemaphore epoch_timeline = VK_NULL_HANDLE;
-    if (VkResult r = create_timeline_semaphore(device, cc::u64(sg::epoch::first) - 1, epoch_timeline); r != VK_SUCCESS)
+    if (VkResult r = create_timeline_semaphore(device, u64(sg::epoch::first) - 1, epoch_timeline); r != VK_SUCCESS)
     {
         vkDestroyDevice(device, nullptr);
         destroy_debug_messenger(instance, messenger);
@@ -315,7 +315,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     }
 
     VkSemaphore submission_timeline = VK_NULL_HANDLE;
-    if (VkResult r = create_timeline_semaphore(device, cc::u64(sg::submission_token::first) - 1, submission_timeline);
+    if (VkResult r = create_timeline_semaphore(device, u64(sg::submission_token::first) - 1, submission_timeline);
         r != VK_SUCCESS)
     {
         vkDestroySemaphore(device, epoch_timeline, nullptr);

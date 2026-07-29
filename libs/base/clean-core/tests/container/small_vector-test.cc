@@ -3,6 +3,8 @@
 #include <clean-core/container/small_vector.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 // Tracks ctor/dtor balance so we can assert no elements leak across an inline→heap spill.
@@ -56,7 +58,7 @@ struct alignas(32) Over32
 // elements at the front, a u32 size, then the tagged resource word; the buffer auto-grows to fill the
 // footprint), and a larger inline buffer grows the struct without wasting leading bytes.
 static_assert(cc::small_vector<int, 4>::inline_capacity() >= 4, "inline_capacity is at least N");
-static_assert(cc::small_vector<cc::u16, 3>::inline_capacity() >= 3, "inline_capacity is at least N");
+static_assert(cc::small_vector<u16, 3>::inline_capacity() >= 3, "inline_capacity is at least N");
 static_assert(cc::small_vector<int, 64>::inline_capacity() >= 64, "keeps at least N inline");
 static_assert(sizeof(cc::small_vector<int, 64>) > sizeof(cc::small_vector<int, 4>),
               "a large inline buffer grows the struct");
@@ -76,7 +78,7 @@ static_assert(cc::small_vector<Over32, 1>::inline_capacity() >= 1, "keeps at lea
 // one rounds the footprint up to 64 B.
 #if CC_HAS_64BIT_POINTERS
 static_assert(sizeof(cc::small_vector<int, 4>) == 48, "small_vector<int,4> should be 48 B");
-static_assert(sizeof(cc::small_vector<cc::u16, 3>) == 48, "small_vector<u16,3> should be 48 B");
+static_assert(sizeof(cc::small_vector<u16, 3>) == 48, "small_vector<u16,3> should be 48 B");
 static_assert(cc::small_vector<int, 4>::inline_capacity() == 9, "auto-grows <int,4> to 9 inline");
 static_assert(sizeof(cc::small_vector<Over16, 2>) == 48, "16 B/16-aligned element still fits the 48 B footprint");
 static_assert(sizeof(cc::small_vector<Over32, 1>) == 64, "32 B/32-aligned element rounds the footprint to 64 B");
@@ -489,20 +491,20 @@ TEST("small_vector - over-aligned element type spills and re-inlines")
 {
     cc::small_vector<Over16, 2> v;
     CHECK(v.is_inline());
-    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0); // elements carry T's alignment
+    CHECK((reinterpret_cast<u64>(v.data()) % 16) == 0); // elements carry T's alignment
 
     for (int i = 0; i < 20; ++i)
         v.push_back(Over16(i));
     CHECK(!v.is_inline()); // spilled to heap
     CHECK(v.size() == 20);
-    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0);
+    CHECK((reinterpret_cast<u64>(v.data()) % 16) == 0);
     for (int i = 0; i < 20; ++i)
         CHECK(v[i].value == i);
 
     v.resize_down_to(2);
     v.shrink_to_fit();
     CHECK(v.is_inline()); // back inline
-    CHECK((reinterpret_cast<cc::u64>(v.data()) % 16) == 0);
+    CHECK((reinterpret_cast<u64>(v.data()) % 16) == 0);
     CHECK(v[0].value == 0);
     CHECK(v[1].value == 1);
 }

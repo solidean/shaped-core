@@ -3,6 +3,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
+using namespace cc::primitive_defines;
+
 // End-to-end rendering-scope clears, driven through the backend-agnostic sg:: API (the WARP context is
 // only the vehicle): open a raster rendering scope over a render-target / depth-stencil texture, clear it,
 // read it back, and verify the clear value landed in every texel. Also covers the explicit
@@ -49,8 +51,8 @@ TEST("sg dx12 - clear render target fills every texel (render_to)")
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(N) * 4);
-    auto const* px = reinterpret_cast<cc::u8 const*>(bytes.value().data());
+    REQUIRE(bytes.value().size() == isize(N) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 255 || px[i * 4 + 1] != 0 || px[i * 4 + 2] != 0 || px[i * 4 + 3] != 255)
@@ -80,7 +82,7 @@ TEST("sg dx12 - clear depth target fills every texel")
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(N) * cc::isize(sizeof(float)));
+    REQUIRE(bytes.value().size() == isize(N) * isize(sizeof(float)));
     auto const* depth = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
@@ -113,7 +115,7 @@ TEST("sg dx12 - clear render target via the explicit manual scope")
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
-    auto const* px = reinterpret_cast<cc::u8 const*>(bytes.value().data());
+    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 0 || px[i * 4 + 1] != 255 || px[i * 4 + 2] != 0 || px[i * 4 + 3] != 255)
@@ -174,7 +176,7 @@ TEST("sg dx12 - clear with an explicit viewport and scissor")
 
     auto const bytes = ctx->wait_for(future);
     REQUIRE(bytes.has_value());
-    auto const* px = reinterpret_cast<cc::u8 const*>(bytes.value().data());
+    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 0 || px[i * 4 + 1] != 0 || px[i * 4 + 2] != 255 || px[i * 4 + 3] != 255)

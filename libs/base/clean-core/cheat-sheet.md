@@ -510,6 +510,12 @@ cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> su
                                                    // <Windows.h> with WIN32_LEAN_AND_MEAN + NOMINMAX,
                                                    // elsewhere expands to nothing. The sanctioned
                                                    // way to reach windows.h in shaped-core.
+                                                   // GOTCHA: it also renames <rpcndr.h>'s global `byte`
+                                                   // away, which would otherwise be AMBIGUOUS with cc::byte
+                                                   // under a global `using namespace cc::primitive_defines;`.
+                                                   // Any gate that pulls a COM SDK stack (<d3d12.h>,
+                                                   // <dxcapi.h>, <wrl/*>) must repeat that bracket — those
+                                                   // reach <rpcndr.h> past WIN32_LEAN_AND_MEAN.
 #include <clean-core/platform/native.hh>
 cc::demangle_symbol(symbol)                        // cc::string — human-readable C++ symbol name
 
@@ -518,6 +524,7 @@ cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards 
 
 #include <clean-core/error/crash_handler.hh>
 cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace
+                                                    // + EVERY other thread's stack (Windows; where a hang lives)
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 ```
 

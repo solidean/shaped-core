@@ -12,6 +12,8 @@
 #include <chrono>
 #include <thread>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 /// Sleeping in slices so shutdown does not have to wait out a whole poll interval. Returns false if a
@@ -35,7 +37,7 @@ bool same_paths(cc::vector<cc::string> const& a, cc::vector<cc::string> const& b
 {
     if (a.size() != b.size())
         return false;
-    for (cc::isize i = 0; i < a.size(); ++i)
+    for (isize i = 0; i < a.size(); ++i)
         if (a[i] != b[i])
             return false;
     return true;

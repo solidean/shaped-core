@@ -874,7 +874,7 @@ union storage_for // NOLINT(cppcoreguidelines-special-member-functions)
         requires std::is_trivially_destructible_v<T>
     = default;
 
-    cc::byte dummy = {};
+    byte dummy = {};
     T value;
 };
 

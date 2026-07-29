@@ -8,6 +8,8 @@
 #include <clean-core/streams/stream.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // stb is committed and always linked, so there is no availability branch here (unlike sqlite's is_available()).
 // The happy path must simply work.
 
@@ -19,22 +21,22 @@ namespace img = babel::image;
 img::image make_gradient(int width, int height, int channels)
 {
     auto out = img::image{.width = width, .height = height, .channels = channels, .comp = img::component::u8};
-    out.pixels.resize_to_uninitialized(cc::i64(width) * height * channels);
+    out.pixels.resize_to_uninitialized(i64(width) * height * channels);
     for (auto y = 0; y < height; ++y)
         for (auto x = 0; x < width; ++x)
             for (auto c = 0; c < channels; ++c)
             {
-                auto const idx = (cc::i64(y) * width + x) * channels + c;
-                out.pixels[idx] = cc::byte((x * 8 + y * 4 + c * 32) & 0xFF);
+                auto const idx = (i64(y) * width + x) * channels + c;
+                out.pixels[idx] = byte((x * 8 + y * 4 + c * 32) & 0xFF);
             }
     return out;
 }
 
-bool pixels_equal(cc::span<cc::byte const> a, cc::span<cc::byte const> b)
+bool pixels_equal(cc::span<byte const> a, cc::span<byte const> b)
 {
     if (a.size() != b.size())
         return false;
-    for (cc::i64 i = 0; i < a.size(); ++i)
+    for (i64 i = 0; i < a.size(); ++i)
         if (a[i] != b[i])
             return false;
     return true;
@@ -83,7 +85,7 @@ TEST("image - png round-trips through the read_stream overload")
     auto const encoded = img::encode(src, img::format::png);
     REQUIRE(encoded.has_value());
 
-    auto adapter = cc::span_read_stream_adapter(cc::span<cc::byte const>(encoded.value()));
+    auto adapter = cc::span_read_stream_adapter(cc::span<byte const>(encoded.value()));
     cc::read_stream stream = adapter;
     auto const decoded = img::read(stream);
     REQUIRE(decoded.has_value());
@@ -111,9 +113,9 @@ TEST("image - jpg round-trip preserves geometry, pixels approximately")
 
     // JPEG is lossy: assert closeness, not equality.
     auto max_delta = 0;
-    for (cc::i64 i = 0; i < d.pixels.size(); ++i)
+    for (i64 i = 0; i < d.pixels.size(); ++i)
     {
-        auto const delta = int(cc::u8(d.pixels[i])) - int(cc::u8(src.pixels[i]));
+        auto const delta = int(u8(d.pixels[i])) - int(u8(src.pixels[i]));
         max_delta = cc::max(max_delta, delta < 0 ? -delta : delta);
     }
     CHECK(max_delta <= 40);
@@ -153,10 +155,9 @@ TEST("image - detect_format on png and jpg magic bytes")
 TEST("image - error paths")
 {
     // garbage bytes match no format
-    cc::byte const garbage[6]
-        = {cc::byte('n'), cc::byte('o'), cc::byte('p'), cc::byte('e'), cc::byte('!'), cc::byte(0)};
-    CHECK(img::read(cc::span<cc::byte const>(garbage)).has_error());
-    CHECK(img::detect_format(cc::span<cc::byte const>(garbage)).has_error());
+    byte const garbage[6] = {byte('n'), byte('o'), byte('p'), byte('e'), byte('!'), byte(0)};
+    CHECK(img::read(cc::span<byte const>(garbage)).has_error());
+    CHECK(img::detect_format(cc::span<byte const>(garbage)).has_error());
 
     // a PNG-signed buffer is not valid JPEG: the low-level jpg reader rejects it on the SOI marker
     auto const png_bytes = img::encode(make_gradient(2, 2, 4), img::format::png).value();

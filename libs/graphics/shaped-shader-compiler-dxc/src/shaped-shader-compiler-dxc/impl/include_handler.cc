@@ -1,5 +1,4 @@
 #include <shaped-shader-compiler-dxc/impl/include_handler.hh>
-#include <wrl/implements.h>
 
 namespace ssc::dxc::impl
 {

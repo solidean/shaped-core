@@ -3,6 +3,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
+using namespace cc::primitive_defines;
+
 // Placed resources: buffers sub-allocated into a shared memory_heap at explicit offsets, on WARP so they
 // run headless on CI. Verifies that two placements at distinct offsets in one heap are independent GPU
 // storage, and that a UAV-usage buffer places correctly. All through the public sg API — placement is a
@@ -11,7 +13,7 @@
 
 namespace
 {
-cc::isize align_up(cc::isize value, cc::isize alignment)
+isize align_up(isize value, isize alignment)
 {
     return (value + alignment - 1) / alignment * alignment;
 }
@@ -25,32 +27,32 @@ TEST("sg dx12 - two placed buffers share one heap without aliasing")
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
-    auto heap = c.persistent.create_memory_heap(cc::isize(1) << 20); // 1 MiB, ample for two buffers
+    auto heap = c.persistent.create_memory_heap(isize(1) << 20); // 1 MiB, ample for two buffers
     REQUIRE(heap != nullptr);
 
     // Query each buffer's footprint, then lay them out back-to-back: A at 0, B after A's occupied size.
     auto const reqs_a = heap->memory_requirements_for_buffer(256, usage);
     auto const reqs_b = heap->memory_requirements_for_buffer(256, usage);
-    cc::isize const off_a = 0;
-    cc::isize const off_b = align_up(reqs_a.size_in_bytes, reqs_b.alignment_in_bytes);
+    isize const off_a = 0;
+    isize const off_b = align_up(reqs_a.size_in_bytes, reqs_b.alignment_in_bytes);
 
     auto const buf_a = c.persistent.create_raw_buffer(256, usage, heap->acquire_allocation_for_buffer(256, usage, off_a));
     auto const buf_b = c.persistent.create_raw_buffer(256, usage, heap->acquire_allocation_for_buffer(256, usage, off_b));
     REQUIRE(buf_a != nullptr);
     REQUIRE(buf_b != nullptr);
 
-    cc::byte src_a[256];
-    cc::byte src_b[256];
+    byte src_a[256];
+    byte src_b[256];
     for (int i = 0; i < 256; ++i)
     {
-        src_a[i] = cc::byte(0xA0 + (i & 0xF));
-        src_b[i] = cc::byte(0xB0 + (i & 0xF));
+        src_a[i] = byte(0xA0 + (i & 0xF));
+        src_b[i] = byte(0xB0 + (i & 0xF));
     }
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf_a, cc::span<cc::byte const>(src_a, 256));
-    up->upload.bytes_to_buffer(buf_b, cc::span<cc::byte const>(src_b, 256));
+    up->upload.bytes_to_buffer(buf_a, cc::span<byte const>(src_a, 256));
+    up->upload.bytes_to_buffer(buf_b, cc::span<byte const>(src_b, 256));
     c.submit_command_list(cc::move(up));
 
     auto down = c.create_command_list();
@@ -69,9 +71,9 @@ TEST("sg dx12 - two placed buffers share one heap without aliasing")
     bool ok_b = true;
     for (int i = 0; i < 256; ++i)
     {
-        if (bytes_a.value()[i] != cc::byte(0xA0 + (i & 0xF)))
+        if (bytes_a.value()[i] != byte(0xA0 + (i & 0xF)))
             ok_a = false;
-        if (bytes_b.value()[i] != cc::byte(0xB0 + (i & 0xF)))
+        if (bytes_b.value()[i] != byte(0xB0 + (i & 0xF)))
             ok_b = false;
     }
     CHECK(ok_a);
@@ -86,7 +88,7 @@ TEST("sg dx12 - placed buffer keeps its heap alive")
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
-    auto heap = c.persistent.create_memory_heap(cc::isize(1) << 20);
+    auto heap = c.persistent.create_memory_heap(isize(1) << 20);
     REQUIRE(heap != nullptr);
 
     auto const buf = c.persistent.create_raw_buffer(256, usage, heap->acquire_allocation_for_buffer(256, usage, 0));
@@ -95,13 +97,13 @@ TEST("sg dx12 - placed buffer keeps its heap alive")
     // Drop our heap handle: the placement must keep the backing heap alive, so the buffer stays usable.
     heap.reset();
 
-    cc::byte src[256];
+    byte src[256];
     for (int i = 0; i < 256; ++i)
-        src[i] = cc::byte(i);
+        src[i] = byte(i);
 
     auto up = c.create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(src, 256));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     c.submit_command_list(cc::move(up));
 
     auto down = c.create_command_list();
@@ -111,7 +113,7 @@ TEST("sg dx12 - placed buffer keeps its heap alive")
 
     auto const bytes = c.wait_for(future);
     REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[100] == cc::byte(100));
+    CHECK(bytes.value()[100] == byte(100));
 }
 
 TEST("sg dx12 - placed read-write (UAV) buffer creates")
@@ -123,7 +125,7 @@ TEST("sg dx12 - placed read-write (UAV) buffer creates")
     // readwrite_buffer usage sets the UAV flag on the desc; make sure that places cleanly.
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
 
-    auto heap = c.persistent.create_memory_heap(cc::isize(1) << 20);
+    auto heap = c.persistent.create_memory_heap(isize(1) << 20);
     REQUIRE(heap != nullptr);
 
     auto const buf = c.persistent.create_raw_buffer(1024, usage, heap->acquire_allocation_for_buffer(1024, usage, 0));

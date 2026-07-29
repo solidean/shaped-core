@@ -24,6 +24,14 @@ cc::vector<finding> run_rules_on_text(cc::string_view source, cc::string_view pa
 /// within `original` is used (the file_id is ignored). Pure — the testable core of `apply_fixes`.
 cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits);
 
+/// Every `suggested_fix` edit across `findings`, byte-identical duplicates merged. A finding's
+/// `suggested_hint` is deliberately not read.
+///
+/// The merge is what lets a fix add something shared by the whole file — an include, a using-directive.
+/// Such a rule puts that edit on EVERY finding it reports, so each fix stays safe to apply on its own;
+/// collected together they must still splice the line exactly once.
+cc::vector<text_edit> collect_fix_edits(cc::span<finding const> findings);
+
 /// Apply every finding's suggested edits back to their files in place, grouped per file. Returns the
 /// number of files changed.
 cc::result<isize> apply_fixes(source_manager const& sm, cc::span<finding const> findings);

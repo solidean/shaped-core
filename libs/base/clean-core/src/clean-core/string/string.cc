@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+using namespace cc::primitive_defines;
+
 // Out-of-line implementations for heap-related operations
 // These are kept in the .cc to reduce header bloat and improve compile times
 
@@ -27,7 +29,7 @@ void cc::string::initialize_heap_from_data(char const* str, isize const len, mem
     _data.heap = data_heap::create_from_allocation(cc::move(alloc));
 }
 
-cc::isize cc::string::replace_all(char const from, char const to)
+isize cc::string::replace_all(char const from, char const to)
 {
     auto* const d = data();
     auto const n = size();
@@ -43,7 +45,7 @@ cc::isize cc::string::replace_all(char const from, char const to)
     return count;
 }
 
-cc::isize cc::string::replace_all(string_view const from, string_view const to)
+isize cc::string::replace_all(string_view const from, string_view const to)
 {
     if (from.empty())
         return 0;

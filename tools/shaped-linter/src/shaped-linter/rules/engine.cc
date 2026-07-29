@@ -58,12 +58,20 @@ cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content)
 cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits)
 {
     // Apply highest-offset-first so earlier offsets stay valid. Insertion sort of pointers by
-    // descending begin — a file carries only a handful of edits.
+    // descending begin, then by descending end — a file carries only a handful of edits.
+    // The second key matters when an insertion (an empty span) shares its offset with a replacement that
+    // starts there: the wider edit has to go first, or the overlap guard below sees the pair out of order.
     cc::vector<text_edit const*> ordered;
     for (auto const& e : edits)
         ordered.push_back(&e);
+    auto const precedes = [](text_edit const& a, text_edit const& b)
+    {
+        if (a.span.byte_begin != b.span.byte_begin)
+            return a.span.byte_begin < b.span.byte_begin;
+        return a.span.byte_end < b.span.byte_end;
+    };
     for (isize i = 1; i < ordered.size(); ++i)
-        for (isize j = i; j > 0 && ordered[j - 1]->span.byte_begin < ordered[j]->span.byte_begin; --j)
+        for (isize j = i; j > 0 && precedes(*ordered[j - 1], *ordered[j]); --j)
         {
             auto const* tmp = ordered[j - 1];
             ordered[j - 1] = ordered[j];
@@ -86,10 +94,21 @@ cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits
     return text;
 }
 
-cc::result<isize> apply_fixes(source_manager const& sm, cc::span<finding const> findings)
+cc::vector<text_edit> collect_fix_edits(cc::span<finding const> findings)
 {
     cc::vector<text_edit> edits;
-    cc::set<u32> files;
+
+    // Two equal insertions could not be caught by `apply_edits`' overlap guard — an empty span never
+    // overlaps anything — so the duplicate has to be dropped here or the line lands once per finding.
+    auto const already_collected = [&](text_edit const& e)
+    {
+        for (auto const& seen : edits)
+            if (seen.span.file_id == e.span.file_id && seen.span.byte_begin == e.span.byte_begin
+                && seen.span.byte_end == e.span.byte_end && seen.replacement == e.replacement)
+                return true;
+        return false;
+    };
+
     for (auto const& f : findings)
     {
         // Only `suggested_fix`. A finding's `suggested_hint` is never read here — that is the whole
@@ -97,11 +116,19 @@ cc::result<isize> apply_fixes(source_manager const& sm, cc::span<finding const> 
         if (!f.suggested_fix.has_value())
             continue;
         for (auto const& e : f.suggested_fix.value().edits)
-        {
-            edits.push_back({.span = e.span, .replacement = e.replacement});
-            files.insert(e.span.file_id);
-        }
+            if (!already_collected(e))
+                edits.push_back({.span = e.span, .replacement = e.replacement});
     }
+    return edits;
+}
+
+cc::result<isize> apply_fixes(source_manager const& sm, cc::span<finding const> findings)
+{
+    auto const edits = collect_fix_edits(findings);
+
+    cc::set<u32> files;
+    for (auto const& e : edits)
+        files.insert(e.span.file_id);
 
     isize changed = 0;
     for (u32 const fid : files)

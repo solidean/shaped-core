@@ -14,11 +14,11 @@ sg::epoch dx12_context::completed_epoch() const
 {
     // The epoch fence's completed value *is* the last fully-finished epoch — we signal the epoch
     // value at end-of-epoch. Before the first advance it reads 0, so report first-1.
-    cc::u64 const first_minus_one = cc::u64(sg::epoch::first) - 1;
+    u64 const first_minus_one = u64(sg::epoch::first) - 1;
     if (!_epoch_fence)
         return sg::epoch(first_minus_one);
-    cc::u64 const v = _epoch_fence->GetCompletedValue();
-    return sg::epoch(v < cc::u64(sg::epoch::first) ? first_minus_one : v);
+    u64 const v = _epoch_fence->GetCompletedValue();
+    return sg::epoch(v < u64(sg::epoch::first) ? first_minus_one : v);
 }
 
 void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
@@ -28,7 +28,7 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
                                                                         "submitted or dropped before advancing");
 
     sg::epoch const last = _current_epoch;
-    _current_epoch = sg::epoch(cc::u64(last) + 1);
+    _current_epoch = sg::epoch(u64(last) + 1);
 
     // Snapshot the inline upload ring cursor as `last`'s boundary; its space frees once `last` retires.
     _upload_inline.on_epoch_advance(last);
@@ -69,7 +69,7 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
             t->expire();
 
     // Signal end-of-epoch: enqueues "epoch `last` finished" after all of its recorded GPU work.
-    HRESULT const hr = _queue->Signal(_epoch_fence.Get(), cc::u64(last));
+    HRESULT const hr = _queue->Signal(_epoch_fence.Get(), u64(last));
     if (FAILED(hr))
     {
         if (note_device_removed_if_lost(hr, "epoch Signal"))
@@ -95,9 +95,9 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     {
         int const a = allowed_in_flight.value();
         CC_ASSERT(a >= 0, "allowed_in_flight must be non-negative");
-        cc::u64 const allowed = cc::u64(a);
-        cc::u64 const last_u = cc::u64(last);
-        if (last_u >= cc::u64(sg::epoch::first) + allowed)
+        u64 const allowed = u64(a);
+        u64 const last_u = u64(last);
+        if (last_u >= u64(sg::epoch::first) + allowed)
             wait_for_epoch(sg::epoch(last_u - allowed)); // this also retires
         else
             process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
@@ -118,13 +118,13 @@ void dx12_context::process_completed_epochs()
 {
     if (!_epoch_fence)
         return;
-    cc::u64 const completed = _epoch_fence->GetCompletedValue();
+    u64 const completed = _epoch_fence->GetCompletedValue();
     // Second release gate: how far the async upload copy queue has drained. A resource an in-flight async
     // upload still references must not be freed even after its epoch retired (the copy queue is decoupled
     // from epochs). The upload system owns the fence; `~0` when it is not up yet, so the gate is trivially
     // open before bring-up completes.
     ID3D12Fence* const upload_fence = _upload_async._completion_fence.Get();
-    cc::u64 const copy_completed = upload_fence ? upload_fence->GetCompletedValue() : cc::u64(-1);
+    u64 const copy_completed = upload_fence ? upload_fence->GetCompletedValue() : u64(-1);
 
     // Reclaim inline upload ring space held by every epoch the GPU has now finished.
     _upload_inline.on_epochs_completed(sg::epoch(completed));
@@ -142,7 +142,7 @@ void dx12_context::process_completed_epochs()
         {
             for (auto& d : s.in_flight)
             {
-                if (cc::u64(d.epoch_id) > completed)
+                if (u64(d.epoch_id) > completed)
                     break;
                 done.push_back(cc::move(d));
             }
@@ -150,7 +150,7 @@ void dx12_context::process_completed_epochs()
 
             auto const gate = [&](dx12_expiring_resource& r, cc::vector<dx12_expiring_resource>& not_ready)
             {
-                if (cc::u64(r.copy_wait) <= copy_completed)
+                if (u64(r.copy_wait) <= copy_completed)
                     ready.push_back(cc::move(r));
                 else
                     not_ready.push_back(cc::move(r));
@@ -192,7 +192,7 @@ void dx12_context::wait_for_epoch(sg::epoch e)
 
     if (_epoch_fence)
     {
-        cc::u64 const target = cc::u64(e);
+        u64 const target = u64(e);
         if (_epoch_fence->GetCompletedValue() < target)
         {
             // A per-call event, not a shared one: the wait/retire family is safe to call from any thread
@@ -234,7 +234,7 @@ bool dx12_context::is_submission_complete(sg::submission_token token) const
         return false;
     if (!_submission_fence)
         return true;
-    return _submission_fence->GetCompletedValue() >= cc::u64(token);
+    return _submission_fence->GetCompletedValue() >= u64(token);
 }
 
 void dx12_context::schedule_deferred_deletion(dx12_expiring_resource expiring)

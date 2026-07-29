@@ -19,16 +19,16 @@ namespace sg::backend::dx12
 struct dx12_download_allocation
 {
     ID3D12Resource* buffer = nullptr;
-    cc::byte const* base = nullptr;
-    cc::isize offset = 0;
-    cc::isize size = 0;
+    byte const* base = nullptr;
+    isize offset = 0;
+    isize size = 0;
 };
 
 /// The CPU-side move of one chunk out of the readback buffer, deferred until the GPU copy completes.
 struct dx12_pending_copy
 {
     cc::unique_function<void()> deferred_cpu_copy;
-    cc::isize bytes = 0;
+    isize bytes = 0;
 };
 
 /// Records the readback copy commands for one resource through the inline READBACK ring buffer,
@@ -39,7 +39,7 @@ struct dx12_resource_download
     virtual ~dx12_resource_download() = default;
 
     /// Total ring-buffer bytes this download needs.
-    [[nodiscard]] virtual cc::isize total_bytes() const = 0;
+    [[nodiscard]] virtual isize total_bytes() const = 0;
 
     /// Records any state transition the source needs before the copy.
     virtual void prepare(dx12_command_list& cmd) = 0;
@@ -60,22 +60,22 @@ struct dx12_resource_download
 /// every deferred copy (kept alive via the future's pin).
 struct dx12_buffer_download final : dx12_resource_download
 {
-    dx12_buffer_download(dx12_buffer const& src, cc::isize src_offset, cc::span<cc::byte> dst)
+    dx12_buffer_download(dx12_buffer const& src, isize src_offset, cc::span<byte> dst)
       : dx12_buffer_download(src._resource.Get(), src_offset, dst)
     {
     }
 
     // Raw-resource overload: the async path holds only the ID3D12Resource* (kept alive by the job's
     // buffer handle), not a dx12_buffer reference.
-    dx12_buffer_download(ID3D12Resource* src, cc::isize src_offset, cc::span<cc::byte> dst)
+    dx12_buffer_download(ID3D12Resource* src, isize src_offset, cc::span<byte> dst)
       : _src(src), _src_offset(src_offset), _dst(dst)
     {
     }
 
-    [[nodiscard]] cc::isize total_bytes() const override { return _dst.size(); }
+    [[nodiscard]] isize total_bytes() const override { return _dst.size(); }
 
     /// Bytes read and recorded so far.
-    [[nodiscard]] cc::isize consumed() const { return _consumed; }
+    [[nodiscard]] isize consumed() const { return _consumed; }
 
     // See dx12_buffer_upload::prepare — buffers need no explicit barrier for copies.
     void prepare(dx12_command_list&) override {}
@@ -85,13 +85,13 @@ struct dx12_buffer_download final : dx12_resource_download
     [[nodiscard]] dx12_pending_copy execute_next_job(ID3D12GraphicsCommandList& list,
                                                      dx12_download_allocation const& alloc) override
     {
-        cc::isize const remaining = _dst.size() - _consumed;
-        cc::isize const n = remaining < alloc.size ? remaining : alloc.size;
+        isize const remaining = _dst.size() - _consumed;
+        isize const n = remaining < alloc.size ? remaining : alloc.size;
         CC_ASSERT(n > 0, "readback allocation too small to make progress");
         list.CopyBufferRegion(alloc.buffer, UINT64(alloc.offset), _src, UINT64(_src_offset + _consumed), UINT64(n));
 
-        cc::byte const* const src_ptr = alloc.base + alloc.offset;
-        cc::byte* const dst_ptr = _dst.data() + _consumed;
+        byte const* const src_ptr = alloc.base + alloc.offset;
+        byte* const dst_ptr = _dst.data() + _consumed;
         auto const size = std::size_t(n);
         _consumed += n;
         return dx12_pending_copy{[dst_ptr, src_ptr, size] { std::memcpy(dst_ptr, src_ptr, size); }, n};
@@ -99,9 +99,9 @@ struct dx12_buffer_download final : dx12_resource_download
 
 private:
     ID3D12Resource* _src = nullptr;
-    cc::isize _src_offset = 0;
-    cc::span<cc::byte> _dst;
-    cc::isize _consumed = 0;
+    isize _src_offset = 0;
+    cc::span<byte> _dst;
+    isize _consumed = 0;
 };
 
 /// Texture readback: records CopyTextureRegion from the source subresource's region into the readback
@@ -114,18 +114,18 @@ private:
 /// alive via the future's pin).
 struct dx12_texture_download final : dx12_resource_download
 {
-    dx12_texture_download(ID3D12Resource* src, dx12_texture_footprint const& fp, cc::span<cc::byte> dst)
+    dx12_texture_download(ID3D12Resource* src, dx12_texture_footprint const& fp, cc::span<byte> dst)
       : _src(src), _fp(fp), _dst(dst)
     {
     }
 
-    [[nodiscard]] cc::isize total_bytes() const override { return _fp.staged_size(); }
+    [[nodiscard]] isize total_bytes() const override { return _fp.staged_size(); }
     void prepare(dx12_command_list&) override {}
     [[nodiscard]] bool is_finished() const override { return _rows_done >= total_rows(); }
 
     /// Staged bytes not yet read (padded). The inline driver reserves this (+ one placement alignment of
     /// slack) so a fits-before-the-seam region lands in a single reservation.
-    [[nodiscard]] cc::isize remaining_bytes() const { return (total_rows() - _rows_done) * _fp.padded_pitch; }
+    [[nodiscard]] isize remaining_bytes() const { return (total_rows() - _rows_done) * _fp.padded_pitch; }
 
     [[nodiscard]] dx12_pending_copy execute_next_job(ID3D12GraphicsCommandList& list,
                                                      dx12_download_allocation const& alloc) override
@@ -133,18 +133,18 @@ struct dx12_texture_download final : dx12_resource_download
         CC_ASSERT(!is_finished(), "texture readback already finished");
 
         // Self-align the window to 512; the waste counts as consumed bytes.
-        cc::isize const aligned = align_up(alloc.offset, texture_placement_alignment);
-        cc::isize const waste = aligned - alloc.offset;
+        isize const aligned = align_up(alloc.offset, texture_placement_alignment);
+        isize const waste = aligned - alloc.offset;
         if (waste >= alloc.size)
             return {}; // no room past the alignment — caller wraps / rolls the window
-        cc::isize const max_rows = (alloc.size - waste) / _fp.padded_pitch;
+        isize const max_rows = (alloc.size - waste) / _fp.padded_pitch;
         if (max_rows == 0)
             return {}; // window can't fit one padded row after alignment
 
         int const slice = int(_rows_done / _fp.rows);
         int const row = int(_rows_done % _fp.rows);
         dx12_texture_copy_chunk const chunk = next_texture_copy_chunk(_fp, slice, row, max_rows);
-        cc::isize const n = chunk.staging_rows();
+        isize const n = chunk.staging_rows();
 
         bool const whole_slices = chunk.row_start == 0 && chunk.row_count == _fp.rows;
         int const top = chunk.row_start * _fp.block_extent;
@@ -188,16 +188,16 @@ struct dx12_texture_download final : dx12_resource_download
         src_box.back = UINT(_fp.z + chunk.slice_start + (whole_slices ? chunk.slice_count : 1));
         list.CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, &src_box);
 
-        cc::byte const* const src_base = alloc.base + aligned;
-        cc::byte* const dst_base = _dst.data();
-        cc::isize const first_row = _rows_done;
-        cc::isize const row_bytes = _fp.row_bytes;
-        cc::isize const padded = _fp.padded_pitch;
+        byte const* const src_base = alloc.base + aligned;
+        byte* const dst_base = _dst.data();
+        isize const first_row = _rows_done;
+        isize const row_bytes = _fp.row_bytes;
+        isize const padded = _fp.padded_pitch;
         _rows_done += n;
         return dx12_pending_copy{.deferred_cpu_copy =
                                      [src_base, dst_base, first_row, n, row_bytes, padded]
                                  {
-                                     for (cc::isize i = 0; i < n; ++i)
+                                     for (isize i = 0; i < n; ++i)
                                          std::memcpy(dst_base + (first_row + i) * row_bytes, src_base + i * padded,
                                                      std::size_t(row_bytes));
                                  },
@@ -205,12 +205,12 @@ struct dx12_texture_download final : dx12_resource_download
     }
 
 private:
-    [[nodiscard]] cc::isize total_rows() const { return cc::isize(_fp.rows) * cc::isize(_fp.depth_slices); }
-    [[nodiscard]] static cc::isize align_up(cc::isize v, cc::isize a) { return (v + a - 1) / a * a; }
+    [[nodiscard]] isize total_rows() const { return isize(_fp.rows) * isize(_fp.depth_slices); }
+    [[nodiscard]] static isize align_up(isize v, isize a) { return (v + a - 1) / a * a; }
 
     ID3D12Resource* _src = nullptr;
     dx12_texture_footprint _fp;
-    cc::span<cc::byte> _dst;
-    cc::isize _rows_done = 0; // padded staging rows read so far (flat over slices)
+    cc::span<byte> _dst;
+    isize _rows_done = 0; // padded staging rows read so far (flat over slices)
 };
 } // namespace sg::backend::dx12

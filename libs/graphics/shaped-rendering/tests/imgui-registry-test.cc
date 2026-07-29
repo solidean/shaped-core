@@ -2,6 +2,8 @@
 #include <nexus/test.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 
+using namespace cc::primitive_defines;
+
 // The arithmetic behind the imgui renderer, checked against hand-computed numbers.
 // None of this needs a device, so it runs on every platform — which matters,
 // because these are the parts most likely to be subtly wrong (an off-by-one scissor clamp, a row-pitch mistake) and the hardest to spot in a rendered image.
@@ -122,18 +124,18 @@ TEST("sr::impl - packing a sub-rect tightens the row pitch")
     constexpr auto height = 3;
     constexpr auto bpp = 4;
 
-    auto image = cc::vector<cc::byte>::create_defaulted(width * height * bpp);
+    auto image = cc::vector<byte>::create_defaulted(width * height * bpp);
     for (auto i = 0; i < image.size(); ++i)
-        image[i] = cc::byte(i);
+        image[i] = byte(i);
 
     // Take the 2x2 rect at (1,1): source rows start at byte (1*4 + 1)*4 = 20 and (2*4 + 1)*4 = 36.
     auto const packed = impl::pack_texture_rect(image.data(), width * bpp, bpp, tg::pos2i(1, 1), tg::vec2i(2, 2));
 
     REQUIRE(packed.size() == 2 * 2 * bpp);
     for (auto i = 0; i < 8; ++i)
-        CHECK(packed[i] == cc::byte(20 + i));
+        CHECK(packed[i] == byte(20 + i));
     for (auto i = 0; i < 8; ++i)
-        CHECK(packed[8 + i] == cc::byte(36 + i));
+        CHECK(packed[8 + i] == byte(36 + i));
 }
 
 TEST("sr::impl - packing a full-width rect is a straight copy")
@@ -142,16 +144,16 @@ TEST("sr::impl - packing a full-width rect is a straight copy")
     constexpr auto height = 2;
     constexpr auto bpp = 1;
 
-    auto image = cc::vector<cc::byte>::create_defaulted(width * height * bpp);
+    auto image = cc::vector<byte>::create_defaulted(width * height * bpp);
     for (auto i = 0; i < image.size(); ++i)
-        image[i] = cc::byte(i);
+        image[i] = byte(i);
 
     auto const packed
         = impl::pack_texture_rect(image.data(), width * bpp, bpp, tg::pos2i(0, 0), tg::vec2i(width, height));
 
     REQUIRE(packed.size() == image.size());
     for (auto i = 0; i < packed.size(); ++i)
-        CHECK(packed[i] == cc::byte(i));
+        CHECK(packed[i] == byte(i));
 }
 
 TEST("sr::impl - each pack allocates its own buffer")
@@ -159,12 +161,12 @@ TEST("sr::impl - each pack allocates its own buffer")
     // ctx.upload is fire-and-forget and holds the pin until the copy runs, so two packs must not alias — reusing one scratch buffer would let a second repack overwrite bytes a pending copy still reads.
     constexpr auto width = 2;
     constexpr auto bpp = 1;
-    auto const image = cc::vector<cc::byte>{cc::byte(1), cc::byte(2), cc::byte(3), cc::byte(4)};
+    auto const image = cc::vector<byte>{byte(1), byte(2), byte(3), byte(4)};
 
     auto const first = impl::pack_texture_rect(image.data(), width * bpp, bpp, tg::pos2i(0, 0), tg::vec2i(2, 1));
     auto const second = impl::pack_texture_rect(image.data(), width * bpp, bpp, tg::pos2i(0, 1), tg::vec2i(2, 1));
 
     CHECK(first.data() != second.data());
-    CHECK(first[0] == cc::byte(1));
-    CHECK(second[0] == cc::byte(3));
+    CHECK(first[0] == byte(1));
+    CHECK(second[0] == byte(3));
 }

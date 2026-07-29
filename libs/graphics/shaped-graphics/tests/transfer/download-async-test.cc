@@ -8,6 +8,8 @@
 #include <shaped-graphics/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
+using namespace cc::primitive_defines;
+
 // Backend-agnostic async buffer download (ctx.download): GPU→CPU streaming on a dedicated copy queue, run
 // against every available backend. These pin the public contract — a fire-and-return-future readback with
 // automatic per-resource sync in BOTH directions (the read waits on the last writer; a later writer waits
@@ -17,9 +19,9 @@
 
 namespace
 {
-auto pattern = [](int i) { return cc::byte(i & 0xFF); };
+auto pattern = [](int i) { return byte(i & 0xFF); };
 
-sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::isize size)
+sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, isize size)
 {
     auto buf = ctx->persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     CC_ASSERT(buf != nullptr, "async download test buffer allocation failed");
@@ -29,16 +31,16 @@ sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, cc::is
 // Seeds `buf` with fn(i) via an inline command-list upload (direct queue) and submits it. Returns the
 // submission token so a test can reason about ordering. The async download then reads committed bytes by
 // auto-waiting on this list (forward sync) — and this path avoids the pending-async-upload block.
-void seed_buffer(sg::context_handle const& ctx, sg::raw_buffer_handle const& buf, cc::isize n, auto&& fn)
+void seed_buffer(sg::context_handle const& ctx, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 {
-    cc::vector<cc::byte> data;
+    cc::vector<byte> data;
     data.reserve(n);
-    for (cc::isize i = 0; i < n; ++i)
-        data.push_back(cc::byte(fn(i)));
+    for (isize i = 0; i < n; ++i)
+        data.push_back(byte(fn(i)));
 
     auto cmd = ctx->create_command_list();
     CC_ASSERT(cmd != nullptr, "seed command list creation failed");
-    cmd->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(data)); // copied during record
+    cmd->upload.bytes_to_buffer(buf, cc::span<byte const>(data)); // copied during record
     ctx->submit_command_list(cc::move(cmd));
 }
 } // namespace
@@ -47,7 +49,7 @@ INVOCABLE_TEST("sg - async download round-trips", (sg::context_handle const& ctx
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
-    seed_buffer(ctx, buf, 256, [](cc::isize i) { return int(i); });
+    seed_buffer(ctx, buf, 256, [](isize i) { return int(i); });
 
     // Fire-and-return-future: the read auto-waits on the seed list (forward sync), no manual barrier.
     auto future = ctx->download.bytes_from_buffer(buf, 0, 256);
@@ -65,7 +67,7 @@ INVOCABLE_TEST("sg - async download round-trips", (sg::context_handle const& ctx
 INVOCABLE_TEST("sg - async typed download round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const buf = make_transfer_buffer(ctx, cc::isize(4) * sizeof(int));
+    auto const buf = make_transfer_buffer(ctx, isize(4) * sizeof(int));
 
     cc::vector<int> in;
     in.push_back(5);
@@ -106,7 +108,7 @@ INVOCABLE_TEST("sg - async download shares a buffer with a later reader", (sg::c
     REQUIRE(ctx != nullptr);
     auto const src = make_transfer_buffer(ctx, 128);
     auto const dst = make_transfer_buffer(ctx, 128);
-    seed_buffer(ctx, src, 128, [](cc::isize i) { return 0x40 + (int(i) & 0xF); });
+    seed_buffer(ctx, src, 128, [](isize i) { return 0x40 + (int(i) & 0xF); });
 
     auto down = ctx->download.bytes_from_buffer(src, 0, 128);
 
@@ -133,18 +135,18 @@ INVOCABLE_TEST("sg - a later write waits on an in-flight async download", (sg::c
     REQUIRE(ctx != nullptr);
     constexpr int n = 256;
     auto const buf = make_transfer_buffer(ctx, n);
-    seed_buffer(ctx, buf, n, [](cc::isize i) { return int(i); }); // the async read must see this
+    seed_buffer(ctx, buf, n, [](isize i) { return int(i); }); // the async read must see this
 
     // Async read issued first; it stamps the buffer so the write below waits on it.
     auto down = ctx->download.bytes_from_buffer(buf, 0, n);
 
     // Direct-queue write of a distinct pattern, submitted at once: it must land *after* the read.
-    cc::byte overwrite[n];
+    byte overwrite[n];
     for (int i = 0; i < n; ++i)
-        overwrite[i] = cc::byte(0xBB);
+        overwrite[i] = byte(0xBB);
     auto up = ctx->create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(overwrite, n));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(overwrite, n));
     ctx->submit_command_list(cc::move(up));
 
     // The async read observes the seeded bytes, not 0xBB.
@@ -165,7 +167,7 @@ INVOCABLE_TEST("sg - a later write waits on an in-flight async download", (sg::c
     REQUIRE(after_bytes.has_value());
     bool write_landed = true;
     for (int i = 0; i < n; ++i)
-        if (after_bytes.value()[i] != cc::byte(0xBB))
+        if (after_bytes.value()[i] != byte(0xBB))
             write_landed = false;
     CHECK(write_landed);
 }
@@ -175,7 +177,7 @@ INVOCABLE_TEST("sg - two async downloads of one buffer", (sg::context_handle con
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
-    seed_buffer(ctx, buf, 256, [](cc::isize i) { return int(i); });
+    seed_buffer(ctx, buf, 256, [](isize i) { return int(i); });
 
     auto a = ctx->download.bytes_from_buffer(buf, 0, 256);
     auto b = ctx->download.bytes_from_buffer(buf, 0, 256);
@@ -199,7 +201,7 @@ INVOCABLE_TEST("sg - dropping an async download future never hangs a later write
     REQUIRE(ctx != nullptr);
     constexpr int n = 64 * 1024; // large enough that the read is worth cancelling
     auto const buf = make_transfer_buffer(ctx, n);
-    seed_buffer(ctx, buf, n, [](cc::isize i) { return int(i); });
+    seed_buffer(ctx, buf, n, [](isize i) { return int(i); });
 
     // Issue the async download and drop its future immediately (before waiting) — cancels the copy.
     {
@@ -208,14 +210,14 @@ INVOCABLE_TEST("sg - dropping an async download future never hangs a later write
     }
 
     // A direct-queue write of the buffer folds the dropped download's completion value and waits on it.
-    cc::byte fill = cc::byte(0x5A);
-    cc::vector<cc::byte> overwrite;
+    byte fill = byte(0x5A);
+    cc::vector<byte> overwrite;
     overwrite.reserve(n);
     for (int i = 0; i < n; ++i)
         overwrite.push_back(fill);
     auto up = ctx->create_command_list();
     REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<cc::byte const>(overwrite));
+    up->upload.bytes_to_buffer(buf, cc::span<byte const>(overwrite));
     ctx->submit_command_list(cc::move(up));
 
     // Pre-fix (cancelled read leaves a hole in the download fence) this never returns.
@@ -244,7 +246,7 @@ INVOCABLE_TEST("sg - async download after an async upload of the same buffer", (
     constexpr int n = 256;
     auto const buf = make_transfer_buffer(ctx, n);
 
-    cc::vector<cc::byte> up;
+    cc::vector<byte> up;
     up.reserve(n);
     for (int i = 0; i < n; ++i)
         up.push_back(pattern(i));

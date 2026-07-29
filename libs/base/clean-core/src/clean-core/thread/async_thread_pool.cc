@@ -198,7 +198,7 @@ cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w, bool authorita
         int const attempts = 2 * n;
         for (int i = 0; i < attempts; ++i)
         {
-            int const victim = int(w.rng.next_u32() % cc::u32(n));
+            int const victim = int(w.rng.next_u32() % u32(n));
             if (victim == w.id)
                 continue;
 
@@ -295,7 +295,7 @@ void cc::async_thread_pool::worker_main(worker& w)
 
         // 2. still nothing: commit to sleeping. Capture the epoch BEFORE registering, so a wake that lands
         //    between here and the wait cannot be mistaken for one we already consumed.
-        cc::i64 const epoch = _wake_epoch.load(cc::memory_order_acquire);
+        i64 const epoch = _wake_epoch.load(cc::memory_order_acquire);
 
         // Our half of the Dekker (see the protocol block). The RMW is a full barrier in its own right; the fence
         // spells out what it is for and keeps the pairing legible if the RMW is ever weakened.

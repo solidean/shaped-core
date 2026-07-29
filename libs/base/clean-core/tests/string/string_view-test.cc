@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+using namespace cc::primitive_defines;
+
 // static assertions for triviality
 static_assert(std::is_trivially_copyable_v<cc::string_view>, "string_view should be trivially copyable");
 static_assert(std::is_trivially_destructible_v<cc::string_view>, "string_view should be trivially destructible");
@@ -845,7 +847,7 @@ TEST("string_view - special cases")
     SECTION("empty view at end of string")
     {
         char const* str = "hello";
-        auto const sv = cc::string_view{str + 5, cc::isize(0)};
+        auto const sv = cc::string_view{str + 5, isize(0)};
         CHECK(sv.empty());
         CHECK(sv.size() == 0);
     }
@@ -869,9 +871,9 @@ TEST("string_view - as_span / as_bytes")
     SECTION("as_bytes covers exactly the viewed bytes")
     {
         auto const bytes = sv.as_bytes();
-        static_assert(std::is_same_v<decltype(bytes), cc::span<cc::byte const> const>);
+        static_assert(std::is_same_v<decltype(bytes), cc::span<byte const> const>);
         CHECK(bytes.size() == 3);
-        CHECK(bytes[0] == cc::byte('a'));
+        CHECK(bytes[0] == byte('a'));
     }
 
     SECTION("empty view yields empty span")

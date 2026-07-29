@@ -57,10 +57,10 @@ struct chase_lev_deque
     static_assert(cc::atomic<T>::is_always_lock_free, "a lock-free deque of lock-ful slots is pointless");
 
     /// `initial_capacity` is rounded up to a power of two (the mask indexing needs one).
-    explicit chase_lev_deque(cc::i64 initial_capacity = 256)
+    explicit chase_lev_deque(i64 initial_capacity = 256)
     {
         CC_ASSERT(initial_capacity > 0, "capacity must be positive");
-        _ring.store(alloc_ring(cc::bit_ceil(cc::u64(initial_capacity))), cc::memory_order_relaxed);
+        _ring.store(alloc_ring(cc::bit_ceil(u64(initial_capacity))), cc::memory_order_relaxed);
     }
 
     /// Frees the live buffer and every buffer a grow retired. Queued VALUES are not touched — see the class note.
@@ -86,8 +86,8 @@ struct chase_lev_deque
     /// Owner only. Grows on demand.
     void push(T v)
     {
-        cc::i64 const b = _bottom.load(cc::memory_order_relaxed);
-        cc::i64 const t = _top.load(cc::memory_order_acquire);
+        i64 const b = _bottom.load(cc::memory_order_relaxed);
+        i64 const t = _top.load(cc::memory_order_acquire);
         ring* a = _ring.load(cc::memory_order_relaxed);
 
         if (b - t > a->mask) // size would exceed capacity - 1
@@ -103,7 +103,7 @@ struct chase_lev_deque
     /// meaningful when this returns true, and is clobbered otherwise.
     [[nodiscard]] bool try_take(T& out)
     {
-        cc::i64 const b = _bottom.load(cc::memory_order_relaxed) - 1;
+        i64 const b = _bottom.load(cc::memory_order_relaxed) - 1;
         ring* const a = _ring.load(cc::memory_order_relaxed);
         _bottom.store(b, cc::memory_order_relaxed); // claim it speculatively
 
@@ -111,7 +111,7 @@ struct chase_lev_deque
         // _bottom. Sequential consistency over the two fences means at least one side sees the other, which is
         // exactly what stops the last element being taken twice -- or lost by both.
         cc::atomic_thread_fence(cc::memory_order_seq_cst);
-        cc::i64 t = _top.load(cc::memory_order_relaxed);
+        i64 t = _top.load(cc::memory_order_relaxed);
 
         if (t > b) // empty
         {
@@ -132,9 +132,9 @@ struct chase_lev_deque
     /// Any thread except the owner. Takes the oldest entry (FIFO). `out` is only meaningful on `success`.
     [[nodiscard]] steal_result try_steal(T& out)
     {
-        cc::i64 t = _top.load(cc::memory_order_acquire);
+        i64 t = _top.load(cc::memory_order_acquire);
         cc::atomic_thread_fence(cc::memory_order_seq_cst); // the other half of try_take's Dekker
-        cc::i64 const b = _bottom.load(cc::memory_order_acquire);
+        i64 const b = _bottom.load(cc::memory_order_acquire);
 
         if (t >= b)
             return steal_result::empty;
@@ -154,51 +154,51 @@ struct chase_lev_deque
     }
 
     /// Racy by construction — for heuristics and stats, never for control flow that must be correct.
-    [[nodiscard]] cc::i64 size_estimate() const
+    [[nodiscard]] i64 size_estimate() const
     {
-        cc::i64 const b = _bottom.load(cc::memory_order_relaxed);
-        cc::i64 const t = _top.load(cc::memory_order_relaxed);
+        i64 const b = _bottom.load(cc::memory_order_relaxed);
+        i64 const t = _top.load(cc::memory_order_relaxed);
         return b - t > 0 ? b - t : 0;
     }
 
     /// Live buffer capacity. Test/diagnostic only; grows behind your back.
-    [[nodiscard]] cc::i64 capacity() const { return _ring.load(cc::memory_order_relaxed)->mask + 1; }
+    [[nodiscard]] i64 capacity() const { return _ring.load(cc::memory_order_relaxed)->mask + 1; }
 
 private:
     // One heap block: this header followed by its slots. `older` chains retired buffers for the destructor.
     struct ring
     {
-        cc::i64 mask;
+        i64 mask;
         ring* older;
 
         [[nodiscard]] cc::atomic<T>* slots() { return reinterpret_cast<cc::atomic<T>*>(this + 1); }
 
-        [[nodiscard]] T get(cc::i64 i) { return slots()[i & mask].load(cc::memory_order_relaxed); }
-        void put(cc::i64 i, T v) { slots()[i & mask].store(v, cc::memory_order_relaxed); }
+        [[nodiscard]] T get(i64 i) { return slots()[i & mask].load(cc::memory_order_relaxed); }
+        void put(i64 i, T v) { slots()[i & mask].store(v, cc::memory_order_relaxed); }
     };
     static_assert(alignof(cc::atomic<T>) <= alignof(ring), "the slots trail the header at alignof(ring)");
 
-    [[nodiscard]] static ring* alloc_ring(cc::i64 cap)
+    [[nodiscard]] static ring* alloc_ring(i64 cap)
     {
-        CC_ASSERT(cc::has_single_bit(cc::u64(cap)), "capacity must be a power of two");
+        CC_ASSERT(cc::has_single_bit(u64(cap)), "capacity must be a power of two");
 
-        cc::isize const bytes = cc::isize(sizeof(ring)) + cap * cc::isize(sizeof(cc::atomic<T>));
-        cc::byte* p = nullptr;
+        isize const bytes = isize(sizeof(ring)) + cap * isize(sizeof(cc::atomic<T>));
+        byte* p = nullptr;
         cc::default_memory_resource->allocate_bytes(&p, bytes, bytes, alignof(ring),
                                                     cc::default_memory_resource->userdata);
 
         auto* r = reinterpret_cast<ring*>(p);
         r->mask = cap - 1;
         r->older = nullptr;
-        for (cc::i64 i = 0; i < cap; ++i)
+        for (i64 i = 0; i < cap; ++i)
             new (cc::placement_new, r->slots() + i) cc::atomic<T>();
         return r;
     }
 
     static void free_ring(ring* r)
     {
-        cc::isize const bytes = cc::isize(sizeof(ring)) + (r->mask + 1) * cc::isize(sizeof(cc::atomic<T>));
-        cc::default_memory_resource->deallocate_bytes(reinterpret_cast<cc::byte*>(r), bytes, alignof(ring),
+        isize const bytes = isize(sizeof(ring)) + (r->mask + 1) * isize(sizeof(cc::atomic<T>));
+        cc::default_memory_resource->deallocate_bytes(reinterpret_cast<byte*>(r), bytes, alignof(ring),
                                                       cc::default_memory_resource->userdata);
     }
 
@@ -210,10 +210,10 @@ private:
     // The alternative (a fixed ring plus an overflow list) buys that memory back by adding a branch to this hot
     // path and a second claim path to the pool, i.e. by adding correctness surface to the code least worth
     // hand-verifying. Not a trade worth making.
-    [[nodiscard]] ring* grow(ring* old, cc::i64 b, cc::i64 t)
+    [[nodiscard]] ring* grow(ring* old, i64 b, i64 t)
     {
         ring* const fresh = alloc_ring((old->mask + 1) * 2);
-        for (cc::i64 i = t; i < b; ++i)
+        for (i64 i = t; i < b; ++i)
             fresh->put(i, old->get(i));
 
         fresh->older = old;
@@ -224,8 +224,8 @@ private:
     // Each on its own line. The owner writes _bottom on every push; thieves CAS _top on every steal; _ring is
     // read by both and written almost never. Sharing a line between any two of these would turn every push into
     // an invalidation of whatever the thieves are polling -- the exact traffic this deque exists to avoid.
-    alignas(64) cc::atomic<cc::i64> _top = {0};
-    alignas(64) cc::atomic<cc::i64> _bottom = {0};
+    alignas(64) cc::atomic<i64> _top = {0};
+    alignas(64) cc::atomic<i64> _bottom = {0};
     alignas(64) cc::atomic<ring*> _ring = {nullptr};
 };
 } // namespace cc::impl

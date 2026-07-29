@@ -6,9 +6,16 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/platform/win32_sanitized.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
+
+// The D3D12 / DXGI / WRL headers reach <rpcndr.h> through <unknwn.h>, which WIN32_LEAN_AND_MEAN does not
+// stop — so the `byte` rename is repeated over them here. See win32_sanitized.hh for why it is needed.
+// The clean-core includes stay above the bracket: a C++ header parsed under the macro would lose `std::byte`.
+#define byte win_byte_override
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
+#undef byte
 
 namespace sg::backend::dx12
 {
@@ -20,7 +27,7 @@ using Microsoft::WRL::ComPtr;
                                      char const* what,
                                      cc::source_location site = cc::source_location::current())
 {
-    return cc::error(cc::format("{} (hr=0x{:08X})", what, cc::u32(hr)), site);
+    return cc::error(cc::format("{} (hr=0x{:08X})", what, u32(hr)), site);
 }
 
 /// A committed buffer resource together with its persistent CPU mapping.
@@ -35,7 +42,7 @@ struct dx12_mapped_buffer
 [[nodiscard]] inline cc::result<dx12_mapped_buffer> create_mapped_ring_buffer(ID3D12Device* device,
                                                                               D3D12_HEAP_TYPE heap_type,
                                                                               D3D12_RESOURCE_STATES initial_state,
-                                                                              cc::isize size)
+                                                                              isize size)
 {
     D3D12_HEAP_PROPERTIES heap = {};
     heap.Type = heap_type;

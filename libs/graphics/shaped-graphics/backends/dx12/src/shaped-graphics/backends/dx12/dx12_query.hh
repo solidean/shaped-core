@@ -15,7 +15,7 @@ namespace sg::backend::dx12
 {
 /// Logical query-heap categories the query system pools. Only timestamps exist today; occlusion /
 /// pipeline-statistics would slot in here and reuse the same lease/resolve/download machinery.
-enum class dx12_query_heap_type : cc::u32
+enum class dx12_query_heap_type : u32
 {
     timestamp = 0,
 
@@ -34,7 +34,7 @@ struct dx12_query_heap_lease
 
     /// Shared by every handle pointing into this heap. Default-constructed (invalid) until submit, then
     /// assigned in place with the heap's actual readback; a dropped list leaves it invalid forever.
-    std::shared_ptr<sg::data_future<cc::u64>> shared_future = std::make_shared<sg::data_future<cc::u64>>();
+    std::shared_ptr<sg::data_future<u64>> shared_future = std::make_shared<sg::data_future<u64>>();
 };
 
 /// Backend GPU-query system: a free-list pool of small (SlotsPerHeap-slot) ID3D12QueryHeaps. A command

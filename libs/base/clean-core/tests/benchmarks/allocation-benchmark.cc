@@ -36,30 +36,30 @@ double mops(cc::memory_resource const& res, isize size, isize align)
     constexpr isize live = 64;       // working set of concurrently-live allocations
     constexpr isize per_pass = 4096; // alloc/free cycles per timed pass
 
-    cc::byte* slots[live] = {};
+    byte* slots[live] = {};
 
     // Prime the ring so every cycle frees a real block.
     for (isize i = 0; i < live; ++i)
         res.allocate_bytes(&slots[i], size, size, align, res.userdata);
 
     isize idx = 0;
-    double const ops_per_sec = bench::measure_units_per_sec(
-        double(per_pass),
-        [&]
-        {
-            u64 acc = 0;
-            for (isize n = 0; n < per_pass; ++n)
-            {
-                cc::byte*& slot = slots[idx];
-                res.deallocate_bytes(slot, size, align, res.userdata);
-                res.allocate_bytes(&slot, size, size, align, res.userdata);
-                slot[0] = cc::byte(n);        // touch both ends to fault the pages, like real use
-                slot[size - 1] = cc::byte(n); //
-                acc ^= reinterpret_cast<u64>(slot);
-                idx = (idx + 1) % live;
-            }
-            return acc;
-        });
+    double const ops_per_sec
+        = bench::measure_units_per_sec(double(per_pass),
+                                       [&]
+                                       {
+                                           u64 acc = 0;
+                                           for (isize n = 0; n < per_pass; ++n)
+                                           {
+                                               byte*& slot = slots[idx];
+                                               res.deallocate_bytes(slot, size, align, res.userdata);
+                                               res.allocate_bytes(&slot, size, size, align, res.userdata);
+                                               slot[0] = byte(n); // touch both ends to fault the pages, like real use
+                                               slot[size - 1] = byte(n); //
+                                               acc ^= reinterpret_cast<u64>(slot);
+                                               idx = (idx + 1) % live;
+                                           }
+                                           return acc;
+                                       });
 
     for (isize i = 0; i < live; ++i)
         res.deallocate_bytes(slots[i], size, align, res.userdata);
@@ -75,29 +75,29 @@ double alloc_mops(cc::memory_resource const& res, isize size)
     constexpr isize live = 64;
     constexpr isize per_pass = 4096;
 
-    using alloc_t = cc::allocation<cc::byte>;
+    using alloc_t = cc::allocation<byte>;
     alloc_t slots[live];
 
     for (isize i = 0; i < live; ++i)
         slots[i] = alloc_t::create_uninitialized(size, &res);
 
     isize idx = 0;
-    double const ops_per_sec = bench::measure_units_per_sec(
-        double(per_pass),
-        [&]
-        {
-            u64 acc = 0;
-            for (isize n = 0; n < per_pass; ++n)
-            {
-                slots[idx] = alloc_t::create_uninitialized(size, &res); // move-assign frees the old block
-                cc::byte* const p = slots[idx].obj_start;
-                p[0] = cc::byte(n);        // touch both ends, like real use
-                p[size - 1] = cc::byte(n); //
-                acc ^= reinterpret_cast<u64>(p);
-                idx = (idx + 1) % live;
-            }
-            return acc;
-        });
+    double const ops_per_sec = bench::measure_units_per_sec(double(per_pass),
+                                                            [&]
+                                                            {
+                                                                u64 acc = 0;
+                                                                for (isize n = 0; n < per_pass; ++n)
+                                                                {
+                                                                    slots[idx] = alloc_t::create_uninitialized(
+                                                                        size, &res); // move-assign frees the old block
+                                                                    byte* const p = slots[idx].obj_start;
+                                                                    p[0] = byte(n); // touch both ends, like real use
+                                                                    p[size - 1] = byte(n); //
+                                                                    acc ^= reinterpret_cast<u64>(p);
+                                                                    idx = (idx + 1) % live;
+                                                                }
+                                                                return acc;
+                                                            });
 
     return ops_per_sec / 1e6;
 }
@@ -123,7 +123,7 @@ double node_mops()
 
     auto& alloc = cc::default_node_allocator();
 
-    cc::byte* slots[live] = {};
+    byte* slots[live] = {};
     for (isize i = 0; i < live; ++i)
         slots[i] = alloc.allocate_node_bytes(class_idx, Size, align);
 
@@ -135,11 +135,11 @@ double node_mops()
                                            u64 acc = 0;
                                            for (isize n = 0; n < per_pass; ++n)
                                            {
-                                               cc::byte*& slot = slots[idx];
+                                               byte*& slot = slots[idx];
                                                cc::node_allocation_free(slot, class_idx);
                                                slot = alloc.allocate_node_bytes(class_idx, Size, align);
-                                               slot[0] = cc::byte(n);        // touch both ends, like real use
-                                               slot[Size - 1] = cc::byte(n); //
+                                               slot[0] = byte(n);        // touch both ends, like real use
+                                               slot[Size - 1] = byte(n); //
                                                acc ^= reinterpret_cast<u64>(slot);
                                                idx = (idx + 1) % live;
                                            }
@@ -168,9 +168,9 @@ namespace steady
 {
 using clock = std::chrono::steady_clock;
 
-constexpr cc::isize batch_n = 10;      // nodes allocated/freed per iteration
-constexpr cc::isize iters = 1'000'000; // iterations per timed run
-constexpr int runs = 3;                // repeated timed runs (noise measure)
+constexpr isize batch_n = 10;      // nodes allocated/freed per iteration
+constexpr isize iters = 1'000'000; // iterations per timed run
+constexpr int runs = 3;            // repeated timed runs (noise measure)
 
 // A fixed permutation of 0..batch_n-1: the order in which the batch is freed. Non-sequential on purpose so
 // the free order is neither pure-LIFO nor pure-FIFO, which could unrealistically flatter one allocator.
@@ -179,16 +179,16 @@ constexpr int free_order[batch_n] = {4, 0, 8, 2, 6, 9, 1, 5, 3, 7};
 // Runs the batch loop 3x with the given alloc/free callables and prints one labeled result row.
 // alloc_one(i) -> cc::byte* stores nothing itself; free_one(p) releases a pointer previously returned.
 template <class AllocOne, class FreeOne>
-void run3(char const* label, cc::isize size, AllocOne alloc_one, FreeOne free_one)
+void run3(char const* label, isize size, AllocOne alloc_one, FreeOne free_one)
 {
-    cc::byte* nodes[batch_n] = {};
+    byte* nodes[batch_n] = {};
 
     // Warmup: materialize the slab / warm the thread-local free list and caches before timing.
-    for (cc::isize w = 0; w < 2000; ++w)
+    for (isize w = 0; w < 2000; ++w)
     {
-        for (cc::isize i = 0; i < batch_n; ++i)
+        for (isize i = 0; i < batch_n; ++i)
             nodes[i] = alloc_one();
-        for (cc::isize i = 0; i < batch_n; ++i)
+        for (isize i = 0; i < batch_n; ++i)
             free_one(nodes[free_order[i]]);
     }
 
@@ -197,13 +197,13 @@ void run3(char const* label, cc::isize size, AllocOne alloc_one, FreeOne free_on
     {
         u64 acc = 0;
         auto const t0 = clock::now();
-        for (cc::isize it = 0; it < iters; ++it)
+        for (isize it = 0; it < iters; ++it)
         {
-            for (cc::isize i = 0; i < batch_n; ++i)
+            for (isize i = 0; i < batch_n; ++i)
                 nodes[i] = alloc_one();
-            for (cc::isize i = 0; i < batch_n; ++i)
+            for (isize i = 0; i < batch_n; ++i)
             {
-                cc::byte* const p = nodes[free_order[i]];
+                byte* const p = nodes[free_order[i]];
                 acc ^= reinterpret_cast<u64>(p); // keep the pointer live so nothing is elided
                 free_one(p);
             }
@@ -228,14 +228,14 @@ void run3(char const* label, cc::isize size, AllocOne alloc_one, FreeOne free_on
 // classes lands in or near the freemap's cache line and could stall the next locked freemap RMW) matters.
 // Measured effect on Zen 4: negligible — node and mimalloc are within noise of the no-touch column.
 template <class AllocOne, class FreeOne>
-void run3_interleaved(char const* label, cc::isize size, bool touch, AllocOne alloc_one, FreeOne free_one)
+void run3_interleaved(char const* label, isize size, bool touch, AllocOne alloc_one, FreeOne free_one)
 {
-    cc::byte* nodes[batch_n] = {};
-    for (cc::isize i = 0; i < batch_n; ++i)
+    byte* nodes[batch_n] = {};
+    for (isize i = 0; i < batch_n; ++i)
         nodes[i] = alloc_one();
 
-    for (cc::isize w = 0; w < 2000; ++w)
-        for (cc::isize i = 0; i < batch_n; ++i)
+    for (isize w = 0; w < 2000; ++w)
+        for (isize i = 0; i < batch_n; ++i)
         {
             free_one(nodes[i]);
             nodes[i] = alloc_one();
@@ -246,16 +246,16 @@ void run3_interleaved(char const* label, cc::isize size, bool touch, AllocOne al
     {
         u64 acc = 0;
         auto const t0 = clock::now();
-        for (cc::isize it = 0; it < iters; ++it)
-            for (cc::isize i = 0; i < batch_n; ++i)
+        for (isize it = 0; it < iters; ++it)
+            for (isize i = 0; i < batch_n; ++i)
             {
                 free_one(nodes[i]);
-                cc::byte* const p = alloc_one();
+                byte* const p = alloc_one();
                 nodes[i] = p;
                 if (touch)
                 {
-                    p[0] = cc::byte(i);
-                    p[size - 1] = cc::byte(i);
+                    p[0] = byte(i);
+                    p[size - 1] = byte(i);
                 }
                 acc ^= reinterpret_cast<u64>(p);
             }
@@ -267,7 +267,7 @@ void run3_interleaved(char const* label, cc::isize size, bool touch, AllocOne al
     }
     std::printf("   M pairs/s\n");
 
-    for (cc::isize i = 0; i < batch_n; ++i)
+    for (isize i = 0; i < batch_n; ++i)
         free_one(nodes[i]);
 }
 
@@ -284,18 +284,18 @@ void for_each_allocator(Body body)
     body(
         "node", //
         [&] { return node_alloc.allocate_node_bytes(class_idx, Size, align); },
-        [&](cc::byte* p) { cc::node_allocation_free(p, class_idx); });
+        [&](byte* p) { cc::node_allocation_free(p, class_idx); });
 
     cc::memory_resource const& mi = *cc::default_memory_resource;
     body(
         "mimalloc",
         [&]
         {
-            cc::byte* p = nullptr;
+            byte* p = nullptr;
             mi.allocate_bytes(&p, Size, Size, align, mi.userdata);
             return p;
         },
-        [&](cc::byte* p) { mi.deallocate_bytes(p, Size, align, mi.userdata); });
+        [&](byte* p) { mi.deallocate_bytes(p, Size, align, mi.userdata); });
 }
 
 template <isize Size>
@@ -317,7 +317,7 @@ void row_interleaved(bool touch)
 // alloc (atomic bitmap load + fetch_and) and free (atomic_or) codegen — the metal this whole investigation
 // is about. Not part of any timing; it exists purely as a disassembly target and is kept alive by a
 // reference from the steady-state test below (TU-local + noinline would otherwise be dead-code-eliminated).
-CC_DONT_INLINE u64 node_alloc_free_hotloop_probe(cc::node_allocator& alloc, cc::byte** nodes, int const* free_perm)
+CC_DONT_INLINE u64 node_alloc_free_hotloop_probe(cc::node_allocator& alloc, byte** nodes, int const* free_perm)
 {
     constexpr isize Size = 16;
     constexpr isize align = 8;
@@ -329,7 +329,7 @@ CC_DONT_INLINE u64 node_alloc_free_hotloop_probe(cc::node_allocator& alloc, cc::
     u64 acc = 0;
     for (isize i = 0; i < batch_n; ++i)
     {
-        cc::byte* const p = nodes[free_perm[i]];
+        byte* const p = nodes[free_perm[i]];
         acc ^= reinterpret_cast<u64>(p);
         cc::node_allocation_free(p, class_idx);
     }
@@ -446,6 +446,6 @@ TEST("bench-alloc (steady-state small batch)", nx::config::manual)
     steady::run_all<8, 16, 32, 64>();
 
     // Keep the disassembly probe alive (TU-local + noinline) without perturbing the timings above.
-    cc::byte* probe_nodes[steady::batch_n] = {};
+    byte* probe_nodes[steady::batch_n] = {};
     bench::sink ^= steady::node_alloc_free_hotloop_probe(cc::default_node_allocator(), probe_nodes, steady::free_order);
 }

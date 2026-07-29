@@ -15,9 +15,9 @@ class dx12_blas final : public sg::blas
 {
 public:
     dx12_blas(dx12_buffer_handle storage,
-              cc::isize size_in_bytes,
-              cc::isize build_scratch_size_in_bytes,
-              cc::isize update_scratch_size_in_bytes,
+              isize size_in_bytes,
+              isize build_scratch_size_in_bytes,
+              isize update_scratch_size_in_bytes,
               sg::accel_build_flags build_flags,
               int geometry_count)
       : sg::blas(storage,
@@ -40,9 +40,9 @@ class dx12_tlas final : public sg::tlas
 {
 public:
     dx12_tlas(dx12_buffer_handle storage,
-              cc::isize size_in_bytes,
-              cc::isize build_scratch_size_in_bytes,
-              cc::isize update_scratch_size_in_bytes,
+              isize size_in_bytes,
+              isize build_scratch_size_in_bytes,
+              isize update_scratch_size_in_bytes,
               sg::accel_build_flags build_flags,
               int instance_count,
               cc::vector<sg::blas_handle> referenced_blases)

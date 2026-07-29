@@ -4,27 +4,26 @@
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/thread/atomic.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 
 // forward declaration
-cc::byte* system_allocate_node_bytes_large(cc::node_class_index idx,
-                                           cc::isize size_bytes,
-                                           cc::isize alignment,
-                                           void* userdata);
-void system_deallocate_node_bytes_large(cc::byte* ptr, cc::node_class_index idx, void* userdata);
-cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info& slabs,
-                                                      cc::node_class_index idx,
-                                                      void* userdata);
+byte* system_allocate_node_bytes_large(cc::node_class_index idx, isize size_bytes, isize alignment, void* userdata);
+void system_deallocate_node_bytes_large(byte* ptr, cc::node_class_index idx, void* userdata);
+byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info& slabs,
+                                                  cc::node_class_index idx,
+                                                  void* userdata);
 
 // forward declaration of the system node memory resource (defined below)
 extern cc::node_memory_resource system_node_memory_resource;
 
 /// Splice a slab into the class's ring as the new head, retaining the existing slabs. Frontend-agnostic
 /// (touches only next pointers); used by both fresh refill and orphan adoption.
-void node_splice_slab_as_head(cc::node_allocator::slab_info& slabs, cc::node_class_index idx, cc::byte* new_slab)
+void node_splice_slab_as_head(cc::node_allocator::slab_info& slabs, cc::node_class_index idx, byte* new_slab)
 {
-    cc::byte*& head = slabs.slab_base[cc::isize(idx)];
+    byte*& head = slabs.slab_base[isize(idx)];
     if (head == nullptr) // first slab for this class: a self-cycle
         *cc::node_slab_next_ptr_for_base(new_slab) = new_slab;
     else // insert after the old head so the whole ring stays reachable
@@ -37,41 +36,41 @@ void node_splice_slab_as_head(cc::node_allocator::slab_info& slabs, cc::node_cla
 
 /// Drain a slab's remote frees into local (threaded) and report whether every usable slot is now free,
 /// i.e. no live node points into it. Frontend-aware: the single-threaded frontend has no remote to drain.
-bool node_slab_drain_and_is_fully_free(cc::byte* base, cc::node_class_index idx)
+bool node_slab_drain_and_is_fully_free(byte* base, cc::node_class_index idx)
 {
-    cc::u64 local = *cc::node_slab_freemap_for_base(base);
+    u64 local = *cc::node_slab_freemap_for_base(base);
 #if CC_HAS_THREADS
-    local |= cc::atomic_ref<cc::u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_relaxed);
+    local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_relaxed);
     *cc::node_slab_freemap_for_base(base) = local;
 #endif
-    return local == cc::node_seed_local_freemaps[cc::isize(idx)];
+    return local == cc::node_seed_local_freemaps[isize(idx)];
 }
 
 /// Return a slab to the backing resource. Valid only for a fully-free slab (no live nodes point into it).
-void node_free_slab_to_backing(cc::byte* base, cc::node_class_index idx)
+void node_free_slab_to_backing(byte* base, cc::node_class_index idx)
 {
-    cc::isize const slab_size = cc::node_slab_size_bytes_for_class(idx);
+    isize const slab_size = cc::node_slab_size_bytes_for_class(idx);
     cc::default_memory_resource->deallocate_bytes(base, slab_size, slab_size, cc::default_memory_resource->userdata);
 }
 
 // how many cold-path (ring-exhaustion) entries to skip between trim sweeps, per class. Trim is a rare
 // O(ring) sweep, so amortize it; a long-lived thread with a stable working set never produces a fully-free
 // slab and so never actually frees anything regardless of how often the sweep runs.
-constexpr cc::u16 node_trim_period = 64;
+constexpr u16 node_trim_period = 64;
 
 /// Reclaim surplus fully-free slabs of a class back to the backing resource, keeping the ring non-empty and
 /// retaining exactly one fully-free slab as a spare (so steady churn never re-mallocs). Cold path only.
 void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index idx)
 {
-    cc::byte* const head = slabs.slab_base[cc::isize(idx)];
+    byte* const head = slabs.slab_base[isize(idx)];
     if (head == nullptr)
         return;
 
     // gather the ring into a local buffer; rings are small (bounded working set). skip if pathologically big.
     constexpr int cap = 64;
-    cc::byte* ring[cap];
+    byte* ring[cap];
     int n = 0;
-    for (cc::byte* cur = head;;)
+    for (byte* cur = head;;)
     {
         if (n == cap)
             return; // unexpectedly large ring: leave it alone this sweep
@@ -82,7 +81,7 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
     }
 
     // survivors = every non-fully-free slab + one fully-free spare; free the rest. never empties the ring.
-    cc::byte* survivors[cap];
+    byte* survivors[cap];
     int s = 0;
     bool kept_spare = false;
     for (int i = 0; i < n; ++i)
@@ -104,7 +103,7 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
     // rebuild the cyclic ring from the survivors (s >= 1 always: a non-empty ring keeps >= 1 slab)
     for (int i = 0; i < s; ++i)
         *cc::node_slab_next_ptr_for_base(survivors[i]) = survivors[(i + 1) % s];
-    slabs.slab_base[cc::isize(idx)] = survivors[0];
+    slabs.slab_base[isize(idx)] = survivors[0];
 }
 
 #if CC_HAS_THREADS
@@ -123,7 +122,7 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
 struct slab_orphan_bin
 {
     cc::atomic_flag lock_flag; // C++20: default-cleared, trivially destructible
-    cc::byte* head = nullptr;  // singly-linked via each slab's next field; nullptr-terminated (not a ring)
+    byte* head = nullptr;      // singly-linked via each slab's next field; nullptr-terminated (not a ring)
 
     void lock()
     {
@@ -133,22 +132,22 @@ struct slab_orphan_bin
     void unlock() { lock_flag.clear(cc::memory_order_release); }
 };
 
-constinit slab_orphan_bin s_orphans[cc::isize(cc::node_class_index::small_count)] = {};
+constinit slab_orphan_bin s_orphans[isize(cc::node_class_index::small_count)] = {};
 
 /// Push an owned slab onto its class's orphan bin. The bin lock must already be held.
-void push_orphan_locked(cc::node_class_index idx, cc::byte* slab)
+void push_orphan_locked(cc::node_class_index idx, byte* slab)
 {
-    auto& bin = s_orphans[cc::isize(idx)];
+    auto& bin = s_orphans[isize(idx)];
     *cc::node_slab_next_ptr_for_base(slab) = bin.head;
     bin.head = slab;
 }
 
 /// Pop one orphan of the given class, or nullptr if the bin is empty. Takes the bin lock internally.
-cc::byte* pop_orphan(cc::node_class_index idx)
+byte* pop_orphan(cc::node_class_index idx)
 {
-    auto& bin = s_orphans[cc::isize(idx)];
+    auto& bin = s_orphans[isize(idx)];
     bin.lock();
-    cc::byte* const slab = bin.head;
+    byte* const slab = bin.head;
     if (slab != nullptr)
         bin.head = cc::node_slab_next_for_base(slab);
     bin.unlock();
@@ -160,20 +159,20 @@ cc::byte* pop_orphan(cc::node_class_index idx)
 void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
 {
     CC_UNUSED(userdata);
-    for (cc::isize ci = 0; ci < cc::isize(cc::node_class_index::small_count); ++ci)
+    for (isize ci = 0; ci < isize(cc::node_class_index::small_count); ++ci)
     {
         auto const idx = cc::node_class_index(ci);
-        cc::byte* const head = slabs.slab_base[ci];
+        byte* const head = slabs.slab_base[ci];
         if (head == nullptr)
             continue;
 
         // one lock per class: a single release publishes every pushed slab to a future adopter
         auto& bin = s_orphans[ci];
         bin.lock();
-        cc::byte* cur = head;
+        byte* cur = head;
         do
         {
-            cc::byte* const nxt = cc::node_slab_next_for_base(cur); // read next before push/free clobbers cur
+            byte* const nxt = cc::node_slab_next_for_base(cur); // read next before push/free clobbers cur
             if (node_slab_drain_and_is_fully_free(cur, idx))
                 node_free_slab_to_backing(cur, idx);
             else
@@ -222,61 +221,61 @@ cc::node_allocator& system_get_allocator(void* userdata)
 
 // 24-byte large-node header, sitting immediately BEFORE the returned payload: [size][alignment][resource*].
 // The resource pointer is at payload-8 so node_allocation_free_large can recover it (see its contract).
-constexpr cc::isize node_large_header_size = 24;
+constexpr isize node_large_header_size = 24;
 
 /// Allocates a large node (> small_max) from the system memory resource.
 /// Layout: allocate a block aligned to `alignment`, place the payload at the first aligned offset that
 /// leaves room for the 24-byte header, and write the header in the 24 bytes right before the payload. So
 /// the payload honors any power-of-two alignment (not just 8) while keeping resource* at payload-8.
-cc::byte* system_allocate_node_bytes_large(cc::node_class_index idx, cc::isize size_bytes, cc::isize alignment, void* userdata)
+byte* system_allocate_node_bytes_large(cc::node_class_index idx, isize size_bytes, isize alignment, void* userdata)
 {
     CC_UNUSED(idx); // not needed for system allocator
     CC_UNUSED(userdata);
 
     // bump alignment to at least 8 bytes (the header fields are 8-byte writes); must be a power of two
-    alignment = cc::max(alignment, cc::isize(8));
+    alignment = cc::max(alignment, isize(8));
 
     // payload offset: the first `alignment`-aligned point with >= header_size bytes ahead of it for the
     // header. Since the block itself is `alignment`-aligned, this offset is a multiple of alignment, so the
     // payload is aligned too. For alignment 8 this is 24 (the old layout); for 16 it is 32; etc.
-    cc::isize const payload_offset = cc::align_up(node_large_header_size, alignment);
-    cc::isize const total_size = payload_offset + size_bytes;
+    isize const payload_offset = cc::align_up(node_large_header_size, alignment);
+    isize const total_size = payload_offset + size_bytes;
 
     // allocate from system memory resource, aligned so the payload lands on an `alignment` boundary
-    cc::byte* alloc_ptr = nullptr;
-    cc::isize const actual_size = cc::default_memory_resource->allocate_bytes(
-        &alloc_ptr, total_size, total_size, alignment, cc::default_memory_resource->userdata);
+    byte* alloc_ptr = nullptr;
+    isize const actual_size = cc::default_memory_resource->allocate_bytes(&alloc_ptr, total_size, total_size, alignment,
+                                                                          cc::default_memory_resource->userdata);
     CC_ASSERT(actual_size >= total_size, "system allocator must allocate at least the requested size");
     CC_ASSERT(alloc_ptr != nullptr, "system allocator must return non-null for non-zero size");
 
-    cc::byte* const payload = alloc_ptr + payload_offset;
+    byte* const payload = alloc_ptr + payload_offset;
     CC_ASSERT(cc::is_aligned(payload, alignment), "large-node payload must honor the requested alignment");
 
     // write the header in the 24 bytes right before the payload: [size][alignment][resource*]
-    *reinterpret_cast<cc::isize*>(payload - 24) = size_bytes;                                  // NOLINT
-    *reinterpret_cast<cc::isize*>(payload - 16) = alignment;                                   // NOLINT
+    *reinterpret_cast<isize*>(payload - 24) = size_bytes;                                      // NOLINT
+    *reinterpret_cast<isize*>(payload - 16) = alignment;                                       // NOLINT
     *reinterpret_cast<cc::node_memory_resource**>(payload - 8) = &system_node_memory_resource; // NOLINT
 
     return payload;
 }
 
 /// Deallocates a large node (> small_max) by reading the header and calling into system memory resource.
-void system_deallocate_node_bytes_large(cc::byte* ptr, cc::node_class_index idx, void* userdata)
+void system_deallocate_node_bytes_large(byte* ptr, cc::node_class_index idx, void* userdata)
 {
     CC_UNUSED(idx); // not needed for system allocator
     CC_UNUSED(userdata);
 
     // read the header from the 24 bytes before the payload: [size][alignment][resource*]
-    cc::isize const size_bytes = *reinterpret_cast<cc::isize*>(ptr - 24);         // NOLINT
-    cc::isize const alignment = *reinterpret_cast<cc::isize*>(ptr - 16);          // NOLINT
+    isize const size_bytes = *reinterpret_cast<isize*>(ptr - 24);                 // NOLINT
+    isize const alignment = *reinterpret_cast<isize*>(ptr - 16);                  // NOLINT
     auto const resource = *reinterpret_cast<cc::node_memory_resource**>(ptr - 8); // NOLINT
 
     CC_ASSERT(resource == &system_node_memory_resource, "resource mismatch in large node deallocation");
 
     // recover the original allocation: the payload sits `payload_offset` into it (same formula as alloc)
-    cc::isize const payload_offset = cc::align_up(node_large_header_size, alignment);
-    cc::byte* const alloc_ptr = ptr - payload_offset;
-    cc::isize const total_size = payload_offset + size_bytes;
+    isize const payload_offset = cc::align_up(node_large_header_size, alignment);
+    byte* const alloc_ptr = ptr - payload_offset;
+    isize const total_size = payload_offset + size_bytes;
     cc::default_memory_resource->deallocate_bytes(alloc_ptr, total_size, alignment,
                                                   cc::default_memory_resource->userdata);
 }
@@ -284,30 +283,29 @@ void system_deallocate_node_bytes_large(cc::byte* ptr, cc::node_class_index idx,
 /// Refills slabs for a given size class by allocating a new slab from the system memory resource.
 /// Initializes the metadata (local freemap from the consteval seed mask; threaded: remote=0, owner stamped),
 /// splices the new slab into the ring as the new head (retaining previous slabs), and allocates one slot.
-cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info& slabs,
-                                                      cc::node_class_index idx,
-                                                      void* userdata)
+byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info& slabs,
+                                                  cc::node_class_index idx,
+                                                  void* userdata)
 {
     CC_UNUSED(userdata);
 
 #if CC_HAS_THREADS
     // adoption: reuse an orphaned slab of this class (abandoned by an exited thread) before mallocing fresh.
-    if (cc::byte* const orphan = pop_orphan(idx); orphan != nullptr)
+    if (byte* const orphan = pop_orphan(idx); orphan != nullptr)
     {
         // take ownership. atomic store because remote-freeing threads read owner_id concurrently on their
         // free path -- they route to remote whichever value they see, but the write must not tear.
-        cc::atomic_ref<cc::u32>(*cc::node_slab_owner_for_base(orphan)).store(cc::node_owner_token(), cc::memory_order_relaxed);
+        cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(orphan)).store(cc::node_owner_token(), cc::memory_order_relaxed);
         // drain remote frees accumulated while orphaned into local
-        cc::u64 local = *cc::node_slab_freemap_for_base(orphan);
-        local
-            |= cc::atomic_ref<cc::u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, cc::memory_order_relaxed);
+        u64 local = *cc::node_slab_freemap_for_base(orphan);
+        local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, cc::memory_order_relaxed);
         *cc::node_slab_freemap_for_base(orphan) = local;
         // track it in the ring regardless of capacity (future remote frees drain on the cold walk)
         node_splice_slab_as_head(slabs, idx, orphan);
         if (local != 0) // adopted a slab with capacity: allocate from it and we are done
         {
             auto const slot_idx = cc::count_trailing_zeroes(local);
-            *cc::node_slab_freemap_for_base(orphan) = local & ~(cc::u64(1) << slot_idx);
+            *cc::node_slab_freemap_for_base(orphan) = local & ~(u64(1) << slot_idx);
             return cc::node_slot_ptr_for(orphan, idx, slot_idx);
         }
         // orphan was full (all slots handed to others): fall through to malloc a fresh slab for this alloc
@@ -315,18 +313,18 @@ cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_i
 #endif
 
     // allocate a new slab from the system memory resource
-    cc::isize const slab_size = cc::node_slab_size_bytes_for_class(idx);
-    cc::isize const slab_alignment = slab_size; // slabs are aligned to their own size
+    isize const slab_size = cc::node_slab_size_bytes_for_class(idx);
+    isize const slab_alignment = slab_size; // slabs are aligned to their own size
 
-    cc::byte* new_slab = nullptr;
-    cc::isize const actual_size = cc::default_memory_resource->allocate_bytes(
+    byte* new_slab = nullptr;
+    isize const actual_size = cc::default_memory_resource->allocate_bytes(
         &new_slab, slab_size, slab_size, slab_alignment, cc::default_memory_resource->userdata);
     CC_ASSERT(actual_size >= slab_size, "system allocator must allocate at least the requested slab size");
     CC_ASSERT(new_slab != nullptr, "system allocator must return non-null for slab allocation");
     CC_ASSERT(cc::is_aligned(new_slab, slab_alignment), "slab must be aligned to its own size");
 
     // initialize metadata: local freemap seeds the free slots (blocking the ones the metadata overlaps)
-    cc::u64 const initial_freemap = cc::node_seed_local_freemaps[cc::isize(idx)];
+    u64 const initial_freemap = cc::node_seed_local_freemaps[isize(idx)];
     *cc::node_slab_freemap_for_base(new_slab) = initial_freemap;
 #if CC_HAS_THREADS
     *cc::node_slab_remote_for_base(new_slab, idx) = 0;                // no remote frees yet
@@ -339,7 +337,7 @@ cc::byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_i
     // allocate the first free slot from the new slab (owner-only, non-atomic — we just created it)
     CC_ASSERT(initial_freemap != 0, "newly allocated slab must have at least one free slot");
     auto const slot_idx = cc::count_trailing_zeroes(initial_freemap);
-    *cc::node_slab_freemap_for_base(new_slab) = initial_freemap & ~(cc::u64(1) << slot_idx);
+    *cc::node_slab_freemap_for_base(new_slab) = initial_freemap & ~(u64(1) << slot_idx);
 
     return cc::node_slot_ptr_for(new_slab, idx, slot_idx);
 }
@@ -360,25 +358,25 @@ constinit cc::node_memory_resource system_node_memory_resource = {
 constinit cc::node_memory_resource* const cc::default_node_memory_resource = &system_node_memory_resource;
 
 #if CC_HAS_THREADS
-cc::u32 cc::impl::node_next_owner_id()
+u32 cc::impl::node_next_owner_id()
 {
     // process-unique, never recycled: an id is never reused, so a free is never miscategorized.
     // ids are not reclaimed on thread exit (that leaks the thread's slabs -- a known, deferred follow-up).
-    static cc::atomic<cc::u32> s_next_owner_id = {1}; // 0 is reserved for "unassigned"
-    cc::u32 const id = s_next_owner_id.fetch_add(1, cc::memory_order_relaxed);
+    static cc::atomic<u32> s_next_owner_id = {1}; // 0 is reserved for "unassigned"
+    u32 const id = s_next_owner_id.fetch_add(1, cc::memory_order_relaxed);
     CC_ASSERT(id != 0, "node owner-id space exhausted (>4B threads ever); cross-thread-free after "
                        "thread-exit is unsupported");
     return id;
 }
 
-cc::isize cc::impl::node_orphan_slab_count()
+isize cc::impl::node_orphan_slab_count()
 {
-    cc::isize count = 0;
-    for (cc::isize ci = 0; ci < cc::isize(cc::node_class_index::small_count); ++ci)
+    isize count = 0;
+    for (isize ci = 0; ci < isize(cc::node_class_index::small_count); ++ci)
     {
         auto& bin = s_orphans[ci];
         bin.lock();
-        for (cc::byte* s = bin.head; s != nullptr; s = cc::node_slab_next_for_base(s))
+        for (byte* s = bin.head; s != nullptr; s = cc::node_slab_next_for_base(s))
             ++count;
         bin.unlock();
     }
@@ -386,7 +384,7 @@ cc::isize cc::impl::node_orphan_slab_count()
 }
 #endif
 
-void cc::node_allocation_free_large(cc::byte* ptr, node_class_index idx)
+void cc::node_allocation_free_large(byte* ptr, node_class_index idx)
 {
     CC_ASSERT(cc::is_aligned(ptr, 8), "large node allocations must be at least 8-byte aligned");
 
@@ -398,14 +396,14 @@ void cc::node_allocation_free_large(cc::byte* ptr, node_class_index idx)
     resource->deallocate_node_bytes_large(ptr, idx, resource->userdata);
 }
 
-cc::byte* cc::node_allocator::allocate_node_bytes_large(node_class_index idx, isize size_bytes, isize alignment)
+byte* cc::node_allocator::allocate_node_bytes_large(node_class_index idx, isize size_bytes, isize alignment)
 {
     CC_ASSERT(_resource != nullptr, "node_allocator must have a valid resource");
     CC_ASSERT(_resource->allocate_node_bytes_large != nullptr, "resource must implement allocate_node_bytes_large");
     return _resource->allocate_node_bytes_large(idx, size_bytes, alignment, _resource->userdata);
 }
 
-cc::byte* cc::node_allocator::refill_slabs_and_allocate_node_bytes(node_class_index idx)
+byte* cc::node_allocator::refill_slabs_and_allocate_node_bytes(node_class_index idx)
 {
     CC_ASSERT(_resource != nullptr, "node_allocator must have a valid resource");
     CC_ASSERT(_resource->refill_slabs_and_allocate_node_bytes != nullptr, "resource must implement "
@@ -413,7 +411,7 @@ cc::byte* cc::node_allocator::refill_slabs_and_allocate_node_bytes(node_class_in
     return _resource->refill_slabs_and_allocate_node_bytes(_slabs, idx, _resource->userdata);
 }
 
-cc::byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
+byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
 {
     // rare, gated trim: return surplus fully-free slabs (from a past watermark) to the backing resource.
     // cold path only, so the hot alloc/free codegen is unchanged; a stable working set never trims (no slab

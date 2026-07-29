@@ -218,7 +218,26 @@ def build_policy() -> cmd.Policy:
 # Argument parsing & dispatch
 # ---------------------------------------------------------------------------
 
+def _force_utf8_streams() -> None:
+    """Make dev.py's own stdout/stderr UTF-8, however they are attached.
+
+    Everything on both ends of this process is UTF-8: the tools we run set their console to CP_UTF8, the
+    child pipes are decoded as UTF-8, and the run logs are written as UTF-8. Python's own streams are the
+    one link that is not — attached to a Windows console they go through the console API and take any
+    character, but *redirected* they fall back to the locale encoding (cp1252 here), and a single source
+    line containing e.g. `⊍` then raises UnicodeEncodeError mid-mirror. `errors="replace"` is the second
+    belt: a stream we cannot reconfigure at all still degrades to `?` rather than throwing.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass # not a reconfigurable text stream (a redirect in a test harness, a closed stream)
+
+
 def main() -> None:
+    _force_utf8_streams()
+
     parser = argparse.ArgumentParser(
         description="shaped-core build & test CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -74,17 +74,16 @@ protected:
     friend class command_list_raster_manual_scope;
     friend class rendering_scope;
 
-    virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<cc::byte const> data, cc::isize offset_in_bytes)
-        = 0;
+    virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) = 0;
 
     virtual void upload_bytes_to_texture(raw_texture_handle texture,
-                                         cc::span<cc::byte const> pixels,
+                                         cc::span<byte const> pixels,
                                          subresource_index const& subresource,
                                          texture_region const& region) = 0;
 
     [[nodiscard]] virtual bytes_future download_bytes_from_buffer(raw_buffer_handle buffer,
-                                                                  cc::isize offset_in_bytes,
-                                                                  cc::isize size_in_bytes) = 0;
+                                                                  isize offset_in_bytes,
+                                                                  isize size_in_bytes) = 0;
 
     [[nodiscard]] virtual bytes_future download_bytes_from_texture(raw_texture_handle texture,
                                                                    subresource_index const& subresource,
@@ -92,14 +91,14 @@ protected:
 
     virtual void copy_buffer_region(raw_buffer_handle src,
                                     raw_buffer_handle dst,
-                                    cc::isize src_offset_in_bytes,
-                                    cc::isize dst_offset_in_bytes,
-                                    cc::isize size_in_bytes) = 0;
+                                    isize src_offset_in_bytes,
+                                    isize dst_offset_in_bytes,
+                                    isize size_in_bytes) = 0;
 
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
     virtual void compute_bind_group(int set, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;
-    virtual void compute_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) = 0;
+    virtual void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
 
     // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
     // Split by resource family: buffers carry no layout, textures do.
@@ -127,7 +126,7 @@ protected:
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
     virtual void raster_set_stencil_reference(u32 reference) = 0;
     virtual void raster_set_blend_constants(tg::vec4f constants) = 0;
-    virtual void raster_set_inline_constants(cc::span<cc::byte const> data, cc::optional<cc::isize> offset) = 0;
+    virtual void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
     virtual void raster_draw(draw_config const& config) = 0;
     virtual void raster_draw_indexed(draw_indexed_config const& config) = 0;
 

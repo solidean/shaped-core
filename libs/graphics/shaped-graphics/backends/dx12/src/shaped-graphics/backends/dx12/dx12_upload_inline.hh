@@ -21,11 +21,11 @@ public:
 
     /// Creates + persistently maps the UPLOAD ring buffer (capacity bytes, > 0). Called once during
     /// context bring-up. Returns a dx12 error if the resource or mapping could not be created.
-    [[nodiscard]] cc::result<cc::unit> initialize(cc::isize capacity);
+    [[nodiscard]] cc::result<cc::unit> initialize(isize capacity);
 
     /// Stages `data` into `dst` at `dst_offset`, recording the copy into `cmd`. Synchronous: the
     /// source bytes are consumed before returning. Empty `data` is a no-op.
-    void upload_buffer(dx12_command_list& cmd, dx12_buffer const& dst, cc::span<cc::byte const> data, cc::isize dst_offset);
+    void upload_buffer(dx12_command_list& cmd, dx12_buffer const& dst, cc::span<byte const> data, isize dst_offset);
 
     /// Stages one texture region's tightly-packed `data` into `dst` per `fp`, recording CopyTextureRegion(s)
     /// into `cmd`. The region is packed into 512-aligned ring windows row/slice-wise, so a region larger than
@@ -35,7 +35,7 @@ public:
     void upload_texture(dx12_command_list& cmd,
                         ID3D12Resource* dst,
                         dx12_texture_footprint const& fp,
-                        cc::span<cc::byte const> data);
+                        cc::span<byte const> data);
 
     /// Snapshots the ring cursor as the end-of-epoch boundary for `closed` (called at advance).
     void on_epoch_advance(sg::epoch closed);
@@ -44,7 +44,7 @@ public:
     void on_epochs_completed(sg::epoch completed);
 
     /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
-    void set_budget(cc::isize capacity);
+    void set_budget(isize capacity);
 
     /// Applies a pending set_budget at an epoch boundary: drains every in-flight epoch (so no GPU work
     /// still reads the ring), then reallocates it at the new capacity. No-op if nothing is pending.
@@ -61,43 +61,43 @@ public:
     /// A snapshot of the ring's logical cursors and physical capacity.
     struct debug_cursor_snapshot
     {
-        cc::u64 next_pos = 0;
-        cc::u64 freed_pos = 0;
-        cc::isize capacity = 0;
+        u64 next_pos = 0;
+        u64 freed_pos = 0;
+        isize capacity = 0;
     };
     [[nodiscard]] debug_cursor_snapshot debug_cursor();
 
     /// Repositions the logical cursor at `pos` (so the next reserve starts at physical `pos % capacity`)
     /// on an already-drained ring: sets next_pos == freed_pos == pos and clears checkpoints, so the ring
     /// reads as empty at that seam-relative position. Call only after a full drain.
-    void debug_set_cursor(cc::u64 pos);
+    void debug_set_cursor(u64 pos);
 
 private:
     /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
     /// returns its start cursor; the caller walks it, handing a resumable job to-seam windows (offset
     /// `cursor % capacity`, size to the seam). `total` must fit the capacity. Blocks (retiring in-flight
     /// epochs) when the space is still held by earlier epochs.
-    cc::u64 reserve_span(cc::isize total);
+    u64 reserve_span(isize total);
 
     dx12_context& _ctx;
 
     ComPtr<ID3D12Resource> _buffer;
-    cc::byte* _mapped = nullptr;
-    cc::isize _capacity = 0;
+    byte* _mapped = nullptr;
+    isize _capacity = 0;
 
     /// A logical end-cursor snapshot for a closed epoch; its space frees once the epoch retires.
     struct epoch_checkpoint
     {
         sg::epoch epoch_id = sg::epoch::invalid;
-        cc::u64 end_pos = 0;
+        u64 end_pos = 0;
     };
 
     struct ring_state
     {
-        cc::u64 next_pos = 0;                     // logical bump cursor over the u64 space
-        cc::u64 freed_pos = 0;                    // everything logically below this is reclaimable
+        u64 next_pos = 0;                         // logical bump cursor over the u64 space
+        u64 freed_pos = 0;                        // everything logically below this is reclaimable
         cc::vector<epoch_checkpoint> checkpoints; // FIFO, oldest epoch at the front
-        cc::isize pending_capacity = 0;           // a set_budget awaiting the next epoch boundary (0 = none)
+        isize pending_capacity = 0;               // a set_budget awaiting the next epoch boundary (0 = none)
     };
     cc::mutex<ring_state> _ring;
 };

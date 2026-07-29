@@ -13,12 +13,15 @@
 
 namespace cc_stream_test
 {
-inline cc::byte b(int v)
+// Vocabulary types (i32/u32/u64/isize/byte/...) available bare inside cc_stream_test, not leaked globally.
+using namespace cc::primitive_defines;
+
+inline byte b(int v)
 {
-    return cc::byte(v);
+    return byte(v);
 }
 
-inline bool bytes_equal(cc::span<cc::byte const> a, cc::span<cc::byte const> b)
+inline bool bytes_equal(cc::span<byte const> a, cc::span<byte const> b)
 {
     if (a.size() != b.size())
         return false;
@@ -31,7 +34,7 @@ inline bool bytes_equal(cc::span<cc::byte const> a, cc::span<cc::byte const> b)
 class mock_pipe_read_stream_adapter
 {
 public:
-    mock_pipe_read_stream_adapter(cc::span<cc::byte const> data, cc::isize chunk) : _data(data), _chunk(chunk) {}
+    mock_pipe_read_stream_adapter(cc::span<byte const> data, isize chunk) : _data(data), _chunk(chunk) {}
 
     mock_pipe_read_stream_adapter(mock_pipe_read_stream_adapter&&) = delete; // pinned: the stream borrows _buffer
     mock_pipe_read_stream_adapter& operator=(mock_pipe_read_stream_adapter&&) = delete;
@@ -39,39 +42,39 @@ public:
     [[nodiscard]] cc::read_stream stream() { return cc::read_stream(_buffer, _buffer, &impl_flush, this); }
 
 private:
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& /*write_end*/, // aliases end for a read-only stream
-                                          void* ctx,
-                                          cc::i64 offset,
-                                          cc::seek_dir dir,
-                                          cc::byte* /*first_write*/)
+    static cc::result<i64> impl_flush(byte*& curr,
+                                      byte*& end,
+                                      byte*& /*write_end*/, // aliases end for a read-only stream
+                                      void* ctx,
+                                      i64 offset,
+                                      cc::seek_dir dir,
+                                      byte* /*first_write*/)
     {
         auto& self = *static_cast<mock_pipe_read_stream_adapter*>(ctx);
         if (!(dir == cc::seek_dir::relative && offset == 0))
-            return cc::i64(-1); // not seekable
+            return i64(-1); // not seekable
 
-        cc::byte* const base = self._buffer;
-        cc::isize const leftover = cc::isize(end - curr);
+        byte* const base = self._buffer;
+        isize const leftover = isize(end - curr);
         std::memmove(base, curr, size_t(leftover));
 
-        cc::isize const room = cc::isize(sizeof(self._buffer)) - leftover;
-        cc::isize const want = cc::min(self._chunk, room);
-        cc::isize const avail = self._data.size() - self._pos;
-        cc::isize const n = cc::min(want, avail);
+        isize const room = isize(sizeof(self._buffer)) - leftover;
+        isize const want = cc::min(self._chunk, room);
+        isize const avail = self._data.size() - self._pos;
+        isize const n = cc::min(want, avail);
         if (n > 0)
             std::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
         self._pos += n;
 
         curr = base;
         end = base + leftover + n;
-        return cc::i64(-1); // a pipe has no meaningful position
+        return i64(-1); // a pipe has no meaningful position
     }
 
-    cc::span<cc::byte const> _data;
-    cc::isize _chunk;
-    cc::isize _pos = 0;
-    cc::byte _buffer[64];
+    cc::span<byte const> _data;
+    isize _chunk;
+    isize _pos = 0;
+    byte _buffer[64];
 };
 
 /// A non-seekable in-memory WRITE sink that records every write-through range it is handed, so tests can
@@ -85,38 +88,38 @@ public:
 
     [[nodiscard]] cc::write_stream stream() { return cc::write_stream(_buffer, _buffer + k_cap, &impl_flush, this); }
 
-    [[nodiscard]] cc::span<cc::byte const> written() const { return _sink; }
+    [[nodiscard]] cc::span<byte const> written() const { return _sink; }
     [[nodiscard]] int flushes_with_pending() const { return _flushes_with_pending; }
 
 private:
-    static constexpr cc::isize k_cap = 64;
+    static constexpr isize k_cap = 64;
 
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& /*write_end*/, // aliases end for a write-only stream
-                                          void* ctx,
-                                          cc::i64 offset,
-                                          cc::seek_dir dir,
-                                          cc::byte* first_write)
+    static cc::result<i64> impl_flush(byte*& curr,
+                                      byte*& end,
+                                      byte*& /*write_end*/, // aliases end for a write-only stream
+                                      void* ctx,
+                                      i64 offset,
+                                      cc::seek_dir dir,
+                                      byte* first_write)
     {
         auto& self = *static_cast<recording_write_stream_adapter*>(ctx);
         if (!(dir == cc::seek_dir::relative && offset == 0))
-            return cc::i64(-1); // not seekable
+            return i64(-1); // not seekable
 
         if (first_write != nullptr && curr > first_write)
         {
-            for (cc::byte* p = first_write; p != curr; ++p)
+            for (byte* p = first_write; p != curr; ++p)
                 self._sink.push_back(*p);
             ++self._flushes_with_pending;
         }
         curr = self._buffer;
         end = self._buffer + k_cap;
-        return cc::i64(-1);
+        return i64(-1);
     }
 
-    cc::vector<cc::byte> _sink;
+    cc::vector<byte> _sink;
     int _flushes_with_pending = 0;
-    cc::byte _buffer[k_cap];
+    byte _buffer[k_cap];
 };
 
 /// A read_write adapter whose read boundary and write capacity are deliberately DIFFERENT: a flush hands out
@@ -126,9 +129,9 @@ private:
 class mock_split_bounds_read_write_adapter
 {
 public:
-    static constexpr cc::isize k_cap = 16;
+    static constexpr isize k_cap = 16;
 
-    explicit mock_split_bounds_read_write_adapter(cc::isize readable) : _readable(readable) {}
+    explicit mock_split_bounds_read_write_adapter(isize readable) : _readable(readable) {}
 
     mock_split_bounds_read_write_adapter(mock_split_bounds_read_write_adapter&&) = delete; // pinned: borrowed _buffer
     mock_split_bounds_read_write_adapter& operator=(mock_split_bounds_read_write_adapter&&) = delete;
@@ -136,25 +139,20 @@ public:
     [[nodiscard]] cc::read_write_stream stream() { return cc::read_write_stream(_buffer, _buffer, &impl_flush, this); }
 
 private:
-    static cc::result<cc::i64> impl_flush(cc::byte*& curr,
-                                          cc::byte*& end,
-                                          cc::byte*& write_end,
-                                          void* ctx,
-                                          cc::i64 offset,
-                                          cc::seek_dir dir,
-                                          cc::byte* /*first_write*/)
+    static cc::result<i64>
+    impl_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 offset, cc::seek_dir dir, byte* /*first_write*/)
     {
         auto& self = *static_cast<mock_split_bounds_read_write_adapter*>(ctx);
         if (!(dir == cc::seek_dir::relative && offset == 0))
-            return cc::i64(-1); // not seekable
+            return i64(-1); // not seekable
 
         curr = self._buffer;
         end = self._buffer + self._readable; // only the filled prefix is readable
         write_end = self._buffer + k_cap;    // ... but the whole buffer can be written
-        return cc::i64(-1);
+        return i64(-1);
     }
 
-    cc::isize _readable;
-    cc::byte _buffer[k_cap] = {};
+    isize _readable;
+    byte _buffer[k_cap] = {};
 };
 } // namespace cc_stream_test

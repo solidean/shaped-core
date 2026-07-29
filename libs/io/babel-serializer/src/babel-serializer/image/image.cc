@@ -35,21 +35,21 @@ isize image::row_stride() const
     return isize(width) * isize(channels) * isize(bytes_per_component());
 }
 
-cc::result<format> detect_format(cc::span<cc::byte const> bytes)
+cc::result<format> detect_format(cc::span<byte const> bytes)
 {
     // PNG opens with the 8-byte signature; the first four bytes are enough to disambiguate.
-    if (bytes.size() >= 4 && bytes[0] == cc::byte(0x89) && bytes[1] == cc::byte(0x50) && bytes[2] == cc::byte(0x4E)
-        && bytes[3] == cc::byte(0x47))
+    if (bytes.size() >= 4 && bytes[0] == byte(0x89) && bytes[1] == byte(0x50) && bytes[2] == byte(0x4E)
+        && bytes[3] == byte(0x47))
         return format::png;
 
     // JPEG opens with the SOI marker FF D8.
-    if (bytes.size() >= 2 && bytes[0] == cc::byte(0xFF) && bytes[1] == cc::byte(0xD8))
+    if (bytes.size() >= 2 && bytes[0] == byte(0xFF) && bytes[1] == byte(0xD8))
         return format::jpg;
 
     return cc::error("image: unrecognized format (magic bytes match neither PNG nor JPEG)");
 }
 
-cc::result<image> read(cc::span<cc::byte const> bytes)
+cc::result<image> read(cc::span<byte const> bytes)
 {
     auto fmt = detect_format(bytes);
     CC_RETURN_IF_ERROR(fmt);
@@ -86,7 +86,7 @@ cc::result<image> read(cc::read_stream& in)
     return read(bytes.value());
 }
 
-cc::result<cc::vector<cc::byte>> encode(image const& img, format fmt, write_options opts)
+cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts)
 {
     if (img.is_empty())
         return cc::error("image encode: empty image");

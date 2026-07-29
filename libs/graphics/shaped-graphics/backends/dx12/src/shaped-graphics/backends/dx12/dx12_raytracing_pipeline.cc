@@ -66,7 +66,7 @@ struct library_builder
     {
         size_t const lib_index = acquire_library(shader);
         std::wstring const entry = widen(shader.entry_point);
-        auto& exports = libraries[cc::isize(lib_index)].exports;
+        auto& exports = libraries[isize(lib_index)].exports;
         for (size_t i = 0; i < size_t(exports.size()); ++i)
             if (exports[i].entry_point == entry)
                 return {lib_index, i};
@@ -77,7 +77,7 @@ struct library_builder
 
     [[nodiscard]] wchar_t const* export_name(export_ref ref) const
     {
-        return libraries[cc::isize(ref.lib_index)].exports[cc::isize(ref.export_index)].export_name.c_str();
+        return libraries[isize(ref.lib_index)].exports[isize(ref.export_index)].export_name.c_str();
     }
 };
 
@@ -129,7 +129,7 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
         miss_refs.push_back(builder.acquire_export(s));
     for (auto const& s : desc.callable_shaders)
         callable_refs.push_back(builder.acquire_export(s));
-    for (cc::isize i = 0; i < desc.hit_shaders.size(); ++i)
+    for (isize i = 0; i < desc.hit_shaders.size(); ++i)
     {
         auto const& h = desc.hit_shaders[i];
         hit_group_build hg;
@@ -151,12 +151,12 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
     // Reserve to exact capacity: `exports` is pointed into by pExports, and `dxil_libraries` / `hit_groups`
     // by the subobjects — a reallocation would dangle those pointers.
     cc::vector<D3D12_EXPORT_DESC> exports;
-    exports.reserve(cc::isize(total_exports));
+    exports.reserve(isize(total_exports));
     cc::vector<D3D12_DXIL_LIBRARY_DESC> dxil_libraries;
     dxil_libraries.reserve(builder.libraries.size());
     for (auto const& lib : builder.libraries)
     {
-        cc::isize const first_export = exports.size();
+        isize const first_export = exports.size();
         for (auto const& e : lib.exports)
             exports.push_back(D3D12_EXPORT_DESC{.Name = e.export_name.c_str(),
                                                 .ExportToRename = e.entry_point.c_str(),
@@ -263,7 +263,7 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
     return dx12_raytracing_pipeline_handle(cc::move(pipeline));
 }
 
-cc::pinned_data<cc::byte const> dx12_raytracing_pipeline::cached_pipeline_data() const
+cc::pinned_data<byte const> dx12_raytracing_pipeline::cached_pipeline_data() const
 {
     // TODO: serialize the state object (ID3D12StateObjectProperties has no GetCachedBlob equivalent; would
     // need collection state objects / add-to-state-object). Empty until then.

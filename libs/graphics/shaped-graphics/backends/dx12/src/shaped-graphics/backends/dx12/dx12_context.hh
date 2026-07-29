@@ -38,20 +38,20 @@ struct dx12_config
     bool use_warp = false;
 
     /// Capacity of the inline UPLOAD ring buffer, in bytes. Bounds the per-epoch inline upload volume.
-    cc::isize upload_ring_bytes = cc::isize(16) * 1024 * 1024;
+    isize upload_ring_bytes = isize(16) * 1024 * 1024;
 
     /// Capacity of the inline READBACK ring buffer, in bytes. Bounds the in-flight inline download volume.
-    cc::isize download_ring_bytes = cc::isize(16) * 1024 * 1024;
+    isize download_ring_bytes = isize(16) * 1024 * 1024;
 
     /// Size of one async-upload staging window, in bytes. The staging buffer is triple-buffered (three
     /// of these), so CPU memcpy and GPU copy overlap; an upload larger than a window packs across
     /// successive windows. Bigger windows amortize submits; smaller ones cut latency and memory.
-    cc::isize async_upload_window_bytes = cc::isize(16) * 1024 * 1024;
+    isize async_upload_window_bytes = isize(16) * 1024 * 1024;
 
     /// Size of one async-download (readback) staging window, in bytes. Triple-buffered like the upload
     /// window; a read larger than a window packs across successive windows. Bigger windows amortize
     /// submits; smaller ones cut latency and memory.
-    cc::isize async_download_window_bytes = cc::isize(16) * 1024 * 1024;
+    isize async_download_window_bytes = isize(16) * 1024 * 1024;
 
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
     int descriptor_heap_capacity = 1 << 16;
@@ -101,12 +101,12 @@ public:
     // backend-typed API — prefer these when you already hold a dx12_context
 
     [[nodiscard]] cc::result<std::unique_ptr<dx12_command_list>> create_dx12_command_list();
-    [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(cc::isize size_in_bytes,
+    [[nodiscard]] cc::result<dx12_buffer_handle> create_dx12_buffer(isize size_in_bytes,
                                                                     sg::buffer_usage usage,
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
-    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(cc::isize size_in_bytes);
+    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes);
     [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
@@ -128,7 +128,7 @@ public:
     [[nodiscard]] cc::result<dx12_compute_pipeline_handle> create_dx12_compute_pipeline(
         sg::compiled_shader const& shader,
         dx12_pipeline_layout_handle layout,
-        cc::span<cc::byte const> cached_pipeline,
+        cc::span<byte const> cached_pipeline,
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_raster_pipeline_handle> create_dx12_raster_pipeline(
         sg::raster_pipeline_description const& desc,
@@ -169,7 +169,7 @@ public:
                                          "create_command_list");
     }
 
-    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(cc::isize size_in_bytes,
+    [[nodiscard]] cc::result<sg::raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
                                                                           sg::buffer_usage usage,
                                                                           sg::allocation_info const& alloc) override
     {
@@ -184,7 +184,7 @@ public:
                                          "create_raw_texture");
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(cc::isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
     {
         return note_device_loss_on_error(cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes)),
                                          "create_memory_heap");
@@ -236,7 +236,7 @@ private:
             reason = _device->GetDeviceRemovedReason();
         if (reason == S_OK)
             return false;
-        mark_device_lost(cc::format("{} (device removed, reason=0x{:08X})", what, cc::u32(reason)));
+        mark_device_lost(cc::format("{} (device removed, reason=0x{:08X})", what, u32(reason)));
         return true;
     }
 
@@ -267,14 +267,14 @@ public:
     // Reached through ctx.upload — async CPU→GPU buffer streaming on the copy queue. Forwards to the
     // async upload system; later direct-queue lists reading the buffer auto-wait on the copy.
     void async_upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
-                                      cc::pinned_data<cc::byte const> data,
-                                      cc::isize offset_in_bytes) override
+                                      cc::pinned_data<byte const> data,
+                                      isize offset_in_bytes) override
     {
         _upload_async.upload_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
     }
 
     void async_upload_bytes_to_texture(sg::raw_texture_handle texture,
-                                       cc::pinned_data<cc::byte const> data,
+                                       cc::pinned_data<byte const> data,
                                        sg::subresource_index const& subresource,
                                        sg::texture_region const& region) override
     {
@@ -284,8 +284,8 @@ public:
     // Reached through ctx.download — async GPU→CPU buffer readback on the copy queue. Forwards to the async
     // download system; a later direct-queue list writing the buffer auto-waits on the read.
     [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
-                                                                    cc::isize offset_in_bytes,
-                                                                    cc::isize size_in_bytes) override
+                                                                    isize offset_in_bytes,
+                                                                    isize size_in_bytes) override
     {
         return _download_async.download_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
     }
@@ -299,10 +299,10 @@ public:
 
     // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
     // change on the owning system, applied at a later safe point (see the systems + advance_epoch).
-    void set_async_upload_window_bytes(cc::isize bytes) override { _upload_async.set_window_bytes(bytes); }
-    void set_async_download_window_bytes(cc::isize bytes) override { _download_async.set_window_bytes(bytes); }
-    void set_inline_upload_budget(cc::isize bytes) override { _upload_inline.set_budget(bytes); }
-    void set_inline_download_budget(cc::isize bytes) override { _download_inline.set_budget(bytes); }
+    void set_async_upload_window_bytes(isize bytes) override { _upload_async.set_window_bytes(bytes); }
+    void set_async_download_window_bytes(isize bytes) override { _download_async.set_window_bytes(bytes); }
+    void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
+    void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
 
     /// Drives all three copy actors one cycle each. Only does anything when they have no thread of their
     /// own; see sg::context::pump_transfers. Every actor is pumped (no short-circuit): they are

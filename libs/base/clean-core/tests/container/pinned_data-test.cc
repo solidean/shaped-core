@@ -6,11 +6,13 @@
 
 #include <memory>
 
+using namespace cc::primitive_defines;
+
 TEST("pinned_data - basic access")
 {
     auto const pd = cc::pinned_data<int>::create_filled(4, 7);
     CHECK(pd.size() == 4);
-    CHECK(pd.size_bytes() == 4 * cc::isize(sizeof(int)));
+    CHECK(pd.size_bytes() == 4 * isize(sizeof(int)));
     CHECK(!pd.empty());
     CHECK(pd.data() != nullptr);
     CHECK(pd[0] == 7);
@@ -181,13 +183,13 @@ TEST("pinned_data - reinterpret")
 {
     SECTION("as_bytes shares the owner and outlives the source")
     {
-        cc::pinned_data<cc::byte const> bytes;
+        cc::pinned_data<byte const> bytes;
         {
             auto const pd = cc::pinned_data<int>::create_filled(2, 0);
             bytes = pd.as_bytes();
             // pd dropped here; bytes must keep the buffer alive via the shared owner
         }
-        CHECK(bytes.size() == 2 * cc::isize(sizeof(int)));
+        CHECK(bytes.size() == 2 * isize(sizeof(int)));
     }
 
     SECTION("reinterpret_as to smaller type")
@@ -202,13 +204,13 @@ TEST("pinned_data - reinterpret")
         auto pd = cc::pinned_data<int>::create_filled(1, 0);
         auto const bytes = pd.as_mutable_bytes();
         for (auto& b : bytes)
-            b = cc::byte{0xFF};
+            b = byte{0xFF};
         CHECK(pd[0] == -1);
     }
 
     SECTION("try_reinterpret_as")
     {
-        auto const pd = cc::pinned_data<cc::byte>::create_defaulted(8);
+        auto const pd = cc::pinned_data<byte>::create_defaulted(8);
         CHECK(pd.try_reinterpret_as<int>().has_value());
         CHECK(!pd.subdata({.offset = 0, .size = 5}).try_reinterpret_as<int>().has_value());
     }

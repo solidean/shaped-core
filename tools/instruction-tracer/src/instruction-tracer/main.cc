@@ -20,6 +20,8 @@
 
 #include <filesystem> // file_size: clean-core has no filesystem-metadata API
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 // 0 = traced something, 1 = bad usage / launch failure, 2 = the target never resolved.
@@ -64,11 +66,11 @@ cc::string os_version_string()
     return cc::format("{} {}.{}.{}", name, vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber);
 }
 
-cc::u64 file_size_of(cc::string_view path)
+u64 file_size_of(cc::string_view path)
 {
     std::error_code ec;
     auto const n = std::filesystem::file_size(std::filesystem::path(std::string(path.data(), size_t(path.size()))), ec);
-    return ec ? 0 : cc::u64(n);
+    return ec ? 0 : u64(n);
 }
 
 cc::result<cc::unit> write_text_file(cc::string_view path, cc::string_view content)
@@ -97,17 +99,17 @@ cc::vector<itrace::mca_result> gather_mca(cc::span<itrace::trace const> traces, 
             if (run.ran && !run.json.empty())
             {
                 auto const dropped = itrace::parse_mca_dropped_lines(run.stderr_text);
-                cc::vector<cc::u32> surviving;
-                for (cc::u32 k = 0; k < in.fed_trace_indices.size(); ++k)
+                cc::vector<u32> surviving;
+                for (u32 k = 0; k < in.fed_trace_indices.size(); ++k)
                 {
                     bool is_dropped = false;
-                    for (cc::u32 const d : dropped)
+                    for (u32 const d : dropped)
                         if (d == k)
                             is_dropped = true;
                     if (!is_dropped)
                         surviving.push_back(in.fed_trace_indices[k]);
                 }
-                r = itrace::parse_mca_json(run.json, surviving, cc::u32(t.instructions.size()));
+                r = itrace::parse_mca_json(run.json, surviving, u32(t.instructions.size()));
             }
         }
         results.push_back(cc::move(r));
@@ -231,7 +233,7 @@ int run(itrace::options const& opts)
         fmt.register_diffs = opts.register_diffs;
 
         itrace::source_cache sources;
-        auto const total = cc::u32(traces.value().size());
+        auto const total = u32(traces.value().size());
         for (auto const& t : traces.value())
         {
             cc::print(itrace::format_trace(t, total, fmt, sources));
@@ -275,7 +277,7 @@ int run(itrace::options const& opts)
 
 int main(int argc, char const* const* argv)
 {
-    auto opts = itrace::parse_options(cc::span<char const* const>(argv, cc::isize(argc)));
+    auto opts = itrace::parse_options(cc::span<char const* const>(argv, isize(argc)));
 
     // Resolve color before the first byte of output, including the usage error below. A parse
     // failure has no options to read, so that path auto-detects.

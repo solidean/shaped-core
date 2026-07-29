@@ -2,6 +2,8 @@
 #include <nexus/bench/bench.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // Verifies the nexus/bench hardware-counter API end to end.
 //
 // It must pass on the virtualized GitHub-hosted CI runners (where the PMU is hidden — only the baseline is
@@ -12,13 +14,13 @@
 namespace
 {
 // A sink the workload writes through so the optimizer cannot delete the measured loop.
-cc::u64 volatile s_bench_sink = 0;
+u64 volatile s_bench_sink = 0;
 
 // A small, data-dependent workload with branches and memory traffic — enough to move every counter.
-void run_workload(cc::u64 iterations)
+void run_workload(u64 iterations)
 {
-    auto state = cc::u64(0x1234'5678'9abc'def0);
-    for (auto i = cc::u64(0); i < iterations; ++i)
+    auto state = u64(0x1234'5678'9abc'def0);
+    for (auto i = u64(0); i < iterations; ++i)
     {
         state = state * 6364136223846793005ull + 1442695040888963407ull;
         if ((state & 0x3f) == 0) // a hard-to-predict branch

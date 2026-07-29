@@ -4,6 +4,7 @@
 #include <clean-core/container/key_value_cache.hh>
 #include <shaped-graphics/fwd.hh> // sg::async_compiled_shader
 #include <shaped-shader-compiler-dxc/compile_options.hh>
+#include <shaped-shader-compiler-dxc/fwd.hh> // also what puts the bare sized aliases in scope inside ssc::dxc
 #include <shaped-shader-compiler-dxc/shader_description.hh>
 
 #include <memory>
@@ -26,7 +27,7 @@ public:
     void add_provider(std::shared_ptr<cc::key_value_provider<cc::hash128, sg::async_compiled_shader>> provider);
 
     /// Convenience: append a default in-memory tier holding up to max_entries compiled shaders.
-    void add_default_in_memory_provider(cc::isize max_entries = 4096);
+    void add_default_in_memory_provider(isize max_entries = 4096);
 
     /// The async compiled shader for (desc, options), reusing a cached node if present. Drive with
     /// cc::async_blocking_get_singlethreaded(sh) or poll sh->try_value() (yields sg::compiled_shader_handle); on a

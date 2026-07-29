@@ -45,7 +45,7 @@ dx12_descriptor_alloc dx12_descriptor_heap::allocate_persistent(int count)
         [&](cc::vector<free_range>& f) -> dx12_descriptor_alloc
         {
             // First fit: carve `count` off the front of the first span large enough.
-            for (cc::isize i = 0; i < f.size(); ++i)
+            for (isize i = 0; i < f.size(); ++i)
             {
                 if (f[i].count < count)
                     continue;
@@ -73,7 +73,7 @@ void dx12_descriptor_heap::free_persistent(dx12_descriptor_alloc alloc)
         {
             // Append, then bubble into its sorted-by-start position (the list stays small).
             f.push_back(free_range{offset, count});
-            cc::isize pos = f.size() - 1;
+            isize pos = f.size() - 1;
             while (pos > 0 && f[pos - 1].start > f[pos].start)
             {
                 free_range const tmp = f[pos - 1];
@@ -112,15 +112,15 @@ dx12_descriptor_alloc dx12_descriptor_heap::allocate_transient(int count)
         cc::optional<int> slot = transient_ring.lock(
             [&](ring_state& s) -> cc::optional<int>
             {
-                cc::u64 start = s.next_pos;
-                int offset = int(start % cc::u64(transient_capacity));
+                u64 start = s.next_pos;
+                int offset = int(start % u64(transient_capacity));
                 if (offset + count > transient_capacity) // a table must be contiguous: waste the tail, restart at 0
                 {
-                    start += cc::u64(transient_capacity - offset);
+                    start += u64(transient_capacity - offset);
                     offset = 0;
                 }
-                cc::u64 const end = start + cc::u64(count);
-                if (end - s.freed_pos > cc::u64(transient_capacity)) // slots still held by in-flight epochs
+                u64 const end = start + u64(count);
+                if (end - s.freed_pos > u64(transient_capacity)) // slots still held by in-flight epochs
                     return {};
                 s.next_pos = end;
                 return offset; // transient region starts at heap offset 0
@@ -147,10 +147,10 @@ void dx12_descriptor_heap::on_epochs_completed(sg::epoch completed)
     transient_ring.lock(
         [&](ring_state& s)
         {
-            cc::isize retired = 0;
+            isize retired = 0;
             for (auto const& cp : s.checkpoints)
             {
-                if (cc::u64(cp.epoch_id) > cc::u64(completed))
+                if (u64(cp.epoch_id) > u64(completed))
                     break;
                 s.freed_pos = cp.end_pos; // checkpoints are monotonic in epoch and end_pos
                 ++retired;

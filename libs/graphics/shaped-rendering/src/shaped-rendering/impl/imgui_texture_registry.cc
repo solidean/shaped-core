@@ -66,7 +66,7 @@ void imgui_texture_registry::create_texture(sg::context& ctx, ImTextureData* tex
     // A freshly built atlas is already tightly packed, so the whole-texture upload needs no repacking —
     // but ctx.upload is fire-and-forget and holds the pin until the copy runs,
     // so the bytes must be owned rather than borrowed from imgui, which may free them once the status goes OK.
-    auto const pixels = pack_texture_rect(reinterpret_cast<cc::byte const*>(tex->GetPixels()), tex->GetPitch(),
+    auto const pixels = pack_texture_rect(reinterpret_cast<byte const*>(tex->GetPixels()), tex->GetPitch(),
                                           tex->BytesPerPixel, tg::pos2i(0, 0), tg::vec2i(tex->Width, tex->Height));
     ctx.upload.bytes_to_texture(texture.raw(), pixels);
 
@@ -105,8 +105,8 @@ void imgui_texture_registry::update_texture(sg::context& ctx, ImTextureData* tex
         // The upload wants the region tightly packed, but imgui's rect is strided by the whole atlas pitch —
         // so this repacks into the pinned buffer the upload takes ownership of.
         auto const pixels
-            = pack_texture_rect(reinterpret_cast<cc::byte const*>(tex->GetPixels()), tex->GetPitch(),
-                                tex->BytesPerPixel, tg::pos2i(int(r.x), int(r.y)), tg::vec2i(int(r.w), int(r.h)));
+            = pack_texture_rect(reinterpret_cast<byte const*>(tex->GetPixels()), tex->GetPitch(), tex->BytesPerPixel,
+                                tg::pos2i(int(r.x), int(r.y)), tg::vec2i(int(r.w), int(r.h)));
         ctx.upload.bytes_to_texture(
             texture.raw(), pixels, {},
             sg::texture_region{.offset = tg::pos3i(int(r.x), int(r.y), 0), .size = tg::vec3i(int(r.w), int(r.h), 1)});

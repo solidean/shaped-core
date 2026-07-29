@@ -163,7 +163,7 @@ TEST("random - shuffle is a reproducible permutation")
     SECTION("same seed shuffles identically")
     {
         REQUIRE(a.size() == b.size());
-        for (cc::isize i = 0; i < a.size(); ++i)
+        for (isize i = 0; i < a.size(); ++i)
             CHECK(a[i] == b[i]);
     }
 

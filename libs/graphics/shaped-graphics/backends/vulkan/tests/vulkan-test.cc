@@ -1,6 +1,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
+using namespace cc::primitive_defines;
+
 // vulkan backend bring-up test. This is its own binary (shaped-graphics-vulkan-test), built only
 // where the vulkan backend builds (the SDK is present), so it never needs an #ifdef guard. Backend-
 // specific tests live here rather than in the backend-agnostic shaped-graphics-test.
@@ -104,11 +106,11 @@ TEST("sg vulkan - epoch advance and retire")
 
     CHECK(c.current_epoch() == sg::epoch::first);
     // Nothing has finished yet, so the completed epoch is first-1.
-    CHECK(cc::u64(c.completed_epoch()) == cc::u64(sg::epoch::first) - 1);
+    CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
 
     c.advance_epoch_and_wait_for_idle();
-    CHECK(c.current_epoch() == sg::epoch(cc::u64(sg::epoch::first) + 1));
-    CHECK(cc::u64(c.completed_epoch()) >= cc::u64(sg::epoch::first)); // the first epoch is now done
+    CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
+    CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
 
 TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires")

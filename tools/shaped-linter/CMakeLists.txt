@@ -16,6 +16,7 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/parse/parser.cc
 
     src/shaped-linter/rules/default_init_assignment.cc
+    src/shaped-linter/rules/qualified_primitive.cc
     src/shaped-linter/rules/registry.cc
     src/shaped-linter/rules/engine.cc
 
@@ -52,6 +53,7 @@ if(SC_BUILD_TESTS)
         tests/report/renderer-test.cc
 
         tests/rules/default_init_assignment-test.cc
+        tests/rules/qualified_primitive-test.cc
         tests/rules/engine-test.cc
         tests/rules/lint_corpus.cc
         tests/rules/corpus-test.cc

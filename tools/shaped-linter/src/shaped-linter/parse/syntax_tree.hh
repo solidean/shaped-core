@@ -8,12 +8,14 @@
 namespace scl
 {
 /// The node kinds the parser produces. Deliberately tiny: shaped-linter only parses what its rules
-/// need (records and variable declarations), treating everything else as opaque.
+/// need, treating everything else as opaque.
 enum class node_kind : u8
 {
     translation_unit,
     record_definition, // a class/struct/union WITH a body
     variable_declaration,
+    namespace_definition, // a namespace WITH a body; an alias (`namespace A = B;`) produces no node
+    using_directive,      // `using namespace X::Y;` — a using-declaration or a type alias produces no node
 };
 
 enum class record_keyword : u8
@@ -41,8 +43,12 @@ enum class decl_scope : u8
 };
 
 /// One node in the arena tree. Fields are interpreted by `kind`:
-///  - translation_unit / record_definition: `children` are node ids of the records/variables inside.
+///  - translation_unit / record_definition / namespace_definition: `children` are the node ids inside.
 ///  - record_definition: `rec_keyword` and `name` (the record name span; empty if anonymous).
+///  - namespace_definition: `name` (the name AS WRITTEN — `a::b` for `namespace a::b`, empty when
+///    anonymous) and `body` (the `{…}` incl. braces — what a rule tests an offset against).
+///  - using_directive: `name` (the nominated namespace, `cc::primitive_defines`) and `effect` (the
+///    bytes over which the directive is in force: past its `;` to the end of the enclosing scope).
 ///  - variable_declaration: `scope`, `form`, and for brace form `init_span` (the `{…}` incl. braces),
 ///    `init_inner` (strictly between the braces), `name` (the declarator-id span), and `declarator`
 ///    (the declarator-id plus any array suffix — a rewrite replacing the initializer starts at its end).
@@ -54,11 +60,18 @@ struct node
     // record_definition
     record_keyword rec_keyword = record_keyword::struct_;
 
-    // record_definition (record name) OR variable_declaration (declarator-id)
+    // record_definition (record name) OR variable_declaration (declarator-id) OR the name a
+    // namespace_definition / using_directive spells
     source_span name;
 
-    // record_definition / translation_unit
+    // record_definition / translation_unit / namespace_definition
     cc::vector<isize> children; // node ids
+
+    // namespace_definition
+    source_span body;
+
+    // using_directive
+    source_span effect;
 
     // variable_declaration
     decl_scope scope = decl_scope::namespace_scope;

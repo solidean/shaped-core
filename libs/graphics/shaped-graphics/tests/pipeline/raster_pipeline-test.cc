@@ -8,6 +8,8 @@
 
 #include <cstddef> // offsetof
 
+using namespace cc::primitive_defines;
+
 // Pure value-type tests for the raster pipeline's fixed-function vocabulary — no GPU / context needed.
 // The real end-to-end pipeline build + draw runs in the dx12 backend suite (dx12-triangle-test.cc).
 
@@ -41,7 +43,7 @@ TEST("sg - raster vertex_input_layout::create derives one slot per vertex type")
     auto const layout = sg::vertex_input_layout::create<test_vertex>();
 
     REQUIRE(layout.slots.size() == 1);
-    CHECK(layout.slots[0].stride == cc::isize(sizeof(test_vertex)));
+    CHECK(layout.slots[0].stride == isize(sizeof(test_vertex)));
     CHECK(layout.slots[0].per_instance == false);
 
     REQUIRE(layout.attributes.size() == 2);
@@ -51,7 +53,7 @@ TEST("sg - raster vertex_input_layout::create derives one slot per vertex type")
     CHECK(layout.attributes[0].format == sg::vertex_attribute_format::vec3f);
     CHECK(layout.attributes[1].semantic == "COLOR");
     CHECK(layout.attributes[1].slot == 0);
-    CHECK(layout.attributes[1].offset == cc::isize(sizeof(float) * 3));
+    CHECK(layout.attributes[1].offset == isize(sizeof(float) * 3));
 }
 
 TEST("sg - raster vertex_input_layout::create assigns one slot per type in order")

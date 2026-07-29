@@ -7,9 +7,9 @@ using namespace cc::primitive_defines;
 namespace
 {
 // View a C string's characters (excluding the terminator) as raw bytes.
-cc::span<cc::byte const> bytes_of(char const* s, isize n)
+cc::span<byte const> bytes_of(char const* s, isize n)
 {
-    return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(s), n);
+    return cc::span<byte const>(reinterpret_cast<byte const*>(s), n);
 }
 } // namespace
 
@@ -33,7 +33,7 @@ TEST("hash128 - data sensitivity")
 
 TEST("hash128 - empty input is well-defined")
 {
-    cc::span<cc::byte const> const empty;
+    cc::span<byte const> const empty;
     CHECK(cc::hash128::create(empty, 0) == cc::hash128::create(empty, 0));
     // distinct seeds still diverge on empty input
     CHECK(cc::hash128::create(empty, 0) != cc::hash128::create(empty, 42));
@@ -61,7 +61,7 @@ TEST("hash128 - known answer (XXH3 128-bit, v0.8.3)")
     // is the canonical XXH3-128 constant. These pin the binding to the algorithm.
     SECTION("empty, seed 0")
     {
-        cc::span<cc::byte const> const empty;
+        cc::span<byte const> const empty;
         auto const h = cc::hash128::create(empty, 0);
         CHECK(h.low == 0x6001c324468d497full);
         CHECK(h.high == 0x99aa06d3014798d8ull);
@@ -69,7 +69,7 @@ TEST("hash128 - known answer (XXH3 128-bit, v0.8.3)")
 
     SECTION("empty, seed 42")
     {
-        cc::span<cc::byte const> const empty;
+        cc::span<byte const> const empty;
         auto const h = cc::hash128::create(empty, 42);
         CHECK(h.low == 0x3c1d09e9fe249164ull);
         CHECK(h.high == 0x16c20acd33f7af2full);

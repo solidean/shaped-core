@@ -38,7 +38,7 @@ namespace
 // Production path: XXH3-64 of the bytes (what string/string_view hash through).
 u64 hash_xxh3(char const* p, size_t n)
 {
-    return cc::make_hash_of_bytes(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(p), isize(n)));
+    return cc::make_hash_of_bytes(cc::span<byte const>(reinterpret_cast<byte const*>(p), isize(n)));
 }
 
 // Classic FNV-1a: one multiply per byte. Trivial setup, but byte-at-a-time hurts on longer keys.

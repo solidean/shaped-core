@@ -12,12 +12,12 @@ sg::epoch vulkan_context::completed_epoch() const
 {
     // The epoch timeline's counter *is* the last fully-finished epoch — we signal the epoch value at
     // end-of-epoch. Its initial value is first-1, so before the first advance it reports first-1.
-    cc::u64 const first_minus_one = cc::u64(sg::epoch::first) - 1;
+    u64 const first_minus_one = u64(sg::epoch::first) - 1;
     if (_epoch_timeline == VK_NULL_HANDLE)
         return sg::epoch(first_minus_one);
-    cc::u64 value = 0;
+    u64 value = 0;
     vkGetSemaphoreCounterValue(_device, _epoch_timeline, &value);
-    return sg::epoch(value < cc::u64(sg::epoch::first) ? first_minus_one : value);
+    return sg::epoch(value < u64(sg::epoch::first) ? first_minus_one : value);
 }
 
 void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
@@ -27,11 +27,11 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
                                                                         "submitted or dropped before advancing");
 
     sg::epoch const last = _current_epoch;
-    _current_epoch = sg::epoch(cc::u64(last) + 1);
+    _current_epoch = sg::epoch(u64(last) + 1);
 
     // Signal end-of-epoch on the direct queue: an empty submit that raises the epoch timeline to `last`
     // once all of epoch `last`'s recorded GPU work has finished (the core invariant).
-    cc::u64 const signal_value = cc::u64(last);
+    u64 const signal_value = u64(last);
     auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
         .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
         .signalSemaphoreValueCount = 1,
@@ -75,9 +75,9 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
     {
         int const a = allowed_in_flight.value();
         CC_ASSERT(a >= 0, "allowed_in_flight must be non-negative");
-        cc::u64 const allowed = cc::u64(a);
-        cc::u64 const last_u = cc::u64(last);
-        if (last_u >= cc::u64(sg::epoch::first) + allowed)
+        u64 const allowed = u64(a);
+        u64 const last_u = u64(last);
+        if (last_u >= u64(sg::epoch::first) + allowed)
             wait_for_epoch(sg::epoch(last_u - allowed)); // this also retires
         else
             process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
@@ -88,7 +88,7 @@ void vulkan_context::process_completed_epochs()
 {
     if (_epoch_timeline == VK_NULL_HANDLE)
         return;
-    cc::u64 completed = 0;
+    u64 completed = 0;
     vkGetSemaphoreCounterValue(_device, _epoch_timeline, &completed);
 
     // Drain finished epochs (oldest first, FIFO is sorted) under the lock; reclaim outside it.
@@ -98,7 +98,7 @@ void vulkan_context::process_completed_epochs()
             cc::vector<vulkan_epoch_data> out;
             for (auto& d : s.in_flight)
             {
-                if (cc::u64(d.epoch_id) > completed)
+                if (u64(d.epoch_id) > completed)
                     break;
                 out.push_back(cc::move(d));
             }
@@ -133,8 +133,8 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
 {
     if (_epoch_timeline != VK_NULL_HANDLE)
     {
-        cc::u64 const target = cc::u64(e);
-        cc::u64 current = 0;
+        u64 const target = u64(e);
+        u64 current = 0;
         vkGetSemaphoreCounterValue(_device, _epoch_timeline, &current);
         if (current < target)
         {
@@ -171,9 +171,9 @@ bool vulkan_context::is_submission_complete(sg::submission_token token) const
         return false;
     if (_submission_timeline == VK_NULL_HANDLE)
         return true;
-    cc::u64 value = 0;
+    u64 value = 0;
     vkGetSemaphoreCounterValue(_device, _submission_timeline, &value);
-    return value >= cc::u64(token);
+    return value >= u64(token);
 }
 
 void vulkan_context::schedule_deferred_deletion(vulkan_expiring_resource expiring)

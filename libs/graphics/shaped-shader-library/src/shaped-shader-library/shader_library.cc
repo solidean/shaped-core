@@ -9,6 +9,8 @@
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns
@@ -175,12 +177,12 @@ slib::shader_library::package_entry const& slib::shader_library::package_of(cc::
     CC_UNREACHABLE("every asset's path lies under the package that registered it");
 }
 
-cc::u64 slib::shader_library::generation() const
+u64 slib::shader_library::generation() const
 {
     return sg::reload_generation();
 }
 
-cc::u64 slib::current_reload_generation()
+u64 slib::current_reload_generation()
 {
     return sg::reload_generation();
 }

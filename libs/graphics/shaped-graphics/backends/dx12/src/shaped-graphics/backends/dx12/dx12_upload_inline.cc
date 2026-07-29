@@ -13,7 +13,7 @@
 
 namespace sg::backend::dx12
 {
-cc::result<cc::unit> dx12_upload_inline_system::initialize(cc::isize capacity)
+cc::result<cc::unit> dx12_upload_inline_system::initialize(isize capacity)
 {
     CC_ASSERT(capacity > 0, "upload ring capacity must be positive");
 
@@ -23,24 +23,24 @@ cc::result<cc::unit> dx12_upload_inline_system::initialize(cc::isize capacity)
     CC_RETURN_IF_ERROR(ring);
 
     _buffer = cc::move(ring.value().resource);
-    _mapped = static_cast<cc::byte*>(ring.value().mapped);
+    _mapped = static_cast<byte*>(ring.value().mapped);
     _capacity = capacity;
     return cc::unit{};
 }
 
-cc::u64 dx12_upload_inline_system::reserve_span(cc::isize total)
+u64 dx12_upload_inline_system::reserve_span(isize total)
 {
     CC_ASSERT(total > 0, "reserve size must be positive");
     CC_ASSERT(total <= _capacity, "a single inline upload exceeds the upload ring capacity");
 
     for (;;)
     {
-        cc::optional<cc::u64> r = _ring.lock(
-            [&](ring_state& s) -> cc::optional<cc::u64>
+        cc::optional<u64> r = _ring.lock(
+            [&](ring_state& s) -> cc::optional<u64>
             {
-                cc::u64 const start = s.next_pos;
-                cc::u64 const end = start + cc::u64(total);
-                if (end - s.freed_pos > cc::u64(_capacity)) // space still held by in-flight epochs
+                u64 const start = s.next_pos;
+                u64 const end = start + u64(total);
+                if (end - s.freed_pos > u64(_capacity)) // space still held by in-flight epochs
                     return {};
                 s.next_pos = end;
                 return start;
@@ -58,7 +58,7 @@ cc::u64 dx12_upload_inline_system::reserve_span(cc::isize total)
 void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
                                                ID3D12Resource* dst,
                                                dx12_texture_footprint const& fp,
-                                               cc::span<cc::byte const> data)
+                                               cc::span<byte const> data)
 {
     if (fp.staged_size() == 0)
         return;
@@ -74,24 +74,24 @@ void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
     // big enough to make progress (a per-chunk reserve could hand it a sub-row tail and stall). Then hand it
     // to-seam windows, walking the reserved span; a window too small for an aligned row returns 0 (skip to the
     // seam).
-    cc::isize const total = upload.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
+    isize const total = upload.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
     CC_ASSERT(total <= _capacity, "an inline texture upload (with staging slack) exceeds the upload ring capacity");
 
-    cc::u64 cursor = reserve_span(total);
+    u64 cursor = reserve_span(total);
     while (!upload.is_finished())
     {
-        cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
-        cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
+        isize const offset = isize(cursor % u64(_capacity));
+        isize const budget = _capacity - offset; // contiguous bytes to the seam
         dx12_upload_allocation const alloc = {_buffer.Get(), _mapped, offset, budget};
-        cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
-        cursor += cc::u64(consumed == 0 ? budget : consumed); // 0 = tail too small for an aligned row → skip to the seam
+        isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
+        cursor += u64(consumed == 0 ? budget : consumed); // 0 = tail too small for an aligned row → skip to the seam
     }
 }
 
 void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
                                               dx12_buffer const& dst,
-                                              cc::span<cc::byte const> data,
-                                              cc::isize dst_offset)
+                                              cc::span<byte const> data,
+                                              isize dst_offset)
 {
     if (data.empty())
         return;
@@ -104,15 +104,15 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
     // Reserve the whole upload once (the span may wrap the seam), then walk it with to-seam windows — the
     // same reserve_span the texture path uses. A buffer consumes each window exactly (it splits at any byte),
     // so it fits in one window unless it straddles the seam.
-    cc::u64 cursor = reserve_span(data.size());
+    u64 cursor = reserve_span(data.size());
     while (!upload.is_finished())
     {
-        cc::isize const offset = cc::isize(cursor % cc::u64(_capacity));
-        cc::isize const budget = _capacity - offset; // contiguous bytes to the seam
+        isize const offset = isize(cursor % u64(_capacity));
+        isize const budget = _capacity - offset; // contiguous bytes to the seam
         dx12_upload_allocation const alloc = {_buffer.Get(), _mapped, offset, budget};
-        cc::isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
+        isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
         CC_ASSERT(consumed > 0, "inline upload made no progress");
-        cursor += cc::u64(consumed);
+        cursor += u64(consumed);
     }
 }
 
@@ -126,10 +126,10 @@ void dx12_upload_inline_system::on_epochs_completed(sg::epoch completed)
     _ring.lock(
         [&](ring_state& s)
         {
-            cc::isize retired = 0;
+            isize retired = 0;
             for (auto const& cp : s.checkpoints)
             {
-                if (cc::u64(cp.epoch_id) > cc::u64(completed))
+                if (u64(cp.epoch_id) > u64(completed))
                     break;
                 s.freed_pos = cp.end_pos; // checkpoints are monotonic in epoch and end_pos
                 ++retired;
@@ -138,7 +138,7 @@ void dx12_upload_inline_system::on_epochs_completed(sg::epoch completed)
         });
 }
 
-void dx12_upload_inline_system::set_budget(cc::isize capacity)
+void dx12_upload_inline_system::set_budget(isize capacity)
 {
     CC_ASSERT(capacity > 0, "upload ring capacity must be positive");
     // Record the request; it is applied at the next advance_epoch (see apply_pending_budget).
@@ -147,14 +147,14 @@ void dx12_upload_inline_system::set_budget(cc::isize capacity)
 
 void dx12_upload_inline_system::apply_pending_budget()
 {
-    cc::isize const pending = _ring.lock([](ring_state& s) { return s.pending_capacity; });
+    isize const pending = _ring.lock([](ring_state& s) { return s.pending_capacity; });
     if (pending <= 0)
         return;
 
     // Drain every in-flight epoch so no GPU work still reads the ring, then retire them so their ring
     // space is reclaimed. After this the ring is empty (only the freshly-opened epoch remains, with no
     // uploads yet), so it is safe to drop and rebuild.
-    while (cc::u64(_ctx.completed_epoch()) + 1 < cc::u64(_ctx.current_epoch()))
+    while (u64(_ctx.completed_epoch()) + 1 < u64(_ctx.current_epoch()))
         _ctx.wait_for_next_inflight_epoch();
     _ctx.process_completed_epochs();
 
@@ -166,7 +166,7 @@ void dx12_upload_inline_system::apply_pending_budget()
     if (_buffer)
         _buffer->Unmap(0, nullptr);
     _buffer = cc::move(ring.value().resource);
-    _mapped = static_cast<cc::byte*>(ring.value().mapped);
+    _mapped = static_cast<byte*>(ring.value().mapped);
     _capacity = pending;
     _ring.lock(
         [&](ring_state& s)
@@ -183,7 +183,7 @@ dx12_upload_inline_system::debug_cursor_snapshot dx12_upload_inline_system::debu
     return _ring.lock([&](ring_state& s) { return debug_cursor_snapshot{s.next_pos, s.freed_pos, _capacity}; });
 }
 
-void dx12_upload_inline_system::debug_set_cursor(cc::u64 pos)
+void dx12_upload_inline_system::debug_set_cursor(u64 pos)
 {
     _ring.lock(
         [&](ring_state& s)

@@ -77,12 +77,12 @@ struct data
     color_type color = color_type::rgba; // native IHDR color type (parsed natively)
     interlace_method interlace = interlace_method::none; // native IHDR interlace (parsed natively)
     component decoded = component::u8;                   // sample type of `pixels`
-    cc::vector<cc::byte> pixels;                         // row-major, top-left origin, tightly packed
+    cc::vector<byte> pixels;                             // row-major, top-left origin, tightly packed
 
     // --- designed now, [todo] populate via a future native chunk walker (stb exposes none of these) ---
     cc::optional<double> gamma;                 // gAMA
     cc::optional<int> srgb_intent;              // sRGB rendering intent (0..3)
-    cc::vector<cc::byte> icc_profile;           // iCCP profile (inflated)
+    cc::vector<byte> icc_profile;               // iCCP profile (inflated)
     cc::string icc_profile_name;                // iCCP profile name
     cc::vector<text_entry> texts;               // tEXt / zTXt / iTXt
     cc::optional<physical_dimensions> physical; // pHYs
@@ -95,7 +95,7 @@ struct data
 // -------------------------------------------------------------------------------------------------
 
 /// Decode a whole PNG buffer. Errors on a bad signature / IHDR or a decode failure.
-[[nodiscard]] cc::result<data> read(cc::span<cc::byte const> bytes);
+[[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
 
 /// Convenience: slurp the stream to end, then decode.
 [[nodiscard]] cc::result<data> read(cc::read_stream& in);
@@ -110,7 +110,7 @@ struct write_options
 };
 
 /// Encode `img`'s pixels to PNG file bytes. Metadata fields stb cannot emit are ignored (see the header note).
-[[nodiscard]] cc::result<cc::vector<cc::byte>> encode(data const& img, write_options opts = {});
+[[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});
 
 /// Encode and write to a stream.
 [[nodiscard]] cc::result<cc::unit> write(cc::write_stream& out, data const& img, write_options opts = {});

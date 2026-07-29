@@ -123,30 +123,30 @@ static_assert(cc::popcount(node_seed_local_freemaps[isize(node_class_index::smal
 /// Recover the slab base address from any pointer inside the slab.
 /// Exploits the fact that slabs are aligned to their own size.
 /// Computation is ptr & ~(slab_size - 1), a single bitwise AND.
-[[nodiscard]] CC_FORCE_INLINE cc::byte* node_slab_base_for_ptr(cc::byte* ptr, node_class_index idx)
+[[nodiscard]] CC_FORCE_INLINE byte* node_slab_base_for_ptr(byte* ptr, node_class_index idx)
 {
     auto const mask = node_slab_mask_for_class(idx);
-    return reinterpret_cast<cc::byte*>(reinterpret_cast<u64>(ptr) & ~u64(mask)); // NOLINT
+    return reinterpret_cast<byte*>(reinterpret_cast<u64>(ptr) & ~u64(mask)); // NOLINT
 }
 
 /// Retrieve the free bitmap for a slab.
 /// The u64 free bitmap is stored at the slab base; one bit per slot.
 /// Bits corresponding to slots overlapping the bitmap itself remain permanently zero.
 /// This function is safe to call with nullptr and will return nullptr in that case.
-[[nodiscard]] CC_FORCE_INLINE u64* node_slab_freemap_for_base(cc::byte* base)
+[[nodiscard]] CC_FORCE_INLINE u64* node_slab_freemap_for_base(byte* base)
 {
     return reinterpret_cast<u64*>(base); // NOLINT
 }
 
 /// Retrieve a pointer to the next-slab-ring slot for read or write.
 /// The offset depends on the frontend (see node_slab_next_offset); all next-pointer access goes through here.
-[[nodiscard]] CC_FORCE_INLINE cc::byte** node_slab_next_ptr_for_base(cc::byte* base)
+[[nodiscard]] CC_FORCE_INLINE byte** node_slab_next_ptr_for_base(byte* base)
 {
-    return reinterpret_cast<cc::byte**>(base + node_slab_next_offset); // NOLINT
+    return reinterpret_cast<byte**>(base + node_slab_next_offset); // NOLINT
 }
 
 /// Retrieve the next slab in the ring.
-[[nodiscard]] CC_FORCE_INLINE cc::byte* node_slab_next_for_base(cc::byte* base)
+[[nodiscard]] CC_FORCE_INLINE byte* node_slab_next_for_base(byte* base)
 {
     return *node_slab_next_ptr_for_base(base);
 }
@@ -154,7 +154,7 @@ static_assert(cc::popcount(node_seed_local_freemaps[isize(node_class_index::smal
 #if CC_HAS_THREADS
 /// Retrieve the owner-id slot of a slab (threaded frontend only).
 /// Holds the token of the thread that hydrated the slab; a free from any other thread routes to remote.
-[[nodiscard]] CC_FORCE_INLINE u32* node_slab_owner_for_base(cc::byte* base)
+[[nodiscard]] CC_FORCE_INLINE u32* node_slab_owner_for_base(byte* base)
 {
     return reinterpret_cast<u32*>(base + 8); // NOLINT
 }
@@ -162,7 +162,7 @@ static_assert(cc::popcount(node_seed_local_freemaps[isize(node_class_index::smal
 /// Retrieve the remote free bitmap of a slab (threaded frontend only).
 /// Lives on the 2nd cache line (@64) for classes whose slab spans two lines; the single-line 1 B class
 /// keeps it on line 0 (@24). Remote frees atomic_or here; the owner drains it into local on underflow.
-[[nodiscard]] CC_FORCE_INLINE u64* node_slab_remote_for_base(cc::byte* base, node_class_index idx)
+[[nodiscard]] CC_FORCE_INLINE u64* node_slab_remote_for_base(byte* base, node_class_index idx)
 {
     auto const off = (node_slab_size_bytes_for_class(idx) >= 128) ? isize(64) : isize(24);
     return reinterpret_cast<u64*>(base + off); // NOLINT
@@ -203,7 +203,7 @@ inline thread_local u32 owner_token = 0;
 /// Compute the slot index within a slab for a given pointer.
 /// Index = (ptr - slab_base) / class_size where class_size = 2^class_index.
 /// Optimized to (ptr - slab_base) >> class_index for power-of-two division.
-[[nodiscard]] CC_FORCE_INLINE u64 node_slot_index_for_ptr(cc::byte* ptr, cc::byte* base, node_class_index idx)
+[[nodiscard]] CC_FORCE_INLINE u64 node_slot_index_for_ptr(byte* ptr, byte* base, node_class_index idx)
 {
     return u64(ptr - base) >> u64(idx);
 }
@@ -211,7 +211,7 @@ inline thread_local u32 owner_token = 0;
 /// Compute the slot pointer for a given base address, class index, and slot index.
 /// Inverse of node_slot_index_for_ptr: ptr = base + slot_index * class_size.
 /// Optimized to base + (slot_index << class_index) for power-of-two multiplication.
-[[nodiscard]] CC_FORCE_INLINE cc::byte* node_slot_ptr_for(cc::byte* base, node_class_index idx, u64 slot_index)
+[[nodiscard]] CC_FORCE_INLINE byte* node_slot_ptr_for(byte* base, node_class_index idx, u64 slot_index)
 {
     return base + (slot_index << u64(idx));
 }
@@ -219,7 +219,7 @@ inline thread_local u32 owner_token = 0;
 /// Cold path for freeing large nodes (> small_max).
 /// Called by node_allocation_free when idx > small_max.
 /// Delegates to the resource's deallocate_node_bytes_large function pointer.
-CC_COLD_FUNC void node_allocation_free_large(cc::byte* ptr, node_class_index idx);
+CC_COLD_FUNC void node_allocation_free_large(byte* ptr, node_class_index idx);
 
 /// Free a node by returning its slot to the slab's free bitmap.
 /// Requires only the pointer and class index; no allocator state or resource reference needed.
@@ -230,7 +230,7 @@ CC_COLD_FUNC void node_allocation_free_large(cc::byte* ptr, node_class_index idx
 /// This ensures that freeing cannot directly depend on the resource by default.
 /// Deallocation is stateless and decoupled from allocation, enabling cross-thread deallocation
 /// without requiring the freeing thread to have any reference to or knowledge of the allocating resource.
-CC_FORCE_INLINE void node_allocation_free(cc::byte* ptr, node_class_index idx)
+CC_FORCE_INLINE void node_allocation_free(byte* ptr, node_class_index idx)
 {
     // branch for large nodes
     if (idx > node_class_index::small_max) [[unlikely]]

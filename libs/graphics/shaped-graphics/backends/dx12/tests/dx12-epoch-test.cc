@@ -2,6 +2,8 @@
 
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // Epoch system: the frame-level GPU lifetime counter/fence — advance/retire, deferred deletion of
 // resources, the per-submission completion token, and in-flight throttling. All on WARP so they
 // exercise a live epoch fence on headless CI. Note: the "a list must be submitted/dropped in the
@@ -22,11 +24,11 @@ TEST("sg dx12 - epoch advance and retire")
 
     CHECK(c.current_epoch() == sg::epoch::first);
     // Nothing has finished yet, so the completed epoch is first-1.
-    CHECK(cc::u64(c.completed_epoch()) == cc::u64(sg::epoch::first) - 1);
+    CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
 
     c.advance_epoch_and_wait_for_idle();
-    CHECK(c.current_epoch() == sg::epoch(cc::u64(sg::epoch::first) + 1));
-    CHECK(cc::u64(c.completed_epoch()) >= cc::u64(sg::epoch::first)); // the first epoch is now done
+    CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
+    CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
 
 TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires")

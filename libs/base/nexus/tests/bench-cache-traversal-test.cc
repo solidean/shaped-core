@@ -4,6 +4,8 @@
 #include <nexus/bench/bench.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // The classic cache lesson: two traversals of a large 2D array that do the *same* work (n*n element reads,
 // the same instruction count) but in different memory order. Row-major walks each row contiguously (cache
 // friendly); column-major strides by a whole row per step (cache hostile), so almost every access misses.
@@ -15,30 +17,30 @@
 
 namespace
 {
-cc::u64 volatile s_sink = 0;
+u64 volatile s_sink = 0;
 
 // 8192 x 8192 32-bit ints = 256 MiB — far larger than any last-level cache.
-constexpr auto s_n = cc::isize(8192);
+constexpr auto s_n = isize(8192);
 
-cc::u64 sum_row_major(cc::span<cc::u32 const> data)
+u64 sum_row_major(cc::span<u32 const> data)
 {
-    auto sum = cc::u64(0);
-    for (auto y = cc::isize(0); y < s_n; ++y)
+    auto sum = u64(0);
+    for (auto y = isize(0); y < s_n; ++y)
     {
 #pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
-        for (auto x = cc::isize(0); x < s_n; ++x)
+        for (auto x = isize(0); x < s_n; ++x)
             sum += data[y * s_n + x]; // contiguous inner stride
     }
     return sum;
 }
 
-cc::u64 sum_col_major(cc::span<cc::u32 const> data)
+u64 sum_col_major(cc::span<u32 const> data)
 {
-    auto sum = cc::u64(0);
-    for (auto x = cc::isize(0); x < s_n; ++x)
+    auto sum = u64(0);
+    for (auto x = isize(0); x < s_n; ++x)
     {
 #pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
-        for (auto y = cc::isize(0); y < s_n; ++y)
+        for (auto y = isize(0); y < s_n; ++y)
             sum += data[y * s_n + x]; // inner stride jumps a full row -> a fresh cache line almost every step
     }
     return sum;
@@ -62,9 +64,9 @@ TEST("nexus bench - 2d traversal cache effect", nx::config::manual)
 {
     using nx::bench::hw_counter;
 
-    auto data = cc::vector<cc::u32>::create_defaulted(s_n * s_n);
-    for (auto i = cc::isize(0); i < data.size(); ++i)
-        data[i] = cc::u32(i); // touch every page so we do not measure first-touch faults
+    auto data = cc::vector<u32>::create_defaulted(s_n * s_n);
+    for (auto i = isize(0); i < data.size(); ++i)
+        data[i] = u32(i); // touch every page so we do not measure first-touch faults
 
     // Baseline (elapsed + ref cycles) plus two PMU counters. measure_all re-runs the walk across PMC subsets
     // if the two do not fit at once, so instructions and cache misses are both measured regardless of how many
@@ -79,7 +81,7 @@ TEST("nexus bench - 2d traversal cache effect", nx::config::manual)
     auto const col = nx::bench::measure_hw_counters([&] { s_sink = sum_col_major(data); }, cfg);
 
     cc::println("2d traversal of {}x{} u32 ({} MiB), same work, different memory order:", s_n, s_n,
-                (s_n * s_n * cc::isize(sizeof(cc::u32))) >> 20);
+                (s_n * s_n * isize(sizeof(u32))) >> 20);
     print_row("row-major", row);
     print_row("col-major", col);
 

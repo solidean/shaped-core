@@ -4,6 +4,8 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 
+using namespace cc::primitive_defines;
+
 // These tests compile unconditionally and branch on is_available() at runtime — the babel::sqlite API is always
 // present; only the backend is fetched-on-demand. No #if here: that is the always-available-API policy
 // (see docs/coding-guidelines.md). The last test pins the not-compiled-in contract directly.
@@ -41,7 +43,7 @@ TEST("sqlite - open, exec and query")
     auto stmt = cc::move(stmt_r.value());
 
     auto names = cc::vector<cc::string>();
-    auto ids = cc::vector<cc::i64>();
+    auto ids = cc::vector<i64>();
     for (auto row : stmt)
     {
         CHECK(row.column_count() == 2);
@@ -76,7 +78,7 @@ TEST("sqlite - prepared statement with binding and reset")
     auto stmt = cc::move(stmt_r.value());
 
     // first execution: id = 2 -> grace
-    REQUIRE(stmt.bind(1, cc::i64(2)).has_value());
+    REQUIRE(stmt.bind(1, i64(2)).has_value());
     auto got = cc::vector<cc::string>();
     for (auto row : stmt)
         got.push_back(cc::string::create_copy_of(row.as_string(0)));
@@ -86,7 +88,7 @@ TEST("sqlite - prepared statement with binding and reset")
 
     // reset + re-bind: id = 3 -> linus
     REQUIRE(stmt.reset().has_value());
-    REQUIRE(stmt.bind(1, cc::i64(3)).has_value());
+    REQUIRE(stmt.bind(1, i64(3)).has_value());
     got.clear();
     for (auto row : stmt)
         got.push_back(cc::string::create_copy_of(row.as_string(0)));
@@ -95,7 +97,7 @@ TEST("sqlite - prepared statement with binding and reset")
 
     // a bound value that matches nothing yields an empty result
     REQUIRE(stmt.reset().has_value());
-    REQUIRE(stmt.bind(1, cc::i64(999)).has_value());
+    REQUIRE(stmt.bind(1, i64(999)).has_value());
     auto count = 0;
     for (auto row : stmt)
     {
@@ -123,11 +125,11 @@ TEST("sqlite - typed columns: integer, real, text, blob, null")
     REQUIRE(ins_r.has_value());
     auto ins = cc::move(ins_r.value());
 
-    cc::byte const blob_bytes[] = {cc::byte(0xDE), cc::byte(0xAD), cc::byte(0xBE), cc::byte(0xEF)};
-    REQUIRE(ins.bind(1, cc::i64(42)).has_value());
+    byte const blob_bytes[] = {byte(0xDE), byte(0xAD), byte(0xBE), byte(0xEF)};
+    REQUIRE(ins.bind(1, i64(42)).has_value());
     REQUIRE(ins.bind(2, 3.5).has_value());
     REQUIRE(ins.bind(3, cc::string_view("shaped")).has_value());
-    REQUIRE(ins.bind(4, cc::span<cc::byte const>(blob_bytes)).has_value());
+    REQUIRE(ins.bind(4, cc::span<byte const>(blob_bytes)).has_value());
     REQUIRE(ins.bind_null(5).has_value());
     // a statement with no result rows: stepping once returns "no row"
     auto stepped = ins.next();
@@ -149,8 +151,8 @@ TEST("sqlite - typed columns: integer, real, text, blob, null")
 
         auto blob = row.as_blob(3);
         REQUIRE(blob.size() == 4);
-        CHECK(blob[0] == cc::byte(0xDE));
-        CHECK(blob[3] == cc::byte(0xEF));
+        CHECK(blob[0] == byte(0xDE));
+        CHECK(blob[3] == byte(0xEF));
 
         CHECK(row.is_null(4));
         CHECK(row.column_type(4) == sql::column_kind::null);
@@ -166,7 +168,7 @@ TEST("sqlite - serialize round-trips through open_blob")
         return;
     }
 
-    auto image = cc::vector<cc::byte>();
+    auto image = cc::vector<byte>();
     {
         auto db = make_people();
         image = db.serialize();
@@ -221,6 +223,6 @@ TEST("sqlite - availability contract holds in both build modes")
         CHECK(sql::database::open("x.sqlite").has_error());
         CHECK(sql::database::open_readonly("x.sqlite").has_error());
         CHECK(sql::database::open_memory().has_error());
-        CHECK(sql::database::open_blob(cc::span<cc::byte const>()).has_error());
+        CHECK(sql::database::open_blob(cc::span<byte const>()).has_error());
     }
 }

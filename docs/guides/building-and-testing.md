@@ -229,7 +229,8 @@ runs this format check (and the others) in one shot — see
 `uv run dev.py check` runs the project's pre-commit gates and reports a single
 green/red verdict — the "everything green" gate. **`uv run dev.py check --fix`
 is the recommended move before committing**: it auto-applies every unambiguous
-fix it can (currently clang-format), runs the rest, and tells you what's left.
+fix it can (clang-tidy, shaped-linter, then clang-format over what they rewrote),
+runs the rest, and tells you what's left.
 
 ```bash
 uv run dev.py check            # run every check -> one verdict
@@ -240,14 +241,22 @@ uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
 ```
 
-Registered checks:
+Registered checks, **in the order they run**:
 
-| Check       | What it does                                                                   | `--fix`? |
-|-------------|--------------------------------------------------------------------------------|----------|
-| `format`    | clang-format `libs/` sources. Dirty-only by default; `--all` for the whole tree. | yes (rewrites in place) |
-| `lint`      | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--all` for the whole tree.  | yes (applies clang-tidy fixes) |
-| `crossrefs` | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
-| `test`      | Build + run the full suite on the debug, default, release **and** (Linux/macOS) sanitizer presets. | no (report only) |
+| Check        | What it does                                                                   | `--fix`? |
+|--------------|--------------------------------------------------------------------------------|----------|
+| `lint`       | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--all` for the whole tree.  | yes (applies clang-tidy fixes) |
+| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`. Dirty-only by default; `--all` for the whole tree.     | yes (applies its suggested fixes) |
+| `format`     | clang-format `libs/` sources. Dirty-only by default; `--all` for the whole tree. | yes (rewrites in place) |
+| `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
+| `test`       | Build + run the full suite on the debug, default, release **and** (Linux/macOS) sanitizer presets. | no (report only) |
+
+**That order is a correctness property, not a listing convention.** A lint fix is a byte-range edit —
+dropping a `cc::` qualifier shortens a line and strands the continuation lines aligned under where it used
+to end — and a clang-tidy fix can land in a header the commit had not otherwise touched, which `format`
+only sees as dirty once that write has happened. Running `format` after both fixers is what makes
+`check --fix` one finished pass instead of a pass plus "now go run format". Naming checks explicitly does
+not change it: `check format lint` runs `lint` first, same as the full gate.
 
 `lint` runs the clang-tidy gates via [tools/lint/clang-tidy.py](../../tools/lint/clang-tidy.py) against the
 strict whitelist in [tools/lint/clang-tidy-gates.yml](../../tools/lint/clang-tidy-gates.yml) — a
@@ -409,7 +418,11 @@ remains available for manually ASan-checking exception-free code paths.
   agent). In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.
 - `--no-configure`, `--no-build` — skip the automatic steps.
 - `--timeout SECS` (on `test`) — per-binary timeout (default 60; `0` disables). A binary that
-  exceeds it is killed and reported as failed.
+  exceeds it is killed and reported as failed — but not before it is asked where it was.
+  dev.py provokes clean-core's crash handler first and gives it two seconds to write, so the step's
+  **stderr log** holds the running test, plus a stack for every thread in the process. In a hang the
+  stack you want is under `other threads`; the faulting one is dev.py's doing and says nothing.
+  The log spells that out, because the report announces a fatal fault that never really happened.
 - `--merged-xml-report FILE` / `--no-xml-reports` (on `test`) — merge per-binary XML into one
   file / skip XML entirely. Per-binary XML is on by default and is what `test_diag` reads, so you
   usually need neither.

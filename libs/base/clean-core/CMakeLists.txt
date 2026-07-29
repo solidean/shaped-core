@@ -197,6 +197,13 @@ elseif(NOT _CC_STACKTRACE_LIB STREQUAL "")
     target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
 endif()
 
+# DbgHelp backs the crash handler's per-thread stack walk (crash_handler.cc). std::stacktrace only ever
+# captures the calling thread, so reporting the OTHER threads — the ones that matter in a deadlock — needs
+# StackWalk64. Windows-only and PRIVATE: nothing in clean-core's API exposes it.
+if(WIN32)
+    target_link_libraries(clean-core PRIVATE dbghelp)
+endif()
+
 # Detect and use the fastest available linker (mold > lld > system default)
 include(DetectLinker)
 cc_detect_linker(_CC_LINKER)

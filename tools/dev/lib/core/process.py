@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -286,13 +287,99 @@ def response_file(args: list[str], prefix: str) -> Iterator[list[str]]:
 # ---------------------------------------------------------------------------
 
 def _pump(src, log_file, mirror_to) -> None:
-    """Read `src` line by line, writing to `log_file` and (optionally) `mirror_to`."""
-    for line in iter(src.readline, ""):
-        log_file.write(line)
-        if mirror_to is not None:
-            mirror_to.write(line)
-            mirror_to.flush()
-    src.close()
+    """Read `src` line by line, writing to `log_file` and (optionally) `mirror_to`.
+
+    This loop must not die while the child is alive. Nothing else drains the pipe, so a pump thread that
+    raises leaves the child blocked on a full OS pipe buffer forever, and `proc.wait()` with it — a hang,
+    not an error, which is far harder to diagnose than the write that caused it. So every per-line failure
+    is reported once and swallowed, and draining continues to the end of the stream.
+    """
+    reported = False
+
+    def complain(what: str, exc: BaseException) -> None:
+        nonlocal reported
+        if reported:
+            return # one line, not one per output line
+        reported = True
+        try:
+            print(f"warning: dev.py could not {what}: {type(exc).__name__}: {exc}\n"
+                  f"         output continues, but some of it may be missing or replaced "
+                  f"(the run log has the full text).", file=sys.stderr, flush=True)
+        except Exception:
+            pass # the complaint channel itself is broken; there is nowhere left to say so
+
+    try:
+        for line in iter(src.readline, ""):
+            try:
+                log_file.write(line)
+            except Exception as e:
+                complain("write to the run log", e)
+            if mirror_to is not None:
+                try:
+                    mirror_to.write(line)
+                    mirror_to.flush()
+                except Exception as e:
+                    complain("mirror child output to this terminal", e)
+    except Exception as e:
+        complain("read the child's output", e)
+    finally:
+        try:
+            src.close()
+        except Exception:
+            pass
+
+
+# How long a timed-out child gets to report where it is before it is killed outright. Long enough for a
+# crash handler to symbolize every thread and write, short enough to be noise against any real timeout.
+_CRASH_REPORT_GRACE_S = 2.0
+
+
+def _request_crash_report(proc: subprocess.Popen) -> bool:
+    """Ask a hung child to say where it is, and report whether the request went out.
+
+    A killed process says nothing, and a timeout with no stack is the hardest failure to chase. But our
+    binaries already know how to answer: nexus installs cc::install_crash_handler(), which on a fatal fault
+    prints the running test, the faulting thread's stack, and every other thread's — including the one that
+    is actually stuck. So provoke that report and let it reach the stderr we are already capturing, rather
+    than terminating the process mid-hang and learning nothing.
+
+    Best-effort throughout: a child that ignores the request, or is not one of ours, is killed as before.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            # A remote thread with a NULL entry point faults on its first instruction, and that fault is
+            # genuinely unhandled, so it reaches the top-level SetUnhandledExceptionFilter — which is the
+            # whole point. DebugBreakProcess does NOT work here and is the obvious-looking trap: ntdll's
+            # DbgUiRemoteBreakin wraps its DbgBreakPoint in an __except of its own, so with no debugger
+            # attached the breakpoint is handled, never becomes unhandled, and the filter never runs.
+            #
+            # The injected thread's own frames say nothing; the running-test hook and the per-thread walk
+            # are what carry the answer, and both are process-wide. Note the process SURVIVES this (the
+            # filter's EXCEPTION_EXECUTE_HANDLER unwinds only the injected thread), so the caller's kill
+            # is not a fallback but the normal path.
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1F0FFF, False, proc.pid) # PROCESS_ALL_ACCESS
+            if not handle:
+                return False
+            try:
+                thread = kernel32.CreateRemoteThread(handle, None, 0, None, None, 0, None)
+                if not thread:
+                    return False
+                kernel32.CloseHandle(thread)
+                return True
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+
+    # POSIX: the handler's signal path does the same job, and here the process really does die of it.
+    try:
+        proc.send_signal(signal.SIGABRT)
+        return True
+    except Exception:
+        return False
 
 
 def run_step(
@@ -331,6 +418,7 @@ def run_step(
 
     start = time.perf_counter()
     timed_out = False
+    asked = False
     with open(stdout_path, "w", encoding="utf-8", errors="replace") as out_f, \
          open(stderr_path, "w", encoding="utf-8", errors="replace") as err_f:
         proc = subprocess.Popen(
@@ -348,12 +436,29 @@ def run_step(
             proc.wait(timeout=timeout if timeout else None)
         except subprocess.TimeoutExpired:
             timed_out = True
-            proc.kill()
+            # Ask where it is before killing it — see _request_crash_report. The child usually dies of the
+            # poke itself (the handler lets the fault run its course), so the kill below is the fallback.
+            asked = _request_crash_report(proc)
+            if asked:
+                try:
+                    proc.wait(timeout=_CRASH_REPORT_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    pass
+            if proc.poll() is None:
+                proc.kill()
             proc.wait()
         for t in threads:
             t.join()
         if timed_out:
-            err_f.write(f"\n[dev.py] TIMEOUT: '{name or step_type}' exceeded {timeout:.0f}s and was killed.\n")
+            err_f.write(f"\n[dev.py] TIMEOUT: '{name or step_type}' exceeded {timeout:.0f}s, then killed.\n")
+            if asked:
+                # Say this plainly: the report above announces a fatal fault that never really happened,
+                # and a reader who takes it at face value chases the wrong thing entirely.
+                err_f.write("[dev.py] Any 'fatal crash' report above is INDUCED — the process was faulted on\n"
+                            "[dev.py] purpose so it would say where it was. The faulting thread is dev.py's\n"
+                            "[dev.py] doing and means nothing; the hung code is under 'other threads'.\n")
+            else:
+                err_f.write("[dev.py] Could not ask it for a crash report, so there is no stack above.\n")
     duration_s = time.perf_counter() - start
 
     report_capture(stdout_path)

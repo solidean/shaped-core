@@ -42,7 +42,7 @@ namespace babel::sqlite
 [[nodiscard]] bool is_available();
 
 /// The dynamic type of a result column, as reported by SQLite for the current row.
-enum class column_kind : cc::u8
+enum class column_kind : u8
 {
     null,
     integer,
@@ -66,7 +66,7 @@ struct row
     [[nodiscard]] i64 as_i64(i32 col) const;
     [[nodiscard]] double as_double(i32 col) const;
     [[nodiscard]] cc::string_view as_string(i32 col) const; // bytes owned by SQLite; valid until the next step
-    [[nodiscard]] cc::span<cc::byte const> as_blob(i32 col) const;
+    [[nodiscard]] cc::span<byte const> as_blob(i32 col) const;
 
 private:
     sqlite3_stmt* _stmt = nullptr;
@@ -91,7 +91,7 @@ public:
     cc::result<cc::unit> bind(i32 index, i64 value);
     cc::result<cc::unit> bind(i32 index, double value);
     cc::result<cc::unit> bind(i32 index, cc::string_view value);
-    cc::result<cc::unit> bind(i32 index, cc::span<cc::byte const> value);
+    cc::result<cc::unit> bind(i32 index, cc::span<byte const> value);
     cc::result<cc::unit> bind_null(i32 index);
 
     /// Advance to the next result row. true = a row is now current (read it via the range-for row, or column_*/as_*
@@ -158,7 +158,7 @@ public:
     /// A transient in-memory database (":memory:").
     [[nodiscard]] static cc::result<database> open_memory();
     /// Load a database from a serialized in-memory image (a copy is taken; the source bytes need not outlive this).
-    [[nodiscard]] static cc::result<database> open_blob(cc::span<cc::byte const> bytes);
+    [[nodiscard]] static cc::result<database> open_blob(cc::span<byte const> bytes);
 
     /// Run one or more SQL statements that yield no result rows (DDL, INSERT/UPDATE/DELETE, PRAGMA, transactions).
     cc::result<cc::unit> exec(cc::string_view sql);
@@ -168,7 +168,7 @@ public:
     [[nodiscard]] cc::result<statement> query(cc::string_view sql) { return prepare(sql); }
 
     /// Serialize the main database to a contiguous byte image (round-trips through open_blob). Empty on failure.
-    [[nodiscard]] cc::vector<cc::byte> serialize() const;
+    [[nodiscard]] cc::vector<byte> serialize() const;
 
     [[nodiscard]] i64 last_insert_rowid() const;
     [[nodiscard]] i64 changes() const;

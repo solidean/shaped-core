@@ -2,6 +2,8 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 
+using namespace cc::primitive_defines;
+
 // Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump,
 // and the node state machine / poll loop. See async_node.hh for the shape and invariants.
 //
@@ -26,7 +28,7 @@ cc::atomic<cc::async_scheduler*> s_default_scheduler = {nullptr};
 
 // spilled dependency-list nodes come from the node slab allocator (wait-free free, cross-thread safe): a node
 // parked by one worker may be re-polled/torn down by another, which then frees these on a different thread.
-cc::impl::async_dep_list_node* dep_alloc_node(cc::u64 dep_word)
+cc::impl::async_dep_list_node* dep_alloc_node(u64 dep_word)
 {
     constexpr auto idx = cc::node_class_index_for<cc::impl::async_dep_list_node>();
     auto* raw = cc::default_node_allocator().allocate_node_bytes(idx, sizeof(cc::impl::async_dep_list_node),
@@ -37,7 +39,7 @@ cc::impl::async_dep_list_node* dep_alloc_node(cc::u64 dep_word)
 void dep_free_node(cc::impl::async_dep_list_node* n)
 {
     // async_dep_list_node is trivially destructible (u64 + raw ptr), so no explicit dtor call is needed
-    cc::node_allocation_free(reinterpret_cast<cc::byte*>(n), cc::node_class_index_for<cc::impl::async_dep_list_node>());
+    cc::node_allocation_free(reinterpret_cast<byte*>(n), cc::node_class_index_for<cc::impl::async_dep_list_node>());
 }
 
 // spilled continuation cells share the same wait-free node slab (a node parked by one worker may be
@@ -58,7 +60,7 @@ void cont_free_cell(cc::impl::async_cont_cell* c)
         c->_weak.~weak_t();
     }
     c->~async_cont_cell();
-    cc::node_allocation_free(reinterpret_cast<cc::byte*>(c), cc::node_class_index_for<cc::impl::async_cont_cell>());
+    cc::node_allocation_free(reinterpret_cast<byte*>(c), cc::node_class_index_for<cc::impl::async_cont_cell>());
 }
 
 // Per-worker recursion depth of the eager depth-first dep drive (poll() calling a dependency's poll()). Caps
@@ -240,7 +242,7 @@ void cc::async_node_base::reschedule_self()
 
 void cc::impl::async_dep_head::add(async_node_base* dep)
 {
-    auto const dv = reinterpret_cast<cc::u64>(dep); // 64-aligned: low 6 bits clear, so unsubscribed
+    auto const dv = reinterpret_cast<u64>(dep); // 64-aligned: low 6 bits clear, so unsubscribed
 
     if (_head == 0) // empty -> single (bit0 == 0 => not a list)
     {
@@ -364,7 +366,7 @@ void cc::impl::async_cont_head::add(async_node_base* dependent)
     if (_head == 0) // empty -> inline (bit0 == 0 => not a list); no allocation for a single dependent
     {
         // dependent is alive (it is polling us); release() hands its weak count to the inline slot
-        _head = reinterpret_cast<cc::u64>(async_node_weak::from_alive(dependent).release());
+        _head = reinterpret_cast<u64>(async_node_weak::from_alive(dependent).release());
         return;
     }
 
@@ -404,7 +406,7 @@ void cc::impl::async_cont_head::remove(async_node_base* dependent)
         if (!sp.is_valid() || sp.get() == dependent)
             _head = 0; // dropped: w's destructor pays the dec_weak
         else
-            _head = reinterpret_cast<cc::u64>(w.release()); // kept: hand the ref back to the inline slot
+            _head = reinterpret_cast<u64>(w.release()); // kept: hand the ref back to the inline slot
         return;
     }
 
@@ -433,14 +435,14 @@ void cc::impl::async_cont_head::remove(async_node_base* dependent)
     normalize(); // set_list_head(nullptr) above leaves the bare tag; this repairs it to empty
 }
 
-cc::isize cc::impl::async_cont_head::count() const
+isize cc::impl::async_cont_head::count() const
 {
     if (_head == 0)
         return 0;
     if ((_head & tag_is_list) == 0)
         return 1;
 
-    cc::isize n = 0;
+    isize n = 0;
     for (auto* c = list_head(); c != nullptr; c = c->_next)
         if (c->_fn == nullptr)
             ++n;
@@ -457,7 +459,7 @@ void cc::impl::async_cont_head::notify_all()
         auto w = async_node_weak::adopt(inline_dep()); // borrowed: handed straight back below
         if (auto const s = w.lock())                   // skips a dependent that is being torn down
             s->schedule();
-        _head = reinterpret_cast<cc::u64>(w.release()); // notify_all does not consume — our dtor still owes it
+        _head = reinterpret_cast<u64>(w.release()); // notify_all does not consume — our dtor still owes it
         return;
     }
 

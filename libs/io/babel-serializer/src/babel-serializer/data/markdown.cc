@@ -551,7 +551,7 @@ cc::result<document> read(cc::read_stream& in)
     return parser.parse(in);
 }
 
-cc::result<document> read(cc::span<cc::byte const> bytes)
+cc::result<document> read(cc::span<byte const> bytes)
 {
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
@@ -560,6 +560,6 @@ cc::result<document> read(cc::span<cc::byte const> bytes)
 
 cc::result<document> read(cc::string_view text)
 {
-    return read(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(text.data()), text.size()));
+    return read(cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size()));
 }
 } // namespace babel::markdown

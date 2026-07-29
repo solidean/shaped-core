@@ -5,15 +5,13 @@
 
 namespace sg
 {
-void context_upload_scope::bytes_to_buffer(raw_buffer_handle buffer,
-                                           cc::pinned_data<cc::byte const> data,
-                                           cc::isize offset_in_bytes)
+void context_upload_scope::bytes_to_buffer(raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset_in_bytes)
 {
     _ctx.async_upload_bytes_to_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
 }
 
 void context_upload_scope::bytes_to_texture(raw_texture_handle texture,
-                                            cc::pinned_data<cc::byte const> data,
+                                            cc::pinned_data<byte const> data,
                                             subresource_index const& subresource,
                                             cc::optional<texture_region> region)
 {
@@ -27,12 +25,12 @@ void context_upload_scope::bytes_to_texture(raw_texture_handle texture,
     _ctx.async_upload_bytes_to_texture(cc::move(texture), cc::move(data), subresource, box);
 }
 
-void context_upload_scope::set_async_window_size(cc::isize bytes)
+void context_upload_scope::set_async_window_size(isize bytes)
 {
     _ctx.set_async_upload_window_bytes(bytes);
 }
 
-void context_upload_scope::set_inline_budget(cc::isize bytes)
+void context_upload_scope::set_inline_budget(isize bytes)
 {
     _ctx.set_inline_upload_budget(bytes);
 }

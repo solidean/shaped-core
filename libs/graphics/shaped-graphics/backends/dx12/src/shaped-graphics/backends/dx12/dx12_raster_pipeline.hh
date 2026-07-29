@@ -22,7 +22,7 @@ public:
                                                                         sg::raster_pipeline_description const& desc);
 
     /// The PSO's serialized blob via ID3D12PipelineState::GetCachedBlob; empty on failure.
-    [[nodiscard]] cc::pinned_data<cc::byte const> cached_pipeline_data() const override;
+    [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
 
     dx12_pipeline_layout_handle layout;
     ComPtr<ID3D12PipelineState> pipeline_state;

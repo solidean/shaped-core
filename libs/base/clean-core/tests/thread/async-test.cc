@@ -6,6 +6,8 @@
 
 #include <memory>
 
+using namespace cc::primitive_defines;
+
 // These tests drive the graph inline on the calling thread (cc::async_blocking_get_singlethreaded or an explicit
 // singlethreaded_scheduler + async_worker_scope) — deterministic and thread-free, matching the threaded_actor test
 // philosophy. The concurrent work-stealing scheduler and its tests live in async-pool-test.cc (threads only).
@@ -23,11 +25,11 @@ namespace
 {
 struct big_value // 96 B: intentionally larger than one line's payload — the node must grow, not fail to compile
 {
-    cc::i64 data[12] = {};
+    i64 data[12] = {};
 };
 struct big_error // 64 B: a custom failure type larger than the 32 B unresolved scratch — grows the error arm
 {
-    cc::i64 data[8] = {};
+    i64 data[8] = {};
 };
 } // namespace
 static_assert(sizeof(cc::async<big_value>) > 64, "a large value must grow the node onto further cache lines");
@@ -84,7 +86,7 @@ TEST("async - a frame result merely convertible to T is converted, not stored ra
     CHECK(cc::async_blocking_get_singlethreaded(s) == "hi");
 
     // the same hazard without a teardown: an int stored into an i64 payload leaves the high half undefined
-    auto n = cc::make_async_lazy<cc::i64>([] { return 42; });
+    auto n = cc::make_async_lazy<i64>([] { return 42; });
     CHECK(cc::async_blocking_get_singlethreaded(n) == 42);
 }
 
@@ -407,7 +409,7 @@ namespace
 // > 32 B, so it cannot live in the node's inline frame slot and gets boxed instead
 struct fat_frame_capture
 {
-    cc::i64 pad[6] = {1, 2, 3, 4, 5, 6};
+    i64 pad[6] = {1, 2, 3, 4, 5, 6};
 };
 
 // immovable AND uncopyable: constructible only in place, so only the emplace path can install it
@@ -425,8 +427,8 @@ TEST("async - a frame too big for the inline slot is boxed and still runs")
 {
     int live = 0;
     {
-        auto a = cc::make_async_lazy<cc::i64>([fat = fat_frame_capture{}, c = live_counter(&live)]
-                                              { return fat.pad[0] + fat.pad[5]; });
+        auto a = cc::make_async_lazy<i64>([fat = fat_frame_capture{}, c = live_counter(&live)]
+                                          { return fat.pad[0] + fat.pad[5]; });
         CHECK(live == 1);
         CHECK(cc::async_blocking_get_singlethreaded(a) == 7);
         CHECK(live == 0); // the box is torn down by the resolve, same as an inline frame
@@ -699,43 +701,43 @@ namespace
 // and sum them. leaf_exec counts leaf-frame runs, so we can assert no completed node is recomputed and that
 // undemanded work stays cold. (Internal frames legitimately run twice — once to register deps and return
 // wait, once to compute after they are ready — which is inherent to the re-entrant poll model.)
-cc::shared_async<cc::i64> build_sum_tree(int depth, std::shared_ptr<cc::i64> const& leaf_exec)
+cc::shared_async<i64> build_sum_tree(int depth, std::shared_ptr<i64> const& leaf_exec)
 {
     if (depth == 0)
-        return cc::make_async_lazy<cc::i64>(
+        return cc::make_async_lazy<i64>(
             [leaf_exec]
             {
                 ++*leaf_exec;
-                return cc::i64(1);
+                return i64(1);
             });
 
     auto left = build_sum_tree(depth - 1, leaf_exec);
     auto right = build_sum_tree(depth - 1, leaf_exec);
     // internal nodes use the variadic dependency form: both children awaited + unwrapped, then summed
-    return cc::make_async_lazy([](cc::i64 l, cc::i64 r) { return l + r; }, left, right);
+    return cc::make_async_lazy([](i64 l, i64 r) { return l + r; }, left, right);
 }
 } // namespace
 
 TEST("async - large dependency tree drives correctly without computing undemanded branches")
 {
-    auto leaf_exec = std::make_shared<cc::i64>(0);
+    auto leaf_exec = std::make_shared<i64>(0);
 
     int const depth = 13; // 2^13 leaves -> 16383 nodes total
     auto root = build_sum_tree(depth, leaf_exec);
 
     // an undemanded sibling subtree: never required, must stay cold
     auto orphan_ran = std::make_shared<bool>(false);
-    auto orphan = cc::make_async_lazy<cc::i64>(
+    auto orphan = cc::make_async_lazy<i64>(
         [orphan_ran]
         {
             *orphan_ran = true;
-            return cc::i64(7);
+            return i64(7);
         });
 
-    CHECK(cc::async_blocking_get_singlethreaded(root) == (cc::i64(1) << depth)); // sum of all leaves == leaf count == 8192
+    CHECK(cc::async_blocking_get_singlethreaded(root) == (i64(1) << depth)); // sum of all leaves == leaf count == 8192
 
     // each demanded leaf ran exactly once (no completed node recomputed); the orphan never did
-    CHECK(*leaf_exec == (cc::i64(1) << depth));
+    CHECK(*leaf_exec == (i64(1) << depth));
     CHECK(!*orphan_ran);
     CHECK(!orphan->is_ready());
 }
@@ -747,11 +749,11 @@ TEST("async - deep cold chain completes across the inline depth cap")
     // queue) for the rest. The result must be identical either way — this pins that the cap fallback is
     // correct and that the native stack stays bounded regardless of graph depth.
     int const n = 400; // > the internal inline depth cap
-    auto node = cc::make_async_lazy<cc::i64>([] { return cc::i64(0); });
+    auto node = cc::make_async_lazy<i64>([] { return i64(0); });
     for (int i = 1; i < n; ++i)
-        node = cc::make_async_lazy([](cc::i64 x) { return x + 1; }, cc::move(node));
+        node = cc::make_async_lazy([](i64 x) { return x + 1; }, cc::move(node));
 
-    CHECK(cc::async_blocking_get_singlethreaded(node) == cc::i64(n - 1));
+    CHECK(cc::async_blocking_get_singlethreaded(node) == i64(n - 1));
 }
 
 // ============================================================================

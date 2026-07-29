@@ -37,7 +37,7 @@ constexpr int num_staging_windows = 3;
 
 // Window sizes round up to the texture placement alignment (512) so each window base is 512-aligned — a
 // texture readback's placed footprint must start there. Buffer readbacks are unaffected by the rounding.
-[[nodiscard]] cc::isize round_window(cc::isize bytes)
+[[nodiscard]] isize round_window(isize bytes)
 {
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
 }
@@ -57,7 +57,7 @@ struct download_mem_job
 // window_index + 1; then its memcpies run in order and their waiters are marked ready.
 struct inflight_window
 {
-    cc::u64 window_index = 0;
+    u64 window_index = 0;
     cc::vector<download_mem_job> mem_jobs;
 };
 
@@ -111,7 +111,7 @@ private:
         if (job.completion_value != dx12_download_fence_value::none)
         {
             ensure_open_window();
-            cc::u64 const v = cc::u64(job.completion_value);
+            u64 const v = u64(job.completion_value);
             if (v > _open_highest_finished)
                 _open_highest_finished = v;
         }
@@ -154,18 +154,18 @@ private:
         // upload completion value (the async upload this read waits on may reverse-wait on a direct writer that
         // itself waits on this window's V). If the open window already finished a read and either wait is still
         // pending, close it now: this job's waits then land in a fresh window pointing only at prior work.
-        bool const forward_pending = cc::u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
+        bool const forward_pending = u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue();
         bool const upload_pending
             = job.upload_wait_value != dx12_copy_fence_value::none
-           && cc::u64(job.upload_wait_value) > _sys._ctx._upload_async._completion_fence->GetCompletedValue();
+           && u64(job.upload_wait_value) > _sys._ctx._upload_async._completion_fence->GetCompletedValue();
         if (_window_open && _open_highest_finished > 0 && (forward_pending || upload_pending))
             submit_window();
 
         while (!download.is_finished())
         {
             ensure_open_window();
-            cc::isize const avail = _sys._window_bytes - _window_used;
-            cc::isize const base = cc::isize(_current_window % cc::u64(num_staging_windows)) * _sys._window_bytes;
+            isize const avail = _sys._window_bytes - _window_used;
+            isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
             dx12_download_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
             dx12_pending_copy chunk = download.execute_next_job(*_list.Get(), alloc);
@@ -179,17 +179,17 @@ private:
             // This chunk reads the source, so its window must first wait for the last direct-queue list that
             // used it (forward sync) and for any pending async upload to it. Max over the window; both fences
             // are monotonic.
-            if (cc::u64(job.wait_token) > _open_max_wait_token)
-                _open_max_wait_token = cc::u64(job.wait_token);
-            if (cc::u64(job.upload_wait_value) > _open_max_upload_wait)
-                _open_max_upload_wait = cc::u64(job.upload_wait_value);
+            if (u64(job.wait_token) > _open_max_wait_token)
+                _open_max_wait_token = u64(job.wait_token);
+            if (u64(job.upload_wait_value) > _open_max_upload_wait)
+                _open_max_upload_wait = u64(job.upload_wait_value);
 
             // The window holding the read's last byte is the one whose completion satisfies a later writer's
             // reverse wait. Values are monotonic in enqueue order, so max keeps the window's value correct.
             bool const last = download.is_finished();
             if (last && job.completion_value != dx12_download_fence_value::none)
             {
-                cc::u64 const v = cc::u64(job.completion_value);
+                u64 const v = u64(job.completion_value);
                 if (v > _open_highest_finished)
                     _open_highest_finished = v;
             }
@@ -213,9 +213,9 @@ private:
         if (_window_open)
             return;
 
-        int const slot = int(_current_window % cc::u64(num_staging_windows));
-        if (_current_window >= cc::u64(num_staging_windows))
-            drain_until(_current_window - cc::u64(num_staging_windows));
+        int const slot = int(_current_window % u64(num_staging_windows));
+        if (_current_window >= u64(num_staging_windows))
+            drain_until(_current_window - u64(num_staging_windows));
 
         if (_allocators[slot] == nullptr) // first use of this slot: fresh allocator, ready to record
         {
@@ -299,7 +299,7 @@ private:
     }
 
     // Drains every in-flight window whose index is <= `last_index_inclusive` (FIFO, oldest first).
-    void drain_until(cc::u64 last_index_inclusive)
+    void drain_until(u64 last_index_inclusive)
     {
         while (!_inflight.empty() && _inflight[0].window_index <= last_index_inclusive)
             drain_front();
@@ -335,7 +335,7 @@ private:
     // rebuilds staging at the new size. The per-slot allocators and the reused command list survive.
     void maybe_resize_staging()
     {
-        cc::isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
+        isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
         if (desired == _sys._window_bytes)
             return;
         CC_ASSERT(desired > 0, "async download staging window must be positive");
@@ -351,15 +351,15 @@ private:
 
         _sys._staging->Unmap(0, nullptr);
         _sys._staging = cc::move(ring.value().resource);
-        _sys._mapped = static_cast<cc::byte*>(ring.value().mapped);
+        _sys._mapped = static_cast<byte*>(ring.value().mapped);
         _sys._window_bytes = desired;
     }
 
     // Blocks the actor until the copy queue has finished `window` (index). The fence is 1-based (see
     // submit_window), so window i's completion is fence value i+1 — distinct from the initial 0.
-    void wait_for_window(cc::u64 window)
+    void wait_for_window(u64 window)
     {
-        cc::u64 const target = window + 1;
+        u64 const target = window + 1;
         if (_sys._window_fence->GetCompletedValue() < target)
         {
             HRESULT const hr = _sys._window_fence->SetEventOnCompletion(target, _sys._wait_event);
@@ -372,8 +372,8 @@ private:
 
     cc::vector<dx12_async_download_job> _pending; // received this cycle, staged in on_process
 
-    cc::u64 _current_window = 0;         // next window index to submit; slot = index % num_staging_windows
-    cc::u64 _last_signaled_download = 0; // highest value signaled on the download completion fence (monotonic)
+    u64 _current_window = 0;         // next window index to submit; slot = index % num_staging_windows
+    u64 _last_signaled_download = 0; // highest value signaled on the download completion fence (monotonic)
 
     // One command list reused across every window; one allocator per window slot, cycled and reset when the
     // window three back has drained. Owned here (not the epoch-gated pool): the copy queue does not observe
@@ -382,17 +382,17 @@ private:
     ComPtr<ID3D12CommandAllocator> _allocators[num_staging_windows];
 
     bool _window_open = false;
-    cc::isize _window_used = 0;                  // bytes read into the open window so far
-    cc::u64 _open_highest_finished = 0;          // highest completion value of reads finished in the open window
-    cc::u64 _open_max_wait_token = 0;            // highest direct-queue token the open window's reads must wait for
-    cc::u64 _open_max_upload_wait = 0;           // highest async-upload value the open window's reads must wait for
+    isize _window_used = 0;                      // bytes read into the open window so far
+    u64 _open_highest_finished = 0;              // highest completion value of reads finished in the open window
+    u64 _open_max_wait_token = 0;                // highest direct-queue token the open window's reads must wait for
+    u64 _open_max_upload_wait = 0;               // highest async-upload value the open window's reads must wait for
     cc::vector<download_mem_job> _open_mem_jobs; // memcpies accumulated for the open window
 
     cc::vector<inflight_window> _inflight; // submitted, not-yet-drained windows (FIFO, oldest at the front)
 };
 } // namespace
 
-cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_bytes)
+cc::result<cc::unit> dx12_download_async_system::initialize(isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async download staging window must be positive");
     window_bytes = round_window(window_bytes); // keep every window's base 512-aligned for texture readbacks
@@ -408,7 +408,7 @@ cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_byt
                                              D3D12_RESOURCE_STATE_COPY_DEST, window_bytes * num_staging_windows);
     CC_RETURN_IF_ERROR(staging);
     _staging = cc::move(staging.value().resource);
-    _mapped = static_cast<cc::byte*>(staging.value().mapped);
+    _mapped = static_cast<byte*>(staging.value().mapped);
     _window_bytes = window_bytes;
     _desired_window_bytes.store(window_bytes, std::memory_order_relaxed); // no resize pending yet
 
@@ -428,7 +428,7 @@ cc::result<cc::unit> dx12_download_async_system::initialize(cc::isize window_byt
     return cc::unit{};
 }
 
-sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_handle buffer, cc::isize offset, cc::isize size)
+sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_handle buffer, isize offset, isize size)
 {
     CC_ASSERT(buffer != nullptr, "async download source buffer is null");
     auto const* const src = dynamic_cast<dx12_buffer const*>(buffer.get());
@@ -440,7 +440,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
 
     // zero-size read: already-ready, empty future (no staging, no actor work).
     if (size == 0)
-        return sg::bytes_future(cc::pinned_data<cc::byte const>(), std::make_shared<sg::ready_bytes_waiter>());
+        return sg::bytes_future(cc::pinned_data<byte const>(), std::make_shared<sg::ready_bytes_waiter>());
 
     CC_ASSERT(src->_resource, "async download source buffer has no storage");
     CC_ASSERT(sg::has_flag(src->usage(), sg::buffer_usage::copy_src), "async download source buffer must have "
@@ -450,17 +450,17 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     // Forward cross-queue sync vs a pending async UPLOAD to the same buffer: the read must observe it.
     // Upload and download own independent copy queues, so the read's window waits on the upload completion
     // fence for this value (issued on the download queue in submit_window) — a clean GPU wait, no CPU stall.
-    cc::u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
+    u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
 
     // Destination the read bytes land in; the pinned_data keeps it alive until the copy runs (or cancels).
-    auto dst = cc::pinned_data<cc::byte>::create_uninitialized(size);
-    cc::span<cc::byte> const dst_span = dst.span();
+    auto dst = cc::pinned_data<byte>::create_uninitialized(size);
+    cc::span<byte> const dst_span = dst.span();
     auto waiter = std::make_shared<dx12_async_download_waiter>();
 
     // Reserve this read's completion value and stamp the buffer *before* enqueuing, so a later direct-queue
     // list that writes the buffer already sees a value to wait on (the reverse cross-queue sync).
-    cc::u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
-    cc::u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
+    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
     while (prev < value
            && !src->_pending_async_download_value.compare_exchange_weak(prev, value, std::memory_order_release,
                                                                         std::memory_order_relaxed))
@@ -503,14 +503,14 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
-    cc::u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
+    u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
 
-    auto dst = cc::pinned_data<cc::byte>::create_uninitialized(fp.tight_size());
-    cc::span<cc::byte> const dst_span = dst.span();
+    auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
+    cc::span<byte> const dst_span = dst.span();
     auto waiter = std::make_shared<dx12_async_download_waiter>();
 
-    cc::u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
-    cc::u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
+    u64 const value = _next_download_value.fetch_add(1, std::memory_order_relaxed) + 1;
+    u64 prev = src->_pending_async_download_value.load(std::memory_order_relaxed);
     while (prev < value
            && !src->_pending_async_download_value.compare_exchange_weak(prev, value, std::memory_order_release,
                                                                         std::memory_order_relaxed))
@@ -533,7 +533,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     return sg::bytes_future(cc::move(dst), cc::move(waiter));
 }
 
-void dx12_download_async_system::set_window_bytes(cc::isize bytes)
+void dx12_download_async_system::set_window_bytes(isize bytes)
 {
     CC_ASSERT(bytes > 0, "async download staging window must be positive");
     // Record the request; the copy actor adopts it at the top of its next process cycle (before staging).

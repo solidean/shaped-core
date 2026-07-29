@@ -5,6 +5,8 @@
 #include <clean-core/string/format.hh>
 #include <nexus/tests/export/xml.hh>
 
+using namespace cc::primitive_defines;
+
 using nx::impl::xml_escape;
 
 namespace
@@ -69,7 +71,7 @@ void print_nested_executions(cc::string& out,
                              int& error_count,
                              int max_errors)
 {
-    cc::isize i = 0;
+    isize i = 0;
     while (i < parent.nested.size())
     {
         auto const group = parent.nested[i].invocation_group;

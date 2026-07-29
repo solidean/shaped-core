@@ -53,7 +53,7 @@ struct cc_key_hash
 template <class K, class V, class Hash = impl::cc_key_hash<K>>
 struct in_memory_key_value_provider final : key_value_provider<K, V>
 {
-    explicit in_memory_key_value_provider(cc::isize max_entries) : _max_entries(max_entries) {}
+    explicit in_memory_key_value_provider(isize max_entries) : _max_entries(max_entries) {}
 
     [[nodiscard]] cc::optional<V> try_get(K const& key) override
     {
@@ -67,12 +67,12 @@ struct in_memory_key_value_provider final : key_value_provider<K, V>
 
     void apply_bookkeeping() override
     {
-        if (cc::isize(_map.size()) > _max_entries)
+        if (isize(_map.size()) > _max_entries)
             _map.clear();
     }
 
 private:
-    cc::isize _max_entries = 0;
+    isize _max_entries = 0;
     std::unordered_map<K, V, Hash> _map;
 };
 
@@ -87,7 +87,7 @@ struct key_value_cache
     }
 
     /// Convenience: append a default in-memory tier holding up to max_entries entries.
-    void add_default_in_memory_provider(cc::isize max_entries = 4096)
+    void add_default_in_memory_provider(isize max_entries = 4096)
     {
         this->add_provider(std::make_shared<in_memory_key_value_provider<K, V>>(max_entries));
     }
@@ -99,12 +99,12 @@ struct key_value_cache
         return _state.lock(
             [&](state& s) -> V
             {
-                for (cc::isize i = 0; i < s.providers.size(); ++i)
+                for (isize i = 0; i < s.providers.size(); ++i)
                 {
                     auto hit = s.providers[i]->try_get(key);
                     if (hit.has_value())
                     {
-                        for (cc::isize j = 0; j < i; ++j)
+                        for (isize j = 0; j < i; ++j)
                             s.providers[j]->set(key, hit.value());
                         return cc::move(hit.value());
                     }

@@ -33,7 +33,7 @@ void shader_cache::add_provider(std::shared_ptr<cc::key_value_provider<cc::hash1
     _cache.add_provider(cc::move(provider));
 }
 
-void shader_cache::add_default_in_memory_provider(cc::isize max_entries)
+void shader_cache::add_default_in_memory_provider(isize max_entries)
 {
     _cache.add_default_in_memory_provider(max_entries);
 }
@@ -54,10 +54,10 @@ cc::hash128 shader_cache::compute_key(shader_description const& desc, compile_op
     b.add_pod(options.optimization);
     b.add_bool(options.debug_info);
     b.add_bool(options.warnings_as_errors);
-    b.add_pod(cc::u64(options.defines.size()));
+    b.add_pod(u64(options.defines.size()));
     for (auto const& d : options.defines)
         b.add_string(d);
-    b.add_pod(cc::u64(options.extra_args.size()));
+    b.add_pod(u64(options.extra_args.size()));
     for (auto const& a : options.extra_args)
         b.add_string(a);
     return cc::hash128::create(b.written_bytes(), 0);

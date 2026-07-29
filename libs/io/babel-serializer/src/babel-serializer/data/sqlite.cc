@@ -88,7 +88,7 @@ cc::result<database> database::open_memory()
     return open_with_flags(":memory:", SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
 }
 
-cc::result<database> database::open_blob(cc::span<cc::byte const> bytes)
+cc::result<database> database::open_blob(cc::span<byte const> bytes)
 {
     auto opened = open_memory();
     if (opened.has_error())
@@ -139,14 +139,13 @@ cc::result<statement> database::prepare(cc::string_view sql)
     return statement(stmt);
 }
 
-cc::vector<cc::byte> database::serialize() const
+cc::vector<byte> database::serialize() const
 {
     sqlite3_int64 size = 0;
     auto* data = sqlite3_serialize(_db, "main", &size, 0);
     if (data == nullptr)
         return {};
-    auto out = cc::vector<cc::byte>::create_copy_of(
-        cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(data), isize(size)));
+    auto out = cc::vector<byte>::create_copy_of(cc::span<byte const>(reinterpret_cast<byte const*>(data), isize(size)));
     sqlite3_free(data);
     return out;
 }
@@ -211,7 +210,7 @@ cc::result<cc::unit> statement::bind(i32 index, cc::string_view value)
     return cc::unit{};
 }
 
-cc::result<cc::unit> statement::bind(i32 index, cc::span<cc::byte const> value)
+cc::result<cc::unit> statement::bind(i32 index, cc::span<byte const> value)
 {
     if (sqlite3_bind_blob(_stmt, index, value.data(), int(value.size_bytes()), SQLITE_TRANSIENT) != SQLITE_OK)
         return cc::error(last_error(handle_of(_stmt)));
@@ -325,13 +324,13 @@ cc::string_view row::as_string(i32 col) const
     return text != nullptr ? cc::string_view(reinterpret_cast<char const*>(text), n) : cc::string_view();
 }
 
-cc::span<cc::byte const> row::as_blob(i32 col) const
+cc::span<byte const> row::as_blob(i32 col) const
 {
     void const* data = sqlite3_column_blob(_stmt, col);
     int const n = sqlite3_column_bytes(_stmt, col);
     if (data == nullptr)
         return {};
-    return cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(data), n);
+    return cc::span<byte const>(reinterpret_cast<byte const*>(data), n);
 }
 
 bool is_available()
@@ -372,7 +371,7 @@ cc::result<database> database::open_memory()
 {
     return cc::error(unavailable());
 }
-cc::result<database> database::open_blob(cc::span<cc::byte const>)
+cc::result<database> database::open_blob(cc::span<byte const>)
 {
     return cc::error(unavailable());
 }
@@ -385,7 +384,7 @@ cc::result<statement> database::prepare(cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::vector<cc::byte> database::serialize() const
+cc::vector<byte> database::serialize() const
 {
     return {};
 }
@@ -415,7 +414,7 @@ cc::result<cc::unit> statement::bind(i32, cc::string_view)
 {
     return cc::error(unavailable());
 }
-cc::result<cc::unit> statement::bind(i32, cc::span<cc::byte const>)
+cc::result<cc::unit> statement::bind(i32, cc::span<byte const>)
 {
     return cc::error(unavailable());
 }
@@ -475,7 +474,7 @@ cc::string_view row::as_string(i32) const
 {
     return {};
 }
-cc::span<cc::byte const> row::as_blob(i32) const
+cc::span<byte const> row::as_blob(i32) const
 {
     return {};
 }

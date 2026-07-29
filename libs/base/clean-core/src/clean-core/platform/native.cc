@@ -8,7 +8,7 @@
 
 // Platform-specific includes for symbol demangling
 #ifdef CC_OS_WINDOWS
-#include <Windows.h>
+#include <clean-core/platform/win32_sanitized.hh>
 
 // NOTE: must be _after_ windows.h
 #include <DbgHelp.h>
