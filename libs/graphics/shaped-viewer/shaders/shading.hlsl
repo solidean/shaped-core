@@ -1,5 +1,6 @@
 #include "common.hlsli"
 #include "background.hlsli"
+#include "mesh.hlsli" // Vertices / Indices + mesh_triangle
 #include "pbr.hlsli"
 
 // Miss + closest-hit for the basic flat-shaded PBR path.
@@ -7,7 +8,6 @@
 // mesh's own vertices, so a random triangle soup shades correctly with no per-vertex normals.
 
 StructuredBuffer<PbrMaterial> Materials : register(t1);
-StructuredBuffer<float3> Vertices : register(t2); // the hit mesh's positions, non-indexed (3 per triangle)
 
 struct Attributes
 {
@@ -28,10 +28,8 @@ void ClosestHit(inout Payload payload, in Attributes attribs)
     PbrMaterial m = Materials[prim];
 
     // Flat face normal from the triangle's object-space vertices, moved into world space.
-    float3 v0 = Vertices[prim * 3 + 0];
-    float3 v1 = Vertices[prim * 3 + 1];
-    float3 v2 = Vertices[prim * 3 + 2];
-    float3 n_obj = normalize(cross(v1 - v0, v2 - v0));
+    Triangle3 tri = mesh_triangle(prim, frame.mesh_is_indexed != 0);
+    float3 n_obj = normalize(cross(tri.v1 - tri.v0, tri.v2 - tri.v0));
     float3 N = normalize(mul((float3x3)ObjectToWorld3x4(), n_obj));
 
     float3 V = -normalize(WorldRayDirection());

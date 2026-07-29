@@ -8,12 +8,11 @@ namespace sv
 {
 /// Stable identity of a view across frames.
 ///
-/// A view is re-submitted every frame as a fresh value; its `view_id` is what ties this frame's view to
-/// the *persistent* resources it accumulates into (temporal accumulators, history buffers). Everything a
-/// view touches that is not keyed by a `view_id` is transient and recreated each frame.
+/// A view is re-submitted every frame as a fresh value.
+/// Its `view_id` is what ties this frame's view to the *persistent* resources it accumulates into (temporal accumulators, history buffers).
+/// Everything a view touches that is not keyed by a `view_id` is transient and recreated each frame.
 ///
-/// Derive one from a human-readable string once and keep reusing it — `from_string` is a plain content
-/// hash, so the same string always yields the same id.
+/// Derive one from a human-readable string once and keep reusing it — `from_string` is a plain content hash, so the same string always yields the same id.
 struct view_id
 {
     u64 value = 0;

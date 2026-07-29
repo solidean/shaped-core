@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash128.hh> // cc::hash128 (the content key)
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
@@ -21,6 +22,11 @@ namespace sv::impl
 ///
 /// This is the generic id-pool the viewer's concrete managers (mesh, material) build on — the reusable core
 /// that a bare `cc::map` per resource type was standing in for.
+///
+/// It is content-addressed: each record is inserted under a caller-supplied `cc::hash128` content hash, and
+/// `find_by_hash` resolves that hash back to a resident id in O(1). The pool never hashes anything itself —
+/// hashes come from outside — so an acquire is O(1) on the happy path and touches the data only on a miss.
+/// Collisions are resolved by hash alone, with no content compare, which is what the 128-bit width buys.
 template <class Id, class Record>
 class lru_pool
 {
@@ -68,12 +74,29 @@ public:
     bool evict(Id id) { return _remove(id); }
 
 protected:
-    /// Store a freshly-built `record` of `size_in_bytes`, mint its id, stamp it used this epoch, then enforce
-    /// the byte budget. Returns the new id.
-    [[nodiscard]] Id insert(Record record, isize size_in_bytes)
+    /// The resident id for content hash `hash`, or null if nothing with that hash is resident (never inserted,
+    /// or evicted since). Marks a hit used this epoch (an LRU touch), so the acquire happy path keeps it alive.
+    [[nodiscard]] cc::optional<Id> find_by_hash(cc::hash128 hash)
     {
+        auto const* const idp = _by_hash.get_ptr(hash);
+        if (idp == nullptr)
+            return {};
+        auto* const e = _entries.get_ptr(*idp);
+        CC_ASSERT(e != nullptr, "lru_pool: hash index names a missing entry");
+        e->last_used = _epoch;
+        return *idp;
+    }
+
+    /// Store a freshly-built `record` of `size_in_bytes` under content `hash`, mint its id, stamp it used this
+    /// epoch, then enforce the byte budget. Returns the new id. `hash` must not already be resident — call
+    /// `find_by_hash` first.
+    [[nodiscard]] Id insert(cc::hash128 hash, Record record, isize size_in_bytes)
+    {
+        CC_ASSERT(!_by_hash.contains(hash), "lru_pool::insert: content hash already resident — find_by_hash first");
         auto const id = Id(_next++);
-        _entries[id] = entry{.record = cc::move(record), .size_in_bytes = size_in_bytes, .last_used = _epoch};
+        _entries[id]
+            = entry{.record = cc::move(record), .size_in_bytes = size_in_bytes, .last_used = _epoch, .hash = hash};
+        _by_hash[hash] = id;
         _total_bytes += size_in_bytes;
         _enforce_budget();
         return id;
@@ -85,6 +108,7 @@ private:
         Record record;
         isize size_in_bytes = 0;
         sg::epoch last_used = sg::epoch(0);
+        cc::hash128 hash;
     };
 
     /// How many epochs `b` is behind `a` (a >= b by construction, so no underflow).
@@ -96,6 +120,7 @@ private:
         if (e == nullptr)
             return false;
         _total_bytes -= e->size_in_bytes;
+        _by_hash.erase(e->hash);
         _entries.erase(id);
         return true;
     }
@@ -139,7 +164,8 @@ private:
     }
 
     cc::map<Id, entry> _entries;
-    u32 _next = 0; // mints upward from 0; the id's ::invalid is u32(-1), never reached
+    cc::map<cc::hash128, Id> _by_hash; // content hash -> id, kept in lockstep with _entries for O(1) acquire
+    u32 _next = 0;                     // mints upward from 0; the id's ::invalid is u32(-1), never reached
     isize _total_bytes = 0;
     sg::epoch _epoch = sg::epoch(0);
     isize _max_bytes = 0;        // <= 0 => unlimited

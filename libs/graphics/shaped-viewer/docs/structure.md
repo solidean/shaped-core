@@ -18,6 +18,7 @@ Shaped Code's visualization needs (SOLIDEAN, internal tools, customer projects).
 ```text
 viewer_definition / view / scene_item   [in progress]  the per-frame description (camera, items, settings, id, size)
 resource managers (mesh / material)     [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
+resource data (triangle / indexed / material)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 pathtrace_routine                        [in progress]  the DXR GI trace the view_renderer drives: TLAS + dispatch_rays into a UAV target
 pbr_raytrace_routine                     [in progress]  the flat single-bounce IBL DXR trace (SH environment), driven directly (not by the view_renderer)
 view_renderer                            [in progress]  a render routine that orchestrates: resolve ids, upload constants, path-trace, open the scope, blit (via sr::blit_routine)

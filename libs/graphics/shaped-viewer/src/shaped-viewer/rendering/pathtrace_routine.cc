@@ -1,4 +1,3 @@
-#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
@@ -6,28 +5,6 @@
 
 namespace sv
 {
-namespace
-{
-/// The global root signature must cover every binding *any* stage uses, so merge the four stages' reflected
-/// bindings, keyed by name (raygen: scene/Output/FrameConstants; hit: Materials/Vertices; miss: background;
-/// shadow miss: none).
-void merge_bindings(cc::vector<sg::binding>& into, cc::span<sg::binding const> from)
-{
-    for (auto const& b : from)
-    {
-        auto seen = false;
-        for (auto const& e : into)
-            if (e.name == b.name)
-            {
-                seen = true;
-                break;
-            }
-        if (!seen)
-            into.push_back(b);
-    }
-}
-} // namespace
-
 void pathtrace_routine::init_declare(sg::context& ctx)
 {
     auto rg = sv::shaders::pathtrace.raygen.PathTraceRayGen->acquire(ctx);
@@ -58,13 +35,10 @@ void pathtrace_routine::init_declare(sg::context& ctx)
             if (compiled_rg == nullptr || compiled_ms == nullptr || compiled_sms == nullptr || compiled_ch == nullptr)
                 return; // a broken edit, or a context accepting no format we can produce — execute no-ops
 
-            auto merged = cc::vector<sg::binding>();
-            merge_bindings(merged, compiled_rg->bindings);
-            merge_bindings(merged, compiled_ms->bindings);
-            merge_bindings(merged, compiled_sms->bindings);
-            merge_bindings(merged, compiled_ch->bindings);
-
-            s.group_layout = ctx.cached.acquire_binding_group_layout(merged);
+            // The global root signature must cover every binding *any* stage uses
+            // (raygen: scene/Output/FrameConstants; hit: Materials/Vertices/Indices; miss: background; shadow miss: none).
+            s.group_layout = ctx.cached.acquire_binding_group_layout(sg::merge_bindings(
+                {compiled_rg->bindings, compiled_ms->bindings, compiled_sms->bindings, compiled_ch->bindings}));
             s.pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {s.group_layout}});
 
             // Payload is PtPayload from pt_common.hlsli: albedo + emissive + normal + hit_t = 10 floats.
@@ -76,8 +50,7 @@ void pathtrace_routine::init_declare(sg::context& ctx)
             auto const hit_h = rpd.add_hit_shader({.closest_hit = *compiled_ch});
             s.pipeline = ctx.uncached.create_raytracing_pipeline(rpd);
 
-            // Miss records in table order: index 0 = primary/bounce miss, index 1 = shadow miss (the raygen's
-            // shadow TraceRay passes MissShaderIndex 1).
+            // Miss records in table order: index 0 = primary/bounce miss, index 1 = shadow miss (the raygen's shadow TraceRay passes MissShaderIndex 1).
             auto stbd = sg::raytracing_shader_table_description{.pipeline = s.pipeline};
             s.raygen = stbd.add_raygen_shader(raygen_h);
             (void)stbd.add_miss_shader(miss_h);
@@ -107,7 +80,8 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
                                  {.name = "FrameConstants", .view = d.frame.as_uniform_buffer()},
                                  {.name = "background", .view = d.background.as_uniform_buffer()},
                                  {.name = "Materials", .view = d.materials.as_readonly_buffer()},
-                                 {.name = "Vertices", .view = d.vertices.as_readonly_buffer()}});
+                                 {.name = "Vertices", .view = d.vertices.as_readonly_buffer()},
+                                 {.name = "Indices", .view = d.indices.as_readonly_buffer()}});
 
             cmd.raytracing.bind_pipeline(*s.pipeline);
             cmd.raytracing.bind_group(0, *group);

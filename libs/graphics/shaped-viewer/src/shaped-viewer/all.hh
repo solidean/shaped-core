@@ -1,12 +1,14 @@
 #pragma once
 
-/// Full umbrella include for shaped-viewer's public surface. Prefer the specific header you need.
+/// Full umbrella include for shaped-viewer's public surface.
+/// Prefer the specific header you need.
 
 #include <shaped-viewer/fwd.hh>
 
 // vocabulary
 #include <shaped-viewer/background.hh>
 #include <shaped-viewer/camera.hh>
+#include <shaped-viewer/gpu_types.hh>
 #include <shaped-viewer/light.hh>
 #include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/render_settings.hh>
@@ -16,6 +18,7 @@
 #include <shaped-viewer/viewer_definition.hh>
 
 // resources
+#include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 

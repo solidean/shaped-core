@@ -36,8 +36,8 @@ TEST("sv - path-traced Cornell box (headless)")
     // Build the Cornell box through the managers (this is where the BLAS is built).
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(box.positions);
-    auto const materials = resources.materials.acquire(box.materials);
+    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(box.positions));
+    auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
     REQUIRE(resources.meshes.contains(mesh));
     REQUIRE(resources.materials.contains(materials));
 
@@ -60,14 +60,16 @@ TEST("sv - path-traced Cornell box (headless)")
     // (kept small so the trace stays fast on the WARP software device).
     auto fc = sv::pt_frame_constants_gpu{};
     fc.camera = sv::camera_gpu::from(cam);
-    fc.light_center = box.light.center;
-    fc.light_u = tg::vec3f(box.light.half_x, 0, 0); // the box light is an axis-aligned XZ rect
-    fc.light_v = tg::vec3f(0, 0, box.light.half_z);
-    fc.light_emission = box.light.emission;
-    fc.light_normal = tg::vec3f(0, -1, 0);
+    // the box light is an axis-aligned XZ rect, emitting straight down
+    fc.light = {.center = box.light.center,
+                .u = tg::vec3f(box.light.half_x, 0, 0),
+                .v = tg::vec3f(0, 0, box.light.half_z),
+                .emission = box.light.emission,
+                .normal = tg::vec3f(0, -1, 0)};
     fc.samples_per_pixel = 16;
     fc.max_bounces = 5;
     fc.seed = 1u;
+    fc.mesh_is_indexed = mesh_rec->is_indexed; // a plain triangle list here — the closest-hit skips Indices
 
     // A closed Cornell box lets no ray escape, so the environment probe stays dark; still bind it (the miss
     // reads it). Zero coefficients = black background.
@@ -94,11 +96,13 @@ TEST("sv - path-traced Cornell box (headless)")
                                           .instances = instances,
                                           .output = target,
                                           .materials = mat_rec->materials,
-                                          .vertices = mesh_rec->vertices});
+                                          .vertices = mesh_rec->vertices,
+                                          .indices = mesh_rec->indices});
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
-    CHECK(mesh_rec->triangle_count > 0);
+    CHECK(mesh_rec->triangle_count == box.materials.size());
+    CHECK(!mesh_rec->is_indexed); // the non-indexed path: a non-indexed BLAS + the stand-in bound as Indices
 }

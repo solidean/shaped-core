@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
@@ -83,6 +84,35 @@ inline triangle_cloud make_triangle_cloud(int triangle_count, cc::u64 seed = 0x5
                                  .metallic = r.range(0.0f, 1.0f),
                                  .roughness = r.range(0.08f, 1.0f),
                                  .emissive = tg::vec3f(0, 0, 0)});
+    }
+    return out;
+}
+
+/// A welded indexed triangle list: the same geometry as its source, with duplicate positions collapsed onto
+/// one vertex — so the index buffer genuinely shares vertices (both triangles of a quad land on 4 positions).
+struct indexed_mesh
+{
+    cc::vector<tg::pos3f> positions;
+    cc::vector<cc::u32> indices;
+};
+
+/// Welds `triangle_list` (3 positions per triangle) into an indexed_mesh, preserving triangle order — so a
+/// material set indexed by PrimitiveIndex() still lines up. O(n²): test-sized meshes only.
+inline indexed_mesh weld_triangle_list(cc::span<tg::pos3f const> triangle_list)
+{
+    auto out = indexed_mesh{};
+    for (auto const& p : triangle_list)
+    {
+        auto index = out.positions.size(); // stays == size() while p is unseen
+        for (auto i = cc::isize(0); i < out.positions.size(); ++i)
+            if (out.positions[i] == p)
+            {
+                index = i;
+                break;
+            }
+        if (index == out.positions.size())
+            out.positions.push_back(p);
+        out.indices.push_back(cc::u32(index));
     }
     return out;
 }

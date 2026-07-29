@@ -8,15 +8,12 @@ camera camera::orbiting(tg::pos3d target, f64 distance, tg::angle_d azimuth, tg:
 {
     auto const [sa, ca] = tg::sin_cos(azimuth);
     auto const [se, ce] = tg::sin_cos(elevation);
-    // Spherical offset in a +y-up frame: azimuth=elevation=0 places the eye at target - distance * z.
     auto const offset = tg::vec3d(distance * ce * sa, distance * se, -distance * ce * ca);
     return looking_at(target + offset, target);
 }
 
 tg::quat_d camera::look_rotation(tg::pos3d eye, tg::pos3d target, tg::vec3d up)
 {
-    // Left-handed pinhole basis: forward into the scene, right/true_up completing an orthonormal frame.
-    // The orientation then maps +x -> right, +y -> true_up, +z -> forward.
     auto const forward = (target - eye).normalized();
     auto const right = tg::dual(tg::cross(up, forward)).normalized();
     auto const true_up = tg::dual(tg::cross(forward, right));
@@ -25,7 +22,6 @@ tg::quat_d camera::look_rotation(tg::pos3d eye, tg::pos3d target, tg::vec3d up)
 
 camera_gpu camera_gpu::from(camera const& cam)
 {
-    // The orientation maps the base frame onto the camera frame, so the pinhole basis is just its columns.
     auto const forward = cam.orientation * tg::vec3d(0, 0, 1);
     auto const right = cam.orientation * tg::vec3d(1, 0, 0);
     auto const true_up = cam.orientation * tg::vec3d(0, 1, 0);

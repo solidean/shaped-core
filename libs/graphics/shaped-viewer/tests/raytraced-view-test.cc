@@ -36,8 +36,8 @@ TEST("sv - flat-PBR raytraced view (headless)")
     // Build the scene through the managers (this is where the BLAS is built).
     auto const cloud = sv_test::make_triangle_cloud(64);
     auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(cloud.positions);
-    auto const materials = resources.materials.acquire(cloud.materials);
+    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
+    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
     REQUIRE(resources.meshes.contains(mesh));
     REQUIRE(resources.materials.contains(materials));
 
@@ -53,9 +53,11 @@ TEST("sv - flat-PBR raytraced view (headless)")
     auto const cam = sv::camera{
         .position = tg::pos3d(2.4, 1.8, -3.2)}; // default orientation frames the origin; square target -> aspect 1
 
-    // Flat-PBR frame constants: just the camera — the surfaces are lit entirely by the SH environment probe.
+    // Flat-PBR frame constants: the camera — the surfaces are lit entirely by the SH environment probe — plus
+    // the bound mesh's geometry layout, which tells the closest-hit how to reach a triangle's vertices.
     auto fc = sv::frame_constants_gpu{};
     fc.camera = sv::camera_gpu::from(cam);
+    fc.mesh_is_indexed = mesh_rec->is_indexed;
 
     // A simple SH environment: a bright DC term plus a vertical (y) gradient, so the surfaces get diffuse
     // irradiance (and a missed ray sees a sky).
@@ -85,6 +87,7 @@ TEST("sv - flat-PBR raytraced view (headless)")
                                              .output = target,
                                              .materials = mat_rec->materials,
                                              .vertices = mesh_rec->vertices,
+                                             .indices = mesh_rec->indices,
                                              .size = size});
 
     ctx.submit_command_list(cc::move(cmd));
@@ -92,4 +95,5 @@ TEST("sv - flat-PBR raytraced view (headless)")
 
     // Reaching here means the whole flat-PBR pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count > 0);
+    CHECK(!mesh_rec->is_indexed); // the non-indexed path: a non-indexed BLAS + the stand-in bound as Indices
 }

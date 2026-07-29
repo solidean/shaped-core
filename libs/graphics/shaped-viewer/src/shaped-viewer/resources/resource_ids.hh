@@ -6,13 +6,12 @@ namespace sv
 {
 /// Strongly-typed resource handles a scene item references.
 ///
-/// Each is an opaque integer newtype minted by the matching manager (see resource_managers.hh) — a scene
-/// item names *what* it draws by id, and the renderer resolves the id to the concrete GPU resource through
-/// the managers. Being `enum class`, they hash and compare out of the box, so they key a cc::map with no
-/// extra boilerplate.
+/// Each is an opaque integer newtype minted by the matching manager (see resource_managers.hh).
+/// A scene item names *what* it draws by id, and the renderer resolves the id to the concrete GPU resource through the managers.
+/// Being `enum class`, they hash and compare out of the box, so they key a cc::map with no extra boilerplate.
 ///
-/// `invalid` (`u32(-1)`, all bits set) is the reserved null id every manager skips when handing ids out —
-/// the managers mint from 0 upward, so 0 is a usable id and only the top of the range is the sentinel.
+/// `invalid` (`u32(-1)`, all bits set) is the reserved null id every manager skips when handing ids out.
+/// The managers mint from 0 upward, so 0 is a usable id and only the top of the range is the sentinel.
 enum class mesh_id : u32
 {
     invalid = u32(-1)

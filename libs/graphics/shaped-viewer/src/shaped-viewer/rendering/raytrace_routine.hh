@@ -16,8 +16,8 @@
 
 namespace sv
 {
-/// Everything one view's trace binds. The renderer fills this from the resolved scene; the routine owns the
-/// per-frame TLAS build and the dispatch.
+/// Everything one view's trace binds.
+/// The renderer fills this from the resolved scene; the routine owns the per-frame TLAS build and the dispatch.
 struct trace_desc
 {
     sg::buffer<frame_constants_gpu> frame;       // the FrameConstants cbuffer (camera + directional light)
@@ -26,21 +26,20 @@ struct trace_desc
     sg::texture_2d output;                       // rgba16f UAV the raygen writes
     sg::buffer<pbr_material_gpu> materials;      // per-triangle PBR params, indexed by PrimitiveIndex()
     sg::buffer<tg::pos3f> vertices;              // the hit mesh's positions, for the flat face normal
+    sg::buffer<u32> indices;                     // 3 indices per triangle, into `vertices`
     tg::vec2i size;                              // dispatch extent (= output size)
 };
 
 /// The basic flat-shaded PBR ray-tracing pass.
 ///
-/// A render routine (see the "everything that traces is a routine" rule): it owns the DXR pipeline + shader
-/// table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on
-/// reload. `execute` (re)builds the frame's TLAS, binds the scene, and dispatches one ray per pixel into the
-/// output image. All state is behind one mutex taken for the whole call, so concurrent traces on the same
-/// context serialize rather than race.
+/// A render routine (see the "everything that traces is a routine" rule): it owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on reload.
+/// `execute` (re)builds the frame's TLAS, binds the scene, and dispatches one ray per pixel into the output image.
+/// All state is behind one mutex taken for the whole call, so concurrent traces on the same context serialize rather than race.
 class pbr_raytrace_routine : public sg::render_routine<pbr_raytrace_routine>
 {
 public:
-    /// Builds the TLAS from `d.instances`, binds the scene, and dispatches `d.size` primary rays into
-    /// `d.output`. A no-op (leaves the target untouched) if the shaders did not compile.
+    /// Builds the TLAS from `d.instances`, binds the scene, and dispatches `d.size` primary rays into `d.output`.
+    /// A no-op (leaves the target untouched) if the shaders did not compile.
     static void execute(sg::command_list& cmd, trace_desc const& d);
 
 protected:

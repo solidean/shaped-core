@@ -1,4 +1,3 @@
-#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/raytrace_routine.hh>
@@ -6,28 +5,6 @@
 
 namespace sv
 {
-namespace
-{
-/// The global root signature must cover every binding *any* stage uses, so merge the three stages'
-/// reflected bindings, keyed by name (raygen: scene/Output/frame; miss: background; hit:
-/// frame/Materials/Vertices).
-void merge_bindings(cc::vector<sg::binding>& into, cc::span<sg::binding const> from)
-{
-    for (auto const& b : from)
-    {
-        auto seen = false;
-        for (auto const& e : into)
-            if (e.name == b.name)
-            {
-                seen = true;
-                break;
-            }
-        if (!seen)
-            into.push_back(b);
-    }
-}
-} // namespace
-
 void pbr_raytrace_routine::init_declare(sg::context& ctx)
 {
     auto rg = sv::shaders::raygen.raygen.RayGen->acquire(ctx);
@@ -55,12 +32,10 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
             if (compiled_rg == nullptr || compiled_ms == nullptr || compiled_ch == nullptr)
                 return; // a broken edit, or a context accepting no format we can produce — execute no-ops
 
-            auto merged = cc::vector<sg::binding>();
-            merge_bindings(merged, compiled_rg->bindings);
-            merge_bindings(merged, compiled_ms->bindings);
-            merge_bindings(merged, compiled_ch->bindings);
-
-            s.group_layout = ctx.cached.acquire_binding_group_layout(merged);
+            // The global root signature must cover every binding *any* stage uses
+            // (raygen: scene/Output/frame; miss: background; hit: frame/Materials/Vertices/Indices).
+            s.group_layout = ctx.cached.acquire_binding_group_layout(
+                sg::merge_bindings({compiled_rg->bindings, compiled_ms->bindings, compiled_ch->bindings}));
             s.pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {s.group_layout}});
 
             auto rpd = sg::raytracing_pipeline_description{.layout = s.pipeline_layout,
@@ -98,7 +73,8 @@ void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
                                  {.name = "frame", .view = d.frame.as_uniform_buffer()},
                                  {.name = "background", .view = d.background.as_uniform_buffer()},
                                  {.name = "Materials", .view = d.materials.as_readonly_buffer()},
-                                 {.name = "Vertices", .view = d.vertices.as_readonly_buffer()}});
+                                 {.name = "Vertices", .view = d.vertices.as_readonly_buffer()},
+                                 {.name = "Indices", .view = d.indices.as_readonly_buffer()}});
 
             cmd.raytracing.bind_pipeline(*s.pipeline);
             cmd.raytracing.bind_group(0, *group);

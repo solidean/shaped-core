@@ -179,8 +179,8 @@ TEST("sv - viewer window (manual)", nx::config::manual)
     // Build the scene once; only the camera moves.
     auto const cloud = sv_test::make_triangle_cloud(96);
     auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(cloud.positions);
-    auto const materials = resources.materials.acquire(cloud.materials);
+    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
+    auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
 
     auto controller = fly_camera{};
 

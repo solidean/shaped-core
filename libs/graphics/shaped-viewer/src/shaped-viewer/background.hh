@@ -7,13 +7,12 @@ namespace sv
 {
 /// The view's background / environment: the radiance a primary ray sees when it misses all geometry.
 ///
-/// For now it is an order-3 RGB spherical-harmonics probe — 16 coefficients, each an RGB radiance, in the
-/// standard real-SH basis with index 0 the constant (DC) term. Order 3 captures a sky gradient plus some
-/// directional structure (a soft sun disc, horizon banding), which is all a background needs; a miss shader
-/// reconstructs the radiance along a ray direction from these coefficients.
+/// For now it is an order-3 RGB spherical-harmonics probe — 16 coefficients, each an RGB radiance, in the standard real-SH basis with index 0 the constant (DC) term.
+/// Order 3 captures a sky gradient plus some directional structure (a soft sun disc, horizon banding), which is all a background needs.
+/// A miss shader reconstructs the radiance along a ray direction from these coefficients.
 ///
-/// All-zero is a black background. This is the scene-side description; the path tracer's miss does not read it
-/// yet — it lands with the pt environment.
+/// All-zero is a black background.
+/// This is the scene-side description; the path tracer's miss does not read it yet — it lands with the pt environment.
 struct background
 {
     static constexpr int sh_coefficient_count = 16; // order 3: (3 + 1)^2 real-SH coefficients
@@ -21,9 +20,9 @@ struct background
     tg::vec3f sh[sh_coefficient_count] = {};
 };
 
-/// GPU-side SH probe, mirroring the `Background` cbuffer in shaders/background.hlsli. Each coefficient sits in
-/// its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused), because HLSL pads cbuffer array elements to a full
-/// float4 lane. Bound at b1, evaluated by the miss shaders (`background_radiance`).
+/// GPU-side SH probe, mirroring the `Background` cbuffer in shaders/background.hlsli.
+/// Each coefficient sits in its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused), because HLSL pads cbuffer array elements to a full float4 lane.
+/// Bound at b1, evaluated by the miss shaders (`background_radiance`).
 struct background_gpu
 {
     tg::vec4f sh[background::sh_coefficient_count] = {};

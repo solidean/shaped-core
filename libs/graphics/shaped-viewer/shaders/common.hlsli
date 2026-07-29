@@ -8,6 +8,8 @@
 struct FrameConstants
 {
     Camera camera;
+
+    uint mesh_is_indexed; // 0 => the bound mesh is a plain triangle list; see mesh.hlsli
 };
 
 ConstantBuffer<FrameConstants> frame : register(b0);

@@ -20,7 +20,7 @@ float3 estimate_direct(float3 P, float3 N, inout uint rng)
     // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
     float s = pt_rand(rng) * 2.0 - 1.0;
     float t = pt_rand(rng) * 2.0 - 1.0;
-    float3 lp = light_center + s * light_u + t * light_v;
+    float3 lp = light.center + s * light.u + t * light.v;
 
     float3 to_light = lp - P;
     float dist2 = dot(to_light, to_light);
@@ -28,7 +28,7 @@ float3 estimate_direct(float3 P, float3 N, inout uint rng)
     float3 wi = to_light / dist;
 
     float cos_surf = dot(N, wi);
-    float cos_light = dot(light_normal, -wi);
+    float cos_light = dot(light.normal, -wi);
     if (cos_surf <= 0.0 || cos_light <= 0.0)
         return float3(0, 0, 0); // surface or light face turned away
 
@@ -47,10 +47,10 @@ float3 estimate_direct(float3 P, float3 N, inout uint rng)
         return float3(0, 0, 0); // occluded
 
     // solid-angle pdf of uniform area sampling, times the Lambertian BRDF's 1/PI (albedo folded in by caller).
-    // the rect's full edges are 2*light_u and 2*light_v, so its area is |cross(2u, 2v)| = 4 |cross(u, v)|.
-    float area = 4.0 * length(cross(light_u, light_v));
+    // the rect's full edges are 2*light.u and 2*light.v, so its area is |cross(2u, 2v)| = 4 |cross(u, v)|.
+    float area = 4.0 * length(cross(light.u, light.v));
     float pdf = dist2 / (area * cos_light);
-    return light_emission * (cos_surf / (PT_PI * pdf));
+    return light.emission * (cos_surf / (PT_PI * pdf));
 }
 
 // Environment next-event estimation at surface point P with normal N: one uniform-hemisphere sample toward the

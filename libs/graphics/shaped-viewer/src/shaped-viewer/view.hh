@@ -12,15 +12,14 @@
 
 namespace sv
 {
-/// One thing to render this frame: a camera looking at a list of scene items, lit by the view's lights and
-/// environment, traced into a single target texture of `size` pixels.
+/// One thing to render this frame: a camera looking at a list of scene items, lit by the view's lights and environment, traced into a single target texture of `size` pixels.
 ///
-/// A view is a plain per-frame value — build a fresh one each frame. Its `id` is the only part that persists:
-/// it names the accumulators and history the view reuses across frames. The renderer hands back one target
-/// texture per view, which a caller then blits into an output window (or a region of one).
+/// A view is a plain per-frame value — build a fresh one each frame.
+/// Its `id` is the only part that persists: it names the accumulators and history the view reuses across frames.
+/// The renderer hands back one target texture per view, which a caller then blits into an output window (or a region of one).
 ///
-/// Lights are held in typed lists (one per kind) rather than mixed into `items`, so a consumer takes exactly
-/// the light type it handles. The `background` is the environment a missed ray sees.
+/// Lights are held in typed lists (one per kind) rather than mixed into `items`, so a consumer takes exactly the light type it handles.
+/// The `background` is the environment a missed ray sees.
 struct view
 {
     /// stable identity naming the accumulators and history reused across frames

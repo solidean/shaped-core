@@ -11,6 +11,7 @@ namespace sv
 using namespace cc::primitive_defines;
 
 // vocabulary
+struct gpu_boolean;
 struct view_id;
 struct camera;
 struct perspective_projection;
@@ -18,6 +19,7 @@ struct camera_gpu;
 struct pbr_material;
 struct pbr_material_gpu;
 struct area_light;
+struct area_light_gpu;
 struct background;
 struct background_gpu;
 struct render_settings;
@@ -26,7 +28,10 @@ struct view;
 struct viewer_definition;
 struct frame_constants_gpu;
 
-// resource ids + managers
+// resource upload data + ids + managers
+struct triangle_data;
+struct indexed_triangle_data;
+struct material_data;
 enum class mesh_id : u32;
 enum class material_set_id : u32;
 enum class tlas_id : u32;

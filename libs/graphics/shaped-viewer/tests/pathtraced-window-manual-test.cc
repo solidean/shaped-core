@@ -191,8 +191,8 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
     // Build the Cornell box once; only the camera moves.
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::scene_resources::create(ctx);
-    auto const mesh = resources.meshes.acquire(box.positions);
-    auto const materials = resources.materials.acquire(box.materials);
+    auto const mesh = resources.meshes.acquire(sv::triangle_data::create(box.positions));
+    auto const materials = resources.materials.acquire(sv::material_data::create(box.materials));
     auto const* const mesh_rec = resources.meshes.get_ptr(mesh);
     auto const* const mat_rec = resources.materials.get_ptr(materials);
     CC_ASSERT(mesh_rec != nullptr && mat_rec != nullptr, "cornell box resources failed to resolve");
@@ -250,15 +250,17 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
         auto fc = sv::pt_frame_constants_gpu{};
         fc.camera = sv::camera_gpu::from(cam);
-        fc.light_center = box.light.center;
-        fc.light_u = tg::vec3f(box.light.half_x, 0, 0); // the box light is an axis-aligned XZ rect
-        fc.light_v = tg::vec3f(0, 0, box.light.half_z);
-        fc.light_emission = box.light.emission;
-        fc.light_normal = tg::vec3f(0, -1, 0);
+        // the box light is an axis-aligned XZ rect, emitting straight down
+        fc.light = {.center = box.light.center,
+                    .u = tg::vec3f(box.light.half_x, 0, 0),
+                    .v = tg::vec3f(0, 0, box.light.half_z),
+                    .emission = box.light.emission,
+                    .normal = tg::vec3f(0, -1, 0)};
         fc.samples_per_pixel = 2; // low per-frame count — accumulation does the heavy lifting when still
         fc.max_bounces = 5;
         fc.accum_frame = accum;
         fc.seed = accum + 1;
+        fc.mesh_is_indexed = mesh_rec->is_indexed;
 
         // Trace this frame's samples into the persistent target (blending in place when accum_frame > 0).
         {
@@ -277,7 +279,8 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
                                                         .instances = instances,
                                                         .output = target,
                                                         .materials = mat_rec->materials,
-                                                        .vertices = mesh_rec->vertices});
+                                                        .vertices = mesh_rec->vertices,
+                                                        .indices = mesh_rec->indices});
             ctx.submit_command_list(cc::move(trace_cmd));
         }
 

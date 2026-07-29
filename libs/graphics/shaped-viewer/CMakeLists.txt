@@ -12,6 +12,7 @@ project(shaped-viewer LANGUAGES CXX)
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
     src/shaped-viewer/camera.cc
+    src/shaped-viewer/light.cc
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
@@ -28,6 +29,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/fwd.hh
     src/shaped-viewer/all.hh
     src/shaped-viewer/view_id.hh
+    src/shaped-viewer/gpu_types.hh
     src/shaped-viewer/camera.hh
     src/shaped-viewer/pbr_material.hh
     src/shaped-viewer/light.hh
@@ -36,6 +38,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene_item.hh
     src/shaped-viewer/view.hh
     src/shaped-viewer/viewer_definition.hh
+    src/shaped-viewer/resources/resource_data.hh
     src/shaped-viewer/resources/resource_ids.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/impl/lru_pool.hh

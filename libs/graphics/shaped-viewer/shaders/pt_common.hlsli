@@ -1,6 +1,7 @@
 #pragma once
 
 #include "camera.hlsli"
+#include "light.hlsli"
 
 // Shared state for the path tracer's ray-tracing shaders: the per-frame constants, the ray payload, and the
 // sampling helpers the raygen integrator uses.
@@ -12,17 +13,12 @@ cbuffer FrameConstants : register(b0)
 {
     Camera camera; // pinhole camera basis (see sv::camera_gpu::from)
 
-    // the single rectangular area light the integrator samples for direct lighting: an oriented rect at
-    // `light_center` spanning [center +/- light_u] x [center +/- light_v] (world half-edge vectors), emitting
-    // `light_emission` radiance out of `light_normal` (= normalize(cross(light_u, light_v))).
-    float3 light_center;     float _padding0;
-    float3 light_u;          float _padding1;
-    float3 light_v;          float _padding2;
-    float3 light_emission;   float _padding3;
-    float3 light_normal;     float _padding4;
+    AreaLight light; // the single rectangular area light the integrator samples for direct lighting
 
     // path-tracer controls (accum_frame drives progressive accumulation: 0 restarts, >0 blends in place)
     int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
+
+    uint mesh_is_indexed; // 0 => the bound mesh is a plain triangle list; see mesh.hlsli
 };
 
 // One path segment's hit result. The raygen (caller) reads it back; the closest-hit fills the surface fields;

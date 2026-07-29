@@ -1,12 +1,14 @@
 #pragma once
 
+#include <clean-core/common/hash128.hh> // cc::hash128
 #include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/container/span.hh>
+#include <clean-core/container/span.hh> // cc::span
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
+#include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/resource_ids.hh>
 #include <typed-geometry/linalg/pos.hh>
 
@@ -30,13 +32,24 @@ struct manager_config
     resource_budget budget = {};
 };
 
-/// One uploaded mesh: its vertex buffer and the BLAS built from it.
+/// One uploaded mesh: its geometry buffers and the BLAS built from them.
 ///
 /// The BLAS is built once, when the mesh is acquired — a scene item then just references the mesh, and the
-/// renderer rebuilds only the (cheap) TLAS each frame. Non-indexed triangle list: `triangle_count == vertices / 3`.
+/// renderer rebuilds only the (cheap) TLAS each frame.
+///
+/// Indexed and non-indexed geometry stay distinct all the way down: an `indexed_triangle_data` acquire uploads
+/// the caller's index buffer and builds an indexed BLAS, while a `triangle_data` acquire uploads nothing extra
+/// and builds a non-indexed one. `is_indexed` is what a shader branches on (it reaches the closest-hit through
+/// the frame constants), and it is the only thing that makes `indices` meaningful.
 struct mesh_record
 {
     sg::buffer<tg::pos3f> vertices;
+
+    /// The mesh's own indices when `is_indexed`; otherwise the manager's stand-in buffer, which no shader
+    /// reads but every binding group must still cover.
+    sg::buffer<u32> indices;
+    bool is_indexed = false;
+
     isize triangle_count = 0;
     sg::blas_handle blas;
 };
@@ -50,15 +63,25 @@ public:
     /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
     [[nodiscard]] static mesh_manager create(sg::context& ctx, manager_config const& cfg = {});
 
-    /// Uploads `positions` (a non-indexed triangle list — 3 vertices per triangle, count a multiple of 3)
-    /// and builds its BLAS, all on one command list submitted before returning. Ray tracing must be
-    /// supported on the context.
-    [[nodiscard]] mesh_id acquire(cc::span<tg::pos3f const> positions);
+    /// The mesh_id for `mesh.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
+    /// On a miss the geometry is uploaded and BLAS-built on command lists submitted before returning, so the
+    /// id is usable immediately. Ray tracing must be supported on the context.
+    ///
+    /// Non-indexed: `positions` is a triangle list, 3 vertices per triangle, count a multiple of 3.
+    [[nodiscard]] mesh_id acquire(triangle_data const& mesh);
+    /// Indexed: `indices` names triangles into `positions`, count a multiple of 3. Nothing is de-indexed —
+    /// the BLAS is built from the index buffer and the closest-hit reads through it.
+    [[nodiscard]] mesh_id acquire(indexed_triangle_data const& mesh);
 
 private:
     explicit mesh_manager(sg::context& ctx) : _ctx(ctx) {}
 
+    /// The stand-in a non-indexed record binds as `Indices`, created on first use and recorded onto `cmd`.
+    /// Its contents are never read — it exists only so the trace's binding group is complete.
+    [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
+
     sg::context& _ctx;
+    sg::buffer<u32> _index_stand_in;
 };
 
 /// One uploaded material set: a StructuredBuffer of `pbr_material_gpu`, one entry per triangle, indexed by
@@ -76,8 +99,10 @@ public:
     /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
     [[nodiscard]] static material_manager create(sg::context& ctx, manager_config const& cfg = {});
 
-    /// Uploads `materials` into a read-only structured buffer on one command list submitted before returning.
-    [[nodiscard]] material_set_id acquire(cc::span<pbr_material const> materials);
+    /// The material_set_id for `materials.hash`, resident from a prior acquire (O(1)), or a freshly uploaded
+    /// one. On a miss the set is packed to its GPU layout and uploaded into a read-only structured buffer on
+    /// one command list submitted before returning.
+    [[nodiscard]] material_set_id acquire(material_data const& materials);
 
 private:
     explicit material_manager(sg::context& ctx) : _ctx(ctx) {}

@@ -27,6 +27,7 @@ sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_
 sv::render_settings              // { int samples_per_pixel, max_bounces; } — view-wide integration controls (no light/sky: those are on the view)
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; material_set_id materials; mat4f transform; } — triangle_mesh only for now
 sv::area_light                   // { vec2f half_extents; mat4f transform; vec3f emission; } — a local-xy rect (emits along local +z) placed by transform; one typed list per light kind on the view
+sv::area_light_gpu::from(light)  // -> area_light_gpu { vec3f center, u, v, emission, normal; } — the world-space rect the integrator samples (u/v are half-edges, normal = cross(u, v))
 sv::background                   // { vec3f sh[16]; } — order-3 RGB spherical-harmonics environment a missed ray sees (both misses reconstruct radiance from it)
 sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
 sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — flat, per-triangle
@@ -37,8 +38,18 @@ sv::pbr_material                 // { vec3f base_color, emissive; float metallic
 ```cpp
 sv::scene_resources::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials } with per-manager budgets
 sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
-mesh_manager::acquire(positions) -> mesh_id          // uploads a triangle list, builds its BLAS (once)
-material_manager::acquire(materials) -> material_set_id  // one pbr_material_gpu per triangle (by PrimitiveIndex)
+
+// What you hand a manager: an owning cc::pinned_data payload + the cc::hash128 that identifies it.
+sv::triangle_data          // { pinned_data<pos3f const> positions; hash128 hash; } — non-indexed list, 3 positions per triangle
+sv::indexed_triangle_data  // { pinned_data<pos3f const> positions; pinned_data<u32 const> indices; hash128 hash; } — 3 indices per triangle
+sv::material_data          // { pinned_data<pbr_material const> materials; hash128 hash; } — one per triangle
+T::create(range…)          // pins (moving an owning rvalue in, deep-copying a borrow) + hashes now (XXH3-128); call once at authoring time, not per frame
+sv::hash_bytes_of(span) / sv::combine_hashes(a, b)  // the hashing primitives, if you key content yourself
+
+mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads + builds a non-indexed BLAS
+mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: PrimitiveIndex() order follows the index buffer
+sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas; }
+material_manager::acquire(material_data) -> material_set_id  // O(1) if resident; else uploads (one pbr_material_gpu per triangle)
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
@@ -48,7 +59,10 @@ sv::mesh_id / material_set_id / tlas_id / texture_id / buffer_id   // enum class
 
 The managers ride on `sv::impl::lru_pool<Id, Record>` (the reusable id-pool): it mints ids, tracks each
 record's byte size + last-used epoch, and evicts on an idle timeout or a byte budget (least-recently-used
-first, never this frame's working set).
+first, never this frame's working set). It is content-addressed — records go in under a caller-supplied
+`cc::hash128`, and `find_by_hash` resolves that hash to a resident id in O(1) — so `acquire` never re-hashes or
+re-uploads for content it already holds. A manager never hashes anything itself, so hash load stays where the
+caller schedules it and never lands inside a per-frame acquire.
 
 ## Rendering — the view_renderer + routines
 
@@ -61,7 +75,8 @@ sv::view_renderer::execute(cmd, def, resources, output)   // output = a sg::colo
 // The leaf routines it drives — each an sg::render_routine<> (everything that traces/draws is a routine):
 sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
 sr::blit_routine::execute(scope, src_texture)        // fullscreen-triangle blit of a texture across an open raster scope (lives in shaped-rendering)
-sv::pt_frame_constants_gpu                           // { camera_gpu; world area-light rect (center + half-edge vectors u/v + emission/normal); i32 samples_per_pixel, max_bounces; u32 seed; } — 256 bytes
+sv::pt_frame_constants_gpu                           // { camera_gpu camera; area_light_gpu light; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; } — 256 bytes
+sv::gpu_boolean                                      // { u32 value; } — a bool as a cbuffer lane: implicit from bool, explicit to bool, false==0/true==1 (shader may declare it bool or uint)
 
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
 sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
@@ -84,8 +99,8 @@ b1; both misses (flat + pt) reconstruct the environment radiance an escaped ray 
 ```cpp
 // setup (once): build the scene through the managers
 auto resources = sv::scene_resources::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
-auto mesh = resources.meshes.acquire(positions);
-auto mats = resources.materials.acquire(materials);
+auto mesh = resources.meshes.acquire(sv::triangle_data::create(positions));         // or indexed_triangle_data::create(positions, indices)
+auto mats = resources.materials.acquire(sv::material_data::create(materials));
 
 // per frame: describe → render (trace + blit) → present, in one command list
 auto def = sv::viewer_definition{};
@@ -113,3 +128,9 @@ ctx.submit_command_list_and_present(*sc, cc::move(cmd));
   per-instance indexing (a flagged extension). The TLAS is still built from every item.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
+- **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is
+  synthesized. `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through
+  `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed` (a `gpu_boolean`, so the
+  plain `bool` off the record assigns straight into it). The `view_renderer` sets
+  it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it
+  were real. A non-indexed record binds the manager's stand-in there, which no shader reads.

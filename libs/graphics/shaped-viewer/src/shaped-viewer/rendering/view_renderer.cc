@@ -8,7 +8,6 @@
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/view.hh>
 #include <shaped-viewer/viewer_definition.hh>
-#include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual for the light normal
 
 namespace sv
 {
@@ -32,8 +31,8 @@ struct resolved_view
 
 resolved_view resolve(view const& v, scene_resources& resources)
 {
-    // The bound Materials/Vertices come from the first mesh: with one item (this slice) that is exact;
-    // multiple meshes want per-instance indexing — a flagged seam.
+    // The bound Materials/Vertices come from the first mesh: with one item (this slice) that is exact.
+    // Multiple meshes want per-instance indexing — a flagged seam.
     auto out = resolved_view{};
     auto instance_index = u32(0);
 
@@ -65,33 +64,25 @@ resolved_view resolve(view const& v, scene_resources& resources)
 }
 
 /// The area light the path tracer integrates: the view's first, or a default so a light-less view is still lit.
-/// The tracer samples one rect for now; further area lights are the multi-light seam.
+/// The tracer samples one rect for now.
+/// Further area lights are the multi-light seam.
 area_light primary_light(view const& v)
 {
     return v.area_lights.empty() ? area_light{} : v.area_lights.front();
 }
 
-pt_frame_constants_gpu make_pt_frame_constants_gpu(view const& v, area_light const& light)
+pt_frame_constants_gpu make_pt_frame_constants_gpu(view const& v, area_light const& light, mesh_record const& mesh)
 {
     auto fc = pt_frame_constants_gpu{};
-    // The projection carries the aspect ratio; set it from this view's target size before baking the basis.
+    // The trace binds this one mesh, so its geometry layout is what the closest-hit must read by.
+    fc.mesh_is_indexed = mesh.is_indexed;
+    // The projection carries the aspect ratio.
+    // Set it from this view's target size before baking the basis.
     auto cam = v.camera;
     cam.projection.aspect_ratio = f64(v.size[0]) / f64(v.size[1] > 0 ? v.size[1] : 1);
     fc.camera = camera_gpu::from(cam);
 
-    // Resolve the rectangle-plus-transform into the world-space rect the integrator samples: the center, the two
-    // world half-edge vectors (images of the local x / y half-extents), and the outward normal. cross(u, v)
-    // gives the local +z (emitting) face directly, and stays correct under rotation / non-uniform scale.
-    auto const& m = light.transform;
-    auto const col_xyz = [&](int c) { return tg::vec3f(m[c, 0], m[c, 1], m[c, 2]); };
-    auto const u = light.half_extents[0] * col_xyz(0);
-    auto const w = light.half_extents[1] * col_xyz(1);
-
-    fc.light_center = col_xyz(3);
-    fc.light_u = u;
-    fc.light_v = w;
-    fc.light_emission = light.emission;
-    fc.light_normal = tg::dual(tg::cross(u, w)).normalized();
+    fc.light = area_light_gpu::from(light);
 
     fc.samples_per_pixel = v.settings.samples_per_pixel;
     fc.max_bounces = v.settings.max_bounces;
@@ -106,9 +97,8 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view const& v, area_light con
 
 void view_renderer::init_declare(sg::context& ctx)
 {
-    // The renderer draws through the leaf routines, so warm their shader compiles when it is first initialized
-    // rather than stalling on the first frame. It keeps no state of its own here — the persistent cache is
-    // scene resources, not shader-derived, so a reload must not clear it.
+    // The renderer draws through the leaf routines, so warm their shader compiles when it is first initialized rather than stalling on the first frame.
+    // It keeps no state of its own here — the persistent cache is scene resources, not shader-derived, so a reload must not clear it.
     pathtrace_routine::prewarm(ctx);
     sr::blit_routine::prewarm(ctx);
 }
@@ -121,8 +111,8 @@ void view_renderer::execute(sg::command_list& cmd,
     auto& self = acquire(cmd);
     auto& ctx = cmd.context();
 
-    // Reclaim stale / over-budget resources, then advance the managers to this frame's epoch. resolve() below
-    // touches each view's meshes/materials (get_ptr), keeping this frame's working set resident.
+    // Reclaim stale / over-budget resources, then advance the managers to this frame's epoch.
+    // resolve() below touches each view's meshes/materials (get_ptr), keeping this frame's working set resident.
     resources.begin_frame(ctx.current_epoch());
 
     if (def.views.empty())
@@ -143,10 +133,10 @@ void view_renderer::execute(sg::command_list& cmd,
 
                 auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
                     1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-                cmd.upload.pod_to_buffer(frame, make_pt_frame_constants_gpu(v, primary_light(v)));
+                cmd.upload.pod_to_buffer(frame, make_pt_frame_constants_gpu(v, primary_light(v), *resolved.mesh));
 
-                // The view's SH environment probe, packed into its GPU lane layout; the miss reconstructs the
-                // radiance an escaped ray sees from it.
+                // The view's SH environment probe, packed into its GPU lane layout.
+                // The miss reconstructs the radiance an escaped ray sees from it.
                 auto const background = ctx.transient.create_buffer<background_gpu>(
                     1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
                 cmd.upload.pod_to_buffer(background, background_gpu::from(v.background));
@@ -162,14 +152,15 @@ void view_renderer::execute(sg::command_list& cmd,
                                                  .instances = resolved.instances,
                                                  .output = target,
                                                  .materials = resolved.materials->materials,
-                                                 .vertices = resolved.mesh->vertices});
+                                                 .vertices = resolved.mesh->vertices,
+                                                 .indices = resolved.mesh->indices});
 
                 targets.push_back(target);
             }
         });
 
-    // Bind the caller's output and blit the view across it — the trace's UAV writes transition to a sampled
-    // read on this same command list, handled by sg's automatic barriers.
+    // Bind the caller's output and blit the view across it.
+    // The trace's UAV writes transition to a sampled read on this same command list, handled by sg's automatic barriers.
     auto scope = cmd.raster.render_to({.color_targets = {output}});
     sr::blit_routine::execute(scope, targets.front());
 }
