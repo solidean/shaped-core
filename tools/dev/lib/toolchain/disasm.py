@@ -5,7 +5,11 @@ live in a PDB that release builds don't emit), so the reliable, config-independe
 place to find symbols is the **object files**: every .obj keeps a full mangled
 symbol table, and for a CC_FORCE_INLINE-heavy hot function the .obj already holds
 its real, fully-inlined codegen. We therefore scan objects, grouped by the CMake
-target that owns them (`.../CMakeFiles/<target>.dir/...`).
+target that owns them (`.../CMakeFiles/<target>.dir/...`), falling back to the
+object's directory relative to the scan root for build trees that aren't CMake's.
+
+Nothing here knows about presets or about this repo: a scan root is any directory
+holding object files, which is what lets `assembly` read another project's build.
 
 Demangling uses `llvm-nm --demangle` rather than a standalone demangler: LLVM's
 built-in demangler handles both the Itanium and the MSVC ABI, while the
@@ -23,6 +27,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,10 +66,10 @@ class Symbol:
         return self.sym_type in _TEXT_TYPES
 
 
-def find_tool(name: str, build_dir: Path) -> str:
-    """Locate an llvm-* tool beside the configured compiler (or on PATH); raise if absent."""
+def find_tool(name: str, *build_dirs: Path) -> str:
+    """Locate an llvm-* tool beside a configured compiler (or on PATH); raise if absent."""
     env_var = "LLVM_" + name.replace("llvm-", "").replace("-", "_").upper()  # llvm-objdump -> LLVM_OBJDUMP
-    found = resolve_tool(name, env_var, build_dir)
+    found = resolve_tool(name, env_var, *build_dirs)
     if not found:
         raise DisasmError(
             f"{name} not found. It ships with LLVM (beside clang); install LLVM or set {env_var}."
@@ -72,24 +77,38 @@ def find_tool(name: str, build_dir: Path) -> str:
     return found
 
 
-def _target_of(obj: Path) -> str:
-    """Recover the owning target from a '.../CMakeFiles/<target>.dir/...' object path."""
+def _target_of(obj: Path, scan_root: Path) -> str:
+    """Name the group an object belongs to — its CMake target, or a path-derived stand-in.
+
+    A CMake tree spells the target out in the path ('.../CMakeFiles/<target>.dir/...'), which is
+    exact and wins. Foreign build trees (MSBuild, a hand-rolled makefile, a bare obj/ directory)
+    carry no such marker, so the object's directory relative to the scan root stands in — enough
+    for --target filtering to still separate one component's objects from another's.
+    """
     for part in obj.parts:
         if part.endswith(".dir"):
             return part[: -len(".dir")]
-    return "?"
+    try:
+        return obj.parent.relative_to(scan_root).as_posix()
+    except ValueError:  # not under the root (a scan root that is itself a file)
+        return obj.parent.name
 
 
-def discover_objects(build_dir: Path, target_patterns: list[str] | None) -> dict[str, list[Path]]:
-    """Map target -> its object files under build_dir, filtered by fnmatch patterns.
+def discover_objects(roots: Sequence[Path], target_patterns: list[str] | None) -> dict[str, list[Path]]:
+    """Map target -> its object files across the given roots, filtered by fnmatch patterns.
 
-    `target_patterns` None/empty means every target. Patterns are matched against
-    the derived target name (comma-splitting is the caller's job).
+    A root is a directory to scan recursively, or a single object file to take as-is.
+    `target_patterns` None/empty means every target. Patterns are matched against the
+    derived target name (comma-splitting is the caller's job).
     """
     by_target: dict[str, list[Path]] = {}
-    for suffix in _OBJ_SUFFIXES:
-        for obj in build_dir.rglob("*" + suffix):
-            by_target.setdefault(_target_of(obj), []).append(obj)
+    for root in roots:
+        if root.is_file():
+            by_target.setdefault(_target_of(root, root.parent), []).append(root)
+            continue
+        for suffix in _OBJ_SUFFIXES:
+            for obj in root.rglob("*" + suffix):
+                by_target.setdefault(_target_of(obj, root), []).append(obj)
 
     if target_patterns:
         kept = {}
@@ -154,7 +173,7 @@ def enumerate_symbols(nm: str, by_target: dict[str, list[Path]]) -> list[Symbol]
                     dname = dm.group(4)
             symbols.append(
                 Symbol(
-                    target=obj_target.get(obj, _target_of(obj)),
+                    target=obj_target.get(obj, "?"),
                     obj=obj,
                     mangled=mname,
                     demangled=dname,

@@ -35,20 +35,25 @@ def _compiler_from_cache(build_dir: Path) -> str | None:
     return None
 
 
-def resolve_tool(name: str, env_var: str, build_dir: Path) -> str | None:
-    """Like find_tool, but also looks beside the configured compiler.
+def resolve_tool(name: str, env_var: str, *build_dirs: Path) -> str | None:
+    """Like find_tool, but also looks beside the compiler configured in each build dir.
 
     On Windows clang-cl and llvm-profdata/llvm-cov ship in the same LLVM bin/ that
     often isn't on PATH; falling back to the compiler's directory keeps the
     versions matched (the tools must match the clang that built the binaries).
+
+    Several build dirs may be offered, tried in order. That is for inspecting a
+    *foreign* build tree: it may be MSVC-built, or have no CMakeCache at all, in
+    which case a local tree that does know an LLVM install is the better guess.
     """
     found = find_tool(name, env_var)
     if found:
         return found
-    cxx = _compiler_from_cache(build_dir)
-    if cxx:
-        exe = name + (".exe" if os.name == "nt" else "")
-        cand = Path(cxx).parent / exe
-        if cand.is_file():
-            return str(cand)
+    exe = name + (".exe" if os.name == "nt" else "")
+    for build_dir in build_dirs:
+        cxx = _compiler_from_cache(build_dir)
+        if cxx:
+            cand = Path(cxx).parent / exe
+            if cand.is_file():
+                return str(cand)
     return None

@@ -14,6 +14,10 @@ tools/dev/lib/toolchain/disasm.py for the rationale and docs/guides/disassembly.
 trace answers the dynamic one — which branch was taken, where an indirect call landed, how many
 instructions an invocation really retired. It drives tools/instruction-tracer (Windows x64 only);
 see that tool's readme.md.
+
+None of it is tied to this repo. A preset is only the convenient default: --build-dir/--objects
+scan any build tree (search/show) and --exe traces any executable, both bypassing preset
+resolution and CMake discovery entirely. Paths the user types are relative to their CWD.
 """
 
 from __future__ import annotations
@@ -38,12 +42,25 @@ NAME = "assembly"
 TRACER_TARGET = "instruction-tracer"
 
 
+def _external_scope(p: argparse.ArgumentParser) -> None:
+    """The flags that point search/show at a build tree outside this repo.
+
+    Either one switches off preset resolution entirely — no CMakePresets.json, no CMake
+    discovery, no configure — so the command works on any project's object files.
+    """
+    p.add_argument("--build-dir", metavar="PATH",
+                   help="Scan this build tree instead of a preset's (any project; skips preset resolution)")
+    p.add_argument("--objects", action="append", metavar="PATH",
+                   help="Scan this object file or directory: comma-list, repeatable (skips preset resolution)")
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Search symbols and disassemble functions (local godbolt over .obj)")
     asm_sub = p.add_subparsers(dest="assembly_cmd", required=True)
 
     s = asm_sub.add_parser("search", help="List symbols matching a pattern (mangled + demangled)")
     a.preset(s)
+    _external_scope(s)
     s.add_argument("pattern", help="Substring (case-insensitive) matched against mangled and demangled names")
     s.add_argument("--target", action="append",
                    help="Restrict to target(s): comma-list, repeatable, wildcards (default: all)")
@@ -55,6 +72,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
     d = asm_sub.add_parser("show", help="Disassemble one function by exact symbol name")
     a.preset(d)
+    _external_scope(d)
     d.add_argument("symbol", help="Exact mangled or demangled symbol name (quote demangled names)")
     d.add_argument("--target", action="append", help="Restrict the search scope to target(s)")
     d.add_argument("--source", action="store_true",
@@ -70,8 +88,15 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                     "binary (e.g. a nexus test-name filter).",
     )
     a.preset(t)
-    t.add_argument("--target", required=True, metavar="TARGET",
-                   help="Executable target to trace, e.g. clean-core-test (built automatically)")
+    # Exactly one: a target of this repo (built for you), or any executable on disk.
+    what = t.add_mutually_exclusive_group(required=True)
+    what.add_argument("--target", metavar="TARGET",
+                      help="Executable target to trace, e.g. clean-core-test (built automatically)")
+    what.add_argument("--exe", metavar="PATH",
+                      help="Executable to trace directly (any project; not built for you)")
+    t.add_argument("--cwd", metavar="PATH",
+                   help="Working directory for the traced binary (default: its own directory for "
+                        "--exe, the repo root for --target)")
 
     # Exactly one, mirroring the tracer. `--spec` rather than `--target` because --target already
     # means a build target across this command.
@@ -140,22 +165,84 @@ def _target_patterns(specs: list[str] | None) -> list[str]:
     return patterns
 
 
+def _user_path(value: str) -> Path:
+    """A path the user typed: '~' expanded, relative to *their* CWD — not to the repo root.
+
+    dev.py never infers the project from the working directory, but a path aimed at another
+    project is typed where the user is standing, so this is the one thing CWD decides.
+    """
+    return Path(value).expanduser().resolve()
+
+
+def _external_roots(args: argparse.Namespace) -> list[Path]:
+    """The scan roots named by --build-dir / --objects, or [] when neither was given."""
+    roots: list[Path] = []
+    if args.build_dir:
+        roots.append(_user_path(args.build_dir))
+    for spec in args.objects or []:
+        roots.extend(_user_path(s) for s in spec.split(",") if s.strip())
+    return roots
+
+
+def _display(ctx: Context, p: Path) -> str:
+    """Repo-relative for our own paths, absolute for anything else (../../.. helps nobody)."""
+    try:
+        p.relative_to(ctx.root)
+    except ValueError:
+        return str(p)
+    return ctx.rel(p)
+
+
 def _scan(args: argparse.Namespace, ctx: Context):
-    """Resolve the preset, enumerate symbols across its objects, and return the pieces."""
-    preset = ctx.resolve_presets(args.preset)[0]
-    if not preset.build_dir.exists():
-        ctx.die(f"no build at {ctx.rel(preset.build_dir)} - run: uv run dev.py build --preset {preset.name}")
+    """Resolve the scan scope, enumerate symbols across its objects, and return the pieces.
 
-    nm = disasm.find_tool("llvm-nm", preset.build_dir)
-    objdump = disasm.find_tool("llvm-objdump", preset.build_dir)
+    Two modes. A preset names one of this repo's build trees; --build-dir / --objects name any
+    tree at all, and then no preset is resolved (`preset` comes back None) — that is what keeps
+    the command usable on a project that has no CMakePresets.json, or no CMake.
+    """
+    roots = _external_roots(args)
+    preset = None
+    tool_dirs: list[Path] = []
 
-    by_target = disasm.discover_objects(preset.build_dir, _target_patterns(args.target))
+    if roots:
+        if args.preset:
+            ctx.die("--preset does not combine with --build-dir/--objects: those name the tree to scan")
+        for root in roots:
+            if not root.exists():
+                ctx.die(f"no such path: {root}")
+        # The foreign tree first (a CMake build there pins the matching LLVM), then ours as a
+        # fallback: an MSVC or non-CMake tree names no compiler, and LLVM is rarely on PATH.
+        # Best-effort, so a project without our presets still works — env and PATH come first anyway.
+        tool_dirs = [r for r in roots if r.is_dir()]
+        try:
+            tool_dirs.append(ctx.resolve_presets(None)[0].build_dir)
+        except Exception:
+            pass
+    else:
+        preset = ctx.resolve_presets(args.preset)[0]
+        if not preset.build_dir.exists():
+            ctx.die(f"no build at {ctx.rel(preset.build_dir)} - run: uv run dev.py build --preset {preset.name}")
+        roots = [preset.build_dir]
+        tool_dirs = [preset.build_dir]
+
+    nm = disasm.find_tool("llvm-nm", *tool_dirs)
+    objdump = disasm.find_tool("llvm-objdump", *tool_dirs)
+
+    by_target = disasm.discover_objects(roots, _target_patterns(args.target))
     if not by_target:
         scope = f" matching --target {', '.join(_target_patterns(args.target))}" if args.target else ""
-        ctx.die(f"no object files found under {ctx.rel(preset.build_dir)}{scope}")
+        where = ", ".join(_display(ctx, r) for r in roots)
+        ctx.die(f"no object files found under {where}{scope}")
 
     symbols = disasm.enumerate_symbols(nm, by_target)
     return preset, objdump, by_target, symbols
+
+
+def _scope_label(args: argparse.Namespace, preset) -> str:
+    """What the search is over: the preset name, or the external roots the user named."""
+    if preset is not None:
+        return preset.name
+    return ", ".join(str(r) for r in _external_roots(args))
 
 
 def _target_meta(ctx: Context, preset) -> dict[str, tuple[str, int]]:
@@ -183,10 +270,11 @@ def _human_bytes(n: int) -> str:
 def _search(args: argparse.Namespace, ctx: Context) -> None:
     preset, _objdump, by_target, symbols = _scan(args, ctx)
     matches = disasm.match_symbols(symbols, args.pattern, regex=args.regex, text_only=not args.all)
-    meta = _target_meta(ctx, preset)
+    # CMake discovery only makes sense for our own presets; an external tree gets object sizes.
+    meta = _target_meta(ctx, preset) if preset is not None else {}
 
     kind = "all symbols" if args.all else "functions"
-    print(console.bold(f"'{args.pattern}' in {preset.name}") + console.dim(f"  ({kind})"))
+    print(console.bold(f"'{args.pattern}' in {_scope_label(args, preset)}") + console.dim(f"  ({kind})"))
 
     # Group matches by target, preserving discovery order.
     by_group: dict[str, list[disasm.Symbol]] = {}
@@ -244,7 +332,7 @@ def _resolve_symbol(symbols: list[disasm.Symbol], query: str, ctx: Context) -> d
         copies = [s for s in exact if s.obj != chosen.obj]
         if copies:
             print(console.dim(f"note: '{query}' is defined in {len(exact)} objects (COMDAT); "
-                              f"showing {ctx.rel(chosen.obj)}"))
+                              f"showing {_display(ctx, chosen.obj)}"))
         return chosen
 
     sub = [s for s in symbols if query.lower() in s.demangled.lower() or query.lower() in s.mangled.lower()]
@@ -260,7 +348,7 @@ def _resolve_symbol(symbols: list[disasm.Symbol], query: str, ctx: Context) -> d
 
 
 def _show(args: argparse.Namespace, ctx: Context) -> None:
-    preset, objdump, _by_target, symbols = _scan(args, ctx)
+    _preset, objdump, _by_target, symbols = _scan(args, ctx)
     if not symbols:
         ctx.die("no symbols found to disassemble")
     sym = _resolve_symbol(symbols, args.symbol, ctx)
@@ -271,7 +359,7 @@ def _show(args: argparse.Namespace, ctx: Context) -> None:
     )
 
     print(console.bold(sym.demangled))
-    meta = console.dim(f"  {sym.target}  --  {ctx.rel(sym.obj)}  --  {sym.mangled}")
+    meta = console.dim(f"  {sym.target}  --  {_display(ctx, sym.obj)}  --  {sym.mangled}")
     print(meta)
     if not args.att:  # label annotation is written for Intel operand order
         print(_format_intel(raw))
@@ -414,10 +502,10 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path, mca_tool: st
         if value is not None:
             argv += [flag, str(value)]
 
-    # The tracer runs with cwd=ctx.root, so resolve a relative --html against the user's CWD (where
-    # they typed the command) rather than the repo root, and pass an absolute path.
+    # The tracer runs with a cwd of our choosing (the repo root, or the traced exe's directory), so
+    # resolve a relative --html against the user's CWD — where they typed it — and pass it absolute.
     if args.html is not None:
-        argv += ["--html", str(Path(args.html).resolve())]
+        argv += ["--html", str(_user_path(args.html))]
 
     # Pass llvm-mca whenever it resolved; the tracer only invokes it for a timing section or --html,
     # so this gives HTML exports timing out of the box without changing a plain trace.
@@ -455,8 +543,17 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
 
     preset = ctx.resolve_presets(args.preset)[0]
 
+    # The tracer itself always comes from this repo — it is our tool, and the preset only ever
+    # decides which build of *it* runs. The traced binary is a separate question below.
+    external = args.exe is not None
+    if external:  # validate before spending a build on the tracer
+        exe = _user_path(args.exe)
+        if not exe.is_file():
+            ctx.die(f"no such executable: {exe}")
+
     if not args.no_build:
-        results = dev.build([preset], [TRACER_TARGET, args.target], root=ctx.root,
+        targets = [TRACER_TARGET] if external else [TRACER_TARGET, args.target]
+        results = dev.build([preset], targets, root=ctx.root,
                             auto_configure=True, mirror=args.mirror_output, verbose=args.verbose)
         if not all(r.ok for r in results):
             ctx.fail_build(results, [preset])
@@ -467,14 +564,24 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
                 f"SC_BUILD_TOOLS=ON, Windows, and the fetched Zydis "
                 f"(uv run extern/zydis/fetch-zydis.py)")
 
-    exe = _artifact_of(ctx, preset, args.target)
-    if exe is None:
-        ctx.die(f"no executable target named {args.target!r} in preset {preset.name!r} — "
-                f"see: uv run dev.py list-targets")
+    if external:
+        # Symbols and source come from the PDB beside the exe; without one the trace degrades to
+        # raw addresses. We can check that directly here, where guessing from a preset name can't.
+        if not exe.with_suffix(".pdb").is_file():
+            print(console.yellow(f"note: no {exe.stem}.pdb beside {exe.name}; the trace will show raw "
+                                 f"addresses without symbols or source"), file=sys.stderr)
+    else:
+        exe = _artifact_of(ctx, preset, args.target)
+        if exe is None:
+            ctx.die(f"no executable target named {args.target!r} in preset {preset.name!r} — "
+                    f"see: uv run dev.py list-targets")
+        if "release" in preset.name:
+            print(console.yellow(f"note: {preset.name} has no PDB; the trace will show raw addresses "
+                                 f"without symbols or source. Use a relwithdebinfo preset."), file=sys.stderr)
 
-    if "release" in preset.name:
-        print(console.yellow(f"note: {preset.name} has no PDB; the trace will show raw addresses "
-                             f"without symbols or source. Use a relwithdebinfo preset."), file=sys.stderr)
+    # An external app resolves its DLLs and data relative to itself, so its own directory is the
+    # only default that reliably starts it; our own targets keep running from the repo root.
+    cwd = _user_path(args.cwd) if args.cwd else (exe.parent if external else ctx.root)
 
     # llvm-mca powers the timing views. Resolve it best-effort; the tracer soft-degrades without it.
     wants_timing = args.html is not None or (args.sections is not None and "timing" in args.sections)
@@ -491,4 +598,4 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
         print(console.dim(f"  $ {' '.join(argv)}"), file=sys.stderr)
 
     # Streamed, not captured: a trace is the output the user came for, not a build log to file away.
-    sys.exit(subprocess.run(argv, cwd=ctx.root).returncode)
+    sys.exit(subprocess.run(argv, cwd=cwd).returncode)
