@@ -15,6 +15,7 @@ words:
   - CPPUNWIND
   - crossrefs
   - dedup
+  - dxcapi
   - DXGI
   - dxil
   - Embree
@@ -59,6 +60,7 @@ words:
   - raytracing
   - readwrite
   - relwithdebinfo
+  - rpcndr
   - rtti
   - Samp
   - samplable
@@ -81,6 +83,7 @@ words:
   - toolsets
   - tweakable
   - uncompiled
+  - unknwn
   - usemtl
   - vbuf
   - vcvars

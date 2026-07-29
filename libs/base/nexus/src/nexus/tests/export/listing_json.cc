@@ -1,6 +1,7 @@
 #include "listing_json.hh"
 
 #include <clean-core/string/format.hh>
+#include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/export/json.hh>
 
 namespace
@@ -41,7 +42,7 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
     out.appendf("{{\n  \"suite\": \"{}\",\n", json_escape(suite_name));
 
     out += "  \"filters\": [";
-    for (cc::isize i = 0; i < config.filters.size(); ++i)
+    for (isize i = 0; i < config.filters.size(); ++i)
         out.appendf("{}\"{}\"", i == 0 ? "" : ", ", json_escape(config.filters[i]));
     out += "],\n";
 

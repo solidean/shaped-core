@@ -1,6 +1,6 @@
 #pragma once
 
-#include <clean-core/fwd.hh>
+#include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
 
 #include <memory>
 
@@ -12,7 +12,7 @@ namespace sg::backend::dx12
 /// Its own newtype so it can't be confused with the epoch / submission / staging fence timelines: a
 /// later direct-queue list waits on this value to see an async upload's writes. `none` == no pending
 /// upload.
-enum class dx12_copy_fence_value : cc::u64
+enum class dx12_copy_fence_value : u64
 {
     none = 0,
 };
@@ -21,7 +21,7 @@ enum class dx12_copy_fence_value : cc::u64
 /// Its own newtype so it can't be confused with the other fence timelines: a later direct-queue list that
 /// WRITES a buffer waits on this value to know the async readback has finished reading it. `none` == no
 /// pending async download.
-enum class dx12_download_fence_value : cc::u64
+enum class dx12_download_fence_value : u64
 {
     none = 0,
 };

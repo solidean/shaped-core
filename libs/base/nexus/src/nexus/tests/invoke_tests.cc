@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
 
@@ -12,7 +13,7 @@ bool nx::impl::signatures_equal(cc::span<std::type_index const> a, cc::span<std:
 {
     if (a.size() != b.size())
         return false;
-    for (cc::isize i = 0; i < a.size(); ++i)
+    for (isize i = 0; i < a.size(); ++i)
         if (a[i] != b[i])
             return false;
     return true;
