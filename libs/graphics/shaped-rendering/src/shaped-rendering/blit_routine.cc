@@ -17,8 +17,7 @@ void blit_routine::init_declare(sg::context& ctx)
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
 
-    // A broken edit: (re)bind a callback that fails, so init still clears every pipeline built against the old
-    // layout and execute no-ops until the next reload compiles.
+    // A broken edit: (re)bind a callback that fails, so init still clears every pipeline built against the old layout and execute no-ops until the next reload compiles.
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
         _state.lock([](state& s) { s.group_layout = nullptr; });
@@ -42,7 +41,8 @@ void blit_routine::init_declare(sg::context& ctx)
             return ctx.cached.acquire_pipeline_layout({.groups = {s.group_layout}});
         });
 
-    // The callback captures the layout + shaders; init clears every pipeline built against the previous ones.
+    // The callback captures the layout + shaders.
+    // Init clears every pipeline built against the previous ones.
     _pipelines.init(ctx,
                     [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
                         sg::context& c, sg::pixel_format format) -> cc::result<sg::raster_pipeline_handle>
@@ -67,8 +67,8 @@ void blit_routine::execute(sg::rendering_scope& scope, sg::texture_2d const& src
     auto& self = acquire(cmd);
     auto& ctx = cmd.context();
 
-    // Fallible rather than throwing: execute() runs inside the caller's rendering scope, and an exception
-    // unwinding out of there would leave their command list unsubmitted.
+    // Fallible rather than throwing: execute() runs inside the caller's rendering scope.
+    // An exception unwinding out of there would leave their command list unsubmitted.
     auto const pipeline = self._pipelines.try_acquire(format);
 
     self._state.lock(
