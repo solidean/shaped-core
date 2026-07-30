@@ -27,16 +27,21 @@ Two more rules bind the whole library:
 - **Reading takes a `cc::read_stream`.** Readers parse against the stream's buffered window (`ready_bytes` / `consume` / `flush`);
   the buffering is inlined in the caller, so a byte-at-a-time parse is fast and nothing slurps the whole input first.
   A seekable stream is only requested if a format genuinely needs random access. string_view / span overloads wrap a `span_read_stream_adapter`.
+  **The documented deviation is a format whose parsed result must hand back zero-copy views of the input** — `gltf` takes a
+  `cc::pinned_data<byte const>` so every embedded buffer is a subview sharing the input's owner.
+  Such a reader still offers stream / span overloads; they simply own a copy, and say so.
 
 ## Top-level structure
 
 ```text
 src/babel-serializer/
   data/        [in progress]   text / structured data formats
+    base64     [done]          codec (both alphabets; optional padding)
     json       [done]          reader
     markdown   [done]          block-level reader (no inline parsing)
     sqlite     [done]          live database engine (read/write; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
+    gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
   image/       [in progress]   image formats (read + write; committed stb backend)
     png        [done]          low-level reader + writer (native IHDR fields; rich metadata [todo])
@@ -45,6 +50,21 @@ src/babel-serializer/
 ```
 
 ## data/ [in progress]
+
+### base64 [done]
+
+A plain codec, not a format reader — it has no `data` structure and no `read`, just four functions.
+
+`decode` accepts **both** RFC 4648 alphabets (standard `+` / `/` and URL-safe `-` / `_`, even mixed in one input),
+treats the `=` padding as optional, and skips ASCII whitespace between characters.
+It fails on a character outside both alphabets, on a data character after padding, and on a final quantum of a single
+character (which encodes no byte at all).
+`decoded_size` is the same validation as an `optional<isize>`, `decode_into` writes into caller storage (a short buffer is an
+error, not an assert), and `encode` always emits the standard alphabet with padding.
+
+There is no streaming interface on purpose: base64 payloads in practice are data URIs and blobs embedded in a text format,
+which the caller already holds whole in memory.
+glTF's `data:` buffers are the first consumer.
 
 ### json [done]
 
@@ -111,7 +131,7 @@ Planned refinement:
 
 ### Other data formats [planned]
 
-`[planned]` base64 / hex codecs, and further structured formats as needed.
+`[planned]` a hex codec, and further structured formats as needed.
 
 ## geometry/ [in progress]
 
@@ -125,9 +145,68 @@ Reader only. A faithful, flat mirror of the Wavefront `.obj`:
 
 OBJ's 1-based and negative/relative indices are both resolved to 0-based here; a missing corner attribute is `-1`.
 
+### gltf [done]
+
+Reader for both glTF 2.0 containers: the JSON `.gltf` and the binary `.glb`.
+`detect_container` picks between them and never fails — anything that does not open with the GLB magic is read as JSON, so a
+malformed file reports a JSON parse error with a byte offset instead of a useless "unrecognized container".
+
+**This is the format that takes bytes instead of a stream, and zero copy is the whole reason.**
+A `.glb` carries its vertex / index / texture payload inline, so `read(cc::pinned_data<byte const>)` returns each `buffers` entry
+as a `subdata` of the input that shares its owner: nothing bulk is copied, and the views stay valid after the caller drops its
+own handle. A bufferView-backed image gets the same treatment, which is what makes `img.data` go straight into `babel::image::read`.
+The JSON side costs nothing extra — the JSON chunk is a subspan handed to `babel::json::read`, whose span stream is unbuffered,
+so the parse runs directly against the input bytes.
+The stream and span overloads exist for convenience and are documented as owning a copy.
+
+The structure is a flat mirror: one `cc::vector` per glTF array, cross-references as **one strong enum per index role**
+(`accessor_index`, `material_index`, …, each with `invalid = -1`), and every list-of-lists flattened into one array plus per-owner
+runs, exactly as OBJ does with face corners. `data::find` resolves an index (nullptr only for `invalid`, because `read` validates
+every index it stores), and `primitives_of` / `attributes_of` / `children_of` / `nodes_of` resolve the runs.
+
+`accessor_view` is the data path: `view_of` resolves a bufferView's stride (0 in the file means tightly packed, so the element size
+becomes the stride) and stacks the accessor's own `byteOffset` on top of the view's.
+`element_size` includes the spec's per-column 4-byte matrix padding — a `MAT3` of `u8` is 12 bytes, not 9.
+From a view, `is_typed_as<T>` / `as_strided<T>` read in place when size and alignment allow, `read_elements<T>` always works
+(one memcpy per element, de-interleaving as it goes), and `data::read_indices` widens a u8 / u16 / u32 index accessor to `u32`.
+
+**External URIs are resolved through a callback, never by babel.**
+`read_options::resolve_uri` is a `cc::function_ref` the caller supplies; unset, an external URI stays recorded with
+`resolved == false` and empty `data`. Percent-decoding and joining against a base path are the resolver's job, because babel owns
+no filesystem policy. `data:` URIs resolve during read via `babel::base64` and must be base64 — glTF 2.0 allows no other form.
+
+Validation follows one rule: **error when the value decides how bytes are interpreted, default or ignore when it only affects
+appearance or is purely additive.** So a sparse accessor, an unknown `componentType` / `type` / `mode`, an out-of-range index, a
+range that escapes its bufferView or buffer, and a **non-empty `extensionsRequired`** all fail the read — the last one is
+spec-mandated, and it is what correctly rejects Draco / meshopt / basisu with a message naming the extension.
+Unknown members, `extras`, morph targets, and the unmodelled `skins` / `animations` / `cameras` arrays are skipped,
+and a wrong JSON type on an *optional* scalar falls back to its default.
+
+**Skipped is not silent.** `data::issues` lists everything the reader did not implement (`unsupported`), could not follow
+(`unresolved`), or tolerated (`malformed`) — each message naming the element by index, with `has_issues()` / `has_issue_of(kind)`
+/ `issue_report()` on top. A `cc::result` alone cannot express "you got a usable structure, but not everything the file
+described", which is the normal outcome for a real-world asset; the issue list is that channel, and an issue never substitutes
+for an error (see [coding-guidelines.md](coding-guidelines.md)). A file this reader fully understands comes back with an empty list.
+
+Planned refinements:
+
+- `[planned]` **skins / animations / cameras** — recorded structurally today only as "skipped"; animations need channels + samplers
+  + interpolation, which is a subsystem rather than a field.
+- `[planned]` **morph targets** — tolerated (ignored) today, so adding them breaks nothing.
+- `[planned]` **sparse accessors** — a hard error today, deliberately: silently ignoring the sparse override hands back the wrong geometry.
+- `[planned]` **typed decode** — normalized-integer dequantization, cross-component conversion (`u16` accessor read as `f32`), and
+  unpacking a padded matrix column layout into a tight `tg::mat3f`. The bytes and the metadata for all three are already exposed.
+- `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document`
+  member and a per-object `i32 json_node`. Deliberately not in v1: retaining the whole JSON document alongside the parsed
+  structure doubles memory against "read once into a native structure", and a stored `json::ref` would dangle across a `cc::move(data)`.
+- `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no `make_translation` / `make_scaling` /
+  quaternion-to-matrix / TRS composition yet, so the reader stores `matrix` or TRS in whichever form the file used and composes nothing.
+  That gap and the rest of what glTF wants from the lower libraries are written up in [lower-library-gaps.md](lower-library-gaps.md).
+- `[planned]` **writer**.
+
 ### Other geometry formats [planned]
 
-`[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`, `.stl`, `.gltf`.
+`[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`, `.stl`.
 
 ## image/ [in progress]
 
@@ -174,6 +253,8 @@ The aggregator: a plain `{ width, height, channels, component, pixels }` buffer,
 The name lives in the group as `babel::image::read` rather than a free `load_image`, but it *is* the planned image aggregator.
 `[planned]` `load_mesh` — dispatches across mesh formats and returns a triangle mesh.
 Wants a `tg::mesh` (typed-geometry roadmap, not built yet); until then the format readers hand back their native structures.
+With OBJ and glTF both landed there are now two native shapes for it to reconcile, which is what will make the aggregator's
+vocabulary an actual decision rather than a rename of one reader's output.
 
 ## Dependency note
 

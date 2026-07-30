@@ -35,8 +35,9 @@ One-liner per library:
 * **`libs/io/babel-serializer`** — serialization / deserialization of various formats.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion),
   with **opinionated aggregators** ("load an image", "load a mesh") planned on top.
-  Readers take a `cc::read_stream` and parse against its buffered window.
-  So far: JSON + markdown readers and a SQLite engine wrapper (`data/`), a Wavefront OBJ reader (`geometry/`),
+  Readers take a `cc::read_stream` and parse against its buffered window —
+  except one that must hand back zero-copy views of its input (`gltf` takes a `cc::pinned_data<byte const>`).
+  So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`), Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`),
   and PNG/JPEG read+write under the `babel::image` aggregator (`image/`).
   Namespace `babel`. Depends on clean-core + typed-geometry.
   Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.

@@ -89,8 +89,10 @@ libraries, often our own take on a parse. Two layers, kept distinct: each format
 arrays), and **opinionated aggregators** ("load an image", "load a mesh" across formats) sit on
 top of those. Reading is optimized for the read-once-into-a-basically-immutable-structure case —
 great to traverse and query, deliberately not for insertion; writing gets a separate API. Readers
-take a `cc::read_stream` and parse against its buffered window rather than slurping the input.
-Today: JSON and markdown readers plus a SQLite engine wrapper (`data/`), a Wavefront OBJ reader (`geometry/`),
+take a `cc::read_stream` and parse against its buffered window rather than slurping the input — the one deviation is a
+format whose result must hand back zero-copy views *of* its input, which takes a `cc::pinned_data<byte const>` instead.
+Today: a base64 codec, JSON and markdown readers plus a SQLite engine wrapper (`data/`),
+Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`),
 and PNG/JPEG read+write with the `babel::image` aggregator on top (`image/`).
 The roadmap lives in [structure.md](../libs/io/babel-serializer/docs/structure.md).
 

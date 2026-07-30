@@ -4,9 +4,11 @@ project(babel-serializer LANGUAGES CXX)
 # Serialization / deserialization of various formats. Each format parses into an unopinionated, read-once
 # structure; opinionated aggregators sit on top later. See readme.md and docs/structure.md.
 add_library(babel-serializer
+    src/babel-serializer/data/base64.cc
     src/babel-serializer/data/json.cc
     src/babel-serializer/data/markdown.cc
     src/babel-serializer/data/sqlite.cc
+    src/babel-serializer/geometry/gltf.cc
     src/babel-serializer/geometry/obj.cc
 
     src/babel-serializer/image/image.cc
@@ -26,10 +28,12 @@ target_sources(babel-serializer
     src/babel-serializer/fwd.hh
     src/babel-serializer/all.hh
 
+    src/babel-serializer/data/base64.hh
     src/babel-serializer/data/json.hh
     src/babel-serializer/data/markdown.hh
     src/babel-serializer/data/sqlite.hh
 
+    src/babel-serializer/geometry/gltf.hh
     src/babel-serializer/geometry/obj.hh
 
     # image/impl/*.hh is internal (the stb backend seam) — deliberately NOT in the public FILE_SET.
@@ -79,10 +83,12 @@ if(SC_BUILD_TESTS)
     add_executable(babel-serializer-test
         tests/main.cc
 
+        tests/data/base64-test.cc
         tests/data/json-test.cc
         tests/data/markdown-test.cc
         tests/data/sqlite-test.cc
 
+        tests/geometry/gltf-test.cc
         tests/geometry/obj-test.cc
 
         tests/image/image-test.cc
