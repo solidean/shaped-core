@@ -5,7 +5,8 @@ namespace scl
 bool is_keyword_spelling(cc::string_view word)
 {
     // A pragmatic subset: the keywords the parser reasons about (record heads, member specifiers,
-    // scope) plus the common ones, so `keyword` vs `identifier` is meaningful. Not the full C++ list.
+    // scope) plus the common ones, so `keyword` vs `identifier` is meaningful.
+    // Not the full C++ list.
     static constexpr cc::string_view keywords[] = {
         "alignas",
         "alignof",
@@ -128,6 +129,10 @@ cc::string_view token_kind_name(token_kind k)
         return "newline";
     case token_kind::preprocessor_directive:
         return "preprocessor_directive";
+    case token_kind::indent:
+        return "indent";
+    case token_kind::dedent:
+        return "dedent";
     }
     return "?";
 }

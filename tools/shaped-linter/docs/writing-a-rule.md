@@ -9,7 +9,9 @@ The engine only builds the expensive layers a rule actually asks for.
 ## The pipeline, and which layer to pick
 
 ```
-source_buffer ─▶ lexer ─▶ token_stream ─▶ parser ─▶ syntax_tree ─▶ rule engine ─▶ findings ─▶ reporter
+                           ┌─▶ parser ─▶ syntax_tree ──┐   (C++ only)
+source_buffer ─▶ lexer ─▶ token_stream                 ├─▶ rule engine ─▶ findings ─▶ reporter
+              └──────────▶ prose extraction ─▶ prose_view ┘
 ```
 
 Pick the **lowest** layer that can express your rule — it is cheaper and simpler:
@@ -18,9 +20,27 @@ Pick the **lowest** layer that can express your rule — it is cheaper and simpl
   The parse tree is not built if no enabled rule needs it.
 * `rule_layer::syntax_tree` — the rule walks the parsed `syntax_tree` (structural checks: something about a *member* vs a local, a record's shape).
   This is what [`default-init-assignment`](../rules/cpp-style/default-init-assignment/default_init_assignment.cc) uses.
+* `rule_layer::prose` — the rule walks `ctx.prose`, the file's comments and body text with the markers stripped (a rule about what we *write*, not what we compile).
+  This is what [`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) uses, and the one layer that exists for markdown and Python too.
 
 A structural rule must use the tree, not a token scan — the tree is what tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site, and it is what carries `node::scope` (`record_scope` / `namespace_scope` / `function_scope`).
 Read the scope off the node; never re-derive it in a rule.
+
+## Which languages it applies to
+
+`rule::languages` is a bitmask over `source_language`, and it defaults to `k_cpp_only`.
+A C++ rule therefore needs no thought: it will never be handed a `.md` or a `.py`.
+
+Set it to `k_all_languages` (or an explicit `language_bit(…) | language_bit(…)`) for a prose rule that binds every file a human writes sentences in.
+The engine filters before it builds anything, so a rule that did not ask for a language costs nothing on it.
+
+The layers a language actually has differ, and the engine gives you an empty one rather than a wrong one:
+
+| | tokens | syntax_tree | prose |
+|---|---|---|---|
+| C++ | yes | yes | yes |
+| Python | yes (plus `indent` / `dedent`) | — | yes |
+| markdown | — | — | yes |
 
 ## The slug and the rationale are mandatory
 
@@ -46,12 +66,11 @@ rules/cpp-style/default-init-assignment/
     default_init_assignment.md      the corpus
 ```
 
-The folder is named **exactly** for the rule id, so a slug read off a finding is the path to everything
-about it; the files inside are snake_case as everywhere else. Pick the group by what the rule is about, and
-add a new one (a directory with its own `CMakeLists.txt`) when none fits.
+The folder is named **exactly** for the rule id, so a slug read off a finding is the path to everything about it; the files inside are snake_case as everywhere else.
+Pick the group by what the rule is about, and add a new one (a directory with its own `CMakeLists.txt`) when none fits.
 
-**The header carries the rule's documentation** — what it enforces, what it deliberately leaves alone, and
-which layer it walks. That doc comment is what a reader meets first; the `.cc` explains only how.
+**The header carries the rule's documentation** — what it enforces, what it deliberately leaves alone, and which layer it walks.
+That doc comment is what a reader meets first; the `.cc` explains only how.
 
 ```cpp
 // <your-rule>.hh
@@ -75,9 +94,11 @@ constexpr cc::string_view k_rationale = "why this matters, and the preferred fix
 
 void check(lint_context& ctx)
 {
-    // ctx.source  — the source_buffer (span_text, line_text)
-    // ctx.tokens  — the token_stream (for token-layer work)
-    // ctx.tree    — the syntax_tree (empty unless some enabled rule needs it)
+    // ctx.source   — the source_buffer (span_text, line_text)
+    // ctx.language — what it was read as
+    // ctx.tokens   — the token_stream (for token-layer work)
+    // ctx.tree     — the syntax_tree (empty unless some enabled rule needs it)
+    // ctx.prose    — the comments and body text (empty unless some enabled rule walks prose)
     // ctx.report({...}) — emit a finding
 }
 } // namespace
@@ -87,13 +108,17 @@ rule const& your_rule()
     static rule const r = {
         .id = k_id,
         .rationale = k_rationale,
-        .layer = rule_layer::syntax_tree, // or rule_layer::tokens
+        .layer = rule_layer::syntax_tree, // or tokens, or prose
+        .languages = k_cpp_only,          // the default; k_all_languages for a prose rule
         .default_severity = severity::warning,
         .check = &check,
     };
     return r;
 }
 ```
+
+A rule whose detector is a **heuristic** says so in its `rationale`, along with what to do about a false positive.
+The rationale prints once per run under the findings, which makes it the one place a reader is guaranteed to see it — [`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) points at its own abbreviation list from there.
 
 ### 2. Emit findings (and an optional fix or hint)
 
@@ -224,7 +249,8 @@ A corpus file needs no CMake change at all — `rules/` is scanned recursively a
 
 ### 5. Test it
 
-Two layers, both nexus. The split and the corpus format are specified in [coding-guidelines.md](coding-guidelines.md); the short version:
+Two layers, both nexus.
+The split and the corpus format are specified in [coding-guidelines.md](coding-guidelines.md); the short version:
 
 * **Smoke tests** in `<your-rule>-test.cc`, in your rule's folder — ordinary `TEST` + `SECTION` with `run_rules_on_text("<snippet>")`, asserting on the findings (count, rule id, fix replacement).
   This is the scratchpad you build the rule in and where a regression gets pinned; keep it under ~200 lines.
@@ -236,6 +262,7 @@ The corpus annotations, in short — the full specification is in [coding-guidel
 
 ```text
 ```cpp [your-rule] fix=" = {0}"        one finding, and that is the rewrite it offers
+```py  [your-rule] path="x.py"         a Python case; `md` / `markdown` likewise
 ```cpp [your-rule] [your-rule]         two findings; their fixes are not pinned
 ```cpp [your-rule] [your-rule] fix=" = 1" fix=" = 2"    two findings offering exactly these two rewrites
 ```cpp [your-rule] fix=" = {0}" hint=" = 0"             the same block, pinning both channels
@@ -256,6 +283,8 @@ A prose-only hint contributes no edit, so its wording is pinned by the smoke tes
 
 `path=` describes the **block**, not a rule, so it stands on its own and may appear anywhere in the info string — at most once.
 Only the name is used, never the contents: a rule that tells a header from a translation unit sees the extension and nothing else.
+**It is also what picks the language.** The fence word (`cpp`, `py`, `md`) says what the block *is* — for highlighting, and to mark it lintable at all — while the extension in `path=` is what the engine dispatches on. A block with no `path=` is linted as C++.
+A markdown case therefore needs a four-backtick outer fence, so its own ``` fences stay content.
 
 A block is linted with `all_rules()` and the total must match exactly, so a second rule firing on your case fails until the block names it too — that is deliberate, it surfaces cross-talk.
 

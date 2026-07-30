@@ -45,7 +45,8 @@ class FormatResult:
     stderr_log: Path | None = None
     offenders: list[Path] = field(default_factory=list)
 
-# Default if `.clang-format`'s `Requires:` header can't be read. Keep in sync
+# Default if `.clang-format`'s `Requires:` header can't be read.
+# Keep in sync
 # with the header, which remains the authoritative source.
 _DEFAULT_MAJOR = 22
 
@@ -68,7 +69,8 @@ _VIOLATION_RE = re.compile(r"^(?P<file>.+?):\d+:\d+:\s+(?:error|warning):", re.M
 
 def find_clang_format(explicit: str | None = None) -> str | None:
     """Locate the clang-format executable: an explicit path/name, then PATH, then
-    the common LLVM install locations. Returns None if nothing usable is found."""
+    the common LLVM install locations.
+    Returns None if nothing usable is found."""
     if explicit:
         if Path(explicit).is_file():
             return explicit
@@ -100,7 +102,8 @@ def required_major(root: Path) -> int:
 
     Parses the `Requires: clang-format >= N` header so the version check enforces
     exactly what the style file declares, with no second constant to keep in
-    sync. Falls back to _DEFAULT_MAJOR if the header is missing or unreadable.
+    sync.
+    Falls back to _DEFAULT_MAJOR if the header is missing or unreadable.
     """
     try:
         text = (root / ".clang-format").read_text(encoding="utf-8")
@@ -112,8 +115,10 @@ def required_major(root: Path) -> int:
 
 def _git_dirty_files(root: Path) -> list[Path]:
     """Files that are git-dirty or untracked — what's reasonably part of the next
-    commit. Deletions are dropped (nothing to format); renames yield their new
-    path. Returns absolute paths; nonexistent entries are filtered out."""
+    commit.
+    Deletions are dropped (nothing to format); renames yield their new
+    path.
+    Returns absolute paths; nonexistent entries are filtered out."""
     try:
         out = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
@@ -144,7 +149,8 @@ def source_roots(root: Path) -> list[Path]:
     """The directories whose `.cc`/`.hh` files clang-format owns.
 
     A whitelist, not a repo-wide sweep: extern/ is vendored third-party code we must not reformat,
-    and a stray source elsewhere should not silently become our problem. Add a root here when the
+    and a stray source elsewhere should not silently become our problem.
+    Add a root here when the
     repo grows first-party C++ outside libs/.
     """
     return [
@@ -174,6 +180,60 @@ def discover_files(root: Path, *, dirty_only: bool) -> list[Path]:
             for f in filenames:
                 if f.endswith(_SOURCE_SUFFIXES):
                     found.append(Path(dirpath) / f)
+    return sorted(found)
+
+
+# shaped-linter's scope, which is wider than clang-format's in both axes.
+#
+# It lints prose as well as code, so markdown and Python are in — and prose lives in docs/ and in the
+# skill files as much as in libs/. Kept separate from the clang-format scope above rather than widening
+# it: clang-format must never be pointed at a .md, and the two are answering different questions.
+_LINT_SUFFIXES = (".cc", ".hh", ".md", ".py")
+
+_LINT_ROOTS = ("libs", "tools", "docs", ".claude/skills")
+
+# First-party files at the repo root, which is not a directory we can walk wholesale.
+_LINT_ROOT_FILES = ("CLAUDE.md", "readme.md", "dev.py")
+
+# Never ours to lint: vendored code, build output, and caches.
+_LINT_EXCLUDED_DIRS = frozenset({"extern", "build", ".venv", "__pycache__", "node_modules", ".git"})
+
+
+def lint_roots(root: Path) -> list[Path]:
+    """The directories shaped-linter owns, as absolute paths."""
+    return [root / r for r in _LINT_ROOTS]
+
+
+def _is_lintable(path: Path, roots: list[Path], root: Path) -> bool:
+    if path.suffix not in _LINT_SUFFIXES:
+        return False
+    if any(part in _LINT_EXCLUDED_DIRS for part in path.parts):
+        return False
+    if any(r in path.parents for r in roots):
+        return True
+    return path.parent == root and path.name in _LINT_ROOT_FILES
+
+
+def discover_lint_files(root: Path, *, dirty_only: bool) -> list[Path]:
+    """Return the sorted list of files shaped-linter should lint.
+
+    Wider than `discover_files`: it covers `.md` and `.py` too, and reaches docs/ and .claude/skills/,
+    because the linter's prose rules bind every file a human writes sentences in.
+    With `dirty_only`, restrict to git-dirty/untracked files (intersected with the same scope).
+    """
+    roots = [r for r in lint_roots(root) if r.is_dir()]
+
+    if dirty_only:
+        return sorted({p for p in _git_dirty_files(root) if _is_lintable(p, roots, root)})
+
+    found: list[Path] = []
+    for lint_root in roots:
+        for dirpath, dirnames, filenames in os.walk(lint_root):
+            dirnames[:] = [d for d in dirnames if d not in _LINT_EXCLUDED_DIRS]
+            for f in filenames:
+                if f.endswith(_LINT_SUFFIXES):
+                    found.append(Path(dirpath) / f)
+    found += [root / f for f in _LINT_ROOT_FILES if (root / f).is_file()]
     return sorted(found)
 
 
@@ -233,7 +293,8 @@ def run_format(
         )
 
     # clang-format output is not stable across major versions, so enforce the
-    # major declared by .clang-format. allow_different_version downgrades the
+    # major declared by .clang-format.
+    # allow_different_version downgrades the
     # mismatch to a warning instead of failing.
     have = clang_format_version(clang_format)
     need = required_major(root)

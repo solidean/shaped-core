@@ -1,10 +1,13 @@
 # shaped-linter
 
-A **self-contained C++ custom linter** for shaped-core, written in C++ on shaped-core's own libraries.
+A **self-contained custom linter** for shaped-core, written in C++ on shaped-core's own libraries.
 
 It is the "custom parsing" sibling of the [clang-tidy gate framework](../lint/): where clang-tidy expresses standard checks, shaped-linter expresses **our own rules** — including ones clang-tidy structurally cannot, such as rules about specific macro placements.
 
-**Self-contained.** No LLVM, clang tooling, or libclang. It builds its own lexer and parser.
+**Not only C++.** It lints `.cc` / `.hh`, `.py` and `.md`, because a rule about how we *write* — a comment, a docstring, a paragraph — binds all three.
+Each language has its own front end; only C++ has a parser.
+**Self-contained.** No LLVM, clang tooling, or libclang.
+It builds its own lexers and parser.
 **On shaped-core.** `cc::` (clean-core) for all data structures / strings / IO, and `nexus` for tests — deliberate dogfooding.
 **Cross-platform.** Built by default in a top-level build (`SC_BUILD_TOOLS`), skipped when shaped-core is consumed via `add_subdirectory`.
 
@@ -15,8 +18,8 @@ Namespace `scl` (internals `scl::impl`).
 Drive it through `dev.py`, which builds it and resolves its path — never construct build paths by hand:
 
 ```bash
-uv run dev.py lint shaped              # lint the first-party C++ sources
-uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh
+uv run dev.py lint shaped              # lint the first-party sources: libs/ tools/ docs/ .claude/skills/, plus CLAUDE.md / readme.md / dev.py
+uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh/.py/.md
 uv run dev.py lint shaped --fix        # apply the suggested fixes in place (then `dev.py format`)
 
 uv run dev.py build -t shaped-linter   # build the tool
@@ -84,14 +87,17 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 | Rule | What it enforces |
 |---|---|
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
+| `no-flow-prose` | Prose is one semantic point per line, so a sentence ending *mid-line* is a finding — in C++ and Python comments, Python docstrings, and markdown body text alike. A heuristic and a reminder: it carries no fix, because obeying the rule means modelling the prose rather than splicing in a newline. |
 | `qualified-primitive` | The sized aliases (`u32`, `isize`, `byte`, …) are spelled bare, never qualified — `cc::u32`, and equally `sg::u32` through a namespace that re-exports them. At a `.cc`'s file scope — anonymous namespaces included — the fix adds the using-directive it needs; in a header, where that would leak into every including TU, the rule stays quiet; inside a named namespace it hints, because the answer is that library's `fwd.hh`. |
 
 ### `fix` and `hint`
 
 A finding can carry two kinds of rewrite, and the distinction is load-bearing:
 
-* a **`fix`** is safe to apply unattended — wherever the rule fires, applying it compiles and preserves behavior. `--fix` applies it.
-* a **`hint`** is the nicer form that only a human can sign off on, because it may fail to compile or silently change what the code means. It is **printed and never applied**, with a message saying what to weigh.
+* a **`fix`** is safe to apply unattended — wherever the rule fires, applying it compiles and preserves behavior.
+  `--fix` applies it.
+* a **`hint`** is the nicer form that only a human can sign off on, because it may fail to compile or silently change what the code means.
+  It is **printed and never applied**, with a message saying what to weigh.
 
 In the rendered output they are two labelled lines: `fix:` says it will be applied by `--fix`, `help:` carries the hint's reasoning with each suggested form marked `(not applied)`.
 `--fix` therefore stays trustworthy across a whole-tree run, and the judgement calls still get surfaced where you can see them.
@@ -104,11 +110,16 @@ Because "safe to apply unattended" is a promise about each fix on its own, the s
 
 ## How it works
 
-A layered pipeline, each rule declaring the highest layer it needs:
+A layered pipeline, each rule declaring the layer it needs and the languages it applies to:
 
 ```
-source_buffer ─▶ lexer ─▶ token_stream ─▶ parser ─▶ syntax_tree ─▶ rule engine ─▶ findings ─▶ renderer ─▶ reporter
+                           ┌─▶ parser ─▶ syntax_tree ──┐   (C++ only)
+source_buffer ─▶ lexer ─▶ token_stream                 ├─▶ rule engine ─▶ findings ─▶ renderer ─▶ reporter
+              └──────────▶ prose extraction ─▶ prose_view ┘
 ```
+
+The file's extension picks the front end, in one place, and the engine builds only what an enabled rule asked for.
+A rule never sees a language it did not declare, so the C++ rules are structurally safe from ever meeting a markdown file.
 
 See [docs/writing-a-rule.md](docs/writing-a-rule.md) to add a rule and [docs/architecture.md](docs/architecture.md) for how the layers fit together.
 
@@ -122,7 +133,8 @@ uv run dev.py test "shaped-linter - corpus files" -c default_init_assignment.md 
 Two layers, both nexus:
 
 * **Smoke tests** per rule (`<rule>-test.cc`, in the rule's folder) — the scratchpad, kept small and debuggable.
-* **A markdown corpus** (`<rule>.md`, in the same folder) — ordinary prose with annotated `cpp` blocks, one invocation per file. This is where breadth lives, and adding a case needs no C++ and no CMake change.
+* **A markdown corpus** (`<rule>.md`, in the same folder) — ordinary prose with annotated `cpp` blocks, one invocation per file.
+  This is where breadth lives, and adding a case needs no C++ and no CMake change.
 
 [docs/coding-guidelines.md](docs/coding-guidelines.md) specifies the annotation format and which layer a case belongs in.
 
@@ -131,8 +143,9 @@ Two layers, both nexus:
 ```
 src/shaped-linter/   the framework the rules stand on
   cli/       command-line parsing (options, usage)
-  lex/       source buffers, spans, tokens, the lexer
-  parse/     the recursive-descent parser and syntax tree
+  lex/       source buffers, spans, tokens, the language dispatch, and the three front ends
+  parse/     the recursive-descent parser and syntax tree (C++ only)
+  prose/     the comments, docstrings and body text a prose rule walks
   rules/     the rule and finding types, the registry, the engine
   report/    the diagnostic renderer: snippet (source view + carets), renderer, style, reporter
   compdb/    (reserved) compile_commands.json reader
@@ -142,7 +155,6 @@ docs/        architecture, writing a rule, coding guidelines
 tests/       mirrors src/ — the framework's own tests
 ```
 
-**A rule is a folder.** `rules/cpp-style/default-init-assignment/` holds the header (where the rule's
-documentation lives), the implementation, its smoke tests and its corpus, so a slug read off a finding is
-the path to everything about it. Nothing about a rule sits anywhere else except one line in `registry.cc`
-and its file names in the group's `CMakeLists.txt`.
+**A rule is a folder.** `rules/cpp-style/default-init-assignment/` holds the header (where the rule's documentation lives), the implementation, its smoke tests and its corpus,
+so a slug read off a finding is the path to everything about it.
+Nothing about a rule sits anywhere else except one line in `registry.cc` and its file names in the group's `CMakeLists.txt`.

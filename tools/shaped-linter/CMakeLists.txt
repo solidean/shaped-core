@@ -13,11 +13,16 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/cli/options.cc
 
     src/shaped-linter/lex/source_buffer.cc
+    src/shaped-linter/lex/source_language.cc
     src/shaped-linter/lex/source_manager.cc
     src/shaped-linter/lex/token.cc
     src/shaped-linter/lex/lexer.cc
+    src/shaped-linter/lex/python_lexer.cc
+    src/shaped-linter/lex/markdown_scanner.cc
 
     src/shaped-linter/parse/parser.cc
+
+    src/shaped-linter/prose/prose_view.cc
 
     src/shaped-linter/rules/registry.cc
     src/shaped-linter/rules/engine.cc
@@ -50,9 +55,14 @@ if(SC_BUILD_TESTS)
         tests/cli/options-test.cc
 
         tests/lex/source_buffer-test.cc
+        tests/lex/source_language-test.cc
         tests/lex/lexer-test.cc
+        tests/lex/python_lexer-test.cc
+        tests/lex/markdown_scanner-test.cc
 
         tests/parse/parser-test.cc
+
+        tests/prose/prose_view-test.cc
 
         tests/report/display_width-test.cc
         tests/report/snippet-test.cc
@@ -78,3 +88,4 @@ endif()
 # One directory per rule group, each naming the files of the rules it holds.
 # Both targets already exist above, so a group appends to them with target_sources.
 add_subdirectory(rules/cpp-style)
+add_subdirectory(rules/prose)

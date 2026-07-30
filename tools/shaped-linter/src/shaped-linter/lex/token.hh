@@ -6,7 +6,8 @@
 
 namespace scl
 {
-/// The lexical category of a token. Punctuators/operators all share `punctuation` and are told apart
+/// The lexical category of a token.
+/// Punctuators/operators all share `punctuation` and are told apart
 /// by `token::text` (via `is_punct`). Trivia (whitespace/newlines/comments) is kept in the stream so
 /// spans stay gap-free, but the parser skips it.
 enum class token_kind : u8
@@ -30,9 +31,16 @@ enum class token_kind : u8
     newline,       // one logical line break
 
     preprocessor_directive, // a whole '#' line to end-of-line, kept OPAQUE (not expanded in v1)
+
+    // Python's indentation structure.
+    // Both are ZERO-WIDTH, spelled by position rather than by bytes:
+    // they sit where the first content of a logical line begins, so the stream still tiles the file.
+    indent,
+    dedent,
 };
 
-/// A single lexed token. Carries its source_span and a non-owning view of its spelling.
+/// A single lexed token.
+/// Carries its source_span and a non-owning view of its spelling.
 struct token
 {
     token_kind kind = token_kind::unknown;
@@ -41,7 +49,8 @@ struct token
 
     /// 0 == spelled directly in source (one token, one contiguous range).
     /// RESERVED hook: a future macro-expansion table will map non-zero ids to {invocation, definition}
-    /// spans; `span` always stays the *spelling* location. Nothing sets this non-zero in v1.
+    /// spans; `span` always stays the *spelling* location.
+    /// Nothing sets this non-zero in v1.
     u32 expansion_id = 0;
 
     bool is(token_kind k) const { return kind == k; }
