@@ -116,27 +116,33 @@ See [docs/writing-a-rule.md](docs/writing-a-rule.md) to add a rule and [docs/arc
 
 ```bash
 uv run dev.py test shaped-linter-test
-uv run dev.py test "shaped-linter - corpus files" -c default_init_assignment.md   # one corpus file
+uv run dev.py test "shaped-linter - corpus files" -c default_init_assignment.md   # one corpus file (substring match)
 ```
 
 Two layers, both nexus:
 
-* **Smoke tests** per rule (`tests/rules/<rule>-test.cc`) — the scratchpad, kept small and debuggable.
-* **A markdown corpus** (`tests/rules/corpus/<rule>.md`) — ordinary prose with annotated `cpp` blocks, one invocation per file. This is where breadth lives, and adding a case needs no C++ and no CMake change.
+* **Smoke tests** per rule (`<rule>-test.cc`, in the rule's folder) — the scratchpad, kept small and debuggable.
+* **A markdown corpus** (`<rule>.md`, in the same folder) — ordinary prose with annotated `cpp` blocks, one invocation per file. This is where breadth lives, and adding a case needs no C++ and no CMake change.
 
 [docs/coding-guidelines.md](docs/coding-guidelines.md) specifies the annotation format and which layer a case belongs in.
 
 ## Layout
 
 ```
-src/shaped-linter/
+src/shaped-linter/   the framework the rules stand on
   cli/       command-line parsing (options, usage)
   lex/       source buffers, spans, tokens, the lexer
   parse/     the recursive-descent parser and syntax tree
-  rules/     the rule type, registry, engine, and concrete rules
+  rules/     the rule and finding types, the registry, the engine
   report/    the diagnostic renderer: snippet (source view + carets), renderer, style, reporter
   compdb/    (reserved) compile_commands.json reader
   main.cc    executable entry point
+rules/       the rules themselves, one folder each: <group>/<rule>/{rule.hh,.cc,-test.cc,.md}
 docs/        architecture, writing a rule, coding guidelines
-tests/       mirrors src/, plus rules/corpus/*.md — the data-driven rule corpus
+tests/       mirrors src/ — the framework's own tests
 ```
+
+**A rule is a folder.** `rules/cpp-style/default-init-assignment/` holds the header (where the rule's
+documentation lives), the implementation, its smoke tests and its corpus, so a slug read off a finding is
+the path to everything about it. Nothing about a rule sits anywhere else except one line in `registry.cc`
+and its file names in the group's `CMakeLists.txt`.

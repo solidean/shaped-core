@@ -14,9 +14,16 @@ The engine builds the parse tree only when some enabled rule asks for it — che
 
 * **`lex/`** — `source_buffer` (owns bytes + a line index), `source_span` (`{file_id, byte_begin, byte_end}`), `source_manager` (owns all buffers, resolves spans), `token` / `token_stream`, and the `lexer`.
 * **`parse/`** — `syntax_tree` (an arena of `node`s referenced by id) and the recursive-descent `parser`.
-* **`rules/`** — `rule` / `finding` / `fix` types, the single `registry`, the `engine`, and one file per rule.
+* **`rules/`** (under `src/`) — the framework only: `rule` / `finding` / `fix` types, the single `registry`, and the `engine`.
 * **`report/`** — the diagnostic renderer: `snippet` (the line-numbered source view with its carets), `renderer` (a finding, and a whole run, as text), `style` (the presentation knobs), and `reporter` (the write to stdout).
 * **`compdb/`** — reserved for the `compile_commands.json` reader (not built yet).
+
+Concrete rules live **outside `src/`**, one folder each under `rules/<group>/<rule>/`, holding the rule's
+header, implementation, smoke tests and corpus together.
+`src/` is the framework a rule stands on; `rules/` is the rules themselves, and the group's `CMakeLists.txt`
+names their files. The tool directory is a second include root, so a rule header is reached as
+`<rules/cpp-style/default-init-assignment/default_init_assignment.hh>` — spelled only by
+`registry.cc` and the rule's own files.
 
 ## Spans are the backbone
 

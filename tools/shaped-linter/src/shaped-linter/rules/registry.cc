@@ -2,8 +2,8 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
-#include <shaped-linter/rules/default_init_assignment.hh>
-#include <shaped-linter/rules/qualified_primitive.hh>
+#include <rules/cpp-style/default-init-assignment/default_init_assignment.hh>
+#include <rules/cpp-style/qualified-primitive/qualified_primitive.hh>
 
 namespace scl
 {

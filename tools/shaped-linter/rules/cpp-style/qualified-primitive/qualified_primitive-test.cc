@@ -5,7 +5,7 @@
 #include <shaped-linter/rules/engine.hh>
 
 // Smoke tests for `qualified-primitive` — the scratchpad the rule was built in, and where an interesting
-// regression gets pinned. Breadth lives in tests/rules/corpus/qualified_primitive.md; see
+// regression gets pinned. Breadth lives in qualified_primitive.md, next to this file; see
 // docs/coding-guidelines.md for which of the two a new case belongs in.
 
 using namespace scl;

@@ -4,14 +4,35 @@ shaped-linter-specific conventions, on top of the repo-wide
 [coding-guidelines](../../../docs/coding-guidelines.md).
 Only decisions that are not obvious from the code belong here.
 
+## A rule is a folder
+
+Everything a rule *is* lives in `rules/<group>/<rule>/` — the header, the implementation, its tests and
+its corpus, in one place. Nothing about a rule lives anywhere else except its one line in
+[registry.cc](../src/shaped-linter/rules/registry.cc) and its file names in the group's `CMakeLists.txt`.
+
+```text
+rules/cpp-style/default-init-assignment/
+    default_init_assignment.hh      the rule's description and main documentation
+    default_init_assignment.cc      the implementation
+    default_init_assignment-test.cc the smoke tests (more than one -test.cc is fine)
+    default_init_assignment.md      the corpus
+```
+
+The group folder and the rule folder are kebab-case, the rule folder named **exactly** for the rule id, so
+a slug read off a finding is the path to everything about it. The files inside stay snake_case, as
+everywhere else in the tree.
+
+`src/` holds only the framework the rules stand on: the pipeline, the rule and finding types, the engine,
+the registry, the renderer.
+
 ## Rule tests come in two layers
 
 Each rule is tested twice, and the two layers answer different questions.
 
-* **Smoke tests** — `tests/rules/<rule>-test.cc`, ordinary `TEST` + `SECTION` with `run_rules_on_text`.
+* **Smoke tests** — `<rule>-test.cc` in the rule's folder, ordinary `TEST` + `SECTION` with `run_rules_on_text`.
   This is the scratchpad you build the rule in, and where an interesting regression gets pinned.
   It is meant to stay small and pleasant to step through in a debugger — **keep it under ~200 lines**.
-* **The corpus** — `tests/rules/corpus/<rule>.md`, a normal markdown file that a human reads top to bottom.
+* **The corpus** — `<rule>.md` in the same folder, a normal markdown file that a human reads top to bottom.
   This is where **breadth** lives: every fix shape, every scope, every look-alike that must stay quiet.
   Adding a case is adding a fenced block, not writing C++.
 
@@ -92,12 +113,12 @@ naming the rule when the check is per-rule.
 
 ## How the corpus reaches the test binary
 
-`tests/rules/corpus-test.cc` is a `nx::invoke_tests` driver: it scans `SCL_CORPUS_DIR` (a path baked in
-by CMake) for `*.md`, parses each with `babel::markdown`, and invokes once per file with the file's
-relative path as the invocation name. So a single file is addressable:
+`tests/rules/corpus-test.cc` is a `nx::invoke_tests` driver: it scans `SCL_CORPUS_DIR` (the `rules/` tree,
+baked in by CMake) **recursively** for `*.md`, parses each with `babel::markdown`, and invokes once per
+file with the file's path relative to `rules/` as the invocation name. So a single file is addressable:
 
 ```bash
-uv run dev.py test "shaped-linter - corpus files" -c default_init_assignment.md
+uv run dev.py test "shaped-linter - corpus files" -c cpp-style/default-init-assignment/default_init_assignment.md
 ```
 
 Two consequences worth knowing:

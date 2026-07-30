@@ -4,6 +4,10 @@ cmake_minimum_required(VERSION 3.28)
 # Cross-platform; the root gates this directory on SC_BUILD_TOOLS alone.
 # It builds its own lexer + parser (no LLVM / libclang) and lints on clean-core (cc::) + nexus.
 
+# Concrete rules do NOT live here — each one owns a folder under rules/<group>/<rule>/ holding its
+# header, implementation, tests and corpus together, and its group's CMakeLists names those files.
+# This file builds the framework the rules stand on, and creates the targets they append to.
+
 # Split from the exe so shaped-linter-test can link the lexer / parser / rule-engine code.
 add_library(shaped-linter-core STATIC
     src/shaped-linter/cli/options.cc
@@ -15,8 +19,6 @@ add_library(shaped-linter-core STATIC
 
     src/shaped-linter/parse/parser.cc
 
-    src/shaped-linter/rules/default_init_assignment.cc
-    src/shaped-linter/rules/qualified_primitive.cc
     src/shaped-linter/rules/registry.cc
     src/shaped-linter/rules/engine.cc
 
@@ -27,7 +29,11 @@ add_library(shaped-linter-core STATIC
 )
 
 target_compile_features(shaped-linter-core PUBLIC cxx_std_23)
-target_include_directories(shaped-linter-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# Two roots: src/ carries the framework as <shaped-linter/…>, and the tool directory itself carries the
+# rule folders as <rules/<group>/<rule>/…>, which is what lets a rule live next to its tests and corpus.
+target_include_directories(shaped-linter-core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}")
 # /Zc:preprocessor: standards-conforming preprocessor on MSVC, matching the rest of the tree.
 target_compile_options(shaped-linter-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
@@ -52,8 +58,6 @@ if(SC_BUILD_TESTS)
         tests/report/snippet-test.cc
         tests/report/renderer-test.cc
 
-        tests/rules/default_init_assignment-test.cc
-        tests/rules/qualified_primitive-test.cc
         tests/rules/engine-test.cc
         tests/rules/lint_corpus.cc
         tests/rules/corpus-test.cc
@@ -64,8 +68,13 @@ if(SC_BUILD_TESTS)
     # itself on clean-core alone.
     target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus babel-serializer)
 
-    # The corpus lives in the source tree and is read at run time, so the test binary is told where it is.
+    # The corpus lives next to each rule and is read at run time, so the test binary is told where the
+    # rule tree starts; it is scanned recursively for *.md.
     # Adding a corpus file therefore needs no CMake change — only a re-run.
     target_compile_definitions(shaped-linter-test
-        PRIVATE SCL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/rules/corpus")
+        PRIVATE SCL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rules")
 endif()
+
+# One directory per rule group, each naming the files of the rules it holds.
+# Both targets already exist above, so a group appends to them with target_sources.
+add_subdirectory(rules/cpp-style)
