@@ -11,6 +11,8 @@
 
 #include <chrono>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 // The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated into the build dir and private to this binary.
 #include <sg_test_shaders.hh>
@@ -58,6 +60,26 @@ protected:
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
         ++declare;
     }
+};
+
+// Counts increments made through acquire_exclusive, deliberately with a PLAIN int rather than an atomic.
+// The guard is what must make the read-modify-write exclusive, and an atomic would pass with or without it.
+class counter_routine : public sg::render_routine<counter_routine>
+{
+public:
+    static void bump(sg::command_list& cmd)
+    {
+        auto self = acquire_exclusive(cmd);
+        ++self->_count;
+    }
+
+    [[nodiscard]] static int count_of(sg::command_list& cmd) { return acquire_exclusive(cmd)->_count; }
+
+    // Reads the same member through the unlocked path, which only compiles because it does not mutate.
+    [[nodiscard]] static int count_via_const(sg::command_list& cmd) { return acquire(cmd)._count; }
+
+private:
+    int _count = 0;
 };
 
 // The end-to-end routine: owns its pipeline via init_declare, dispatches in execute.
@@ -110,6 +132,29 @@ sg::context_handle make_warp_context()
     return ctx.has_value() ? ctx.value() : nullptr;
 }
 } // namespace
+
+TEST("sg - routine acquire hands out a const reference, acquire_exclusive a move-only guard")
+{
+    // A mutable reference creeping back into the unlocked path would silently re-open unguarded writes.
+    static_assert(
+        std::is_same_v<decltype(counting_routine::acquire(std::declval<sg::command_list&>())), counting_routine const&>);
+    static_assert(std::is_same_v<decltype(counter_routine::acquire_exclusive(std::declval<sg::command_list&>())),
+                                 sg::routine_guard<counter_routine>>);
+    static_assert(!std::is_copy_constructible_v<sg::routine_guard<counter_routine>>);
+
+    auto const ctx = make_warp_context();
+    if (ctx == nullptr)
+        SKIP("no dx12 WARP device");
+
+    auto cmd = ctx->create_command_list();
+
+    // Both entry points reach the one per-context instance — a write through the guard is what the const path then reads.
+    counter_routine::bump(*cmd);
+    CHECK(counter_routine::count_of(*cmd) == 1);
+    CHECK(counter_routine::count_via_const(*cmd) == 1);
+
+    ctx->drop_command_list(cc::move(cmd));
+}
 
 TEST("sg - routine phases run once, then re-run declare + materialize on a reload")
 {
@@ -305,6 +350,44 @@ TEST("sg - concurrent acquires of one routine run each phase exactly once")
 
     CHECK(racing_routine::once.load() == 1);
     CHECK(racing_routine::declare.load() == 1);
+}
+
+TEST("sg - acquire_exclusive serializes concurrent access to a routine's own state")
+{
+    // Unguarded, the plain-int increment races and the total lands below the expected count.
+    auto const ctx = make_warp_context();
+    if (ctx == nullptr)
+        SKIP("no dx12 WARP device");
+
+    constexpr auto thread_count = 8;
+    constexpr auto bumps_per_thread = 2000;
+
+    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+    cc::atomic<int> ready = 0;
+
+    for (auto i = 0; i < thread_count; ++i)
+        threads.emplace_back(
+            [&]
+            {
+                // Each thread records against its own command list, which is the situation the guard is for.
+                auto cmd = ctx->create_command_list();
+
+                ++ready;
+                while (ready.load() < thread_count)
+                    std::this_thread::yield();
+
+                for (auto n = 0; n < bumps_per_thread; ++n)
+                    counter_routine::bump(*cmd);
+
+                ctx->drop_command_list(cc::move(cmd));
+            });
+
+    for (auto& t : threads)
+        t.join();
+
+    auto cmd = ctx->create_command_list();
+    CHECK(counter_routine::count_of(*cmd) == thread_count * bumps_per_thread);
+    ctx->drop_command_list(cc::move(cmd));
 }
 
 #endif // CC_HAS_THREADS

@@ -23,6 +23,8 @@ class routine_registry;
 class render_routine_base;
 template <class Derived>
 class render_routine;
+template <class Derived>
+class routine_guard;
 class pipeline_cache;
 class command_list;
 class command_list_upload_scope;

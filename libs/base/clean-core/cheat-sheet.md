@@ -179,7 +179,8 @@ pd.reinterpret_as<U>();  pd.try_reinterpret_as<U>();  pd.as_bytes();  pd.as_muta
 cc::pinned_data<int const> c = pd;        // T -> T const conversion, shares owner
 
 cc::as_pinned_data(std::shared_ptr<Container>);   // wrap a shared contiguous container, never copies
-cc::make_pinned_data(container_or_shared_ptr);    // shared_ptr -> wrap; owning rvalue -> move; borrow/lvalue -> copy
+cc::as_pinned_data(pinned_data<T>);               // identity: an already-pinned range passes through, same owner
+cc::make_pinned_data(container_or_shared_ptr);    // pinned_data/shared_ptr -> wrap; owning rvalue -> move; borrow/lvalue -> copy
 ```
 
 ## Strings (UTF-8)
@@ -400,6 +401,9 @@ cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback
 m.try_lock([](auto& d){ ... });           // -> cc::optional<R> (or bool for void) — nullopt if not acquired
 m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then operate
+auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold; g-> / *g reach the value, released when g dies
+                                          // move-only. NOT the default: lock(f) is, and it keeps references inside the callback.
+                                          // for the critical section that cannot be one call (spans your statements / handed to a caller)
 
 #include <clean-core/thread/thread.hh>
 cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux)

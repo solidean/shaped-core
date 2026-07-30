@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 
 #include <memory>
+#include <type_traits>
 
 using namespace cc::primitive_defines;
 
@@ -130,6 +131,29 @@ TEST("pinned_data - as_pinned_data wraps without copying")
         auto const empty = cc::as_pinned_data(np);
         CHECK(empty.empty());
     }
+
+    SECTION("an already-pinned range passes through")
+    {
+        auto const again = cc::as_pinned_data(pd);
+        CHECK(again.data() == ptr);
+        CHECK(again.pin() == pd.pin()); // same owner, not a re-pin
+
+        cc::pinned_data<int const> const cpd = pd;
+        auto const cagain = cc::as_pinned_data(cpd);
+        static_assert(std::is_same_v<decltype(cagain), cc::pinned_data<int const> const>); // constness carries through
+        CHECK(cagain.data() == ptr);
+    }
+}
+
+TEST("pinned_data - make_pinned_data on a pinned_data shares instead of copying")
+{
+    auto const pd = cc::pinned_data<int>::create_filled(3, 5);
+    auto const shared = cc::make_pinned_data(pd);
+    CHECK(shared.data() == pd.data());
+    CHECK(shared.pin() == pd.pin());
+
+    auto const from_rvalue = cc::make_pinned_data(cc::pinned_data<int>(pd));
+    CHECK(from_rvalue.data() == pd.data());
 }
 
 TEST("pinned_data - make_pinned_data strategies")

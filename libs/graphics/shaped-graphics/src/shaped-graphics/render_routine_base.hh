@@ -25,10 +25,10 @@ namespace sg
 /// A routine reads that counter directly — it needs no library reference.
 /// Instances live per-context in ctx.routines, so their cached GPU state dies with the context that built it — no stale handles across contexts.
 ///
-/// Threading: the phase engine is guarded, so concurrent acquires of one routine are safe and each phase runs exactly once —
+/// Threading: one lock per routine, held across the phase callbacks, so concurrent acquires are safe and each phase runs exactly once —
 /// the losers of the race block until the winner is done, then see it initialized.
-/// The phase callbacks therefore run under this lock and must not call back into acquire/prewarm for the same routine.
-/// A routine's *own* mutable state is a separate matter it owns; see sg::render_routine.
+/// It is the same lock acquire_exclusive hands out, so it guards the derived routine's own state too; see sg::render_routine.
+/// A phase callback therefore must not call back into acquire/acquire_exclusive/prewarm for the same routine.
 class render_routine_base
 {
 public:
@@ -48,9 +48,12 @@ private:
     // The phase engine is driven by the CRTP's static entry points (acquire / prewarm), not by user code.
     template <class>
     friend class render_routine;
+    // It hands the same lock on to its caller, so it needs to name what _init guards.
+    template <class>
+    friend class routine_guard;
 
     /// Which phases have run, and at which reload generation.
-    /// Behind a mutex because two threads may acquire the same routine at once and each phase must run only once.
+    /// It shares _init with the derived routine's own state, so a phase runs only once even under a concurrent acquire.
     struct init_state
     {
         bool once_done = false;
@@ -68,7 +71,7 @@ private:
     void ensure_initialized(command_list& cmd);
 
     // The bodies of the two above, minus the locking — so they may call each other, which the entry points cannot: cc::mutex is not recursive.
-    // Only ever called with `_init` already held.
+    // Only ever called with `_init` already held, which is also how acquire_exclusive runs the phases under the guard it hands out.
 
     void ensure_initialized_no_materialize_impl(init_state& s, context& ctx);
     void ensure_initialized_impl(init_state& s, command_list& cmd);

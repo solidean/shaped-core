@@ -64,6 +64,42 @@ public:
         return quat(T{}, T{}, s, c);
     }
 
+    /// the rotation mapping the canonical basis onto the given axes: the result sends (1, 0, 0) to `x_axis`,
+    /// (0, 1, 0) to `y_axis`, (0, 0, 1) to `z_axis`. The three axes must be orthonormal and right-handed
+    /// (they are the columns of the rotation matrix); the result is meaningless otherwise.
+    [[nodiscard]] static quat make_from_basis(vec<3, T> const& x_axis, vec<3, T> const& y_axis, vec<3, T> const& z_axis)
+        requires(tg::traits::has_sqrt<T>)
+    {
+        T const m00 = x_axis.data[0];
+        T const m10 = x_axis.data[1];
+        T const m20 = x_axis.data[2];
+        T const m01 = y_axis.data[0];
+        T const m11 = y_axis.data[1];
+        T const m21 = y_axis.data[2];
+        T const m02 = z_axis.data[0];
+        T const m12 = z_axis.data[1];
+        T const m22 = z_axis.data[2];
+
+        T const trace = m00 + m11 + m22;
+        if (trace > T(0))
+        {
+            T const s = tg::sqrt(trace + T(1)) * T(2); // s = 4 * w
+            return quat((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, T(0.25) * s);
+        }
+        if (m00 > m11 && m00 > m22)
+        {
+            T const s = tg::sqrt(T(1) + m00 - m11 - m22) * T(2); // s = 4 * x
+            return quat(T(0.25) * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s);
+        }
+        if (m11 > m22)
+        {
+            T const s = tg::sqrt(T(1) + m11 - m00 - m22) * T(2); // s = 4 * y
+            return quat((m01 + m10) / s, T(0.25) * s, (m12 + m21) / s, (m02 - m20) / s);
+        }
+        T const s = tg::sqrt(T(1) + m22 - m00 - m11) * T(2); // s = 4 * z
+        return quat((m02 + m20) / s, (m12 + m21) / s, T(0.25) * s, (m10 - m01) / s);
+    }
+
     // access
 public:
     [[nodiscard]] constexpr T& operator[](int i)

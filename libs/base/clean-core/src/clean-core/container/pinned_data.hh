@@ -199,9 +199,16 @@ template <class Container>
     return pinned_data<elem>::create_from_pin(view, std::shared_ptr<void const>(cc::move(p)));
 }
 
+/// Passes an already-pinned range through unchanged — same elements, same owner, no copy.
+template <class T>
+[[nodiscard]] pinned_data<T> as_pinned_data(pinned_data<T> p)
+{
+    return p;
+}
+
 /// Creates a pinned_data from any contiguous container, pinning its elements. Chooses the
 /// cheapest safe strategy:
-///  1. c is already a shared_ptr of a contiguous container -> wrap it (zero copies).
+///  1. c is already a pinned_data, or a shared_ptr of a contiguous container -> wrap it (zero copies).
 ///  2. c is an owning rvalue (not a borrow range) -> move it into a shared_ptr (zero element copies).
 ///  3. otherwise (a borrow range, or an lvalue) -> allocate an owned deep copy of the elements.
 template <class Container>
@@ -209,7 +216,7 @@ template <class Container>
 {
     if constexpr (requires { cc::as_pinned_data(cc::forward<Container>(c)); })
     {
-        // case 1: already a shared_ptr of a contiguous container
+        // case 1: already pinned, or a shared_ptr of a contiguous container
         return cc::as_pinned_data(cc::forward<Container>(c));
     }
     else

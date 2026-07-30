@@ -56,6 +56,21 @@ state — via a `named_sampler`. There are two ways in, and *which one* is a lay
   descriptor heap and root descriptor table, so a group with dynamic samplers binds a second heap and
   table at dispatch — see the dx12 section below.)
 
+Going register-bound means the sampler binding must leave the group layout's bindings, or the group claims
+that register a second time as a dynamic sampler — `split_off_sampler_bindings` is the reflection-side split.
+
+## Working with reflected bindings
+
+Reflection hands you one `cc::vector<binding>` per shader stage, but a pipeline has a single binding
+interface, so [`binding.hh`](../../src/shaped-graphics/binding.hh) carries the two operations every
+multi-stage caller needs:
+
+- `merge_bindings({stage0.bindings, stage1.bindings, …})` — the union by name, first-seen order. A
+  raytracing pipeline's global root signature must cover every stage's bindings; a raster pipeline's group
+  covers vertex + fragment.
+- `split_off_sampler_bindings(bindings)` — removes the sampler bindings and returns them, for the samplers
+  that are bound outside the group (see above).
+
 ## Where this is headed
 
 Bindings are the input to the rest of the descriptor system, which consumes them (and the `raw_view`s

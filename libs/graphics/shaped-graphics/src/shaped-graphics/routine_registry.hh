@@ -27,12 +27,12 @@ template <class T>
 /// the first acquire of a given type creates and registers it here (lazy self-registration — no explicit registration, no by-name lookup),
 /// and it lives until the context is shut down or it is explicitly evicted.
 ///
-/// Everything type-keyed is private and driven through sg::render_routine's statics (`R::acquire(cmd)` / `R::prewarm(ctx)` / `R::evict(ctx)`);
+/// Everything type-keyed is private and driven through sg::render_routine's statics (`R::acquire(cmd)` / `R::acquire_exclusive(cmd)` / `R::prewarm(ctx)` / `R::evict(ctx)`);
 /// the only public operation here is clear().
 /// A thin per-context sub-object like ctx.cached, created and destroyed with its context.
 ///
-/// Map access is guarded, so acquire is safe from parallel command-list recording, and each routine guards its own init phases (see render_routine_base).
-/// What is *not* covered here is the state a routine holds itself — that is the routine's job, behind its own cc::mutex (see sg::render_routine).
+/// Map access is guarded, so acquiring is safe from parallel command-list recording.
+/// What a routine holds itself is guarded by the routine's own lock instead, which acquire_exclusive hands to its caller (see sg::render_routine).
 /// Do not clear()/evict() a registry while another thread is still recording against the same context.
 class routine_registry
 {

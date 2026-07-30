@@ -528,6 +528,12 @@ follow:
   blocked must now pump — a wait only the absent thread could satisfy is a deadlock, not a slow path
   (see [shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/threading.md)).
 
+Guarded data lives in a `cc::mutex<T>`, never next to a bare mutex — the value is only reachable under the lock.
+
+- **`lock(f)` is the default form.** It returns by value, so no reference to the guarded value escapes the callback.
+- **`lock_scoped()` is the exception**, for the critical section that cannot be one call: it spans the caller's own statements, or the lock is handed back to a caller.
+  It returns a move-only `cc::mutex_guard<T>` that releases when it dies, and the escaping reference lives exactly as long as the guard.
+
 ---
 
 ## Operators & Overloading
@@ -576,11 +582,12 @@ one semantic point per line, no reflowed blocks, free line length.
 
 ### Code Comments
 
-- Explain invariants, assumptions, and non-obvious design decisions.
-  Favor **why** over **how** — the code already shows how.
-- Do not restate code. Answer "what would surprise a competent reader here?"
-- Inline comments justify unusual operations, hidden dependencies, representation choices or correctness constraints.
-  Delete comments that merely describe the action being performed, unless they serve the grouping rule below.
+- A comment earns its place only by carrying a **constraint the code cannot state itself**: an invariant, a precondition, a unit, an ordering or aliasing dependency, a correctness pitfall.
+  If a competent reader could be *wrong* about something, name that — nothing else.
+- **Never justify or narrate.** Not which algorithm it is, not why this approach was chosen, not what it buys (fast / robust / well-conditioned), not what the lines do.
+  That is backstory: it goes in the commit message or a higher-level doc, never in the source.
+- **Litmus test:** if the sentence would read naturally in the PR description or the commit message, it does not belong inline.
+- Do not restate code. Answer only "what would surprise — or mislead — a competent reader here?"
 - Use comments for grouping and structure.
   Skimming a long function's comments should reveal its logical flow.
 

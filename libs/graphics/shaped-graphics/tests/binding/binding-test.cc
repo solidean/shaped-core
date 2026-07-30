@@ -105,6 +105,59 @@ TEST("sg bindings - compiled_shader holds reflection")
     CHECK(sg::accepts(b.type, sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()));
 }
 
+TEST("sg bindings - merge_bindings unions stages by name")
+{
+    // Two stages of one pipeline: they share "frame", so the union has three entries.
+    auto const raygen
+        = cc::vector<sg::binding>{{.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
+                                  {.name = "Output", .index = 0, .type = sg::binding_type::readwrite_texture}};
+    auto const hit = cc::vector<sg::binding>{
+        {.name = "frame", .index = 7, .type = sg::binding_type::uniform_buffer},
+        {.name = "Vertices", .index = 1, .type = sg::binding_type::readonly_structured_buffer}};
+
+    auto const merged = sg::merge_bindings({raygen, hit});
+    REQUIRE(merged.size() == 3);
+    CHECK(merged[0].name == "frame");
+    CHECK(merged[1].name == "Output");
+    CHECK(merged[2].name == "Vertices");
+
+    // First occurrence wins, so the hit stage's disagreeing index does not overwrite the raygen one.
+    CHECK(merged[0].index == 0);
+
+    // The accumulating overload is the same merge, one stage at a time.
+    auto acc = cc::vector<sg::binding>();
+    sg::merge_bindings(acc, raygen);
+    sg::merge_bindings(acc, hit);
+    REQUIRE(acc.size() == 3);
+    CHECK(acc[2].name == "Vertices");
+
+    // Merging a stage into itself changes nothing.
+    sg::merge_bindings(acc, hit);
+    CHECK(acc.size() == 3);
+}
+
+TEST("sg bindings - split_off_sampler_bindings partitions in order")
+{
+    auto bindings = cc::vector<sg::binding>{{.name = "Albedo", .index = 0, .type = sg::binding_type::readonly_texture},
+                                            {.name = "sPoint", .index = 0, .type = sg::binding_type::sampler},
+                                            {.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
+                                            {.name = "sLinear", .index = 1, .type = sg::binding_type::sampler}};
+
+    auto const samplers = sg::split_off_sampler_bindings(bindings);
+
+    REQUIRE(samplers.size() == 2);
+    CHECK(samplers[0].name == "sPoint");
+    CHECK(samplers[1].name == "sLinear");
+
+    REQUIRE(bindings.size() == 2);
+    CHECK(bindings[0].name == "Albedo");
+    CHECK(bindings[1].name == "frame");
+
+    // A second split has nothing left to take.
+    CHECK(sg::split_off_sampler_bindings(bindings).empty());
+    CHECK(bindings.size() == 2);
+}
+
 TEST("sg bindings - named_view pairs a name with a bound view")
 {
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
