@@ -401,6 +401,9 @@ cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback
 m.try_lock([](auto& d){ ... });           // -> cc::optional<R> (or bool for void) — nullopt if not acquired
 m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then operate
+auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold; g-> / *g reach the value, released when g dies
+                                          // move-only. NOT the default: lock(f) is, and it keeps references inside the callback.
+                                          // for the critical section that cannot be one call (spans your statements / handed to a caller)
 
 #include <clean-core/thread/thread.hh>
 cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux)

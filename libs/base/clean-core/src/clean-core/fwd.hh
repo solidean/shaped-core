@@ -222,6 +222,8 @@ struct result;
 
 template <class T>
 struct mutex;
+template <class T>
+class mutex_guard;
 
 enum class threaded_actor_mode;
 struct threaded_actor_base;

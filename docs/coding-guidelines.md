@@ -512,6 +512,12 @@ follow:
   blocked must now pump — a wait only the absent thread could satisfy is a deadlock, not a slow path
   (see [shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/threading.md)).
 
+Guarded data lives in a `cc::mutex<T>`, never next to a bare mutex — the value is only reachable under the lock.
+
+- **`lock(f)` is the default form.** It returns by value, so no reference to the guarded value escapes the callback.
+- **`lock_scoped()` is the exception**, for the critical section that cannot be one call: it spans the caller's own statements, or the lock is handed back to a caller.
+  It returns a move-only `cc::mutex_guard<T>` that releases when it dies, and the escaping reference lives exactly as long as the guard.
+
 ---
 
 ## Operators & Overloading
