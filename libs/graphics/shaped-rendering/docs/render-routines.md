@@ -16,7 +16,7 @@ A routine in `sr` derives from the CRTP base and lives in its own `.cc`/`.hh` pa
 class mipmap_routine : public sg::render_routine<mipmap_routine>
 {
 public:
-    static void execute(sg::command_list& cmd, /* args */);   // acquire(cmd) + record the passes
+    static void execute(sg::command_list& cmd, /* args */);   // acquire_exclusive(cmd) + record the passes
 
 protected:
     void init_declare(sg::context& ctx) override;             // acquire shaders (via slib) + pipelines
@@ -28,16 +28,16 @@ The framework in `sg` needs no shader library; reload tracking is `sg`'s own gen
 
 Register `sr::shader_package()` with your `slib::shader_library` once at startup, or every routine here acquires nothing and draws nothing.
 
-## A routine holds state — and guards it
+## A routine holds state — and the framework guards it
 
-`acquire()` returns a non-const reference: routines are expected to keep things.
-What a routine owes in exchange is guarding them, because `acquire()` hands the same per-context instance to every caller.
-The shape is a single `cc::mutex<state>` locked once per entry point — see [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md#threading).
+Routines are expected to keep things, and `acquire()` hands the same per-context instance to every caller.
+So a routine that writes anything opens its entry point with `acquire_exclusive(cmd)`, whose guard holds the routine's lock for its lifetime.
+The members are then plain members — no `struct state`, no `cc::mutex` — see [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md#threading).
 
 The worked example is Dear ImGui ([imgui.md](imgui.md)).
-`sr::imgui_routine` holds three kinds of state in one `state` struct:
+`sr::imgui_routine` holds three kinds of state:
 shader-derived (layouts, pipelines — rebuilt by `init_declare` on every reload), imgui-owned (the font atlas textures — deliberately *not* rebuilt), and per-frame (the geometry).
-Sorting members by which of those they are is most of the design work; the locking then falls out.
+Sorting members by which of those they are is most of the design work — the first two live on the routine, and only the third does not.
 
 Concrete routines arrive here as they are implemented, each with its own tests.
 See [structure.md](structure.md) for the roadmap.

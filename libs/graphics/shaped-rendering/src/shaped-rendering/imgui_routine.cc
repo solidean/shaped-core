@@ -147,39 +147,34 @@ void imgui_routine::init_declare(sg::context& ctx)
     // The texture registry deliberately survives — the atlas has nothing to do with our shaders.
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
-        _state.lock([](state& s) { s.group_layout = nullptr; });
+        _group_layout = nullptr;
         _pipelines.init(ctx, [](sg::context&, sg::pixel_format) -> cc::result<sg::raster_pipeline_handle>
                         { return cc::error(cc::any_error("imgui shaders did not compile")); });
         return;
     }
 
-    auto const pipeline_layout = _state.lock(
-        [&](state& s) -> sg::pipeline_layout_handle
-        {
-            // Group 0 is built from the *fragment* bindings alone.
-            // That is what keeps the vertex stage's b0 out of it — inline constants must be excluded from every group layout (see pipeline_layout.hh).
-            // gSampler is name-matched here as a static sampler, so it is baked into the layout and costs no per-group descriptor;
-            // clamp-to-edge stops the atlas bleeding across glyph edges.
-            s.group_layout = ctx.cached.acquire_binding_group_layout(
-                compiled_ps->bindings,
-                {sg::named_sampler{.name = "gSampler",
-                                   .sampler = {.address_u = sg::sampler_address_mode::clamp_edge,
-                                               .address_v = sg::sampler_address_mode::clamp_edge,
-                                               .address_w = sg::sampler_address_mode::clamp_edge}}});
+    // Group 0 is built from the *fragment* bindings alone.
+    // That is what keeps the vertex stage's b0 out of it — inline constants must be excluded from every group layout (see pipeline_layout.hh).
+    // gSampler is name-matched here as a static sampler, so it is baked into the layout and costs no per-group descriptor;
+    // clamp-to-edge stops the atlas bleeding across glyph edges.
+    _group_layout = ctx.cached.acquire_binding_group_layout(
+        compiled_ps->bindings, {sg::named_sampler{.name = "gSampler",
+                                                  .sampler = {.address_u = sg::sampler_address_mode::clamp_edge,
+                                                              .address_v = sg::sampler_address_mode::clamp_edge,
+                                                              .address_w = sg::sampler_address_mode::clamp_edge}}});
 
-            // The vertex stage's only binding is the 16-byte ortho block, which rides as root constants.
-            auto const* const constants_binding = [&]() -> sg::binding const*
-            {
-                for (auto const& b : compiled_vs->bindings)
-                    if (b.type == sg::binding_type::uniform_buffer)
-                        return &b;
-                return nullptr;
-            }();
-            CC_ASSERT(constants_binding != nullptr, "imgui.hlsl must declare the imgui_constants cbuffer");
+    // The vertex stage's only binding is the 16-byte ortho block, which rides as root constants.
+    auto const* const constants_binding = [&]() -> sg::binding const*
+    {
+        for (auto const& b : compiled_vs->bindings)
+            if (b.type == sg::binding_type::uniform_buffer)
+                return &b;
+        return nullptr;
+    }();
+    CC_ASSERT(constants_binding != nullptr, "imgui.hlsl must declare the imgui_constants cbuffer");
 
-            return ctx.cached.acquire_pipeline_layout(
-                {.groups = {s.group_layout}, .inline_constants = *constants_binding});
-        });
+    auto const pipeline_layout
+        = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}, .inline_constants = *constants_binding});
 
     // The callback captures the layout + shaders; init clears every pipeline built against the previous ones.
     // imgui emits both windings so culling is off, and it is drawn in list order so there is no depth test.
@@ -242,89 +237,84 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
     CC_ASSERT(!sg::is_srgb_format(target_format), "imgui colors are already sRGB-encoded; bind a non-srgb view of "
                                                   "the target instead");
 
-    auto& self = acquire(cmd);
+    auto self = acquire_exclusive(cmd);
     auto& ctx = cmd.context();
 
     // Fallible rather than throwing: execute() runs inside the caller's rendering scope, and an exception
     // unwinding out of there would leave their command list unsubmitted.
-    auto const pipeline = self._pipelines.try_acquire(target_format);
+    auto const pipeline = self->_pipelines.try_acquire(target_format);
 
-    self._state.lock(
-        [&](state& s)
+    // Textures first: a draw below may sample an atlas imgui only just grew.
+    // These go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
+    self->_textures.service_requests(ctx, draw_data);
+
+    if (pipeline.has_error() || pipeline.value() == nullptr)
+        return; // shaders did not compile, or this format's pipeline failed to build
+    if (draw_data->TotalVtxCount == 0 || draw_data->TotalIdxCount == 0)
+        return;
+
+    auto const geo = upload_geometry(cmd, draw_data);
+
+    scope.bind_pipeline(*pipeline.value());
+    scope.bind_vertex_buffer(geo.vertices.as_vertex_buffer());
+    scope.bind_index_buffer(geo.indices.as_index_buffer());
+    scope.set_viewport({.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(target_size[0]), float(target_size[1]))});
+    scope.set_inline_constants(
+        impl::compute_ortho_constants(tg::pos2f(draw_data->DisplayPos.x, draw_data->DisplayPos.y),
+                                      tg::vec2f(draw_data->DisplaySize.x, draw_data->DisplaySize.y)));
+
+    auto const display_pos = tg::pos2f(draw_data->DisplayPos.x, draw_data->DisplayPos.y);
+    auto const framebuffer_scale = tg::vec2f(draw_data->FramebufferScale.x, draw_data->FramebufferScale.y);
+
+    // imgui's draw lists are concatenated into one vertex and one index buffer, so each list's commands are offset by everything before it.
+    auto global_vertex_offset = 0;
+    auto global_index_offset = isize(0);
+
+    // The bound group must outlive every draw that uses it: bind_group records a pointer, and the draw is what dereferences it.
+    // Holding the handle out here (rather than inside the rebind block) is what keeps it alive until it is replaced or the recording ends.
+    auto bound_group = sg::binding_group_handle{};
+    auto bound_texture = ImTextureID_Invalid;
+
+    for (auto const* const list : draw_data->CmdLists)
+    {
+        for (auto const& dc : list->CmdBuffer)
         {
-            // Textures first: a draw below may sample an atlas imgui only just grew. These go out on
-            // ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
-            s.textures.service_requests(ctx, draw_data);
+            // TODO(sr): user callbacks are not dispatched.
+            // Supporting them also means supporting ImDrawCallback_ResetRenderState, which needs the bind block above factored out of this loop.
+            // No imgui core path emits one, so nothing is lost until a caller adds one.
+            if (dc.UserCallback != nullptr)
+                continue;
 
-            if (pipeline.has_error() || pipeline.value() == nullptr)
-                return; // shaders did not compile, or this format's pipeline failed to build
-            if (draw_data->TotalVtxCount == 0 || draw_data->TotalIdxCount == 0)
-                return;
+            auto const scissor = impl::compute_scissor(
+                tg::aabb2f(tg::pos2f(dc.ClipRect.x, dc.ClipRect.y), tg::pos2f(dc.ClipRect.z, dc.ClipRect.w)),
+                display_pos, framebuffer_scale, target_size);
+            if (!scissor.has_value())
+                continue; // entirely outside the target
 
-            auto const geo = upload_geometry(cmd, draw_data);
-
-            scope.bind_pipeline(*pipeline.value());
-            scope.bind_vertex_buffer(geo.vertices.as_vertex_buffer());
-            scope.bind_index_buffer(geo.indices.as_index_buffer());
-            scope.set_viewport(
-                {.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(target_size[0]), float(target_size[1]))});
-            scope.set_inline_constants(
-                impl::compute_ortho_constants(tg::pos2f(draw_data->DisplayPos.x, draw_data->DisplayPos.y),
-                                              tg::vec2f(draw_data->DisplaySize.x, draw_data->DisplaySize.y)));
-
-            auto const display_pos = tg::pos2f(draw_data->DisplayPos.x, draw_data->DisplayPos.y);
-            auto const framebuffer_scale = tg::vec2f(draw_data->FramebufferScale.x, draw_data->FramebufferScale.y);
-
-            // imgui's draw lists are concatenated into one vertex and one index buffer, so each list's commands are offset by everything before it.
-            auto global_vertex_offset = 0;
-            auto global_index_offset = isize(0);
-
-            // The bound group must outlive every draw that uses it: bind_group records a pointer, and the draw is what dereferences it.
-            // Holding the handle out here (rather than inside the rebind block) is what keeps it alive until it is replaced or the recording ends.
-            auto bound_group = sg::binding_group_handle{};
-            auto bound_texture = ImTextureID_Invalid;
-
-            for (auto const* const list : draw_data->CmdLists)
+            if (dc.GetTexID() != bound_texture)
             {
-                for (auto const& dc : list->CmdBuffer)
-                {
-                    // TODO(sr): user callbacks are not dispatched.
-                    // Supporting them also means supporting ImDrawCallback_ResetRenderState, which needs the bind block above factored out of this loop.
-                    // No imgui core path emits one, so nothing is lost until a caller adds one.
-                    if (dc.UserCallback != nullptr)
-                        continue;
+                auto const texture = self->_textures.try_texture_of(dc.GetTexID());
+                if (texture.has_error())
+                    continue; // imgui named a texture we never created; skip rather than bind garbage
 
-                    auto const scissor = impl::compute_scissor(
-                        tg::aabb2f(tg::pos2f(dc.ClipRect.x, dc.ClipRect.y), tg::pos2f(dc.ClipRect.z, dc.ClipRect.w)),
-                        display_pos, framebuffer_scale, target_size);
-                    if (!scissor.has_value())
-                        continue; // entirely outside the target
-
-                    if (dc.GetTexID() != bound_texture)
-                    {
-                        auto const texture = s.textures.try_texture_of(dc.GetTexID());
-                        if (texture.has_error())
-                            continue; // imgui named a texture we never created; skip rather than bind garbage
-
-                        // Transient: one descriptor allocation per texture switch, recycled with the epoch.
-                        // With a single font atlas that is one group for the whole frame.
-                        bound_group = ctx.transient.create_binding_group(
-                            s.group_layout,
-                            {sg::named_view{.name = "gTexture", .view = texture.value().as_readonly_view()}});
-                        scope.bind_group(0, *bound_group);
-                        bound_texture = dc.GetTexID();
-                    }
-
-                    scope.set_scissor(scissor.value());
-                    scope.draw_indexed({.index_range = {.offset = global_index_offset + isize(dc.IdxOffset),
-                                                        .size = isize(dc.ElemCount)},
-                                        .vertex_offset = global_vertex_offset + int(dc.VtxOffset)});
-                }
-
-                global_vertex_offset += list->VtxBuffer.Size;
-                global_index_offset += isize(list->IdxBuffer.Size);
+                // Transient: one descriptor allocation per texture switch, recycled with the epoch.
+                // With a single font atlas that is one group for the whole frame.
+                bound_group = ctx.transient.create_binding_group(
+                    self->_group_layout,
+                    {sg::named_view{.name = "gTexture", .view = texture.value().as_readonly_view()}});
+                scope.bind_group(0, *bound_group);
+                bound_texture = dc.GetTexID();
             }
-        });
+
+            scope.set_scissor(scissor.value());
+            scope.draw_indexed(
+                {.index_range = {.offset = global_index_offset + isize(dc.IdxOffset), .size = isize(dc.ElemCount)},
+                 .vertex_offset = global_vertex_offset + int(dc.VtxOffset)});
+        }
+
+        global_vertex_offset += list->VtxBuffer.Size;
+        global_index_offset += isize(list->IdxBuffer.Size);
+    }
 }
 
 void render_imgui(imgui_context& imgui, sg::context& ctx, sg::swapchain& main, tg::vec4f clear_color)

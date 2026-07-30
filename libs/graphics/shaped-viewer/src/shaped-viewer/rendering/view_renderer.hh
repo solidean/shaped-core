@@ -1,7 +1,6 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
-#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/render_routine.hh>
 #include <shaped-viewer/fwd.hh>
@@ -20,7 +19,10 @@ namespace sv
 /// It never records a trace / draw itself — that rule stays in the leaf routines.
 /// This one only sequences them and owns the per-view persistent cache.
 ///
-/// Being a routine, that persistent cache — keyed by view_id, the temporal-accumulation seam — lives on the per-context instance behind the routine's own mutex, rather than in a value the caller has to keep around.
+/// Being a routine, that persistent cache — keyed by view_id, the temporal-accumulation seam — lives on the per-context instance under the routine's own lock, rather than in a value the caller has to keep around.
+///
+/// It is the only one of the three that takes a guard: both leaves it drives read-only, so driving them under its own guard nests no lock.
+/// Should a leaf ever need one, the order is view_renderer before leaf — matching init_declare, which prewarms the same leaves.
 class view_renderer : public sg::render_routine<view_renderer>
 {
 public:
@@ -49,11 +51,6 @@ private:
     {
     };
 
-    struct state
-    {
-        cc::map<view_id, persistent_view_resources> persistent;
-    };
-
-    cc::mutex<state> _state;
+    cc::map<view_id, persistent_view_resources> _persistent;
 };
 } // namespace sv

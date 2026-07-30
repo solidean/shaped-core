@@ -85,9 +85,10 @@ public:
     /// (default in-memory tiers installed); reach the cache via `ctx.cached.cache()` to add tiers.
     context_cached_scope cached;
 
-    /// Per-context render-routine registry (see routine_registry / render_routine). Routines are reached
-    /// by type through `sg::render_routine::acquire(cmd)`; touch this to `prewarm<...>()` before opening a
-    /// list, or `evict<R>()` / `clear()` to release cached routine GPU state early. Cleared on shutdown.
+    /// Per-context render-routine registry (see routine_registry / render_routine).
+    /// Routines are reached by type through `sg::render_routine::acquire_exclusive(cmd)`, or `acquire(cmd)` to only read.
+    /// Touch this to `prewarm<...>()` before opening a list, or to `evict<R>()` / `clear()` cached routine GPU state early.
+    /// Cleared on shutdown.
     routine_registry routines;
 
     /// Opens a new command list, already recording. Single-use: submit or drop it once. Infallible in

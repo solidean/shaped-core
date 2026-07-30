@@ -113,56 +113,57 @@ void view_renderer::execute(sg::command_list& cmd,
                             scene_resources& resources,
                             sg::color_target const& output)
 {
-    auto& self = acquire(cmd);
     auto& ctx = cmd.context();
-
-    // Reclaim stale / over-budget resources, then advance the managers to this frame's epoch.
-    // resolve() below touches each view's meshes/materials (get_ptr), keeping this frame's working set resident.
-    resources.begin_frame(ctx.current_epoch());
-
-    if (def.views.empty())
-        return;
 
     // One transient target per view; the first is what reaches `output` (multi-view compositing is the seam).
     auto targets = cc::vector<sg::texture_2d>();
 
-    self._state.lock(
-        [&](state& s)
+    // Scoped to the part that touches _persistent; the blit below needs nothing of ours.
+    {
+        auto self = acquire_exclusive(cmd);
+
+        // Reclaim stale / over-budget resources, then advance the managers to this frame's epoch.
+        // resolve() below touches each view's meshes/materials (get_ptr), keeping this frame's working set resident.
+        resources.begin_frame(ctx.current_epoch());
+
+        if (def.views.empty())
+            return;
+
+        for (auto const& v : def.views)
         {
-            for (auto const& v : def.views)
-            {
-                auto const resolved = resolve(v, resources);
+            auto const resolved = resolve(v, resources);
 
-                // Reserve the view's persistent slot — temporal accumulators land here (empty payload for now).
-                (void)s.persistent[v.id];
+            // Reserve the view's persistent slot — temporal accumulators land here (empty payload for now).
+            (void)self->_persistent[v.id];
 
-                auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-                    1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-                cmd.upload.pod_to_buffer(frame, make_pt_frame_constants_gpu(v, primary_light(v), *resolved.mesh));
+            auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(frame, make_pt_frame_constants_gpu(v, primary_light(v), *resolved.mesh));
 
-                // The view's SH environment probe, packed into its GPU lane layout.
-                // The miss reconstructs the radiance an escaped ray sees from it.
-                auto const background = ctx.transient.create_buffer<background_gpu>(
-                    1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-                cmd.upload.pod_to_buffer(background, background_gpu::from(v.background));
+            // The view's SH environment probe, packed into its GPU lane layout.
+            // The miss reconstructs the radiance an escaped ray sees from it.
+            auto const background = ctx.transient.create_buffer<background_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(background, background_gpu::from(v.background));
 
-                auto const target = ctx.transient.create_texture_2d(
-                    {.format = sg::pixel_format::rgba16_float, // UAV-written by the raygen, sampled by the blit
-                     .width = v.size[0],
-                     .height = v.size[1],
-                     .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+            auto const target = ctx.transient.create_texture_2d(
+                {.format = sg::pixel_format::rgba16_float, // UAV-written by the raygen, sampled by the blit
+                 .width = v.size[0],
+                 .height = v.size[1],
+                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
-                pathtrace_routine::execute(cmd, {.frame = frame,
-                                                 .background = background,
-                                                 .instances = resolved.instances,
-                                                 .output = target,
-                                                 .materials = resolved.materials->materials,
-                                                 .vertices = resolved.mesh->vertices,
-                                                 .indices = resolved.mesh->indices});
+            // Called under our own guard, and takes none of its own.
+            pathtrace_routine::execute(cmd, {.frame = frame,
+                                             .background = background,
+                                             .instances = resolved.instances,
+                                             .output = target,
+                                             .materials = resolved.materials->materials,
+                                             .vertices = resolved.mesh->vertices,
+                                             .indices = resolved.mesh->indices});
 
-                targets.push_back(target);
-            }
-        });
+            targets.push_back(target);
+        }
+    }
 
     // Bind the caller's output and blit the view across it.
     // The trace's UAV writes transition to a sampled read on this same command list, handled by sg's automatic barriers.

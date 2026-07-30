@@ -222,13 +222,16 @@ sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of t
 class my_routine : public sg::render_routine<my_routine>   // CRTP base; override the phases you need
 {
 public:
-    static void execute(sg::command_list& cmd, /* args */)  // acquire(cmd) + record work
-    { auto const& self = acquire(cmd); /* ... */ }
+    static void execute(sg::command_list& cmd, /* args */)  // acquire_exclusive(cmd) + record work
+    { auto self = acquire_exclusive(cmd); /* self->... is mutable, under the routine's lock */ }
 protected:
-    void init_declare(sg::context& ctx) override { /* acquire shaders (slib) + pipelines */ }
+    void init_declare(sg::context& ctx) override { /* acquire shaders (slib) + pipelines; already locked */ }
+private:
+    sg::binding_group_layout_handle _group_layout;   // plain members — the framework guards them
 };
 // call site: my_routine::execute(cmd, args);   // reached by type — no handle, no registration
+// acquire(cmd) is the other entry point: -> my_routine const&, no lock, for a routine that only reads.
 ```
 
 See the [shaped-graphics cheat sheet](../shaped-graphics/cheat-sheet.md) for the full framework surface
-(`acquire` / `prewarm` / `evict`, the three init phases, `ctx.routines.clear()`).
+(`acquire` / `acquire_exclusive` / `prewarm` / `evict`, the three init phases, `ctx.routines.clear()`).

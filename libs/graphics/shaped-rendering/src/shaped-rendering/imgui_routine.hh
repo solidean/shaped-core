@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/thread/mutex.hh>
 #include <imgui/imgui_fwd.hh>
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/pixel_format.hh>
@@ -23,7 +22,7 @@ namespace sr
 ///     sr::imgui_routine::execute(pass, ImGui::GetDrawData());
 ///
 /// The routine owns the GPU textures backing imgui's atlas and a keyed_pipeline_cache (one pipeline per target format).
-/// All of it lives behind one mutex, taken for the length of each entry point, so two threads recording imgui against the same context serialize rather than race.
+/// execute() runs under acquire_exclusive for its whole length, so two threads recording imgui against the same context serialize rather than race.
 /// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
 ///
 /// This frame's geometry is deliberately *not* state:
@@ -62,15 +61,12 @@ protected:
     void init_declare(sg::context& ctx) override;
 
 private:
-    /// Everything this routine mutates, in one place so the locking rule is checkable by inspection.
-    /// The shader-derived group_layout is rebuilt by init_declare on every reload; the atlas is not.
-    struct state
-    {
-        sg::binding_group_layout_handle group_layout;
-        impl::imgui_texture_registry textures;
-    };
+    /// Rebuilt by init_declare on every reload.
+    sg::binding_group_layout_handle _group_layout;
 
-    cc::mutex<state> _state;
+    /// The GPU textures behind imgui's atlas.
+    /// Deliberately survives a reload — the atlas has nothing to do with our shaders.
+    impl::imgui_texture_registry _textures;
 
     /// One pipeline per color-target format drawn to — in practice exactly one, the swapchain's.
     /// init_declare (re)binds the build callback, which captures the layout + shaders; a broken reload

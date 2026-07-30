@@ -1,7 +1,6 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
-#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/acceleration_structure.hh> // sg::tlas_instance
 #include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/fwd.hh>
@@ -64,7 +63,7 @@ struct pt_trace_desc
 ///
 /// A render routine, structured exactly like pbr_raytrace_routine: it owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired path-tracing shaders and rebuilt on reload.
 /// Where the flat PBR routine shades a single direct-lit sample, this one integrates global illumination — the raygen bounces each ray diffusely and estimates direct light at every hit with next-event estimation toward the rectangular ceiling light, accumulating `samples_per_pixel` paths per pixel in one dispatch.
-/// All state sits behind one mutex taken for the whole call.
+/// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
 class pathtrace_routine : public sg::render_routine<pathtrace_routine>
 {
 public:
@@ -76,16 +75,11 @@ protected:
     void init_declare(sg::context& ctx) override;
 
 private:
-    /// Everything the routine mutates, rebuilt wholesale by init_declare on every reload.
-    struct state
-    {
-        sg::binding_group_layout_handle group_layout;
-        sg::pipeline_layout_handle pipeline_layout;
-        sg::raytracing_pipeline_handle pipeline;
-        sg::raytracing_shader_table_handle table;
-        sg::raygen_index raygen = {};
-    };
-
-    cc::mutex<state> _state;
+    // Rebuilt wholesale by init_declare on every reload.
+    // The pipeline layout is not among them — the pipeline holds it.
+    sg::binding_group_layout_handle _group_layout;
+    sg::raytracing_pipeline_handle _pipeline;
+    sg::raytracing_shader_table_handle _table;
+    sg::raygen_index _raygen = {};
 };
 } // namespace sv
