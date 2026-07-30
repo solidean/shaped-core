@@ -22,6 +22,8 @@ namespace sr
 /// The build callback (given the context + the key) does the actual creation, so the cache stays agnostic to what a pipeline needs.
 /// The caller captures its layout and shaders into the callback at `init` time.
 ///
+/// The whole acquire path is const — only `init` mutates — so a const cache can still build lazily.
+///
 /// Error model: the sync path is a `try_acquire` (-> cc::result) / `acquire` (-> throws) pair.
 /// The async path needs no separate `try_`, since a cc::shared_async already carries its outcome — `acquire_async` is the fallible form.
 ///
@@ -51,7 +53,7 @@ public:
     /// The pipeline for `key`, get-or-scheduled: one build per key, and a warmed build is reused.
     /// A build failure surfaces as an async error.
     /// Drive with cc::(try_)async_blocking_get_singlethreaded, or poll.
-    [[nodiscard]] async_handle acquire_async(Key const& key)
+    [[nodiscard]] async_handle acquire_async(Key const& key) const
     {
         return _cache.lock(
             [&](map_t& m) -> async_handle
@@ -75,11 +77,11 @@ public:
     }
 
     /// Warm the cache: start the build for `key` and keep the node (fire-and-forget).
-    void prepare(Key const& key) { (void)acquire_async(key); }
+    void prepare(Key const& key) const { (void)acquire_async(key); }
 
     /// Blocking get-or-build, fallible: the built handle or the build error.
     /// This is the form for inside a rendering scope, where an exception must not unwind out past an open command list.
-    [[nodiscard]] cc::result<handle> try_acquire(Key const& key)
+    [[nodiscard]] cc::result<handle> try_acquire(Key const& key) const
     {
         auto node = acquire_async(key);
         auto driven = cc::try_async_blocking_get_singlethreaded(node);
@@ -93,13 +95,14 @@ public:
 
     /// Blocking get-or-build.
     /// Returns the handle; throws on build failure (matching sg's create_*).
-    [[nodiscard]] handle acquire(Key const& key) { return try_acquire(key).or_throw(); }
+    [[nodiscard]] handle acquire(Key const& key) const { return try_acquire(key).or_throw(); }
 
 private:
     using map_t = cc::map<Key, async_handle>;
 
     sg::context* _ctx = nullptr;
     build_fn _build;
-    cc::mutex<map_t> _cache;
+    // Mutable: acquiring is logically a read — the get-or-create is an internal detail behind the mutex.
+    mutable cc::mutex<map_t> _cache;
 };
 } // namespace sr

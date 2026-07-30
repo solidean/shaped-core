@@ -193,6 +193,8 @@ pipelines.prepare(format);        // warm the cache for `format` ahead of the dr
   command list would leave it unsubmitted.
 - **The build callback may run on a pool worker and concurrently for distinct keys** — capture only immutable
   state (the layout + shaders), and do not race `init` with in-flight builds. With no pool, builds run inline.
+- **The whole acquire path is `const`** — `acquire` / `try_acquire` / `acquire_async` / `prepare` work on a `keyed_pipeline_cache const&`, so a routine's const draw path can build lazily.
+  Only `init` mutates.
 
 ## Blit routine
 
