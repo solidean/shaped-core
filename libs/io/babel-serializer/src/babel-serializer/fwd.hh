@@ -3,8 +3,8 @@
 #include <clean-core/fwd.hh>
 
 /// Aggregate forward declarations for babel-serializer.
-/// Each format lives in its own sub-namespace (babel::json, babel::markdown, babel::sqlite, babel::obj) and owns its own header;
-/// include that header directly when it is all you need.
+/// Each format lives in its own sub-namespace (babel::base64, babel::json, babel::markdown, babel::sqlite, babel::obj, babel::gltf)
+/// and owns its own header; include that header directly when it is all you need.
 
 namespace babel
 {
@@ -36,6 +36,50 @@ struct face;
 struct group;
 struct data;
 } // namespace babel::obj
+
+namespace babel::gltf
+{
+// The index roles. A forward declaration must repeat the underlying type exactly, hence the `: int` here too.
+enum class buffer_index : int;
+enum class buffer_view_index : int;
+enum class accessor_index : int;
+enum class mesh_index : int;
+enum class node_index : int;
+enum class scene_index : int;
+enum class material_index : int;
+enum class texture_index : int;
+enum class image_index : int;
+enum class sampler_index : int;
+
+enum class container : u8;
+enum class issue_kind : u8;
+enum class component_type : u16;
+enum class accessor_type : u8;
+enum class primitive_mode : u8;
+enum class buffer_target : u16;
+enum class alpha_mode : u8;
+enum class filter : u16;
+enum class wrap_mode : u16;
+
+struct issue;
+struct asset_info;
+struct buffer;
+struct buffer_view;
+struct accessor;
+struct attribute;
+struct primitive;
+struct mesh;
+struct node;
+struct scene;
+struct texture_ref;
+struct material;
+struct texture;
+struct image;
+struct sampler;
+struct accessor_view;
+struct read_options;
+struct data;
+} // namespace babel::gltf
 
 namespace babel::sqlite
 {
