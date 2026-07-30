@@ -49,9 +49,12 @@ TEST("sv - view renderer end to end (headless)")
         v.size = size;
         v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)}; // default orientation frames the origin
         v.items.push_back({.mesh = mesh, .materials = materials});
-        // Lights are a typed list on the view — the default rect (overhead, facing down) with a brighter emission.
-        // Exercises the area_light rectangle+transform -> world-rect derivation the view_renderer does.
-        v.area_lights.push_back({.emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
+        // Lights are a typed list on the view — an overhead rect facing down (cross(+x, +z) is -y).
+        // Exercises the area_light -> area_light_gpu derivation the view_renderer does.
+        v.area_lights.push_back({.center = tg::pos3f(0, 3, 0),
+                                 .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                 .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                                 .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
         def.views.push_back(cc::move(v));
     }
 
@@ -118,7 +121,10 @@ TEST("sv - view renderer renders indexed geometry (headless)")
         v.size = size;
         v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
         v.items.push_back({.mesh = mesh, .materials = materials});
-        v.area_lights.push_back({.emission = tg::vec3f(15.0f, 15.0f, 15.0f)});
+        v.area_lights.push_back({.center = tg::pos3f(0, 3, 0),
+                                 .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                 .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                                 .emission = tg::vec3f(15.0f, 15.0f, 15.0f)});
         def.views.push_back(cc::move(v));
     }
 

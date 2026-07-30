@@ -12,8 +12,8 @@
 struct AreaLight
 {
     float3 center;   float _l0;
-    float3 u;        float _l1; // world half-edge along the rect's local x
-    float3 v;        float _l2; // world half-edge along the rect's local y
+    float3 u;        float _l1; // world half-extent spanning the rect's first axis
+    float3 v;        float _l2; // world half-extent spanning the rect's second axis
     float3 emission; float _l3;
     float3 normal;   float _l4; // = normalize(cross(u, v)); the emitting face
 };

@@ -26,8 +26,9 @@ sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f6
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; } — view-wide integration controls (no light/sky: those are on the view)
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; material_set_id materials; mat4f transform; } — triangle_mesh only for now
-sv::area_light                   // { vec2f half_extents; mat4f transform; vec3f emission; } — a local-xy rect (emits along local +z) placed by transform; one typed list per light kind on the view
-sv::area_light_gpu::from(light)  // -> area_light_gpu { vec3f center, u, v, emission, normal; } — the world-space rect the integrator samples (u/v are half-edges, normal = cross(u, v))
+sv::area_light                   // { pos3f center; vec3f half_extent_u, half_extent_v; vec3f emission; } — a world-space rect emitting along cross(half_extent_u, half_extent_v); one typed list per light kind on the view
+                                 //   emission has no default (it is -1): set it, or the first use warns to stderr
+sv::area_light_gpu::from(light)  // -> area_light_gpu { vec3f center, u, v, emission, normal; } — the rect in GPU lane layout (u/v are the half-extents, normal = cross(u, v))
 sv::background                   // { vec3f sh[16]; } — order-3 RGB spherical-harmonics environment a missed ray sees (both misses reconstruct radiance from it)
 sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
 sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — flat, per-triangle
@@ -89,9 +90,9 @@ The path tracer bounces each ray diffusely (cosine-weighted) and does next-event
 fewer samples than a naive integrator. The environment is gathered by MIS (balance heuristic) between the NEE
 ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
 The view_renderer builds `pt_frame_constants_gpu` from the view's first `area_light` plus
-`render_settings::samples_per_pixel` / `max_bounces`. A view with an empty `area_lights` list falls back to a
-default light, so the scene is lit even without matching emissive geometry (unlike a Cornell box, whose light
-rect must match the emitter). The view's `background` (RGB SH) is packed to `background_gpu` and bound at
+`render_settings::samples_per_pixel` / `max_bounces`. A view with an empty `area_lights` list falls back to an
+overhead rect facing down, so the scene is lit even without matching emissive geometry (unlike a Cornell box,
+whose light rect must match the emitter). The view's `background` (RGB SH) is packed to `background_gpu` and bound at
 b1; both misses (flat + pt) reconstruct the environment radiance an escaped ray sees via `background_radiance`.
 
 ## Typical frame

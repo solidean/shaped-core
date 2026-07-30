@@ -3,6 +3,7 @@
 #include <nexus/test.hh>
 #include <shaped-viewer/camera.hh>
 #include <shaped-viewer/gpu_types.hh>
+#include <shaped-viewer/light.hh>
 #include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/resources/resource_data.hh>
@@ -124,6 +125,40 @@ TEST("sv - pbr_material_gpu::from preserves fields")
     CHECK(g.metallic == m.metallic);
     CHECK(g.roughness == m.roughness);
     CHECK(g.emissive == m.emissive);
+}
+
+TEST("sv - area_light_gpu::from lays out the rect and its emitting face")
+{
+    static_assert(sizeof(sv::area_light_gpu) == 80); // five 16-byte cbuffer lanes
+
+    auto const light = sv::area_light{.center = tg::pos3f(0, 3, 0),
+                                      .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                      .half_extent_v = tg::vec3f(0, 0, 0.5f),
+                                      .emission = tg::vec3f(12, 12, 12)};
+    auto const g = sv::area_light_gpu::from(light);
+
+    CHECK(g.center == tg::vec3f(0, 3, 0));
+    CHECK(g.u == light.half_extent_u);
+    CHECK(g.v == light.half_extent_v);
+    CHECK(g.emission == light.emission);
+    CHECK(g.normal == tg::vec3f(0, -1, 0)); // cross(+x, +z) faces down
+
+    SECTION("swapping the two half-extents spans the same rect, flipping the face")
+    {
+        auto flipped = light;
+        flipped.half_extent_u = light.half_extent_v;
+        flipped.half_extent_v = light.half_extent_u;
+        CHECK(sv::area_light_gpu::from(flipped).normal == tg::vec3f(0, 1, 0));
+    }
+
+    SECTION("emission has no usable default")
+    {
+        // Negative on every channel, so a light that was never given an emission is reported on use instead of
+        // tracing as a black rect.
+        CHECK(sv::area_light{}.emission[0] < 0);
+        CHECK(sv::area_light{}.emission[1] < 0);
+        CHECK(sv::area_light{}.emission[2] < 0);
+    }
 }
 
 TEST("sv - gpu_boolean packs a bool into one 32-bit lane")

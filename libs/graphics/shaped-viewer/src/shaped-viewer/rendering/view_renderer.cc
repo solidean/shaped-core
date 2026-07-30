@@ -63,12 +63,17 @@ resolved_view resolve(view const& v, scene_resources& resources)
     return out;
 }
 
-/// The area light the path tracer integrates: the view's first, or a default so a light-less view is still lit.
+/// The area light the path tracer integrates: the view's first, or the fallback below so a light-less view is still lit.
 /// The tracer samples one rect for now.
 /// Further area lights are the multi-light seam.
 area_light primary_light(view const& v)
 {
-    return v.area_lights.empty() ? area_light{} : v.area_lights.front();
+    // A 1.5 x 1.5 rect three units overhead facing down (cross(+x, +z) is -y), a key light for a scene near the origin.
+    auto const fallback = area_light{.center = tg::pos3f(0, 3, 0),
+                                     .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                     .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                                     .emission = tg::vec3f(12.0f, 12.0f, 12.0f)};
+    return v.area_lights.empty() ? fallback : v.area_lights.front();
 }
 
 pt_frame_constants_gpu make_pt_frame_constants_gpu(view const& v, area_light const& light, mesh_record const& mesh)

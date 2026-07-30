@@ -213,7 +213,11 @@ TEST("sv - viewer window (manual)", nx::config::manual)
             v.size = tg::vec2i(win->width(), win->height());
             controller.apply(v.camera);
             v.items.push_back({.mesh = mesh, .materials = materials});
-            v.area_lights.push_back({.emission = tg::vec3f(14.0f, 14.0f, 14.0f)}); // default overhead rect, facing down
+            // an overhead rect facing down (cross(+x, +z) is -y)
+            v.area_lights.push_back({.center = tg::pos3f(0, 3, 0),
+                                     .half_extent_u = tg::vec3f(0.75f, 0, 0),
+                                     .half_extent_v = tg::vec3f(0, 0, 0.75f),
+                                     .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
 
             // A cool-blue SH sky: a bright ambient DC term plus a vertical gradient (brighter toward the zenith,
             // +y). The path tracer's miss shows it behind the cloud, and env NEE lights the cloud from it.
