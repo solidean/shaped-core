@@ -179,7 +179,8 @@ pd.reinterpret_as<U>();  pd.try_reinterpret_as<U>();  pd.as_bytes();  pd.as_muta
 cc::pinned_data<int const> c = pd;        // T -> T const conversion, shares owner
 
 cc::as_pinned_data(std::shared_ptr<Container>);   // wrap a shared contiguous container, never copies
-cc::make_pinned_data(container_or_shared_ptr);    // shared_ptr -> wrap; owning rvalue -> move; borrow/lvalue -> copy
+cc::as_pinned_data(pinned_data<T>);               // identity: an already-pinned range passes through, same owner
+cc::make_pinned_data(container_or_shared_ptr);    // pinned_data/shared_ptr -> wrap; owning rvalue -> move; borrow/lvalue -> copy
 ```
 
 ## Strings (UTF-8)
