@@ -1,8 +1,11 @@
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
 #include <clean-core/thread/mutex.hh>
 #include <nexus/test.hh>
+
+#include <type_traits>
 
 
 TEST("mutex - construction")
@@ -157,6 +160,53 @@ TEST("mutex - try_lock success")
         auto result = m.try_lock([](int const& val) { return cc::to_string(val); });
         REQUIRE(result.has_value());
         CHECK(result.value() == "42");
+    }
+}
+
+TEST("mutex - lock_scoped")
+{
+    SECTION("read and modify through the guard")
+    {
+        auto m = cc::mutex<int>{42};
+
+        auto value = m.lock_scoped();
+        CHECK(*value == 42);
+        *value = 7;
+        CHECK(*value == 7);
+    }
+
+    SECTION("operator-> reaches the value's members")
+    {
+        auto m = cc::mutex<cc::vector<int>>{};
+
+        auto values = m.lock_scoped();
+        values->push_back(1);
+        values->push_back(2);
+        CHECK(values->size() == 2);
+    }
+
+    SECTION("the lock is released when the guard dies")
+    {
+        auto m = cc::mutex<int>{0};
+        {
+            auto value = m.lock_scoped();
+            *value = 99;
+        }
+
+        // A guard still holding the lock would deadlock here rather than fail a check.
+        CHECK(m.lock([](int const& val) { return val; }) == 99);
+    }
+
+    SECTION("the guard is move-only")
+    {
+        static_assert(!std::is_copy_constructible_v<cc::mutex_guard<int>>);
+        static_assert(!std::is_copy_assignable_v<cc::mutex_guard<int>>);
+        static_assert(std::is_move_constructible_v<cc::mutex_guard<int>>);
+
+        auto m = cc::mutex<int>{5};
+        auto value = m.lock_scoped();
+        auto moved = cc::move(value);
+        CHECK(*moved == 5);
     }
 }
 

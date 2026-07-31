@@ -8,8 +8,9 @@ the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 sv will grow into Shaped Code's visualization renderer — the top of the graphics stack, serving
 SOLIDEAN, internal tools, and customer visualization needs.
 
-This library is an **early-stage skeleton**: it builds and links but has no renderer yet. See
-[docs/structure.md](docs/structure.md) for the intended scope.
+This library has a **first vertical slice**: a per-frame `viewer_definition` of views, each path-traced
+into a target texture and blitted into a window by the `view_renderer` routine — raytracing-first, dx12 + DXR today.
+See [docs/structure.md](docs/structure.md) for the roadmap and [cheat-sheet.md](cheat-sheet.md) for the API.
 
 ## Building & testing
 

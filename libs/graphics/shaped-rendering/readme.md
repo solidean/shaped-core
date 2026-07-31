@@ -77,6 +77,18 @@ see its [docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
 `sr` hosts the **concrete** routines built on top of it; they land as they are implemented.
 See [docs/render-routines.md](docs/render-routines.md) for the sr-side overview and [docs/structure.md](docs/structure.md) for the wider roadmap.
 
+## Pipeline cache
+
+`sr::keyed_pipeline_cache<Key, Pipeline = sg::raster_pipeline>` is a get-or-create cache of pipelines keyed by a caller-chosen key — one pipeline per key, built once.
+The key is almost always the render-target pixel format: a routine draws the same shaders into whatever target it is handed, and each distinct format needs its own pipeline.
+It replaces the hand-rolled "small vector of `{format, pipeline}` plus a linear-search find-or-create" that routines otherwise grow (`sr::blit_routine` is the first user).
+
+The build callback — given the context and the key — does the actual creation, so the cache stays agnostic to what a pipeline needs; the caller captures its layout and shaders into the callback at `init` time.
+`init` clears the cache, which is exactly what a hot-reload wants: a rebuilt layout invalidates every pipeline cached against the old one.
+The sync path is a `try_acquire` (→ `cc::result`) / `acquire` (→ throws) pair, mirroring sg's `try_create_*` / `create_*`; `acquire_async` is the fallible async form, and `prepare` warms a key ahead of the draw.
+
+See the [cheat-sheet](cheat-sheet.md) for the full surface.
+
 ## Building & testing
 
 Build and test through the repo driver — never run the `shaped-rendering-test` binary directly.

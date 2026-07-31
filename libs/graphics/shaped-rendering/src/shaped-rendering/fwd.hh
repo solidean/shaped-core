@@ -13,6 +13,7 @@ using namespace cc::primitive_defines;
 
 // Concrete render routines land here as they are implemented;
 // the routine framework itself lives in shaped-graphics (sg::render_routine / ctx.routines).
+class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
 
 // OS windows (see window.hh).
 // Always declared; SR_HAS_WINDOW says whether a backend was built in, and without one creation fails.

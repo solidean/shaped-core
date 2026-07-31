@@ -21,8 +21,9 @@ Re-init is driven by sg's **process-global reload generation** (`sg::reload_gene
 when content derived state is invalidated it moves (the shader library calls `sg::signal_reload()` on hot reload), and the next `acquire` re-runs declare + materialize while `init_once` state is preserved.
 
 The customary call shape is a **static `execute()`** taking the command list.
-It opens with `acquire(cmd)` — which finds (or lazily creates) this routine's per-context instance, initializes it, and hands it back —
-and reads the routine's private members through that reference:
+It opens with `acquire(cmd)` or `acquire_exclusive(cmd)` — which finds (or lazily creates) this routine's per-context instance, initializes it, and hands it back —
+and reads the routine's private members through that reference.
+The example below only *reads*, so it takes the const one; see [Threading](#threading) for when to take the other:
 
 ```cpp
 class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
@@ -30,7 +31,7 @@ class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
 public:
     static void execute(sg::command_list& cmd, sg::buffer<sg::u32> const& out)
     {
-        auto& self = acquire(cmd);                       // lazily creates + initializes; returns the routine
+        auto const& self = acquire(cmd);                 // lazily creates + initializes; returns the routine
         auto const pipeline = cc::async_blocking_get_singlethreaded(self._pipeline);
         auto const group = cmd.context().transient.create_binding_group(
             self._group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
@@ -59,12 +60,12 @@ private:
 pattern_fill_routine::execute(cmd, out);
 ```
 
-`acquire(cmd)` reaches the context through `cmd.context()`, so it takes only the command list.
+Both entry points reach the context through `cmd.context()`, so they take only the command list.
 `prewarm(ctx)` is the variant for before a command list exists — it runs init_once + init_declare, so async compiles start as early as possible;
-materialize then happens on the first `acquire(cmd)`.
+materialize then happens on the first acquire.
 
-The example above is deliberately the minimum, and it assumes one recording thread: its members are touched without a lock.
-A routine recorded from several threads — or one holding anything that changes after init — needs the `cc::mutex<state>` shape from [Threading](#threading) below.
+The example above is deliberately the minimum: it reads members a reload could rewrite underneath it, which is only sound while nothing else records this routine.
+Anything beyond that takes `acquire_exclusive` — see [Threading](#threading) below.
 
 ## Per-context, reached by type: `ctx.routines`
 
@@ -96,18 +97,15 @@ The memo holds only a weak reference, so it can never keep a routine alive past 
 ## Threading
 
 A routine is a per-context singleton handed to every caller on that context, so the threading model has to be explicit.
-It is three separate guarantees, and only the first two are the framework's:
+It is three guarantees, and all three are now the framework's:
 
-1. **The registry is guarded.** `acquire` is safe from parallel command-list recording.
-2. **The phase engine is guarded.** Racing acquires of one routine run each phase exactly once — the losers block until the winner is done, then observe it initialized.
-   The phase callbacks therefore run under that lock, and must not call back into `acquire` / `prewarm` for the same routine.
-3. **A routine's own mutable state is the routine's job.** The framework cannot know what a routine keeps or how it wants it synchronized.
+1. **The registry is guarded.** Acquiring is safe from parallel command-list recording.
+2. **There is one lock per routine, and it covers both the init phases and everything the routine owns.**
+   Racing acquires run each phase exactly once — the losers block until the winner is done, then observe it initialized.
+   The phase callbacks run under that lock, so they must not call back into `acquire` / `acquire_exclusive` / `prewarm` for the same routine.
+3. **`acquire_exclusive` hands that lock to the caller**, so a routine no longer carries a mutex of its own.
 
-That third point is the one that bites.
-`acquire` returns a **non-const** reference precisely because routines are expected to hold state — a pipeline cache keyed by target format, a resource registry, a scratch buffer that grows.
-Anything `execute` writes is written through a reference two threads may hold at once.
-
-The shape to reach for first is a single `cc::mutex<state>` holding everything the routine owns, locked once per entry point:
+Which entry point you use is how a routine declares whether it mutates:
 
 ```cpp
 class my_routine : public sg::render_routine<my_routine>
@@ -115,27 +113,35 @@ class my_routine : public sg::render_routine<my_routine>
 public:
     static void execute(sg::command_list& cmd, /* args */)
     {
-        auto& self = acquire(cmd);
-        self._state.lock([&](state& s) { /* read and write s freely */ });
+        auto self = acquire_exclusive(cmd);   // holds the routine's lock for the guard's lifetime
+        self->_scratch.grow(...);             // read and write freely through ->
     }
 
 protected:
     void init_declare(sg::context& ctx) override
     {
-        _state.lock([&](state& s) { /* rebuild the shader-derived half of s */ });
+        _group_layout = ...;                  // already under the lock; no locking of its own
     }
 
 private:
-    struct state { /* pipelines, layouts, caches, per-frame scratch */ };
-    cc::mutex<state> _state;
+    sg::binding_group_layout_handle _group_layout;   // plain members — no `struct state`, no cc::mutex
 };
 ```
 
-One mutex over everything keeps the rule checkable by inspection, and it costs nothing real: two threads recording the same routine serialize, which is what they would have to do anyway.
+`acquire_exclusive` is the one to reach for: a routine is expected to hold state — a pipeline cache keyed by target format, a resource registry, a scratch buffer that grows — and the guard is what makes writing it safe.
+Keep the guard to the scope that actually mutates; it serializes every other thread recording that routine for as long as it lives.
 
-**State written in `init_declare` and only read afterwards is not exempt.**
-A reload on another thread re-runs `init_declare` while this thread is recording, so those members belong behind the same mutex as the rest.
-Note the lock order this implies — the phase lock is taken first, then the routine's own — so a routine must never take its own lock and then call `acquire`.
+`acquire` is the other half, and it takes **no lock at all** — it returns `Derived const&`, so only non-mutating members are reachable.
+That makes it a real contract rather than a guarantee: **whatever the const path can reach must be immutable after init, or self-guarded on its own** (`sr::keyed_pipeline_cache` is, which is why its whole acquire path is `const`).
+A reload on another thread re-runs `init_declare` while this thread reads, so **a routine whose `execute` touches anything `init_declare` writes belongs on `acquire_exclusive`** — which in practice is nearly all of them.
+
+Taking a *different* routine's guard while holding your own is fine — `sv::view_renderer` drives its leaf routines under its own guard, and today they take none of their own.
+The lock is not recursive, so the two rules are: never re-acquire the *same* routine under its own guard, and take any two routines in the same order everywhere.
+
+Both halves of that are an approximation of the model this actually wants, and the gap is a missing clean-core type:
+**the init phases should exclude every `execute`, while `execute` calls that only read should run in parallel with each other.**
+A read-only routine like `sr::blit_routine` has no reason to serialize against another thread's `execute`, and `acquire`'s no-lock path is not the same thing as a shared one — a reload can still land mid-read.
+Closing it needs a `cc::shared_mutex<T>` beside `cc::mutex<T>`; it is tracked in the [sg TODO](TODO.md).
 
 Do not `clear()` / `evict()` a registry while another thread is still recording against the same context.
 

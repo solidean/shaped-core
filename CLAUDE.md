@@ -25,8 +25,9 @@ One-liner per library:
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/io/babel-serializer`** — serialization / deserialization of various formats.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") planned on top.
-  Readers take a `cc::read_stream` and parse against its buffered window.
-  So far: JSON + markdown readers and a SQLite engine wrapper (`data/`), a Wavefront OBJ reader (`geometry/`), and PNG/JPEG read+write under the `babel::image` aggregator (`image/`).
+  Readers take a `cc::read_stream` and parse against its buffered window — except one that must hand back zero-copy views of its input (`gltf` takes a `cc::pinned_data<byte const>`).
+  So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`), Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`).
+  Plus PNG/JPEG read+write under the `babel::image` aggregator (`image/`).
   Namespace `babel`. Depends on clean-core + typed-geometry.
   Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs (dx12/vulkan tier 1; metal/webgpu tier 2;
@@ -221,8 +222,9 @@ Full rule: [docs/coding-guidelines.md](docs/coding-guidelines.md#prose-style--on
 * `///` for type/member docs, `//` for inline.
   **No Doxygen / Javadoc / XML-doc tags** (`@param`, `\return`, `<summary>`, …) — API docs aren't generated here.
 * State constraints as *what must hold*: "size must be >= 0", not "asserts on negative size".
-* Cut the backstory: no rationale aimed at the author, no "why we chose this", no task/PR references.
-  Those go in the commit message or a higher-level doc.
+* Comment only a constraint a reader could be *wrong* about — an invariant, precondition, ordering/aliasing dependency, correctness pitfall.
+  **Litmus test:** if the sentence would read naturally in the commit message or PR description, it belongs there, not inline.
+* Cut the backstory: no justification or narration — not which algorithm it is, not "why we chose this", not what it buys (fast / robust / well-conditioned), no task/PR references.
 * No comments on trivial getters / one-liners.
 
 ### The style is evolving — don't retrofit the whole repo

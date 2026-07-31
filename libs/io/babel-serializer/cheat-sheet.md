@@ -3,12 +3,29 @@
 Serialization / deserialization of various formats. Namespace `babel`; headers included by full path from `src/`.
 > Reading takes a `cc::read_stream` and parses against its buffered window — no whole-input buffering.
 > Each format parses into an unopinionated, read-once structure; string_view / span overloads wrap a `span_read_stream_adapter`.
+> The deviation: `gltf` takes a `cc::pinned_data<byte const>` so its buffers are zero-copy subviews of the input.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (json + markdown + obj + sqlite + image)
+#include <babel-serializer/all.hh>   // umbrella (base64 + json + markdown + sqlite + obj + gltf + image)
 ```
 
 ---
+
+## base64 (`babel::base64`)
+
+Tolerant on input, canonical on output. No streaming interface — data URIs and embedded blobs are already in memory.
+
+```cpp
+#include <babel-serializer/data/base64.hh>
+
+cc::optional<isize> decoded_size(cc::string_view text);              // nullopt when text is not valid base64
+cc::result<cc::vector<cc::byte>> decode(cc::string_view text);       // fresh buffer
+cc::result<isize> decode_into(cc::string_view text, cc::span<cc::byte> out); // -> bytes written; short out is an error
+cc::string encode(cc::span<cc::byte const> bytes);                   // standard alphabet, '=' padded
+
+babel::base64::decode("Zm9vYmFy").value();  // "foobar"
+babel::base64::decode("-_-_").value();      // URL-safe alphabet decodes too
+```
 
 ## JSON (`babel::json`)
 
@@ -101,6 +118,87 @@ struct group  { cc::string name; i32 first_face; i32 face_count; }; // faces[fir
 // iterate a face's corners:
 for (auto ci = f.first_corner; ci < f.first_corner + f.corner_count; ++ci)
     auto const p = m.positions[m.corners[ci].position];
+```
+
+## glTF 2.0 / GLB (`babel::gltf`)
+
+Takes **bytes, not a stream**: every embedded buffer comes back as a `cc::pinned_data` subview sharing the input's owner.
+
+```cpp
+#include <babel-serializer/geometry/gltf.hh>
+
+babel::gltf::container detect_container(cc::span<cc::byte const> bytes); // gltf | glb; never fails
+
+struct read_options {   // by value; the default touches nothing outside the input
+    cc::function_ref<cc::result<cc::pinned_data<cc::byte const>>(cc::string_view uri)> resolve_uri;
+};
+
+cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte const> bytes, read_options = {}); // ZERO-COPY
+cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte> bytes, read_options = {});
+cc::result<babel::gltf::data> read(cc::read_stream& in, read_options = {});       // slurps, then pins (moves)
+cc::result<babel::gltf::data> read(cc::span<cc::byte const> bytes, read_options = {}); // COPIES into a pin
+cc::result<babel::gltf::data> read(cc::string_view text, read_options = {});           // COPIES into a pin
+```
+
+```cpp
+auto const doc = babel::gltf::read(pinned).value();
+doc.source;            // container::gltf | container::glb
+doc.asset;             // asset_info { version, min_version, generator, copyright }
+
+// what the read did NOT give you — a successful read with issues is normal for a real asset
+doc.issues;                 // cc::vector<issue> { issue_kind kind; cc::string message; }, in notice order
+doc.has_issues();           // bool
+doc.has_issue_of(babel::gltf::issue_kind::unsupported); // unsupported | unresolved | malformed
+doc.issue_report();         // cc::string, one "kind: message" line per issue; "" when clean
+
+doc.extensions_used;   // cc::vector<cc::string>; extensions_required is always empty (a non-empty one fails the read)
+
+doc.buffers;      // cc::vector<buffer>      — { uri, byte_length, pinned_data<byte const> data, resolved }
+doc.buffer_views; // cc::vector<buffer_view> — { buffer, byte_offset, byte_length, byte_stride (0 = packed), target }
+doc.accessors;    // cc::vector<accessor>    — { buffer_view, byte_offset, component, type, count, normalized, ... }
+doc.attributes;   // cc::vector<attribute>   — every primitive attribute, flattened { semantic, accessor }
+doc.primitives;   // cc::vector<primitive>   — flattened { first_attribute, attribute_count, indices, material, mode }
+doc.meshes; doc.nodes; doc.scenes; doc.materials; doc.textures; doc.images; doc.samplers;
+doc.default_scene;     // scene_index; the document's `scene`
+```
+
+Index roles are strong enums (`buffer_index`, `buffer_view_index`, `accessor_index`, `mesh_index`, `node_index`,
+`scene_index`, `material_index`, `texture_index`, `image_index`, `sampler_index`), each with `invalid = -1`:
+
+```cpp
+buffer const* b = doc.find(buffer_index(0));    // one overload per role; nullptr ONLY for `invalid`
+cc::span<primitive const> ps = doc.primitives_of(doc.meshes[0]);
+cc::span<attribute const> as = doc.attributes_of(ps[0]);
+cc::span<node_index const> cs = doc.children_of(doc.nodes[0]);
+cc::span<node_index const> rs = doc.nodes_of(doc.scenes[0]);
+accessor_index pos = doc.find_attribute(ps[0], "POSITION"); // invalid when absent
+cc::span<f32 const> lo = doc.min_of(doc.accessors[1]);      // empty when the file stated no bounds; also max_of
+```
+
+```cpp
+// accessor data: a strided view that CARRIES the buffer's pin, so it may outlive `doc`
+cc::result<babel::gltf::accessor_view> v = doc.view_of(pos);  // also view_of(accessor const&)
+v.value().bytes;        // pinned_data<byte const>, starting at element 0
+v.value().stride;       // NEVER 0 — a packed accessor gets element_size
+v.value().count; v.value().element_size; v.value().component; v.value().type; v.value().normalized;
+v.value().element(i);   // cc::span<byte const>, non-owning; asserts 0 <= i < count
+
+auto const view = v.value();
+view.is_typed_as<tg::vec3f>();     // size + alignment allow reading in place?
+view.as_strided<tg::vec3f>();      // cc::strided_span<tg::vec3f const>; precondition: is_typed_as
+view.read_elements<tg::vec3f>();   // result<cc::vector<T>>; always safe (memcpy per element, de-interleaves)
+
+cc::result<cc::vector<u32>> idx = doc.read_indices(ps[0]);  // widens a u8 / u16 / u32 SCALAR accessor
+
+// accessor arithmetic, if you do it yourself:
+a.component_count(); // 1/2/3/4/4/9/16   a.component_size(); // 1/1/2/2/4/4
+a.element_size();    // packed element bytes INCLUDING per-column 4-byte matrix padding (MAT3 of u8 == 12)
+```
+
+```cpp
+// a node keeps the transform form the file used — `matrix` and TRS are mutually exclusive in the spec
+node const& n = doc.nodes[0];
+n.has_matrix ? use(n.matrix) : use(n.translation, n.rotation, n.scale); // tg::mat4f / vec3f + quat_f + vec3f
 ```
 
 ## SQLite (`babel::sqlite`)
@@ -198,6 +296,17 @@ babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stre
 - **OBJ indices are resolved.** 1-based and negative/relative OBJ indices are both converted to 0-based here; a missing corner attribute is `-1`.
 - **OBJ is faithful, not a mesh.** No triangulation, no dedup — polygons stay polygons. `usemtl` / `o` / `g` / `s` are recorded (or skipped), not applied.
 - **Errors carry an offset / line.** JSON errors report the byte offset; OBJ errors report the line number. Both come back as a `cc::result` error.
+- **base64 is tolerant decoding, canonical encoding.** Both alphabets and optional padding on the way in; standard alphabet with `=` padding on the way out. A single trailing character (`"Zm9vY"`) encodes no byte and is an error, not a truncation.
+- **glTF: which overload copies.** Only `read(cc::pinned_data<...>)` is zero-copy. The span / string_view overloads pin an owned **copy** (a span is a borrow, and the buffers must not dangle); the stream overload slurps once and *moves* that buffer into the pin.
+- **glTF buffer views outlive the document.** `buffer::data` and `accessor_view::bytes` carry the pin, so they stay valid after both the `data` and the caller's own handle are gone. `accessor_view::element(i)` does *not* — it is a plain span into the view.
+- **glTF `resolved` implies the exact length.** A resolved buffer has `data.size() == byte_length`; a GLB BIN chunk is trimmed past its padding. `resolved == false` with empty `data` means an external URI nobody fetched — supply `read_options::resolve_uri` (the URI arrives exactly as written; path policy is yours).
+- **glTF indices are strong enums, `find` means absence.** `invalid` is the only reason `find` returns nullptr — `read` validates every stored index, so out-of-range never reaches you. Cross into the integer with an explicit `int(x)`.
+- **glTF stride 0 means packed, and accessor offsets stack.** `buffer_view::byte_stride == 0` is "absent", not a stride; `accessor_view` resolves it to `element_size`. An accessor's `byte_offset` is *relative to* its bufferView's.
+- **glTF matrix accessors are column-padded.** `element_size()` includes the spec's per-column 4-byte padding: a `MAT3` of `u8` is 12 bytes (not 9), of `u16` is 24 (not 18). `MAT4`/`MAT3` of `f32` match `sizeof(tg::mat4f)` / `sizeof(tg::mat3f)`.
+- **glTF is strict about bytes, lenient about the rest.** Hard errors: sparse accessors, a non-empty `extensionsRequired` (so Draco / meshopt / basisu are refused by name), unknown `componentType` / `type` / `mode`, and any range escaping its bufferView or buffer. Skipped: unknown members, `extras`, morph targets, and the `skins` / `animations` / `cameras` arrays — a wrong JSON type on an *optional* scalar just falls back.
+- **glTF: `.value()` is not the whole answer — check `issues`.** Everything skipped (`unsupported`), unfollowable (`unresolved`) or tolerated (`malformed`) is recorded there with the element's index, so a usable-but-incomplete import is visible. An issue never *replaces* an error: anything that would make the structure wrong still fails the read. A fully understood file leaves `has_issues()` false.
+- **glTF hands back encoded image bytes, never pixels.** `image::data` is the PNG/JPEG payload — feed it to `babel::image::read`. `babel::gltf` does not depend on `babel::image`.
+- **glTF node transforms are not composed.** `has_matrix` picks which fields are authoritative; the reader never multiplies TRS into a matrix (typed-geometry has no TRS composition yet) and never flattens the hierarchy.
 - **Markdown never fails on content.** Every input is a valid document — its `cc::result` reports stream I/O failure only. An unterminated fence simply runs to end of input.
 - **Markdown parses blocks, not inlines.** `text()` is the raw source, so `**bold**` keeps its asterisks and there are no inline child nodes. Setext headings, indented code blocks, tables and HTML blocks are `[planned]`, not silently handled.
 - **Markdown `line()` is what makes a corpus debuggable.** Every block records the 1-based line it starts on, so a failure can point at the file and line rather than at a string literal.
@@ -212,10 +321,12 @@ babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stre
 ## Umbrellas
 
 ```cpp
+#include <babel-serializer/data/base64.hh>   // just base64
 #include <babel-serializer/data/json.hh>     // just JSON
 #include <babel-serializer/data/markdown.hh> // just markdown
 #include <babel-serializer/data/sqlite.hh>   // just SQLite
 #include <babel-serializer/geometry/obj.hh>  // just OBJ
+#include <babel-serializer/geometry/gltf.hh> // just glTF / GLB
 #include <babel-serializer/image/png.hh>     // just PNG (low-level)
 #include <babel-serializer/image/jpg.hh>     // just JPG (low-level)
 #include <babel-serializer/image/image.hh>   // the image aggregator

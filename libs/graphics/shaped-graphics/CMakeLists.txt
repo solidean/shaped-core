@@ -19,6 +19,7 @@ add_library(shaped-graphics
     src/shaped-graphics/gpu_timestamp.cc
     src/shaped-graphics/acceleration_structure.cc
     src/shaped-graphics/backend/command_list_slot.cc
+    src/shaped-graphics/binding.cc
     src/shaped-graphics/binding_group_layout.cc
     src/shaped-graphics/pipeline_layout.cc
     src/shaped-graphics/compute_pipeline.cc

@@ -446,6 +446,10 @@ sg::binding                 // { cc::string name; u32 set, index, count; binding
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
+sg::merge_bindings({s0.bindings, s1.bindings, ...})  // -> cc::vector<binding>  union by name, first-seen order — one root sig must cover every stage
+sg::merge_bindings(into, from)          // void — same merge, accumulating into a cc::vector<binding> stage by stage
+sg::split_off_sampler_bindings(v)       // -> cc::vector<binding>  REMOVES the sampler bindings from v and returns them (both keep order)
+                            //   split off the samplers you bind register-wise (pipeline_layout static_samplers); leaving one in the group claims its register twice
 
 #include <shaped-graphics/compiled_shader.hh>
 sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
@@ -594,14 +598,18 @@ void init_once(sg::context& ctx)          // first init only, NEVER on reload �
 void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
 void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
-my_routine::acquire(cmd)                   // -> my_routine&  — lazily create in cmd.context().routines, init (declare+materialize), return
+my_routine::acquire_exclusive(cmd)         // -> sg::routine_guard<my_routine> — lazily create + init, and HOLD the routine's lock; self-> is mutable
+my_routine::acquire(cmd)                   // -> my_routine const&  — same, but NO lock held: only const members are reachable
 my_routine::prewarm(ctx)                   // void     — create + init_once/init_declare only (before a command list; async compiles fan out on the pool)
 my_routine::evict(ctx)                     // void     — drop this routine's instance + its cached GPU state
-// acquire memoizes the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
-// A routine is EXPECTED to hold state — hence the non-const reference. Threading, three parts:
-//   registry guarded (acquire from parallel recording is fine); phase engine guarded (each phase runs once);
-//   the routine's OWN mutable state is the routine's job — put it behind one cc::mutex<state> and lock per entry point.
-//   That includes state written in init_declare and only read later: a reload on another thread rewrites it.
+// Both memoize the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
+// A routine is EXPECTED to hold state, so acquire_exclusive is the usual one — a routine needs NO mutex of its own.
+// Threading, three parts, all now the framework's:
+//   registry guarded (acquiring from parallel recording is fine);
+//   ONE lock per routine covering both the init phases and everything the routine owns — acquire_exclusive hands it to you;
+//   acquire() takes no lock, so whatever it reaches must be immutable after init or self-guarded (sr::keyed_pipeline_cache is).
+//   State written in init_declare and only read later is exactly the case that needs acquire_exclusive: a reload rewrites it.
+// The lock is not recursive: never re-acquire the SAME routine under its guard. A DIFFERENT routine is fine, in a consistent order.
 // re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
 
 #include <shaped-graphics/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP

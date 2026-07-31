@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/fwd.hh>
@@ -106,4 +108,21 @@ struct binding
     /// view's size. Absent for other kinds.
     cc::optional<isize> block_size;
 };
+
+/// Appends every binding of `from` whose name `into` does not already carry.
+/// One pipeline has one binding interface, so a multi-stage pipeline's group layout must cover the union of
+/// its stages' reflected bindings — merge them stage by stage, then hand the result to a group layout.
+/// A name already in `into` keeps its existing entry: two stages disagreeing on (set, index), count or type
+/// is a shader bug this does not detect.
+void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from);
+
+/// The union of all `stages`' bindings by name, in first-seen order — the merge above over several stages.
+[[nodiscard]] cc::vector<binding> merge_bindings(cc::span<cc::span<binding const> const> stages);
+
+/// Removes the sampler bindings from `bindings` and returns them, both keeping their relative order.
+/// Split them off for the samplers bound *outside* the group — a register-bound `bound_sampler` on the
+/// pipeline_layout needs no group binding, and leaving one in the group layout claims the same register a
+/// second time (as a dynamic sampler), which the backend rejects.
+/// Sampler bindings kept in `bindings` are the ones the group layout binds: name-matched static, or dynamic per group.
+[[nodiscard]] cc::vector<binding> split_off_sampler_bindings(cc::vector<binding>& bindings);
 } // namespace sg

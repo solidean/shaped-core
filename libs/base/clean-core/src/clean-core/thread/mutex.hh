@@ -90,6 +90,22 @@ struct cc::mutex
 #endif
     }
 
+    /// Scoped alternative to lock(f) — reach for lock(f) first.
+    /// This is for the critical section that cannot be one call: it spans the caller's own statements, or the lock is handed back to a caller.
+    /// The returned guard holds the lock until it dies and reaches the value through -> and *.
+    /// Usage:
+    ///   cc::mutex<cc::vector<int>> m;
+    ///   auto values = m.lock_scoped();
+    ///   values->push_back(1);
+    [[nodiscard]] mutex_guard<T> lock_scoped()
+    {
+#if CC_HAS_THREADS
+        return mutex_guard<T>(_value, _mutex);
+#else
+        return mutex_guard<T>(_value);
+#endif
+    }
+
     /// Wait on condition variable with predicate, then invoke function with protected value
     /// Atomically unlocks the mutex and waits on the condition variable until the predicate returns true
     /// Once awakened and predicate is satisfied, invokes f with the protected value
@@ -142,5 +158,43 @@ private:
     T _value;
 #if CC_HAS_THREADS
     std::mutex _mutex;
+#endif
+};
+
+/// What mutex::lock_scoped returns: a hold on the lock, reaching the guarded value through -> and *.
+/// The lock is released when the guard dies.
+///
+/// Not the default way to reach a mutex's value — lock(f) is, and it keeps every reference to the value inside the callback.
+/// A guard is the exception, for the critical section that cannot be one call.
+/// The reference lives exactly as long as the guard, so the guard is move-only and must not outlive its mutex.
+///
+/// Without threads there is no lock to hold, only the pointer — the same shape cc::mutex itself takes.
+template <class T>
+class cc::mutex_guard
+{
+public:
+    [[nodiscard]] T& operator*() const { return *_value; }
+    [[nodiscard]] T* operator->() const { return _value; }
+
+    mutex_guard(mutex_guard&&) = default;
+    mutex_guard& operator=(mutex_guard&&) = default;
+
+    // Deleted explicitly rather than left to the lock member: without threads there is none, and the implicit copy would come back.
+    mutex_guard(mutex_guard const&) = delete;
+    mutex_guard& operator=(mutex_guard const&) = delete;
+
+private:
+    friend struct cc::mutex<T>;
+
+    // Both forms are explicit: an explicitness that changed with CC_HAS_THREADS would make a call site build in one threading mode and not the other.
+#if CC_HAS_THREADS
+    explicit mutex_guard(T& value, std::mutex& m) : _value(&value), _lock(m) {}
+#else
+    explicit mutex_guard(T& value) : _value(&value) {}
+#endif
+
+    T* _value;
+#if CC_HAS_THREADS
+    std::unique_lock<std::mutex> _lock;
 #endif
 };

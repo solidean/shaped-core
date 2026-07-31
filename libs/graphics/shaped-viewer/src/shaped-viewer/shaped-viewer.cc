@@ -1,6 +1,6 @@
-// Anchor translation unit for the shaped-viewer static library. It keeps the target well-formed
-// while the library is an empty skeleton; the renderer's code lands in its own .cc files as it
-// is implemented.
+// Anchor translation unit for the shaped-viewer static library.
+// The real code lives in its own .cc files (camera, resource_managers, the routines, view_renderer, shaders);
+// this just keeps the umbrella header self-compiling.
 
 #include <shaped-viewer/all.hh>
 

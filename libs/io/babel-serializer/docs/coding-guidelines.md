@@ -94,6 +94,97 @@ Reach for a low-level codec when you need a format's metadata; reach for the agg
 
 ---
 
+## A reader may take bytes instead of a stream — when the result must hand back views of the input
+
+The library-wide rule is that reading takes a `cc::read_stream`.
+**Take a `cc::pinned_data<byte const>` instead when the parsed structure has to hand back zero-copy views of the input bytes.**
+`gltf` is the first such format, and the test for it is narrow: a `.glb` carries its vertex / index / texture payload inline, so
+each `buffers` entry is a `subdata` of the input that shares its owner — no bulk copy, and the views stay valid after the caller
+drops its own handle. A stream cannot promise that: its window is a recycled buffer, so anything kept has to be copied out.
+
+**Why this is not a defeat for the stream rule** (not obvious): parsing the *text* still goes through a stream.
+The JSON chunk is a subspan handed to `babel::json::read`, and a span-backed stream is unbuffered — the span **is** the window — so
+the parse is as inlined as passing the raw bytes would have been. The pinned input buys the payload's lifetime, not a different parser.
+
+Such a reader still offers the full overload set, and each one documents its cost:
+
+- `read(cc::pinned_data<byte const>, ...)` — the zero-copy entry point;
+- `read(cc::read_stream&, ...)` — slurps, then **moves** the slurped buffer into a pin (`cc::make_pinned_data` on an rvalue copies no elements);
+- `read(cc::span<byte const>, ...)` / `read(cc::string_view, ...)` — a span is a borrow, so these pin an **owned copy** and say so in the `///` doc.
+
+Reach for this shape only for the embedded-payload case.
+A text format has nothing to hand back a view of, and should stay on the plain stream.
+
+---
+
+## `read_options` is the reader counterpart to `write_options`
+
+A reader that needs knobs takes a `read_options` struct **by value, with defaults that touch nothing outside the input bytes** —
+mirroring the writer convention below.
+
+Injected I/O travels as a `cc::function_ref`, not a path or a flag: `gltf::read_options::resolve_uri` is how a `.gltf` reaches its
+external `.bin`, and the URI arrives exactly as the file spelled it.
+**Why** (not obvious): babel owns no filesystem policy. Percent-decoding, joining against a base directory, and deciding whether a
+relative path may escape it are all caller decisions, and a format reader that guessed them would be wrong for half its callers.
+A default-constructed `function_ref` is invalid, so `is_valid()` is the natural "no resolver" sentinel — no extra flag.
+
+Unresolvable is not an error: the reference is recorded (`uri` kept, `resolved == false`, empty bytes) and the *read* still succeeds.
+Only a resolver that itself returns an error fails the read.
+
+---
+
+## A complex format's result carries an issue list, not just a `cc::result`
+
+`cc::result` answers one question: did the read produce a usable structure?
+For a large, extension-riddled, reference-heavy format that is not enough, because the interesting outcomes are neither
+success nor failure — **we skipped a feature the file uses**, **we could not follow a reference**, **the file is sloppy and we
+tolerated it**. All three return a perfectly good structure that is *not everything the file described*, and a caller that only
+checks `has_value()` will never know.
+
+So such a format's `data` carries a `cc::vector<issue>`, appended in the order the reader noticed things, with a kind:
+
+- **`unsupported`** — the file uses something this reader does not implement. Nothing is wrong with the file; the gap is ours.
+- **`unresolved`** — a reference the reader could not follow (an external URI with no resolver). The data is absent.
+- **`malformed`** — the file violates the spec in a way we chose to tolerate; the named property fell back to its default.
+
+**The rule that keeps this honest: an issue and an error are mutually exclusive.**
+Anything that would make the returned structure *wrong* stays a `cc::result` error (a glTF sparse accessor, an unknown
+`componentType`). Anything the caller can act on but survive without is an issue. Never both, and never an issue *instead of*
+an error for something that changes how bytes are interpreted.
+
+Two consequences worth stating, because they are what make the list trustworthy:
+
+- **Every tolerated fallback emits one.** If the reader silently defaults a value, that default is indistinguishable from the
+  file having said so — which is precisely the bug class the list exists to kill. This is also why a tolerant enum mapper should
+  return `cc::optional` and let the *call site* record the issue: only the call site knows which element it was reading, and the
+  message must name it.
+- **A clean file yields an empty list.** `has_issues()` on a file the reader fully understands must be false, so tests assert it
+  and callers can treat non-empty as "show this to the user".
+
+Reach for this when a format has features worth skipping or references worth failing to follow.
+A format where every input is either fully understood or an error (JSON, base64) needs no issue list, and adding one would be noise.
+
+---
+
+## Index-heavy formats: one strong enum per index role
+
+The repo-wide rule against `-1` sentinels ([coding-guidelines](../../../../docs/coding-guidelines.md)) bites hardest in a format
+whose cross-references are bare JSON integers. glTF has ten distinct index roles, and `primitive.indices` and `primitive.material`
+are both `int` in the file — as plain `i32` members they would swap without a diagnostic.
+So each role gets `enum class <role>_index : int { invalid = -1 };`, and `invalid` reads as "the file left this property out".
+
+**babel's own flattening offsets stay plain `i32`.** `primitive::first_attribute` / `attribute_count` are not a format
+cross-reference; they are this library's run encoding, exactly as in `obj::face::first_corner`, and they are never absent.
+That is also why `obj` is not a counter-example to the rule: it has a single index role, so there is nothing to confuse.
+
+Pair the enums with a `find(<role>_index) -> Element const*` overload set and validate every stored index once, after parsing.
+Then `nullptr` carries exactly one meaning — absent, never out-of-range — which is what makes the accessors safe to use without
+re-checking. The validation pass has a second job: `cc::pinned_data::subdata` **asserts** on an out-of-range range and
+`subdata_clamped` silently truncates, so neither is a validation channel — every slice site needs a bounds check that produces a
+`cc::error` before it.
+
+---
+
 ## The writer convention (established by images, babel's first writer)
 
 Images are babel's first format to **write**.
