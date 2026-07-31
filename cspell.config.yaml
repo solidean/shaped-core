@@ -14,15 +14,18 @@ words:
   - CPPRTTI
   - CPPUNWIND
   - crossrefs
+  - dedents
   - dedup
+  - docstring
+  - docstrings
   - dxcapi
   - DXGI
   - dxil
   - Embree
   - emcc
   - emrun
-  - emscripten
   - Emscripten
+  - emscripten
   - emsdk
   - fovy
   - fprofile
@@ -32,20 +35,22 @@ words:
   - hwnd
   - IDXGI
   - imgui
+  - indents
   - initializers
   - isize
   - kondo
   - libline
-  - lparam
   - LPARAM
+  - lparam
   - lpfn
   - lpsz
   - LRESULT
   - mimalloc's
   - miscompiles
-  - msvc
   - MSVC
+  - msvc
   - mtllib
+  - munch
   - noprofile
   - numthreads
   - ORBIS
@@ -53,6 +58,7 @@ words:
   - pessimized
   - precommit
   - pycache
+  - pyi
   - qtcreator
   - raygen
   - raygeneration
@@ -70,14 +76,14 @@ words:
   - slib
   - slib's
   - smod
-  - Solidean
   - SOLIDEAN
+  - Solidean
   - stbd
   - stdlib
   - subresource
   - swapchain
-  - texcoord
   - TEXCOORD
+  - texcoord
   - texcoords
   - tlas
   - toolsets
@@ -89,11 +95,11 @@ words:
   - vcvars
   - venv
   - vulkan
-  - wasi
   - WASI
+  - wasi
   - WNDCLASSEXW
   - workdir
-  - wparam
   - WPARAM
+  - wparam
 ignoreWords: []
 import: []

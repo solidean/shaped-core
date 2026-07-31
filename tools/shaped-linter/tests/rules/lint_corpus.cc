@@ -31,7 +31,7 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
     };
 
     skip_spaces();
-    while (i < n && !is_space(info[i])) // the language word, already known to be "cpp"
+    while (i < n && !is_space(info[i])) // the language word, already known to be a lintable one
         ++i;
 
     while (true)
@@ -69,7 +69,8 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             continue;
         }
 
-        // key="…", with \" and \\ escapes. `fix=` / `hint=` pin a replacement text and bind identically,
+        // key="…", with \" and \\ escapes.
+        // `fix=` / `hint=` pin a replacement text and bind identically,
         // differing only in which of the rule's two rewrite channels they read; `path=` describes the
         // block itself and binds to no rule at all.
         auto matched_keyword = cc::string_view();
@@ -89,7 +90,8 @@ bool parse_annotations(cc::string_view info, lint_corpus_case& out, cc::string& 
             ++i;
 
             // `\n` / `\t` / `\r` become the real character — a replacement that splices in a whole line
-            // has to be spellable on the one line a fence info string gets. Any other `\x` is just `x`,
+            // has to be spellable on the one line a fence info string gets.
+            // Any other `\x` is just `x`,
             // which is what makes `\"` and `\\` work.
             auto value = cc::string();
             while (i < n && info[i] != '"')
@@ -170,7 +172,18 @@ cc::string_view language_of(cc::string_view info)
     return info.subview({.start = 0, .end = e});
 }
 
-/// Walk a parsed corpus file in document order, turning every annotated `cpp` block into a case and
+/// Whether a fence's language word marks a block the linter can lint.
+///
+/// The word only says what the block IS; what it is linted AS comes from `path=`, since that is what the
+/// engine reads.
+/// So `py` and `md` open the door for a Python or markdown case, and a `text` or `json`
+/// block stays illustration.
+bool is_lintable_language(cc::string_view word)
+{
+    return word == "cpp" || word == "py" || word == "python" || word == "md" || word == "markdown";
+}
+
+/// Walk a parsed corpus file in document order, turning every annotated block into a case and
 /// carrying the nearest preceding heading along as its title.
 cc::result<lint_corpus_group> build_group(md::document const& doc, cc::string_view relative_path)
 {
@@ -186,7 +199,7 @@ cc::result<lint_corpus_group> build_group(md::document const& doc, cc::string_vi
             heading = cc::string(n.text());
             continue;
         }
-        if (!n.is_code_block() || language_of(n.info()) != "cpp")
+        if (!n.is_code_block() || !is_lintable_language(language_of(n.info())))
             continue;
 
         auto c = lint_corpus_case{.title = heading, .line = n.line(), .source = cc::string(n.text())};

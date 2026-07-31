@@ -2,7 +2,8 @@
 
 Thin wiring: each linter lives under tools/lint/ and this command shells out to it.
 Today it has one subcommand, `clang-tidy`, backed by tools/lint/clang-tidy.py; more linters (including
-custom parsers) plug in as further subcommands. The clang-tidy gates are a strict whitelist that must be
+custom parsers) plug in as further subcommands.
+The clang-tidy gates are a strict whitelist that must be
 zero before a commit — distinct from the root .clang-tidy, which is the broader IDE incubator.
 
 `check` reuses `run_clang_tidy` (dirty-only) as a pre-commit gate — see tools/dev/cmd/check.py.
@@ -54,7 +55,8 @@ def run_clang_tidy(
     """Run tools/lint/clang-tidy.py against a preset's compilation database; return True if clean.
 
     Resolves the preset and ensures it is configured (so compile_commands.json exists), then shells out
-    to the standalone runner. Shared by `lint clang-tidy` and the `check` lint gate.
+    to the standalone runner.
+    Shared by `lint clang-tidy` and the `check` lint gate.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
     ctx.discover(preset)  # (re)configure if stale — guarantees compile_commands.json
@@ -88,9 +90,11 @@ def run_shaped_linter(
     """Build shaped-linter and run it over first-party C++ sources; return True if clean.
 
     shaped-linter is our own parser-based linter (tools/shaped-linter) — the custom-rules sibling of the
-    clang-tidy gates. It parses each file itself, so it lints headers directly (no compilation database).
+    clang-tidy gates.
+    It parses each file itself, so it lints headers directly (no compilation database).
     Dirty-only in `check` so a not-yet-clean tree adopts it incrementally, exactly like the clang-tidy
-    gates. Shared by `lint shaped` and the `check` shaped-lint gate.
+    gates.
+    Shared by `lint shaped` and the `check` shaped-lint gate.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
     ctx.discover(preset)  # (re)configure if stale
@@ -107,9 +111,10 @@ def run_shaped_linter(
         print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
         return False
 
-    files = dev.discover_files(ctx.root, dirty_only=dirty_only)
+    # Its own scope, wider than clang-format's: it lints prose too, so .md and .py are in and so is docs/.
+    files = dev.discover_lint_files(ctx.root, dirty_only=dirty_only)
     if not files:
-        print(dev.console.green("shaped-linter: nothing to lint (no C++ sources in scope)"), file=sys.stderr)
+        print(dev.console.green("shaped-linter: nothing to lint (no sources in scope)"), file=sys.stderr)
         return True
 
     # Batch to stay well under the OS command-line length limit on a whole-tree run.

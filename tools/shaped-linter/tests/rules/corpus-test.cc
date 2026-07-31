@@ -11,8 +11,9 @@
 #include <algorithm> // std::sort
 #include <filesystem>
 
-// The data-driven half of rule testing: every markdown file under tests/rules/corpus/ becomes one
-// invocation, addressable by its relative path. See lint_corpus.hh for the annotation format and
+// The data-driven half of rule testing: every markdown file under rules/ becomes one invocation,
+// addressable by its relative path — a corpus sits in its own rule's folder, next to the rule and its
+// smoke tests. See lint_corpus.hh for the annotation format and
 // ../../docs/coding-guidelines.md for which cases belong here rather than in a rule's smoke tests.
 
 #ifndef SCL_CORPUS_DIR

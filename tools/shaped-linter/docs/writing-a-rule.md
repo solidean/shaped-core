@@ -9,7 +9,9 @@ The engine only builds the expensive layers a rule actually asks for.
 ## The pipeline, and which layer to pick
 
 ```
-source_buffer ─▶ lexer ─▶ token_stream ─▶ parser ─▶ syntax_tree ─▶ rule engine ─▶ findings ─▶ reporter
+                           ┌─▶ parser ─▶ syntax_tree ──┐   (C++ only)
+source_buffer ─▶ lexer ─▶ token_stream                 ├─▶ rule engine ─▶ findings ─▶ reporter
+              └──────────▶ prose extraction ─▶ prose_view ┘
 ```
 
 Pick the **lowest** layer that can express your rule — it is cheaper and simpler:
@@ -17,10 +19,28 @@ Pick the **lowest** layer that can express your rule — it is cheaper and simpl
 * `rule_layer::tokens` — the rule reads the `token_stream` directly (spelling-level checks: a banned identifier, a macro name, a literal shape).
   The parse tree is not built if no enabled rule needs it.
 * `rule_layer::syntax_tree` — the rule walks the parsed `syntax_tree` (structural checks: something about a *member* vs a local, a record's shape).
-  This is what [`default-init-assignment`](../src/shaped-linter/rules/default_init_assignment.cc) uses.
+  This is what [`default-init-assignment`](../rules/cpp-style/default-init-assignment/default_init_assignment.cc) uses.
+* `rule_layer::prose` — the rule walks `ctx.prose`, the file's comments and body text with the markers stripped (a rule about what we *write*, not what we compile).
+  This is what [`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) uses, and the one layer that exists for markdown and Python too.
 
 A structural rule must use the tree, not a token scan — the tree is what tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site, and it is what carries `node::scope` (`record_scope` / `namespace_scope` / `function_scope`).
 Read the scope off the node; never re-derive it in a rule.
+
+## Which languages it applies to
+
+`rule::languages` is a bitmask over `source_language`, and it defaults to `k_cpp_only`.
+A C++ rule therefore needs no thought: it will never be handed a `.md` or a `.py`.
+
+Set it to `k_all_languages` (or an explicit `language_bit(…) | language_bit(…)`) for a prose rule that binds every file a human writes sentences in.
+The engine filters before it builds anything, so a rule that did not ask for a language costs nothing on it.
+
+The layers a language actually has differ, and the engine gives you an empty one rather than a wrong one:
+
+| | tokens | syntax_tree | prose |
+|---|---|---|---|
+| C++ | yes | yes | yes |
+| Python | yes (plus `indent` / `dedent`) | — | yes |
+| markdown | — | — | yes |
 
 ## The slug and the rationale are mandatory
 
@@ -34,10 +54,23 @@ Every rule carries:
 
 ## Steps
 
-### 1. Add the rule source
+### 1. Create the rule's folder
 
-Create `src/shaped-linter/rules/<your-rule>.hh` / `.cc`.
-Expose one accessor returning the rule by reference:
+**A rule is a folder**, holding everything about it: `rules/<group>/<your-rule>/`.
+
+```text
+rules/cpp-style/default-init-assignment/
+    default_init_assignment.hh      the description and main documentation
+    default_init_assignment.cc      the implementation
+    default_init_assignment-test.cc the smoke tests (more than one is fine)
+    default_init_assignment.md      the corpus
+```
+
+The folder is named **exactly** for the rule id, so a slug read off a finding is the path to everything about it; the files inside are snake_case as everywhere else.
+Pick the group by what the rule is about, and add a new one (a directory with its own `CMakeLists.txt`) when none fits.
+
+**The header carries the rule's documentation** — what it enforces, what it deliberately leaves alone, and which layer it walks.
+That doc comment is what a reader meets first; the `.cc` explains only how.
 
 ```cpp
 // <your-rule>.hh
@@ -45,11 +78,13 @@ Expose one accessor returning the rule by reference:
 #include <shaped-linter/rules/rule.hh>
 namespace scl
 {
+/// The `your-rule` rule.
+/// What it enforces, in the first line. Then the boundary: what it deliberately stays quiet on, and why.
 rule const& your_rule();
 } // namespace scl
 ```
 
-In the `.cc`, put the id, the rationale, and the `check` in an anonymous namespace, then hand them to a function-local static `rule`:
+In the `.cc` — which includes its own header with quotes — put the id, the rationale, and the `check` in an anonymous namespace, then hand them to a function-local static `rule`:
 
 ```cpp
 namespace
@@ -59,9 +94,11 @@ constexpr cc::string_view k_rationale = "why this matters, and the preferred fix
 
 void check(lint_context& ctx)
 {
-    // ctx.source  — the source_buffer (span_text, line_text)
-    // ctx.tokens  — the token_stream (for token-layer work)
-    // ctx.tree    — the syntax_tree (empty unless some enabled rule needs it)
+    // ctx.source   — the source_buffer (span_text, line_text)
+    // ctx.language — what it was read as
+    // ctx.tokens   — the token_stream (for token-layer work)
+    // ctx.tree     — the syntax_tree (empty unless some enabled rule needs it)
+    // ctx.prose    — the comments and body text (empty unless some enabled rule walks prose)
     // ctx.report({...}) — emit a finding
 }
 } // namespace
@@ -71,13 +108,17 @@ rule const& your_rule()
     static rule const r = {
         .id = k_id,
         .rationale = k_rationale,
-        .layer = rule_layer::syntax_tree, // or rule_layer::tokens
+        .layer = rule_layer::syntax_tree, // or tokens, or prose
+        .languages = k_cpp_only,          // the default; k_all_languages for a prose rule
         .default_severity = severity::warning,
         .check = &check,
     };
     return r;
 }
 ```
+
+A rule whose detector is a **heuristic** says so in its `rationale`, along with what to do about a false positive.
+The rationale prints once per run under the findings, which makes it the one place a reader is guaranteed to see it — [`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) points at its own abbreviation list from there.
 
 ### 2. Emit findings (and an optional fix or hint)
 
@@ -112,7 +153,7 @@ A hint carries a `message` saying what to weigh, plus optional `edits`; a hint w
 ```
 
 The two are independent — a finding may carry both, and then the fix is what lands while the hint is printed alongside.
-[`default_init_assignment.cc`](../src/shaped-linter/rules/default_init_assignment.cc) is the worked example: its fix moves the `=` in and keeps the braces (always safe), while its hint offers the braceless `= value` for a member and the `auto v = T(value)` form for a local.
+[`default_init_assignment.cc`](../rules/cpp-style/default-init-assignment/default_init_assignment.cc) is the worked example: its fix moves the `=` in and keeps the braces (always safe), while its hint offers the braceless `= value` for a member and the `auto v = T(value)` form for a local.
 Its block comment spells out which hazard rules out which rewrite — worth reading before you decide where your own rewrite belongs.
 
 Nothing in the engine reads a hint's edits; `apply_fixes` looks only at `suggested_fix`, and [`engine-test.cc`](../tests/rules/engine-test.cc) pins that.
@@ -131,7 +172,7 @@ An **empty span** is the insertion: nothing is removed and `replacement` is spli
 ```
 
 `collect_fix_edits` merges byte-identical edits, so N findings asking for the same line still splice it exactly once — which is why the insertion must be computed identically for every finding in the file, not relative to the one being reported.
-[`qualified_primitive.cc`](../src/shaped-linter/rules/qualified_primitive.cc) is the worked example; its `using_directive_insertion` also shows the other half of the job — deciding whether a safe offset exists at all.
+[`qualified_primitive.cc`](../rules/cpp-style/qualified-primitive/qualified_primitive.cc) is the worked example; its `using_directive_insertion` also shows the other half of the job — deciding whether a safe offset exists at all.
 
 Spans are `{file_id, byte_begin, byte_end}` (half-open).
 Get text with `ctx.source.span_text(span)`; resolve to line/column happens later, in the reporter.
@@ -177,33 +218,51 @@ All of that is [`report/snippet.cc`](../src/shaped-linter/report/snippet.cc)'s j
 
 ### 3. Register it
 
-Add one line to [`registry.cc`](../src/shaped-linter/rules/registry.cc)'s `all_rules()`:
+Add one line to [`registry.cc`](../src/shaped-linter/rules/registry.cc)'s `all_rules()`, and the include for your header:
 
 ```cpp
+#include <rules/<group>/<your-rule>/<your_rule>.hh>
+...
 v.push_back(your_rule());
 ```
 
 The registry is the single list of rules — mirroring how the clang-tidy gate config is one list of gates.
+It is the one place outside your folder that names your rule.
 
 ### 4. Add it to the build
 
-List the new `.cc` in [`CMakeLists.txt`](../CMakeLists.txt) under `shaped-linter-core`, and its smoke test under `shaped-linter-test`.
-A corpus file needs no CMake change — the corpus directory is scanned at run time.
+Name the `.cc` and each `-test.cc` in your group's `CMakeLists.txt` — see [`rules/cpp-style/CMakeLists.txt`](../rules/cpp-style/CMakeLists.txt):
+
+```cmake
+target_sources(shaped-linter-core PRIVATE
+    <your-rule>/<your_rule>.cc
+)
+if(SC_BUILD_TESTS)
+    target_sources(shaped-linter-test PRIVATE
+        <your-rule>/<your_rule>-test.cc
+    )
+endif()
+```
+
+A whole new group also needs its `add_subdirectory(rules/<group>)` at the bottom of the [root `CMakeLists.txt`](../CMakeLists.txt).
+A corpus file needs no CMake change at all — `rules/` is scanned recursively at run time.
 
 ### 5. Test it
 
-Two layers, both nexus. The split and the corpus format are specified in [coding-guidelines.md](coding-guidelines.md); the short version:
+Two layers, both nexus.
+The split and the corpus format are specified in [coding-guidelines.md](coding-guidelines.md); the short version:
 
-* **Smoke tests** in `tests/rules/<rule>-test.cc` — ordinary `TEST` + `SECTION` with `run_rules_on_text("<snippet>")`, asserting on the findings (count, rule id, fix replacement).
+* **Smoke tests** in `<your-rule>-test.cc`, in your rule's folder — ordinary `TEST` + `SECTION` with `run_rules_on_text("<snippet>")`, asserting on the findings (count, rule id, fix replacement).
   This is the scratchpad you build the rule in and where a regression gets pinned; keep it under ~200 lines.
   The whole detect-and-fix path is `apply_edits(src, edits)` (see [`engine-test.cc`](../tests/rules/engine-test.cc)) — that is the layer that pins what the rewritten source *looks like*, which the corpus never does.
-* **A markdown corpus** at `tests/rules/corpus/<rule>.md` — ordinary prose with annotated `cpp` blocks (see [`default_init_assignment.md`](../tests/rules/corpus/default_init_assignment.md)).
+* **A markdown corpus** at `<your-rule>.md`, in the same folder — ordinary prose with annotated `cpp` blocks (see [`default_init_assignment.md`](../rules/cpp-style/default-init-assignment/default_init_assignment.md)).
   This is where breadth lives; adding a case is adding a fenced block, not writing C++.
 
 The corpus annotations, in short — the full specification is in [coding-guidelines.md](coding-guidelines.md):
 
 ```text
 ```cpp [your-rule] fix=" = {0}"        one finding, and that is the rewrite it offers
+```py  [your-rule] path="x.py"         a Python case; `md` / `markdown` likewise
 ```cpp [your-rule] [your-rule]         two findings; their fixes are not pinned
 ```cpp [your-rule] [your-rule] fix=" = 1" fix=" = 2"    two findings offering exactly these two rewrites
 ```cpp [your-rule] fix=" = {0}" hint=" = 0"             the same block, pinning both channels
@@ -224,6 +283,8 @@ A prose-only hint contributes no edit, so its wording is pinned by the smoke tes
 
 `path=` describes the **block**, not a rule, so it stands on its own and may appear anywhere in the info string — at most once.
 Only the name is used, never the contents: a rule that tells a header from a translation unit sees the extension and nothing else.
+**It is also what picks the language.** The fence word (`cpp`, `py`, `md`) says what the block *is* — for highlighting, and to mark it lintable at all — while the extension in `path=` is what the engine dispatches on. A block with no `path=` is linted as C++.
+A markdown case therefore needs a four-backtick outer fence, so its own ``` fences stay content.
 
 A block is linted with `all_rules()` and the total must match exactly, so a second rule firing on your case fails until the block names it too — that is deliberate, it surfaces cross-talk.
 

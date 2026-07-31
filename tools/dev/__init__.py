@@ -2,7 +2,8 @@
 
 Plain functions over plain data — orchestration (argument parsing, command
 dispatch, project-specific policy) lives in the project's dev.py; this package
-only provides helpers. Everything is collection-oriented: configure/build/test
+only provides helpers.
+Everything is collection-oriented: configure/build/test
 operate on lists of presets and targets.
 """
 
@@ -36,6 +37,7 @@ from .lib.quality.format import (
     FormatSetupError,
     clang_format_version,
     discover_files,
+    discover_lint_files,
     find_clang_format,
     format_sources,
     required_major,
@@ -98,6 +100,7 @@ __all__ = [
     "FormatSetupError",
     "clang_format_version",
     "discover_files",
+    "discover_lint_files",
     "find_clang_format",
     "format_sources",
     "required_major",

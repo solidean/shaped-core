@@ -6,8 +6,11 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <shaped-linter/lex/lexer.hh>
+#include <shaped-linter/lex/python_lexer.hh>
+#include <shaped-linter/lex/source_language.hh>
 #include <shaped-linter/parse/parser.hh>
 #include <shaped-linter/parse/syntax_tree.hh>
+#include <shaped-linter/prose/prose_view.hh>
 
 namespace scl
 {
@@ -15,23 +18,41 @@ cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> 
 {
     cc::vector<finding> out;
 
-    auto tokens = lex(buffer);
-    if (tokens.has_error())
-        return out; // lexing is effectively infallible; nothing to lint if it somehow fails
-    auto const ts = cc::move(tokens.value());
+    // The file's extension picks the front end, and rules that did not ask for this language never run.
+    // This is the only place a language is decided; below it every layer is already language-correct.
+    auto const language = language_from_path(buffer.path());
 
-    syntax_tree tree; // empty unless a rule needs it
-    if (any_needs_tree(rules))
+    cc::vector<rule> active;
+    for (auto const& r : rules)
+        if (r.check && applies_to(r, language))
+            active.push_back(r);
+    if (active.empty())
+        return out;
+
+    token_stream ts; // markdown has no lexer, and no rule asks it for tokens
+    if (language == source_language::cpp || language == source_language::python)
+    {
+        auto tokens = language == source_language::cpp ? lex(buffer) : lex_python(buffer);
+        if (tokens.has_error())
+            return out; // lexing is effectively infallible; nothing to lint if it somehow fails
+        ts = cc::move(tokens.value());
+    }
+
+    syntax_tree tree; // empty unless a rule needs it — and only C++ has a parser at all
+    if (language == source_language::cpp && any_needs_tree(active))
     {
         auto parsed = parse(buffer, ts);
         if (parsed.has_value())
             tree = cc::move(parsed.value());
     }
 
-    lint_context ctx = {.source = buffer, .tokens = ts, .tree = tree, .out = out};
-    for (auto const& r : rules)
-        if (r.check)
-            r.check(ctx);
+    prose_view prose; // empty unless a rule walks prose
+    if (any_needs_prose(active))
+        prose = extract_prose(buffer, language, ts);
+
+    lint_context ctx = {.source = buffer, .language = language, .tokens = ts, .tree = tree, .prose = prose, .out = out};
+    for (auto const& r : active)
+        r.check(ctx);
 
     return out;
 }
@@ -57,7 +78,8 @@ cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content)
 
 cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits)
 {
-    // Apply highest-offset-first so earlier offsets stay valid. Insertion sort of pointers by
+    // Apply highest-offset-first so earlier offsets stay valid.
+    // Insertion sort of pointers by
     // descending begin, then by descending end — a file carries only a handful of edits.
     // The second key matters when an insertion (an empty span) shares its offset with a replacement that
     // starts there: the wider edit has to go first, or the overlap guard below sees the pair out of order.
@@ -79,7 +101,8 @@ cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits
         }
 
     auto text = cc::string(original);
-    // Overlap guard: edits are descending, so each end must not exceed the previous begin. Only read by
+    // Overlap guard: edits are descending, so each end must not exceed the previous begin.
+    // Only read by
     // the assert, so it is stripped (with its reads) in release — mark it to avoid a set-but-unused warning.
     [[maybe_unused]] u32 prev_begin = u32(text.size()) + 1;
     for (auto const* e : ordered)

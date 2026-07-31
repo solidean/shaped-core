@@ -11,7 +11,7 @@ aggregate and every implicit constructor accepts.
 
 The nicer forms — a member's plain `= value` and a local's `auto v = T(value)` — ride along as a **hint**,
 which `--fix` never applies. Both can fail to compile or change which constructor runs, so a human signs
-off on them; see the block comment in [default_init_assignment.cc](../../../src/shaped-linter/rules/default_init_assignment.cc)
+off on them; see the block comment in [default_init_assignment.cc](default_init_assignment.cc)
 for exactly which hazard belongs to which form.
 
 Blocks below are annotated with `[default-init-assignment]` for "fires once here",
@@ -66,7 +66,7 @@ struct S { int x {0}; };
 ```
 
 An array bound belongs to the declarator, so the rewrite starts after it and `[N]` survives.
-The replacement text alone cannot show that — [engine-test.cc](../../rules/engine-test.cc) pins the applied result.
+The replacement text alone cannot show that — [engine-test.cc](../../../tests/rules/engine-test.cc) pins the applied result.
 
 ```cpp [default-init-assignment] fix=" = {1, 2}"
 struct S { T a[N]{1, 2}; };
