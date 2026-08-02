@@ -7,9 +7,9 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/raster.hh> // sg::rendering_scope — execute() reads its format + size
 #include <shaped-graphics/context/context.hh>
-#include <shaped-graphics/pipeline/raster_pipeline.hh>
-#include <shaped-graphics/pipeline/vertex_input.hh>
 #include <shaped-graphics/present/swapchain.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raster/vertex_input.hh>
 #include <shaped-rendering/imgui_context.hh> // render_imgui drives update_viewports
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>

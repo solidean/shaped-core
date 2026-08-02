@@ -51,7 +51,8 @@ Headers are included by their full path from `src/`, e.g. `#include <shaped-grap
 | `command_list/`     | the abstract `command_list` and its seven recording scopes (`upload`, `download`, `copy`, `compute`, `raster`, `raytracing`, `query`) |
 | `context/`          | the abstract `context`, its six lifetime/transfer scopes (`persistent`, `transient`, `upload`, `download`, `uncached`, `cached`), and `pipeline_cache` |
 | `memory/`           | `allocation_info` + `memory_heap` — placed vs dedicated backing memory |
-| `pipeline/`         | `compute_pipeline`, `raster_pipeline`, and the fixed-function state a raster PSO aggregates |
+| `compute/`          | `compute_pipeline` |
+| `raster/`           | `raster_pipeline` and the fixed-function state a graphics PSO aggregates: topology, rasterization, blend, depth-stencil, vertex input |
 | `present/`          | `swapchain` and the presentation path |
 | `query/`            | GPU queries — `gpu_timestamp` today |
 | `raytracing/`       | `blas`/`tlas`, `raytracing_pipeline`, `raytracing_shader_table` |

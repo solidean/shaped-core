@@ -4,7 +4,7 @@ Graphics-API wrapper.
 Namespace `sg`.
 Depends on clean-core + typed-geometry.
 Headers are included by full path from `src/`, and the tree is grouped by topic: `#include <shaped-graphics/<folder>/<name>.hh>`.
-The folders are `barrier/ binding/ command_list/ context/ memory/ pipeline/ present/ query/ raytracing/ resource/ routine/`; only `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh` and `bytes_future.hh` sit at the root.
+The folders are `barrier/ binding/ command_list/ compute/ context/ memory/ present/ query/ raster/ raytracing/ resource/ routine/`; only `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh` and `bytes_future.hh` sit at the root.
 See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.

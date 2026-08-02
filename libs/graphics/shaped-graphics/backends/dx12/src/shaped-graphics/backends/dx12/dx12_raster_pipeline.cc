@@ -7,7 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_raster_state.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
-#include <shaped-graphics/pipeline/raster_pipeline.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg::backend::dx12

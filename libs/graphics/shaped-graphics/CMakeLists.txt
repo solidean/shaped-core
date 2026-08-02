@@ -22,8 +22,8 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
-    src/shaped-graphics/pipeline/compute_pipeline.cc
-    src/shaped-graphics/pipeline/raster_pipeline.cc
+    src/shaped-graphics/compute/compute_pipeline.cc
+    src/shaped-graphics/raster/raster_pipeline.cc
     src/shaped-graphics/raytracing/raytracing_pipeline.cc
     src/shaped-graphics/raytracing/raytracing_shader_table.cc
     src/shaped-graphics/binding/binding_group.cc
@@ -79,14 +79,14 @@ target_sources(shaped-graphics
     src/shaped-graphics/resource/raw_buffer.hh
     src/shaped-graphics/resource/buffer.hh
     src/shaped-graphics/resource/pixel_format.hh
-    src/shaped-graphics/pipeline/primitive_topology.hh
-    src/shaped-graphics/pipeline/rasterization_state.hh
-    src/shaped-graphics/pipeline/blend_state.hh
-    src/shaped-graphics/pipeline/depth_stencil_state.hh
-    src/shaped-graphics/pipeline/vertex_input.hh
+    src/shaped-graphics/raster/primitive_topology.hh
+    src/shaped-graphics/raster/rasterization_state.hh
+    src/shaped-graphics/raster/blend_state.hh
+    src/shaped-graphics/raster/depth_stencil_state.hh
+    src/shaped-graphics/raster/vertex_input.hh
     src/shaped-graphics/resource/vertex_buffer_view.hh
     src/shaped-graphics/resource/index_buffer_view.hh
-    src/shaped-graphics/pipeline/raster_pipeline.hh
+    src/shaped-graphics/raster/raster_pipeline.hh
     src/shaped-graphics/resource/raw_texture.hh
     src/shaped-graphics/resource/texture.hh
     src/shaped-graphics/resource/texture_traits.hh
@@ -104,7 +104,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/binding_group_layout.hh
     src/shaped-graphics/binding/pipeline_layout.hh
     src/shaped-graphics/binding/compiled_shader.hh
-    src/shaped-graphics/pipeline/compute_pipeline.hh
+    src/shaped-graphics/compute/compute_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_shader_table.hh
     src/shaped-graphics/binding/binding_group.hh

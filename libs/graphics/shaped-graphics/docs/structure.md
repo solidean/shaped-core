@@ -58,6 +58,9 @@ src/shaped-graphics/
     raytracing.hh/.cc             [in progress] cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12 real; vulkan stub)
     query.hh/.cc                  [in progress] cmd.query: record_gpu_timestamp / is_supported (dx12 real; vulkan stub)
 
+  compute/
+    compute_pipeline.hh/.cc       [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
+
   context/
     context.hh/.cc                [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; every create funneled through a scope
     persistent.hh/.cc             [done]        ctx.persistent: the persistent-lifetime resource factory
@@ -72,20 +75,19 @@ src/shaped-graphics/
     allocation_info.hh            [done]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
     memory_heap.hh/.cc            [in progress] abstract heap + memory_requirements; dx12 places buffers, textures + vulkan still dedicated-only
 
-  pipeline/
-    compute_pipeline.hh/.cc       [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
+  present/
+    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire_backbuffer / present / resize / HDR flag); dx12 real (vulkan stub)
+
+  query/
+    gpu_timestamp.hh/.cc          [done]        pollable tick result of cmd.query.record_gpu_timestamp
+
+  raster/
     raster_pipeline.hh/.cc        [in progress] abstract graphics PSO + raster_pipeline_description; dx12 real (vulkan stub)
     primitive_topology.hh         [done]        topology + topology_type
     rasterization_state.hh        [done]        fill/cull/front-face + depth bias
     blend_state.hh                [done]        blend factors/ops, per-target blend + write mask
     depth_stencil_state.hh        [done]        depth test/write, stencil faces + ops (reuses compare_op)
     vertex_input.hh               [in progress] vertex_input_layout / slots / attributes; attributes are still HLSL-semantic-keyed
-
-  present/
-    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire_backbuffer / present / resize / HDR flag); dx12 real (vulkan stub)
-
-  query/
-    gpu_timestamp.hh/.cc          [done]        pollable tick result of cmd.query.record_gpu_timestamp
 
   raytracing/
     acceleration_structure.hh/.cc [in progress] blas / tlas + their build inputs; dx12 real (vulkan stub)

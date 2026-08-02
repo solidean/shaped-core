@@ -1,6 +1,6 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/compute.hh>
-#include <shaped-graphics/pipeline/compute_pipeline.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 
 namespace sg
 {

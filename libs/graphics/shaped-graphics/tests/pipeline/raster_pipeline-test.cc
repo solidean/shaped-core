@@ -1,10 +1,10 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/pipeline/blend_state.hh>
-#include <shaped-graphics/pipeline/depth_stencil_state.hh>
-#include <shaped-graphics/pipeline/primitive_topology.hh>
-#include <shaped-graphics/pipeline/raster_pipeline.hh>
-#include <shaped-graphics/pipeline/rasterization_state.hh>
-#include <shaped-graphics/pipeline/vertex_input.hh>
+#include <shaped-graphics/raster/blend_state.hh>
+#include <shaped-graphics/raster/depth_stencil_state.hh>
+#include <shaped-graphics/raster/primitive_topology.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raster/rasterization_state.hh>
+#include <shaped-graphics/raster/vertex_input.hh>
 
 #include <cstddef> // offsetof
 

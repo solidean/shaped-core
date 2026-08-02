@@ -7,9 +7,9 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh> // pipeline_layout_description::groups
 #include <shaped-graphics/binding/sampler.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
-#include <shaped-graphics/pipeline/compute_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 
 namespace sg

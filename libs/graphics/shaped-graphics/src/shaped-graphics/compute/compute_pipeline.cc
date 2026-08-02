@@ -1,4 +1,4 @@
-#include <shaped-graphics/pipeline/compute_pipeline.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 
 namespace sg
 {

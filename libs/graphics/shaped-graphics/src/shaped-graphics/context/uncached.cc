@@ -1,9 +1,9 @@
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/uncached.hh>
 #include <shaped-graphics/exceptions.hh>
-#include <shaped-graphics/pipeline/compute_pipeline.hh>      // compute_pipeline_description::shader
-#include <shaped-graphics/pipeline/raster_pipeline.hh>       // raster_pipeline_description
+#include <shaped-graphics/raster/raster_pipeline.hh>         // raster_pipeline_description
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh> // raytracing_pipeline_description
 
 namespace sg

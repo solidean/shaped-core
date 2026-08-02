@@ -1,4 +1,4 @@
-#include <shaped-graphics/pipeline/raster_pipeline.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg
 {

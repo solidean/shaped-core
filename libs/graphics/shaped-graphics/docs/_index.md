@@ -20,11 +20,12 @@ shaped-graphics/
   barrier/         # the access-tracking substrate a backend emits barriers from
   binding/         # compiled shaders, reflected bindings, samplers, group + pipeline layouts
   command_list/    # the abstract command_list and its seven recording scopes
+  compute/         # the compute pipeline
   context/         # the abstract context, its six lifetime/transfer scopes, and the pipeline cache
   memory/          # allocation_info + memory_heap (placed vs dedicated backing memory)
-  pipeline/        # compute + raster pipelines and the fixed-function state they aggregate
   present/         # swapchain / presentation
   query/           # GPU queries (timestamps today)
+  raster/          # the raster pipeline and the fixed-function state it aggregates
   raytracing/      # acceleration structures, raytracing pipeline, shader table
   resource/        # buffers, textures, views, pixel formats — the GPU resource surface
   routine/         # the render-routine framework and its registry
