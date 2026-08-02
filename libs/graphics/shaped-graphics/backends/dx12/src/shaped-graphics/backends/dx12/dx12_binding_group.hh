@@ -6,9 +6,9 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/binding_group.hh>
+#include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/views.hh> // sg::view_class
+#include <shaped-graphics/resource/views.hh> // sg::view_class
 
 namespace sg::backend::dx12
 {

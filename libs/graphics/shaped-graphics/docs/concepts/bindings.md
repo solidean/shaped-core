@@ -4,9 +4,9 @@
 > decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
 > [views](views.md).
 
-A [`compiled_shader`](../../src/shaped-graphics/compiled_shader.hh) is a bytecode blob plus the
+A [`compiled_shader`](../../src/shaped-graphics/binding/compiled_shader.hh) is a bytecode blob plus the
 metadata and **reflection** needed to build a pipeline and bind resources to it. Its reflection is a
-flat list of [`binding`](../../src/shaped-graphics/binding.hh)s — the named resource slots the shader
+flat list of [`binding`](../../src/shaped-graphics/binding/binding.hh)s — the named resource slots the shader
 declares. This is the schema half of the descriptor system; the bound half is [views](views.md).
 (Compilation itself is not part of sg yet — a `compiled_shader` is produced by a future compiler or
 loader, or hand-authored in a test.)
@@ -30,7 +30,7 @@ HLSL / GLSL / Slang / MSL / WGSL:
 
 ## Bindings and views speak the same vocabulary
 
-A `binding` describes what the shader *expects*; a [`raw_view`](../../src/shaped-graphics/views.hh)
+A `binding` describes what the shader *expects*; a [`raw_view`](../../src/shaped-graphics/resource/views.hh)
 describes what is *bound*. For buffer and texture kinds they line up exactly: `access_of(binding_type)` and
 `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have, and
 `accepts(binding_type, raw_view)` is the check. That equivalence is what lets a binding validate a
@@ -41,7 +41,7 @@ bound view without a backend — and it is why `binding_type`'s view kinds mirro
 
 A `sampler` binding (`is_sampler(binding_type)`) has no view — a sampler carries no memory and no
 `(access, shape)`, so `accepts` rejects any view for it. It is matched instead to a
-[`sampler`](../../src/shaped-graphics/sampler.hh) — an immutable filtering/addressing/LOD
+[`sampler`](../../src/shaped-graphics/binding/sampler.hh) — an immutable filtering/addressing/LOD
 state — via a `named_sampler`. There are two ways in, and *which one* is a layout-time decision:
 
 - **static** — fixed for every group and costs no per-group descriptor. Two ways to declare one, and you
@@ -62,7 +62,7 @@ that register a second time as a dynamic sampler — `split_off_sampler_bindings
 ## Working with reflected bindings
 
 Reflection hands you one `cc::vector<binding>` per shader stage, but a pipeline has a single binding
-interface, so [`binding.hh`](../../src/shaped-graphics/binding.hh) carries the two operations every
+interface, so [`binding.hh`](../../src/shaped-graphics/binding/binding.hh) carries the two operations every
 multi-stage caller needs:
 
 - `merge_bindings({stage0.bindings, stage1.bindings, …})` — the union by name, first-seen order. A
@@ -88,9 +88,9 @@ group can be rebound at one slot without disturbing the others. It may also carr
 directly on the command list via `cmd.compute.set_inline_constants(...)` for fast per-dispatch parameters
 without descriptor allocation (dx12 root constants / vulkan push constants). `binding_group_layout`, `pipeline_layout`,
 and `compute_pipeline` are schemas / PSOs, not lifetime-scoped resources — they are built through the raw
-[`ctx.uncached.create_*`](../../src/shaped-graphics/context.uncached.hh) scope, or (almost always preferred)
+[`ctx.uncached.create_*`](../../src/shaped-graphics/context/uncached.hh) scope, or (almost always preferred)
 deduplicated and built asynchronously through
-[`ctx.cached.acquire_*`](../../src/shaped-graphics/context.cached.hh). See [caches](caches.md).
+[`ctx.cached.acquire_*`](../../src/shaped-graphics/context/cached.hh). See [caches](caches.md).
 A `binding_group`, being a per-instance set of bound resources, is genuinely lifetime-scoped:
 `ctx.persistent.create_binding_group` for one that lives until released, `ctx.transient.create_binding_group`
 for per-frame scratch recycled when its epoch retires. The `command_list` recording that binds and
@@ -128,6 +128,6 @@ bindings; texel/typed buffers and acceleration structures are the remaining unsu
 
 ## See also
 
-- [binding.hh](../../src/shaped-graphics/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
-- [compiled_shader.hh](../../src/shaped-graphics/compiled_shader.hh) — the shader data model.
+- [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
+- [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.
 - [views](views.md) — the bound half: `raw_view` and the typed views that convert to it.

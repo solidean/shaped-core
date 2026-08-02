@@ -7,7 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::backend::dx12
 {

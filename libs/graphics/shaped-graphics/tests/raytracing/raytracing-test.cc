@@ -1,10 +1,10 @@
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/acceleration_structure.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/command_list.raytracing.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/command_list/raytracing.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/raytracing/acceleration_structure.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 // Backend-agnostic ray-tracing acceleration-structure builds over the public sg API, run against every

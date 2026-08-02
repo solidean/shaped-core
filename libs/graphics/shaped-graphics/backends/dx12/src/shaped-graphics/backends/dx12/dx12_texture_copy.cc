@@ -2,8 +2,8 @@
 #include <clean-core/common/utility.hh> // cc::min
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::backend::dx12
 {

@@ -1,7 +1,7 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh> // sg::buffer<T> — exact/clamped wrapping + reinterpret_as
-#include <shaped-graphics/raw_buffer.hh>
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/resource/buffer.hh> // sg::buffer<T> — exact/clamped wrapping + reinterpret_as
+#include <shaped-graphics/resource/raw_buffer.hh>
+#include <shaped-graphics/resource/views.hh>
 
 #include <memory>
 #include <variant> // std::get — the erased raw_view is a variant; buffer views live in its raw_buffer_view arm

@@ -2,7 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string_view.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/fwd.hh>

@@ -2,14 +2,14 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
 #include <imgui/imgui.h>
-#include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/command_list.raster.hh> // sg::rendering_scope — execute() reads its format + size
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/pipeline_layout.hh>
-#include <shaped-graphics/raster_pipeline.hh>
-#include <shaped-graphics/swapchain.hh>
-#include <shaped-graphics/vertex_input.hh>
+#include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/command_list/raster.hh> // sg::rendering_scope — execute() reads its format + size
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/pipeline/raster_pipeline.hh>
+#include <shaped-graphics/pipeline/vertex_input.hh>
+#include <shaped-graphics/present/swapchain.hh>
 #include <shaped-rendering/imgui_context.hh> // render_imgui drives update_viewports
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>

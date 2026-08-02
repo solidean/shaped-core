@@ -2,10 +2,10 @@
 
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/acceleration_structure.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
+#include <shaped-graphics/raytracing/acceleration_structure.hh>
 
 // Ray-tracing smoke: build a triangle BLAS and a single-instance TLAS on WARP (which implements DXR),
 // then check the results. The build, the prebuild sizes, and the instance count are all public sg API; the

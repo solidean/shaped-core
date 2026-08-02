@@ -5,8 +5,8 @@
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/exceptions.hh>
-#include <shaped-graphics/raw_buffer.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::backend::dx12
 {

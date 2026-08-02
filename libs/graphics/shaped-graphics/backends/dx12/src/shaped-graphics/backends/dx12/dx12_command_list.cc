@@ -3,7 +3,6 @@
 // epoch retires); see libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
 #include <clean-core/string/print.hh>
-#include <shaped-graphics/backend/access_inference.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
@@ -14,6 +13,7 @@
 #include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
+#include <shaped-graphics/barrier/access_inference.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::dx12

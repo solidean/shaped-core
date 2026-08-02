@@ -4,7 +4,7 @@
 > decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
 > [memory](memory.md), [views](views.md), [barriers](barriers.md).
 
-A texture is a GPU-resident, immutable-shape resource — like [`raw_buffer`](../../src/shaped-graphics/raw_buffer.hh),
+A texture is a GPU-resident, immutable-shape resource — like [`raw_buffer`](../../src/shaped-graphics/resource/raw_buffer.hh),
 but with a texel grid (format, extents, mips, array slices, samples) instead of a byte range. Textures
 are shaped by two ideas that are worth explaining: **raw resource vs typed wrapper**, and a
 **restrictive format set**.
@@ -13,11 +13,11 @@ are shaped by two ideas that are worth explaining: **raw resource vs typed wrapp
 
 The resource splits in two:
 
-- [`raw_texture`](../../src/shaped-graphics/raw_texture.hh) is the *stupid, general* base — it holds a
+- [`raw_texture`](../../src/shaped-graphics/resource/raw_texture.hh) is the *stupid, general* base — it holds a
   `texture_description` and nothing else; a backend subclasses it and owns the native handle. Its API is
   minimal (getters + the finalizer/expiry lifetime hooks it shares with `raw_buffer`). All shapes flow
   through the one type; creation returns a `raw_texture_handle`.
-- [`texture<Traits>`](../../src/shaped-graphics/texture.hh) is a thin, *typed* value wrapper that
+- [`texture<Traits>`](../../src/shaped-graphics/resource/texture.hh) is a thin, *typed* value wrapper that
   privately holds a `raw_texture_handle`. `Traits` is a single `texture_traits<Dim, Array, Cube,
   Multisampled>` *type* — it carries the shape as static members, a static `matches(desc)` that runs the
   runtime shape check against a `texture_description`, and the per-view parameter bags the factories take
@@ -43,7 +43,7 @@ one genuinely-orthogonal flag (how the slices are interpreted; a cube array is `
 
 ## Restrictive `pixel_format`
 
-[`pixel_format`](../../src/shaped-graphics/pixel_format.hh) is deliberately small: a format is included
+[`pixel_format`](../../src/shaped-graphics/resource/pixel_format.hh) is deliberately small: a format is included
 only when **every** realistic backend (DX12 / Vulkan / Metal / WebGPU) has a direct equivalent. This
 keeps the enum backend-neutral — no value that one API can represent and another can't.
 
@@ -67,7 +67,7 @@ Creation: `ctx.persistent.create_raw_texture(desc)` and `ctx.transient.create_ra
 allocate a real GPU texture from a full `texture_description` — **dx12** via a committed
 `ID3D12Resource`, **vulkan** via a dedicated `VkImage` (minimal, matching its buffer path). On top of
 that, per-shape typed factories (`create_texture_2d`, `create_texture_cube`, … one per `texture<Traits>`
-typedef, on both scopes, with `try_` twins — see [texture_descriptions.hh](../../src/shaped-graphics/texture_descriptions.hh))
+typedef, on both scopes, with `try_` twins — see [texture_descriptions.hh](../../src/shaped-graphics/resource/texture_descriptions.hh))
 take a shape-specific description that exposes only the free parameters (cubes a single `.size`, cube
 arrays a `.cube_count`, MS a `.sample_count`), expand it to a full `texture_description`, and return the
 wrapped `texture<Traits>` directly.

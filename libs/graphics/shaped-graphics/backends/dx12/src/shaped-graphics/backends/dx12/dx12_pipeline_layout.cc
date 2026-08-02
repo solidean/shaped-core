@@ -2,7 +2,7 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
-#include <shaped-graphics/binding.hh> // sg::is_sampler
+#include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 
 namespace sg::backend::dx12
 {

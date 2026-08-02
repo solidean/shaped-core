@@ -40,12 +40,27 @@ upload/download/copy. See [docs/structure.md](docs/structure.md) for what is `[d
 
 ## File organization
 
-Source lives in `src/shaped-graphics/`:
+Source lives in `src/shaped-graphics/`, grouped by topic.
+Headers are included by their full path from `src/`, e.g. `#include <shaped-graphics/resource/texture.hh>`.
 
 | Path                | What's in it |
 |---------------------|--------------|
-| (root)              | `fwd.hh` (fwd decls + `*_handle` typedefs), `all.hh`, `types.hh`, `pixel_format.hh`, and the abstract `context` / `command_list` / `raw_buffer` / `raw_texture` (+ typed `texture.hh`) |
+| (root)              | the cross-cutting vocabulary only: `fwd.hh` (fwd decls + `*_handle` typedefs), `all.hh`, `types.hh`, `exceptions.hh`, `bytes_future.hh` |
+| `barrier/`          | the access-tracking substrate: access/stage/layout vocabulary, the three-timeline `resource_access_state`, the subresource partition, the command-list slot model |
+| `binding/`          | `compiled_shader`, the reflected `binding` vocabulary, `sampler`, and the bind path's `binding_group_layout` / `pipeline_layout` / `binding_group` |
+| `command_list/`     | the abstract `command_list` and its seven recording scopes (`upload`, `download`, `copy`, `compute`, `raster`, `raytracing`, `query`) |
+| `context/`          | the abstract `context`, its six lifetime/transfer scopes (`persistent`, `transient`, `upload`, `download`, `uncached`, `cached`), and `pipeline_cache` |
+| `memory/`           | `allocation_info` + `memory_heap` — placed vs dedicated backing memory |
+| `pipeline/`         | `compute_pipeline`, `raster_pipeline`, and the fixed-function state a raster PSO aggregates |
+| `present/`          | `swapchain` and the presentation path |
+| `query/`            | GPU queries — `gpu_timestamp` today |
+| `raytracing/`       | `blas`/`tlas`, `raytracing_pipeline`, `raytracing_shader_table` |
+| `resource/`         | the GPU resource surface: `raw_buffer`/`buffer<T>`, `raw_texture`/`texture<Traits>`, `views.hh`, `pixel_format`, subresource addressing |
+| `routine/`          | the render-routine framework: `render_routine<Derived>`, `routine_registry`, `reload_generation` |
 | `backends/<api>/`   | concrete per-backend static libraries (`dx12/`, `vulkan/`) that subclass the abstract types, each smurf-named in `sg::backend::<api>` |
+
+Where a folder is named after a type, that type's header repeats the name (`command_list/command_list.hh`, `context/context.hh`) and doubles as the folder's umbrella.
+`impl/` subfolders (e.g. `resource/impl/`) are internal — they are `sg::impl` and deliberately outside the public header set.
 
 ## Building & testing
 

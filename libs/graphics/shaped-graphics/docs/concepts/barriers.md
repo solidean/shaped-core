@@ -17,7 +17,7 @@ There is no public `declare_access`. What a resource is used as follows from the
 - a compute `dispatch` ⇒ each bound view's access class: `readonly` ⇒ `shader_read`, `readwrite` ⇒
   `shader_write`, `uniform` ⇒ `uniform_read` (the inferred replacement for a per-binding declaration).
 
-The mapping lives in [access_inference.hh](../../src/shaped-graphics/backend/access_inference.hh) so every backend
+The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh) so every backend
 agrees on the semantics.
 
 **The one exception — arrays / bindless.** Element usage of a resource *array* bound to a shader cannot be
@@ -30,7 +30,7 @@ place, the texture path is stubbed until `sg::texture` lands.)
 
 ## The vocabulary is backend-neutral
 
-[resource_access.hh](../../src/shaped-graphics/backend/resource_access.hh) defines `access_flags` (what an op
+[resource_access.hh](../../src/shaped-graphics/barrier/resource_access.hh) defines `access_flags` (what an op
 does — `shader_read`, `copy_write`, …), `pipeline_stage_flags` (where — `compute`, `copy`, …), and
 `texture_layout` (buffers are always `general`; textures use `shader_readonly` / `shader_readwrite` /
 `render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`). These are
@@ -40,7 +40,7 @@ deliberately **not** any one backend's spelling; each value documents its D3D12 
 
 ## Minimal barriers: the three-timeline state
 
-[resource_access_state.hh](../../src/shaped-graphics/backend/resource_access_state.hh) is the reusable state
+[resource_access_state.hh](../../src/shaped-graphics/barrier/resource_access_state.hh) is the reusable state
 machine a backend feeds declared accesses into. It keeps three timelines so read-after-read is free and
 only the *delta* of new work is synced:
 
@@ -57,7 +57,7 @@ core "emit this barrier" seam.
 ## Subresources: a covering partition (designed-in for textures)
 
 A texture's subresource domain is the grid (mip × array slice × aspect plane). Buffers are
-single-subresource and never touch this. [subresource.hh](../../src/shaped-graphics/backend/subresource.hh)
+single-subresource and never touch this. [subresource.hh](../../src/shaped-graphics/resource/subresource.hh)
 tracks per-subresource state as a **covering partition**: a set of range-boxes that always exactly tile
 the whole domain. Declaring an access to a sub-range *splits* boxes so the range aligns to box boundaries
 (keeping the tiling exact), then touches only the covered boxes; `try_merge` collapses back to one box
@@ -68,7 +68,7 @@ below); a backend keeps one partition per open command-list slot plus a canonica
 ## Concurrent command lists (the concurrency model)
 
 Every command list is "concurrent": on creation it takes a **slot** from the context's
-[command_list_slot_allocator](../../src/shaped-graphics/backend/command_list_slot.hh) (a mutex-guarded 64-bit free
+[command_list_slot_allocator](../../src/shaped-graphics/barrier/command_list_slot.hh) (a mutex-guarded 64-bit free
 bitmask — lowest clear bit — with a heap free-list past 64, which warns since that many concurrent
 recorders usually means a leaked list). The slot keys the list's **private** access-state entry inside
 each resource it touches (a `cc::small_vector` of per-slot states, so a few parallel lists don't
@@ -148,8 +148,8 @@ when its compute/copy milestone lands.
 
 ## See also
 
-- [resource_access.hh](../../src/shaped-graphics/backend/resource_access.hh) — the neutral vocabulary.
-- [resource_access_state.hh](../../src/shaped-graphics/backend/resource_access_state.hh) — the three-timeline machine.
-- [subresource.hh](../../src/shaped-graphics/backend/subresource.hh) — the covering partition.
-- [command_list_slot.hh](../../src/shaped-graphics/backend/command_list_slot.hh) — the concurrency substrate.
+- [resource_access.hh](../../src/shaped-graphics/barrier/resource_access.hh) — the neutral vocabulary.
+- [resource_access_state.hh](../../src/shaped-graphics/barrier/resource_access_state.hh) — the three-timeline machine.
+- [subresource.hh](../../src/shaped-graphics/resource/subresource.hh) — the covering partition.
+- [command_list_slot.hh](../../src/shaped-graphics/barrier/command_list_slot.hh) — the concurrency substrate.
 - [threading](threading.md) — the thread model concurrent recording builds on.

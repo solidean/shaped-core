@@ -76,7 +76,7 @@ every view's access (a `readwrite_buffer_view` requires `readwrite_buffer`, etc.
 ## The erased `raw_view`
 
 Every typed view converts (`to_raw()`, or implicitly) into one
-[`raw_view`](../../src/shaped-graphics/views.hh) — a `std::variant` over one cohesive payload per
+[`raw_view`](../../src/shaped-graphics/resource/views.hh) — a `std::variant` over one cohesive payload per
 resource kind: `raw_buffer_view` (access + shape + buffer + byte layout), `raw_texture_view` (access +
 texture + dimension + format + range), and `raw_tlas_view` (the TLAS). A backend `std::visit`s / `get_if`s
 the active arm to build its native descriptor; `access_of(rv)` / `shape_of(rv)` read the active arm's
@@ -225,7 +225,7 @@ implies (sampled → `shader_read`, storage → `storage`) via `shader_layout_of
 Binding a texture as a graphics-pipeline **color** or **depth/stencil** target is a *different kind* of
 view: it is never shader-visible, never enters a binding group / descriptor table, and is bound through the
 output-merger (`OMSetRenderTargets` / dynamic-rendering attachments). So it does **not** erase to `raw_view`
-— `render_target_view` / `depth_stencil_view` (in [views.hh](../../src/shaped-graphics/views.hh)), plain
+— `render_target_view` / `depth_stencil_view` (in [views.hh](../../src/shaped-graphics/resource/views.hh)), plain
 value types (holding the `raw_texture_handle`, so they keep the texture alive) with getters `texture()` /
 `dimension()` / `format()` / `range()` / `width()` / `height()`. A backend consumes the typed view directly.
 
@@ -235,12 +235,12 @@ The factories mirror the storage-view shape — a single mip level + an array-sl
 storage views, MSAA **is** allowed (`Texture2DMS…`). The factory asserts the texture's usage
 (`render_target` / `depth_stencil`) and its format: a render target must be a renderable color format
 (`is_render_target_format` — non-depth, non-compressed), a depth-stencil target a depth format
-(`is_depth_format`). The render-pass / OMSetRenderTargets *consumer* is future work; today the DX12 backend
-lands the descriptors into non-shader-visible RTV/DSV heaps (`dx12_context::create_dx12_render_target_view`
-/ `create_dx12_depth_stencil_view`).
+(`is_depth_format`). The DX12 backend lands the descriptors into non-shader-visible RTV/DSV heaps
+(`dx12_context::create_dx12_render_target_view` / `create_dx12_depth_stencil_view`), and the rendering scope
+(`cmd.raster.render_to`) binds them through `OMSetRenderTargets`.
 
 Deferred: **aspect (depth/stencil) selection + format reinterpretation** on sampled views (depth-as-SRV
-needs a typeless resource), the **render-pass consumer** for the render-target / depth-stencil views above, and **texel
+needs a typeless resource) and **texel
 buffers** (`Buffer<T>` / `samplerBuffer` — a format-decoded linear buffer). **Samplers** are supported (see
 [bindings](bindings.md) and `sampler.hh`) — they are not views, so they live outside this concept: a
 `sampler` bound static (baked into a layout's root signature) or dynamic (per binding_group, in a separate
@@ -248,6 +248,6 @@ sampler descriptor heap).
 
 ## See also
 
-- [views.hh](../../src/shaped-graphics/views.hh) — the view types (shader-facing views plus `render_target_view` / `depth_stencil_view`), `view_class` / `view_shape`, and `raw_view`.
-- [buffer.hh](../../src/shaped-graphics/buffer.hh) — the typed `buffer<T>.as_*()` view factories (raw_buffer itself has only the byte-level `as_raw_*`).
+- [views.hh](../../src/shaped-graphics/resource/views.hh) — the view types (shader-facing views plus `render_target_view` / `depth_stencil_view`), `view_class` / `view_shape`, and `raw_view`.
+- [buffer.hh](../../src/shaped-graphics/resource/buffer.hh) — the typed `buffer<T>.as_*()` view factories (raw_buffer itself has only the byte-level `as_raw_*`).
 - [memory](memory.md) — the resource-backing model views sit on top of.

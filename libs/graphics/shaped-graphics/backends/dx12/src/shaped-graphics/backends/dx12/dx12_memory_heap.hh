@@ -2,7 +2,7 @@
 
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/memory_heap.hh>
+#include <shaped-graphics/memory/memory_heap.hh>
 
 #include <memory>
 

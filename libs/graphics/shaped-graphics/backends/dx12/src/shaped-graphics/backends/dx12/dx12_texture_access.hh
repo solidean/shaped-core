@@ -3,13 +3,13 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/string/print.hh>
-#include <shaped-graphics/backend/command_list_slot.hh>
-#include <shaped-graphics/backend/resource_access.hh>
-#include <shaped-graphics/backend/resource_access_state.hh>
-#include <shaped-graphics/backend/subresource.hh>
-#include <shaped-graphics/backend/subresource_state.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/barrier/resource_access.hh>
+#include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/barrier/subresource_state.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/subresource.hh>
 
 namespace sg::backend::dx12
 {

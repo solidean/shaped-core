@@ -2,7 +2,7 @@
 
 #include <clean-core/container/map.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/render_routine.hh>
+#include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/view_id.hh>
 

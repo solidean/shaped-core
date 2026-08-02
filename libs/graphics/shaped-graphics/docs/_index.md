@@ -7,18 +7,32 @@ for repo-wide docs see [docs/_index.md](../../../../docs/_index.md).
 
 ## Source organization
 
-shaped-graphics' headers live in `src/shaped-graphics/`:
+shaped-graphics' headers live in `src/shaped-graphics/`, grouped by topic.
+Only the cross-cutting vocabulary sits at the root; everything else is in the folder that owns it.
 
 ```text
 shaped-graphics/
-  fwd.hh          # fwd decls + *_handle typedefs
-  all.hh          # umbrella
-  types.hh        # backend_kind, buffer_usage
-  context.hh      # abstract driver / factory
-  command_list.hh # abstract; records GPU work
-  buffer.hh       # abstract; GPU-resident, immutable shape (protected metadata)
-backends/         # concrete per-backend static libs (dx12/, vulkan/) that subclass the sg types
+  fwd.hh           # fwd decls + *_handle typedefs
+  all.hh           # umbrella
+  types.hh         # backend_kind, thread_model, buffer_usage, texture_usage
+  exceptions.hh    # the typed sg exceptions
+  bytes_future.hh  # the shared result type of every download
+  barrier/         # the access-tracking substrate a backend emits barriers from
+  binding/         # compiled shaders, reflected bindings, samplers, group + pipeline layouts
+  command_list/    # the abstract command_list and its seven recording scopes
+  context/         # the abstract context, its six lifetime/transfer scopes, and the pipeline cache
+  memory/          # allocation_info + memory_heap (placed vs dedicated backing memory)
+  pipeline/        # compute + raster pipelines and the fixed-function state they aggregate
+  present/         # swapchain / presentation
+  query/           # GPU queries (timestamps today)
+  raytracing/      # acceleration structures, raytracing pipeline, shader table
+  resource/        # buffers, textures, views, pixel formats — the GPU resource surface
+  routine/         # the render-routine framework and its registry
+backends/          # concrete per-backend static libs (dx12/, vulkan/) that subclass the sg types
 ```
+
+Headers are included by their full path from `src/`, e.g. `#include <shaped-graphics/resource/texture.hh>`.
+A folder's own umbrella, where it has one, is the same-named header inside it (`command_list/command_list.hh`, `context/context.hh`).
 
 ## Topics
 

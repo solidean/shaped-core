@@ -1,7 +1,7 @@
 #include <clean-core/fwd.hh> // cc::u64: epoch is an enum over u64
 #include <nexus/test.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;

@@ -87,5 +87,5 @@ otherwise it deadlocks with no threads and passes every threaded test.
 ## See also
 
 - [types.hh](../../src/shaped-graphics/types.hh) — the `thread_model` enum.
-- [context.hh](../../src/shaped-graphics/context.hh) — `threading()` and the operations it classifies.
+- [context.hh](../../src/shaped-graphics/context/context.hh) — `threading()` and the operations it classifies.
 - [epochs](epochs.md) — why epoch management is the externally-synchronized half.

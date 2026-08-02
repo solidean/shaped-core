@@ -1,9 +1,9 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/acceleration_structure.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#include <shaped-graphics/raytracing/acceleration_structure.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
 // Inline ray tracing (DXR tier 1.1 RayQuery / TraceRayInline) end to end on WARP, with NO ray-tracing

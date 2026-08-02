@@ -3,46 +3,38 @@
 Running list of known follow-ups. Bigger design intent lives in
 [structure.md](structure.md).
 
-- **Buffer transfer — remaining:** inline buffer upload / download / copy is in (sg `command_list` API +
-  `bytes_future`, real dx12 over UPLOAD / READBACK ring buffers, a `cc::threaded_actor` for deferred
-  readback copies). Still open: the **vulkan** implementation (currently a `CC_UNREACHABLE` stub);
-  **texture** upload/download (the `dx12_resource_upload/_download` helpers are shaped for it, concrete
-  texture impls are TODO); and download robustness — the readback ring's free watermark advances in
-  submit order, which only matches allocation order for single-threaded recording (needs per-region
-  tracking / the split GPU-CPU watermarks), plus fallback staging when a single list's inline transfers
-  exceed the ring capacity (currently asserts).
+- **Transfer — remaining:** host↔device transfer is in for **buffers and textures**, both inline
+  (`cmd.upload` / `cmd.download`, over dx12's UPLOAD / READBACK ring buffers) and async
+  (`ctx.upload` / `ctx.download`, over dedicated copy queues with cross-queue fence waits), with
+  `bytes_future` as the shared result.
+  Still open: the **vulkan** implementation (currently a
+  `CC_UNREACHABLE` stub); **device→device texture copy** (`cmd.copy` only does buffer regions today);
+  and **fallback staging** when a single list's inline transfers exceed the ring capacity — the ring
+  now blocks on in-flight epochs first, but with nothing in flight it still asserts.
 - **Barriers + access tracking — remaining:** the access-tracking system is in for **buffers** (inferred
   access, the three-timeline `resource_access_state`, the command-list slot model with revert/promote, and
-  dx12 enhanced-barrier emission — see [concepts/barriers.md](concepts/barriers.md)). Uploading then
-  downloading / self-copying the *same* buffer now works in one command list. **Textures** are now tracked
-  too: each `dx12_texture` owns a per-command-list covering partition and emits subresource-range
-  `D3D12_TEXTURE_BARRIER` layout transitions (with entry-layout revert on a non-final submit) — dx12-owned
-  tracking + emission, since barrier models differ across backends. A bound texture in a compute dispatch
-  now *drives* it: SRV/UAV texture views (`texture<Traits>::as_*_view`) transition to `shader_read` /
-  `storage` at dispatch via `shader_layout_of`. Still open: **texture copy / upload / download** ops (so a
-  sampled texture can be populated; the barrier system will order those too); render-target/depth-stencil
-  views; **vulkan** barrier emission (lands with its compute/transfer
-  milestone; it reuses the shared vocabulary + state machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs
-  an array binding path + a binding-name→resource reflection map); migrating `access_flags` /
+  dx12 enhanced-barrier emission — see [concepts/barriers.md](concepts/barriers.md)). **Textures** are
+  tracked too: each `dx12_texture` owns a per-command-list covering partition and emits subresource-range
+  `D3D12_TEXTURE_BARRIER` layout transitions (with entry-layout revert on a non-final submit). Real public
+  ops drive it — texture upload/download, a bound texture in a compute dispatch (SRV/UAV views transition
+  via `shader_layout_of`), and the rendering scope's color / depth-stencil targets.
+  Still open: **vulkan**
+  barrier emission (lands with its compute/transfer milestone; it reuses the shared vocabulary + state
+  machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs an array
+  binding path + a binding-name→resource reflection map); migrating `access_flags` /
   `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables
   automatic transitions for callers that know their resources are already in the right layout; and folding
   the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws — deferred layers:** the graphics path is in (`sg::raster_pipeline` +
-  `raster_pipeline_description` with its fixed-function state vocabulary — `primitive_topology`,
-  `rasterization_state`, `blend_state`, `depth_stencil_state` reusing `compare_op`, `vertex_input_layout`
-  with a type-driven `create<Vs...>()`; `ctx.uncached.create_raster_pipeline`; and draw recording on
-  `cmd.raster` / `cmd.raster.manual` — `bind_pipeline` / `bind_group` / `bind_vertex_buffers` /
-  `bind_index_buffer` / `set_viewport` / `set_scissor` / `set_stencil_reference` / `set_blend_constants` /
-  `set_inline_constants` / `draw` / `draw_indexed`; dx12 real on WARP, vulkan stubbed). See
+  `raster_pipeline_description` with its fixed-function state vocabulary, geometry + tessellation stages,
+  `ctx.uncached.create_raster_pipeline`, draw recording on `cmd.raster` / `cmd.raster.manual`, and the
+  rendering scope that binds color / depth-stencil targets; dx12 real on WARP, vulkan stubbed). See
   [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open: **PSO caching**
   (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing + `async_raster_pipeline` —
   the compute/RT parity piece); **indirect draws** (`draw_indirect` / count buffers); **dynamic primitive
   topology** and **dynamic depth bias** (both baked into the PSO for now); **mesh / task** stages; and the
   **vulkan** implementation (`VkPipeline` + dynamic-rendering formats + the `vkCmdDraw*` seams — currently
-  `CC_UNREACHABLE`). **Geometry** and **tessellation** (hull/domain) stages are now in for dx12:
-  `raster_pipeline_description::geometry_shader` / `tessellation_control_shader` /
-  `tessellation_evaluation_shader`, the `patch_list` topology + `patch_control_points`, and the DXC gs/hs/ds
-  profiles.
+  `CC_UNREACHABLE`).
 - **Acceleration structures — deferred layers:** the single-shot build path is in (`sg::blas`/`sg::tlas`,
   the `cmd.raytracing` scope with `build_blas` for triangles + procedural AABBs, `build_tlas`, and
   `is_supported()`; dx12 real on WARP, vulkan stubbed). The abstract types already carry the stats a refit
@@ -63,7 +55,7 @@ Running list of known follow-ups. Bigger design intent lives in
   Traits-keyed), so what remains is switching the handles to it (keeps sg off `std::`). Needs a Traits for the
   sg shapes — `cc::default_shared_traits` gives a trailing control block with no source change. See the
   [coding-guidelines](coding-guidelines.md) note.
-- **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly (~126 occurrences across the
+- **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly (~110 occurrences across the
   dx12 + vulkan backends, `raw_buffer`, `raw_texture`, `bytes_future`, `acceleration_structure`). clean-core
   has migrated to [`cc::atomic`](../../../base/clean-core/src/clean-core/thread/atomic.hh), and `<atomic>` is
   no longer blessed to call into directly — see
@@ -71,25 +63,15 @@ Running list of known follow-ups. Bigger design intent lives in
   mechanical (with threads `cc::atomic` **is** `std::atomic`), and no correctness gap exists today because
   dx12/vulkan are desktop-only. It becomes real when WebGPU-on-wasm lands: that build has no threads, and
   every one of those atomics would keep its interlock for a concurrency that cannot happen.
-- **`cc::flags`:** `buffer_usage` uses a hand-rolled `enum class` + bitwise operators; migrate to
-  `cc::flags` once that clean-core type is implemented.
+- **`cc::flags`:** `buffer_usage` and `texture_usage` use a hand-rolled `enum class` + bitwise operators;
+  migrate to `cc::flags` once that clean-core type is implemented (it is still a stub).
 - **Views — deferred layers:** buffer views (`uniform`/`readonly`/`readwrite`, `byte` = raw) + the
   erased `raw_view` are in, as are texture SRV/UAV views and `render_target` / `depth_stencil` target
-  views (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array); see [concepts/views.md](concepts/views.md).
-  Still deferred:
+  views (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array), which the rendering scope binds as
+  output-merger targets; see [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
-  - the **render-pass / OMSetRenderTargets consumer** for the RTV/DSV views (the descriptors + heaps
-    exist in the dx12 backend, but nothing binds them as output-merger targets yet);
-  - the **binding path** (pipelines, descriptor groups/layouts, `command_list` binding) that consumes
-    `raw_view`, plus **reflection-driven validation** of a view's `T`/access against the shader;
-  - the **backend `raw_view` translation** (`switch` on `(access, shape)` → native descriptor) — no
-    backend code exists for views yet;
+  - **reflection-driven validation** of a view's `T`/access against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
-- **Typed buffer wrapper:** `raw_buffer` is untyped — every view factory re-specifies the element type
-  (`as_readwrite_buffer<T>()`, `as_vertex_buffer<T>()`, `as_index_buffer(format)`, …). Add a strongly-typed,
-  templated `buffer<T>` (the analogue of `texture<Traits>` over `raw_texture`) that carries its element
-  type / shape so the type is inferred once at creation and checked at compile time, rather than re-passed at
-  each call site. It would wrap a `raw_buffer_handle` like `texture<Traits>` wraps `raw_texture_handle`.
 - **Vertex attributes: go location-based, drop the HLSL semantic from the public API.** `vertex_attribute`
   currently identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that
   doesn't survive a change of shader language. Every other target matches vertex inputs by a **numeric
@@ -117,19 +99,14 @@ Running list of known follow-ups. Bigger design intent lives in
   version/feature floor beyond the 1.2 baseline is still worth adding.
 - **Epoch system — deferred layers:** the epoch core (counter + direct-queue epoch/submission
   timelines, in-flight FIFO, advance/retire, throttle, deferred deletion + finalizers, command
-  allocator/pool recycling) is in for dx12 and vulkan; see [concepts/epochs.md](concepts/epochs.md).
+  allocator/pool recycling) is in for dx12 and vulkan, as are dx12's dedicated **async copy queues**
+  behind `ctx.upload` / `ctx.download`; see [concepts/epochs.md](concepts/epochs.md).
   Still deferred:
-  - the **async copy queue** with pooled group fences and per-resource pending syncs (start:
-    inline-only uploads on the direct queue);
-  - **transient resources** — the linear bump allocator and the transient descriptor ring-buffers
-    (start: persistent-only);
-  - the **split GPU/CPU download watermarks** for readback (start: treat a download as done when the
-    fence signals, with a synchronous CPU copy).
+  - the **vulkan** async copy queue, which has neither the queue nor the per-resource pending syncs;
+  - **transient textures** — `ctx.transient`'s bump allocator and the transient descriptor ring are in
+    for dx12, but the heap is buffers-only, so a transient texture still asserts.
 - **`cc::ringbuffer`:** the epoch in-flight set uses a `cc::vector` drained from the front, because
   `cc::ringbuffer` is currently an unimplemented stub. Switch to it once it lands.
-- **Command-allocator pool as a standalone object:** dx12's `dx12_allocator_pool` is two vectors
-  under one context-level `cc::mutex`. Promote it to an object that owns its synchronization and pools
-  **per queue** (the epoch system grows multiple queues), instead of the ad-hoc mutex on the context.
 - **Render routines want a shared/exclusive lock, not a mutex.**
   The model to reach is: a routine's init phases exclude every `execute`, while `execute` calls that only *read* run in parallel with each other.
   A read-only routine like `sr::blit_routine` — one that can be acquired without exclusivity — has no reason to serialize against another thread's `execute`.
@@ -137,7 +114,7 @@ Running list of known follow-ups. Bigger design intent lives in
   `acquire()` takes **no** lock where it wants a shared one (so a reload's `init_declare` can run while it reads), and `acquire_exclusive()` serializes `execute` calls that would be free to overlap.
   The clean-core extension it needs is a `cc::shared_mutex<T>` next to `cc::mutex<T>` — `lock_shared(f)` / `lock_shared_scoped()` alongside `lock(f)` / `lock_scoped()`.
   Then `acquire()` holds a shared guard for the caller's read, `acquire_exclusive()` keeps the exclusive one, and the init phases run under the exclusive side of the same lock.
-  See [render_routine.hh](../src/shaped-graphics/render_routine.hh) and [render-routines.md](render-routines.md#threading).
+  See [render_routine.hh](../src/shaped-graphics/routine/render_routine.hh) and [render-routines.md](render-routines.md#threading).
 - **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).

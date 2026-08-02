@@ -1,7 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 
 namespace sg::backend::dx12
 {

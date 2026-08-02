@@ -1,7 +1,7 @@
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>

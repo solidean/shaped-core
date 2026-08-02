@@ -3,8 +3,8 @@
 #include <clean-core/common/hash128.hh> // cc::hash128
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh> // cc::span
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/buffer.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/pbr_material.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>

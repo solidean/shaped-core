@@ -1,9 +1,9 @@
 #pragma once
 
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/render_routine.hh>
-#include <shaped-graphics/texture.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/texture.hh>
+#include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/keyed_pipeline_cache.hh>
 

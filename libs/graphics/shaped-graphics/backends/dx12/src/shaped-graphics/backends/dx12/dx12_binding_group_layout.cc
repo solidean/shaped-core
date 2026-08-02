@@ -1,8 +1,8 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
-#include <shaped-graphics/binding_group.hh> // sg::named_sampler
-#include <shaped-graphics/sampler.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::named_sampler
+#include <shaped-graphics/binding/sampler.hh>
 
 namespace sg::backend::dx12
 {

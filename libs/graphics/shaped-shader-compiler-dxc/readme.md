@@ -2,7 +2,7 @@
 
 A lean wrapper over the [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler)
 (DXC, `IDxcCompiler3`) that turns HLSL into an
-[`sg::compiled_shader`](../shaped-graphics/src/shaped-graphics/compiled_shader.hh) — bytecode plus the
+[`sg::compiled_shader`](../shaped-graphics/src/shaped-graphics/binding/compiled_shader.hh) — bytecode plus the
 reflected bindings and compute workgroup size sg needs to build pipelines. Namespace `ssc::dxc`. Depends on
 **shaped-graphics** (and transitively typed-geometry + clean-core). Part of the
 [graphics family](../../../docs/graphics.md).

@@ -1,9 +1,9 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
-#include <shaped-graphics/texture.hh>
-#include <shaped-graphics/texture_descriptions.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/texture.hh>
+#include <shaped-graphics/resource/texture_descriptions.hh>
 
 // Backend-agnostic texture creation: each is an INVOCABLE_TEST run against every available backend
 // (see tests/context/context-test.cc for the mechanism). Creation only — using a texture in a command

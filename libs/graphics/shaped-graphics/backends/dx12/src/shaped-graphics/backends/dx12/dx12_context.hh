@@ -2,8 +2,6 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
-#include <shaped-graphics/allocation_info.hh>
-#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -20,8 +18,10 @@
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
 #include <memory>

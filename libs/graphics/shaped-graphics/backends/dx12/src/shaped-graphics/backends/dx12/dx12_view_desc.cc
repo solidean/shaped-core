@@ -4,7 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
 {

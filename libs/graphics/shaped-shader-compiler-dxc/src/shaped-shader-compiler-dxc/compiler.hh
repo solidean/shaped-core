@@ -5,7 +5,7 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 #include <shaped-shader-compiler-dxc/preprocessed_source.hh>
 #include <shaped-shader-compiler-dxc/shader_description.hh>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <clean-core/string/string.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 
 /// One shader to compile: its HLSL source plus what/how to build it. For compile(), `source` must

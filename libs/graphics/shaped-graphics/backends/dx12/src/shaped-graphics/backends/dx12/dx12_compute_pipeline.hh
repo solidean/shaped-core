@@ -3,8 +3,8 @@
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/compute_pipeline.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/pipeline/compute_pipeline.hh>
 
 namespace sg::backend::dx12
 {

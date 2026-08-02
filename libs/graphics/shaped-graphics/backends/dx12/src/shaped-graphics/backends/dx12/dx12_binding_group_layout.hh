@@ -5,8 +5,8 @@
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group_layout.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
 
 namespace sg::backend::dx12
 {
