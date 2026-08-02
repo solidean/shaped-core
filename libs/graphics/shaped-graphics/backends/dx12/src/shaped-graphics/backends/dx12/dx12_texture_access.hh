@@ -7,6 +7,7 @@
 #include <shaped-graphics/backend/resource_access.hh>
 #include <shaped-graphics/backend/resource_access_state.hh>
 #include <shaped-graphics/backend/subresource.hh>
+#include <shaped-graphics/backend/subresource_state.hh>
 #include <shaped-graphics/pixel_format.hh>
 #include <shaped-graphics/raw_texture.hh>
 

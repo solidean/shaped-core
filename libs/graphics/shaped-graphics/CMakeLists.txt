@@ -53,6 +53,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/fwd.hh
     src/shaped-graphics/all.hh
     src/shaped-graphics/types.hh
+    src/shaped-graphics/exceptions.hh
     src/shaped-graphics/context.hh
     src/shaped-graphics/context.persistent.hh
     src/shaped-graphics/context.transient.hh
@@ -72,8 +73,11 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list.compute.hh
     src/shaped-graphics/command_list.raster.hh
     src/shaped-graphics/command_list.raytracing.hh
+    src/shaped-graphics/command_list.query.hh
+    src/shaped-graphics/gpu_timestamp.hh
     src/shaped-graphics/acceleration_structure.hh
     src/shaped-graphics/raw_buffer.hh
+    src/shaped-graphics/buffer.hh
     src/shaped-graphics/pixel_format.hh
     src/shaped-graphics/primitive_topology.hh
     src/shaped-graphics/rasterization_state.hh
@@ -86,6 +90,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/raw_texture.hh
     src/shaped-graphics/texture.hh
     src/shaped-graphics/texture_traits.hh
+    src/shaped-graphics/texture_descriptions.hh
     src/shaped-graphics/sampler.hh
     src/shaped-graphics/texture_region.hh
     src/shaped-graphics/backend/command_list_slot.hh
@@ -93,6 +98,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/backend/resource_access_state.hh
     src/shaped-graphics/backend/access_inference.hh
     src/shaped-graphics/backend/subresource.hh
+    src/shaped-graphics/backend/subresource_state.hh
     src/shaped-graphics/views.hh
     src/shaped-graphics/binding.hh
     src/shaped-graphics/binding_group_layout.hh
