@@ -1,11 +1,11 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
-#include <shaped-graphics/acceleration_structure.hh> // sg::tlas_instance
-#include <shaped-graphics/buffer.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/render_routine.hh>
-#include <shaped-graphics/texture.hh>
+#include <shaped-graphics/raytracing/acceleration_structure.hh> // sg::tlas_instance
+#include <shaped-graphics/resource/buffer.hh>
+#include <shaped-graphics/resource/texture.hh>
+#include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-viewer/background.hh>
 #include <shaped-viewer/camera.hh> // camera_gpu
 #include <shaped-viewer/fwd.hh>

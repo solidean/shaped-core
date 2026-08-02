@@ -1,11 +1,15 @@
 # shaped-graphics cheat sheet
 
-Graphics-API wrapper. Namespace `sg`. Depends on clean-core + typed-geometry. Headers are
-included by full path from `src/`: `#include <shaped-graphics/<name>.hh>`.
+Graphics-API wrapper.
+Namespace `sg`.
+Depends on clean-core + typed-geometry.
+Headers are included by full path from `src/`, and the tree is grouped by topic: `#include <shaped-graphics/<folder>/<name>.hh>`.
+The folders are `barrier/ binding/ command_list/ compute/ context/ memory/ present/ query/ raster/ raytracing/ resource/ routine/`; only `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh` and `bytes_future.hh` sit at the root.
+See the [readme](readme.md#file-organization) for what each folder holds.
 
-> **Scope note:** this sheet covers the small surface that exists today. The **dx12** backend is
-> real (device / command list / GPU buffer); the sg core abstract API and the **vulkan** backend are
-> still stubs.
+> **Scope note:** this sheet covers the surface that exists today.
+> The sg core API and the **dx12** backend are real.
+> The **vulkan** backend implements device / buffer creation, and its recording, barrier, raster and raytracing paths are still stubs.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): resource creates
@@ -68,7 +72,7 @@ sg::present_mode          // vsync | immediate  (swapchain frame pacing — see 
 ## context — mutable driver / factory
 
 ```cpp
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/context/context.hh>
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
@@ -161,7 +165,7 @@ buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is
 ## command_list — records GPU work  (abstract)
 
 ```cpp
-#include <shaped-graphics/command_list.hh>
+#include <shaped-graphics/command_list/command_list.hh>
 // abstract; a backend subclasses it (protected ctor). obtained via ctx.create_command_list()
 // -> std::unique_ptr; passed by reference (command_list&). record once; submit OR drop it once,
 // explicitly, in the epoch it opened in (not reused). Leaving it to go out of scope auto-drops it + warns.
@@ -175,8 +179,8 @@ cmd.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_fu
 cmd.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T
 cmd.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 cmd.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — inline read one texture (sub)region back (needs copy_src), tightly packed; ready once the submitted list runs
-sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/backend/subresource.hh>
-sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/texture_region.hh>
+sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/resource/subresource.hh>
+sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/resource/texture_region.hh>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 // cmd.upload/download = INLINE (recorded in this list); ctx.upload/download = ASYNC (copy queue, off the
@@ -218,7 +222,7 @@ cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.off
 ## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
 
 ```cpp
-#include <shaped-graphics/gpu_timestamp.hh>
+#include <shaped-graphics/query/gpu_timestamp.hh>
 sg::gpu_timestamp t = cmd.query.record_gpu_timestamp(); // copyable value type; read AFTER submitting the list
 t.is_valid()                    // bool — backed by a real query (false = default-constructed / unsupported backend)
 t.is_ready()                    // bool — NON-BLOCKING poll; true once the tick landed (false before submit / forever if dropped)
@@ -232,7 +236,7 @@ ctx.wait_for_seconds(t)         // -> cc::optional<double>   — same, returns s
 ## raw_buffer — GPU-resident, immutable shape  (abstract)
 
 ```cpp
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 // abstract; a backend subclasses it. protected ctor: raw_buffer(size_in_bytes, usage)  (size 0 = empty)
 b.size_in_bytes()                  // isize   (inline, cheap — no virtual call)
 b.usage()                          // sg::buffer_usage
@@ -267,7 +271,7 @@ b.try_as_buffer<T>()                       // -> cc::optional<buffer<T>> (nullop
 ## buffer<T> — typed buffer wrapper  (element type fixed at compile time)
 
 ```cpp
-#include <shaped-graphics/buffer.hh>       // the typed buffer<T> wrapper
+#include <shaped-graphics/resource/buffer.hh>       // the typed buffer<T> wrapper
 sg::buffer<T>                              // GPU-side span<T>: wraps a raw_buffer_handle, T fixed at compile time
 // create typed (preferred): element_count -> byte size = count * sizeof(T); returns the wrapped buffer<T>:
 ctx.persistent.create_buffer<Particle>(1000, usage, alloc={})  // -> sg::buffer<Particle>  (+ try_ twin)
@@ -293,7 +297,7 @@ buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer
 ## pixel_format — texel formats  (restrictive; all backends have an equivalent)
 
 ```cpp
-#include <shaped-graphics/pixel_format.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 sg::pixel_format             // enum: undefined, r8/rg8/rgba8/bgra8 (unorm/snorm/uint/sint/srgb),
                              //   r/rg/rgba 16f & 32f & int, rgb10a2_unorm, rg11b10_float,
                              //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
@@ -308,8 +312,8 @@ sg::format_block_extent(f)   // int   — 1 (uncompressed) or 4 (BC)
 ## texture — GPU-resident texture  (raw resource + typed wrapper)
 
 ```cpp
-#include <shaped-graphics/raw_texture.hh>   // the raw resource + its description
-#include <shaped-graphics/texture.hh>       // the typed texture<Traits> wrapper + shape typedefs
+#include <shaped-graphics/resource/raw_texture.hh>   // the raw resource + its description
+#include <shaped-graphics/resource/texture.hh>       // the typed texture<Traits> wrapper + shape typedefs
 sg::texture_description      // { format, dimension(d1/d2/d3), width/height/depth, mip_levels,
                              //   array_layers (cc::optional<int>; nullopt = not an array),
                              //   sample_count (>1 = MSAA), is_cube, usage }
@@ -323,7 +327,7 @@ sg::texture_usage            // flags: copy_src/copy_dst, readonly_texture, read
 ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedicated; throws sg::allocation_exception; + try_ twin)
 ctx.transient.create_raw_texture(desc)         // -> raw_texture_handle  (dedicated for now; auto-expires; + try_ twin)
 // typed factories (preferred): shape-specific description (only the free params) -> the wrapped texture<Traits>:
-#include <shaped-graphics/texture_descriptions.hh>
+#include <shaped-graphics/resource/texture_descriptions.hh>
 ctx.persistent.create_texture_2d({.format=..., .width=256, .height=128, .usage=...})  // -> sg::texture_2d  (+ try_ twin)
 ctx.transient.create_texture_2d({...})         // -> sg::texture_2d  (transient; no allocation_info param)
 //   one per typedef: create_texture_1d/2d/3d/cube/1d_array/2d_array/cube_array/2d_ms/2d_array_ms/cube_ms/cube_array_ms
@@ -357,7 +361,7 @@ tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face a
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
 
 ```cpp
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/resource/views.hh>
 sg::view_element<T>          // concept: T is `byte`, or sizeof(T) % 4 == 0 (GPUs load DWORD-aligned)
 sg::uniform_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
 sg::uniform_buffer_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
@@ -403,7 +407,7 @@ sg::is_render_target_format(f) // bool — a renderable color format (not depth,
 ## swapchain — window presentation  (dx12 real; via ctx.create_swapchain)
 
 ```cpp
-#include <shaped-graphics/swapchain.hh>
+#include <shaped-graphics/present/swapchain.hh>
 sg::swapchain_description       // { void* native_window_handle=nullptr (HWND on Windows); int buffer_count=2 (>=2);
                                 //   pixel_format format=bgra8_unorm; present_mode present_mode=vsync; bool enable_hdr=false }
 sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
@@ -422,7 +426,7 @@ sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->nati
 ## samplers — how a shader reads a texture  (see docs/concepts/bindings.md)
 
 ```cpp
-#include <shaped-graphics/sampler.hh>
+#include <shaped-graphics/binding/sampler.hh>
 sg::sampler                 // { min/mag/mip_filter; address_u/v/w; mip_lod_bias; max_anisotropy;
                             //   min/max_lod; cc::optional<compare_op> compare; sampler_border_color }  — value type, ==
                             //   defaults = trilinear, repeat, no anisotropy, no comparison (max_lod = sampler::lod_max)
@@ -438,7 +442,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
 
 ```cpp
-#include <shaped-graphics/binding.hh>
+#include <shaped-graphics/binding/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
 sg::binding                 // { cc::string name; u32 set, index, count; binding_type type; cc::optional<isize> block_size }
@@ -451,7 +455,7 @@ sg::merge_bindings(into, from)          // void — same merge, accumulating int
 sg::split_off_sampler_bindings(v)       // -> cc::vector<binding>  REMOVES the sampler bindings from v and returns them (both keep order)
                             //   split off the samplers you bind register-wise (pipeline_layout static_samplers); leaving one in the group claims its register twice
 
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
 sg::is_raytracing_stage(s)  // bool — one of the six RT stages;  sg::is_compute_stage(s) — the compute stage
 sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob (ctx.accepts_shader_format(f))
@@ -466,7 +470,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 ## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
 
 ```cpp
-#include <shaped-graphics/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
+#include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
 sg::named_view              // { cc::string name; raw_view view }  — input to create_binding_group (a typed view converts)
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
@@ -512,7 +516,7 @@ raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serial
 ## acceleration structures — ray-tracing blas / tlas  (see docs/concepts/acceleration-structures.md)
 
 ```cpp
-#include <shaped-graphics/acceleration_structure.hh>   // resources + input structs (also via command_list.raytracing.hh)
+#include <shaped-graphics/raytracing/acceleration_structure.hh>   // resources + input structs (also via command_list.raytracing.hh)
 sg::blas_handle   // std::shared_ptr<sg::blas const>   — bottom-level (one mesh's triangles or AABBs); persistent
 sg::tlas_handle   // std::shared_ptr<sg::tlas const>   — top-level (instances of blas); a tlas keeps its blases alive
 // input structs (value types; build-input buffers need buffer_usage::accel_structure_build_input):
@@ -539,8 +543,8 @@ tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAcceleration
 ## raytracing pipeline + shader table + dispatch_rays  (dx12 real on WARP; see docs/concepts/raytracing-pipeline.md)
 
 ```cpp
-#include <shaped-graphics/raytracing_pipeline.hh>
-#include <shaped-graphics/raytracing_shader_table.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 // each RT shader is its own single-entry lib_6_x compiled_shader (stage raygen/miss/closest_hit/any_hit/intersection/callable)
 sg::hit_shader { optional<compiled_shader> closest_hit, any_hit, intersection; }  // intersection present ⇒ procedural hit group
 sg::raytracing_pipeline_description { pipeline_layout_handle layout;              // global root signature (one, no local root sigs)
@@ -567,8 +571,8 @@ cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — tra
 ## cached layouts + pipelines — the built-in cache  (ctx.cached / pipeline_cache)
 
 ```cpp
-#include <shaped-graphics/context.cached.hh>   // (via context.hh) — the ctx.cached scope
-#include <shaped-graphics/pipeline_cache.hh>   // the cache itself
+#include <shaped-graphics/context/cached.hh>   // (via context.hh) — the ctx.cached scope
+#include <shaped-graphics/context/pipeline_cache.hh>   // the cache itself
 // Every context has a built-in pipeline_cache (default in-memory tiers installed). "acquire" = get-or-create.
 ctx.cached.acquire_binding_group_layout(span<binding const>, static_samplers={}) // -> binding_group_layout_handle  SYNC; (bindings, static_samplers) keyed => one shared handle
 ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_layout_handle  SYNC; keyed on the ordered group-layout identities => one shared handle
@@ -590,7 +594,7 @@ pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provi
 ## render routines — reusable GPU-work units  (see docs/render-routines.md)
 
 ```cpp
-#include <shaped-graphics/render_routine.hh>
+#include <shaped-graphics/routine/render_routine.hh>
 // A routine is a per-context singleton reached BY TYPE. Derive from the CRTP base:
 class my_routine : public sg::render_routine<my_routine> { ... };
 // protected virtuals (all default to no-ops) — three-phase init, split so async compiles start early:
@@ -612,11 +616,11 @@ my_routine::evict(ctx)                     // void     — drop this routine's i
 // The lock is not recursive: never re-acquire the SAME routine under its guard. A DIFFERENT routine is fine, in a consistent order.
 // re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
 
-#include <shaped-graphics/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
+#include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
 ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown
 // Per-context: a routine's cached GPU state dies with the context that built it — never stale across contexts.
 
-#include <shaped-graphics/reload_generation.hh>
+#include <shaped-graphics/routine/reload_generation.hh>
 sg::reload_generation()                    // -> u64   — process-global "content-derived state invalidated" counter (read)
 sg::signal_reload()                        // void     — bump it (the shader library calls this on hot reload)
 ```
@@ -626,7 +630,7 @@ sg::signal_reload()                        // void     — bump it (the shader l
 ```cpp
 #include <shaped-graphics/fwd.hh>
 sg::lifetime_scope                      // persistent | transient  (hard lifetime contract; transient expires at epoch retire)
-#include <shaped-graphics/allocation_info.hh>
+#include <shaped-graphics/memory/allocation_info.hh>
 sg::allocation_info                     // value type: where a resource's memory lives (cheap to copy)
 ai.heap                                 // memory_heap_handle — null = dedicated / self-allocating
 ai.offset / ai.size_in_bytes            // isize — placement within `heap` (ignored when dedicated)
@@ -634,7 +638,7 @@ ai.scope                                // sg::lifetime_scope
 ai.is_dedicated()                       // bool — heap == nullptr (owns its allocation; "committed" in dx12)
 ai.is_placed()                          // bool — heap != nullptr (sub-allocated into a shared heap)
 
-#include <shaped-graphics/memory_heap.hh>
+#include <shaped-graphics/memory/memory_heap.hh>
 sg::memory_requirements                 // { isize alignment_in_bytes; isize size_in_bytes; }  (backend-reported)
 // abstract, immutable; a backend subclasses it. shared via memory_heap_handle = shared_ptr<memory_heap const>
 h.size_in_bytes()                       // isize — total underlying allocation

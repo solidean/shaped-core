@@ -2,7 +2,7 @@
 
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::backend::vulkan
 {

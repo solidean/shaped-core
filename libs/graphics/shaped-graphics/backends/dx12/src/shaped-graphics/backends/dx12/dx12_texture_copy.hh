@@ -2,7 +2,7 @@
 
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/texture_region.hh>
+#include <shaped-graphics/resource/texture_region.hh>
 
 namespace sg::backend::dx12
 {

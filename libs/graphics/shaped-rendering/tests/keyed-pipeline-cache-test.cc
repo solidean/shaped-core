@@ -2,8 +2,8 @@
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/pixel_format.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-rendering/keyed_pipeline_cache.hh>
 
 #include <memory>

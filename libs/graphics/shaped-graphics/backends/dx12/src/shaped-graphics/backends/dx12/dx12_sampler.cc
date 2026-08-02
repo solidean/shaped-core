@@ -1,6 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
-#include <shaped-graphics/sampler.hh>
+#include <shaped-graphics/binding/sampler.hh>
 
 namespace sg::backend::dx12
 {

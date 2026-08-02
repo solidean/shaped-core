@@ -21,7 +21,7 @@ library at all, and why a shader library can be replaced without touching sg.
 
 | Type | What it is |
 |---|---|
-| [`sg::compiled_shader`](../src/shaped-graphics/compiled_shader.hh) | bytecode + stage + entry point + reflected [bindings](concepts/bindings.md) (+ compute workgroup size) |
+| [`sg::compiled_shader`](../src/shaped-graphics/binding/compiled_shader.hh) | bytecode + stage + entry point + reflected [bindings](concepts/bindings.md) (+ compute workgroup size) |
 | `sg::shader_stage` | `compute`, `vertex`, `fragment`, the six ray-tracing stages, … |
 | `sg::shader_format` | the bytecode flavour: `dxil`, `spirv`, `metal_lib` |
 | `sg::async_compiled_shader` | `cc::shared_async<compiled_shader>` — compilation is asynchronous and fallible |

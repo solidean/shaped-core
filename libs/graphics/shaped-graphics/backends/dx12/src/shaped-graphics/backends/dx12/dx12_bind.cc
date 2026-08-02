@@ -11,11 +11,11 @@
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
-#include <shaped-graphics/compute_pipeline.hh>
-#include <shaped-graphics/pipeline_layout.hh>
-#include <shaped-graphics/raster_pipeline.hh>
-#include <shaped-graphics/raytracing_pipeline.hh>
-#include <shaped-graphics/raytracing_shader_table.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
 namespace sg::backend::dx12
 {

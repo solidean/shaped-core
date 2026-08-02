@@ -9,7 +9,7 @@
 A **GPU query** records a value the GPU produces while executing a command list, read back on the host
 afterward. Today the only kind is a **timestamp**: `cmd.query.record_gpu_timestamp()` records a
 point-in-time GPU tick at that point in the list and returns a
-[`gpu_timestamp`](../../src/shaped-graphics/gpu_timestamp.hh). Two timestamps around some work give that
+[`gpu_timestamp`](../../src/shaped-graphics/query/gpu_timestamp.hh). Two timestamps around some work give that
 work's GPU duration — only *differences* between ticks are meaningful, never the absolute value.
 
 The result surfaces as a small, copyable value type (the query analogue of a `bytes_future`):

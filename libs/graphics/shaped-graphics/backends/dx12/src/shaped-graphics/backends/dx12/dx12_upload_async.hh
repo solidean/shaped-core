@@ -8,7 +8,7 @@
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/texture_region.hh>
+#include <shaped-graphics/resource/texture_region.hh>
 
 #include <atomic>
 

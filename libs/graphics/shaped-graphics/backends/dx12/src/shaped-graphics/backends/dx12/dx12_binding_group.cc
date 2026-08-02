@@ -5,9 +5,9 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
 {

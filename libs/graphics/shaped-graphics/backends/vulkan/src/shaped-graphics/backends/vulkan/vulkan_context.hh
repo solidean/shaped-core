@@ -2,15 +2,15 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
-#include <shaped-graphics/allocation_info.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
 #include <memory>

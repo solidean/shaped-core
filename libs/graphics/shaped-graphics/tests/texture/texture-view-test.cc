@@ -1,7 +1,7 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/texture.hh>
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/resource/texture.hh>
+#include <shaped-graphics/resource/views.hh>
 
 #include <memory>
 #include <variant>

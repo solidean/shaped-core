@@ -1,7 +1,7 @@
 #pragma once
 
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
-#include <shaped-graphics/pixel_format.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg::backend::dx12
 {

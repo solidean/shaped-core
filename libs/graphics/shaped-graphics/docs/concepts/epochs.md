@@ -47,7 +47,7 @@ place to throttle how far the CPU runs ahead of the GPU.
 ## Only the concept is shared; the machinery is per-backend
 
 In sg, the **concept** is abstract — the `epoch` / `submission_token` types and the virtual contract
-on [`sg::context`](../../src/shaped-graphics/context.hh) (`current_epoch`, `advance_epoch`,
+on [`sg::context`](../../src/shaped-graphics/context/context.hh) (`current_epoch`, `advance_epoch`,
 `process_completed_epochs`, `wait_for_epoch`, …). **How** a backend realizes epochs is its own
 business, and a backend may uphold the contract **without** tracking real in-flight epochs at all —
 e.g. an opengl backend, whose driver already manages resource lifetimes, could just validate the
@@ -101,7 +101,7 @@ closing epoch's payload. On retire the handle is nulled **first**, then finalize
 crucially **outside** the in-flight lock, because they may be slow or re-entrant and run on an
 unspecified thread.
 
-**Finalizers** ([`buffer::add_finalizer`](../../src/shaped-graphics/raw_buffer.hh)) are callbacks that run
+**Finalizers** ([`buffer::add_finalizer`](../../src/shaped-graphics/resource/raw_buffer.hh)) are callbacks that run
 once a resource's GPU handle is released *and* it is no longer in flight. They are the feedback point
 for reclaiming externally-owned backing memory — the mechanism that later enables **placed resources
 on custom allocators**, where the allocator needs a definite "the GPU is truly done with this" signal
@@ -139,5 +139,5 @@ ring-buffers); and the split GPU/CPU download watermarks for readback. The in-fl
 - [dx12_epoch.hh](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.hh) /
   [dx12_epoch.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc) — the reference
   realization (payload structs, advance/retire, waits).
-- [context.hh](../../src/shaped-graphics/context.hh) — the epoch contract on `sg::context`.
+- [context.hh](../../src/shaped-graphics/context/context.hh) — the epoch contract on `sg::context`.
 - [cheat-sheet](../../cheat-sheet.md) — the epoch API at a glance.

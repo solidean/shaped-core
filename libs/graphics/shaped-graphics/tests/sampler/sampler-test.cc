@@ -1,7 +1,7 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/sampler.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/sampler.hh>
 
 // Pure value/vocabulary tests for samplers: the backend-neutral sampler, the sampler
 // binding_type, and named_sampler. No GPU — the dx12 translation + heap wiring live in

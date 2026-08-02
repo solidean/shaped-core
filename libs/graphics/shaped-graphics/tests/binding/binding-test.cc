@@ -1,11 +1,11 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/binding_group_layout.hh>
-#include <shaped-graphics/buffer.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/pipeline_layout.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/resource/buffer.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 
 #include <memory>
 #include <type_traits>

@@ -7,7 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
-#include <shaped-graphics/sampler.hh>
+#include <shaped-graphics/binding/sampler.hh>
 
 // dx12 samplers: the sampler -> D3D12 translation (pure) and, on WARP, that a root signature
 // with a static + a dynamic sampler and a binding group with a dynamic sampler are accepted by the debug

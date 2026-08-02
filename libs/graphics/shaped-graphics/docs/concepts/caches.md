@@ -19,13 +19,13 @@ ctx.cached.acquire_*    ── get-or-create over the built-in pipeline_cache  �
 ssc::dxc::shader_cache  ── get-or-create over the DXC compiler (a separate lib)
 ```
 
-- [`ctx.uncached`](../../src/shaped-graphics/context.uncached.hh) is the **raw layer**: it builds a fresh
+- [`ctx.uncached`](../../src/shaped-graphics/context/uncached.hh) is the **raw layer**: it builds a fresh
   `binding_group_layout` / `pipeline_layout` / `compute_pipeline` every call. It sits apart from
   `ctx.persistent` / `ctx.transient` on purpose — a layout or pipeline is a *schema / PSO*, not a
   lifetime-scoped GPU resource, so it does not belong on a resource-lifetime scope. Uncached is a
   **deliberately poor default**: most code should not rebuild these per frame.
-- [`ctx.cached`](../../src/shaped-graphics/context.cached.hh) is the **front door**. Every context owns a
-  [`pipeline_cache`](../../src/shaped-graphics/pipeline_cache.hh) (with default in-memory tiers installed),
+- [`ctx.cached`](../../src/shaped-graphics/context/cached.hh) is the **front door**. Every context owns a
+  [`pipeline_cache`](../../src/shaped-graphics/context/pipeline_cache.hh) (with default in-memory tiers installed),
   reached here. `acquire_binding_group_layout` and `acquire_pipeline_layout` return shared handles;
   `acquire_compute_pipeline` returns an **async** handle whose build runs off-thread.
 - The DXC [`shader_cache`](../../../shaped-shader-compiler-dxc/src/shaped-shader-compiler-dxc/shader_cache.hh)
@@ -116,8 +116,8 @@ re-hash the bytecode), disk-backed provider tiers, and richer eviction than clea
 
 ## See also
 
-- [pipeline_cache.hh](../../src/shaped-graphics/pipeline_cache.hh) — the layout + compute-pipeline cache.
-- [context.cached.hh](../../src/shaped-graphics/context.cached.hh) / [context.uncached.hh](../../src/shaped-graphics/context.uncached.hh) — the `ctx.cached` / `ctx.uncached` scopes.
+- [pipeline_cache.hh](../../src/shaped-graphics/context/pipeline_cache.hh) — the layout + compute-pipeline cache.
+- [context.cached.hh](../../src/shaped-graphics/context/cached.hh) / [context.uncached.hh](../../src/shaped-graphics/context/uncached.hh) — the `ctx.cached` / `ctx.uncached` scopes.
 - [key_value_cache.hh](../../../../base/clean-core/src/clean-core/container/key_value_cache.hh) / [byte_stream_builder.hh](../../../../base/clean-core/src/clean-core/container/byte_stream_builder.hh) — the tiered cache + key serializer.
 - [cc::async](../../../../base/clean-core/docs/systems/async.md) — the async/dataflow system the async builds run on.
 - [bindings](bindings.md) — the schemas being cached and where `binding_group` (not cached) lives.

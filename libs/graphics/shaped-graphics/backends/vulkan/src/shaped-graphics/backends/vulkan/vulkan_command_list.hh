@@ -2,10 +2,10 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
-#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
-#include <shaped-graphics/command_list.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/command_list/command_list.hh>
 
 namespace sg::backend::vulkan
 {

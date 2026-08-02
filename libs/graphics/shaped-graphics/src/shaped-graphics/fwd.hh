@@ -38,12 +38,12 @@ class command_list_raster_manual_scope;
 class rendering_scope;
 class raw_buffer;
 class raw_texture;
-class blas;                         // bottom-level acceleration structure (see acceleration_structure.hh)
-class tlas;                         // top-level acceleration structure (see acceleration_structure.hh)
+class blas;                         // bottom-level acceleration structure (see raytracing/acceleration_structure.hh)
+class tlas;                         // top-level acceleration structure (see raytracing/acceleration_structure.hh)
 struct blas_triangles;              // value type — one triangle geometry input to build_blas
 struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
 struct tlas_instance;               // value type — one instance input to build_tlas
-enum class accel_build_flags : u32; // build-time trade-offs (see acceleration_structure.hh)
+enum class accel_build_flags : u32; // build-time trade-offs (see raytracing/acceleration_structure.hh)
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
 
 /// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS
@@ -53,18 +53,18 @@ enum class index_format : u8
     uint16, // DX12 R16_UINT / Vk INDEX_TYPE_UINT16
     uint32, // DX12 R32_UINT / Vk INDEX_TYPE_UINT32
 };
-struct texture_description;        // value type (see raw_texture.hh) — input to create_raw_texture
-enum class pixel_format : u16;     // texel format (see pixel_format.hh)
+struct texture_description;        // value type (see resource/raw_texture.hh) — input to create_raw_texture
+enum class pixel_format : u16;     // texel format (see resource/pixel_format.hh)
 enum class texture_usage : u32;    // texture usage flags (see types.hh)
-enum class texture_dimension : u8; // 1D / 2D / 3D (see raw_texture.hh)
+enum class texture_dimension : u8; // 1D / 2D / 3D (see resource/raw_texture.hh)
 class bytes_waiter;
 class bytes_future;
 template <class T>
 class data_future;
-class gpu_timestamp; // value type (see gpu_timestamp.hh) — result of cmd.query.record_gpu_timestamp
+class gpu_timestamp; // value type (see query/gpu_timestamp.hh) — result of cmd.query.record_gpu_timestamp
 class memory_heap;
-struct allocation_info;     // value type (see allocation_info.hh) — no handle typedef
-struct memory_requirements; // value type (see memory_heap.hh)
+struct allocation_info;     // value type (see memory/allocation_info.hh) — no handle typedef
+struct memory_requirements; // value type (see memory/memory_heap.hh)
 
 /// Lifetime mode of a resource — a hard contract, not a hint. `persistent` lives until its handles are
 /// released; `transient` expires when its epoch retires (using it beyond that is a hard error, and the
@@ -76,7 +76,7 @@ enum class lifetime_scope
     transient,
 };
 
-// Backend-neutral access-state vocabulary (see resource_access.hh / resource_access_state.hh) — the
+// Backend-neutral access-state vocabulary (see barrier/resource_access.hh / barrier/resource_access_state.hh) — the
 // shared, opt-in building blocks a backend uses to track state and emit barriers.
 enum class access_flags : u32;
 enum class pipeline_stage_flags : u32;
@@ -84,41 +84,41 @@ enum class texture_layout : u32;
 struct access_barrier;
 struct resource_access_state;
 
-// Resource views (see views.hh) — value types, no handle typedefs. The typed view templates
+// Resource views (see resource/views.hh) — value types, no handle typedefs. The typed view templates
 // (uniform_buffer_view/readonly_buffer_view/readwrite_buffer_view) are constrained, and `raw_view` is a
-// `std::variant` alias (not forward-declarable), so only the enums are declared here; include views.hh for
+// `std::variant` alias (not forward-declarable), so only the enums are declared here; include resource/views.hh for
 // the views themselves.
 enum class view_class;
 enum class view_shape;
-enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see views.hh)
-struct raw_buffer_view;                 // erased buffer-view payload — one arm of raw_view (see views.hh)
+enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see resource/views.hh)
+struct raw_buffer_view;                 // erased buffer-view payload — one arm of raw_view (see resource/views.hh)
 struct raw_texture_view;                // erased texture-view payload — one arm of raw_view
 struct raw_tlas_view;                   // erased acceleration-structure-view payload — one arm of raw_view
 
-// Render-target / depth-stencil views (see views.hh) — a texture bound as a color / depth-stencil target.
+// Render-target / depth-stencil views (see resource/views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.
 class render_target_view;
 class depth_stencil_view;
 
-// Window presentation (see swapchain.hh) — a chain of back buffers presented to an OS window.
+// Window presentation (see present/swapchain.hh) — a chain of back buffers presented to an OS window.
 struct swapchain_description; // value type — input to create_swapchain
 class swapchain;
 enum class present_mode : u8; // frame pacing (vsync / immediate)
 
-// Rendering-scope targets (see command_list.raster.hh) — a view plus its begin-op (clear / preserve /
+// Rendering-scope targets (see command_list/raster.hh) — a view plus its begin-op (clear / preserve /
 // discard). Built via the view's .cleared() / .preserved() / .discarded() members.
 enum class target_op : u8;
 struct color_target;
 struct depth_stencil_target;
 
-// Texture samplers (see sampler.hh) — value types, no handle.
+// Texture samplers (see binding/sampler.hh) — value types, no handle.
 enum class sampler_filter;
 enum class sampler_address_mode;
 enum class sampler_border_color;
 enum class compare_op;
 struct sampler;
 
-// Compiled shaders + reflected bindings (see compiled_shader.hh / binding.hh) — value types.
+// Compiled shaders + reflected bindings (see binding/compiled_shader.hh / binding/binding.hh) — value types.
 enum class binding_type;
 enum class shader_stage;
 enum class shader_format;
@@ -128,8 +128,8 @@ struct compute_dimensions;
 struct compiled_shader;
 
 // Bind path: group schema (binding_group_layout) -> pipeline interface (pipeline_layout) -> pipeline
-// (compute_pipeline) -> instance (binding_group). See binding_group_layout.hh / pipeline_layout.hh /
-// compute_pipeline.hh / binding_group.hh.
+// (compute_pipeline) -> instance (binding_group). See binding/binding_group_layout.hh / binding/pipeline_layout.hh /
+// pipeline/compute_pipeline.hh / binding/binding_group.hh.
 class binding_group_layout;
 class pipeline_layout;
 struct bound_sampler;               // {binding, sampler} — a register-bound static sampler on a pipeline_layout
@@ -140,9 +140,9 @@ class binding_group;
 struct named_view;    // {name, raw_view} — input to create_binding_group
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
 
-// Raster (graphics) pipeline + its fixed-function state vocabulary (see raster_pipeline.hh and the
-// primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh /
-// vertex_input.hh state headers). All value types unless noted.
+// Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
+// pipeline/primitive_topology.hh / pipeline/rasterization_state.hh / pipeline/blend_state.hh / pipeline/depth_stencil_state.hh /
+// pipeline/vertex_input.hh state headers). All value types unless noted.
 enum class primitive_topology;
 enum class primitive_topology_type;
 enum class fill_mode;
@@ -166,14 +166,14 @@ class raster_pipeline;
 struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
 
-// Draw recording (see command_list.raster.hh) — vertex/index buffer views + draw parameters.
+// Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
 // (index_format is defined above — shared with raytracing.)
 struct vertex_buffer_view;
 struct index_buffer_view;
 struct draw_config;
 struct draw_indexed_config;
 
-// Ray-tracing pipeline + shader table (see raytracing_pipeline.hh / raytracing_shader_table.hh). A
+// Ray-tracing pipeline + shader table (see raytracing/raytracing_pipeline.hh / raytracing/raytracing_shader_table.hh). A
 // DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.
 class raytracing_pipeline;
 struct raytracing_pipeline_description; // {layout, raygen/miss/hit/callable shaders, limits} — input to create

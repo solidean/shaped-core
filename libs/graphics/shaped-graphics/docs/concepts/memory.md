@@ -9,7 +9,7 @@ Two orthogonal axes decide where a resource's GPU memory comes from and how long
 - **Lifetime mode** — `lifetime_scope`: `persistent` vs `transient`. *When* the memory is valid.
 - **Backing** — dedicated vs placed. *How* the memory is allocated.
 
-An [`allocation_info`](../../src/shaped-graphics/allocation_info.hh) carries both and is passed to every
+An [`allocation_info`](../../src/shaped-graphics/memory/allocation_info.hh) carries both and is passed to every
 `create_*` call.
 
 ## Lifetime modes
@@ -35,7 +35,7 @@ resource at all?".
 "committed resource" in dx12 terms. Simple and self-contained; one allocation per resource.
 
 **Placed** (`is_placed()`, non-null heap) — the resource is sub-allocated into a shared
-[`memory_heap`](../../src/shaped-graphics/memory_heap.hh) at an offset, sharing that heap's single
+[`memory_heap`](../../src/shaped-graphics/memory/memory_heap.hh) at an offset, sharing that heap's single
 underlying allocation. Placing many resources into one heap avoids per-resource allocation overhead and
 lets the caller pack them however it likes.
 
@@ -104,6 +104,6 @@ resources, transient) until its own milestone.
 
 ## See also
 
-- [allocation_info.hh](../../src/shaped-graphics/allocation_info.hh) — the value type and `lifetime_scope`.
-- [memory_heap.hh](../../src/shaped-graphics/memory_heap.hh) — the heap factory and `memory_requirements`.
+- [allocation_info.hh](../../src/shaped-graphics/memory/allocation_info.hh) — the value type and `lifetime_scope`.
+- [memory_heap.hh](../../src/shaped-graphics/memory/memory_heap.hh) — the heap factory and `memory_requirements`.
 - [epochs](epochs.md) — the epoch retirement that bounds a transient resource's lifetime.

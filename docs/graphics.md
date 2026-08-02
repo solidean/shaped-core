@@ -30,7 +30,8 @@ over concrete graphics backends.
 
 - **Backends are separate static libraries** under
   [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/), one per API. dx12
-  and vulkan are **tier 1** (both stubbed today); metal and webgpu are **tier 2** (soon);
+  and vulkan are **tier 1** (dx12 is real; vulkan creates devices and resources but stubs its
+  recording paths); metal and webgpu are **tier 2** (soon);
   opengl and webgl are **legacy compat** (planned). A backend is built only where it is
   available for the platform/build.
 - **Abstract interfaces, backends derive directly.** `sg::context` / `sg::command_list` /
@@ -99,7 +100,7 @@ the [shaped-viewer readme](../libs/graphics/shaped-viewer/readme.md).
 A side utility (not part of the sv→sr→sg chain): a lean wrapper over the DirectX Shader Compiler
 (DXC) that turns HLSL into an `sg::compiled_shader` — bytecode + reflected bindings + compute
 workgroup size — filling the "compilation is not part of sg yet" gap noted in
-[compiled_shader.hh](../libs/graphics/shaped-graphics/src/shaped-graphics/compiled_shader.hh). It
+[compiled_shader.hh](../libs/graphics/shaped-graphics/src/shaped-graphics/binding/compiled_shader.hh). It
 depends only on **shaped-graphics**. Two-step API: `preprocess` (resolve `#include`s via a
 caller-supplied resolver) then `compile` (already-flattened source → DXIL + reflection).
 

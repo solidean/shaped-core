@@ -4,7 +4,7 @@
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
 #include <memory>

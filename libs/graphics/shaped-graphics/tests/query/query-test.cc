@@ -1,8 +1,8 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/gpu_timestamp.hh>
+#include <shaped-graphics/query/gpu_timestamp.hh>
 
 // Backend-agnostic GPU-query round-trip: record two timestamps, submit, read them back. Gated on
 // is_supported() so it also asserts the unsupported path (an invalid query, record still callable).

@@ -15,7 +15,7 @@ records hold **only a shader identifier** — one global root signature, no per-
 
 ## The pipeline mirrors compute_pipeline, but is a state object
 
-A [`raytracing_pipeline`](../../src/shaped-graphics/raytracing_pipeline.hh) is built from a
+A [`raytracing_pipeline`](../../src/shaped-graphics/raytracing/raytracing_pipeline.hh) is built from a
 `raytracing_pipeline_description`: a `pipeline_layout` (its global root signature) plus shaders grouped by
 category — `raygen_shaders`, `miss_shaders`, `callable_shaders`, and `hit_shaders` (each a `hit_shader` of
 optional closest-hit / any-hit / intersection). Unlike `compute_pipeline_description`, which references one
@@ -36,7 +36,7 @@ asynchronously; `ctx.uncached.create_raytracing_pipeline` is the synchronous esc
 
 Registering a shader in the pipeline returns a **handle** (`raygen_shader_handle`, `miss_shader_handle`,
 `hit_shader_handle`, `callable_shader_handle`) — its slot in the pipeline. Adding that handle to a
-[`raytracing_shader_table`](../../src/shaped-graphics/raytracing_shader_table.hh) returns an **index**
+[`raytracing_shader_table`](../../src/shaped-graphics/raytracing/raytracing_shader_table.hh) returns an **index**
 (`raygen_index`, …) — its slot in the *table*, which is what HLSL `TraceRay` / `dispatch_rays` address at
 launch. The table maps handle → index, so the same pipeline can back several tables with different layouts.
 
@@ -62,7 +62,7 @@ readable buffer for now; `types.hh` reserves a dedicated `shader_binding_table` 
 
 ## dispatch_rays reuses the compute bind/hazard machinery
 
-[`cmd.raytracing.dispatch_rays(table, raygen, width, height, depth)`](../../src/shaped-graphics/command_list.raytracing.hh)
+[`cmd.raytracing.dispatch_rays(table, raygen, width, height, depth)`](../../src/shaped-graphics/command_list/raytracing.hh)
 records the trace. In dx12 it binds the state object with `SetPipelineState1`, binds groups through the
 compute root signature, then runs the same **declare-hazards → flush → op** rhythm as `compute_dispatch`
 at `pipeline_stage_flags::raytracing`: a bound `tlas` surfaces as `accel_read`, and the shader-table buffer

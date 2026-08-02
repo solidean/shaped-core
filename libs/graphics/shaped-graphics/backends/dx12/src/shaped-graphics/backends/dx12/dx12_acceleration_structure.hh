@@ -2,9 +2,9 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
-#include <shaped-graphics/acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/raytracing/acceleration_structure.hh>
 
 namespace sg::backend::dx12
 {

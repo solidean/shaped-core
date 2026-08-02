@@ -6,8 +6,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
-#include <shaped-graphics/context.persistent.hh>
-#include <shaped-graphics/context.upload.hh>
+#include <shaped-graphics/context/persistent.hh>
+#include <shaped-graphics/context/upload.hh>
 #include <shaped-graphics/types.hh>
 
 #include <cstring>

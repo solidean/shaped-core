@@ -5,6 +5,7 @@
 
 #include <clean-core/error/result.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
 #include <vulkan/vulkan.h>
 
 namespace sg::backend::vulkan

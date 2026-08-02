@@ -1,7 +1,7 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
-#include <shaped-graphics/texture.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/texture.hh>
 
 #include <memory>
 

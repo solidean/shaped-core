@@ -218,7 +218,7 @@ sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of t
 ## Writing a concrete routine
 
 ```cpp
-#include <shaped-graphics/render_routine.hh>
+#include <shaped-graphics/routine/render_routine.hh>
 class my_routine : public sg::render_routine<my_routine>   // CRTP base; override the phases you need
 {
 public:

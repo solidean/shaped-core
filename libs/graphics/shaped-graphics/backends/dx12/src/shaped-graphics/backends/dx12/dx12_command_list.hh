@@ -3,14 +3,14 @@
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <shaped-graphics/backend/command_list_slot.hh>
-#include <shaped-graphics/backend/subresource.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_cpu_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/command_list.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/resource/subresource.hh>
 
 namespace sg::backend::dx12
 {

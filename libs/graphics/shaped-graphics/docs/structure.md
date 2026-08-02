@@ -20,35 +20,106 @@ Update the tags as the API lands. This document is design intent, not a guarante
 
 ## Top-level structure
 
+The tree is grouped by topic.
+Only the cross-cutting vocabulary sits at the root — everything else lives in the folder that owns it, and is included by its full path (`#include <shaped-graphics/resource/texture.hh>`).
+Where a folder is named after a type, that type's header repeats the folder name and doubles as the folder's umbrella.
+
 ```text
 src/shaped-graphics/
-  fwd.hh / all.hh / types.hh      [in progress]
-  context.hh/.cc                  [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; creates funneled via ctx.persistent
-  exceptions.hh                   [in progress] typed sg exceptions (device_lost / allocation / pipeline_creation / binding_group)
-  context.persistent.hh/.cc       [in progress] context_persistent_scope: ctx.persistent resource factory (back-ref + friend of context)
-  command_list.hh/.cc             [in progress] abstract; recording API planned
-  raw_buffer.hh/.cc               [in progress] abstract; protected shape (size/usage) done; as_* view factories
-  pixel_format.hh                 [in progress] restrictive texel-format enum + helpers (depth/compressed/block-size)
-  raw_texture.hh/.cc              [in progress] abstract; texture_description + protected shape; creation only (no views/barriers yet)
-  texture.hh                      [in progress] texture<Traits> typed wrapper (concept-gated getters) + shape typedefs
-  views.hh                        [in progress] strongly-typed buffer views (uniform/readonly/readwrite<T>, byte=raw)
-                                                + erased raw_view; texture/texel views deferred (resource + format exist; binding is future)
-  binding.hh                      [in progress] backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
-  compiled_shader.hh              [in progress] shader data model: bytecode blob + stage/format/entry + reflected bindings
+  fwd.hh / all.hh / types.hh      [done]       fwd decls + *_handle typedefs; umbrella; the small vocabulary enums
+  exceptions.hh                   [done]       typed sg exceptions (device_lost / allocation / pipeline_creation / swapchain_creation / binding_group)
+  bytes_future.hh/.cc             [done]       bytes_waiter / bytes_future / data_future<T> — the result vocabulary every download shares
+
+  barrier/                                     # the access-tracking substrate; shared vocabulary, per-backend emission
+    resource_access.hh            [done]       access_flags / pipeline_stage_flags / texture_layout / access_barrier
+    resource_access_state.hh      [done]       the three-timeline declare/flush state machine
+    subresource_state.hh          [done]       subresource_box + the covering partition over a texture's subresource domain
+    access_inference.hh           [done]       which access/layout an op or a bound view implies
+    command_list_slot.hh/.cc      [done]       dense per-command-list index into a resource's concurrent access-state slots
+
+  binding/
+    compiled_shader.hh            [in progress] bytecode blob + stage/format/entry + reflected bindings
                                                 (context::accepted_shader_formats advertises what a backend takes;
                                                  producing one is shaped-shader-library's job — see docs/shaders.md)
-  binding_group_layout.hh/.cc     [in progress] abstract: one group's schema (built from bindings); dx12 = descriptor-table schema (vulkan stub)
-  pipeline_layout.hh/.cc          [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
-  compute_pipeline.hh/.cc         [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
-  binding_group.hh/.cc            [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
-  command_list.compute.hh/.cc     [in progress] cmd.compute scope: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
-  command_list.query.hh/.cc       [in progress] cmd.query scope: record_gpu_timestamp / is_supported -> gpu_timestamp (dx12 real; vulkan stub)
-  allocation_info.hh              [stub]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
-  memory_heap.hh/.cc              [stub]        abstract; memory_requirements struct + alloc-info factory (query/acquire per kind); backend requirements hook pure-virtual
+                                                deferred: the reflected vertex-input / I-O signatures
+    binding.hh/.cc                [done]        backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
+    sampler.hh                    [in progress] sampler value type + filter/address/border/compare vocabulary; dx12 real, vulkan pending
+    binding_group_layout.hh/.cc   [in progress] abstract: one group's schema; dx12 = descriptor-table schema (vulkan stub)
+    pipeline_layout.hh/.cc        [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
+    binding_group.hh/.cc          [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
+
+  command_list/
+    command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
+    upload.hh/.cc                 [in progress] cmd.upload: inline host→device buffer + texture writes (dx12 real; vulkan stub)
+    download.hh/.cc               [in progress] cmd.download: inline readback of buffers + textures -> bytes_future (dx12 real; vulkan stub)
+    copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (dx12 real; vulkan stub); texture copies pending
+    compute.hh/.cc                [in progress] cmd.compute: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
+    raster.hh/.cc                 [in progress] cmd.raster: rendering scope, bindings, viewport/scissor state, draws (dx12 real; vulkan stub)
+    raytracing.hh/.cc             [in progress] cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12 real; vulkan stub)
+    query.hh/.cc                  [in progress] cmd.query: record_gpu_timestamp / is_supported (dx12 real; vulkan stub)
+
+  compute/
+    compute_pipeline.hh/.cc       [in progress] abstract: compute shader + pipeline layout; dx12 = PSO (vulkan stub)
+
+  context/
+    context.hh/.cc                [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; every create funneled through a scope
+    persistent.hh/.cc             [done]        ctx.persistent: the persistent-lifetime resource factory
+    transient.hh/.cc              [in progress] ctx.transient: per-epoch bump allocator over one owned memory_heap (buffers only so far)
+    upload.hh/.cc                 [in progress] ctx.upload: async bulk streaming on the dedicated copy queue (dx12 real; vulkan stub)
+    download.hh/.cc               [in progress] ctx.download: async bulk readback on the copy queue -> bytes_future (dx12 real; vulkan stub)
+    uncached.hh/.cc               [in progress] ctx.uncached: the raw, non-memoized layout / pipeline factory
+    cached.hh/.cc                 [in progress] ctx.cached: get-or-create over pipeline_cache (layouts sync, pipelines async); raster pipelines still missing
+    pipeline_cache.hh/.cc         [in progress] content-addressed tiered cache for group layouts, pipeline layouts, compute + raytracing pipelines
+
+  memory/
+    allocation_info.hh            [done]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
+    memory_heap.hh/.cc            [in progress] abstract heap + memory_requirements; dx12 places buffers, textures + vulkan still dedicated-only
+
+  present/
+    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire_backbuffer / present / resize / HDR flag); dx12 real (vulkan stub)
+
+  query/
+    gpu_timestamp.hh/.cc          [done]        pollable tick result of cmd.query.record_gpu_timestamp
+
+  raster/
+    raster_pipeline.hh/.cc        [in progress] abstract graphics PSO + raster_pipeline_description; dx12 real (vulkan stub)
+    primitive_topology.hh         [done]        topology + topology_type
+    rasterization_state.hh        [done]        fill/cull/front-face + depth bias
+    blend_state.hh                [done]        blend factors/ops, per-target blend + write mask
+    depth_stencil_state.hh        [done]        depth test/write, stencil faces + ops (reuses compare_op)
+    vertex_input.hh               [in progress] vertex_input_layout / slots / attributes; attributes are still HLSL-semantic-keyed
+
+  raytracing/
+    acceleration_structure.hh/.cc [in progress] blas / tlas + their build inputs; dx12 real (vulkan stub)
+    raytracing_pipeline.hh/.cc    [in progress] DXR state object + the shader-handle registration phase; dx12 real (vulkan stub)
+    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table; dx12 real (vulkan stub)
+
+  resource/
+    pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)
+    subresource.hh                [done]        texture_aspect / subresource_extent / _index / _range — pure addressing vocabulary
+    raw_buffer.hh/.cc             [in progress] abstract; protected shape (size/usage); as_* view factories
+    buffer.hh                     [done]        buffer<T> typed wrapper over raw_buffer_handle — element type pinned once at creation
+    raw_texture.hh/.cc            [in progress] abstract; texture_description + protected shape
+    texture.hh                    [in progress] texture<Traits> typed wrapper (concept-gated getters) + shape typedefs
+    texture_traits.hh             [done]        compile-time shape (dimension / array / cube / multisampled) + view-factory parameter bags
+    texture_descriptions.hh       [done]        shape-specific description structs feeding the typed create_texture_* calls
+    texture_region.hh             [done]        a texel box within one subresource, for host↔device copies
+    views.hh                      [in progress] typed buffer views (uniform/readonly/readwrite<T>, byte=raw) + the erased raw_view;
+                                                texture SRV/UAV + render_target / depth_stencil views; texel buffer views deferred
+    vertex_buffer_view.hh         [done]        buffer + byte range + stride
+    index_buffer_view.hh          [done]        buffer + index_format + byte range
+    impl/                                       internal (sg::impl), outside the public header set
+
+  routine/
+    render_routine_base.hh        [in progress] abstract base of a registered routine (init/evict hooks)
+    render_routine.hh/.cc         [in progress] render_routine<Derived> CRTP: 3-phase, hot-reload-aware acquire / prewarm / evict
+    routine_registry.hh/.cc       [in progress] the per-context ctx.routines type-keyed registry
+    reload_generation.hh/.cc      [done]        process-global monotonic counter driving hot-reload invalidation
+
 backends/                                       # each subclasses the abstract sg types directly
-  dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer
+  dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
-  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): real device/cmd-list/buffer
+  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): device + resource creation; recording is stubbed
   metal/                          [planned]     tier 2
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
@@ -57,7 +128,8 @@ backends/                                       # each subclasses the abstract s
 
 ## Backend tiers
 
-- **Tier 1 (now):** dx12, vulkan. Both are real (device + command list + GPU buffer + epoch system).
+- **Tier 1 (now):** dx12, vulkan. dx12 is real across the surface; vulkan has the device, queues, epochs
+  and resource creation, with the recording paths still stubbed.
 - **Tier 2 (soon):** metal, webgpu.
 - **Legacy compat (planned):** opengl, webgl.
 
@@ -92,11 +164,12 @@ storage). There are **no host-visible resources**; host↔device transfer is a g
 resource sg manages, driven through command lists. See the [coding-guidelines](coding-guidelines.md).
 
 Resource creation is reached through a **lifetime scope** on the context rather than the context
-directly: `ctx.persistent.create_raw_buffer(...)`. A scope (`sg::context_persistent_scope`) is a thin facade with a
+directly: `ctx.persistent.create_raw_buffer(...)`. A scope is a thin facade with a
 back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
-and the scope — a friend — funnels through it, tagging the request with its lifetime. Today only the
-persistent scope exists; a transient scope (per-frame/epoch resources, mapping onto `lifetime_scope`)
-is the planned second one.
+and the scope — a friend — funnels through it, tagging the request with its lifetime. Two lifetime
+scopes exist: `ctx.persistent` and `ctx.transient` (per-epoch, over a bump allocator; buffers only so
+far). Transfer gets its own scopes on the same pattern — `ctx.upload` / `ctx.download` for async bulk
+work on the copy queue — as do the factories, `ctx.uncached` and `ctx.cached`.
 
 ## Ownership & lifetime
 
@@ -121,31 +194,36 @@ factory for `allocation_info` — allocation tracking lives in the caller's own 
 [concepts/memory.md](concepts/memory.md) for the lifetime modes (persistent vs transient) and the
 placed-vs-dedicated system.
 
-Only the **dedicated** case is implemented today; a placed allocation asserts in the backends
-(`is_dedicated()` gate) until placement lands. **Not yet wired:** `context` has no `create_memory_heap`,
-and neither backend can bind a resource into a heap yet.
+`context` exposes `try_create_memory_heap`, and placement is live for **dx12 buffers** — that is what `ctx.transient`'s bump allocator runs on.
+Still dedicated-only: **dx12 textures** and **all vulkan resources**, both of which assert on a placed `allocation_info`.
 
 ## Planned surface (beyond the current stubs)
 
 ```text
 buffer transfer      [in progress]  command_list inline upload / download / copy (dx12 real, vulkan stub)
+texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped
+                                  (dx12 real, vulkan stub); device→device texture copy is the gap
 barriers             [in progress]  inferred access + state tracking + concurrent-list slot model; dx12 enhanced
                                   barriers real for buffers + textures (subresource-range layout transitions,
-                                  entry-layout revert); no public texture op drives it yet, vulkan pending
+                                  entry-layout revert), driven by texture transfer and the rendering scope;
+                                  vulkan pending
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
-                                  in compute); render_target/depth_stencil views done (dx12 descriptors, no render-pass
-                                  consumer yet); texel buffers deferred
+                                  in compute); render_target/depth_stencil views done and consumed by the rendering
+                                  scope; texel buffers deferred
 bindings             [in progress]  compiled_shader + binding vocab; binding_group_layout / pipeline_layout / group + compute_pipeline (dx12 real, vulkan stub)
-texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation + dx12 layout barriers + SRV/UAV
-                                  + RTV/DSV views done; copies + the render-pass consumer for RTV/DSV remain
-pipeline             [in progress]  compute pipeline + bind path (dx12 real, vulkan stub); graphics pipelines + shader compiler planned
+texture              [in progress]  raw_texture + texture<Traits> + pixel_format; creation, dx12 layout barriers,
+                                  SRV/UAV + RTV/DSV views and host↔device copies done; device→device copies remain
+pipeline             [in progress]  compute + raster pipelines and the bind path (dx12 real, vulkan stub); shaders are
+                                  compiled by shaped-shader-compiler-dxc. Raster PSO caching is the remaining gap
 sampler              [in progress]  sampler + static/dynamic samplers; dx12 real (root-sig static samplers
                                   + a separate sampler descriptor heap for dynamic ones); vulkan pending
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;
-                                  dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update,
-                                  compaction, SBT, raytracing pipelines, the acceleration_structure binding
+                                  dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update, compaction
+raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.raytracing.dispatch_rays, and the
+                                  acceleration_structure binding (inline RayQuery); dx12 real (WARP), vulkan stub.
+                                  Deferred: local root signatures, a dedicated shader-table buffer usage, a cached blob
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; dx12 real (WARP),
                                   vulkan stub. Deferred: occlusion + pipeline-statistics queries
@@ -155,7 +233,10 @@ swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acqui
                                   borrowed dx12_texture on the render-pass path); vulkan stub. Deferred: deeper HDR,
                                   multi-window, exclusive fullscreen
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
-                                  deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real)
+                                  deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real),
+                                  plus dx12's dedicated async copy queues for ctx.upload / ctx.download
+transient resources  [in progress]  ctx.transient's per-epoch bump allocator over a memory_heap + the transient
+                                  descriptor ring (dx12 real); transient textures pending
 ```
 
 The **epoch system** is the frame-level GPU-lifetime + CPU↔GPU sync mechanism: only the concept
@@ -168,10 +249,10 @@ underpins safe resource reclamation and command-allocator recycling. See
 
 ```text
 1. core types + backend bridge stubs + dx12/vulkan stubs   [in progress]  (this bootstrap)
-2. command_list buffer inline upload / download            [in progress]  dx12 real; copy + vulkan pending
+2. command_list buffer inline upload / download / copy     [in progress]  dx12 real; vulkan pending
 3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
-4. textures + views                                        [in progress]  texture resource + creation done (dx12 real, vulkan minimal); texture/texel views + binding path remain
-5. pipelines + shaders                                     [in progress]  compute bind path dx12-real (vulkan + graphics + shader compiler pending)
+4. textures + views                                        [in progress]  resource, creation, views and host↔device copies done (dx12 real, vulkan minimal); texel buffer views remain
+5. pipelines + shaders                                     [in progress]  compute + raster bind paths dx12-real, DXC compiler in place (vulkan pending)
 6. presentation (swapchain/surface) + submission/sync      [in progress]  dx12 swapchain real (WARP-tested); vulkan pending
 7. tier 2 backends (metal, webgpu)                         [planned]
 8. legacy backends (opengl, webgl)                         [planned]

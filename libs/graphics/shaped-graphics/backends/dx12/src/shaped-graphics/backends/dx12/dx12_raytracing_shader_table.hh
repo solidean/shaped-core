@@ -4,7 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/raytracing_shader_table.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
 namespace sg::backend::dx12
 {

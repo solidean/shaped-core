@@ -5,7 +5,7 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/raster_pipeline.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg::backend::dx12
 {

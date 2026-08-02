@@ -197,7 +197,7 @@ Not invariants — v1 shortcuts:
   chunks across calls), and the waiter is `dx12_async_download_waiter` — a `bytes_waiter` that simply blocks
   on its ready flag (no "submitted" gate, unlike the inline path — an async download is always handed to the
   actor).
-- The public facade is [`context.download.hh`](../../src/shaped-graphics/context.download.hh)
+- The public facade is [`context.download.hh`](../../src/shaped-graphics/context/download.hh)
   (`ctx.download`), which also carries the inline readback ring's `set_budget`.
 
 ## Backend note: vulkan needs a second-transfer-queue fallback

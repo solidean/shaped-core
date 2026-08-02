@@ -14,7 +14,7 @@ Two ideas shape the design: the resources are **plain vocabulary types with no t
 
 ## `blas` / `tlas` are the vocabulary types — no `raw_`/typed split
 
-[`raw_buffer`](../../src/shaped-graphics/raw_buffer.hh) and `raw_texture` split into a raw resource plus a
+[`raw_buffer`](../../src/shaped-graphics/resource/raw_buffer.hh) and `raw_texture` split into a raw resource plus a
 typed wrapper (`buffer<T>`, `texture<Traits>`) because they carry a *user-defined element type* worth
 layering type safety over. An acceleration structure has none — it is an opaque structure the driver
 builds and the tracer reads; there is nothing to type. So there is no `raw_blas`: **`blas` and `tlas` are
@@ -69,7 +69,7 @@ Every other sg resource is created by a `ctx.*` factory that just allocates. An 
 cannot be: its result size comes from a **prebuild query over the build inputs**, and producing it is GPU
 work. Allocation and build are therefore one **recorded** step — and sg never records command work from a
 `ctx.*` method. So creation is a command-list op on a new **`cmd.raytracing`** scope (mirroring
-[`cmd.compute`](../../src/shaped-graphics/command_list.compute.hh) / `cmd.copy`, and the future home of
+[`cmd.compute`](../../src/shaped-graphics/command_list/compute.hh) / `cmd.copy`, and the future home of
 trace-rays): `cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the result buffer,
 record the build with **transient** scratch, and return the handle.
 
@@ -80,7 +80,7 @@ later** for structures rebuilt from scratch every frame; it would be a property 
 not a separate scope. Build scratch is transient either way.
 
 Ordering is inferred, never hand-synchronized: a build declares
-[`accel_write`](../../src/shaped-graphics/backend/resource_access.hh) on the `accel_build` stage over its
+[`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over its
 storage and `accel_read` over each referenced BLAS; a later trace declares `accel_read` on the
 `raytracing` stage. The [barriers](barriers.md) system turns those into the right GPU barriers — the
 `accel_*` accesses and stages already exist, and `is_unordered_write` already covers `accel_write`.
@@ -150,7 +150,7 @@ runs a raygen→miss→closest-hit trace on WARP. See
 ## See also
 
 - [types.hh](../../src/shaped-graphics/types.hh) — `buffer_usage::accel_structure_storage` / `accel_structure_build_input`.
-- [resource_access.hh](../../src/shaped-graphics/backend/resource_access.hh) — the `accel_*` access flags and stages.
+- [resource_access.hh](../../src/shaped-graphics/barrier/resource_access.hh) — the `accel_*` access flags and stages.
 - [barriers](barriers.md) — how AS build/trace accesses are tracked and ordered.
 - [memory](memory.md) — the persistent-vs-transient lifetime axis the handle sits on.
 - [bindings](bindings.md) — the future `acceleration_structure` binding used to trace against a `tlas`.

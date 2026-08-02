@@ -183,7 +183,7 @@ Not invariants — v1 shortcuts:
   rebuilds the triple-buffered staging buffer at `bytes * 3`. The per-slot allocators and the reused
   command list survive; only staging memory changes. Applied before the next upload is staged, so
   in-flight uploads are unaffected.
-- The public facade is [`context.upload.hh`](../../src/shaped-graphics/context.upload.hh) (`ctx.upload`).
+- The public facade is [`context.upload.hh`](../../src/shaped-graphics/context/upload.hh) (`ctx.upload`).
 
 ## See also
 

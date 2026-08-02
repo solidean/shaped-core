@@ -6,7 +6,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/fixed_vector.hh>
-#include <shaped-graphics/backend/access_inference.hh> // shader_access_of / shader_layout_of
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -15,8 +14,9 @@
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
-#include <shaped-graphics/command_list.raster.hh>
-#include <shaped-graphics/pixel_format.hh>
+#include <shaped-graphics/barrier/access_inference.hh> // shader_access_of / shader_layout_of
+#include <shaped-graphics/command_list/raster.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 
 #include <memory> // std::dynamic_pointer_cast
 

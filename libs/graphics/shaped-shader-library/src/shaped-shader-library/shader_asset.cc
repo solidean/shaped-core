@@ -1,6 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
-#include <shaped-graphics/context.hh> // acquire(ctx) asks it which formats it accepts
+#include <shaped-graphics/context/context.hh> // acquire(ctx) asks it which formats it accepts
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
