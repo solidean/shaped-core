@@ -26,8 +26,20 @@ Find the topic that makes fixing them coherent.
 Walk outward from those files: same-area headers, the docs their comments **cite**, the cheat-sheet entries for their symbols.
 Redundancy lives *across* levels — repo docs, library docs, cheat sheet, header `///`, inline `//` — and a rewrite that fixes a header while leaving the doc it points at stale has fixed nothing.
 
+**Code and docs are one scope, not two.**
+A topic's prose spans levels by nature, so the default scope covers every level the topic touches.
+That is the headers, the `.cc` rationale comments, the concept docs they cite, and the cheat-sheet sections for those symbols.
+Splitting them into separate passes is the failure mode this skill exists to prevent — it is what leaves a rewritten header pointing at a doc that still contradicts it.
+A code-only or docs-only scope is the exception, and needs a reason beyond size.
+
 Offer 2–3 candidate scopes with counts (files, comment lines, current findings) and let the user pick.
+Make every candidate span levels, and let the choice be *how far out the topic reaches* — never *code or docs*.
+Naming the doc surface as the expensive option is how you talk the user out of the thing they wanted.
+If a level is genuinely too big for one pass, say what you are deferring and why, rather than offering it as an upgrade.
 Scope is fluid; "topic" is only the default shape.
+
+While walking outward, note what is **missing**: a central type with no concept doc, a cited path that does not resolve, a default that exists only in the cheat-sheet.
+A gap is a scope candidate like any other — this skill grows documentation as readily as it trims it.
 
 ### 2. Read the files
 
@@ -64,6 +76,14 @@ To `.tmp/prose-<topic>.plan` (gitignored, and easy for the user to read).
 - Everything after `| ` is verbatim final text — comment marker and indentation included, and nothing is inferred.
 - A bare `|` is an empty line inside a block.
 
+**Take every span's line numbers from a fresh read of that file, in the same session as writing the plan.**
+An off-by-one span silently swallows the declaration under the comment block, which is the one mistake this format makes easy.
+Reconstructing numbers from an earlier read, a search result or memory is how it happens.
+
+`prose apply` catches it every time — that is what the code-unchanged check is for — but read its message carefully:
+it reports where the *token streams diverge*, which is downstream of the span that is actually wrong.
+`'double' where 'u64' was` means a declaration went missing somewhere above, not that anything is wrong at the reported line.
+
 ### 5. Apply
 
 ```bash
@@ -84,7 +104,22 @@ It answers the reader questions from step 3.
 Instruct it **symmetrically** — flag dropped facts that mattered *and* added lines that do not earn their place.
 "Shorter and still answers everything" is a pass, not a regression.
 
-### 7. One commit
+Point it at the code as well as the prose, and ask it to check the claims:
+which exception types a scope actually throws, whether the stated preconditions match the `CC_ASSERT`s, whether a doc still describes a capability the type has since grown.
+A cold reader finds factual drift that no prose rule can see, and that is often the most valuable thing it returns.
+
+### 7. Correction pass
+
+**Expect a second `prose apply`, not a hand-edit.**
+A cold reader that finds nothing is the exception; a real review returns dropped facts, wrong exception types and files you wrongly left out of scope.
+Write those as a second plan (`.tmp/prose-<topic>-fixes.plan`) and land them the same way — the code-unchanged and rule-fires checks matter just as much on the corrections.
+
+Do not fold the review's findings into the working tree by hand.
+A hand-edit skips both checks, and it is the corrections — written under time pressure, against line numbers that just moved — that most need them.
+
+Two apply passes, one commit.
+
+### 8. One commit
 
 ## Two rules that override the defaults
 
