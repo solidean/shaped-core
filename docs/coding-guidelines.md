@@ -600,6 +600,9 @@ one semantic point per line, no reflowed blocks, free line length.
   That is backstory: it goes in the commit message or a higher-level doc, never in the source.
 - **Cross-module causal narration is the worst of it** — "we do it this way because *(some implementation fact three libraries over)*".
   It reads as insight and ages into a lie: the fact it names is not ours to keep true, and nobody rechecks it when that other code moves.
+- **A reference to something that no longer exists is dangling, and gets deleted** — a discarded prototype, a subsystem that was removed, a plan, a handover note, "an earlier version did X".
+  The reader cannot look any of it up, so it reads as a live part of the system that they simply cannot find.
+  If a removed approach still matters, it is a constraint on the *current* design: state that constraint and drop the history.
 - **Delete backstory by default.** The genuine Chesterton's fence exists — the comment without which someone *will* remove something load-bearing — but it is rare.
   On this tree, invented reasoning outnumbers the real cautionary tale by something like 20:1, so the prior is that it goes.
   Keep it only when you can name the concrete mistake the reader would otherwise make, and then state the mistake, not the history.

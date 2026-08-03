@@ -69,6 +69,11 @@ No narration of why an approach was chosen, and above all no cross-module causal
 Delete it by default: a real Chesterton's fence is rare enough (roughly 20:1 against on this tree) to be the exception you argue for.
 A measurement narrative belongs in the concept doc — never next to the code it once explained.
 
+**Dangling references go too, and a rework is where they surface.**
+A discarded prototype, a removed subsystem, a plan, a handover note, "an earlier version pinned X".
+The reader cannot look any of it up, so it reads as a live part of the system that they simply cannot find.
+Where a removed approach still matters it is a constraint on the *current* design: keep the constraint, drop the history.
+
 The budget is the anti-bloat device.
 It is not a shrink rule.
 
@@ -80,6 +85,13 @@ Do not reconstruct either figure with `wc` / `grep -c` pipelines; both come from
 ### 4. Write the plan
 
 To `.tmp/prose-<topic>.plan` (gitignored, and easy for the user to read).
+
+**Keep a plan under ~800 lines, and split the surface into several when it would run over.**
+One concept still covers the whole surface — this is chunking the *landing*, not the scoping.
+A big surface as one plan means a long write before the first dry run, and one bad span rejects every file in it;
+a chunk per file, or per closely-related group, gets each one validated, budget-checked and applied while it is still fresh in mind.
+Name them for the chunk (`prose-async-doc.plan`, `prose-async-headers.plan`, …) and land them in sequence under one commit.
+Apply each chunk before writing the next: applying shifts line numbers, so a later chunk's spans must be read after the earlier ones land.
 
 ```
 ## libs/base/clean-core/src/clean-core/container/key_value_cache.hh

@@ -442,7 +442,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 // The pool without threads
 // ============================================================================
 // Same class, same public API, no threads: cc::async_thread_pool exists on every platform, because gating the
-// API on the flag would push the branch into every caller (the cc::threaded_actor policy).
+// API on the flag would push the branch into every caller.
 // What it cannot do is run anything concurrently, so it stops pretending to.
 //
 // The one decision that does all the work is async_scheduler(false) -- no steal-capable peers.
