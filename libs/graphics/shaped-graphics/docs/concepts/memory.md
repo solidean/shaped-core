@@ -1,9 +1,5 @@
 # Concept: memory
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [epochs](epochs.md).
-
 Two orthogonal axes decide where a resource's GPU memory comes from and how long it lives:
 
 - **Lifetime mode** — `lifetime_scope`: `persistent` vs `transient`. *When* the memory is valid.

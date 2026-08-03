@@ -1,8 +1,5 @@
 # Concept: raster (graphics) pipeline + draws
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)).
-> See also [bindings](bindings.md), [views](views.md), [barriers](barriers.md).
-
 A [`raster_pipeline`](../../src/shaped-graphics/raster/raster_pipeline.hh) is the graphics counterpart of `compute_pipeline`: a compiled PSO (vertex + optional fragment shader) plus fixed-function state, built from a `raster_pipeline_description` against a `pipeline_layout`.
 It is bound and drawn inside a rendering scope.
 Named `raster_pipeline` (not "graphics pipeline") to match the existing `cmd.raster` recording scope and the `raster_*` command-list seams.
@@ -70,3 +67,10 @@ Note [`dx12_pipeline_layout`](../../backends/dx12/src/shaped-graphics/backends/d
 PSO **caching** (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing + `async_raster_pipeline` — the compute/RT parity piece), **indirect draws**,
 **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and the **vulkan** implementation.
 Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).
+
+## See also
+
+- [bindings](bindings.md) — the reflected bindings a `pipeline_layout` is built from.
+- [views](views.md) — the render-target and depth views a rendering scope is opened on.
+- [barriers](barriers.md) — the attachment transitions a rendering scope infers for you.
+- [caches](caches.md) — why the raster pipeline is `ctx.uncached`-only today.

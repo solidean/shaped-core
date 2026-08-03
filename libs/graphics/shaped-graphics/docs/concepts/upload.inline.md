@@ -1,10 +1,5 @@
 # Concept: inline upload
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)), and backend-neutral (the
-> per-backend realization is a section at the end). See also [epochs](epochs.md), [threading](threading.md),
-> and the siblings [async upload](upload.async.md) and [inline download](download.inline.md).
-
 ## What inline upload is
 
 **Inline upload** stages latency-critical CPU→GPU buffer writes through a persistently-mapped **staging

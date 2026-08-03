@@ -24,38 +24,26 @@ milestone is command-list buffer **upload / download / copy** in sg.
 
 ### shaped-graphics — `sg::`
 
-The graphics-API wrapper. It exposes a small, backend-agnostic surface — `context`,
-`command_list`, and GPU resource types (`buffer` today; `texture`, `pipeline`, … to come) —
-over concrete graphics backends.
+The graphics-API wrapper.
+It exposes a small, backend-agnostic surface — `context`, `command_list`, and the GPU resource types (buffers, textures, views, layouts and pipelines) — over concrete graphics backends.
 
-- **Backends are separate static libraries** under
-  [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/), one per API. dx12
-  and vulkan are **tier 1** (dx12 is real; vulkan creates devices and resources but stubs its
-  recording paths); metal and webgpu are **tier 2** (soon);
-  opengl and webgl are **legacy compat** (planned). A backend is built only where it is
-  available for the platform/build.
-- **Abstract interfaces, backends derive directly.** `sg::context` / `sg::command_list` /
-  `sg::buffer` (under
-  [src/shaped-graphics/](../libs/graphics/shaped-graphics/src/shaped-graphics/)) are abstract; a
-  backend subclasses them directly (`sg::backend::vulkan::vulkan_context : sg::context`) — there is
-  no separate bridge/impl layer. Cheap shared metadata (a buffer's size/usage) lives in the base
-  as protected members, so reading it costs no virtual call and every backend inherits it.
-- **sg does not depend on the backends.** The dependency arrow points one way (backends → sg):
-  there is no `sg::create_context` in the core. Each backend library instead exposes an
-  `sg::create_<backend>_context(config)` factory with its own config type. `backend_kind` is a
-  coarse tag, not a backend identity — a debug/cpu/remote backend is just as valid as dx12/vulkan.
-  This decoupling is intentional, so sg never overfits to today's GPU backends.
-- **Resource model.** `context` and `command_list` are the mutable drivers. Resources
-  (`buffer`, later `texture`) are **shared-immutable**: their shape is fixed and they behave
-  like a span over mutable GPU-resident memory. There are **no host-visible buffers or
-  textures** in the API — PCIe transfer is a globally shared resource that sg manages.
-- **Handles.** Every shared type has an `xyz_handle` typedef =
-  `std::shared_ptr<sg::xyz>` (e.g. `sg::context_handle`).
+- **Backends are separate static libraries** under [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/), one per API.
+  dx12 and vulkan are **tier 1** — dx12 is real, while vulkan creates devices and resources but stubs its recording paths.
+  metal and webgpu are **tier 2** (soon); opengl and webgl are **legacy compat** (planned).
+  A backend is built only where it is available for the platform and build.
+- **Abstract interfaces, backends derive directly.**
+  `sg::context`, `sg::command_list` and `sg::raw_buffer` are abstract; a backend subclasses them directly (`vulkan_context : sg::context`), with no bridge or impl layer between.
+  Cheap shared metadata, such as a buffer's size and usage, lives in the base as protected members, so reading it costs no virtual call and every backend inherits it.
+- **sg does not depend on the backends.** The dependency arrow points one way, backends → sg, so there is no `sg::create_context` in the core.
+  Each backend library exposes its own `sg::create_<backend>_context(config)` instead — see the [context concept doc](../libs/graphics/shaped-graphics/docs/concepts/context.md).
+  `backend_kind` is a coarse tag, not a backend identity: a debug, CPU or remote backend is just as valid as dx12 or vulkan.
+- **Resource model.** `context` and `command_list` are the mutable drivers.
+  Resources are **shared-immutable**: their shape is fixed, and they behave like a span over mutable GPU-resident memory.
+  There are **no host-visible buffers or textures** in the API — PCIe transfer is a globally shared resource that sg manages.
+- **Handles.** Every shared type has an `xyz_handle` typedef, `std::shared_ptr<sg::xyz>`, such as `sg::context_handle`.
 
-See the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md) and its
-[coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md) for the
-load-bearing conventions (handles, backend smurf naming, the duplication-over-abstraction
-stance).
+See the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md) and its [coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md) for the load-bearing conventions.
+Those are handles, backend smurf naming, and the duplication-over-abstraction stance.
 
 ### shaped-rendering — `sr::`
 

@@ -69,7 +69,7 @@ sg::has_flag(usage, flag) // bool — every bit of `flag` set in `usage`
 sg::present_mode          // vsync | immediate  (swapchain frame pacing — see the swapchain section)
 ```
 
-## context — mutable driver / factory
+## context — mutable driver / factory  (see docs/concepts/context.md)
 
 ```cpp
 #include <shaped-graphics/context/context.hh>
@@ -91,19 +91,19 @@ ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (he
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
+                                                   //   using any transient resource past its epoch is a hard error (asserts)
 ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset_in_bytes=0)  // void — ASYNC stream host bytes into buf on the copy queue (needs copy_dst); fire-and-forget, pin holds the bytes; later lists reading buf auto-wait; empty = no-op
 ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset_in_elements=0)   // void — typed convenience; re-views the SAME pin as bytes (no copy). offset in ELEMENTS of T. build the pin with cc::make_pinned_data / cc::as_pinned_data
                                                    //   buf may be a raw_buffer_handle OR a buffer<T> — pass the typed buffer and T is deduced (no .raw())
 ctx.upload.bytes_to_texture(tex, cc::pinned_data<byte const>, subresource={}, region={})  // void — ASYNC upload tightly-packed pixels into one texture (sub)region (needs copy_dst); later lists reading tex auto-wait
-ctx.upload.set_async_window_size(bytes)            // void — resize the async staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
-ctx.upload.set_inline_budget(bytes)                // void — resize the inline (cmd.upload) ring; applied at the next advance_epoch; default 16 MiB
+ctx.upload.set_async_window_size(bytes)            // void — resize the async staging window (x3 buffered); copy actor adopts it between windows; dx12 default 16 MiB
+ctx.upload.set_inline_budget(bytes)                // void — resize the inline (cmd.upload) ring; applied at the next advance_epoch; dx12 default 16 MiB
 ctx.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_future — ASYNC read buf back on the copy queue (needs copy_src); read auto-waits on the last writer, a later writer auto-waits on the read; drop the future to cancel; size 0 = ready empty future
 ctx.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T. See bytes_from_buffer
 ctx.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 ctx.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — ASYNC read one texture (sub)region back (needs copy_src), tightly packed
-ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; default 16 MiB
-ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); default 16 MiB
-                                                   //   using any transient resource past its epoch is a hard error (asserts)
+ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; dx12 default 16 MiB
+ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); dx12 default 16 MiB
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in); throws sg::device_lost_exception on device loss
 ctx.submit_command_list_and_present(sc, std::move(cmd)) // -> submission_token — THE present path: folds the swapchain back-buffer's present-layout transition into cmd, submits, then presents (see swapchain)
 ctx.drop_command_list(std::move(cmd))              // void — consumes cmd; explicit discard (same epoch). NB a list left to leave
@@ -117,7 +117,7 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { bool enable_debug_layer=false; bool use_warp=false; }  (independent flags)
+// dx12_config { enable_debug_layer=false; use_warp=false; upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // create errors on environment failure (no adapter, device refused); misuse asserts
 ```
 

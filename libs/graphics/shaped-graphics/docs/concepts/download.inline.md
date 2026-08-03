@@ -1,9 +1,5 @@
 # Concept: inline download
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [epochs](epochs.md), [threading](threading.md), and the sibling [inline upload](upload.inline.md).
-
 ## What inline download is
 
 **Inline download** reads GPU buffer bytes back to the host through a persistently-mapped

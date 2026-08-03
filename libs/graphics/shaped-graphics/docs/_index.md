@@ -52,7 +52,12 @@ A folder's own umbrella, where it has one, is the same-named header inside it (`
 ## Concepts
 
 Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions behind a topic.
+A concept doc answers "what is this and why is it shaped this way?".
+It is not the full API — that is the [cheat-sheet](../cheat-sheet.md) — and not the roadmap, which is [structure](structure.md).
+Where a concept doc has a per-backend section, it sits at the end, so the body stays backend-neutral.
 
+- [context](concepts/context.md) — `sg::context` itself: why there is no `sg::create_context`, the six creation scopes and how to pick between them,
+  the frame loop, shutdown, and how device loss surfaces.
 - [backends](concepts/backends.md) — what a backend is, why we duplicate rather than abstract across them, and how each backend carries its own tests (feature smoke + backend-internal invariants).
 - [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the epoch counter/fence, advance/retire, deferred deletion, and finalizers.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are concurrency-safe and which must be externally synchronized.
@@ -60,7 +65,8 @@ Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions 
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
 - [textures](concepts/textures.md) — the `raw_texture` resource vs the typed `texture<Traits>` wrapper, the derived-not-flagged `texture_description` shape, and the restrictive `pixel_format` set.
 - [bindings](concepts/bindings.md) — `compiled_shader` reflection: the backend-agnostic `binding` vocabulary (`binding_type`, `(set, index)`) and how a binding validates a bound `raw_view`.
-- [caches](concepts/caches.md) — the content-addressed get-or-create caches for binding layouts, compute pipelines (async), and compiled shaders: `ctx.uncached` (raw) vs `ctx.cached`, keys, and tiers.
+- [caches](concepts/caches.md) — the content-addressed get-or-create caches for binding layouts, compute and raytracing pipelines (async), and compiled shaders:
+  `ctx.uncached` (raw) vs `ctx.cached`, the keys, and the provider tiers.
 - [acceleration structures](concepts/acceleration-structures.md) — ray-tracing `blas`/`tlas`:
   opaque driver-built structures whose creation is a recorded `cmd.raytracing` build, the DXR∩Vulkan input vocabulary, and the persistent-vs-transient handle lifetime.
 - [raytracing pipeline](concepts/raytracing-pipeline.md) — the full DXR path:

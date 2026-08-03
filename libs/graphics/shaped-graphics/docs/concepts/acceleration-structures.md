@@ -1,9 +1,5 @@
 # Concept: acceleration structures
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [barriers](barriers.md), [memory](memory.md), [bindings](bindings.md).
-
 A ray-tracing **acceleration structure** is an opaque, driver-built spatial index the GPU traverses to
 find ray/geometry hits. sg exposes two: a **`blas`** (bottom-level) indexes the triangles or procedural
 primitives of one mesh; a **`tlas`** (top-level) indexes a set of *instances*, each placing a `blas` into
