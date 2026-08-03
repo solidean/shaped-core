@@ -7,22 +7,18 @@
 
 #include <memory>
 
-/// Backend-agnostic cache for group layouts, pipeline layouts, and compute pipelines, keyed by a
-/// cc::hash128 over the logical creation arguments (so it is independent of any backend handle identity).
-/// A second acquire with the same arguments returns the already-created handle / async node instead of
-/// rebuilding.
+/// Backend-agnostic cache for group layouts, pipeline layouts, and compute + raytracing pipelines.
+/// Keyed by a cc::hash128 over the logical creation arguments, so it is independent of any backend handle identity.
+/// A second acquire with the same arguments returns the already-created handle / async node instead of rebuilding.
 ///
-/// Layouts are cheap and are cached synchronously; compute pipelines are built asynchronously
-/// (multi-ms PSO creation) as a cc::async routed to the installed default pool. Graphics / raytracing
-/// pipelines are future work — sg has no such types yet.
+/// Layouts are cheap and cached synchronously.
+/// Pipelines are built asynchronously as a cc::async routed to the installed default pool, since PSO creation is multi-ms.
+/// Raster pipelines are not cached yet.
 ///
-/// A context owns one of these (reached via ctx.cached); the acquire_* methods take the owning context
-/// so the cache stays a plain member.
+/// A context owns one of these, reached via ctx.cached; the acquire_* methods take the owning context so the cache stays a plain member.
 ///
-/// Threading: the async pipeline build calls a backend create from a pool worker, which is only safe
-/// where the backend permits concurrent pipeline creation (dx12 device creates are free-threaded). With
-/// a single_threaded thread_model, install no pool and drive the node inline on the main thread via
-/// cc::async_blocking_get_singlethreaded.
+/// Threading: the async pipeline build calls a backend create from a pool worker, which is only safe where the backend permits concurrent pipeline creation (dx12 device creates are free-threaded).
+/// With a single_threaded thread_model, install no pool and drive the node inline on the main thread via cc::async_blocking_get_singlethreaded.
 
 namespace sg
 {
@@ -50,28 +46,27 @@ public:
 
     // acquire (get-or-create)
 public:
-    /// The cached binding_group_layout for these bindings + static samplers, created via ctx.uncached on a
-    /// miss. Identical (bindings, static_samplers) map to one shared handle — the static samplers are part
-    /// of the key, since they are baked into the group layout. Throws sg::pipeline_creation_exception on failure.
+    /// The cached binding_group_layout for these bindings + static samplers, created via ctx.uncached on a miss.
+    /// Identical (bindings, static_samplers) map to one shared handle — the static samplers are part of the key, since they are baked into the group layout.
+    /// Throws sg::pipeline_creation_exception on failure, or sg::device_lost_exception if the device was lost.
     [[nodiscard]] binding_group_layout_handle acquire_binding_group_layout(context& ctx,
                                                                            cc::span<binding const> bindings,
                                                                            cc::span<named_sampler const> static_samplers
                                                                            = {});
 
-    /// The cached pipeline_layout for these ordered group layouts, created via ctx.uncached on a miss. The
-    /// key is the group layouts' handle identity, so acquire the group layouts THROUGH the cache for full
-    /// dedup. Throws sg::pipeline_creation_exception on failure.
+    /// The cached pipeline_layout for these ordered group layouts, created via ctx.uncached on a miss.
+    /// The key is the group layouts' handle identity, so acquire the group layouts THROUGH the cache for full dedup.
+    /// Throws sg::pipeline_creation_exception on failure, or sg::device_lost_exception if the device was lost.
     [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(context& ctx, pipeline_layout_description const& desc);
 
-    /// The async compute_pipeline for `desc`, built via ctx.uncached on a miss. The key combines the
-    /// shader's content with the pipeline_layout handle's identity, so acquire the pipeline layout THROUGH
-    /// the cache to get full dedup (identical layouts then share one handle). Drive with
-    /// cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// The async compute_pipeline for `desc`, built via ctx.uncached on a miss.
+    /// The key combines the shader's content with the pipeline_layout handle's identity, so acquire the pipeline layout THROUGH the cache for full dedup.
+    /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_compute_pipeline acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc);
 
-    /// The async raytracing_pipeline for `desc`, built via ctx.uncached on a miss. The key combines every
-    /// shader's content with the pipeline_layout handle's identity and the pipeline limits. Drive with
-    /// cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
+    /// The async raytracing_pipeline for `desc`, built via ctx.uncached on a miss.
+    /// The key combines every shader's content with the pipeline_layout handle's identity and the pipeline limits.
+    /// Drive with cc::async_blocking_get_singlethreaded, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     [[nodiscard]] async_raytracing_pipeline acquire_raytracing_pipeline(context& ctx,
                                                                         raytracing_pipeline_description const& desc);
 
@@ -91,6 +86,6 @@ private:
     cc::key_value_cache<cc::hash128, pipeline_layout_handle> _pipeline_layout_cache;
     cc::key_value_cache<cc::hash128, async_compute_pipeline> _compute_cache;
     cc::key_value_cache<cc::hash128, async_raytracing_pipeline> _raytracing_cache;
-    // TODO: _graphics_cache once that pipeline type exists in sg.
+    // TODO: a raster_pipeline cache tier.
 };
 } // namespace sg

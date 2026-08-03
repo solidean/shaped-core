@@ -89,8 +89,8 @@ cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
 {
     if (timestamp._heap_future == nullptr)
         return {};
-    // Its heap is delivered by the readback actor like any other download, so this blocks on the actor
-    // exactly as wait_for(future) does — and needs the same pump to make progress without threads.
+    // Its heap is delivered by the readback actor like any other download, so this blocks on the actor exactly as wait_for(future) does.
+    // It needs the same pump to make progress without threads.
     drive_transfers_until_ready(*timestamp._heap_future);
     auto const data = timestamp._heap_future->wait_get_data();
     if (!data.has_value())
@@ -109,17 +109,16 @@ cc::optional<double> context::wait_for_seconds(gpu_timestamp const& timestamp)
 
 context::~context()
 {
-    // The backend destructor calls shutdown() before this base destructor runs. Reaching here not
-    // shut down means a lifetime/order bug (e.g. a context torn down through a path that skipped it).
+    // The backend destructor calls shutdown() before this base destructor runs.
+    // Reaching here not shut down means a lifetime/order bug — e.g. a context torn down through a path that skipped it.
     CC_ASSERT(_is_shut_down, "context must be shut down before destruction");
 }
 
 void context::shutdown()
 {
-    // A base context has no backend resources of its own; a backend overrides this to release its
-    // device/queue/tracking (and duplicate this idempotent flag flip). Routine instances are released at
-    // the top of each backend's shutdown (see routines.clear() there), before its resource systems are
-    // torn down — a routine's cached GPU state must not outlive the device it was built on.
+    // A base context has no backend resources of its own; a backend overrides this to release its device/queue/tracking and duplicate this idempotent flag flip.
+    // Routine instances are released at the top of each backend's shutdown (see routines.clear() there), before its resource systems are torn down.
+    // A routine's cached GPU state must not outlive the device it was built on.
     routines.clear();
     _is_shut_down = true;
 }

@@ -15,8 +15,7 @@ void context_upload_scope::bytes_to_texture(raw_texture_handle texture,
                                             subresource_index const& subresource,
                                             cc::optional<texture_region> region)
 {
-    // No region copies the whole subresource; a given region is used as-is, bounds-checked, and an empty
-    // one is a no-op.
+    // No region copies the whole subresource; a given region is used as-is, bounds-checked, and an empty one is a no-op.
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
