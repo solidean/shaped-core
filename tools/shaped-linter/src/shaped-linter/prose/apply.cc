@@ -122,6 +122,27 @@ cc::result<cc::unit> check_new_prose(planned_rewrite const& rewritten)
     return cc::unit{};
 }
 
+/// The prose `text` carries, read as the language `path` names.
+///
+/// A file that will not lex measures as empty instead of failing: the numbers are a report, never a gate,
+/// and the plan's own validation is what rejects a bad rewrite.
+prose_stats measure_text(cc::string_view text, cc::string_view path)
+{
+    auto const language = language_from_path(path);
+    auto const buffer = source_buffer::from_text(cc::string(text), path, 0);
+
+    token_stream tokens; // markdown has no lexer and needs none
+    if (language != source_language::markdown)
+    {
+        auto lexed = lex_as(buffer, language);
+        if (lexed.has_error())
+            return {};
+        tokens = cc::move(lexed.value());
+    }
+
+    return measure_prose(extract_prose(buffer, language, tokens));
+}
+
 cc::string join_path(cc::string_view root, cc::string_view path)
 {
     if (root.empty())
@@ -194,10 +215,11 @@ cc::result<cc::unit> validate_rewrite(planned_rewrite const& rewritten, cc::stri
     return check_new_prose(rewritten);
 }
 
-cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_view root, bool dry_run)
+cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_view root, apply_settings const& settings)
 {
     cc::vector<planned_rewrite> rewrites;
     cc::vector<cc::string> targets;
+    cc::vector<file_prose_delta> deltas;
     auto edits = isize(0);
 
     // Everything is built and judged before anything is written, so a plan that fails on its last file
@@ -215,17 +237,25 @@ cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_vie
         CC_RETURN_IF_ERROR(rewritten);
         CC_RETURN_IF_ERROR(validate_rewrite(rewritten.value(), buffer.value()->text()));
 
+        if (settings.stats)
+            deltas.push_back({
+                .path = file.path,
+                .before = measure_text(buffer.value()->text(), file.path),
+                .after = measure_text(rewritten.value().text, file.path),
+            });
+
         rewrites.push_back(cc::move(rewritten.value()));
         targets.push_back(target);
         edits += file.edits.size();
     }
 
-    if (dry_run)
-        return apply_report{.files_changed = rewrites.size(), .edits_applied = edits};
+    auto report = apply_report{.files_changed = rewrites.size(), .edits_applied = edits, .prose = cc::move(deltas)};
+    if (settings.dry_run)
+        return report;
 
     for (isize i = 0; i < rewrites.size(); ++i)
         CC_RETURN_IF_ERROR(write_file(targets[i], rewrites[i].text));
 
-    return apply_report{.files_changed = rewrites.size(), .edits_applied = edits};
+    return report;
 }
 } // namespace scl

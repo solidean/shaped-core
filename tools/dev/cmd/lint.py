@@ -46,6 +46,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(pa)
     pa.add_argument("plan", help="Plan file to apply (conventionally under .tmp/)")
     pa.add_argument("--dry-run", action="store_true", help="Validate the plan and report, but write nothing")
+    pa.add_argument("--stats", action="store_true",
+                    help="Also report the prose delta — lines and words, before and after, per file and total")
     return p
 
 
@@ -160,6 +162,7 @@ def run_prose_apply(
     preset_specs: list[str] | None,
     plan: str,
     dry_run: bool,
+    stats: bool = False,
     mirror: bool = False,
     verbose: bool = False,
 ) -> bool:
@@ -168,6 +171,8 @@ def run_prose_apply(
     The plan names line spans across many files and the prose to put there, so a surface-wide rework of
     comments and docs lands in ONE invocation instead of hundreds of edits.
     Applying is all-or-nothing, and the linter rejects any span whose edit changed code rather than prose.
+    `stats` adds the prose delta — lines and words, before and after, per file and total — which is how a
+    rework's line budget is measured rather than guessed.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
     ctx.discover(preset)  # (re)configure if stale
@@ -194,6 +199,8 @@ def run_prose_apply(
     argv = [str(exe), "prose", "apply", "--color", "always" if dev.console.enabled() else "never"]
     if dry_run:
         argv.append("--dry-run")
+    if stats:
+        argv.append("--stats")
     argv.append(str(plan_path))
 
     # Plan paths are repo-relative, so the linter must run from the repo root.
@@ -220,7 +227,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             raise SystemExit(0 if ok else 1)
         case "prose-apply":
             ok = run_prose_apply(
-                ctx, preset_specs=args.preset, plan=args.plan, dry_run=args.dry_run,
+                ctx, preset_specs=args.preset, plan=args.plan, dry_run=args.dry_run, stats=args.stats,
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)

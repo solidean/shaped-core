@@ -126,6 +126,12 @@ cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* c
             continue;
         }
 
+        if (arg == "--stats")
+        {
+            opts.stats = true;
+            continue;
+        }
+
         if (arg == "--no-color")
         {
             opts.color = cc::console::color_mode::never;
@@ -199,6 +205,7 @@ usage:
 
 options:
   --dry-run        validate the plan and report, but write nothing
+  --stats          also report the prose delta — lines and words, before and after, per file
   --color <mode>   auto (default), always or never
   --no-color       the old spelling of --color never
   -h / --help      print this and exit

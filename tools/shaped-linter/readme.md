@@ -27,7 +27,7 @@ uv run dev.py test shaped-linter-test  # run its tests
 
 uv run dev.py run shaped-linter <file>...   # point it at specific files (builds first)
 
-uv run dev.py lint prose-apply <plan> [--dry-run]  # apply a plan of prose rewrites (see below)
+uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]  # apply a plan of prose rewrites (see below)
 ```
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
@@ -43,6 +43,10 @@ shaped-linter prose apply [options] <plan>
   --color <mode>           auto (default), always or never
   --no-color               the old spelling of --color never
   -h / --help              print usage and exit
+
+prose apply also takes:
+  --dry-run                validate the plan and report, but write nothing
+  --stats                  report the prose delta per file and in total
 ```
 
 A fix is a byte-range edit, so a rewrite that shortens a line leaves the continuation lines under it aligned to where the text used to be.
@@ -93,6 +97,20 @@ Two validations run over every file before anything is written, and either one r
   A violation the plan did not write is not the plan's to answer for, which is the same non-ripple principle as `--changed-lines`.
 
 `--dry-run` runs both and writes nothing.
+
+`--stats` adds the prose delta — lines and words, before and after, per file and in total:
+
+```
+shaped-linter: applied 27 edit(s) across 14 file(s)
+prose lines and words, before -> after:
+   62 ->  48 (-14)    810 ->  640 (-170)   libs/graphics/shaped-graphics/src/shaped-graphics/context/context.hh
+  485 -> 391 (-94)   5210 -> 4180 (-1030)   total, 14 file(s)
+```
+
+Both counts are taken over extracted prose, so a `///`, a `*` leader and the code around them never register; markdown keeps its `#` and `1.` markers, as the extractor does.
+The numbers are identical under `--dry-run`, because every file is rewritten in memory before any of them is written — that is what makes the delta something to check a plan against before it lands.
+A file that will not lex measures as empty rather than failing the plan: this is a report, never a gate.
+
 The `reworking-prose` skill is the workflow around this: scope, concept, plan, apply, cold-reader review.
 
 ## Output

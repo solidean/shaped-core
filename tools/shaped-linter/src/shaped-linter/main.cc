@@ -4,6 +4,7 @@
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/string/string.hh>
 #include <shaped-linter/cli/changed_lines.hh>
 #include <shaped-linter/cli/options.hh>
 #include <shaped-linter/lex/source_manager.hh>
@@ -118,6 +119,88 @@ int run(scl::options const& opts)
     return exit_findings;
 }
 
+/// Right-align `text` in `width` columns.
+cc::string aligned(cc::string_view text, isize width)
+{
+    cc::string out;
+    for (auto i = text.size(); i < width; ++i)
+        out += ' ';
+    out += text;
+    return out;
+}
+
+/// A delta always carries its sign, which is what makes the column read as a change rather than a count.
+cc::string signed_text(isize value)
+{
+    return value > 0 ? cc::format("+{}", value) : cc::to_string(value);
+}
+
+/// One row of the prose delta table, rendered to text up front so the columns can be sized before printing.
+struct stats_row
+{
+    cc::string lines_before;
+    cc::string lines_after;
+    cc::string lines_delta;
+    cc::string words_before;
+    cc::string words_after;
+    cc::string words_delta;
+    cc::string label;
+};
+
+stats_row row_of(scl::prose_stats before, scl::prose_stats after, cc::string_view label)
+{
+    return {
+        .lines_before = cc::to_string(before.lines),
+        .lines_after = cc::to_string(after.lines),
+        .lines_delta = signed_text(after.lines - before.lines),
+        .words_before = cc::to_string(before.words),
+        .words_after = cc::to_string(after.words),
+        .words_delta = signed_text(after.words - before.words),
+        .label = cc::string(label),
+    };
+}
+
+/// Print `--stats`: one row per file in plan order, then the total.
+/// Every column is sized from the widest entry, the total row included, so the numbers line up down the block.
+void print_prose_stats(cc::span<scl::file_prose_delta const> files)
+{
+    if (files.empty())
+        return;
+
+    scl::prose_stats before;
+    scl::prose_stats after;
+    cc::vector<stats_row> rows;
+
+    for (auto const& f : files)
+    {
+        before.lines += f.before.lines;
+        before.words += f.before.words;
+        after.lines += f.after.lines;
+        after.words += f.after.words;
+        rows.push_back(row_of(f.before, f.after, f.path));
+    }
+    rows.push_back(row_of(before, after, cc::format("total, {} file(s)", files.size())));
+
+    auto w_lines = isize(0);
+    auto w_words = isize(0);
+    auto w_lines_delta = isize(0);
+    auto w_words_delta = isize(0);
+    for (auto const& r : rows)
+    {
+        w_lines = cc::max({w_lines, r.lines_before.size(), r.lines_after.size()});
+        w_words = cc::max({w_words, r.words_before.size(), r.words_after.size()});
+        w_lines_delta = cc::max(w_lines_delta, r.lines_delta.size());
+        w_words_delta = cc::max(w_words_delta, r.words_delta.size());
+    }
+
+    cc::println("prose lines and words, before -> after:");
+    for (auto const& r : rows)
+        cc::println("  {} -> {} ({})   {} -> {} ({})   {}", aligned(r.lines_before, w_lines),
+                    aligned(r.lines_after, w_lines), aligned(r.lines_delta, w_lines_delta),
+                    aligned(r.words_before, w_words), aligned(r.words_after, w_words),
+                    aligned(r.words_delta, w_words_delta), r.label);
+}
+
 int run_prose_apply(scl::prose_apply_options const& opts)
 {
     scl::source_manager sm;
@@ -137,7 +220,7 @@ int run_prose_apply(scl::prose_apply_options const& opts)
     }
 
     // Paths in a plan are repo-relative and dev.py runs us from the repo root, so the cwd is the root.
-    auto const report = scl::apply_prose_plan(plan.value(), "", opts.dry_run);
+    auto const report = scl::apply_prose_plan(plan.value(), "", {.dry_run = opts.dry_run, .stats = opts.stats});
     if (report.has_error())
     {
         cc::eprintln("{}", report.error().to_string());
@@ -146,6 +229,7 @@ int run_prose_apply(scl::prose_apply_options const& opts)
 
     cc::println("shaped-linter: {} {} edit(s) across {} file(s)", opts.dry_run ? "validated" : "applied",
                 report.value().edits_applied, report.value().files_changed);
+    print_prose_stats(report.value().prose);
     return exit_ok;
 }
 

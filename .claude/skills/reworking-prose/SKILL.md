@@ -57,6 +57,9 @@ Three things, before any new text is written:
 The budget is the anti-bloat device.
 It is not a shrink rule.
 
+`--stats` in step 5 is what measures it — the dry run reports the same lines and words a real run would, so the budget is checked against the plan before the plan lands.
+Do not reconstruct those counts with `wc` / `grep -c` pipelines; the applier already holds both sides.
+
 ### 4. Write the plan
 
 To `.tmp/prose-<topic>.plan` (gitignored, and easy for the user to read).
@@ -87,14 +90,18 @@ it reports where the *token streams diverge*, which is downstream of the span th
 ### 5. Apply
 
 ```bash
-uv run dev.py lint prose-apply .tmp/prose-<topic>.plan --dry-run   # validate everything, write nothing
-uv run dev.py lint prose-apply .tmp/prose-<topic>.plan             # all-or-nothing
+uv run dev.py lint prose-apply .tmp/prose-<topic>.plan --dry-run --stats   # validate everything, write nothing
+uv run dev.py lint prose-apply .tmp/prose-<topic>.plan --stats             # all-or-nothing
 uv run dev.py format --dirty-only
 uv run dev.py lint shaped --dirty-only
 ```
 
 Applying is all-or-nothing across every file in the plan, and a file is rejected when the edit changed **code** rather than prose, or when a rule fires on a line the plan **wrote**.
 Both are hard failures — fix the plan, do not work around the tool.
+
+`--stats` prints the prose delta per file and in total, which is where step 3's budget gets checked.
+Read it on the dry run: a surface that was meant to shrink and came back `+40` is a plan to revise, not a result to land.
+A file whose delta is `+0 / +0` usually means the rewrite only moved words around, which is worth a second look before it lands as churn.
 
 ### 6. Cold-reader pass
 

@@ -6,6 +6,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-linter/fwd.hh>
 #include <shaped-linter/prose/plan.hh>
+#include <shaped-linter/prose/prose_view.hh>
 
 namespace scl
 {
@@ -21,11 +22,32 @@ struct planned_rewrite
     cc::vector<u32> edited_lines;
 };
 
+/// How `apply_prose_plan` runs.
+struct apply_settings
+{
+    /// Validate the whole plan and report, but write nothing.
+    bool dry_run = false;
+
+    /// Measure each file's prose before and after, filling `apply_report::prose`.
+    bool stats = false;
+};
+
+/// One file's prose on either side of its rewrite.
+struct file_prose_delta
+{
+    cc::string path;
+    prose_stats before;
+    prose_stats after;
+};
+
 /// What `apply_prose_plan` did, or would have done under `--dry-run`.
 struct apply_report
 {
     isize files_changed = 0;
     isize edits_applied = 0;
+
+    /// In plan order, and empty unless `apply_settings::stats` asked for it.
+    cc::vector<file_prose_delta> prose;
 };
 
 /// Rewrite one file's text per `file.edits` and report which new lines the plan wrote.
@@ -50,6 +72,7 @@ cc::result<cc::unit> validate_rewrite(planned_rewrite const& rewritten, cc::stri
 ///
 /// All-or-nothing: every file is rewritten and validated in memory first, so a plan that fails on its last
 /// file leaves the first one untouched on disk.
-/// `dry_run` stops after validation and writes nothing.
-cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_view root, bool dry_run);
+/// Both sides of the prose delta are therefore in hand before anything is written, which is why `--dry-run`
+/// reports the same numbers a real run would.
+cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_view root, apply_settings const& settings);
 } // namespace scl

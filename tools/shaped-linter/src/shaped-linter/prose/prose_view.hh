@@ -54,7 +54,21 @@ struct prose_view
     cc::vector<prose_block> blocks;
 };
 
+/// How much prose a file carries.
+///
+/// Both counts are taken over the extracted text, so a `///` marker, a `*` leader and the blank lines
+/// between blocks never count.
+/// A word is a whitespace-separated run, so a markdown `1.` and a bare URL each count as one.
+struct prose_stats
+{
+    isize lines = 0;
+    isize words = 0;
+};
+
 /// Extract the prose of `buffer`, reading it as `language`.
 /// `tokens` is that file's token stream and is unused for markdown, which has no lexer.
 prose_view extract_prose(source_buffer const& buffer, source_language language, token_stream const& tokens);
+
+/// Count the lines and words of an extracted view.
+prose_stats measure_prose(prose_view const& view);
 } // namespace scl

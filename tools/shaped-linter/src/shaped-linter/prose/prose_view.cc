@@ -219,4 +219,30 @@ prose_view extract_prose(source_buffer const& buffer, source_language language, 
         return extract_from_markdown(buffer);
     return extract_from_tokens(buffer, language, tokens);
 }
+
+prose_stats measure_prose(prose_view const& view)
+{
+    prose_stats out;
+    for (auto const& block : view.blocks)
+        for (auto const& line : block.lines)
+        {
+            ++out.lines;
+
+            // Both ends are already trimmed, so a word starts wherever a space run ends.
+            auto in_word = false;
+            for (auto const c : line.text)
+            {
+                if (is_space(c))
+                {
+                    in_word = false;
+                    continue;
+                }
+                if (!in_word)
+                    ++out.words;
+                in_word = true;
+            }
+        }
+
+    return out;
+}
 } // namespace scl

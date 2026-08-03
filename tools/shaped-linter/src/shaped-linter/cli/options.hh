@@ -50,6 +50,9 @@ struct prose_apply_options
     /// --dry-run: validate the whole plan and report, but write nothing.
     bool dry_run = false;
 
+    /// --stats: also report each file's prose lines and words before and after, plus the total.
+    bool stats = false;
+
     /// --color auto|always|never, as for the lint command.
     cc::console::color_mode color = cc::console::color_mode::automatic;
 
