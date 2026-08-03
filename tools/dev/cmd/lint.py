@@ -48,6 +48,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     pa.add_argument("--dry-run", action="store_true", help="Validate the plan and report, but write nothing")
     pa.add_argument("--stats", action="store_true",
                     help="Also report the prose delta — lines and words, before and after, per file and total")
+
+    ps = lint_sub.add_parser("prose-stats", help="Report how much prose files carry — lines and words, per file and total")
+    a.preset(ps)
+    ps.add_argument("paths", nargs="+", help="Files or directories to measure (a directory is walked for lintable sources)")
     return p
 
 
@@ -211,6 +215,51 @@ def run_prose_apply(
     return result.ok
 
 
+def run_prose_stats(
+    ctx: Context,
+    *,
+    preset_specs: list[str] | None,
+    paths: list[str],
+    mirror: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Build shaped-linter and report how much prose the given files carry; return True if it ran.
+
+    The measure is the linter's own — extracted prose only, so a `///` marker and the code around it never
+    register — and it is the same one `prose-apply --stats` reports a delta in.
+    That is what lets a rework be scoped and budgeted BEFORE its plan is written, rather than discovering
+    the size of the job from the delta afterwards.
+    """
+    preset = ctx.resolve_presets(preset_specs)[0]
+    ctx.discover(preset)  # (re)configure if stale
+
+    files = dev.expand_lint_paths(ctx.root, paths)
+    if not files:
+        ctx.die(f"no lintable files under {' '.join(paths)}")
+
+    build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True,
+                              mirror=mirror, verbose=verbose)
+    if not all(r.ok for r in build_results):
+        dev.report.print_build_failure(build_results, [preset], ctx.root)
+        return False
+
+    exe = next((t.artifact for t in ctx.discover(preset)
+                if t.name == "shaped-linter" and t.kind == "EXECUTABLE" and t.artifact), None)
+    if exe is None:
+        print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
+        return False
+
+    # Repo-relative, so the table reads like the plan paths do; the linter runs from the root either way.
+    argv = [str(exe), "prose", "stats", "--color", "always" if dev.console.enabled() else "never"]
+    argv += [str(f.relative_to(ctx.root)) if f.is_relative_to(ctx.root) else str(f) for f in files]
+
+    result = dev.run_step(
+        argv, step_type="lint", name="prose-stats",
+        build_dir=preset.build_dir, cwd=ctx.root, mirror=True, verbose=verbose,
+    )
+    return result.ok
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     match args.lint_cmd:
         case "clang-tidy":
@@ -228,6 +277,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         case "prose-apply":
             ok = run_prose_apply(
                 ctx, preset_specs=args.preset, plan=args.plan, dry_run=args.dry_run, stats=args.stats,
+                mirror=args.mirror_output, verbose=args.verbose,
+            )
+            raise SystemExit(0 if ok else 1)
+        case "prose-stats":
+            ok = run_prose_stats(
+                ctx, preset_specs=args.preset, paths=args.paths,
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)

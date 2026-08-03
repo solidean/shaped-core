@@ -28,6 +28,7 @@ uv run dev.py test shaped-linter-test  # run its tests
 uv run dev.py run shaped-linter <file>...   # point it at specific files (builds first)
 
 uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]  # apply a plan of prose rewrites (see below)
+uv run dev.py lint prose-stats <path>...            # how much prose files carry, before writing a plan
 ```
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
@@ -37,6 +38,7 @@ It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only
 ```
 shaped-linter [options] <file>...
 shaped-linter prose apply [options] <plan>
+shaped-linter prose stats [options] <file>...
 
   --fix                    apply each finding's suggested edit back to its file in place
   --changed-lines <file>   report PROSE findings only on the lines named there
@@ -88,7 +90,10 @@ Spans ascend and may not overlap.
 Everything after `| ` is the verbatim final line, comment marker and indentation included — the applier infers neither.
 A bare `|` is an empty line, and the file's existing line terminator is preserved.
 
-Two validations run over every file before anything is written, and either one rejects the whole plan:
+Two validations run over every file before anything is written, and either one rejects the whole plan.
+Both keep going after a failure: a plan is authored across many files at once, so stopping at the first problem would cost the author one round trip per problem.
+One run therefore reports every problem the plan has — prose findings rendered with carets over the **rewritten** text, since none of it is on disk yet.
+
 
 * **code is unchanged** — the non-trivia token sequence must be identical to the original's.
   This is what lets a span cover a line that also holds code (`#include <memory> // std::shared_ptr`) and still permit only its trailing comment to move.
@@ -111,7 +116,19 @@ Both counts are taken over extracted prose, so a `///`, a `*` leader and the cod
 The numbers are identical under `--dry-run`, because every file is rewritten in memory before any of them is written — that is what makes the delta something to check a plan against before it lands.
 A file that will not lex measures as empty rather than failing the plan: this is a report, never a gate.
 
-The `reworking-prose` skill is the workflow around this: scope, concept, plan, apply, cold-reader review.
+## `prose stats` — how much prose a surface carries
+
+```
+uv run dev.py lint prose-stats libs/graphics/shaped-graphics/docs/concepts/
+```
+
+Reports prose lines and words per file, then a total, over the same extraction `--stats` measures a delta in — so the two can never disagree.
+A directory is walked for the same file kinds `lint shaped` covers.
+
+This is what makes a rework scopeable *before* its plan exists: candidate scopes get real counts, and a line budget can be set against a number rather than a guess.
+`--stats` then reports whether the plan met it.
+
+The `reworking-prose` skill is the workflow around both: scope, concept, plan, apply, cold-reader review.
 
 ## Output
 

@@ -1,7 +1,9 @@
 #include "prose_view.hh"
 
 #include <clean-core/common/utility.hh>
+#include <shaped-linter/lex/lexer.hh>
 #include <shaped-linter/lex/markdown_scanner.hh>
+#include <shaped-linter/lex/python_lexer.hh>
 #include <shaped-linter/lex/source_buffer.hh>
 
 namespace scl
@@ -244,5 +246,22 @@ prose_stats measure_prose(prose_view const& view)
         }
 
     return out;
+}
+
+prose_stats measure_file_prose(cc::string_view text, cc::string_view path)
+{
+    auto const language = language_from_path(path);
+    auto const buffer = source_buffer::from_text(cc::string(text), path, 0);
+
+    token_stream tokens; // markdown has no lexer and needs none
+    if (language != source_language::markdown)
+    {
+        auto lexed = language == source_language::python ? lex_python(buffer) : lex(buffer);
+        if (lexed.has_error())
+            return {};
+        tokens = cc::move(lexed.value());
+    }
+
+    return measure_prose(extract_prose(buffer, language, tokens));
 }
 } // namespace scl

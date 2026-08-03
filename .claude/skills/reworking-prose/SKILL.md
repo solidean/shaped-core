@@ -32,7 +32,8 @@ That is the headers, the `.cc` rationale comments, the concept docs they cite, a
 Splitting them into separate passes is the failure mode this skill exists to prevent — it is what leaves a rewritten header pointing at a doc that still contradicts it.
 A code-only or docs-only scope is the exception, and needs a reason beyond size.
 
-Offer 2–3 candidate scopes with counts (files, comment lines, current findings) and let the user pick.
+Offer 2–3 candidate scopes with counts (files, prose lines, current findings) and let the user pick.
+`uv run dev.py lint prose-stats <path>...` gives the prose lines and words, per file and total, for any file or directory — that is where the counts come from, not from an estimate.
 Make every candidate span levels, and let the choice be *how far out the topic reaches* — never *code or docs*.
 Naming the doc surface as the expensive option is how you talk the user out of the thing they wanted.
 If a level is genuinely too big for one pass, say what you are deferring and why, rather than offering it as an upgrade.
@@ -57,8 +58,9 @@ Three things, before any new text is written:
 The budget is the anti-bloat device.
 It is not a shrink rule.
 
-`--stats` in step 5 is what measures it — the dry run reports the same lines and words a real run would, so the budget is checked against the plan before the plan lands.
-Do not reconstruct those counts with `wc` / `grep -c` pipelines; the applier already holds both sides.
+Set it against the numbers `prose-stats` gave you in step 1, and check it with `--stats` in step 5.
+The dry run reports the same lines and words a real run would, so the budget is tested before the plan lands.
+Do not reconstruct either figure with `wc` / `grep -c` pipelines; both come from the same extraction the linter uses.
 
 ### 4. Write the plan
 
@@ -98,6 +100,9 @@ uv run dev.py lint shaped --dirty-only
 
 Applying is all-or-nothing across every file in the plan, and a file is rejected when the edit changed **code** rather than prose, or when a rule fires on a line the plan **wrote**.
 Both are hard failures — fix the plan, do not work around the tool.
+
+**One dry run reports every problem the plan has**, so fix them as a batch rather than re-running per finding.
+Prose findings come back with carets over the *rewritten* text, which is the text to correct in the plan — not what is still on disk.
 
 `--stats` prints the prose delta per file and in total, which is where step 3's budget gets checked.
 Read it on the dry run: a surface that was meant to shrink and came back `+40` is a plan to revise, not a result to land.

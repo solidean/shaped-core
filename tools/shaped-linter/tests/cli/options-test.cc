@@ -121,3 +121,23 @@ TEST("shaped-linter - options - prose apply takes one plan and its flags")
         CHECK(scl::parse_prose_apply_options(unknown).has_error());
     }
 }
+
+TEST("shaped-linter - options - prose stats takes many files")
+{
+    SECTION("every positional is a file to measure")
+    {
+        char const* const argv[] = {"a.hh", "docs/b.md"};
+        auto const r = scl::parse_prose_stats_options(argv);
+        REQUIRE(r.has_value());
+        CHECK(r.value().files.size() == 2);
+        CHECK(r.value().files[1] == "docs/b.md");
+    }
+    SECTION("no files, or an unknown flag, errors")
+    {
+        char const* const none[] = {"--color=never"};
+        CHECK(scl::parse_prose_stats_options(none).has_error());
+
+        char const* const unknown[] = {"--stats", "a.hh"};
+        CHECK(scl::parse_prose_stats_options(unknown).has_error());
+    }
+}

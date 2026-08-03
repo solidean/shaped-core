@@ -66,4 +66,25 @@ cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* c
 
 /// The `prose apply` usage text.
 cc::string_view prose_apply_usage_text();
+
+/// Parsed command line for `shaped-linter prose stats`.
+struct prose_stats_options
+{
+    /// Files to measure.
+    /// At least one is required (unless --help).
+    cc::vector<cc::string> files;
+
+    /// --color auto|always|never, as for the lint command.
+    cc::console::color_mode color = cc::console::color_mode::automatic;
+
+    /// -h / --help: main prints usage and exits 0.
+    bool help = false;
+};
+
+/// Parse the arguments AFTER the `prose stats` verb — `args` holds nothing to skip.
+/// Fails on an unknown flag or on no input files.
+cc::result<prose_stats_options> parse_prose_stats_options(cc::span<char const* const> args);
+
+/// The `prose stats` usage text.
+cc::string_view prose_stats_usage_text();
 } // namespace scl

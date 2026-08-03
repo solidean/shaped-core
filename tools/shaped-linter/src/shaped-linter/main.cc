@@ -147,6 +147,14 @@ struct stats_row
     cc::string label;
 };
 
+/// One row of the `prose stats` table — a measurement rather than a delta.
+struct measure_row
+{
+    cc::string lines;
+    cc::string words;
+    cc::string label;
+};
+
 stats_row row_of(scl::prose_stats before, scl::prose_stats after, cc::string_view label)
 {
     return {
@@ -220,25 +228,97 @@ int run_prose_apply(scl::prose_apply_options const& opts)
     }
 
     // Paths in a plan are repo-relative and dev.py runs us from the repo root, so the cwd is the root.
-    auto const report = scl::apply_prose_plan(plan.value(), "", {.dry_run = opts.dry_run, .stats = opts.stats});
-    if (report.has_error())
+    auto const outcome = scl::apply_prose_plan(plan.value(), "", {.dry_run = opts.dry_run, .stats = opts.stats});
+    if (!outcome.problems.empty())
     {
-        cc::eprintln("{}", report.error().to_string());
+        // Every problem at once: a plan spans many files, so one-at-a-time costs a round trip each.
+        // Findings first, then the structural errors, so the summary is the last line either stream carries.
+        // Spans point into the rewritten text, so the carets land on the prose the plan wrote.
+        if (!outcome.problems.findings.empty())
+            scl::report_findings(outcome.problems.findings, outcome.sources, {.color = cc::console::color_enabled()});
+
+        for (auto const& e : outcome.problems.errors)
+            cc::eprintln("{}", e); // already `error: `-prefixed
+
+        cc::eprintln("shaped-linter: {} problem(s); nothing was written", outcome.problems.count());
         return exit_usage;
     }
 
     cc::println("shaped-linter: {} {} edit(s) across {} file(s)", opts.dry_run ? "validated" : "applied",
-                report.value().edits_applied, report.value().files_changed);
-    print_prose_stats(report.value().prose);
+                outcome.report.edits_applied, outcome.report.files_changed);
+    print_prose_stats(outcome.report.prose);
     return exit_ok;
 }
 
-/// Dispatch `shaped-linter prose apply …`. `args` is the full argv.
+int run_prose_stats(scl::prose_stats_options const& opts)
+{
+    scl::prose_stats total;
+    cc::vector<measure_row> rows;
+
+    for (auto const& file : opts.files)
+    {
+        scl::source_manager sm;
+        auto buffer = sm.add_from_file(file);
+        if (buffer.has_error())
+        {
+            cc::eprintln("error: cannot read {}: {}", file, buffer.error().to_string());
+            return exit_usage;
+        }
+
+        auto const s = scl::measure_file_prose(buffer.value()->text(), file);
+        total.lines += s.lines;
+        total.words += s.words;
+        rows.push_back({.lines = cc::to_string(s.lines), .words = cc::to_string(s.words), .label = cc::string(file)});
+    }
+
+    rows.push_back({.lines = cc::to_string(total.lines),
+                    .words = cc::to_string(total.words),
+                    .label = cc::format("total, {} file(s)", opts.files.size())});
+
+    auto w_lines = isize(0);
+    auto w_words = isize(0);
+    for (auto const& r : rows)
+    {
+        w_lines = cc::max(w_lines, r.lines.size());
+        w_words = cc::max(w_words, r.words.size());
+    }
+
+    cc::println("prose lines and words:");
+    for (auto const& r : rows)
+        cc::println("  {}  {}   {}", aligned(r.lines, w_lines), aligned(r.words, w_words), r.label);
+
+    return exit_ok;
+}
+
+/// Dispatch `shaped-linter prose apply …` / `prose stats …`. `args` is the full argv.
 int run_prose_command(cc::span<char const* const> args)
 {
-    if (args.size() < 3 || cc::string_view(args[2]) != "apply")
+    auto const verb = args.size() >= 3 ? cc::string_view(args[2]) : cc::string_view("");
+
+    if (verb == "stats")
     {
-        cc::eprintln("error: the only prose subcommand is 'apply'");
+        auto opts = scl::parse_prose_stats_options(args.subspan(3));
+        cc::console::configure(opts.has_value() ? opts.value().color : cc::console::color_mode::automatic);
+
+        if (opts.has_error())
+        {
+            cc::eprintln("error: {}", opts.error().to_string());
+            cc::eprint(scl::prose_stats_usage_text());
+            return exit_usage;
+        }
+
+        if (opts.value().help)
+        {
+            cc::print(scl::prose_stats_usage_text());
+            return exit_ok;
+        }
+
+        return run_prose_stats(opts.value());
+    }
+
+    if (verb != "apply")
+    {
+        cc::eprintln("error: the prose subcommands are 'apply' and 'stats'");
         cc::eprint(scl::prose_apply_usage_text());
         return exit_usage;
     }

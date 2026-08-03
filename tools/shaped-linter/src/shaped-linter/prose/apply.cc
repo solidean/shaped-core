@@ -62,17 +62,24 @@ cc::result<token_stream> lex_as(source_buffer const& buffer, source_language lan
     return language == source_language::python ? lex_python(buffer) : lex(buffer);
 }
 
-cc::result<cc::unit> check_code_unchanged(planned_rewrite const& rewritten,
-                                          cc::string_view original,
-                                          source_language language)
+/// Append a plan diagnostic — already `error: `-prefixed and carrying its own site, since it is read by
+/// the plan's author rather than debugged.
+void check_code_unchanged(planned_rewrite const& rewritten,
+                          cc::string_view original,
+                          source_language language,
+                          cc::vector<cc::string>& out)
 {
     auto const before_buffer = source_buffer::from_text(cc::string(original), rewritten.path, 0);
     auto const after_buffer = source_buffer::from_text(cc::string(rewritten.text), rewritten.path, 0);
 
     auto before = lex_as(before_buffer, language);
-    CC_RETURN_IF_ERROR(before);
     auto after = lex_as(after_buffer, language);
-    CC_RETURN_IF_ERROR(after);
+    if (before.has_error() || after.has_error())
+    {
+        out.push_back(
+            cc::format("error: {}: cannot lex this file, so the edit cannot be checked against it", rewritten.path));
+        return;
+    }
 
     auto const old_tokens = significant_tokens(before.value());
     auto const new_tokens = significant_tokens(after.value());
@@ -84,28 +91,29 @@ cc::result<cc::unit> check_code_unchanged(planned_rewrite const& rewritten,
             continue;
 
         auto const at = after_buffer.line_col_at(new_tokens[i].span.byte_begin);
-        return cc::error(cc::format("{}:{}: this edit changes code, not just prose ('{}' where '{}' was)", rewritten.path,
-                                    at.line, comparable_text(new_tokens[i]), comparable_text(old_tokens[i])));
+        out.push_back(cc::format("error: {}:{}: this edit changes code, not just prose ('{}' where '{}' was)",
+                                 rewritten.path, at.line, comparable_text(new_tokens[i]), comparable_text(old_tokens[i])));
+        return;
     }
 
     if (old_tokens.size() != new_tokens.size())
-        return cc::error(cc::format("{}: this edit changes code, not just prose ({} code tokens where there were {})",
-                                    rewritten.path, new_tokens.size(), old_tokens.size()));
-
-    return cc::unit{};
+        out.push_back(cc::format("error: {}: this edit changes code, not just prose ({} code tokens where there were "
+                                 "{})",
+                                 rewritten.path, new_tokens.size(), old_tokens.size()));
 }
 
-cc::result<cc::unit> check_new_prose(planned_rewrite const& rewritten)
+void collect_new_prose(planned_rewrite const& rewritten, source_manager& sources, cc::vector<finding>& out)
 {
     cc::vector<rule> prose_rules;
     for (auto const& r : all_rules())
         if (r.layer == rule_layer::prose)
             prose_rules.push_back(r);
     if (prose_rules.empty())
-        return cc::unit{};
+        return;
 
-    auto const buffer = source_buffer::from_text(cc::string(rewritten.text), rewritten.path, 0);
-    for (auto const& f : run_rules(buffer, prose_rules))
+    // Registered rather than local, so the findings' spans still resolve once this returns.
+    auto const& buffer = sources.add_from_text(cc::string(rewritten.text), rewritten.path);
+    for (auto& f : run_rules(buffer, prose_rules))
     {
         auto const line = buffer.line_col_at(f.span.byte_begin).line;
 
@@ -116,31 +124,8 @@ cc::result<cc::unit> check_new_prose(planned_rewrite const& rewritten)
         if (!written_here)
             continue; // a violation the plan did not write is not the plan's to answer for
 
-        return cc::error(cc::format("{}:{}: {} ({})", rewritten.path, line, f.message, f.rule_id));
+        out.push_back(cc::move(f));
     }
-
-    return cc::unit{};
-}
-
-/// The prose `text` carries, read as the language `path` names.
-///
-/// A file that will not lex measures as empty instead of failing: the numbers are a report, never a gate,
-/// and the plan's own validation is what rejects a bad rewrite.
-prose_stats measure_text(cc::string_view text, cc::string_view path)
-{
-    auto const language = language_from_path(path);
-    auto const buffer = source_buffer::from_text(cc::string(text), path, 0);
-
-    token_stream tokens; // markdown has no lexer and needs none
-    if (language != source_language::markdown)
-    {
-        auto lexed = lex_as(buffer, language);
-        if (lexed.has_error())
-            return {};
-        tokens = cc::move(lexed.value());
-    }
-
-    return measure_prose(extract_prose(buffer, language, tokens));
 }
 
 cc::string join_path(cc::string_view root, cc::string_view path)
@@ -206,24 +191,31 @@ cc::result<planned_rewrite> build_rewrite(plan_file const& file, cc::string_view
     return out;
 }
 
-cc::result<cc::unit> validate_rewrite(planned_rewrite const& rewritten, cc::string_view original)
+void validate_rewrite(planned_rewrite const& rewritten,
+                      cc::string_view original,
+                      source_manager& sources,
+                      apply_problems& out)
 {
     auto const language = language_from_path(rewritten.path);
     if (language != source_language::markdown)
-        CC_RETURN_IF_ERROR(check_code_unchanged(rewritten, original, language));
+        check_code_unchanged(rewritten, original, language, out.errors);
 
-    return check_new_prose(rewritten);
+    // Runs even after a code-changed error: the point is to report everything wrong in one pass.
+    collect_new_prose(rewritten, sources, out.findings);
 }
 
-cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_view root, apply_settings const& settings)
+apply_outcome apply_prose_plan(prose_plan const& plan, cc::string_view root, apply_settings const& settings)
 {
+    apply_outcome out;
+
     cc::vector<planned_rewrite> rewrites;
     cc::vector<cc::string> targets;
     cc::vector<file_prose_delta> deltas;
     auto edits = isize(0);
 
-    // Everything is built and judged before anything is written, so a plan that fails on its last file
+    // Everything is built and judged before anything is written, so a plan with a problem in its last file
     // leaves the earlier ones exactly as they were.
+    // A failing file is recorded and skipped rather than returned on, so one run reports every problem.
     for (auto const& file : plan.files)
     {
         auto const target = join_path(root, file.path);
@@ -231,17 +223,25 @@ cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_vie
         source_manager sm;
         auto buffer = sm.add_from_file(target);
         if (buffer.has_error())
-            return cc::error(cc::format("cannot read {}: {}", target, buffer.error().to_string()));
+        {
+            out.problems.errors.push_back(cc::format("error: cannot read {}", target));
+            continue;
+        }
 
         auto rewritten = build_rewrite(file, buffer.value()->text());
-        CC_RETURN_IF_ERROR(rewritten);
-        CC_RETURN_IF_ERROR(validate_rewrite(rewritten.value(), buffer.value()->text()));
+        if (rewritten.has_error())
+        {
+            out.problems.errors.push_back(rewritten.error().to_string()); // already `error: `-prefixed
+            continue;
+        }
+
+        validate_rewrite(rewritten.value(), buffer.value()->text(), out.sources, out.problems);
 
         if (settings.stats)
             deltas.push_back({
                 .path = file.path,
-                .before = measure_text(buffer.value()->text(), file.path),
-                .after = measure_text(rewritten.value().text, file.path),
+                .before = measure_file_prose(buffer.value()->text(), file.path),
+                .after = measure_file_prose(rewritten.value().text, file.path),
             });
 
         rewrites.push_back(cc::move(rewritten.value()));
@@ -249,13 +249,17 @@ cc::result<apply_report> apply_prose_plan(prose_plan const& plan, cc::string_vie
         edits += file.edits.size();
     }
 
-    auto report = apply_report{.files_changed = rewrites.size(), .edits_applied = edits, .prose = cc::move(deltas)};
+    if (!out.problems.empty())
+        return out; // nothing is written when anything is wrong
+
+    out.report = {.files_changed = rewrites.size(), .edits_applied = edits, .prose = cc::move(deltas)};
     if (settings.dry_run)
-        return report;
+        return out;
 
     for (isize i = 0; i < rewrites.size(); ++i)
-        CC_RETURN_IF_ERROR(write_file(targets[i], rewrites[i].text));
+        if (auto const written = write_file(targets[i], rewrites[i].text); written.has_error())
+            out.problems.errors.push_back(written.error().to_string());
 
-    return report;
+    return out;
 }
 } // namespace scl

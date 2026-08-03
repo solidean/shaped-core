@@ -71,4 +71,11 @@ prose_view extract_prose(source_buffer const& buffer, source_language language, 
 
 /// Count the lines and words of an extracted view.
 prose_stats measure_prose(prose_view const& view);
+
+/// Measure the prose `text` carries, read as the language `path` names — extraction and counting in one.
+///
+/// This is the single definition of "how much prose is in this file", shared by `prose apply --stats` and
+/// `prose stats`, so the two can never drift.
+/// Text that will not lex measures as empty rather than failing: the numbers are a report, never a gate.
+prose_stats measure_file_prose(cc::string_view text, cc::string_view path);
 } // namespace scl
