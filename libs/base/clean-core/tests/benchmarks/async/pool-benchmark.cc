@@ -3,12 +3,12 @@
 // The concurrent scheduler needs OS threads; this file compiles to nothing where they are unavailable (wasm).
 #if CC_HAS_THREADS
 
-// cc::async_thread_pool benchmark — Phase 2 of the async performance gate.
+// cc::async_thread_pool benchmark: the concurrent half of the async performance picture.
 //
-// Phase 1 (async-benchmark.cc) answered the single-thread question. This one asks the two that decide the gate:
-// does a graph get near-linear speedup on the regular cases, and what does a fork-join task cost? Every case is
-// a hand-written fork-join graph over the raw primitives — the ergonomic parallel_for/reduce helpers are a
-// post-gate concern and must not block measurement.
+// async-benchmark.cc answers the single-thread question; this one asks the two that matter under concurrency.
+// Does a graph get near-linear speedup on the regular cases, and what does a fork-join task cost?
+// Every case is a hand-written fork-join graph over the raw primitives, since no ergonomic parallel_for /
+// reduce helpers exist yet.
 //
 // The five canonical shapes:
 //   parallel quicksort   recursive, irregular subproblem sizes -> the steal-quality stress
@@ -17,25 +17,29 @@
 //   nested parallel-for  a parallel-for whose leaf is itself a parallel-for -> deque depth + nested spawn
 //   spawn tree           trivial leaves, so per-node scheduling overhead IS the measurement
 //
-// Four things about the numbers, none obvious from a table and each one learned by getting it wrong:
+// Four things about the numbers, none of them obvious from a table:
 //
-// * A "w worker" row runs w+1 THREADS. blocking_get makes the calling thread participate as a worker for the
-//   duration (see async_thread_pool.hh), so the sweep tops out at hardware-concurrency MINUS ONE, and the "vs
-//   1w" column is anchored on a 2-thread config rather than a serial one. Compare rows, not absolutes.
-// * The machine matters and this file cannot know it. A heterogeneous part (P+E cores, SMT) bends the curve at
-//   the E-core and hyperthread boundaries, which is a property of the machine and not a defect in the
-//   scheduler. Judge the knee, not the top, against the count of *performance* cores on whatever you ran.
-// * Leaf work must stay compute-bound, and that is a live constraint, not a note: a memory-bound leaf caps
-//   speedup at DRAM bandwidth and measures the machine instead of the scheduler. It broke exactly once already
-//   — see mix(), whose eight LCG rounds were folded into one multiply-add by clang until it was made
-//   non-affine. If a case stops scaling past ~8 workers, check the codegen before blaming the pool.
-// * The spawn tree is the only case whose leaf does nothing, so it is the only one where per-node scheduling
-//   cost IS the measurement — and correspondingly the one most sensitive to idle-worker policy.
+// * A "w worker" row runs w+1 THREADS.
+//   blocking_get makes the calling thread participate as a worker for the duration (see async_thread_pool.hh),
+//   so the sweep tops out at hardware-concurrency MINUS ONE, and the "vs 1w" column is anchored on a 2-thread
+//   config rather than a serial one.
+//   Compare rows, not absolutes.
+// * The machine matters and this file cannot know it.
+//   A heterogeneous part (P+E cores, SMT) bends the curve at the E-core and hyperthread boundaries, which is a
+//   property of the machine and not a defect in the scheduler.
+//   Judge the knee, not the top, against the count of *performance* cores on whatever you ran.
+// * Leaf work must stay compute-bound, and that is a live constraint rather than a note.
+//   A memory-bound leaf caps speedup at DRAM bandwidth and measures the machine instead of the scheduler --
+//   see mix(), which clang folded into a single multiply-add until it was made non-affine.
+//   If a case stops scaling past ~8 workers, check the codegen before blaming the pool.
+// * The spawn tree is the only case whose leaf does nothing, so per-node scheduling cost IS its measurement,
+//   and it is correspondingly the most sensitive to idle-worker policy.
 //
-// Every fork-join frame is kept at or under the node's 32 B inline frame slot: a closure over 32 B falls back
-// to a heap-boxed cc::unique_function, which would put an allocation in every task. That is why the grain sizes
-// are namespace-scope constants rather than captures, and why a two-child frame captures exactly
-// span(16) + two shared_async(8+8). Adding one capture to any of these silently changes what is measured.
+// Every fork-join frame is kept at or under the node's 32 B inline frame slot.
+// A closure over 32 B falls back to a heap-boxed cc::unique_function, which would put an allocation in every task.
+// That is why the grain sizes are namespace-scope constants rather than captures, and why a two-child frame
+// captures exactly span(16) + two shared_async(8+8).
+// Adding one capture to any of these silently changes what is measured.
 
 #include "../bench_util.hh"
 
@@ -61,10 +65,11 @@ namespace
 {
 // make_async_lazy<i64>, but pinning the frame to the node's inline slot first.
 //
-// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here —
-// if that budget ever changes, this assert is what will (loudly) notice. The zero-dependency make_async_lazy
-// form wraps the frame in a lambda whose only capture is the frame itself, so sizeof(F) IS the installed frame
-// size; the variadic dep form would additionally store the dep handles, and none of these use it.
+// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here.
+// If that budget ever changes, this assert is what will loudly notice.
+// The zero-dependency make_async_lazy form wraps the frame in a lambda whose only capture is the frame itself,
+// so sizeof(F) IS the installed frame size.
+// The variadic dep form would additionally store the dep handles, and none of these use it.
 template <class F>
 [[nodiscard]] cc::shared_async<i64> spawn(F&& f)
 {
@@ -96,10 +101,11 @@ constexpr int tree_depth = 16; // 2^17 - 1 = 131071 nodes, trivial leaves
 
 // --- leaf work -------------------------------------------------------------------------------------------
 
-// An empty inline-asm barrier: makes `v` un-analyzable, and (being volatile) gives its containing function
-// side effects. The second half is the one that matters here — without it a CC_DONT_INLINE serial baseline is
-// still a pure function of unchanging arguments, so clang hoists the whole call out of the timing loop and the
-// baseline measures 0.00 ns. Same barrier, same reason, as async-benchmark.cc.
+// An empty inline-asm barrier: it makes `v` un-analyzable and, being volatile, gives its containing function side effects.
+// The side effects are what matter here.
+// Without them a CC_DONT_INLINE serial baseline is still a pure function of unchanging arguments, so clang
+// hoists the whole call out of the timing loop and the baseline measures 0.00 ns.
+// Same barrier, same reason, as async-benchmark.cc.
 CC_FORCE_INLINE void opaque(i64& v)
 {
 #if defined(__clang__) || defined(__GNUC__)
@@ -110,16 +116,14 @@ CC_FORCE_INLINE void opaque(i64& v)
 #endif
 }
 
-// Cheap, data-dependent, compute-bound mixing, so the benchmark measures scheduling rather than DRAM
-// bandwidth. Shared verbatim by the serial baselines and the async leaves — the comparison is only honest if
-// both do exactly the same arithmetic.
+// Cheap, data-dependent, compute-bound mixing, so the benchmark measures scheduling rather than DRAM bandwidth.
+// Shared verbatim by the serial baselines and the async leaves -- the comparison is only honest if both do exactly the same arithmetic.
 //
-// It must NOT be affine. This was eight rounds of `x = x*1664525 + 1013904223`, and clang composed all eight
-// into a single multiply-add — the emitted loop was one `imul` by 0xea890021 plus one `add` of 0xa3d95fa8,
-// which are exactly 1664525^8 and the matching addend mod 2^32. That silently turned the parallel-for and
-// reduction leaves into memory-bandwidth streamers, i.e. the precise failure this file's header warns against:
-// they measured the machine, not the scheduler, and capped out around 8 workers. lowbias32 (Chris Wellons'
-// hash-prospector search) is xor-shift/multiply and so is not affine over Z_2^32; rounds of it cannot collapse.
+// It must NOT be affine, and that is the one constraint to check before changing it.
+// An affine mix composes: a chain of `x = x*a + b` rounds collapses into a single multiply-add, which turns
+// the parallel-for and reduction leaves into memory-bandwidth streamers.
+// Those measure the machine rather than the scheduler, and cap out around 8 workers.
+// lowbias32 (Chris Wellons' hash-prospector search) is xor-shift/multiply, so it is not affine over Z_2^32 and its rounds cannot collapse.
 CC_FORCE_INLINE i32 mix(i32 x)
 {
     cc::u32 h = cc::u32(x);
@@ -167,8 +171,8 @@ isize hoare_partition(cc::span<i32> d)
 }
 
 // --- serial baselines ------------------------------------------------------------------------------------
-// noinline so the compiler cannot fold a whole workload away or inline it into a shape the async version has
-// no counterpart for. These are the speedup denominators.
+// noinline so the compiler cannot fold a whole workload away, or inline it into a shape the async version has no counterpart for.
+// These are the speedup denominators.
 
 CC_DONT_INLINE void serial_quicksort(cc::span<i32> d)
 {
@@ -192,9 +196,9 @@ CC_DONT_INLINE void serial_pfor(cc::span<i32> d)
     mix_range(d);
 }
 
-// The reduce and tree baselines take the opaque() barrier because they are otherwise pure functions of
-// unchanging inputs: their mutating siblings (quicksort, pfor) cannot be hoisted out of the timing loop, but
-// these two can, and did — they measured 0.00 ns until this was added.
+// The reduce and tree baselines take the opaque() barrier because they are otherwise pure functions of unchanging inputs.
+// Their mutating siblings, quicksort and pfor, cannot be hoisted out of the timing loop, but these two can --
+// and measured 0.00 ns until the barrier was added.
 CC_DONT_INLINE i64 serial_reduce(cc::span<i32 const> d)
 {
     i64 s = sum_range(d);
