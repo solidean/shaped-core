@@ -13,7 +13,7 @@
 // cc::async<T, E = async_error> — a low-overhead value/dataflow async for compute-heavy dependency graphs.
 //
 // The model is values and dataflow transformations, not futures/promises or callback chains, and it is
-// documented in docs/systems/async.md — this header is the typed public surface over async_node.hh's core.
+// documented in libs/base/clean-core/docs/systems/async.md — this header is the typed public surface over async_node.hh's core.
 // An async<T, E> is an eventual result<T, E> produced by a compute frame: a callable or state machine polled
 // through an async_context<T, E>.
 // Polling never blocks a thread; a frame that cannot yet progress parks on its not-ready dependencies and is
@@ -259,7 +259,8 @@ public:
 
     // manual / promise-style completion (for externally produced values)
 public:
-    /// Complete externally with a value; wakes any parked dependents. Call at most once.
+    /// Complete externally with a value; wakes any parked dependents.
+    /// Call at most once — unlike the resolve_* actions this is NOT asserted, and a second call runs teardown over a live value.
     void push_value(T v) { this->finish_value(cc::move(v)); } // builds the value into the payload, wakes dependents
 
     /// Complete externally with a value built in place from `args` (never moved) — the immovable-T path.
@@ -269,7 +270,8 @@ public:
         this->template finish_value_emplace<T>(cc::forward<Args>(args)...);
     }
 
-    /// Complete externally with an error; wakes any parked dependents. Call at most once.
+    /// Complete externally with an error; wakes any parked dependents.
+    /// Call at most once, and see push_value: this is not asserted either.
     void push_error(E e) { this->finish_error(cc::move(e)); }
 
     /// Complete externally with an error built in place from `args`.
@@ -680,7 +682,7 @@ cc::optional<cc::result<T, E>> singlethreaded_scheduler::try_blocking_get(shared
     // run_until stops the moment `root` is ready, which can strand a node that MIGRATED into our queue mid-drive.
     // schedule() / schedule_on() are idempotent on `scheduled`, so no other scheduler could reclaim it and a blocking_get on it would hang.
     // Draining with our worker scope still bound settles each such node — completed, or re-parked as `blocked` and re-woken onto whichever scheduler finishes its dependency.
-    // See "Multi-scheduler correctness" in docs/systems/async.md for why running that work here, rather than on its origin scheduler, is accepted.
+    // See "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md for why running that work here, rather than on its origin scheduler, is accepted.
     drain();
 
     // A drained queue does not mean the graph completed, only that WE could not advance `root`.

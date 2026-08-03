@@ -13,7 +13,7 @@
 // Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency and
 // continuation bookkeeping, the scheduler seam, and the failure-channel value type.
 // The templated public surface (async<T>, async_context, make_async_*) lives in async.hh.
-// The model all of this implements is documented in docs/systems/async.md.
+// The model all of this implements is documented in libs/base/clean-core/docs/systems/async.md.
 //
 // Nothing here ever blocks a thread.
 // poll() drives a node's compute frame forward until it completes, fails as a value, or parks on not-ready
@@ -132,7 +132,7 @@ struct async_scheduler
 {
     /// True if a node enqueued here may be picked up by ANOTHER thread.
     /// Fixed at construction, so the poll loop reads it as a plain field rather than paying a virtual call per step.
-    /// The poll loop publishes a node's dependencies only when this holds — see "Publish all-but-one" in docs/systems/async.md.
+    /// The poll loop publishes a node's dependencies only when this holds — see "Publish all-but-one" in libs/base/clean-core/docs/systems/async.md.
     bool const has_steal_capable_peers;
 
     /// Make a node runnable on the CURRENT worker (local / hot enqueue).
@@ -190,7 +190,7 @@ struct singlethreaded_scheduler final : async_scheduler
 
     /// Drive `root` on this thread and return its outcome, or nullopt if this scheduler pumped everything reachable from here and `root` is still not ready.
     /// Nullopt means "not from here, not yet": the graph may be parked on an unpushed manual node, or have migrated onto another scheduler.
-    /// Re-driving after the push, or letting the owning scheduler finish, resolves it — see "Multi-scheduler correctness" in docs/systems/async.md.
+    /// Re-driving after the push, or letting the owning scheduler finish, resolves it — see "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md.
     template <class T, class E = async_error>
     [[nodiscard]] cc::optional<cc::result<T, E>> try_blocking_get(shared_async<T, E> const& root);
 
@@ -529,7 +529,7 @@ void async_typed_teardown(async_node_base* n);
 /// The typed value AND the typed error live in the derived typed node (async.hh), sharing payload offset 0 by state.
 /// The base builds them via the finish_value* / finish_error* member templates, and reaches their destructors and the size class via async_type_ops.
 ///
-/// Concurrency: safe to drive from multiple threads, and what that guarantees is spelled out under "Multi-scheduler correctness" in docs/systems/async.md.
+/// Concurrency: safe to drive from multiple threads, and what that guarantees is spelled out under "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md.
 /// Two invariants bind the code here: at most one thread polls a node (try_begin_running), and the per-node spinlock is never held across the user compute frame.
 /// The state word stays atomic independently of that lock, for lock-free is_ready() / is_cold() reads.
 ///
@@ -609,7 +609,7 @@ public:
     ~async_node_base() = default;
 
     // payload — the node's offset-16 slot, raw storage declared by the derived typed node.
-    // A hand-managed union of the UNRESOLVED scratch (frame + deps + conts) and the RESOLVED value ⊍ error, discriminated by state — see docs/systems/async.md for the layout.
+    // A hand-managed union of the UNRESOLVED scratch (frame + deps + conts) and the RESOLVED value ⊍ error, discriminated by state — see libs/base/clean-core/docs/systems/async.md for the layout.
     // The base reaches it by pointer arithmetic on `this`, which relies on single inheritance putting the base subobject at offset 0 of the node.
     // The value overwrites the frame's slot; that is safe only because a resolving frame destroys itself first — see the frame section below.
     // Manual sub-object lifetime — see finish_value / finish_error / teardown.

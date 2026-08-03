@@ -210,6 +210,8 @@ private:
     // The old buffer is RETIRED, not freed: a thief may be between its `_ring` load and its slot read right now, and freeing under it would be a use-after-free.
     // Retiring costs a bounded amount of memory -- capacity doubles, so the whole chain is under 2x the live
     // buffer -- and it is what the destructor's walk cleans up.
+    // Do not reclaim it instead with a fixed ring plus an overflow list: that adds a branch to this hot path and a
+    // second claim path to the pool, which is correctness surface on the code least worth hand-verifying.
     [[nodiscard]] ring* grow(ring* old, i64 b, i64 t)
     {
         ring* const fresh = alloc_ring((old->mask + 1) * 2);

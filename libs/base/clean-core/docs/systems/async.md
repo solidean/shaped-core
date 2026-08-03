@@ -205,10 +205,10 @@ The loop therefore publishes only the **other** dependencies, and only when `asy
 `require()` neither schedules nor subscribes: the poll loop owns both, and schedules whatever is left before it parks.
 
 For a `singlethreaded_scheduler` chains and single-dependency transforms enqueue **nothing at all**.
-For a pool, a fan-out of n publishes n−1 stealable siblings; a 1-worker pool reports no peers and behaves like the single-threaded case.
+For a pool, a fan-out of n publishes n−1 stealable siblings, at every worker count — a 1-worker pool is still steal-capable, because the participating `blocking_get` caller is a second claimant.
 
 This is a lifetime property as much as a performance one: a queued entry is a strong node handle, so work abandoned in a queue pins its graph alive.
-The "reused scheduler settles empty" test pins that.
+The `async - a reused singlethreaded_scheduler settles empty after each graph` test pins that.
 
 A published sibling costs **two refcount atomics**: `route_after_schedule`'s `from_alive`, and the worker dropping the handle after `poll()`.
 The deque round-trip itself has none — an entry is a raw pointer whose strong count is moved in and out by `cc::shared_ptr`'s `release` / `adopt`, a load and a store rather than an RMW.
@@ -302,7 +302,8 @@ auto root = build_graph();
 int v = pool.blocking_get(root);                 // submit to the pool, block THIS (foreign) thread
 ```
 
-`pool.blocking_get` / `try_blocking_get` submit the root and block the calling thread on a one-shot completion hook.
+`pool.blocking_get` / `try_blocking_get` drive `root` on the calling thread, which borrows a pool slot and participates (see above), and block only once there is nothing left for it to run.
+With every external slot already claimed they fall back to submitting the root and blocking on a one-shot completion hook.
 Call them only from a **foreign** thread; from inside a worker of the same pool it asserts, since it would park a pool thread on its own work.
 
 The node machinery is thread-safe under this — see [Multi-scheduler correctness](#multi-scheduler-correctness) for exactly what is and is not guaranteed.
@@ -335,7 +336,8 @@ The `_sleepers` check that follows is a relaxed load of a shared, read-mostly li
 
 The deque holds **raw node pointers**, not handles: a Chase-Lev slot is read speculatively by thieves that may lose the race for it, so it cannot hold a smart pointer at all.
 Each entry owns one strong count by hand, via `cc::shared_ptr`'s `release` / `adopt` pair.
-**The pool therefore owes every queued entry a release** — `~async_thread_pool` drains its deques after joining, and without that, abandoning a 131k-node graph leaks ~49k nodes (pinned by a test).
+**The pool therefore owes every queued entry a release** — `~async_thread_pool` drains its deques after joining.
+Without that, abandoning a 131k-node graph leaks ~49k nodes, which the `async - destroying a pool releases work abandoned in its deques` test pins.
 
 **Wake protocol.** There is deliberately no counter of claimable work.
 A worker's scan of the deques already answers "is there work", so a counter would be a hot-path RMW serving a cold-path question.
@@ -451,9 +453,6 @@ Three properties of the shape constrain what can be changed:
   The driven leaf has four such drops — `run_one`, `enqueue`'s by-value parameter, the queue element's destroy, `route_after_schedule` — against one that fires.
   All four are the queue round-trip, so driving a root directly instead of `schedule` → enqueue → pop would remove most of them.
 
-Two cheap wins are unclaimed.
-A `/GS` stack cookie sits in `free_storage`, which has no buffers, on the hottest free path.
-And `free_storage` chases `node -> ops -> class_index` into a cold cacheline for a constant it then bounds-checks.
 
 **The park path schedules only `cold` deps**, and must keep doing so.
 `schedule()` drags a `blocked` node back to `scheduled` and re-enqueues it, so scheduling a dep that is itself parked makes it re-subscribe and re-park.

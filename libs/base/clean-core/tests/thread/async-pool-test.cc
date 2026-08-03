@@ -266,7 +266,7 @@ TEST("async - a pool with one worker still wakes for injected work")
 // multi-scheduler correctness — a graph reached from two schedulers at once
 // ============================================================================
 // Supported and must stay correct; not optimized for.
-// See "Multi-scheduler correctness" in docs/systems/async.md for what is and is not guaranteed.
+// See "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md for what is and is not guaranteed.
 
 TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked in a pool")
 {

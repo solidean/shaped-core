@@ -5,7 +5,7 @@
 using namespace cc::primitive_defines;
 
 // Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump, and the node state machine / poll loop.
-// See async_node.hh for the shape and invariants, and docs/systems/async.md for the model.
+// See async_node.hh for the shape and invariants, and libs/base/clean-core/docs/systems/async.md for the model.
 //
 // Concurrency model (safe to drive from many threads):
 //   * a per-node spinlock (the low bit of the packed state/ops control word) serializes state transitions and
