@@ -10,15 +10,14 @@
 #include <clean-core/memory/shared_ptr.hh> // cc::shared_ptr / cc::weak_ptr (intrusive node handles)
 #include <clean-core/thread/atomic.hh>
 
-// Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency /
-// continuation bookkeeping, the scheduler seam, and the failure-channel value type. The templated public
-// surface (async<T>, async_context, make_async_*, async_blocking_get_singlethreaded) lives in async.hh.
+// Untemplated core of the cc::async dataflow system: the node state machine, the pending-dependency and
+// continuation bookkeeping, the scheduler seam, and the failure-channel value type.
+// The templated public surface (async<T>, async_context, make_async_*) lives in async.hh.
+// The model all of this implements is documented in docs/systems/async.md.
 //
-// Nothing here ever blocks a thread: poll() drives a node's compute frame forward until it completes, fails
-// as a value, or parks on not-ready dependencies with wakeup continuations installed. singlethreaded_scheduler
-// runs everything inline on the calling thread, which is what makes the system testable without threads;
-// cc::async_thread_pool (async_thread_pool.hh) runs graphs concurrently over lock-free work-stealing deques.
-// Both are just implementations of the async_scheduler seam below.
+// Nothing here ever blocks a thread.
+// poll() drives a node's compute frame forward until it completes, fails as a value, or parks on not-ready
+// dependencies with wakeup continuations installed.
 
 namespace cc
 {
@@ -34,8 +33,8 @@ enum class async_error_kind : u8
 };
 
 /// Value carried on an async's failure channel: either a wrapped cc::any_error or a cancellation.
-/// Move-only (follows cc::any_error). A default-constructed async_error is an empty placeholder used for
-/// the "no failure yet" slot inside a node; only read it once the node reports has_error().
+/// Move-only, following cc::any_error.
+/// A default-constructed async_error is an empty placeholder for the "no failure yet" slot inside a node — only read it once the node reports has_error().
 struct async_error
 {
     async_error() = default;
@@ -90,12 +89,10 @@ enum class async_step_status : u8
 
 namespace impl
 {
-/// Refcount traits for the async node: one fused strong/weak count lives inline in async_node_base (offset 0),
-/// so a node needs no separate control block and the handle is one pointer. Keyed on the BASE, so every async<T>
-/// shares it via upcast and continuations can hold weak_ptr<async_node_base> cells that actually point at
-/// larger async<T> nodes. free_storage frees by the concrete size class stashed at construction; destroy_object
-/// tears down only the payload (frame/value/error/continuations) and leaves the counts alive — a weak ref may
-/// still read them after the object is gone. Method bodies are defined inline once async_node_base is complete.
+/// Refcount traits for the async node: one fused strong/weak count lives inline in async_node_base at offset 0, so a node needs no control block and a handle is one pointer.
+/// Keyed on the BASE, so every async<T> shares it via upcast, and a continuation can hold a weak_ptr<async_node_base> cell that actually points at a larger async<T> node.
+/// free_storage frees by the concrete size class stashed at construction.
+/// destroy_object tears down only the payload — frame, value, error, continuations — and leaves the counts alive, since a weak ref may still read them after the object is gone.
 struct async_node_traits
 {
     static constexpr bool supports_weak = true;
@@ -115,8 +112,8 @@ struct async_node_traits
 };
 } // namespace impl
 
-/// The owning / weak node handles. shared_async<T> (async.hh) is a cc::shared_ptr<async<T>, async_node_traits>
-/// that upcasts to this base handle when handed to the scheduler; continuations are async_node_weak cells.
+/// The owning / weak node handles.
+/// shared_async<T> (async.hh) is a cc::shared_ptr<async<T>, async_node_traits> that upcasts to this base handle when handed to the scheduler; continuations are async_node_weak cells.
 using async_node_ptr = cc::shared_ptr<async_node_base, impl::async_node_traits>;
 using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 
@@ -124,29 +121,26 @@ using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 // scheduler seam
 // ============================================================================
 
-/// Where runnable nodes go. The async machinery only ever asks a scheduler to make a node runnable; it never
-/// owns execution or blocks. A worker binds a scheduler to its thread with async_worker_scope; nodes then
-/// reach it via async_scheduler::current(). Two implementations ship: singlethreaded_scheduler (inline, on the
-/// calling thread) and async_thread_pool (work-stealing, concurrent).
+/// Where runnable nodes go.
+/// The async machinery only ever asks a scheduler to make a node runnable — it never owns execution and never blocks.
+/// A worker binds a scheduler to its thread with async_worker_scope; nodes reach it via async_scheduler::current().
+/// Two implementations ship: singlethreaded_scheduler below, and async_thread_pool (async_thread_pool.hh).
 ///
-/// A queued node is passed as a shared handle so the scheduler co-owns it while it waits: a node cannot be
-/// destroyed while runnable, which is what makes required dependencies freely schedulable (and steal-safe).
+/// A queued node is passed as a shared handle, so the scheduler co-owns it while it waits.
+/// A node therefore cannot be destroyed while runnable, which is what makes a required dependency freely schedulable and steal-safe.
 struct async_scheduler
 {
-    /// True if a node enqueued here may be picked up by ANOTHER thread. Fixed at construction, so the poll
-    /// loop reads it as a plain field rather than paying a virtual call per step.
-    ///
-    /// The poll loop publishes a node's dependencies only when this holds: it is about to drive one of them
-    /// inline on this stack anyway, so with nobody to steal the rest, enqueuing them is pure churn — every
-    /// entry would be popped later as a ready no-op, and until then its strong ref pins the node alive.
+    /// True if a node enqueued here may be picked up by ANOTHER thread.
+    /// Fixed at construction, so the poll loop reads it as a plain field rather than paying a virtual call per step.
+    /// The poll loop publishes a node's dependencies only when this holds — see "Publish all-but-one" in docs/systems/async.md.
     bool const has_steal_capable_peers;
 
-    /// Make a node runnable on the CURRENT worker (local / hot enqueue). Called only when a worker scope is
-    /// active on this thread.
+    /// Make a node runnable on the CURRENT worker (local / hot enqueue).
+    /// Called only when a worker scope is active on this thread.
     virtual void enqueue(async_node_ptr node) = 0;
 
-    /// Injection: make a node runnable regardless of the calling thread (foreign threads, cross-thread
-    /// wakeups). The default routes to enqueue; a pool overrides this with its injection queue.
+    /// Injection: make a node runnable regardless of the calling thread — foreign threads, cross-thread wakeups.
+    /// The default routes to enqueue; a pool overrides this with its injection queue.
     virtual void submit(async_node_ptr node) { enqueue(cc::move(node)); }
 
     virtual ~async_scheduler() = default;
@@ -159,16 +153,15 @@ public:
     [[nodiscard]] static async_scheduler& current();
     [[nodiscard]] static async_scheduler* current_or_null();
 
-    /// The process-wide default scheduler that compute nodes route to when they cannot run on the current
-    /// thread. Null unless one is installed (see install_default_async_pool). Read-mostly: install once at
-    /// startup, before the graphs that depend on it run.
+    /// The process-wide default scheduler that compute nodes route to when they cannot run on the current thread.
+    /// Null unless one is installed (see install_default_async_pool).
+    /// Read-mostly — install once at startup, before the graphs that depend on it run.
     static void set_default(async_scheduler* sched);
     [[nodiscard]] static async_scheduler* default_or_null();
 };
 
-/// RAII begin/end of an async worker scope: binds `scheduler` to the calling thread for its lifetime, so
-/// node scheduling and polling on this thread route through it. Nesting restores the previous binding.
-/// This is the low-level hook that decouples the async graph from any particular executor.
+/// RAII begin/end of an async worker scope: binds `scheduler` to the calling thread for its lifetime, so node scheduling and polling on this thread route through it.
+/// Nesting restores the previous binding.
 struct async_worker_scope
 {
     /// Binds `scheduler` to the calling thread.
@@ -184,26 +177,20 @@ private:
     async_scheduler* _previous = nullptr;
 };
 
-/// The default scheduler: a LIFO stack pumped on the calling thread, driving everything inline. No global
-/// lock, no thread ever blocks. LIFO keeps freshly spawned children hot in cache, matching explicit-stack
-/// recursion.
+/// The default scheduler: a LIFO stack pumped on the calling thread, driving everything inline.
+/// No global lock, and no thread ever blocks.
 ///
-/// Single-threaded by construction, not by circumstance: it has no peers, so it never publishes work and a
-/// graph's nodes cannot run concurrently even when other threads sit idle. Progress happens only while this
-/// thread is inside blocking_get / run_one / run_until — which is why a graph that parks on a manual node
-/// needs the pump called again after the external push.
+/// Single-threaded by construction, not by circumstance — it has no peers, so it never publishes work.
+/// Progress happens only while this thread is inside blocking_get / run_one / run_until, which is why a graph parked on a manual node needs the pump called again after the external push.
 struct singlethreaded_scheduler final : async_scheduler
 {
     singlethreaded_scheduler() : async_scheduler(false) {}
 
     void enqueue(async_node_ptr node) override; // out-of-line: needs the node handle's traits complete
 
-    /// Drive `root` on this thread and return its outcome, or nullopt if this scheduler pumped everything
-    /// reachable from here and `root` is still not ready. Nullopt means "not from here, not yet" — the graph
-    /// may be parked on an unpushed manual node, or may have migrated onto another scheduler (see
-    /// "Multi-scheduler correctness" in libs/base/clean-core/docs/systems/async.md). Re-driving after the push,
-    /// or letting
-    /// the owning scheduler finish, resolves it. Defined in async.hh, which has the typed handle.
+    /// Drive `root` on this thread and return its outcome, or nullopt if this scheduler pumped everything reachable from here and `root` is still not ready.
+    /// Nullopt means "not from here, not yet": the graph may be parked on an unpushed manual node, or have migrated onto another scheduler.
+    /// Re-driving after the push, or letting the owning scheduler finish, resolves it — see "Multi-scheduler correctness" in docs/systems/async.md.
     template <class T, class E = async_error>
     [[nodiscard]] cc::optional<cc::result<T, E>> try_blocking_get(shared_async<T, E> const& root);
 
@@ -214,8 +201,8 @@ struct singlethreaded_scheduler final : async_scheduler
     /// Poll one queued node (LIFO). Returns false if the queue was empty.
     bool run_one();
 
-    /// Pump the queue until `done` returns true or the queue drains. May return with work still queued (that
-    /// is what `done` means) — the scheduler owns it until drained or destroyed.
+    /// Pump the queue until `done` returns true or the queue drains.
+    /// May return with work still queued — that is what `done` means — and the scheduler owns it until drained or destroyed.
     void run_until(cc::function_ref<bool()> done);
 
     /// Pump until the queue is empty.
@@ -232,9 +219,9 @@ private:
 
 namespace impl
 {
-/// One entry of a node's not-ready dependency set: a raw (non-owning) async_node_base* plus a "subscribed"
-/// bit, packed into a single word. A dependency is 64-aligned (async_node_base is alignas(64)), so bits 0..5
-/// are free; bit 1 is the subscribed flag. This proxy edits the packed word in place.
+/// One entry of a node's not-ready dependency set: a raw, non-owning async_node_base* plus a "subscribed" bit, packed into a single word.
+/// A dependency is 64-aligned (async_node_base is alignas(64)), so bits 0..5 are free; bit 1 is the subscribed flag.
+/// This proxy edits the packed word in place.
 struct async_dep_entry
 {
     u64* _word;
@@ -253,17 +240,17 @@ struct async_dep_entry
     }
 };
 
-/// A spilled-dependency-list node, used only when a node tracks 2+ not-ready deps. node_allocation-backed and
-/// intrusively linked; _dep packs the dependency + subscribed bit exactly like a single-mode head.
+/// A spilled-dependency-list node, used only when a node tracks 2+ not-ready deps.
+/// node_allocation-backed and intrusively linked; _dep packs the dependency + subscribed bit exactly like a single-mode head.
 struct async_dep_list_node
 {
     u64 _dep; // 64-aligned async_node_base* in the high bits, subscribed in bit 1
     async_dep_list_node* _next;
 };
 
-/// A node's set of not-ready dependencies, folded into a single 8 B tagged word (replaces two 64 B
-/// small_vectors). Only the single active poller ever touches it, so it needs no lock. Move-only; the
-/// destructor frees any spilled list nodes.
+/// A node's set of not-ready dependencies, folded into a single 8 B tagged word.
+/// Only the single active poller ever touches it, so it needs no lock.
+/// Move-only; the destructor frees any spilled list nodes.
 ///
 /// _head encoding:
 ///   0            -> empty
@@ -307,7 +294,8 @@ struct async_dep_head
         return n;
     }
 
-    /// The first tracked dependency (any entry), or nullptr if empty. Used to pick one to drive inline.
+    /// The first tracked dependency (any entry), or nullptr if empty.
+    /// Used to pick one to drive inline.
     [[nodiscard]] async_node_base* first() const
     {
         if (_head == 0)
@@ -316,7 +304,8 @@ struct async_dep_head
         return reinterpret_cast<async_node_base*>(word & async_dep_entry::dep_mask);
     }
 
-    /// Append a not-ready dependency (order irrelevant). The entry starts unsubscribed.
+    /// Append a not-ready dependency (order irrelevant).
+    /// The entry starts unsubscribed.
     void add(async_node_base* dep);
     /// Remove (and free) every entry whose dependency is already ready.
     void remove_ready()
@@ -374,9 +363,9 @@ private:
 // continuation head — dependents to wake on completion (lives in the result slot)
 // ============================================================================
 
-/// A spilled continuation entry: either a weak dependent (to schedule) or a one-shot completion latch
-/// (to call). node_allocation-backed and intrusively linked, exactly like async_dep_list_node. The
-/// union member is left inactive by the default ctor; the allocator constructs the active member.
+/// A spilled continuation entry: either a weak dependent, to schedule, or a one-shot completion latch, to call.
+/// node_allocation-backed and intrusively linked, exactly like async_dep_list_node.
+/// The union member is left inactive by the default ctor; the allocator constructs the active member.
 struct async_cont_cell
 {
     async_cont_cell* _next = nullptr;
@@ -393,22 +382,16 @@ struct async_cont_cell
     async_cont_cell& operator=(async_cont_cell const&) = delete;
 };
 
-/// A node's set of dependents to wake when it completes (its "continuations"), plus at most a few
-/// one-shot completion latches. One tagged word (8 B), so it fits the unresolved arm's layout (frame 32 +
-/// deps 8 + conts 8 = the 48 B scratch). The continuation head is live only BEFORE the node is ready; once
-/// ready it is stolen and the payload holds the typed value/error instead — the two never coexist. Guarded by
-/// the node _lock: unlike async_dep_head it has multiple writers (other nodes' pollers subscribing /
-/// unsubscribing, plus this node completing).
+/// A node's set of dependents to wake when it completes (its "continuations"), plus at most a few one-shot completion latches.
+/// One tagged word, so it fits the unresolved arm's 48 B budget of frame 32 + deps 8 + conts 8.
+/// Live only BEFORE the node is ready: once ready it is stolen and the payload holds the typed value/error instead, so the two never coexist.
+/// Guarded by the node _lock — unlike async_dep_head it has multiple writers, namely other nodes' pollers subscribing and unsubscribing, plus this node completing.
 ///
-/// Encoding mirrors async_dep_head: 0 = empty, bit0 == 0 = one dependent inline (the common single-dependent
-/// case pays no allocation), bit0 == 1 = spill-list head. Nodes are alignas(64), so the low bits are free.
-/// EITHER one inline dependent OR a list, never both — a 2nd dependent, and every latch, promotes the inline
-/// entry into the list first.
+/// Encoding mirrors async_dep_head, and EITHER one inline dependent OR a list is live, never both — a 2nd dependent, and every latch, promotes the inline entry into the list first.
 ///
-/// The one real difference from async_dep_head: its entries are non-owning raw pointers, ours are WEAK. The
-/// inline slot has no weak_ptr to do that for it, so it holds exactly one weak count BY HAND — every store
-/// inc_weaks, every drop dec_weaks (weak_ptr::adopt / release move the count in and out without a redundant
-/// inc/dec pair). Spill cells keep their own async_node_weak and are self-managing.
+/// The one difference that matters: its entries are WEAK, where async_dep_head's are non-owning raw pointers.
+/// The inline slot has no weak_ptr to do that for it, so it holds exactly one weak count BY HAND — every store inc_weaks, every drop dec_weaks, via weak_ptr::adopt / release.
+/// Spill cells keep their own async_node_weak and are self-managing.
 struct async_cont_head
 {
     async_cont_head() = default;
@@ -433,7 +416,8 @@ struct async_cont_head
     async_cont_head(async_cont_head const&) = delete;
     async_cont_head& operator=(async_cont_head const&) = delete;
 
-    /// True if no dependents and no latches are installed (the leaf case). Cheap; safe to test under the lock.
+    /// True if no dependents and no latches are installed (the leaf case).
+    /// Cheap, and safe to test under the lock.
     [[nodiscard]] bool empty() const { return _head == 0; }
 
     /// Subscribe a dependent (held weakly). Takes the inline slot if free, else prepends a spill cell.
@@ -445,9 +429,9 @@ struct async_cont_head
     /// Number of live weak dependents (latches excluded).
     [[nodiscard]] isize count() const;
 
-    /// Fire every entry: schedule each still-live dependent, call each latch. Call on a stolen (local)
-    /// head only — never while holding the node lock, since scheduling a dependent takes its lock. Does not
-    /// consume the entries; the caller's destructor releases them.
+    /// Fire every entry: schedule each still-live dependent, call each latch.
+    /// Call on a stolen (local) head only, never while holding the node lock — scheduling a dependent takes its lock.
+    /// Does not consume the entries; the caller's destructor releases them.
     void notify_all();
 
 private:
@@ -469,29 +453,26 @@ private:
     u64 _head = 0;
 };
 
-/// The node's transient scratch while it is UNRESOLVED: the compute frame, the not-ready dependency set, and
-/// the continuation head (dependents to wake). All three are mutually exclusive with the resolved value/error,
-/// which reuses the same storage — so this arm shares the node's payload slot (offset 16) with the value ⊍
-/// error (a union discriminated by state; see async_node_base). The value is built straight over this arm at
-/// resolution — over the frame, which by then has destroyed itself (see async_node_base's frame section).
-/// Manual lifetime: async_node_base placement-constructs this at birth and placement-destroys it when
-/// switching to the resolved value/error.
+/// The node's transient scratch while it is UNRESOLVED: the compute frame, the not-ready dependency set, and the continuation head of dependents to wake.
+/// All three are mutually exclusive with the resolved value/error, which reuses the same storage — so this arm shares the payload slot at offset 16, a union discriminated by state.
+/// The value is built straight over this arm at resolution, over the frame, which by then has destroyed itself (see the frame section in async_node_base).
+/// Manual lifetime: async_node_base placement-constructs this at birth and placement-destroys it when switching to the resolved value/error.
 struct async_unresolved
 {
-    /// The compute frame, stored INLINE: raw storage, not a self-destroying object — only the ops table knows
-    /// F, so async_node_base owns this slot's lifetime (install_frame builds it, ops->frame_destroy ends it)
-    /// and ~async_unresolved deliberately leaves it alone. Empty for a frameless (manual/push) node. A closure
-    /// too big for 32 B falls back to an 8 B cc::unique_function stored here instead.
+    /// The compute frame, stored INLINE: raw storage, not a self-destroying object.
+    /// Only the ops table knows F, so async_node_base owns this slot's lifetime — install_frame builds it, ops->frame_destroy ends it, and ~async_unresolved deliberately leaves it alone.
+    /// Empty for a frameless (manual/push) node.
+    /// A closure too big for 32 B falls back to an 8 B cc::unique_function stored here instead.
     alignas(16) byte frame[32];
     async_dep_head deps;   // 8
     async_cont_head conts; // 8
-    // Default special members: default ctor births an empty arm (the frame slot is left raw); the
-    // (non-trivial) default dtor frees dep-list nodes + continuation cells. move/copy are implicitly deleted.
+    // Default special members: the default ctor births an empty arm, leaving the frame slot raw.
+    // The (non-trivial) default dtor frees dep-list nodes + continuation cells; move/copy are implicitly deleted.
 };
 static_assert(sizeof(async_cont_head) == 8, "async_cont_head must stay one word — the arm budgets it 8 B");
 static_assert(sizeof(async_dep_head) == 8, "async_dep_head must stay one word — the arm budgets it 8 B");
-// The arm is what a 64 B node's payload has room for: 16 B header + 48 B payload. Growing it past 48 pushes
-// async<int> into the 128 B size class (see the sizeof guards in async-test.cc).
+// The arm is what a 64 B node's payload has room for: 16 B header + 48 B payload.
+// Growing it past 48 pushes async<int> into the 128 B size class (see the sizeof guards in async-test.cc).
 static_assert(sizeof(async_unresolved) == 48, "the unresolved arm must stay 48 B: frame 32 + deps 8 + conts 8");
 } // namespace impl
 
@@ -499,8 +480,8 @@ static_assert(sizeof(async_unresolved) == 48, "the unresolved arm must stay 48 B
 // async_node_base — untemplated node state + poll loop
 // ============================================================================
 
-/// Lifecycle state of a node. Transitions are CAS-based so a dependency completing and scheduling a node can
-/// never be lost against that node parking itself (the classic block-vs-wake race).
+/// Lifecycle state of a node.
+/// Transitions are CAS-based, so a dependency completing and scheduling a node can never be lost against that node parking itself.
 enum class async_node_state : u8
 {
     cold,             // 0  created, never scheduled, compute not started
@@ -510,28 +491,24 @@ enum class async_node_state : u8
     external_pending, // 4  awaiting external completion (a manual/promise node, no compute frame)
     ready_value,      // 5  terminal: completed with a value
     ready_error,      // 6  terminal: completed on the failure channel
-    // 7 states -> fits 3 bits (see async_node_base's packed control word). is-error is encoded in the state
-    // itself (ready_value vs ready_error), not a separate flag.
+    // 7 states -> fits 3 bits (see async_node_base's packed control word).
+    // is-error is encoded in the state itself (ready_value vs ready_error), not as a separate flag.
 };
 
-/// Type-erased per-async<T, E, F> operations, reached from the untemplated base — the hand-rolled replacement
-/// for a C++ vtable (mirrors unique_function's static descriptor). One static-constexpr instance exists per
-/// distinct op set; the node stores a pointer to it, set at construction (and again when a frame is installed,
-/// which is what picks F). It recovers the things the base cannot derive from a base-typed pointer: how to
-/// destroy the typed value or the typed error, how to run and destroy the inline compute frame, and the node's
-/// size class (used by the intrusive free path, which runs on a base-typed weak cell after the concrete type is
-/// long erased).
-/// alignas(32): the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock (see
-/// async_node_base's _state_and_ops), so every async_type_ops instance must be 32-aligned to keep those bits
-/// free. Objects are static-constexpr globals (one per op set), so the alignment costs nothing meaningful.
+/// Type-erased per-async<T, E, F> operations, reached from the untemplated base — the hand-rolled replacement for a C++ vtable.
+/// One static-constexpr instance per distinct op set, keyed so it collapses across types; the node points at it from construction, and again once a frame picks F.
+/// It recovers what a base-typed pointer cannot: how to destroy the typed value or error, and how to run and destroy the inline frame.
+/// It also carries the size class, which the intrusive free path needs long after the concrete type is erased.
+///
+/// alignas(32) is load-bearing: the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock, so every instance must be 32-aligned to keep those bits free.
 struct alignas(32) async_type_ops
 {
     void (*teardown_value)(async_node_base*); // destroy the resolved value in the payload (ready_value)
     void (*teardown_error)(async_node_base*); // destroy the resolved error in the payload (ready_error)
 
-    // The compute frame, stored inline in the unresolved arm at payload offset 0. Both null for a frameless
-    // node (manual/push, or a born-ready factory). There is deliberately no frame_move: the frame is
-    // constructed once in place, run in place, and destroyed in place — see async_node_base's frame section.
+    // The compute frame, stored inline in the unresolved arm at payload offset 0.
+    // Both null for a frameless node: manual/push, or a born-ready factory.
+    // There is deliberately no frame_move — the frame is constructed once in place, run in place, and destroyed in place (see async_node_base's frame section).
     async_step_status (*frame_invoke)(void* frame, async_context_base& ctx);
     void (*frame_destroy)(void* frame);
 
@@ -541,36 +518,26 @@ static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned 
 
 namespace impl
 {
-/// Type-erased teardown of a resolved payload of type U (value or error), defined in async.hh. Declared here so
-/// async_node_base can befriend it — it reaches the protected payload. Keyed on U alone so the ops descriptor
-/// collapses across types (see impl::async_type_ops_for).
+/// Type-erased teardown of a resolved payload of type U (value or error), defined in async.hh.
+/// Declared here so async_node_base can befriend it — it reaches the protected payload.
+/// Keyed on U alone, so the ops descriptor collapses across types (see impl::async_type_ops_for).
 template <class U>
 void async_typed_teardown(async_node_base* n);
 } // namespace impl
 
-/// Shared, T/E-agnostic node machinery. Holds the atomic state, the not-ready dependency set (folded into one
-/// packed word, for scheduling/wakeup), the continuation list (dependents to wake on completion), and the
-/// type-erased compute frame (its signature carries no T/E). The typed value AND the typed error live in the
-/// derived typed node (async.hh, sharing payload offset 0 by state); the base builds them via the finish_value*
-/// / finish_error* member templates and reaches their destructors + the size class via async_type_ops.
+/// Shared, T/E-agnostic node machinery: the atomic state, the not-ready dependency set, the continuation list of dependents to wake, and the type-erased compute frame.
+/// The typed value AND the typed error live in the derived typed node (async.hh), sharing payload offset 0 by state.
+/// The base builds them via the finish_value* / finish_error* member templates, and reaches their destructors and the size class via async_type_ops.
 ///
-/// Concurrency: safe to drive from multiple threads. A per-node spinlock serializes state transitions and
-/// continuation/subscription bookkeeping; the state word stays atomic for lock-free is_ready()/is_cold()
-/// reads. At most one thread polls a node at a time (try_begin_running), and a completing dependency that
-/// wakes a running node sets a re-poll flag instead of enqueuing a second copy. The lock is never held across
-/// the user compute frame. Continuations are held as weak_ptrs so a completing dependency can never wake a
-/// dependent that is being torn down concurrently.
+/// Concurrency: safe to drive from multiple threads, and what that guarantees is spelled out under "Multi-scheduler correctness" in docs/systems/async.md.
+/// Two invariants bind the code here: at most one thread polls a node (try_begin_running), and the per-node spinlock is never held across the user compute frame.
+/// The state word stays atomic independently of that lock, for lock-free is_ready() / is_cold() reads.
 ///
-/// Every node carries its own intrusive strong/weak refcount (async_node_traits) and is created through
-/// cc::make_shared into one slab node: shared_async<T> for public nodes. schedule()/poll() recover a handle
-/// from `this` in O(1) via async_node_ptr::from_alive (strong > 0 is guaranteed while polling/scheduling), and
-/// the scheduler co-owns queued nodes through that handle. A node MUST be created via make_async_* (which
-/// make_shared) — a stack node is unsupported (from_alive would corrupt a never-initialized count).
+/// Every node carries its own intrusive strong/weak refcount (async_node_traits) and is created through cc::make_shared into one slab node.
+/// schedule() and poll() recover a handle from `this` in O(1) via async_node_ptr::from_alive, since strong > 0 is guaranteed while polling or scheduling.
+/// A node MUST be created via make_async_*: a stack node is unsupported, because from_alive would corrupt a never-initialized count.
 ///
-/// The concrete node (async<T>) is cacheline-aligned (64 B): nodes are polled and woken concurrently from
-/// different threads, so keeping each on its own line avoids false sharing between unrelated nodes. The
-/// alignment lives on the derived typed node, not here — this base is the low half of that line, and forcing
-/// alignas(64) on it alone would round its own size up to 64 and push the typed value/frame onto a 2nd line.
+/// alignas(64) lives on the derived typed node, not here — forcing it on this base alone would round its own size up to 64 and push the typed value and frame onto a second line.
 struct async_node_base
 {
     // queries
@@ -586,13 +553,13 @@ public:
     }
     [[nodiscard]] bool is_cold() const { return load_state(cc::memory_order_acquire) == async_node_state::cold; }
 
-    // The failure-channel value is typed (E), so it is read/propagated through the typed node (async<T, E>),
-    // not here — the base only knows a node HAS an error (has_error), not its type. See async<T, E>::try_error /
-    // propagate_error in async.hh.
+    // The failure-channel value is typed, so it is read and propagated through async<T, E>, not here.
+    // The base only knows a node HAS an error (has_error), not its type — see async<T, E>::try_error / propagate_error in async.hh.
 
     // debug/introspection (used by tests) — racy on a live node; call only when it is quiescent (single-threaded)
 public:
-    /// Number of not-ready dependencies currently tracked. Only meaningful between polls (unresolved arm).
+    /// Number of not-ready dependencies currently tracked.
+    /// Only meaningful between polls, on the unresolved arm.
     [[nodiscard]] isize pending_dependency_count() const { return is_ready() ? 0 : deps().count(); }
     /// Number of installed wakeup continuations (may count entries whose dependent has since expired).
     /// Zero once ready — the continuation head is stolen at completion (the payload then holds value/error).
@@ -600,24 +567,26 @@ public:
 
     // scheduling / driving
 public:
-    /// Idempotent hint: make this node runnable. Routes to the current worker (hot) if a worker scope is active
-    /// here, else to the installed default pool. Never implies ownership of execution. Safe to call from a
-    /// completed dependency waking many dependents, or twice. A running node records a re-poll request instead
-    /// of enqueuing. Requires the node to be shared-owned (created via make_shared).
+    /// Idempotent hint: make this node runnable.
+    /// Routes to the current worker (hot) if a worker scope is active here, else to the installed default pool.
+    /// Never implies ownership of execution, and is safe to call twice, or from a completed dependency waking many dependents.
+    /// A running node records a re-poll request instead of enqueuing.
+    /// The node must be shared-owned, created via make_shared.
     void schedule();
 
-    /// Like schedule(), but routes onto `target` specifically (bypassing current-thread routing). Used by
-    /// drivers to place a root on a chosen pool. cold/blocked -> scheduled + target.submit(); a running node
-    /// records a re-poll; terminal/already-scheduled nodes are left as-is.
+    /// Like schedule(), but routes onto `target` specifically, bypassing current-thread routing.
+    /// Used by drivers to place a root on a chosen pool.
+    /// cold/blocked -> scheduled + target.submit(); a running node records a re-poll; terminal and already-scheduled nodes are left as-is.
     void schedule_on(async_scheduler& target);
 
-    /// Drive this node forward. Never blocks. Acquires execution ownership (a no-op if another poller owns it
-    /// or it is terminal/manual), then loops: drop ready deps, park on the remaining ones (subscribing late),
-    /// run one compute step, publish on completion.
+    /// Drive this node forward.
+    /// Never blocks.
+    /// Acquires execution ownership, a no-op if another poller owns it or it is terminal/manual.
+    /// Then loops: drop ready deps, park on the remaining ones subscribing late, run one compute step, publish on completion.
     void poll();
 
-    /// Install a one-shot completion callback fired once when this node becomes ready (used by the pool
-    /// blocking driver). Returns true if the node was ALREADY ready (no callback installed — do not wait).
+    /// Install a one-shot completion callback, fired once when this node becomes ready (the pool blocking driver uses this).
+    /// Returns true if the node was ALREADY ready, in which case no callback was installed and you must not wait.
     bool install_completion_hook_or_ready(void (*fn)(void*), void* ctx);
 
     // subscription (called by the poll loop)
@@ -634,18 +603,16 @@ public:
     async_node_base& operator=(async_node_base const&) = delete;
     async_node_base& operator=(async_node_base&&) = delete;
 
-    /// Nodes are never destructed: they are torn down by teardown_payload (at strong 0) + free_storage (at
-    /// weak 0), never by delete — there is no C++ vtable and no virtual dtor. The implicit (non-virtual)
-    /// destructor is never invoked.
+    /// Nodes are never destructed.
+    /// They are torn down by teardown_payload at strong 0 and free_storage at weak 0, never by delete — there is no C++ vtable and no virtual dtor.
+    /// The implicit, non-virtual destructor is never invoked.
     ~async_node_base() = default;
 
-    // payload — the node's offset-16 slot (raw storage declared by the derived typed node): a hand-managed
-    // union of the UNRESOLVED scratch (frame + deps + conts) and the RESOLVED value ⊍ error, discriminated by
-    // state. The resolved value/error is built straight over the scratch, so it grows the node naturally for a
-    // large T (no inline cap). The base reaches the payload by pointer arithmetic on `this` (single inheritance,
-    // base-first: the base subobject is at offset 0 of the node). The value overwrites the frame's slot, which
-    // is safe because a resolving frame destroys itself first — see the frame section below. Manual sub-object
-    // lifetime — see finish_value / finish_error / teardown.
+    // payload — the node's offset-16 slot, raw storage declared by the derived typed node.
+    // A hand-managed union of the UNRESOLVED scratch (frame + deps + conts) and the RESOLVED value ⊍ error, discriminated by state — see docs/systems/async.md for the layout.
+    // The base reaches it by pointer arithmetic on `this`, which relies on single inheritance putting the base subobject at offset 0 of the node.
+    // The value overwrites the frame's slot; that is safe only because a resolving frame destroys itself first — see the frame section below.
+    // Manual sub-object lifetime — see finish_value / finish_error / teardown.
 protected:
     using frame_type = cc::unique_function<async_step_status(async_context_base&)>;
 
@@ -668,41 +635,38 @@ protected:
         return reinterpret_cast<impl::async_unresolved const*>(payload())->conts;
     }
 
-    // resolved arm (active once ready). The value and the error share payload offset 0 (mutually exclusive by
-    // state), so both storages alias value_storage(); the typed node reinterprets it as T (ready_value) or E
-    // (ready_error). The base builds either via the finish_value*/finish_error* member templates below.
+    // resolved arm, active once ready.
+    // The value and the error share payload offset 0, mutually exclusive by state, so both storages alias value_storage().
+    // The typed node reinterprets it as T (ready_value) or E (ready_error); the base builds either via the finish_value* / finish_error* member templates below.
     [[nodiscard]] void* value_storage() { return payload(); }
 
-    /// Construct the (empty) unresolved arm into the payload. Called once from the derived ctor (after set_ops).
+    /// Construct the (empty) unresolved arm into the payload.
+    /// Called once from the derived ctor, after set_ops.
     void init_payload() { new (cc::placement_new, payload()) impl::async_unresolved(); }
 
-    // compute frame — its signature is T-agnostic; it lives INLINE in the unresolved arm at payload offset 0.
+    // compute frame — its signature is T-agnostic, and it lives INLINE in the unresolved arm at payload offset 0.
     //
-    // The frame is constructed once in place, invoked in place, and destroyed in place — it is never moved, so
-    // parking costs nothing and an immovable frame works. The catch is that the resolved value is built over
-    // the frame's own slot, and a frame resolves RE-ENTRANTLY (`return actx.success(v)` runs finish_value while
-    // the closure is still on the stack). So finish_* destroys the live, executing frame before building the
-    // value: the `delete this;` idiom, and it carries `delete this;`'s rule —
+    // The frame is constructed once in place, invoked in place, and destroyed in place, never moved, so parking costs nothing and an immovable frame works.
+    // The catch: the resolved value is built over the frame's own slot, and a frame resolves RE-ENTRANTLY — `return actx.success(v)` runs finish_value while the closure is still on the stack.
+    // So finish_* destroys the live, executing frame before building the value, which is the `delete this;` idiom and carries `delete this;`'s rule —
     //
-    //   A FRAME MUST NOT TOUCH ITS CAPTURES AFTER CALLING A resolve_* ACTION. resolve is terminal; a tail
-    //   `return ctx.success(v)` touches nothing afterwards, which is what makes this safe.
+    //   A FRAME MUST NOT TOUCH ITS CAPTURES AFTER CALLING A resolve_* ACTION.
+    //   Resolve is terminal; a tail `return ctx.success(v)` touches nothing afterwards, which is what makes it safe.
     //
-    // The resolve arguments themselves are fine: resolve_to_value/_to_error take their value BY VALUE, so what
-    // reaches finish_* is a stack temporary, never a reference into the captures (or into a dependency the
-    // captures pin). The *_emplace forms forward by reference and are the documented exception — see async.hh.
+    // The resolve arguments themselves are fine: resolve_to_value / resolve_to_error take their value BY VALUE, so what reaches finish_* is a stack temporary.
+    // It is never a reference into the captures, or into a dependency the captures pin.
+    // The *_emplace forms forward by reference and are the documented exception — see async.hh.
     //
-    // Installing a frame needs T/E (to pick the ops instance), so the public entry points are async<T, E>'s
-    // set_frame / set_frame_emplace; these are the untyped half they build on.
+    // Installing a frame needs T/E to pick the ops instance, so the public entry points are async<T, E>'s set_frame / set_frame_emplace; these are the untyped half they build on.
 protected:
-    /// True if F is stored inline rather than boxed. 32 B covers the frames the sugar builds (the wrapper's
-    /// captured fn + its shared_async dependency handles); anything larger falls back to a heap-boxed
-    /// cc::unique_function, which is itself one pointer and so always fits.
+    /// True if F is stored inline rather than boxed.
+    /// 32 B covers the frames the sugar builds — the wrapper's captured fn plus its shared_async dependency handles.
+    /// Anything larger falls back to a heap-boxed cc::unique_function, which is itself one pointer and so always fits.
     template <class F>
     static constexpr bool frame_fits_inline = sizeof(F) <= 32 && alignof(F) <= 16;
 
-    /// Build the frame in place and re-point the node at the ops instance that knows how to run and destroy it
-    /// (installing the frame is what determines F). Construction-time only: init_control_word writes the
-    /// control word with a plain relaxed store, which is only safe before the node is shared.
+    /// Build the frame in place and re-point the node at the ops instance that knows how to run and destroy it — installing the frame is what determines F.
+    /// Construction-time only: init_control_word writes the control word with a plain relaxed store, which is safe only before the node is shared.
     template <class G, class... Args>
     void install_frame(async_type_ops const* ops, Args&&... args)
     {
@@ -711,22 +675,22 @@ protected:
         init_control_word(ops, async_node_state::cold);
     }
 
-    /// End the in-place frame's lifetime, if this node has one (frameless: manual/push and the born-ready
-    /// factories). Idempotent only in the sense that each teardown path calls it exactly once.
+    /// End the in-place frame's lifetime, if this node has one — manual/push nodes and the born-ready factories are frameless.
+    /// Idempotent only in the sense that each teardown path calls it exactly once.
     void destroy_frame()
     {
         if (auto const f = ops()->frame_destroy) // null for a frameless node
             f(frame_storage());
     }
 
-    // completion — steal the continuation head, tear down the unresolved arm, build the result in the payload,
-    // wake dependents. finish_value / finish_error are symmetric typed member templates (the (typed) construction
-    // lives here); the emplace forms build in place from raw args so an immovable T works. Used by the poll loop,
-    // resolve_to_value / resolve_to_error, push_value / push_error, and the make_async_from_* factories.
+    // completion — steal the continuation head, tear down the unresolved arm, build the result in the payload, wake dependents.
+    // finish_value / finish_error are symmetric typed member templates; the emplace forms build in place from raw args, so an immovable T works.
+    // Used by the poll loop, resolve_to_value / resolve_to_error, push_value / push_error, and the make_async_from_* factories.
     //
     // Publishes the terminal state LAST (release), then wakes dependents outside the lock.
 protected:
-    /// Resolve with a value by moving `v` into the payload. Requires nothrow-move (moved under the node lock).
+    /// Resolve with a value by moving `v` into the payload.
+    /// Requires nothrow-move: the move happens under the node lock.
     template <class T>
     void finish_value(T&& v)
     {
@@ -741,9 +705,9 @@ protected:
     void finish_value_emplace(Args&&... args)
     {
         unsubscribe_all(); // the frame is still live and still pins the deps we are unsubscribing from
-        destroy_frame();   // the `delete this;` moment: the value goes where the frame is. Before the lock —
-                           // releasing the captures runs arbitrary user destructors (a dropped dependency
-                           // handle can free its node), which must not happen under our spinlock.
+        destroy_frame();   // the `delete this;` moment: the value goes where the frame is.
+                           // Before the lock, because releasing the captures runs arbitrary user destructors —
+                           // a dropped dependency handle can free its node, which must not happen under our spinlock.
         impl::async_cont_head continuations;
         {
             lock_scope g(this);
@@ -785,37 +749,34 @@ protected:
 
     // payload teardown
 protected:
-    /// Release the active payload arm + the frame but LEAVE the intrusive counts (and _ops) alive — a weak ref
-    /// may still read them after the object is gone. Called once by async_node_traits at strong 0
-    /// (destroy_object); free_storage reclaims the raw node afterward.
+    /// Release the active payload arm and the frame, but LEAVE the intrusive counts and _ops alive — a weak ref may still read them after the object is gone.
+    /// Called once by async_node_traits at strong 0 (destroy_object); free_storage reclaims the raw node afterwards.
     void teardown_payload();
 
     // shared helpers for the typed node
 protected:
-    /// Stash this node's type-erased ops (its static async_type_ops), so the base can destroy the typed value
-    /// and free the right size class through a base-typed pointer. Called ONCE from the derived ctor, before
-    /// the node is shared — stores the 32-aligned ops pointer into the control word with state=cold. The ops
-    /// bits never change afterwards (free_storage reads them at weak 0), so teardown_payload never clears them.
+    /// Stash this node's type-erased ops, so the base can destroy the typed value and free the right size class through a base-typed pointer.
+    /// Called ONCE from the derived ctor, before the node is shared: it stores the 32-aligned ops pointer into the control word with state=cold.
+    /// The ops bits never change afterwards, because free_storage reads them at weak 0 — so teardown_payload never clears them.
     void set_ops(async_type_ops const* ops)
     {
         _state_and_ops.store(reinterpret_cast<u64>(ops), cc::memory_order_relaxed); // state cold, wake/lock clear
     }
 
-    /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain
-    /// relaxed store suffices — no reload/mask/re-store. Folds set_ops + an initial state transition (the
-    /// manual/push node births external_pending) that would otherwise not merge across the atomic. `ops` must be
-    /// 32-aligned (bits 0..4 free); wake/lock start clear.
+    /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain relaxed store suffices.
+    /// It folds set_ops and an initial state transition — the manual/push node births external_pending — that would otherwise not merge across the atomic.
+    /// `ops` must be 32-aligned, leaving bits 0..4 free; wake and lock start clear.
     void init_control_word(async_type_ops const* ops, async_node_state state)
     {
         _state_and_ops.store(reinterpret_cast<u64>(ops) | (u64(state) << state_shift), cc::memory_order_relaxed);
     }
 
-    /// Register `dep` as a not-ready dependency of this node (no subscription yet — that happens late, only
-    /// if this node has to park).
+    /// Register `dep` as a not-ready dependency of this node.
+    /// No subscription yet — that happens late, and only if this node has to park.
     void add_pending_dependency(async_node_base* dep) { deps().add(dep); }
 
-    /// Remove this node's continuations from every dependency it subscribed to. No-op with no deps (a leaf, or
-    /// a node that never parked) — the poll loop and every completion/teardown path call it unconditionally.
+    /// Remove this node's continuations from every dependency it subscribed to.
+    /// A no-op with no deps — a leaf, or a node that never parked — since the poll loop and every completion/teardown path call it unconditionally.
     void unsubscribe_all()
     {
         if (!deps().empty())
@@ -854,17 +815,13 @@ private:
         return reinterpret_cast<async_type_ops const*>(_state_and_ops.load(cc::memory_order_relaxed) & ops_mask);
     }
 
-    // Lock protocol: acquire the lock bit via a test-and-test-and-set fetch_or, release via fetch_and. While
-    // the lock is held only this thread writes the state/wake bits (readers just acquire-load), so the mutators
-    // below are plain load/mask/store — a concurrent spinner's fetch_or only re-sets an already-set lock bit,
-    // never changing the value. State stores are release, so a lock-free is_ready() acquire-load that sees a
-    // terminal state also sees the value/error published before it.
+    // Lock protocol: acquire the lock bit via a test-and-test-and-set fetch_or, release via fetch_and.
+    // While the lock is held only this thread writes the state/wake bits, and readers just acquire-load, so the mutators below are plain load/mask/store.
+    // A concurrent spinner's fetch_or only re-sets an already-set lock bit, never changing the value.
+    // State stores are release, so a lock-free is_ready() acquire-load that sees a terminal state also sees the value/error published before it.
     //
-    // Without threads the lock is uncontendable by construction — the only thread that could hold it is the one
-    // asking for it — so both sides compile away. cc::atomic already strips the interlock, but the RMW and its
-    // branch would remain, and the lock bit itself would only ever be written and read back as clear. The
-    // mutators below stay exactly as they are: they are plain load/mask/store either way, and the bit they
-    // preserve simply never gets set.
+    // Without threads the lock is uncontendable by construction — the only thread that could hold it is the one asking for it — so both sides compile away.
+    // The mutators below are unchanged either way: plain load/mask/store, preserving a bit that simply never gets set.
     void spin_lock()
     {
 #if CC_HAS_THREADS
@@ -922,25 +879,22 @@ private:
     friend void impl::async_typed_teardown(async_node_base*); // reaches value_storage for the typed dtor
     friend struct impl::async_node_traits;                    // reaches the intrusive counts / ops / teardown_payload
 
-    /// Intrusive refcount (async_node_traits): strong owners in the high half, weak (continuation cells + the
-    /// strong owners' collective one) in the low half. Born 1/1 by init_control. Fused into one word (offset 0)
-    /// so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the
-    /// sole owner — see cc::fused_refcount. The state/lock live in a separate word.
+    /// Intrusive refcount (async_node_traits): strong owners in the high half, weak in the low half — continuation cells plus the strong owners' collective one.
+    /// Born 1/1 by init_control.
+    /// Fused into one word at offset 0, so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the sole owner (cc::fused_refcount).
     cc::atomic<u64> _counts = {0};
 
-    /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits
-    /// 2..4, the wake-pending flag in bit 1, and the spinlock in bit 0. Folding lock + state + wake in with the
-    /// ops pointer keeps the fixed header at 16 B (with _counts). Set once at construction (set_ops); the
-    /// ops bits never change, so free_storage can read them at weak 0.
+    /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits 2..4, the wake-pending flag in bit 1, the spinlock in bit 0.
+    /// Folding lock + state + wake in with the ops pointer is what keeps the fixed header at 16 B alongside _counts.
+    /// Set once at construction (set_ops); the ops bits never change, so free_storage can read them at weak 0.
     ///
-    /// NOTE: is_ready()/is_cold() are lock-free acquire loads of this word, so they share an address with the
-    /// lock RMWs. Deliberate: nearly all is_ready() calls target already-resolved nodes, which take no lock
-    /// (completion is done) — no contention there. If a hot pre-completion is_ready() path ever contends,
-    /// steal the MSB of _counts' weak half for a dedicated ready bit instead.
+    /// is_ready() / is_cold() are lock-free acquire loads of this word, so they share an address with the lock RMWs.
+    /// That is deliberate — nearly all is_ready() calls target already-resolved nodes, which take no lock at all.
+    /// Should a hot pre-completion is_ready() path ever contend, steal the MSB of _counts' weak half for a dedicated ready bit instead.
     cc::atomic<u64> _state_and_ops = {0};
 
-    // No further members: this is a 16 B header. The payload (unresolved scratch ⊍ resolved value/error, incl.
-    // the compute frame) is raw storage declared by the derived async_typed_node<T> at offset 16, via payload().
+    // No further members: this is a 16 B header.
+    // The payload — unresolved scratch ⊍ resolved value/error, including the compute frame — is raw storage declared by the derived async_typed_node<T> at offset 16, via payload().
 };
 static_assert(sizeof(async_node_base) == 16, "async_node_base must be a 16 B header (payload() offset relies on it)");
 
