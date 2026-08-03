@@ -126,6 +126,12 @@ cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* c
             continue;
         }
 
+        if (arg == "--stats")
+        {
+            opts.stats = true;
+            continue;
+        }
+
         if (arg == "--no-color")
         {
             opts.color = cc::console::color_mode::never;
@@ -170,6 +176,60 @@ cc::result<prose_apply_options> parse_prose_apply_options(cc::span<char const* c
     return opts;
 }
 
+cc::result<prose_stats_options> parse_prose_stats_options(cc::span<char const* const> args)
+{
+    prose_stats_options opts;
+
+    for (isize i = 0; i < args.size(); ++i)
+    {
+        cc::string_view const arg = args[i];
+
+        if (arg == "-h" || arg == "--help")
+        {
+            opts.help = true;
+            return opts;
+        }
+
+        if (arg == "--no-color")
+        {
+            opts.color = cc::console::color_mode::never;
+            continue;
+        }
+
+        if (arg == "--color")
+        {
+            if (i + 1 >= args.size())
+                return cc::error("--color needs a mode (auto, always or never)");
+
+            ++i;
+            auto mode = parse_color_mode(args[i]);
+            CC_RETURN_IF_ERROR(mode);
+
+            opts.color = mode.value();
+            continue;
+        }
+
+        if (arg.starts_with("--color="))
+        {
+            auto mode = parse_color_mode(arg.subview(cc::string_view("--color=").size()));
+            CC_RETURN_IF_ERROR(mode);
+
+            opts.color = mode.value();
+            continue;
+        }
+
+        if (arg.starts_with("-") && arg != "-")
+            return cc::error(cc::format("unknown argument '{}' (see prose stats --help)", arg));
+
+        opts.files.push_back(cc::string(arg));
+    }
+
+    if (!opts.help && opts.files.empty())
+        return cc::error("no input files (see prose stats --help)");
+
+    return opts;
+}
+
 cc::string_view usage_text()
 {
     return R"(shaped-linter — a self-contained C++ custom linter for shaped-core
@@ -177,6 +237,7 @@ cc::string_view usage_text()
 usage:
   shaped-linter [options] <file>... [-- <file>...]
   shaped-linter prose apply [options] <plan>
+  shaped-linter prose stats [options] <file>...
 
 options:
   --fix                    apply each finding's suggested edit back to its file in place
@@ -199,6 +260,7 @@ usage:
 
 options:
   --dry-run        validate the plan and report, but write nothing
+  --stats          also report the prose delta — lines and words, before and after, per file
   --color <mode>   auto (default), always or never
   --no-color       the old spelling of --color never
   -h / --help      print this and exit
@@ -218,7 +280,29 @@ with no `| ` lines deletes. Spans ascend and may not overlap. Everything after `
 verbatim, comment marker and indentation included — nothing is inferred.
 
 Applying is all-or-nothing. A file is rejected if the edit changed code rather than
-prose, or if a rule fires on a line the plan wrote.
+prose, or if a rule fires on a line the plan wrote. Every file is still judged after
+one fails, so a run reports every problem the plan has rather than only the first.
+)";
+}
+
+cc::string_view prose_stats_usage_text()
+{
+    return R"(shaped-linter prose stats — how much prose a file carries
+
+usage:
+  shaped-linter prose stats [options] <file>...
+
+options:
+  --color <mode>   auto (default), always or never
+  --no-color       the old spelling of --color never
+  -h / --help      print this and exit
+
+Reports prose lines and words per file, then a total. Counts only extracted prose,
+so a `///` marker, a `*` leader and the code around them never register; markdown
+keeps the `#` and `1.` markers it reads as text.
+
+The same measure `prose apply --stats` reports a delta in, so a rework can be scoped
+and budgeted before its plan is written.
 )";
 }
 } // namespace scl

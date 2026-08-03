@@ -239,11 +239,9 @@ transient resources  [in progress]  ctx.transient's per-epoch bump allocator ove
                                   descriptor ring (dx12 real); transient textures pending
 ```
 
-The **epoch system** is the frame-level GPU-lifetime + CPU↔GPU sync mechanism: only the concept
-(`sg::epoch` / `sg::submission_token` and the `sg::context` contract) is shared; each backend
-realizes it (dx12 does; a backend may also uphold the contract without real in-flight tracking). It
-underpins safe resource reclamation and command-allocator recycling. See
-[concepts/epochs.md](concepts/epochs.md).
+The **epoch system** underpins safe resource reclamation and command-allocator recycling.
+Only the vocabulary is shared — `sg::epoch` / `sg::submission_token` and the `sg::context` contract — and each backend realizes it for itself.
+See [concepts/epochs.md](concepts/epochs.md).
 
 ## Initial implementation order
 

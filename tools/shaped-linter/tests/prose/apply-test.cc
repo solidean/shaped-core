@@ -31,6 +31,15 @@ cc::string edited(planned_rewrite const& r)
     }
     return out;
 }
+
+/// How many problems judging `r` against `original` turns up.
+isize problems(planned_rewrite const& r, cc::string_view original)
+{
+    source_manager sources;
+    apply_problems out;
+    validate_rewrite(r, original, sources, out);
+    return out.count();
+}
 } // namespace
 
 TEST("prose apply - a replacement swaps whole lines")
@@ -95,7 +104,7 @@ TEST("prose apply - changing code is rejected")
     auto const original = cc::string("int x = 1; // note\n");
     auto const r = build("## a.hh\n[1]\n| int y = 1; // note\n", original);
 
-    CHECK(validate_rewrite(r, original).has_error());
+    CHECK(problems(r, original) > 0);
 }
 
 TEST("prose apply - deleting a line that holds code is rejected")
@@ -103,7 +112,7 @@ TEST("prose apply - deleting a line that holds code is rejected")
     auto const original = cc::string("// doc\nint x = 1;\n");
     auto const r = build("## a.hh\n[1-2]\n| // doc\n", original);
 
-    CHECK(validate_rewrite(r, original).has_error());
+    CHECK(problems(r, original) > 0);
 }
 
 TEST("prose apply - a trailing comment may be rewritten and re-aligned")
@@ -111,7 +120,7 @@ TEST("prose apply - a trailing comment may be rewritten and re-aligned")
     auto const original = cc::string("#include <memory>        // std::shared_ptr, std::make_shared\n");
     auto const r = build("## a.hh\n[1]\n| #include <memory> // shared_ptr\n", original);
 
-    CHECK(validate_rewrite(r, original).has_value());
+    CHECK(problems(r, original) == 0);
 }
 
 TEST("prose apply - prose that violates a rule is rejected")
@@ -119,7 +128,7 @@ TEST("prose apply - prose that violates a rule is rejected")
     auto const original = cc::string("/// a comment\nint x;\n");
     auto const r = build("## a.hh\n[1]\n| /// One point. And a second one on the same line.\n", original);
 
-    CHECK(validate_rewrite(r, original).has_error());
+    CHECK(problems(r, original) > 0);
 }
 
 TEST("prose apply - a violation the plan did not write is not the plan's problem")
@@ -128,7 +137,7 @@ TEST("prose apply - a violation the plan did not write is not the plan's problem
     auto const original = cc::string("/// One point. And a second one on the same line.\n/// stale\nint x;\n");
     auto const r = build("## a.hh\n[2]\n| /// fresh\n", original);
 
-    CHECK(validate_rewrite(r, original).has_value());
+    CHECK(problems(r, original) == 0);
 }
 
 TEST("prose apply - markdown is prose end to end")
@@ -137,7 +146,7 @@ TEST("prose apply - markdown is prose end to end")
     auto const r = build("## a.md\n[3]\n| new body\n", original);
 
     CHECK(r.text == "# Title\n\nnew body\n");
-    CHECK(validate_rewrite(r, original).has_value());
+    CHECK(problems(r, original) == 0);
 }
 
 TEST("prose apply - python comments go through the python lexer")
@@ -145,7 +154,7 @@ TEST("prose apply - python comments go through the python lexer")
     auto const original = cc::string("x = 1  # old\n");
     auto const r = build("## a.py\n[1]\n| x = 1  # new\n", original);
 
-    CHECK(validate_rewrite(r, original).has_value());
+    CHECK(problems(r, original) == 0);
 }
 
 TEST("prose apply - changing python code is rejected")
@@ -153,5 +162,49 @@ TEST("prose apply - changing python code is rejected")
     auto const original = cc::string("x = 1  # note\n");
     auto const r = build("## a.py\n[1]\n| x = 2  # note\n", original);
 
-    CHECK(validate_rewrite(r, original).has_error());
+    CHECK(problems(r, original) > 0);
+}
+
+TEST("prose apply - every bad line is reported, not just the first")
+{
+    // Authoring a plan is a batch job across many files, so stopping at the first problem costs the
+    // author one round trip per problem.
+    auto const original = cc::string("# Title\n\na\nb\nc\n");
+    auto const r = build("## a.md\n[3-5]\n"
+                         "| One point. And a second one on the same line.\n"
+                         "| Another point. With a second one too.\n"
+                         "| A third. And again.\n",
+                         original);
+
+    CHECK(problems(r, original) == 3);
+}
+
+TEST("prose apply - a code change and a prose violation are both reported")
+{
+    // The code check runs first but must not swallow the prose findings behind it.
+    auto const original = cc::string("int x = 1; // note\n");
+    auto const r = build("## a.hh\n[1]\n| int y = 1; // One point. And a second one.\n", original);
+
+    source_manager sources;
+    apply_problems out;
+    validate_rewrite(r, original, sources, out);
+
+    CHECK(out.errors.size() == 1);
+    CHECK(out.findings.size() == 1);
+}
+
+TEST("prose apply - findings resolve against the rewritten text, not the file")
+{
+    // The carets have to land on the prose the plan WROTE; nothing of it is on disk yet.
+    auto const original = cc::string("# Title\n\nold\n");
+    auto const r = build("## a.md\n[3]\n| One point. And a second one on the same line.\n", original);
+
+    source_manager sources;
+    apply_problems out;
+    validate_rewrite(r, original, sources, out);
+
+    REQUIRE(out.findings.size() == 1);
+    auto const& buffer = sources.buffer(out.findings[0].span.file_id);
+    CHECK(buffer.path() == "a.md");
+    CHECK(buffer.line_text(3) == "One point. And a second one on the same line.");
 }

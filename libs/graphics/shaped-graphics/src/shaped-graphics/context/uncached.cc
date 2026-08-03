@@ -23,7 +23,6 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
     cc::span<binding const> bindings,
     cc::span<named_sampler const> static_samplers)
 {
-    // Layouts have no transient variant — always persistent.
     return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
 }
 
@@ -39,7 +38,6 @@ pipeline_layout_handle context_uncached_scope::create_pipeline_layout(pipeline_l
 
 cc::result<pipeline_layout_handle> context_uncached_scope::try_create_pipeline_layout(pipeline_layout_description const& desc)
 {
-    // Layouts have no transient variant — always persistent.
     return _ctx.try_create_pipeline_layout(desc, lifetime_scope::persistent);
 }
 
@@ -56,7 +54,6 @@ compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_
 cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_pipeline(
     compute_pipeline_description const& desc)
 {
-    // Pipelines have no transient variant — always persistent.
     return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -72,7 +69,6 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
 
 cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
 {
-    // Pipelines have no transient variant — always persistent.
     return _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -90,7 +86,6 @@ raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(ra
 cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytracing_pipeline(
     raytracing_pipeline_description const& desc)
 {
-    // Pipelines have no transient variant — always persistent.
     return _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -108,7 +103,6 @@ raytracing_shader_table_handle context_uncached_scope::create_raytracing_shader_
 cc::result<raytracing_shader_table_handle> context_uncached_scope::try_create_raytracing_shader_table(
     raytracing_shader_table_description const& desc)
 {
-    // A shader table is a persistent, uncached object referencing a specific pipeline.
     return _ctx.try_create_raytracing_shader_table(desc, lifetime_scope::persistent);
 }
 } // namespace sg

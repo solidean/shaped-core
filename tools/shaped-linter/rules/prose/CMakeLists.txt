@@ -5,10 +5,12 @@
 
 target_sources(shaped-linter-core PRIVATE
     no-flow-prose/no_flow_prose.cc
+    no-long-prose-line/no_long_prose_line.cc
 )
 
 if(SC_BUILD_TESTS)
     target_sources(shaped-linter-test PRIVATE
         no-flow-prose/no_flow_prose-test.cc
+        no-long-prose-line/no_long_prose_line-test.cc
     )
 endif()

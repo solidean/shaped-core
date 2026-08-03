@@ -1,9 +1,5 @@
 # Concept: textures
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [memory](memory.md), [views](views.md), [barriers](barriers.md).
-
 A texture is a GPU-resident, immutable-shape resource — like [`raw_buffer`](../../src/shaped-graphics/resource/raw_buffer.hh),
 but with a texel grid (format, extents, mips, array slices, samples) instead of a byte range. Textures
 are shaped by two ideas that are worth explaining: **raw resource vs typed wrapper**, and a
@@ -80,3 +76,9 @@ Since first landing, textures have grown views ([views.md](views.md)), per-comma
   texture-capable transient `memory_heap` is the missing piece.
 - **Device→device texture copies** (texture→texture `CopyTextureRegion`) — only host↔device copies exist.
 - **Mip generation / format conversion** — belongs in shaped-rendering (sr), on top of these copies.
+
+## See also
+
+- [memory](memory.md) — the lifetime and placement axes a texture's backing memory is chosen on.
+- [views](views.md) — how a shader reads a texture.
+- [barriers](barriers.md) — the layout tracking that makes an explicit transition unnecessary.

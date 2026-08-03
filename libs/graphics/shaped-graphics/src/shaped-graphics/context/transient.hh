@@ -10,36 +10,30 @@
 
 namespace sg
 {
-/// Resource factory for a context's *transient* lifetime scope, reached as `ctx.transient`. Transient
-/// resources are tied to the current epoch and recycled when it retires (see lifetime_scope) — per-frame
-/// scratch (intermediate buffers, one-shot binding groups) that never needs to outlive the work that
-/// produced it. Using one past its epoch is a hard error.
+/// Resource factory for a context's *transient* lifetime scope, reached as `ctx.transient`.
+/// Transient resources are tied to the current epoch and recycled when it retires (see lifetime_scope) — per-frame scratch that never needs to outlive the work that produced it.
+/// Using one past its epoch is a hard error.
 ///
-/// Buffers are sub-allocated by a simple **per-epoch bump allocator** over one persistent memory_heap
-/// the scope owns: the head resets to 0 whenever the epoch changes, so successive epochs alias the same
-/// storage. That is safe — a direct queue executes each epoch's GPU work before the next's, so the
-/// memory is free by the time it is reused — and cheaper than a ring (smaller heap, better cache
-/// behaviour). Requests larger than the budget fall back to a dedicated (committed) allocation. This is
-/// all built on the public create_memory_heap + create_raw_buffer; the backend only sees a transient,
-/// heap-placed allocation_info.
-/// Each create comes in a throwing default (`create_*`, returns the handle, raises a typed sg exception
-/// on failure) and a fallible core (`try_create_*`, returns cc::result). See docs/error-handling.md and
-/// context_persistent_scope. Contract violations assert in either flavor.
+/// Buffers are sub-allocated by a per-epoch bump allocator over one persistent memory_heap the scope owns.
+/// The head resets to 0 whenever the epoch changes, so successive epochs alias the same storage — safe because a direct queue executes each epoch's GPU work before the next's.
+/// Requests larger than the budget fall back to a dedicated (committed) allocation.
+///
+/// Every create comes in a `try_create_*` fallible core and a throwing `create_*` default, as on context_persistent_scope — the pattern in docs/error-handling.md.
 class context_transient_scope
 {
     // buffers
 public:
-    /// Allocates a transient buffer of `size_in_bytes` (>= 0, 0 is a valid empty buffer) from the
-    /// current epoch's bump window; the storage is reused once the epoch changes. Throws
-    /// sg::allocation_exception on allocation failure.
+    /// Allocates a transient buffer of `size_in_bytes` from the current epoch's bump window; the storage is reused once the epoch changes.
+    /// Size must be >= 0, and 0 is a valid empty buffer.
+    /// Throws sg::allocation_exception on allocation failure.
     [[nodiscard]] raw_buffer_handle create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
-    /// Fallible core of create_raw_buffer — returns an error instead of throwing.
     [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usage usage);
 
-    // Typed buffer factory — allocates `element_count` elements of `T` (byte size element_count * sizeof(T))
-    // and returns the wrapped `buffer<T>`, whose view factories are typed by `T`. `element_count` must be
-    // >= 0 (0 is a valid empty buffer). Error behaviour mirrors create_raw_buffer.
+    // Typed buffer factory — allocates `element_count` elements of `T`, so element_count * sizeof(T) bytes.
+    // Returns the wrapped `buffer<T>`, whose view factories are typed by `T`.
+    // `element_count` must be >= 0, and 0 is a valid empty buffer.
+    // Error behaviour mirrors create_raw_buffer.
 
     template <class T>
     [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usage usage)
@@ -58,21 +52,19 @@ public:
 
     // textures
 public:
-    /// Allocates a transient texture, recycled once this epoch retires. Throws sg::allocation_exception
-    /// on allocation failure. NOTE: the transient bump-heap is buffers-only today, so a transient texture
-    /// is currently a *dedicated* allocation auto-expired at the next epoch — not bump-suballocated. A
-    /// texture-capable transient memory_heap (placed transient textures) is a deferred memory_heap extension.
+    /// Allocates a transient texture, recycled once this epoch retires.
+    /// Throws sg::allocation_exception on allocation failure.
+    /// The transient bump-heap is buffers-only today, so a transient texture is a *dedicated* allocation auto-expired at the next epoch, not bump-suballocated.
+    /// Placed transient textures wait on a texture-capable transient memory_heap.
     [[nodiscard]] raw_texture_handle create_raw_texture(texture_description const& desc);
 
-    /// Fallible core of create_raw_texture — returns an error instead of throwing.
     [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc);
 
-    // Typed texture factories — take a shape-specific description (only the free parameters; see
-    // texture_descriptions.hh), expand it to a full texture_description, create the transient raw_texture, and
-    // return the wrapped `texture<Traits>`. `create_texture` / `try_create_texture` are the generic core
-    // (deduce the shape from the description); the named `create_texture_2d` / … wrappers exist so the
-    // description can be brace-initialized at the call site (`create_texture_2d({.width = 256, ...})`), which
-    // the deduced template cannot. Error behaviour mirrors create_raw_texture.
+    // Typed texture factories — take a shape-specific description (see texture_descriptions.hh), expand it to a full texture_description, and return the wrapped `texture<Traits>`.
+    // `create_texture` / `try_create_texture` are the generic core, deducing the shape from the description.
+    // The named `create_texture_2d` / … wrappers exist so the description can be brace-initialized at the call site: `create_texture_2d({.width = 256, ...})`.
+    // The deduced `create_texture` template cannot do that.
+    // Error behaviour mirrors create_raw_texture.
 
     template <class Desc>
     [[nodiscard]] typename Desc::texture_type create_texture(Desc const& desc)
@@ -176,23 +168,21 @@ public:
 
     // bind path
 public:
-    /// Instantiates `layout` with the given name->view bindings as a transient binding_group (validated
-    /// against the layout), whose descriptors are recycled when this epoch retires. Throws
-    /// sg::binding_group_exception on a wiring error or descriptor-heap exhaustion.
+    /// Instantiates `layout` with the given name->view bindings as a transient binding_group, validated against the layout.
+    /// Its descriptors are recycled when this epoch retires.
+    /// Throws sg::binding_group_exception on a wiring error or descriptor-heap exhaustion.
     [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle layout,
                                                             cc::span<named_view const> views,
                                                             cc::span<named_sampler const> samplers = {});
 
-    /// Fallible core of create_binding_group — returns an error instead of throwing.
     [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                             cc::span<named_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
-    /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources
-    /// (buffers today, textures in future). May be called any time, repeatedly: it records a *pending*
-    /// budget and returns immediately without touching the GPU. The change takes effect at the next
-    /// advance_epoch, which drains in-flight work and resizes the transient heap; until then the current
-    /// budget stays in force. Default: 128 MiB.
+    /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
+    /// May be called any time, repeatedly: it records a *pending* budget and returns immediately without touching the GPU.
+    /// The change takes effect at the next advance_epoch, which drains in-flight work and resizes the transient heap; until then the current budget stays in force.
+    /// Default: 128 MiB.
     void set_budget(isize size_in_bytes);
 
     // Pinned to its owning context: neither copyable nor movable.
@@ -205,17 +195,15 @@ private:
     friend class context;
     explicit context_transient_scope(context& ctx) : _ctx(ctx) {}
 
-    // Applies a pending set_budget() at an epoch boundary: if one is pending, drains all in-flight epochs
-    // (so nothing still references the current transient heap), then drops the heap and adopts the new
-    // budget — the heap is lazily recreated at the new size on the next transient allocation. No-op if
-    // nothing is pending. Reached via context::apply_pending_transient_budget from a backend's advance_epoch.
+    // Applies a pending set_budget() at an epoch boundary, draining all in-flight epochs first so nothing still references the current transient heap.
+    // It then drops the heap and adopts the new budget; the heap is lazily recreated at the new size on the next transient allocation.
+    // No-op if nothing is pending; reached via context::apply_pending_transient_budget from a backend's advance_epoch.
     void apply_pending_budget_at_epoch_boundary();
 
     context& _ctx;
 
-    // The bump allocator state: the heap (lazy), its budget, the current head, the epoch the head was last
-    // reset for, and a budget change awaiting the next epoch boundary. Guarded — create_raw_buffer may run on
-    // any thread.
+    // The bump allocator state: the heap (lazy), its budget, the current head, the epoch the head was last reset for, and a budget change awaiting the next epoch boundary.
+    // Guarded — create_raw_buffer may run on any thread.
     struct bump_state
     {
         memory_heap_handle heap = nullptr;

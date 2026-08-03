@@ -1,9 +1,5 @@
 # Concept: barriers & access-state tracking
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [threading](threading.md) and [epochs](epochs.md).
-
 sg tracks how each resource is accessed and inserts the GPU barriers that order those accesses. The goal
 is **correct, minimal** barriers with **no explicit barrier API** for the caller: access is inferred from
 the operation, and the concurrency model lets several command lists record at once.

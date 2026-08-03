@@ -313,6 +313,32 @@ def discover_lint_files(root: Path, *, dirty_only: bool) -> list[Path]:
     return sorted(found)
 
 
+def expand_lint_paths(root: Path, paths: list[str]) -> list[Path]:
+    """Expand user-given files and directories into the lintable files under them.
+
+    Same suffix and exclusion rules as `discover_lint_files`, so `prose-stats docs/` measures exactly the
+    files `lint shaped` would have walked there.
+    A named file is taken as given — measuring one deliberately is not the same as discovering it.
+    """
+    found: list[Path] = []
+    for raw in paths:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / p
+
+        if p.is_file():
+            found.append(p)
+            continue
+
+        for dirpath, dirnames, filenames in os.walk(p):
+            dirnames[:] = [d for d in dirnames if d not in _LINT_EXCLUDED_DIRS]
+            for f in filenames:
+                if f.endswith(_LINT_SUFFIXES):
+                    found.append(Path(dirpath) / f)
+
+    return sorted(set(found))
+
+
 def format_sources(
     files: list[Path],
     *,

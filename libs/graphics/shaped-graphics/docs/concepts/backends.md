@@ -1,9 +1,5 @@
 # Concept: backends
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full rules (those are the [coding-guidelines](../coding-guidelines.md)). See also
-> [epochs](epochs.md), [threading](threading.md), [inline upload](upload.inline.md).
-
 ## What a backend is
 
 `sg::context`, `sg::command_list`, and `sg::raw_buffer` are **abstract interfaces**. A *backend* is a

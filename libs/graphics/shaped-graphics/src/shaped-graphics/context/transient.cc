@@ -28,8 +28,8 @@ void context_transient_scope::apply_pending_budget_at_epoch_boundary()
     if (pending == 0)
         return;
 
-    // Drain every in-flight epoch so no GPU work still references the current transient heap before we drop
-    // it. Only needed if a heap actually exists. Uses base-context virtuals only, so it is backend-agnostic.
+    // Drain every in-flight epoch so no GPU work still references the current transient heap before we drop it.
+    // Only needed if a heap actually exists, and it uses base-context virtuals only, so it stays backend-agnostic.
     if (live)
     {
         while (u64(_ctx.completed_epoch()) + 1 < u64(_ctx.current_epoch()))
@@ -64,8 +64,8 @@ cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isi
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
 
-    // Empty buffers own no storage; a dedicated transient allocation is enough. Non-empty ones reserve a
-    // window from the per-epoch bump allocator, resetting the head when the epoch changes.
+    // Empty buffers own no storage; a dedicated transient allocation is enough.
+    // Non-empty ones reserve a window from the per-epoch bump allocator, resetting the head when the epoch changes.
     if (size_in_bytes > 0)
     {
         auto reserved = _bump.lock(
@@ -114,9 +114,8 @@ raw_texture_handle context_transient_scope::create_raw_texture(texture_descripti
 
 cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(texture_description const& desc)
 {
-    // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated
-    // allocation tagged transient (the backend auto-expires it at the next epoch). Placed/bump-allocated
-    // transient textures wait on a texture-capable transient memory_heap. See the header note.
+    // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated allocation tagged transient, which the backend auto-expires at the next epoch.
+    // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
     return _ctx.try_create_raw_texture(desc, alloc);

@@ -1,9 +1,5 @@
 # Concept: GPU queries
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [inline download](download.inline.md), [epochs](epochs.md), and [threading](threading.md).
-
 ## What GPU queries are
 
 A **GPU query** records a value the GPU produces while executing a command list, read back on the host
@@ -62,3 +58,9 @@ The handles it already handed out keep their (still-invalid) future forever, so 
 The `dx12_query_heap_type` enum, the per-type free list, and the lease/resolve/readback flow are shaped
 to grow: occlusion or pipeline-statistics queries add a heap type and their own result view, and reuse
 the same pooling and submit-time resolve machinery. Timestamps are the only kind implemented today.
+
+## See also
+
+- [inline download](download.inline.md) — the readback ring the batched query results are delivered through.
+- [epochs](epochs.md) — the epoch the query heap lease and its reclaim are tied to.
+- [threading](threading.md) — why polling a `gpu_timestamp` needs no context lock.
