@@ -8,10 +8,10 @@
 
 using namespace cc::primitive_defines;
 
-// Runtime resizing of the transfer resources (ctx.upload.set_async_window_size / set_inline_budget and
-// ctx.download.set_budget), on WARP. Each ring is created tiny, then grown, and a transfer that would not
-// fit the original capacity is run to prove the resize took effect — plus a round-trip either side of the
-// change to prove correctness is preserved. See upload.async / upload.inline / download.inline concept docs.
+// Runtime resizing of the transfer resources on WARP: ctx.upload.set_async_window_size / set_inline_budget and ctx.download.set_budget.
+// Each ring is created tiny, then grown, and a transfer that would not fit the original capacity proves the resize took effect.
+// A round-trip either side of the change proves correctness is preserved.
+// See the upload.async / upload.inline / download.inline concept docs.
 
 namespace
 {

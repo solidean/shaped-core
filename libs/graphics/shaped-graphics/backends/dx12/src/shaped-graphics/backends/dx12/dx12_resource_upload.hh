@@ -12,9 +12,10 @@
 
 namespace sg::backend::dx12
 {
-/// A window inside the persistently-mapped UPLOAD ring buffer, handed to execute_next_job. `base`
-/// points at byte 0 of the mapped buffer; the writable window is [base + offset, base + offset + size),
-/// and `offset` is also the GPU-side source offset for the copy. Non-owning.
+/// A window inside the persistently-mapped UPLOAD ring buffer, handed to execute_next_job.
+/// `base` points at byte 0 of the mapped buffer; the writable window is [base + offset, base + offset + size).
+/// `offset` is also the GPU-side source offset for the copy.
+/// Non-owning.
 struct dx12_upload_allocation
 {
     ID3D12Resource* buffer = nullptr;
@@ -23,9 +24,10 @@ struct dx12_upload_allocation
     isize size = 0;
 };
 
-/// Records the copy commands that stage one resource's bytes through the inline UPLOAD ring buffer,
-/// hiding whether the destination is a buffer or a texture. The upload system drives it: reserve a
-/// window, prepare(), then execute_next_job() (once for a buffer; repeatedly for a chunked texture).
+/// Records the copy commands that stage one resource's bytes through the inline UPLOAD ring buffer.
+/// Hides whether the destination is a buffer or a texture.
+/// The upload system drives it: reserve a window, prepare(), then execute_next_job().
+/// That is once for a buffer, repeatedly for a chunked texture.
 struct dx12_resource_upload
 {
     virtual ~dx12_resource_upload() = default;
@@ -39,17 +41,16 @@ struct dx12_resource_upload
     /// Whether all copy commands have been recorded.
     [[nodiscard]] virtual bool is_finished() const = 0;
 
-    /// Copies the next chunk into the allocation window and records the GPU copy. Returns bytes
-    /// consumed from the window (0 if it is too small to make progress).
+    /// Copies the next chunk into the allocation window and records the GPU copy.
+    /// Returns bytes consumed from the window — 0 when it is too small to make progress.
     [[nodiscard]] virtual isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc)
         = 0;
 };
 
-/// Buffer upload: copies `data` into `dst` at `dst_offset` via CopyBufferRegion. Resumable — each
-/// execute_next_job stages as much as the window holds and records that chunk, so an upload larger than
-/// the staging window is split across successive calls (a buffer fits one job when the window is big
-/// enough; the async copy queue chunks large ones). The source bytes are read during execute_next_job,
-/// so they need only outlive the calls that consume them.
+/// Buffer upload: copies `data` into `dst` at `dst_offset` via CopyBufferRegion.
+/// Resumable — each execute_next_job stages as much as the window holds and records that chunk.
+/// An upload larger than the window therefore splits across successive calls.
+/// The source bytes are read during execute_next_job, so they need only outlive the calls that consume them.
 struct dx12_buffer_upload final : dx12_resource_upload
 {
     dx12_buffer_upload(dx12_buffer const& dst, isize dst_offset, cc::span<byte const> data)
@@ -57,8 +58,7 @@ struct dx12_buffer_upload final : dx12_resource_upload
     {
     }
 
-    // Raw-resource overload: the async path holds only the ID3D12Resource* (kept alive by the job's
-    // buffer handle), not a dx12_buffer reference.
+    // Raw-resource overload: `dst` must outlive the recorded copies.
     dx12_buffer_upload(ID3D12Resource* dst, isize dst_offset, cc::span<byte const> data)
       : _dst(dst), _dst_offset(dst_offset), _data(data)
     {
@@ -69,8 +69,7 @@ struct dx12_buffer_upload final : dx12_resource_upload
     /// Bytes staged and recorded so far.
     [[nodiscard]] isize consumed() const { return _consumed; }
 
-    // Buffers rely on D3D12 implicit state promotion/decay for copies, so no barrier is needed.
-    // TODO: global-barrier placeholder — a real per-resource state-tracking barrier system lands later.
+    // No barrier here — the command list's access tracking flushes intra-list buffer hazards.
     void prepare(dx12_command_list&) override {}
 
     [[nodiscard]] bool is_finished() const override { return _consumed == _data.size(); }
@@ -93,15 +92,16 @@ private:
     isize _consumed = 0;
 };
 
-/// Texture upload: stages the region's rows — each padded to the D3D12 row-pitch alignment (256) — into
-/// the staging buffer and records CopyTextureRegion. Resumable at row/slice granularity: each
-/// execute_next_job is handed a plain byte window, **self-aligns** it to the 512-byte placement alignment,
-/// stages the largest chunk that fits (a run of whole depth slices, or a partial block-row run within one
-/// slice; see next_texture_copy_chunk), and returns the bytes consumed *including* the alignment waste — so
-/// the ring/window stays byte-agnostic. A region larger than the free window, or one straddling the seam,
-/// splits across successive calls; a window too small to fit an aligned padded row returns 0 (the driver
-/// then wraps / rolls to a fresh window). Only a single padded row wider than a whole ring/window is
-/// unsupported (a very wide 1D texture). Layout barriers are the driver's job, so `prepare` is a no-op.
+/// Texture upload: stages the region's rows into the staging buffer and records CopyTextureRegion.
+/// Each row is padded to the D3D12 row-pitch alignment (256).
+/// Resumable at row/slice granularity, which is the contract every ring driver walks:
+///  - execute_next_job is handed a plain byte window and **self-aligns** it to the 512-byte placement alignment;
+///  - it stages the largest chunk that fits (see next_texture_copy_chunk);
+///  - it returns bytes consumed *including* the alignment waste, so the ring stays a plain byte allocator;
+///  - a window too small for an aligned padded row returns 0, and the driver rolls to a fresh one.
+/// A region larger than the free window, or one straddling the seam, splits across successive calls.
+/// Unsupported: a single padded row wider than a whole ring or window (a very wide 1D texture).
+/// Layout barriers are the driver's job, so `prepare` is a no-op.
 struct dx12_texture_upload final : dx12_resource_upload
 {
     dx12_texture_upload(ID3D12Resource* dst, dx12_texture_footprint const& fp, cc::span<byte const> data)
@@ -113,8 +113,8 @@ struct dx12_texture_upload final : dx12_resource_upload
     void prepare(dx12_command_list&) override {}
     [[nodiscard]] bool is_finished() const override { return _rows_done >= total_rows(); }
 
-    /// Staged bytes not yet recorded (padded). The inline driver reserves this (+ one placement alignment of
-    /// slack for the self-alignment) so a fits-before-the-seam region lands in a single reservation.
+    /// Staged bytes not yet recorded (padded).
+    /// The inline driver reserves this plus one placement alignment of slack, so a fits-before-the-seam region lands in one reservation.
     [[nodiscard]] isize remaining_bytes() const { return (total_rows() - _rows_done) * _fp.padded_pitch; }
 
     [[nodiscard]] isize execute_next_job(ID3D12GraphicsCommandList& list, dx12_upload_allocation const& alloc) override

@@ -6,10 +6,10 @@
 
 using namespace cc::primitive_defines;
 
-// dx12 async-upload internals that the backend-agnostic tier-1 suite (tests/transfer/upload-async-test.cc)
-// can't reach: the staging pipeline's window packing and recycling, forced with a deliberately tiny window
-// size (a dx12_config knob). The public upload/sync contract is pinned in tier 1. See
-// libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
+// dx12 async-upload internals the backend-agnostic tier-1 suite (tests/transfer/upload-async-test.cc) can't reach.
+// That is the staging pipeline's window packing and recycling, forced with a deliberately tiny window size (a dx12_config knob).
+// The public upload/sync contract is pinned in tier 1.
+// See libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
 
 namespace
 {
@@ -24,8 +24,8 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 }
 } // namespace
 
-// A single upload larger than one staging window must pack across several windows, pipelining and
-// recycling as it goes. A fresh context with deliberately tiny windows forces it.
+// A single upload larger than one staging window must pack across several windows, pipelining and recycling as it goes.
+// A fresh context with deliberately tiny windows forces it.
 TEST("sg dx12 - async upload larger than a staging window packs across windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 4096});
@@ -53,11 +53,10 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows")
     CHECK(matches);
 }
 
-// Many uploads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on
-// the window fence and recycle windows repeatedly. Each targets its own buffer; all must read back intact.
-// Regression: window 0 shares its staging slot with window 3, and the window fence must observe window 0's
-// completion before window 3 overwrites the slot — a 0-based fence value collided with the fence's initial
-// 0 and skipped that wait, so buffer 0 read back buffer 3's bytes (only slot 0 was affected).
+// Many uploads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on the window fence and recycle windows repeatedly.
+// Each targets its own buffer; all must read back intact.
+// Window 0 shares its staging slot with window 3, so the window fence must observe window 0's completion before window 3 overwrites that slot.
+// That aliasing is what the 1-based window-fence values guard — see submit_window in dx12_upload_async.cc.
 TEST("sg dx12 - many async uploads recycle the staging windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
@@ -92,17 +91,18 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
     CHECK(all_ok);
 }
 
-// Uneven upload sizes (none a window multiple) force the actor to both pack several jobs into one window and
-// split a single job across windows, all while recycling — a shape the exact-fill and single-large-upload
-// tests miss. Distinct buffers; each must read back intact.
+// Uneven upload sizes (none a window multiple) force the actor to both pack several jobs into one window and split a single job across windows, all while recycling.
+// That is a shape the exact-fill and single-large-upload tests miss.
+// Distinct buffers; each must read back intact.
 TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
     auto& c = *ctx.value();
 
-    // Sizes chosen so windows carry parts of two uploads and single uploads span windows; aggregate spans
-    // several windows so slots recycle. Byte k*13+7 keeps each buffer's pattern distinct.
+    // Sizes chosen so windows carry parts of two uploads and single uploads span windows.
+    // The aggregate spans several windows, so slots recycle.
+    // Byte k*13+7 keeps each buffer's pattern distinct.
     isize const sizes[] = {700, 300, 900, 1500, 200, 1100, 640, 1300, 480, 760};
     int const count = 10;
     cc::vector<sg::raw_buffer_handle> bufs;

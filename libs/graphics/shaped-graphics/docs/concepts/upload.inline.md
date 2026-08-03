@@ -68,18 +68,16 @@ per-epoch **actor-drain** signal, not at GPU retire. See [inline download](downl
 ## dx12 implementation
 
 - [`dx12_upload_inline.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_inline.hh)
-  / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_inline.cc) — the ring
-  (`next_pos` cursor, `freed_pos` watermark, `epoch_checkpoint` FIFO), the reservation loop, and the
-  epoch hooks. The system **creates and maps its own `D3D12_HEAP_TYPE_UPLOAD` buffer** in `initialize`,
-  off the context's device; the "copy command" is `ID3D12GraphicsCommandList::CopyBufferRegion`, on the
-  single DIRECT queue.
+  / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_inline.cc)
+  — the ring (`next_pos` cursor, `freed_pos` watermark, `epoch_checkpoint` FIFO), the reservation loop, and the epoch hooks.
+  The system **creates and maps its own `D3D12_HEAP_TYPE_UPLOAD` buffer** in `initialize`, off the context's device.
+  The "copy command" is `ID3D12GraphicsCommandList::CopyBufferRegion`, on the single DIRECT queue.
 - [`dx12_resource_upload.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_upload.hh)
-  — the per-resource copy recorder (`dx12_buffer_upload` / `dx12_texture_upload`), hiding buffer vs
-  texture behind a resumable job loop so the ring stays a plain byte allocator. A buffer or texture larger
-  than the free ring splits across the seam; the texture split is at row/slice granularity.
-- The epoch hooks `on_epoch_advance` / `on_epochs_completed` are called from
-  [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc)
-  `advance_epoch` / `process_completed_epochs`.
+  — the per-resource copy recorder, `dx12_buffer_upload` / `dx12_texture_upload`.
+  It hides buffer vs texture behind a resumable job loop, so the ring stays a plain byte allocator.
+  A buffer or texture larger than the free ring splits across the seam, the texture split at row/slice granularity.
+- The epoch hooks `on_epoch_advance` / `on_epochs_completed` are called from `advance_epoch` / `process_completed_epochs` in
+  [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 
 ## See also
 

@@ -1,19 +1,7 @@
-// dx12_upload_async_system: a dedicated COPY queue that streams CPU→GPU buffer writes off the frame
-// path. A cc::threaded_actor drains upload jobs, memcpys their bytes into a persistently-mapped UPLOAD
-// staging buffer, and records CopyBufferRegion on the copy queue.
-//
-// The staging buffer is triple-buffered into fixed windows so CPU memcpy and GPU copy overlap: while the
-// GPU copies window N the actor fills window N+1, with window N+2 as slack. A window is submitted as
-// soon as it fills (or the inbox drains), so latency stays low; an upload larger than a window packs
-// across successive windows. Reusing a window's memory waits on the per-window staging fence — but only
-// three submissions later, so the wait is normally already satisfied (that headroom is the whole point
-// of three windows). A second fence, this system's completion fence, is signaled with the highest
-// finished upload value each window, and the submit path makes a later direct-queue list wait on it so
-// it observes the copy. The system owns one copy command list (reused across windows) and one allocator
-// per window slot, cycled on the window fence — not the epoch-gated command pool, since the copy queue
-// does not observe epoch semantics. Source bytes are only read during the memcpy into staging, so a job
-// (and its pin) is destroyed as soon as it is fully staged — on the actor thread, off the submission
-// path. See libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
+// dx12_upload_async_system: the copy actor behind dx12_upload_async.hh — window packing, submission, and the staging memcpy.
+// The shape and the two fences are on the class doc there.
+// Source bytes are read only during the memcpy into staging, so a job and its pin die as soon as it is fully staged — on the actor thread, off the submission path.
+// Why the acyclicity guard is load-bearing: libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
 
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
@@ -27,21 +15,21 @@ namespace sg::backend::dx12
 {
 namespace
 {
-// Triple-buffered staging: one window being copied by the GPU, one just submitted, one being filled by
-// the CPU. Fewer than three would reintroduce a sync bubble (the CPU would stall on the window it just
-// handed the GPU); more only adds staging memory.
+// Triple-buffered staging: one window being copied by the GPU, one just submitted, one being filled by the CPU.
+// Fewer than three reintroduces a sync bubble — the CPU would stall on the window it just handed the GPU.
+// More only adds staging memory.
 constexpr int num_staging_windows = 3;
 
-// A window size is rounded up to the texture placement alignment (512) so each window's base is 512-aligned
-// — a texture copy's placed footprint must start there. Buffers are unaffected by the rounding.
+// A window size rounds up to the texture placement alignment (512), so each window's base is 512-aligned.
+// A texture copy's placed footprint must start there; buffers are unaffected by the rounding.
 [[nodiscard]] isize round_window(isize bytes)
 {
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
 }
 
 /// The async-upload copy actor: one thread that packs jobs into staging windows and submits copy work.
-/// All window / job / command-list state lives here and is touched only on the actor thread, so it needs
-/// no locks. It reaches shared, immutable-after-init fields (staging buffer, fences, queue) via _sys.
+/// All window / job / command-list state lives here and is touched only on the actor thread, so it needs no locks.
+/// It reaches the shared, immutable-after-init fields (staging buffer, fences, queue) via _sys.
 class dx12_upload_async_actor final : public cc::threaded_actor_impl<dx12_async_upload_job>
 {
 public:
@@ -68,9 +56,9 @@ protected:
 
     void on_thread_shutdown() override
     {
-        // Flush anything still buffered, then wait for the copy queue to idle so the staging buffer and
-        // the command list/allocators are safe to release (the copy queue is independent of the epoch/
-        // direct queue, which shutdown drained separately).
+        // Flush anything still buffered, then wait for the copy queue to idle.
+        // The staging buffer and the command list/allocators are only safe to release afterwards.
+        // This queue is independent of the direct queue, which shutdown drains separately.
         for (auto& job : _pending)
             stage_job(job);
         _pending.clear();
@@ -80,11 +68,11 @@ protected:
     }
 
 private:
-    // A dropped upload (every handle released / storage expired before the actor reached it): skip the copy
-    // — a 1 GiB upload to a released buffer must not stage or block — but STILL advance the completion fence
-    // to this job's value. The lifetime gate holds the storage until the completion fence reaches that value,
-    // and any forward reader stamped with it waits on the same value, so leaving a hole would hang both. An
-    // empty window still submits + signals, keeping the completion fence monotonic and gap-free.
+    // A dropped upload — every handle released, or the storage expired, before the actor reached it.
+    // Skip the copy: a 1 GiB upload to a released buffer must not stage or block.
+    // But STILL advance the completion fence to this job's value.
+    // The lifetime gate holds the storage until the fence reaches it, and any forward reader stamped with it waits on the same value — a hole would hang both.
+    // An empty window still submits and signals, keeping the completion fence monotonic and gap-free.
     void fold_dropped_completion(dx12_async_upload_job& job)
     {
         if (job.copy_fence_value != dx12_copy_fence_value::none)
@@ -96,8 +84,8 @@ private:
         }
     }
 
-    // Resolves one upload's destination (buffer or texture) and stages it. The strong handle is held across
-    // the whole staging loop (memcpy + record), released at return.
+    // Resolves one upload's destination (buffer or texture) and stages it.
+    // The strong handle is held across the whole staging loop — memcpy and record — and released at return.
     void stage_job(dx12_async_upload_job& job)
     {
         if (job.is_texture)
@@ -126,17 +114,16 @@ private:
         }
     }
 
-    // Packs one resource upload (buffer or texture) into staging windows, submitting each as it fills. An
-    // upload larger than a window spans several; a texture job self-aligns each window and returns 0 when a
-    // window tail can't fit its next aligned row, which rolls to a fresh window (buffers never return 0).
+    // Packs one resource upload (buffer or texture) into staging windows, submitting each as it fills.
+    // An upload larger than a window spans several.
+    // A texture job self-aligns each window and returns 0 when a window tail can't fit its next aligned row, which rolls to a fresh window; buffers never return 0.
     void stage_resource(dx12_resource_upload& upload, dx12_async_upload_job& job)
     {
-        // A window issues its reverse-sync wait once, hoisted to the front (submit_window), so it must never
-        // both promise a completion V and carry a reverse-wait that could depend on V — that self-referential
-        // pair is the copy-actor deadlock (the window's Wait sits ahead of the very copy whose signal the Wait
-        // transitively needs). If the open window already finished an upload and this job's reverse token is
-        // still pending on the direct queue, close the window now: this job's Wait then lands in a fresh
-        // window that can only point at prior, already-submitted windows.
+        // A window issues its reverse-sync wait once, hoisted to the front (submit_window).
+        // So it must never both promise a completion V and carry a reverse-wait that could depend on V.
+        // That self-referential pair is the copy-actor deadlock: the window's Wait sits ahead of the very copy whose signal the Wait transitively needs.
+        // If the open window already finished an upload and this job's reverse token is still pending on the direct queue, close the window now.
+        // This job's Wait then lands in a fresh window that can only point at prior, already-submitted windows.
         if (_window_open && _open_highest_finished > 0
             && u64(job.wait_token) > _sys._ctx._submission_fence->GetCompletedValue())
             submit_window();
@@ -156,8 +143,8 @@ private:
             }
             _window_used += consumed;
 
-            // This chunk writes the destination, so its window must first wait for the last direct-queue list
-            // that used it (reverse sync). Max over the window; the submission fence is monotonic.
+            // This chunk writes the destination, so its window must first wait for the last direct-queue list that used it.
+            // Max over the window; the submission fence is monotonic.
             if (u64(job.wait_token) > _open_max_wait_token)
                 _open_max_wait_token = u64(job.wait_token);
 
@@ -174,10 +161,10 @@ private:
         }
     }
 
-    // Ensures a window is open with room to write. One command list is reused across all windows (Reset
-    // onto the next allocator is legal while a prior submission is still executing); each of the three
-    // window slots has its own allocator. Reusing a slot waits on the window three submissions back — its
-    // previous occupant — so both that allocator's GPU work and its staging memory are done.
+    // Ensures a window is open with room to write.
+    // One command list is reused across all windows: Reset onto the next allocator is legal while a prior submission still executes.
+    // Each of the three window slots has its own allocator.
+    // Reusing a slot waits on the window three submissions back, so both that allocator's GPU work and its staging memory are done.
     void ensure_open_window()
     {
         if (_window_open)
@@ -217,9 +204,9 @@ private:
         _window_open = true;
     }
 
-    // Closes + submits the open window: executes it, signals the window fence (its staging memory +
-    // allocator are reusable once the GPU drains it) and, if it finished any upload, the completion fence
-    // up to the highest finished value. No-op if no window is open.
+    // Closes + submits the open window: executes it, then signals the window fence — its staging memory and allocator are reusable once the GPU drains it.
+    // If the window finished any upload it also signals the completion fence up to the highest finished value.
+    // No-op when no window is open.
     void submit_window()
     {
         if (!_window_open)
@@ -228,24 +215,23 @@ private:
         HRESULT const hc = _list->Close();
         CC_ASSERT(SUCCEEDED(hc), "ID3D12GraphicsCommandList::Close failed");
 
-        // Reverse sync: hold the copy queue until every direct-queue list that used this window's
-        // destination buffers has finished, so the copy never races an earlier-submitted reader/writer.
-        // Over-waiting on a higher (monotonic) token is safe; an already-completed token returns at once.
+        // Reverse sync: hold the copy queue until every direct-queue list that used this window's destinations has finished.
+        // The copy then never races an earlier-submitted reader or writer.
+        // Over-waiting on a higher (monotonic) token is safe, and an already-completed token returns at once.
         if (_open_max_wait_token > 0)
             _sys._copy_queue->Wait(_sys._ctx._submission_fence.Get(), _open_max_wait_token);
 
         ID3D12CommandList* lists[] = {_list.Get()};
         _sys._copy_queue->ExecuteCommandLists(1, lists);
 
-        // Window fence values are 1-based (window i completing signals i+1): the fence starts at 0, so a
-        // 0-based value for window 0 would be indistinguishable from "not yet started" and wait_for_window(0)
-        // would never block — recycling slot 0 before window 0's copy has drained it. wait_for_window applies
-        // the same +1, so callers pass window indices.
+        // Window fence values are 1-based: window i completing signals i+1.
+        // The fence starts at 0, so a 0-based value for window 0 would read as "not yet started" and wait_for_window(0) would never block — recycling slot 0 before its copy drained it.
+        // wait_for_window applies the same +1, so callers pass window indices.
         HRESULT const hs = _sys._copy_queue->Signal(_sys._window_fence.Get(), _current_window + 1);
         CC_ASSERT(SUCCEEDED(hs), "ID3D12CommandQueue::Signal (staging window) failed");
 
-        // Completion fence is monotonic: only signal when this window finished a later upload than any
-        // prior window. Windows carrying only a mid-upload chunk finish nothing and skip it.
+        // Completion fence is monotonic: only signal when this window finished a later upload than any prior one.
+        // Windows carrying only a mid-upload chunk finish nothing and skip it.
         if (_open_highest_finished > _last_signaled_copy)
         {
             HRESULT const hcf = _sys._copy_queue->Signal(_sys._completion_fence.Get(), _open_highest_finished);
@@ -257,10 +243,10 @@ private:
         ++_current_window;
     }
 
-    // Adopts a pending set_window_bytes if one differs from the current size. Called at the top of a
-    // process cycle, when no window is open (any open window is submitted first). Fully drains the copy
-    // queue so no in-flight window still reads the old staging buffer, then rebuilds it at the new size.
-    // The per-slot allocators and the reused command list survive — only staging memory changes.
+    // Adopts a pending set_window_bytes when one differs from the current size.
+    // Called at the top of a process cycle, when no window is open — any open window is submitted first.
+    // Fully drains the copy queue so no in-flight window still reads the old staging buffer, then rebuilds it at the new size.
+    // The per-slot allocators and the reused command list survive; only staging memory changes.
     void maybe_resize_staging()
     {
         isize const desired = round_window(_sys._desired_window_bytes.load(std::memory_order_acquire));
@@ -272,8 +258,8 @@ private:
         if (_current_window > 0)
             wait_for_window(_current_window - 1); // wait out every submitted window (drops all readers)
 
-        // Build the new staging buffer before releasing the old, so a failed allocation leaves the current
-        // one intact (the resize is then simply not applied; the next cycle retries).
+        // Build the new staging buffer before releasing the old, so a failed allocation leaves the current one intact.
+        // The resize is then simply not applied, and the next cycle retries.
         auto ring = create_mapped_ring_buffer(_sys._ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD,
                                               D3D12_RESOURCE_STATE_GENERIC_READ, desired * num_staging_windows);
         CC_ASSERT(ring.has_value(), "async upload staging resize failed to allocate");
@@ -284,8 +270,8 @@ private:
         _sys._window_bytes = desired;
     }
 
-    // Blocks the actor until the copy queue has finished `window` (index). The fence is 1-based (see
-    // submit_window), so window i's completion is fence value i+1 — distinct from the initial 0.
+    // Blocks the actor until the copy queue has finished `window` (index).
+    // The fence is 1-based (see submit_window), so window i's completion is fence value i+1 — distinct from the initial 0.
     void wait_for_window(u64 window)
     {
         u64 const target = window + 1;
@@ -304,9 +290,8 @@ private:
     u64 _current_window = 0;     // next window index to submit; slot = index % num_staging_windows
     u64 _last_signaled_copy = 0; // highest value signaled on the completion fence (monotonic)
 
-    // One command list reused across every window; one allocator per window slot, cycled and reset when
-    // the window three back has completed. Owned here (not the epoch-gated pool): the copy queue does not
-    // observe epoch semantics.
+    // One command list reused across every window; one allocator per window slot, reset when the window three back has completed.
+    // Owned here rather than in the epoch-gated pool, since the copy queue does not observe epoch semantics.
     ComPtr<ID3D12GraphicsCommandList> _list;
     ComPtr<ID3D12CommandAllocator> _allocators[num_staging_windows];
 
@@ -327,8 +312,8 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(isize window_bytes)
     if (HRESULT hr = _ctx._device->CreateCommandQueue(&copy_queue_desc, IID_PPV_ARGS(&_copy_queue)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandQueue (async upload copy) failed");
 
-    // UPLOAD heap, GENERIC_READ: the copy queue reads staged bytes from here via CopyBufferRegion. Three
-    // windows back-to-back in one committed buffer, addressed by (window index % 3) * window_bytes.
+    // UPLOAD heap, GENERIC_READ: the copy queue reads staged bytes from here via CopyBufferRegion.
+    // Three windows back-to-back in one committed buffer, addressed by (window index % 3) * window_bytes.
     auto staging = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD,
                                              D3D12_RESOURCE_STATE_GENERIC_READ, window_bytes * num_staging_windows);
     CC_RETURN_IF_ERROR(staging);
@@ -340,8 +325,7 @@ cc::result<cc::unit> dx12_upload_async_system::initialize(isize window_bytes)
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_window_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async upload window) failed");
 
-    // Upload completion fence: signaled by this system's copy queue when a window's copy has run; a later
-    // direct-queue reader waits on it at submit (see dx12_command_list).
+    // Upload completion fence: signaled by this copy queue when a window's copy has run, and a later direct-queue reader waits on it at submit (see dx12_command_list).
     if (HRESULT hr = _ctx._device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_completion_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (async upload completion) failed");
 
@@ -368,8 +352,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
                                                                       "buffer_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
-    // Reserve this upload's completion value and stamp the destination *before* enqueuing, so any command
-    // list that reads the buffer after this call already sees a value to wait on.
+    // Reserve this upload's completion value and stamp the destination *before* enqueuing, so any command list reading the buffer after this call already sees a value to wait on.
     u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
     u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
     while (prev < value
@@ -380,15 +363,14 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     }
 
     dx12_async_upload_job job;
-    // Weak ref, not strong: a caller may drop its last handle before the actor stages this. Resolving at
-    // stage time lets us skip the copy (and its staging cost) for a released buffer — see stage_job. The
-    // buffer's storage stays alive independently until the copy fence reaches `value` (the lifetime gate).
+    // Weak ref, not strong: a caller may drop its last handle before the actor stages this.
+    // Resolving at stage time lets a released buffer skip the copy and its staging cost — see stage_job.
+    // The storage stays alive independently until the copy fence reaches `value`, which is the lifetime gate.
     job.buffer_target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer)); // dst already dynamic_cast-verified
     job.dst_offset = offset;
     job.src = cc::move(data);
     job.copy_fence_value = dx12_copy_fence_value(value);
-    // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never
-    // overwrites bytes an earlier-submitted list still reads.
+    // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never overwrites bytes an earlier-submitted list still reads.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     _actor->enqueue_message(cc::move(job));
 }
@@ -411,8 +393,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(data.size() == fp.tight_size(), "async upload pixel data size does not match the copy region");
 
-    // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command
-    // list that reads the texture already sees a value to wait on.
+    // Reserve this upload's completion value and stamp the destination before enqueuing, so a later command list reading the texture already sees a value to wait on.
     u64 const value = _next_copy_value.fetch_add(1, std::memory_order_relaxed) + 1;
     u64 prev = dst->_pending_async_upload_value.load(std::memory_order_relaxed);
     while (prev < value

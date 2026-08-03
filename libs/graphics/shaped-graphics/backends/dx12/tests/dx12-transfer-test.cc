@@ -4,12 +4,10 @@
 
 using namespace cc::primitive_defines;
 
-// Inline buffer transfer: upload / download over the inline UPLOAD / READBACK ring buffers, on WARP
-// so they run on headless CI. See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md and
-// libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
-// NOTE: these tests split upload and download across separate command lists. Same-list upload-then-
-// download of one buffer is also correct now (dx12_command_list::record_transfer_barrier orders it) —
-// the backend-agnostic tests (tests/transfer/) cover that single-list path.
+// Inline buffer transfer on WARP, so it runs on headless CI: upload / download over the inline UPLOAD / READBACK ring buffers.
+// See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md and libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
+// These tests split upload and download across separate command lists.
+// Same-list upload-then-download of one buffer is equally correct — the list's own access tracking orders it — and tests/transfer/ covers that single-list path.
 
 namespace
 {
@@ -245,10 +243,10 @@ TEST("sg dx12 - inline transfer reused across epochs")
     }
 }
 
-// Two lists record downloads concurrently (interleaved ring reservations) but submit in the OPPOSITE
-// order. The actor copies in submission order — which no longer matches ring-allocation order — so a
-// per-submission free watermark would reclaim the first-allocated window while the other list still
-// holds it. Epoch-granular reclaim must keep both windows pinned; both futures must read back intact.
+// Two lists record downloads concurrently, interleaving their ring reservations, but submit in the OPPOSITE order.
+// The actor copies in submission order, which then does not match ring-allocation order.
+// A per-submission free watermark would reclaim the first-allocated window while the other list still holds it.
+// Epoch-granular reclaim must keep both windows pinned, and both futures must read back intact.
 TEST("sg dx12 - interleaved downloads submitted out of allocation order")
 {
     auto handle = dx12::acquire_warp_context();

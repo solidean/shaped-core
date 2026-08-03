@@ -97,15 +97,14 @@ Dropping a recording list (`drop_command_list`) is distinct from dropping the *f
 ## Where the pieces live
 
 - [`dx12_download_inline.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_inline.hh)
-  / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_inline.cc) — the ring,
-  the actor, the per-epoch counters, and reclaim. The system **creates and maps its own READBACK heap**
-  and starts the actor in `initialize` (colocated), off the context's device.
+  / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_inline.cc)
+  — the ring, the actor, the per-epoch counters, and reclaim.
+  The system **creates and maps its own READBACK heap** and starts the actor in `initialize`, off the context's device.
 - [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh)
-  — the per-resource readback recorder + its **deferred CPU copy** (`dx12_buffer_download`), the closure
-  the actor runs once the GPU copy has completed.
-- [`bytes_future.hh`](../../src/shaped-graphics/bytes_future.hh) — the future/waiter the caller polls
-  (`is_ready` / `try_get_bytes`) or waits on via `ctx.wait_for(future)`; `dx12_download_waiter` adds the
-  *submitted* and *cancelled* gates.
+  — the per-resource readback recorder plus its **deferred CPU copy** (`dx12_buffer_download`), the closure the actor runs once the GPU copy has completed.
+- [`bytes_future.hh`](../../src/shaped-graphics/bytes_future.hh)
+  — the future/waiter the caller polls (`is_ready` / `try_get_bytes`) or waits on via `ctx.wait_for(future)`.
+  `dx12_download_waiter` adds the *submitted* and *cancelled* gates.
 - The advance hook is called from [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 
 ## Load-bearing invariants
