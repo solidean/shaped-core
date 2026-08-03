@@ -9,10 +9,8 @@
 
 namespace sg::backend::dx12
 {
-/// dx12 ray-tracing pipeline: an ID3D12StateObject (DXR raytracing pipeline) assembled from the compiled
-/// shader libraries, hit groups, and the pipeline layout's global root signature. Holds the pipeline layout
-/// to keep the root signature alive, plus the 32-byte shader identifiers a shader table copies (indexed by
-/// the matching *_shader_handle).
+/// dx12 ray-tracing pipeline: an ID3D12StateObject (DXR raytracing pipeline) assembled from the compiled shader libraries, hit groups, and the pipeline layout's global root signature.
+/// Holds the pipeline layout to keep the root signature alive.
 class dx12_raytracing_pipeline final : public sg::raytracing_pipeline
 {
 public:

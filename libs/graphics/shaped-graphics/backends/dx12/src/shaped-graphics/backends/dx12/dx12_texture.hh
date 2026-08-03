@@ -100,7 +100,8 @@ public:
         return _access.lock([&](dx12_texture_access& t) { return t.finalize(slot); });
     }
 
-    /// Discard `slot` at drop: the recorded work never runs, so just clear the slot. Thread-safe.
+    /// Discard `slot` at drop: the recorded work never runs, so just clear the slot.
+    /// Thread-safe.
     void discard_slot(sg::command_list_slot slot) const
     {
         _access.lock([&](dx12_texture_access& t) { t.discard(slot); });

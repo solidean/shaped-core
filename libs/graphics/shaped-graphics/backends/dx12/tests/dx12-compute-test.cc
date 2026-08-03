@@ -8,11 +8,11 @@
 
 using namespace cc::primitive_defines;
 
-// End-to-end compute bind path: build a compiled_shader from the embedded blob + hand-authored reflection,
-// create the layout / pipeline / binding_group, dispatch, then read the buffer back and check every element.
-// Runs on WARP so it exercises the real GPU paths on headless CI. Everything drives the public sg API — the
-// only dx12-specific piece is the DXIL blob (shader bytecode is inherently per-backend); the descriptor-ring
-// tests below additionally take a dx12 context with a tiny, hand-sized descriptor heap, which is a dx12 knob.
+// End-to-end compute bind path: build a compiled_shader from the embedded blob plus hand-authored reflection.
+// Then create the layout / pipeline / binding_group, dispatch, and read the buffer back checking every element.
+// Runs on WARP so it exercises the real GPU paths on headless CI.
+// Everything drives the public sg API; the only dx12-specific piece is the DXIL blob, since shader bytecode is inherently per-backend.
+// The descriptor-ring tests below additionally take a dx12 context with a tiny, hand-sized descriptor heap, which is a dx12 knob.
 
 namespace
 {
@@ -68,8 +68,8 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     auto group = ctx->persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));
     REQUIRE(group != nullptr);
 
-    // Record + submit the dispatch. dispatch_threads auto-divides the thread count by the shader's
-    // 64-thread workgroup, so this is the count/64 = 4 groups a raw dispatch_groups would spell out.
+    // Record + submit the dispatch.
+    // dispatch_threads auto-divides the thread count by the shader's 64-thread workgroup, so this is the count/64 = 4 groups a raw dispatch_groups would spell out.
     auto disp = ctx->create_command_list();
     REQUIRE(disp != nullptr);
     disp->compute.bind_pipeline(*pipeline);
@@ -93,11 +93,10 @@ TEST("sg dx12 - compute dispatch writes a structured buffer")
     CHECK(ok);
 }
 
-// Drive the same dispatch with a TRANSIENT output buffer + TRANSIENT binding group each epoch, on a
-// deliberately tiny transient descriptor region (32 slots) so 40 iterations wrap the ring several
-// times. Proves the transient descriptor ring + transient buffer heap reclaim end-to-end on the GPU:
-// no exhaustion, and every epoch's result is correct (Output[i] == i*2). The tiny hand-sized descriptor
-// heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
+// Drive the same dispatch with a TRANSIENT output buffer and TRANSIENT binding group each epoch.
+// The transient descriptor region is a deliberately tiny 32 slots, so 40 iterations wrap the ring several times.
+// Proves the transient descriptor ring and transient buffer heap reclaim end-to-end on the GPU: no exhaustion, and every epoch's result is correct (Output[i] == i*2).
+// The tiny hand-sized descriptor heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
 TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 {
     auto ctx_r = sg::create_dx12_context(

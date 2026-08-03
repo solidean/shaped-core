@@ -96,27 +96,21 @@ Preserve these; the rest is tuning:
 
 ## dx12 implementation
 
-- Sizing via `GetRaytracingAccelerationStructurePrebuildInfo` over the translated
-  `D3D12_RAYTRACING_GEOMETRY_DESC` array (BLAS) or the packed
-  `D3D12_RAYTRACING_INSTANCE_DESC` array (TLAS); the build is
-  `ID3D12GraphicsCommandList4::BuildRaytracingAccelerationStructure`.
-- Instances pack into `D3D12_RAYTRACING_INSTANCE_DESC`: `InstanceID:24`, `InstanceMask`,
-  `InstanceContributionToHitGroupIndex:24`, `Flags` (opaque override + cull), and the 3×4 `Transform`.
-- Barriers come free: [`dx12_barrier.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_barrier.cc)
-  already maps `accel_build` → `BUILD_RAYTRACING_ACCELERATION_STRUCTURE` sync, `raytracing` → `RAYTRACING`
-  sync, and `accel_read`/`accel_write` → the AS read/write barrier accesses. **Only the AS storage buffers
-  are acceleration structures** — the build declares `accel_write` on its result and `accel_read` on each
-  referenced BLAS. Build *scratch* is a plain UAV (`shader_write`) and the geometry/instance *inputs* are
-  ordinary reads (`shader_read`); the enhanced-barrier AS access bits are illegal on non-AS buffers.
-- **AS storage buffers are created in — and stay in — the `RAYTRACING_ACCELERATION_STRUCTURE` resource
-  state** (with `ALLOW_UNORDERED_ACCESS`), not the usual `COMMON`: D3D12 forbids transitioning an AS
-  resource, and both the enhanced AS barriers and `BuildRaytracingAccelerationStructure` require that state.
-  This is the one buffer usage that overrides the backend's default COMMON creation
-  ([`dx12_buffer.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc)).
+- Sizing via `GetRaytracingAccelerationStructurePrebuildInfo` over the translated `D3D12_RAYTRACING_GEOMETRY_DESC` array (BLAS) or the packed `D3D12_RAYTRACING_INSTANCE_DESC` array (TLAS).
+  The build is `ID3D12GraphicsCommandList4::BuildRaytracingAccelerationStructure`.
+- Instances pack into `D3D12_RAYTRACING_INSTANCE_DESC`: `InstanceID:24`, `InstanceMask`, `InstanceContributionToHitGroupIndex:24`, `Flags` (opaque override + cull), and the 3×4 `Transform`.
+- Barriers come free, in [`dx12_barrier.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_barrier.cc).
+  `accel_build` already maps to `BUILD_RAYTRACING_ACCELERATION_STRUCTURE` sync, `raytracing` to `RAYTRACING` sync, and `accel_read`/`accel_write` to the AS read/write barrier accesses.
+  **Only the AS storage buffers are acceleration structures** — the build declares `accel_write` on its result and `accel_read` on each referenced BLAS.
+  Build *scratch* is a plain UAV (`shader_write`) and the geometry/instance *inputs* are ordinary reads (`shader_read`).
+  The enhanced-barrier AS access bits are illegal on non-AS buffers.
+- **AS storage buffers are created in — and stay in — the `RAYTRACING_ACCELERATION_STRUCTURE` resource state**, with `ALLOW_UNORDERED_ACCESS`, rather than the usual `COMMON`.
+  D3D12 forbids transitioning an AS resource, and both the enhanced AS barriers and `BuildRaytracingAccelerationStructure` require that state.
+  This is the one buffer usage that overrides the backend's default COMMON creation, in [`dx12_buffer.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc).
 
-The **vulkan** backend stubs the path until its own raytracing milestone: `to_vk_buffer_usage` does not yet
-map the `accel_structure_*` usages (nor add the buffer device address they need), and placed allocations —
-which a future transient variant would want — aren't implemented yet.
+The **vulkan** backend stubs the path until its own raytracing milestone.
+`to_vk_buffer_usage` does not yet map the `accel_structure_*` usages, nor add the buffer device address they need.
+Placed allocations, which a future transient variant would want, are not implemented either.
 
 ## What's implemented today vs deferred
 
