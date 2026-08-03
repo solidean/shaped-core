@@ -35,4 +35,7 @@ cc::vector<text_edit> collect_fix_edits(cc::span<finding const> findings);
 /// Apply every finding's suggested edits back to their files in place, grouped per file. Returns the
 /// number of files changed.
 cc::result<isize> apply_fixes(source_manager const& sm, cc::span<finding const> findings);
+
+/// Overwrite `path` with `content`. The one place the linter writes source back.
+cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content);
 } // namespace scl

@@ -6,6 +6,10 @@ A sentence that ends in the *middle* of a line means two points were packed onto
 The detector is one shape: `<word>. <more text>`.
 Two short sentences on one line are fine when the line ends with the second one, and a long sentence that had to wrap carries no interior full stop at all.
 
+The rule deliberately carries no fix, because obeying it means modelling the prose rather than splicing in a newline.
+Acting on more than a couple of findings is `prose apply`'s job: it takes a plan of rewrites across many files and lands them in one pass, and the `reworking-prose` skill is the workflow around it.
+Repairing a hit in isolation is the failure mode both exist to prevent.
+
 Blocks below are annotated with `[no-flow-prose]` for "fires once here" and `~[no-flow-prose]` for "must stay quiet".
 `path="…"` is what picks the language: the fence word says what the block *is*, the path says what it is linted *as*.
 A block with no path is linted as C++.

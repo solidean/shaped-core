@@ -145,6 +145,82 @@ def _git_dirty_files(root: Path) -> list[Path]:
     return paths
 
 
+# A whole untracked file is "changed", and its length is not worth a stat — the linter clamps anyway.
+_ALL_LINES = 0xFFFFFFFF
+
+
+def changed_line_ranges(root: Path) -> dict[Path, list[tuple[int, int]]]:
+    """The 1-based line ranges each dirty file changed, as absolute paths -> [(first, last), ...].
+
+    This is what makes a dirty-only prose run line-exact instead of file-wide.
+    A prose finding sits on one line, so it either changed or it did not; a code finding can be caused by
+    a line the edit never touched, which is why only prose rules are scoped this way.
+
+    Tracked changes come from `git diff -U0 HEAD`, so staged and unstaged both count.
+    An untracked file has no diff and is reported as changed end to end.
+    A pure-deletion hunk marks the surviving line above it, which is the one the edit could have broken.
+    """
+    ranges: dict[Path, list[tuple[int, int]]] = {}
+
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--unified=0", "--no-color", "HEAD"],
+            cwd=str(root), capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        out = None
+
+    if out is not None and out.returncode == 0:
+        current: Path | None = None
+        for line in out.stdout.splitlines():
+            if line.startswith("+++ "):
+                target = line[4:].strip()
+                if target == "/dev/null":
+                    current = None
+                else:
+                    current = (root / (target[2:] if target.startswith("b/") else target)).resolve()
+                continue
+            if current is None or not line.startswith("@@"):
+                continue
+
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+            if not m:
+                continue
+            start = int(m.group(1))
+            count = int(m.group(2)) if m.group(2) is not None else 1
+            if count == 0:
+                ranges.setdefault(current, []).append((max(1, start), max(1, start)))
+            else:
+                ranges.setdefault(current, []).append((start, start + count - 1))
+
+    try:
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=str(root), capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        untracked = None
+
+    if untracked is not None and untracked.returncode == 0:
+        for name in untracked.stdout.splitlines():
+            if not name.strip():
+                continue
+            p = (root / name.strip()).resolve()
+            if p.is_file():
+                ranges.setdefault(p, []).append((1, _ALL_LINES))
+
+    return ranges
+
+
+def format_changed_line_spec(ranges: dict[Path, list[tuple[int, int]]]) -> str:
+    """Render `changed_line_ranges` as shaped-linter's `--changed-lines` spec: `<path>:a-b,c-d` per line."""
+    lines = []
+    for path in sorted(ranges):
+        spec = ",".join(f"{first}-{last}" for first, last in ranges[path])
+        lines.append(f"{path}:{spec}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def source_roots(root: Path) -> list[Path]:
     """The directories whose `.cc`/`.hh` files clang-format owns.
 
