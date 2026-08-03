@@ -26,6 +26,8 @@ uv run dev.py build -t shaped-linter   # build the tool
 uv run dev.py test shaped-linter-test  # run its tests
 
 uv run dev.py run shaped-linter <file>...   # point it at specific files (builds first)
+
+uv run dev.py lint prose-apply <plan> [--dry-run]  # apply a plan of prose rewrites (see below)
 ```
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
@@ -34,11 +36,13 @@ It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only
 
 ```
 shaped-linter [options] <file>...
+shaped-linter prose apply [options] <plan>
 
-  --fix            apply each finding's suggested edit back to its file in place
-  --color <mode>   auto (default), always or never
-  --no-color       the old spelling of --color never
-  -h / --help      print usage and exit
+  --fix                    apply each finding's suggested edit back to its file in place
+  --changed-lines <file>   report PROSE findings only on the lines named there
+  --color <mode>           auto (default), always or never
+  --no-color               the old spelling of --color never
+  -h / --help              print usage and exit
 ```
 
 A fix is a byte-range edit, so a rewrite that shortens a line leaves the continuation lines under it aligned to where the text used to be.
@@ -48,6 +52,48 @@ Under `dev.py check --fix` this is already handled: the gate runs the linters be
 `auto` colors only when stdout and stderr are both terminals, and honours `NO_COLOR` / `FORCE_COLOR`, so a redirected run carries no escapes.
 The policy is `cc::console`'s, shared with instruction-tracer and dev.py.
 `dev.py lint shaped` passes its own already-resolved decision through, since it captures the linter's output.
+
+### `--changed-lines`, and why dirty-only is line-exact for prose
+
+A prose finding sits on exactly one line, and that line either changed or it did not — so scoping a dirty-only run to changed lines is exact rather than a heuristic.
+A code finding can be caused by a line the edit never touched, which is why the filter applies to `rule_layer::prose` rules alone.
+
+`dev.py lint shaped --dirty-only` computes the ranges (`git diff -U0 HEAD`, plus untracked files end to end) and passes them as a spec file, one `<path>:a-b,c-d` per line.
+The effect is that editing one section of a long document puts only *those lines* in the gate.
+Without it, touching a paragraph of a 400-line doc drags every older violation in that file into the next commit, and a scoped job becomes an unbounded sweep.
+
+## `prose apply` — many prose rewrites in one pass
+
+Repairing prose one finding at a time does not work: the finding says a line was reflowed, while the defect is usually that the comment says three things, two of which belong elsewhere or nowhere.
+`prose apply` exists so a whole surface can be re-decided at once and land as a single invocation.
+
+The plan names line spans and the prose to put there:
+
+```
+## libs/base/clean-core/src/clean-core/container/key_value_cache.hh
+[14-17]
+| /// A tiered get-or-create cache: key_value_cache over a stack of key_value_provider tiers.
+| /// The tier interface is the extension seam for on-disk / networked caches.
+[49-50]
+[+52]
+| /// Eviction is deliberately crude — see apply_bookkeeping.
+```
+
+`[a-b]` replaces those lines, `[a]` one line, `[+n]` inserts before line n, and a span with no `| ` lines deletes.
+Spans ascend and may not overlap.
+Everything after `| ` is the verbatim final line, comment marker and indentation included — the applier infers neither.
+A bare `|` is an empty line, and the file's existing line terminator is preserved.
+
+Two validations run over every file before anything is written, and either one rejects the whole plan:
+
+* **code is unchanged** — the non-trivia token sequence must be identical to the original's.
+  This is what lets a span cover a line that also holds code (`#include <memory> // std::shared_ptr`) and still permit only its trailing comment to move.
+  Markdown has no lexer and is prose end to end, so it is edited freely.
+* **the new prose passes the rules** — but only on lines the plan actually wrote.
+  A violation the plan did not write is not the plan's to answer for, which is the same non-ripple principle as `--changed-lines`.
+
+`--dry-run` runs both and writes nothing.
+The `reworking-prose` skill is the workflow around this: scope, concept, plan, apply, cold-reader review.
 
 ## Output
 
@@ -145,7 +191,7 @@ src/shaped-linter/   the framework the rules stand on
   cli/       command-line parsing (options, usage)
   lex/       source buffers, spans, tokens, the language dispatch, and the three front ends
   parse/     the recursive-descent parser and syntax tree (C++ only)
-  prose/     the comments, docstrings and body text a prose rule walks
+  prose/     the comments, docstrings and body text a prose rule walks, plus the `prose apply` plan and applier
   rules/     the rule and finding types, the registry, the engine
   report/    the diagnostic renderer: snippet (source view + carets), renderer, style, reporter
   compdb/    (reserved) compile_commands.json reader

@@ -214,6 +214,8 @@ Full rule: [docs/coding-guidelines.md](docs/coding-guidelines.md#prose-style--on
   The 120-col limit binds code, not prose.
 * **`uv run dev.py lint shaped` flags the common case** — shaped-linter's `no-flow-prose`, over C++ and Python comments, docstrings and markdown body text.
   It is a heuristic reminder with no auto-fix; an abbreviation ending in a dot is its false positive, and the answer is to add the word to the list in [no_flow_prose.cc](tools/shaped-linter/rules/prose/no-flow-prose/no_flow_prose.cc).
+  **Acting on more than a couple of findings is the `reworking-prose` skill's job**, not a run of local edits — it reworks a whole documentation surface and lands every rewrite through `dev.py lint prose-apply`.
+  Dirty-only is line-exact for prose, so fixing one section never drags a file's older violations into the gate.
 * **A short orphan line is the tell.** A line carrying only a few trailing words of the line above means you wrapped early — join them.
 * A sentence that ends mid-line, with the next point starting on that same line, is the other failure mode.
   The first words of each line must give the shape of the passage.
@@ -258,6 +260,8 @@ Invokable session tooling lives in [.claude/skills/](.claude/skills/). Worth cal
 
 * **`/building-and-testing`** — drive `dev.py` and the `repo_tools` `build_diag` / `test_diag` diagnostics.
   See [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md).
+* **`/reworking-prose`** — rework the comments and docs around a topic wholesale, landing every rewrite in one `dev.py lint prose-apply` pass.
+  Use it whenever prose findings pile up, a guideline changes, or a surface needs more documentation than it has.
 
 ---
 
@@ -318,6 +322,7 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Format code (pre-commit)         | `uv run dev.py format --dirty-only`                              |
 | Run the clang-tidy gates         | `uv run dev.py lint clang-tidy` (`--dirty-only` in `check`; gates in [tools/lint/clang-tidy-gates.yml](tools/lint/clang-tidy-gates.yml)) |
 | Run shaped-linter's own rules    | `uv run dev.py lint shaped [--dirty-only] [--fix]` ([readme](tools/shaped-linter/readme.md)) |
+| Rework a topic's comments/docs   | the `reworking-prose` skill, applied via `uv run dev.py lint prose-apply <plan> [--dry-run]` |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
