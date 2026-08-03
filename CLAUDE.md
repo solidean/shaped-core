@@ -227,6 +227,8 @@ Full rule: [docs/coding-guidelines.md](docs/coding-guidelines.md#prose-style--on
 * Comment only a constraint a reader could be *wrong* about — an invariant, precondition, ordering/aliasing dependency, correctness pitfall.
   **Litmus test:** if the sentence would read naturally in the commit message or PR description, it belongs there, not inline.
 * Cut the backstory: no justification or narration — not which algorithm it is, not "why we chose this", not what it buys (fast / robust / well-conditioned), no task/PR references.
+  Worst of all is cross-module causal narration ("because *(impl fact three libraries over)*") — it ages into a lie nobody rechecks.
+  **Delete backstory by default**; a genuine Chesterton's fence is real but rare (roughly 20:1 against on this tree), so it is the exception you argue for, naming the mistake rather than the history.
 * No comments on trivial getters / one-liners.
 
 ### The style is evolving — don't retrofit the whole repo

@@ -598,6 +598,11 @@ one semantic point per line, no reflowed blocks, free line length.
   If a competent reader could be *wrong* about something, name that — nothing else.
 - **Never justify or narrate.** Not which algorithm it is, not why this approach was chosen, not what it buys (fast / robust / well-conditioned), not what the lines do.
   That is backstory: it goes in the commit message or a higher-level doc, never in the source.
+- **Cross-module causal narration is the worst of it** — "we do it this way because *(some implementation fact three libraries over)*".
+  It reads as insight and ages into a lie: the fact it names is not ours to keep true, and nobody rechecks it when that other code moves.
+- **Delete backstory by default.** The genuine Chesterton's fence exists — the comment without which someone *will* remove something load-bearing — but it is rare.
+  On this tree, invented reasoning outnumbers the real cautionary tale by something like 20:1, so the prior is that it goes.
+  Keep it only when you can name the concrete mistake the reader would otherwise make, and then state the mistake, not the history.
 - **Litmus test:** if the sentence would read naturally in the PR description or the commit message, it does not belong inline.
 - Do not restate code.
   Answer only "what would surprise — or mislead — a competent reader here?"
