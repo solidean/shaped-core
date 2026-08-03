@@ -122,7 +122,7 @@ def _git_dirty_files(root: Path) -> list[Path]:
     try:
         out = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
-            cwd=str(root), capture_output=True, text=True, timeout=30,
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -165,7 +165,7 @@ def changed_line_ranges(root: Path) -> dict[Path, list[tuple[int, int]]]:
     try:
         out = subprocess.run(
             ["git", "diff", "--unified=0", "--no-color", "HEAD"],
-            cwd=str(root), capture_output=True, text=True, timeout=60,
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired):
         out = None
@@ -196,7 +196,7 @@ def changed_line_ranges(root: Path) -> dict[Path, list[tuple[int, int]]]:
     try:
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=str(root), capture_output=True, text=True, timeout=30,
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         untracked = None
