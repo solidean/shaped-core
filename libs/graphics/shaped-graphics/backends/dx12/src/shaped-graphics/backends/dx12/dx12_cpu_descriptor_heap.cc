@@ -1,5 +1,5 @@
-// dx12_cpu_descriptor_heap: a flat non-shader-visible RTV/DSV descriptor slab — bump cursor plus a
-// free list for slot reuse. See dx12_cpu_descriptor_heap.hh.
+// dx12_cpu_descriptor_heap: a flat non-shader-visible RTV/DSV descriptor slab — bump cursor plus a free list for slot reuse.
+// See dx12_cpu_descriptor_heap.hh.
 
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>

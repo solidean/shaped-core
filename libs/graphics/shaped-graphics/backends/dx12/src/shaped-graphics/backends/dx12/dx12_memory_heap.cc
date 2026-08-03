@@ -1,5 +1,5 @@
-// dx12_memory_heap: DEFAULT heap creation and per-buffer requirement queries, plus the context
-// entry point create_dx12_memory_heap. Placement itself happens in create_dx12_buffer.
+// dx12_memory_heap: DEFAULT heap creation and per-buffer requirement queries, plus the context entry point create_dx12_memory_heap.
+// Placement itself happens in create_dx12_buffer.
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>

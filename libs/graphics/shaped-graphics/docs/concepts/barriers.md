@@ -103,44 +103,37 @@ keeps each list's layout bookkeeping consistent, but it cannot see across two li
 
 ## dx12: buffer barriers + texture layout transitions
 
-dx12 tracks intra-list hazards with the shared state machine and emits **enhanced barriers**
-(`ID3D12GraphicsCommandList7::Barrier`) — see
-[dx12_barrier.hh](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_barrier.hh). This replaced the
-old stopgap that bounced every buffer through `COMMON` after each copy: uploading then downloading (or
-self-copying) the **same** buffer now works in one command list with a precise
-`COPY_DEST→COPY_SOURCE`-style transition.
+dx12 tracks intra-list hazards with the shared state machine and emits **enhanced barriers** (`ID3D12GraphicsCommandList7::Barrier`).
+See [dx12_barrier.hh](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_barrier.hh).
+Uploading then downloading — or self-copying — the **same** buffer works in one command list, with a precise `COPY_DEST→COPY_SOURCE`-style transition rather than a bounce through `COMMON`.
 
-**Access is declared, then flushed, then emitted — batched per operation.** An operation first *declares*
-access on every resource it touches — a copy's src + dst, or a dispatch's whole bound group — which only
-accumulates into each resource's next-op state (no barrier yet). `flush_barriers()`, just before the op,
-then flushes each declared resource (turning its accumulated declares into barriers) and submits the whole
-batch in one `Barrier` call (one `D3D12_BARRIER_GROUP` per type). Two payoffs: a dispatch binding many
-resources pays one barrier call, not one per binding; and a resource bound *more than once* to the same op
-(e.g. two views of one texture) merges its declares into a single barrier carrying the **union** of the
-accesses, rather than emitting a redundant barrier per binding.
+**Access is declared, then flushed, then emitted — batched per operation.**
+An operation first *declares* access on every resource it touches — a copy's src + dst, or a dispatch's whole bound group.
+That only accumulates into each resource's next-op state, emitting no barrier.
+`flush_barriers()`, just before the op, then flushes each declared resource, turning its accumulated declares into barriers.
+It submits the whole batch in one `Barrier` call, with one `D3D12_BARRIER_GROUP` per type.
+A dispatch binding many resources pays one barrier call, not one per binding.
+And a resource bound *more than once* to the same op — two views of one texture, say — merges its declares into a single barrier carrying the **union** of the accesses.
 
-When those bindings need *different* layouts — a texture bound as both a sampled (`shader_readonly`/SRV) and
-a storage (`shader_readwrite`/UAV) view — `combine_layouts` picks one that serves both. No specialized D3D12
-layout serves both an SRV and a UAV, so it falls back to `general` (COMMON) and warns once (sampling in
-COMMON is slower). A genuinely incompatible pair (e.g. copy-dest + sampled in one op) asserts.
+When those bindings need *different* layouts — a texture bound as both a sampled (`shader_readonly`/SRV) and a storage (`shader_readwrite`/UAV) view — `combine_layouts` picks one that serves both.
+No specialized D3D12 layout serves both an SRV and a UAV, so it falls back to `general` (COMMON) and warns once, since sampling in COMMON is slower.
+A genuinely incompatible pair, such as copy-dest plus sampled in one op, asserts.
 
-For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always
-`general` (D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`), so revert emits nothing and
-cross-list ordering rides on that decay — no trailing barriers.
+For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always `general`, because D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`.
+So revert emits nothing and cross-list ordering rides on that decay, with no trailing barriers.
 
-**Textures give the machinery teeth.** Each `dx12_texture` owns a per-command-list covering partition
-([dx12_texture_access](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_texture_access.hh)):
-`declare` accumulates the covered subresource boxes' access, and `flush` rolls them through the state
-machine and returns the per-box `D3D12_TEXTURE_BARRIER`s (scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`,
-`LayoutBefore→LayoutAfter`) the command list batches and emits before the op; a non-last-user submit returns
-the reverse transitions back to the canonical layout (flushed before `Close`), and warns.
-This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine + partition;
-barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each
-owns its tracking + emission. Its first driver is the inline texture copy: `cmd.upload.bytes_to_texture` /
-`cmd.download.bytes_from_texture` record a `copy_dst` / `copy_src` access against the region before staging,
-so the layout transition is emitted ahead of the `CopyTextureRegion` (binding a texture to a dispatch is
-the next driver). The **vulkan** backend reuses the shared vocabulary + state machine with its own emission
-when its compute/copy milestone lands.
+**Textures give the machinery teeth.**
+Each `dx12_texture` owns a per-command-list covering partition, [dx12_texture_access](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_texture_access.hh).
+`declare` accumulates the covered subresource boxes' access.
+`flush` rolls them through the state machine and returns the per-box `D3D12_TEXTURE_BARRIER`s the command list batches and emits before the op.
+Each is scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`, carrying `LayoutBefore→LayoutAfter`.
+A non-last-user submit returns the reverse transitions back to the canonical layout, flushed before `Close`, and warns.
+This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine and partition.
+Barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each owns its tracking and emission.
+The drivers today are the inline texture copy, the compute, ray-tracing and raster bound groups, the raster rendering scope's target transitions, and the swapchain's present transition.
+The inline copy is the clearest: `cmd.upload.bytes_to_texture` / `cmd.download.bytes_from_texture` record a `copy_dst` / `copy_src` access against the region before staging.
+The layout transition is therefore emitted ahead of the `CopyTextureRegion`.
+The **vulkan** backend reuses the shared vocabulary and state machine with its own emission when its compute/copy milestone lands.
 
 ## See also
 

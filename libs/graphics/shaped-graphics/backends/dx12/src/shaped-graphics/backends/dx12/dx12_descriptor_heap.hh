@@ -9,11 +9,12 @@
 
 namespace sg::backend::dx12
 {
-/// A reservation of `count` contiguous descriptors at `offset` in the shader-visible heap (heap-relative).
-/// Move-only so a range has exactly one owner and its free is easy to follow. It does NOT free itself: a
-/// persistent range must be handed to dx12_descriptor_heap::free_persistent at the right epoch (its owning
-/// binding_group moves it into that epoch's deferred-deletion finalizer), and a transient range is reclaimed
-/// collectively by the ring, so its owner just drops it. `count == 0` is the empty / moved-from state.
+/// A reservation of `count` contiguous descriptors at `offset` in the shader-visible heap, heap-relative.
+/// Move-only, so a range has exactly one owner and its free is easy to follow.
+/// It does NOT free itself.
+/// A persistent range must be handed to dx12_descriptor_heap::free_persistent at the right epoch — its owning binding_group moves it into that epoch's deferred-deletion finalizer.
+/// A transient range is reclaimed collectively by the ring, so its owner just drops it.
+/// `count == 0` is the empty / moved-from state.
 struct dx12_descriptor_alloc
 {
     int offset = 0;
@@ -42,46 +43,43 @@ struct dx12_descriptor_alloc
     [[nodiscard]] bool is_empty() const { return count == 0; }
 };
 
-/// The context's single shader-visible CBV/SRV/UAV descriptor heap, split into two regions by lifetime.
-/// Only one shader-visible CBV/SRV/UAV heap can be bound at a time, so both regions live in this one heap.
+/// A shader-visible descriptor heap, CBV/SRV/UAV or SAMPLER, split into two regions by lifetime.
+/// Only one shader-visible heap of each type can be bound at a time, so both regions live in this one heap.
 ///
 /// The two regions use deliberately different allocators, because their hazard models differ:
 ///
-///   - TRANSIENT (leading fraction): a **ring**, reclaimed per epoch. Descriptors are written by the CPU
-///     when a group is created and read by the GPU during that epoch, so a slot cannot be reused until
-///     the epoch that wrote it has retired (a CPU/GPU in-flight hazard). The ring's per-epoch checkpoints
-///     enforce exactly that. (This is unlike the transient *buffer* heap, whose contents are only ever
-///     GPU-touched: a serialized queue lets it use a plain bump-reset with cross-epoch aliasing.)
+///   - TRANSIENT (leading fraction): a **ring**, reclaimed per epoch.
+///     Descriptors are written by the CPU when a group is created and read by the GPU during that epoch, so a slot cannot be reused until the epoch that wrote it has retired.
+///     The ring's per-epoch checkpoints enforce exactly that.
+///     This is unlike the transient *buffer* heap, whose contents are only ever GPU-touched: a serialized queue lets it use a plain bump-reset with cross-epoch aliasing.
 ///
-///   - PERSISTENT (the rest): a **free-ranges allocator** — a group's range is returned to the free list
-///     when the group is released, deferred until its last-using epoch retires (a finalizer on the
-///     epoch, mirroring buffer deletion). So long-lived groups don't leak the heap.
+///   - PERSISTENT (the rest): a **free-ranges allocator**.
+///     A group's range returns to the free list when the group is released, deferred until its last-using epoch retires — a finalizer on the epoch, mirroring buffer deletion.
+///     So long-lived groups do not leak the heap.
 ///
-/// A binding_group allocates a contiguous range from the region matching its lifetime; the command list
-/// binds it as a root descriptor table.
+/// A binding_group allocates a contiguous range from the region matching its lifetime; the command list binds it as a root descriptor table.
 struct dx12_descriptor_heap
 {
-    /// Initializes a shader-visible heap of `heap_type` (CBV/SRV/UAV or SAMPLER) with `capacity`
-    /// descriptors; the leading `transient_fraction` share (0..1) backs the transient ring, the rest the
-    /// persistent free list. `ctx` is used to retire in-flight epochs when the transient ring is full.
-    /// Body in dx12_descriptor_heap.cc.
+    /// Initializes a shader-visible heap of `heap_type` (CBV/SRV/UAV or SAMPLER) with `capacity` descriptors.
+    /// The leading `transient_fraction` share (0..1) backs the transient ring, the rest the persistent free list.
+    /// The leading `transient_fraction` share, which must be in [0, 1), backs the transient ring; the rest is the persistent free list.
     [[nodiscard]] cc::result<cc::unit> initialize(dx12_context& ctx,
                                                   D3D12_DESCRIPTOR_HEAP_TYPE heap_type,
                                                   int capacity,
                                                   float transient_fraction);
 
-    /// Allocates `count` contiguous PERSISTENT descriptors from the free list. Free the returned
-    /// reservation with free_persistent when the group is released. Returns an EMPTY reservation
-    /// (is_empty()) when the region is exhausted — a recoverable failure the caller reports as an error.
+    /// Allocates `count` contiguous PERSISTENT descriptors from the free list.
+    /// Free the returned reservation with free_persistent when the group is released.
+    /// Returns an EMPTY reservation (is_empty()) when the region is exhausted — a recoverable failure the caller reports as an error.
     [[nodiscard]] dx12_descriptor_alloc allocate_persistent(int count);
 
-    /// Returns a persistent reservation (as from allocate_persistent) to the free list, coalescing
-    /// neighbours, and consumes it (left empty).
+    /// Returns a persistent reservation, as from allocate_persistent, to the free list, coalescing neighbours, and consumes it — leaving it empty.
     void free_persistent(dx12_descriptor_alloc alloc);
 
-    /// Ring-allocates `count` contiguous TRANSIENT descriptors for the current epoch. Blocks (retiring
-    /// in-flight epochs) when the ring is full. `count` must fit the transient region. The returned
-    /// reservation is not individually freed — the ring reclaims it when the epoch retires.
+    /// Ring-allocates `count` contiguous TRANSIENT descriptors for the current epoch.
+    /// Blocks, retiring in-flight epochs, when the ring is full.
+    /// `count` must fit the transient region.
+    /// The returned reservation is not individually freed — the ring reclaims it when the epoch retires.
     [[nodiscard]] dx12_descriptor_alloc allocate_transient(int count);
 
     /// Snapshots the transient ring cursor as the end-of-epoch boundary for `closed` (called at advance).
@@ -107,8 +105,8 @@ struct dx12_descriptor_heap
     int capacity = 0;
     int transient_capacity = 0; // [0, transient_capacity) is the ring; [transient_capacity, capacity) persistent
 
-    /// A free span [start, start+count) of persistent descriptors (heap-relative). The list is kept
-    /// sorted by start with no adjacent spans (freeing coalesces).
+    /// A free span [start, start+count) of persistent descriptors, heap-relative.
+    /// The list is kept sorted by start with no adjacent spans, since freeing coalesces.
     struct free_range
     {
         int start = 0;
