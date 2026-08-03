@@ -4,8 +4,9 @@ name: Windows Clang
 # Wide-but-shallow gate (single config); the deep debug/release matrix lives in
 # ci-linux-clang.yml. Everything runs through dev.py with an explicit preset (no
 # default-preset reliance). Uses the runner's preinstalled toolchain — clang 20
-# (LLVM), CMake, Ninja; dev.py injects the MSVC environment for clang-cl via
-# vswhere, so there is no toolchain-install or MSVC-setup step. clang-cl ships as
+# (LLVM), CMake, Ninja — with only LLVM's bin put back on PATH; dev.py injects the
+# MSVC environment for clang-cl via vswhere, so there is no toolchain-install or
+# MSVC-setup step. clang-cl ships as
 # a single unversioned binary (no clang++-N to swap to), so --toolset 20 here
 # *asserts* clang-cl is version 20 rather than selecting it — a hard error if the
 # base image moves off clang 20, so the bump is loud. See docs/guides/ci.md.
@@ -28,6 +29,17 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+
+      # Runner image 20260728.188 stopped putting LLVM's bin on PATH; 20260714.173 still did.
+      # LLVM itself is unchanged (still 20.1.8) and still at the standard location, but the preset's
+      # `CMAKE_CXX_COMPILER: clang-cl` is a bare name, so losing PATH reads as "no version-20 compiler"
+      # rather than as the environment change it is.
+      # Fails loudly here instead, if the image ever moves LLVM rather than just unsetting PATH.
+      - name: Put LLVM on PATH
+        run: |
+          $llvm = "$env:ProgramFiles\LLVM\bin"
+          if (-not (Test-Path "$llvm\clang-cl.exe")) { throw "no clang-cl.exe under $llvm - the image moved LLVM" }
+          Add-Content $env:GITHUB_PATH $llvm
 
       # Informational only: doctor also probes clangd's compile DB and llvm-cov,
       # which aren't needed for build+test and would fail a fresh runner.
