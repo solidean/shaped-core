@@ -4,12 +4,11 @@
 
 using namespace cc::primitive_defines;
 
-// Epoch system: the frame-level GPU lifetime counter/fence — advance/retire, deferred deletion of
-// resources, the per-submission completion token, and in-flight throttling. All on WARP so they
-// exercise a live epoch fence on headless CI. Note: the "a list must be submitted/dropped in the
-// epoch it was opened in" and "no open lists at advance" contracts are CC_ASSERT-enforced; we don't
-// test the abort paths (nexus has no death test). See
-// libs/graphics/shaped-graphics/docs/concepts/epochs.md.
+// Epoch system: the frame-level GPU lifetime counter/fence — advance/retire, deferred deletion of resources, the per-submission completion token, and in-flight throttling.
+// All on WARP, so they exercise a live epoch fence on headless CI.
+// The "a list must be submitted/dropped in the epoch it was opened in" and "no open lists at advance" contracts are CC_ASSERT-enforced.
+// Their abort paths are untested, since nexus has no death test.
+// See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
 namespace
 {

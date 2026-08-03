@@ -1,6 +1,6 @@
-// dx12_command_list: GPU-query recording (cmd.query). Timestamps lease query heaps from the context's
-// dx12_query_system, and finalize_queries_before_close resolves + reads them back at submit. See
-// libs/graphics/shaped-graphics/docs/concepts/queries.md.
+// dx12_command_list: GPU-query recording (cmd.query).
+// Timestamps lease query heaps from the context's dx12_query_system, and finalize_queries_before_close resolves + reads them back at submit.
+// See libs/graphics/shaped-graphics/docs/concepts/queries.md.
 
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
