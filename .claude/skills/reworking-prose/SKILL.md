@@ -58,7 +58,8 @@ Work it out in this order, before any new text is written:
 - **what every other level gets instead** — never a second full copy, and never silence.
   A **mini-duplication** is the one-liner you repeat where making the reader jump would cost more than the repeat.
   A **mini-hint** is a named symbol or a cited path that says where to look.
-  An answer that lives at exactly one level and is unreachable from the others is not documented;
+  An answer that lives at exactly one level and is unreachable from the others is not documented.
+  **"Another level owns it" licenses a shorter line, not always no line** — deleting a whole section outright is the easy over-correction, and a landing page is where it hurts most;
 - a **word budget per surface**, which may be *higher* than today when the point is to document more.
 
 Verbosity is the enemy and so is missing documentation — the concept is what lets you cut hard without stranding a reader.
@@ -139,8 +140,9 @@ Both are hard failures — fix the plan, do not work around the tool.
 **One dry run reports every problem the plan has**, so fix them as a batch rather than re-running per finding.
 Prose findings come back with carets over the *rewritten* text, which is the text to correct in the plan — not what is still on disk.
 
-**Budget two dry runs per chunk, because your own rewrites will trip `no-long-prose-line`.**
-Joining a justified block into one semantic point routinely lands at 210–290 characters, over the 200 ceiling — it is structural, not carelessness, and it fires on nearly every chunk.
+**Budget two dry runs per markdown chunk, because your own rewrites will trip `no-long-prose-line`.**
+Joining a justified block into one semantic point routinely lands at 210–290 characters, over the 200 ceiling — structural, not carelessness.
+It is a markdown problem: a `///` block is already short, so code chunks nearly always pass first time and a reflowed markdown paragraph nearly always does not.
 So the rhythm is: write, dry-run, split each flagged line at its seam, dry-run again, apply.
 Do not hand-count characters while writing the plan; the dry run finds them for free and you will guess wrong.
 
