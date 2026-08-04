@@ -15,16 +15,16 @@
 /// keep different splits of the same data distinct, so a stream of heterogeneous fields hashes
 /// unambiguously.
 ///
-/// Built for reuse: clear() resets the length without releasing the allocation, so the buffer stays
-/// hot for the next build. thread_local_scratch() hands out a per-thread instance for exactly this.
+/// Built for reuse: clear() resets the length without releasing the allocation, so the buffer stays hot for the next build.
+/// thread_local_scratch() hands out a per-thread instance for exactly this.
 
 namespace cc
 {
 class byte_stream_builder
 {
 public:
-    /// An empty per-thread builder, cleared on each call — amortizes allocations when building a
-    /// local blob to hash. Do NOT hold two references across a nested build on the same thread.
+    /// An empty per-thread builder, cleared on each call — amortizes allocations when building a local blob to hash.
+    /// Do NOT hold two references across a nested build on the same thread.
     [[nodiscard]] static byte_stream_builder& thread_local_scratch()
     {
         static thread_local byte_stream_builder scratch;
@@ -56,8 +56,8 @@ public:
         this->add(cc::as_bytes(range));
     }
 
-    /// Append a u64 element-count prefix, then the elements' bytes. Prevents ambiguity between
-    /// different splits of the same total data.
+    /// Append a u64 element-count prefix, then the elements' bytes.
+    /// Prevents ambiguity between different splits of the same total data.
     template <class Range>
     void add_pod_span_sized(Range const& range)
     {
@@ -88,7 +88,8 @@ public:
     /// Reset the length to zero, keeping the allocation for reuse.
     void clear() { _buffer.clear(); }
 
-    /// View the accumulated bytes. Invalidated by the next mutating call.
+    /// View the accumulated bytes.
+    /// Invalidated by the next mutating call.
     [[nodiscard]] cc::span<byte const> written_bytes() const { return _buffer; }
 
 private:

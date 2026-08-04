@@ -307,6 +307,7 @@ auto p = cc::make_unique<T>(args...);              // *p; p->member; p.get(); p.
 p = nullptr;                                       // destroys + clears (no reset()); ==/!= vs ptr/nullptr; hidden-friend hash
 
 #include <clean-core/memory/shared_ptr.hh>         // cc::shared_ptr<T, Traits=default_shared_traits<T>> — 8 B, intrusive
+// PROVISIONAL: shaped by cc::async's needs, its only user; the Traits protocol is expected to be simplified (docs/systems/shared-ptr.md)
 auto s = cc::make_shared<T>(args...);              // only way to construct (strong=1); *s; s->m; s.get(); default: [T|control]
 cc::weak_ptr<T> w = s;  w.lock();                   // weak (if Traits::supports_weak); lock() -> shared_ptr or empty
 // custom Traits (all static, on T*) for intrusive counts: node_size/node_align + init_control/inc_strong/
@@ -625,12 +626,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`, and `flags`.
   Check the header before relying on one.
 - **Streams are move-only real types (private-inheritance wrappers over one engine).**
-  Conversions only ever NARROW (`seekable_* -> plain`, `read_write -> read`/`write`;
-  `read <-> write` never). An adapter converts to any legal narrowing; a stream
-  narrows to another stream only **from an rvalue**, consuming it — so one backend
-  never has two live views. A consumed / moved-from stream asserts on use.
-  Narrowing away write capability with unflushed bytes pending asserts.
-- **Flush a write stream before dropping its adapter** — buffered bytes are lost
-  otherwise (there is no auto-flush). A stream borrows into its adapter, so the
-  adapter must outlive it; the file adapter's 4 KiB buffer is *inline*, so once a
-  stream is taken the adapter is effectively pinned (don't move it).
+  Conversions only ever NARROW (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write` never).
+  An adapter converts to any legal narrowing; a stream narrows to another stream only **from an rvalue**, consuming it, so one backend never has two live views.
+  A consumed or moved-from stream asserts on use, and narrowing away write capability with unflushed bytes pending asserts too.
+- **Flush a write stream before dropping its adapter** — buffered bytes are lost otherwise, since there is no auto-flush.
+  A stream borrows into its adapter, so the adapter must outlive it.
+  The file adapter's 4 KiB buffer is *inline*, so once a stream is taken the adapter is effectively pinned; do not move it.

@@ -31,8 +31,8 @@ class shader_asset;
 class shader_library;
 
 /// A shared filesystem.
-/// std::shared_ptr because the handle is polymorphic: cc::shared_ptr's default traits place the refcount at an offset derived from sizeof(T).
-/// It cannot hold a derived object through a base handle.
+/// std::shared_ptr because the handle is polymorphic: cc::shared_ptr's default traits place the refcount at an offset derived from sizeof(T), so it cannot hold a derived object through a base handle.
+/// A base-keyed Traits would fix that, and libs/base/clean-core/docs/systems/shared-ptr.md says why writing one is not worth it yet.
 using filesystem_handle = std::shared_ptr<filesystem>;
 
 /// A shared shader asset.

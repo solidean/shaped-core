@@ -1,16 +1,12 @@
 // Node-allocation DESIGN benchmark: the fast-path variants, side by side.
 //
-// Each variant is a self-contained mini-slab-allocator implemented inline below, with only the hot path
-// real; refill/drain-underflow routes through bench_design::cold_refill (an opaque call in another TU that
-// never fires in the timed loop). The point is to compare the *instruction mix* of each lock-removal
-// strategy on whatever machine you run it on — the whole reason to ship all the code (see
-// libs/base/clean-core/docs/systems/node-allocation.md).
+// Each variant is a self-contained mini-slab-allocator implemented inline below, with only the hot path real; refill and drain-underflow route through bench_design::cold_refill.
+// The point is to compare the *instruction mix* of each lock-removal strategy on whatever machine you run it on, which is the whole reason to ship all the code.
+// See libs/base/clean-core/docs/systems/node-allocation.md.
 //
-// The cold refill is out-of-TU on purpose: it makes the optimizer reload the slab base on every allocation
-// (it cannot prove the base survives the call), exactly as the real cc::node_allocator must (its cold path
-// allocate_node_bytes_non_fast is likewise opaque). Without it the variants hoist a single fixed slab base
-// into a register and report a number the real allocator can't reach; with it, the shipped `node` line below
-// tracks the step2_tls_diff variant it implements. Never remove it for a "cleaner" inline stub.
+// cold_refill is an opaque out-of-TU call on purpose, and node-allocation-design-refill.hh says why.
+// With it, the shipped `node` line below tracks the step2_tls_diff variant it implements.
+// Never replace it with a "cleaner" inline stub.
 //
 // Variants:
 //   atomic          current design: one bitmap + next, `lock and` to allocate, `lock or` to free (2 locks)
@@ -19,8 +15,8 @@
 //                   drain remote->local when local empties (1 lock + amortized drain)
 //   step1_diff      as step1 but the remote bitmap sits in a 2nd cache line (avoids false sharing under
 //                   contention, at the cost of a 2nd line touched here)
-//   step2_tls_same  as step1 plus an owner check on free: owner frees non-atomically into local, only
-//                   remote threads pay the atomic. Owner token = a thread_local int16 (0 locks single-thread)
+//   step2_tls_same  as step1 plus an owner check on free: the owner frees non-atomically into local, and
+//                   only remote threads pay the atomic; owner token = a thread_local int16 (0 locks single-thread)
 //   step2_tls_diff  step2 with the remote bitmap in a 2nd cache line
 //   step2_teb_same  step2 with the owner token = the TEB self pointer (one gs-relative load, no TLS-index chain)
 //   step2_teb_diff  step2_teb with the remote bitmap in a 2nd cache line
@@ -28,8 +24,9 @@
 //   system          cc::system_memory_resource (platform malloc), same batch pattern
 //   node            the REAL shipped cc::node_allocator (not a mock) -- the line to trust for actual perf
 //
-// Workload: allocate a fixed batch of N, free all N in a fixed permuted order, repeat; 3 runs. Metric is
-// millions of alloc+free pairs/s AND GB/s (= pairs/s * size). Machine-readable rows are printed as
+// Workload: allocate a fixed batch of N, free all N in a fixed permuted order, repeat; 3 runs.
+// Metric is millions of alloc+free pairs/s AND GB/s (= pairs/s * size).
+// Machine-readable rows are printed as
 //   RESULT,<variant>,<size>,<run>,<mops>,<gbps>
 // for scripts/plot-node-allocation-design.py to parse into SVGs.
 
@@ -192,8 +189,9 @@ struct VarSingle
     }
 };
 
-// Step 1: split local/remote bitmap. Non-atomic allocate from local; atomic free into remote; drain
-// remote->local when local empties. `Diff` places the remote bitmap on the 2nd cache line.
+// Step 1: split local/remote bitmap.
+// Non-atomic allocate from local, atomic free into remote, and drain remote->local when local empties.
+// `Diff` places the remote bitmap on the 2nd cache line.
 template <isize Size, bool Diff>
 struct VarStep1
 {
@@ -241,8 +239,9 @@ struct VarStep1
     }
 };
 
-// Step 2: step 1 plus an owner check on free. The owning thread frees non-atomically into local; only a
-// genuinely remote thread pays the atomic into remote. `Teb` selects the owner-token source.
+// Step 2: step 1 plus an owner check on free.
+// The owning thread frees non-atomically into local; only a genuinely remote thread pays the atomic into remote.
+// `Teb` selects the owner-token source.
 template <isize Size, bool Diff, bool Teb>
 struct VarStep2
 {
@@ -314,9 +313,9 @@ struct VarResource
     CC_FORCE_INLINE void free(byte* p) { res->deallocate_bytes(p, Size, 8, res->userdata); }
 };
 
-// node: the REAL shipped cc::node_allocator, not an inline mock. Same batch pattern, so it should track the
-// design variant it implements (step2_tls_diff) up to the cost of its extra not-taken branches (large-node
-// check, cold-path fallback). This is the line to trust for "what does the actual allocator do here".
+// node: the REAL shipped cc::node_allocator, not an inline mock.
+// Same batch pattern, so it should track the design variant it implements (step2_tls_diff), up to the cost of its extra not-taken branches — the large-node check and the cold-path fallback.
+// This is the line to trust for "what does the actual allocator do here".
 // Size is a power-of-two class size, so the class index is exactly log2(Size); size/align args are ignored
 // for small classes (only idx matters), so the hot path is identical to allocate_node_bytes' fast path.
 template <isize Size>
@@ -383,10 +382,9 @@ void measure(char const* name, isize size, Var& v)
     v.teardown();
 }
 
-// Non-inlined, uniquely-named single-batch hot-loop probe, instantiated for the design mock and the real
-// allocator below. Identical loop structure differing only in the Var type, so `dev.py assembly show` lands
-// on each hot path and they can be diffed instruction-for-instruction — the check that the shipped
-// allocator actually compiles to the step2_tls_diff design it was chosen from (not just claims to).
+// Non-inlined, uniquely-named single-batch hot-loop probe, instantiated for the design mock and for the real allocator below.
+// The loop structure is identical and differs only in the Var type, so `dev.py assembly show` lands on each hot path and they can be diffed instruction-for-instruction.
+// That is the check that the shipped allocator actually compiles to the step2_tls_diff design it was chosen from, rather than only claiming to.
 // Kept alive by references from the TEST (TU-local + noinline would otherwise be dead-code-eliminated).
 template <class Var>
 CC_DONT_INLINE u64 design_hotloop_probe(Var& v, byte** nodes, int const* free_perm)
@@ -455,7 +453,8 @@ void sweep()
 }
 } // namespace
 
-// Full design sweep across the small size classes. Manual: analyzed via scripts/plot-node-allocation-design.py.
+// Full design sweep across the small size classes.
+// Manual: analyzed via scripts/plot-node-allocation-design.py.
 TEST("bench-node-design (fast-path variants)", nx::config::manual)
 {
     g_tls_owner = 0x51D2; // any nonzero per-thread id for the step2_tls owner token

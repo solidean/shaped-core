@@ -110,7 +110,8 @@ inline constexpr isize node_slab_next_offset = CC_HAS_THREADS ? 16 : 8;
     return mask;
 }
 
-/// Per-class initial local free bitmaps, one per small size class. Indexed by class index in refill.
+/// Per-class initial local free bitmaps, one per small size class.
+/// Indexed by class index in refill.
 inline constexpr u64 node_seed_local_freemaps[isize(node_class_index::small_count)] = {
     node_compute_seed_local_freemap(0), node_compute_seed_local_freemap(1), node_compute_seed_local_freemap(2),
     node_compute_seed_local_freemap(3), node_compute_seed_local_freemap(4), node_compute_seed_local_freemap(5),
@@ -170,7 +171,8 @@ static_assert(cc::popcount(node_seed_local_freemaps[isize(node_class_index::smal
 
 namespace impl
 {
-/// Allocates the next process-unique nonzero owner id. Out-of-line so the token fast path stays a TLS load.
+/// Allocates the next process-unique nonzero owner id.
+/// Out-of-line so the token fast path stays a TLS load.
 [[nodiscard]] CC_COLD_FUNC u32 node_next_owner_id();
 
 /// Test/debug hook: total slabs currently held in the system resource's per-class orphan bins (slabs
@@ -191,9 +193,9 @@ inline thread_local u32 owner_token = 0;
     return impl::owner_token;
 }
 
-/// The calling thread's owner token WITHOUT lazy assignment (0 if never assigned). For the hot free path:
-/// a thread with token 0 has never hydrated a slab, so it owns none, so 0 != any slab's nonzero owner and
-/// the free correctly routes to remote. Skipping the assignment drops a branch (the t==0 check) from every free.
+/// The calling thread's owner token WITHOUT lazy assignment; 0 when it was never assigned.
+/// For the hot free path: a thread with token 0 has never hydrated a slab, so it owns none, so 0 never equals a slab's nonzero owner and the free routes to remote correctly.
+/// Skipping the assignment drops the t == 0 branch from every free.
 [[nodiscard]] CC_FORCE_INLINE u32 node_owner_token_or_zero()
 {
     return impl::owner_token;
@@ -222,14 +224,11 @@ inline thread_local u32 owner_token = 0;
 CC_COLD_FUNC void node_allocation_free_large(byte* ptr, node_class_index idx);
 
 /// Free a node by returning its slot to the slab's free bitmap.
-/// Requires only the pointer and class index; no allocator state or resource reference needed.
-/// The owning thread frees non-atomically into local; a genuinely remote thread atomic_ors into the slab's
-/// remote bitmap, which the owner drains on underflow. Single-threaded builds always take the plain path.
+/// The owning thread frees non-atomically into local; a genuinely remote thread atomic_ors into the slab's remote bitmap, which the owner drains on underflow.
+/// A single-threaded build always takes the plain path.
 ///
-/// DESIGN CHOICE: This is a free function, not bound to node_memory_resource.
-/// This ensures that freeing cannot directly depend on the resource by default.
-/// Deallocation is stateless and decoupled from allocation, enabling cross-thread deallocation
-/// without requiring the freeing thread to have any reference to or knowledge of the allocating resource.
+/// A free function rather than a node_memory_resource member, and that is the point: freeing needs only the pointer and the class index, so it can never depend on the resource.
+/// That is what makes cross-thread deallocation stateless — see libs/base/clean-core/docs/systems/node-allocation.md.
 CC_FORCE_INLINE void node_allocation_free(byte* ptr, node_class_index idx)
 {
     // branch for large nodes
@@ -272,12 +271,12 @@ extern cc::node_memory_resource* const default_node_memory_resource;
 
 namespace impl
 {
-/// This thread's default node allocator; null until hydrated by the cold path. Zero-init POD, so the
-/// read is a plain inline TLS load with no guard -- that is what lets the alloc fast path inline.
-/// Authoritative, not a shadow cache: set_default_node_allocator repoints it and every later alloc
-/// sees the new one. Safe to read during another TU's static init (reads null, then hydrates).
-/// Assumes static linkage (local-exec/initial-exec TLS); a PIC shared build would degrade this to a
-/// __tls_get_addr call. impl::owner_token carries the same assumption.
+/// This thread's default node allocator; null until the cold path hydrates it.
+/// Zero-init POD, so the read is a plain inline TLS load with no guard — that is what lets the alloc fast path inline.
+/// Authoritative rather than a shadow cache: set_default_node_allocator repoints it and every later alloc sees the new one.
+/// Safe to read during another TU's static init, where it reads null and then hydrates.
+/// Assumes static linkage (local-exec / initial-exec TLS); a PIC shared build would degrade this to a __tls_get_addr call.
+/// impl::owner_token carries the same assumption.
 inline thread_local cc::node_allocator* default_node_alloc = nullptr;
 
 /// Cold first-touch: resolve the default resource's allocator for this thread, install it, return it.
@@ -312,8 +311,8 @@ public:
     node_allocator() = default;
     explicit node_allocator(node_memory_resource* resource) : _resource(resource) {}
 
-    // at teardown, hand retained slabs back to the resource (via its reclaim_slabs hook) so a thread's
-    // slabs are adopted by later threads instead of leaking. no-op if the resource has no hook.
+    // at teardown, hand retained slabs back to the resource through its reclaim_slabs hook, so a thread's slabs are adopted by later threads instead of leaking.
+    // a no-op if the resource has no hook.
     // move/copy are deleted: an allocator owns its slab ring and is only ever used by reference or in place.
     ~node_allocator();
     node_allocator(node_allocator const&) = delete;
@@ -382,30 +381,14 @@ private:
     cc::node_memory_resource* _resource = nullptr;
 };
 
-/// Small-node allocation system optimized for cheap thread-local allocation and wait-free deallocation.
-/// Nodes are grouped by power-of-two size classes: class index i corresponds to size 2^i bytes.
-/// Size class index = bit_width(max(sizeof(T), alignof(T)) - 1), ensuring both size and alignment are satisfied.
+/// Small-node allocation system: cheap thread-local allocation, and wait-free deallocation that needs only the pointer and its class index.
 ///
-/// Each slab is a 64 * class_size block; slabs are aligned to their own size. Data starts at slab offset 0;
-/// slots overlapping the metadata are permanently blocked by a per-class consteval seed mask (see
-/// node_compute_seed_local_freemap). The metadata layout is frontend-dependent (CC_HAS_THREADS):
-///   - threaded: local_freemap @0, owner_id @8 (u32), next @16; remote_freemap @64 (2nd cache line) for
-///     classes whose slab spans two lines (idx >= 1), else @24. Usable slots: 1B → 36, 2B → 50, 16B+ → ~62.
-///   - single-threaded: local_freemap @0, next @8; usable slots: 1B → 48, 8B → 62, 16B+ → 63 (as before).
+/// The size classes, the slab layout, the two compile-time frontends and the slab lifecycle across threads are all in libs/base/clean-core/docs/systems/node-allocation.md.
+/// The layout constants this file's refill, fast path and seed mask must agree on are stated once above node_slab_next_offset.
 ///
-/// The fast path is two compile-time frontends behind an unchanged API (selected by CC_HAS_THREADS):
-///   - threaded (step2_tls_diff): the owner allocs/frees non-atomically into local; a genuinely remote
-///     thread atomic_ors into remote; the owner drains remote into local on underflow (cold path).
-///   - single-threaded: plain non-atomic and/or on one bitmap, no owner/remote.
-/// Deallocation requires only the pointer and class index; no allocator state or resource reference needed.
-/// The allocating thread discovers remotely freed slots during cold allocation paths (drain + slab reuse).
-///
-/// Slab base recovery from any interior pointer: ptr & ~(slab_size - 1), exploiting alignment.
-///
-/// Target use case: node-based containers (list, map, set) and small heap objects (unique_ptr payloads, unique_function).
-/// Out of scope: large allocations, contiguous buffers, bulk operations; use cc::allocation<T> or cc::memory_resource.
-///
-/// Future: could support shared_ptr-like semantics as well by co-locating refcounts
+/// Target use case: node-based containers (list, map, set) and small heap objects — unique_ptr payloads, unique_function storage.
+/// cc::shared_ptr also builds its refcounted nodes on this allocator; see libs/base/clean-core/docs/systems/shared-ptr.md.
+/// Out of scope: large allocations, contiguous buffers, bulk operations — reach for cc::allocation<T> or cc::memory_resource instead.
 struct cc::node_memory_resource
 {
     // returns a node allocator that is usable on this thread
@@ -434,12 +417,13 @@ struct cc::node_memory_resource
     cc::function_ptr<void(cc::byte*, node_class_index, void*)> deallocate_node_bytes_large = nullptr;
 
     // optional: hand this allocator's retained slabs back to the resource at allocator teardown.
-    // called from ~node_allocator (threaded frontend only). null => slabs leak on destruction, which is
-    // fine for stateless/private resources; the system resource implements per-class orphan reclamation so
-    // a thread's slabs are reused by later threads instead of leaking. must null out each slab_base it takes.
+    // called from ~node_allocator, threaded frontend only.
+    // null means slabs leak on destruction, which is fine for a stateless or private resource; the system resource implements per-class orphan reclamation instead.
+    // must null out each slab_base it takes.
     cc::function_ptr<void(node_allocator::slab_info&, void*)> reclaim_slabs = nullptr;
 
-    /// User-defined data for custom allocators. Can be nullptr for stateless allocators.
+    /// User-defined data for custom allocators.
+    /// May be nullptr for a stateless allocator.
     void* userdata = nullptr;
 };
 
@@ -447,16 +431,14 @@ namespace cc
 {
 /// Returns the default node allocator for the current thread, hydrating it on first use.
 /// The returned allocator is thread-local and must not be used across threads.
-/// For most use cases, this is the recommended way to obtain a node allocator (or take an explicit node_allocator&).
+/// This is the usual way to obtain one, short of taking an explicit node_allocator&.
 ///
-/// Inline by design: an unconditional out-of-line call here would sit in front of every node
-/// allocation and block the alloc fast path from inlining into the caller. The steady state is a
-/// TLS load plus a predicted-not-taken branch.
+/// Inline by design: an unconditional out-of-line call here would sit in front of every node allocation and block the alloc fast path from inlining into the caller.
+/// The steady state is a TLS load plus a predicted-not-taken branch.
 ///
-/// The default resource's get_allocator is consulted once per thread, not per call, so repointing
-/// default_node_memory_resource->get_allocator mid-run is not observed by threads that already
-/// allocated. Nothing does that (the resource pointer is constinit *const, and the system
-/// resource is TU-local), and set_default_node_allocator is the supported way to override.
+/// The default resource's get_allocator is consulted once per thread rather than once per call.
+/// So repointing default_node_memory_resource->get_allocator mid-run is not observed by threads that already allocated.
+/// Nothing does that — the resource pointer is constinit *const and the system resource is TU-local — and set_default_node_allocator is the supported override.
 [[nodiscard]] CC_FORCE_INLINE node_allocator& default_node_allocator()
 {
     auto* a = cc::impl::default_node_alloc;
@@ -465,21 +447,20 @@ namespace cc
     return *a;
 }
 
-/// Repoints this thread's default node allocator. null resets to the default resource's allocator,
-/// re-resolved on the next use.
-/// The allocator must outlive every node allocated from it while it was installed: frees derive
-/// everything from the pointer and never consult an allocator, so nothing can detect a violation.
-/// Deregister before destroying the allocator (~node_allocator asserts it is not still installed).
+/// Repoints this thread's default node allocator.
+/// null resets to the default resource's allocator, re-resolved on the next use.
+/// The allocator must outlive every node allocated from it while it was installed: frees derive everything from the pointer and never consult an allocator, so nothing can detect a violation.
+/// Deregister before destroying the allocator; ~node_allocator asserts it is not still installed.
 void set_default_node_allocator(node_allocator* alloc);
 
-/// This thread's installed default WITHOUT hydrating: null means "not resolved yet".
-/// Distinct from default_node_allocator(), which hydrates and never returns null. Use this to save
-/// and restore the slot around an override (see scoped_default_node_allocator).
+/// This thread's installed default WITHOUT hydrating; null means "not resolved yet".
+/// Distinct from default_node_allocator(), which hydrates and never returns null.
+/// Use it to save and restore the slot around an override — see scoped_default_node_allocator.
 [[nodiscard]] node_allocator* get_default_node_allocator();
 
 /// Scoped override of this thread's default node allocator.
-/// Restores the exact previous slot value -- including null -- so overrides nest. Same lifetime
-/// contract as set_default_node_allocator: nodes allocated inside must not outlive `alloc`.
+/// Restores the exact previous slot value, including null, so overrides nest.
+/// Same lifetime contract as set_default_node_allocator: nodes allocated inside must not outlive `alloc`.
 struct scoped_default_node_allocator
 {
     explicit scoped_default_node_allocator(node_allocator* alloc) : _prev(cc::get_default_node_allocator())
@@ -596,15 +577,14 @@ public:
     T* ptr = nullptr;
 };
 
-/// A node_allocation with its element type erased: a single move-only handle that owns any node-allocated
-/// object, whatever its type or size class. It keeps node_allocation<T>'s allocation fast path and stateless
-/// wait-free free, and is built by moving a node_allocation<T> in. The tradeoff is handle size — three
-/// pointers (payload, deleter, class index) instead of one — so prefer node_allocation<T> when the type is
-/// statically known. Meant for type-erased wrappers with no natural base class, e.g. unique_function storage.
+/// A node_allocation with its element type erased: one move-only handle that owns any node-allocated object, whatever its type or size class.
+/// It keeps node_allocation<T>'s allocation fast path and stateless wait-free free, and is built by moving a node_allocation<T> in.
+/// The tradeoff is handle size — three pointers (payload, deleter, class index) rather than one — so prefer node_allocation<T> when the type is statically known.
+/// Meant for type-erased wrappers with no natural base class, e.g. unique_function storage.
 ///
-/// How it works: erasing a node_allocation<T> captures its pointer, its class index, and a deleter (null for
-/// trivially destructible T). Destruction runs the deleter (if any) and returns the slot using the stored
-/// class index, so no type information or allocator state is needed at the free site.
+/// Erasing a node_allocation<T> captures its pointer, its class index, and a deleter (null for a trivially destructible T).
+/// Destruction runs the deleter if there is one, then returns the slot using the stored class index.
+/// So the free site needs no type information and no allocator state.
 struct cc::any_node_allocation
 {
     // properties
@@ -690,16 +670,16 @@ public:
     // future: we have 7 padding bytes here (3 on wasm?)
 };
 
-/// A node_allocation for polymorphic types: the handle's static type may be a base while the live object is
-/// any derived type in any size class. It keeps node_allocation<T>'s single-pointer handle, fast allocation
-/// path, and stateless wait-free free; the price is that the size class can no longer be deduced from T, so
-/// the user supplies a NodeTraits that destroys the object and reports the class it was allocated in. Use it
-/// for intrusive polymorphic nodes (virtual or hand-rolled dispatch) without paying for a fat handle.
+/// A node_allocation for polymorphic types: the handle's static type may be a base while the live object is any derived type, in any size class.
+/// It keeps node_allocation<T>'s single-pointer handle, fast allocation path and stateless wait-free free.
+/// The price is that the size class can no longer be deduced from T, so the user supplies a NodeTraits that destroys the object and reports the class it was allocated in.
+/// Use it for intrusive polymorphic nodes — virtual or hand-rolled dispatch — without paying for a fat handle.
 ///
-/// How it works: the handle stores only a T* (as node_allocation<T> does). At destruction it passes *ptr to
-/// NodeTraits::destroy_and_get_class_index(T&), which must read the class index (typically via a virtual),
-/// destroy the object, and return that index — read it before destroying, since the vtable is gone afterwards.
-/// The slot is then returned to that class's slab. Move-only; copying is unsupported.
+/// The handle stores only a T*, as node_allocation<T> does.
+/// At destruction it passes *ptr to NodeTraits::destroy_and_get_class_index(T&), which must read the class index (typically via a virtual), destroy the object, and return that index.
+/// Read the index BEFORE destroying: the vtable is gone afterwards.
+/// The slot then goes back to that class's slab.
+/// Move-only; copying is unsupported.
 ///
 /// Example:
 ///     struct my_traits

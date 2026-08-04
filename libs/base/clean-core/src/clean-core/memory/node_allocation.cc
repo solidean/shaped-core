@@ -19,8 +19,8 @@ byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info&
 // forward declaration of the system node memory resource (defined below)
 extern cc::node_memory_resource system_node_memory_resource;
 
-/// Splice a slab into the class's ring as the new head, retaining the existing slabs. Frontend-agnostic
-/// (touches only next pointers); used by both fresh refill and orphan adoption.
+/// Splice a slab into the class's ring as the new head, retaining the existing slabs.
+/// Frontend-agnostic — it touches only next pointers — and used by both fresh refill and orphan adoption.
 void node_splice_slab_as_head(cc::node_allocator::slab_info& slabs, cc::node_class_index idx, byte* new_slab)
 {
     byte*& head = slabs.slab_base[isize(idx)];
@@ -34,8 +34,8 @@ void node_splice_slab_as_head(cc::node_allocator::slab_info& slabs, cc::node_cla
     head = new_slab;
 }
 
-/// Drain a slab's remote frees into local (threaded) and report whether every usable slot is now free,
-/// i.e. no live node points into it. Frontend-aware: the single-threaded frontend has no remote to drain.
+/// Drain a slab's remote frees into local and report whether every usable slot is now free, i.e. no live node points into it.
+/// The single-threaded frontend has no remote to drain.
 bool node_slab_drain_and_is_fully_free(byte* base, cc::node_class_index idx)
 {
     u64 local = *cc::node_slab_freemap_for_base(base);
@@ -46,16 +46,17 @@ bool node_slab_drain_and_is_fully_free(byte* base, cc::node_class_index idx)
     return local == cc::node_seed_local_freemaps[isize(idx)];
 }
 
-/// Return a slab to the backing resource. Valid only for a fully-free slab (no live nodes point into it).
+/// Return a slab to the backing resource.
+/// Valid only for a fully-free slab: no live node may point into it.
 void node_free_slab_to_backing(byte* base, cc::node_class_index idx)
 {
     isize const slab_size = cc::node_slab_size_bytes_for_class(idx);
     cc::default_memory_resource->deallocate_bytes(base, slab_size, slab_size, cc::default_memory_resource->userdata);
 }
 
-// how many cold-path (ring-exhaustion) entries to skip between trim sweeps, per class. Trim is a rare
-// O(ring) sweep, so amortize it; a long-lived thread with a stable working set never produces a fully-free
-// slab and so never actually frees anything regardless of how often the sweep runs.
+// how many cold-path (ring-exhaustion) entries to skip between trim sweeps, per class.
+// trim is a rare O(ring) sweep, so it is amortized.
+// a long-lived thread with a stable working set never produces a fully-free slab, so it never actually frees anything however often the sweep runs.
 constexpr u16 node_trim_period = 64;
 
 /// Reclaim surplus fully-free slabs of a class back to the backing resource, keeping the ring non-empty and
@@ -80,7 +81,8 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
             break;
     }
 
-    // survivors = every non-fully-free slab + one fully-free spare; free the rest. never empties the ring.
+    // survivors = every non-fully-free slab, plus one fully-free spare; free the rest.
+    // never empties the ring.
     byte* survivors[cap];
     int s = 0;
     bool kept_spare = false;
@@ -108,17 +110,12 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
 
 #if CC_HAS_THREADS
 // ---- slab lifecycle across threads: orphan bins + reclamation helpers ---------------------------------
-// When a thread exits, its retained slabs are reclaimed: fully-free slabs go back to the backing resource,
-// the rest are handed to a per-class orphan bin, and a later thread adopts an orphan on refill instead of
-// mallocing fresh. The dying thread's owner_id is never recycled, so every free into an orphaned slab routes
-// to remote until it is adopted -- no plain-local writer can race the future adopter. See the lifecycle
-// section of libs/base/clean-core/docs/systems/node-allocation.md.
+// The lifecycle this implements — abandonment at thread exit, the per-class orphan bin, adoption on refill — is in libs/base/clean-core/docs/systems/node-allocation.md.
 //
-// The bin is a constinit cc::atomic_flag spinlock, not a std::mutex: it is trivially destructible and
-// never torn down, so the main thread's tls_allocator can reclaim safely even during static teardown (a
-// std::mutex static might already be destroyed). Abandonment/adoption are rare and latency-tolerant, so a
-// spinlock's short holds are fine. The lock's release/acquire is the sole ordering for the handoff of a
-// slab's local/owner/next fields between the exiting thread and a future adopter.
+// The bin is a constinit cc::atomic_flag spinlock rather than a std::mutex: it is trivially destructible and never torn down.
+// So the main thread's tls_allocator can reclaim safely even during static teardown, where a std::mutex static might already be destroyed.
+// Abandonment and adoption are rare and latency-tolerant, so a spinlock's short holds are fine.
+// The lock's release/acquire is the sole ordering for the handoff of a slab's local/owner/next fields between the exiting thread and a future adopter.
 struct slab_orphan_bin
 {
     cc::atomic_flag lock_flag; // C++20: default-cleared, trivially destructible
@@ -134,7 +131,8 @@ struct slab_orphan_bin
 
 constinit slab_orphan_bin s_orphans[isize(cc::node_class_index::small_count)] = {};
 
-/// Push an owned slab onto its class's orphan bin. The bin lock must already be held.
+/// Push an owned slab onto its class's orphan bin.
+/// The bin lock must already be held.
 void push_orphan_locked(cc::node_class_index idx, byte* slab)
 {
     auto& bin = s_orphans[isize(idx)];
@@ -142,7 +140,8 @@ void push_orphan_locked(cc::node_class_index idx, byte* slab)
     bin.head = slab;
 }
 
-/// Pop one orphan of the given class, or nullptr if the bin is empty. Takes the bin lock internally.
+/// Pop one orphan of the given class, or nullptr if the bin is empty.
+/// Takes the bin lock internally.
 byte* pop_orphan(cc::node_class_index idx)
 {
     auto& bin = s_orphans[isize(idx)];
@@ -192,11 +191,9 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
 #endif // CC_HAS_THREADS
 
 /// The system resource's per-thread allocator, plus self-deregistration.
-/// This is the one allocator that stays installed as the thread default until thread exit, so a
-/// plain ~node_allocator assert would fire on it. Clearing the slot here is sound precisely where
-/// the general case is not: this wrapper is itself thread_local, so its dtor provably runs on the
-/// one thread whose slot it clears. impl::default_node_alloc is trivially destructible, so its
-/// storage outlives this dtor on both the Itanium and MSVC TLS teardown paths.
+/// This is the one allocator that stays installed as the thread default until thread exit, so a plain ~node_allocator assert would fire on it.
+/// Clearing the slot here is sound precisely where the general case is not: this wrapper is itself thread_local, so its dtor provably runs on the one thread whose slot it clears.
+/// impl::default_node_alloc is trivially destructible, so its storage outlives this dtor on both the Itanium and MSVC TLS teardown paths.
 struct tls_default_allocator
 {
     // node_allocator's resource ctor is explicit, so the initializer names the type — copy-list-init
@@ -224,9 +221,8 @@ cc::node_allocator& system_get_allocator(void* userdata)
 constexpr isize node_large_header_size = 24;
 
 /// Allocates a large node (> small_max) from the system memory resource.
-/// Layout: allocate a block aligned to `alignment`, place the payload at the first aligned offset that
-/// leaves room for the 24-byte header, and write the header in the 24 bytes right before the payload. So
-/// the payload honors any power-of-two alignment (not just 8) while keeping resource* at payload-8.
+/// Layout: allocate a block aligned to `alignment`, place the payload at the first aligned offset that leaves room for the 24-byte header, and write the header in the 24 bytes right before it.
+/// So the payload honors any power-of-two alignment, not just 8, while keeping resource* at payload-8.
 byte* system_allocate_node_bytes_large(cc::node_class_index idx, isize size_bytes, isize alignment, void* userdata)
 {
     CC_UNUSED(idx); // not needed for system allocator
@@ -235,9 +231,9 @@ byte* system_allocate_node_bytes_large(cc::node_class_index idx, isize size_byte
     // bump alignment to at least 8 bytes (the header fields are 8-byte writes); must be a power of two
     alignment = cc::max(alignment, isize(8));
 
-    // payload offset: the first `alignment`-aligned point with >= header_size bytes ahead of it for the
-    // header. Since the block itself is `alignment`-aligned, this offset is a multiple of alignment, so the
-    // payload is aligned too. For alignment 8 this is 24 (the old layout); for 16 it is 32; etc.
+    // payload offset: the first `alignment`-aligned point with >= header_size bytes ahead of it for the header.
+    // the block itself is `alignment`-aligned, so this offset is a multiple of alignment and the payload is aligned too.
+    // alignment 8 gives 24, alignment 16 gives 32, and so on.
     isize const payload_offset = cc::align_up(node_large_header_size, alignment);
     isize const total_size = payload_offset + size_bytes;
 
@@ -293,8 +289,8 @@ byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info&
     // adoption: reuse an orphaned slab of this class (abandoned by an exited thread) before mallocing fresh.
     if (byte* const orphan = pop_orphan(idx); orphan != nullptr)
     {
-        // take ownership. atomic store because remote-freeing threads read owner_id concurrently on their
-        // free path -- they route to remote whichever value they see, but the write must not tear.
+        // take ownership.
+        // atomic store because remote-freeing threads read owner_id concurrently on their free path: they route to remote whichever value they see, but the write must not tear.
         cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(orphan)).store(cc::node_owner_token(), cc::memory_order_relaxed);
         // drain remote frees accumulated while orphaned into local
         u64 local = *cc::node_slab_freemap_for_base(orphan);
@@ -426,10 +422,9 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
     if (start_base == nullptr) [[unlikely]]
         return this->refill_slabs_and_allocate_node_bytes(idx);
 
-    // The head's local just emptied (that's why the fast path fell through), but any slab in the ring --
-    // including the head -- may have cross-thread frees waiting in its remote bitmap. Walk the whole ring
-    // from the head; on each slab with an empty local, drain remote into local (atomic exchange) and retry.
-    // TODO: still O(ring) per exhaustion for alloc-heavy workflows -- some bookkeeping could keep this cheaper.
+    // The head's local just emptied, which is why the fast path fell through, but any slab in the ring — including the head — may have cross-thread frees waiting in its remote bitmap.
+    // Walk the whole ring from the head; on each slab with an empty local, drain remote into local with an atomic exchange, and retry.
+    // TODO: still O(ring) per exhaustion for alloc-heavy workloads — some bookkeeping could keep this cheaper.
     auto base = start_base;
     do
     {
@@ -478,10 +473,9 @@ cc::node_allocator* cc::get_default_node_allocator()
 
 cc::node_allocator::~node_allocator()
 {
-    // A destroyed allocator that is still installed leaves the slot dangling, and the next alloc on
-    // this thread hands out slots from freed slabs. Best-effort: only this thread's slot is visible,
-    // so a cross-thread install/destroy still slips through. The system's own thread-default is
-    // exempt because tls_default_allocator clears the slot before we get here.
+    // A destroyed allocator that is still installed leaves the slot dangling, and the next alloc on this thread hands out slots from freed slabs.
+    // Best-effort: only this thread's slot is visible, so a cross-thread install/destroy still slips through.
+    // The system's own thread-default is exempt, because tls_default_allocator clears the slot before we get here.
     CC_ASSERT(cc::impl::default_node_alloc != this,
               "node allocator destroyed while still installed as this thread's default -- deregister it first "
               "(set_default_node_allocator / scoped_default_node_allocator)");

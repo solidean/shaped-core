@@ -35,8 +35,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
   [types.hh](../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately, so the storage needs a type of its own.
 - **`cc::shared_ptr`:** the `*_handle` typedefs still use `std::shared_ptr`.
-  [`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) has landed (8 B, intrusive, Traits-keyed), so what remains is switching the handles over, which keeps sg off `std::`.
-  Needs a Traits for the sg shapes — `cc::default_shared_traits` gives a trailing control block with no source change.
+  [`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) exists — 8 B, intrusive, Traits-keyed.
+  But its Traits protocol is provisional, shaped by `cc::async`'s needs and expected to be simplified.
+  So this is gated on that API settling rather than ready to pick up: see [systems/shared-ptr](../../../base/clean-core/docs/systems/shared-ptr.md).
+  It will not be a drop-in even then.
+  sg's resources are polymorphic, so `default_shared_traits`' `sizeof(T)`-derived control offset cannot find the counts through a base-typed handle — the same blocker slib hits.
+  They also derive from `std::enable_shared_from_this`, with 30+ `shared_from_this()` call sites and no `cc::shared_ptr` equivalent.
   See the [coding-guidelines](coding-guidelines.md) note.
 - **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly.
   About 110 occurrences, across the dx12 and vulkan backends, `raw_buffer`, `raw_texture`, `bytes_future` and `acceleration_structure`.

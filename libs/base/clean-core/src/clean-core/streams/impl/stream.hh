@@ -13,10 +13,9 @@
 #include <cstring> // std::memcpy
 #include <type_traits>
 
-// Implementation core for the byte streams: the internal stream_access enum and the single
-// cc::impl::stream<Access, Seekable> engine that the six public stream types in <clean-core/streams/stream.hh>
-// are built from. The author-facing flush contract (cc::seek_dir, cc::stream_flush_fn) is public and lives in
-// <clean-core/streams/stream_flush.hh>. See stream.hh for the concept and the performance/conversion rationale.
+// Implementation core for the byte streams: the internal stream_access enum, and the single cc::impl::stream<Access, Seekable> engine the six public stream types are built from.
+// Those public types live in <clean-core/streams/stream.hh>, which also carries the concept and the performance and conversion rationale.
+// The author-facing flush contract (cc::seek_dir, cc::stream_flush_fn) is public, in <clean-core/streams/stream_flush.hh>.
 
 namespace cc::impl
 {
@@ -49,8 +48,8 @@ constexpr bool stream_access_narrows(stream_access from, stream_access to)
     return from == to || (from == stream_access::read_write && (to == stream_access::read || to == stream_access::write));
 }
 
-/// True if the public stream type `To` is `From` or a legal narrowing of it (drop seekable, read_write -> read
-/// or write). Used by adapters to gate which stream types they can hand out. Both must expose `::engine`.
+/// True if the public stream type `To` is `From` or a legal narrowing of it — drop seekable, read_write -> read or write.
+/// Used by adapters to gate which stream types they can hand out; both must expose `::engine`.
 template <class From, class To>
 concept stream_narrows_to = requires {
     typename From::engine;
@@ -77,8 +76,8 @@ template <stream_access Access>
 using stream_write_end_t
     = std::conditional_t<stream_can_read(Access) && stream_can_write(Access), byte*, stream_no_first_write>;
 
-/// The single templated stream engine; the six public stream types in <clean-core/streams/stream.hh> inherit
-/// the matching instantiation and pull in its capability-relevant methods. Members/methods gated by params.
+/// The single templated stream engine; the six public stream types in <clean-core/streams/stream.hh> inherit the matching instantiation and pull in its capability-relevant methods.
+/// Members and methods are gated by the template params.
 template <stream_access Access, bool Seekable>
 struct stream
 {
@@ -91,8 +90,9 @@ public:
     /// An invalid (unbound) stream.
     stream() = default;
 
-    /// Bind a stream to an adapter's window + flush callback. Called by adapters; `context` must outlive the
-    /// stream. curr/end delimit the initial window (equal for a buffered adapter, full for a span).
+    /// Bind a stream to an adapter's window + flush callback.
+    /// Called by adapters, and `context` must outlive the stream.
+    /// curr/end delimit the initial window: equal for a buffered adapter, the full span for a span adapter.
     stream(byte* curr, byte* end, stream_flush_fn flush, void* context)
       : _curr(curr), _end(end), _flush(flush), _context(context)
     {
@@ -121,8 +121,8 @@ public:
 
     // flushing (all streams)
 public:
-    /// Plain flush: refill the read window / write through pending bytes. Returns the position of curr if
-    /// the source tracks one, else -1; a cc::result error on I/O failure.
+    /// Plain flush: refill the read window, or write through pending bytes.
+    /// Returns the position of curr if the source tracks one, else -1, or a cc::result error on I/O failure.
     cc::result<i64> flush() { return this->impl_flush(0, seek_dir::relative); }
 
     // reading
@@ -144,8 +144,9 @@ public:
         _curr += n;
     }
 
-    /// True if there is no more data. On a seekable stream this is a dry check (position vs size — the buffer
-    /// is not disturbed); on a non-seekable stream the window must actually be refilled to tell.
+    /// True if there is no more data.
+    /// On a seekable stream this is a dry check — position against size, with the buffer left alone.
+    /// On a non-seekable stream the window must actually be refilled to tell.
     cc::result<bool> at_end()
         requires(can_read)
     {
@@ -336,7 +337,8 @@ public:
         _curr += n;
     }
 
-    /// Write all bytes of src, draining as needed. Errors if a bounded sink runs out of space.
+    /// Write all bytes of src, draining as needed.
+    /// Errors if a bounded sink runs out of space.
     cc::result<cc::unit> write(cc::span<byte const> src)
         requires(can_write)
     {
@@ -371,14 +373,16 @@ public:
 
     // seeking (seekable streams only; O(1) or O(log n) by contract)
 public:
-    /// Seek to an absolute byte offset from the start. Returns the new position.
+    /// Seek to an absolute byte offset from the start.
+    /// Returns the new position.
     cc::result<i64> seek_to(i64 offset)
         requires(is_seekable)
     {
         return this->impl_flush(offset, seek_dir::begin);
     }
 
-    /// Seek by a signed delta from the current position. Returns the new position.
+    /// Seek by a signed delta from the current position.
+    /// Returns the new position.
     cc::result<i64> skip(i64 delta)
         requires(is_seekable)
     {
@@ -400,14 +404,16 @@ public:
         return this->impl_flush(0, seek_dir::dry_relative);
     }
 
-    /// Total size of the underlying data. Does not disturb the buffer.
+    /// Total size of the underlying data.
+    /// Does not disturb the buffer.
     cc::result<i64> size()
         requires(is_seekable)
     {
         return this->impl_flush(0, seek_dir::dry_end);
     }
 
-    /// Bytes between the current position and the end. Does not disturb the buffer.
+    /// Bytes between the current position and the end.
+    /// Does not disturb the buffer.
     cc::result<i64> remaining_bytes()
         requires(is_seekable)
     {
@@ -420,9 +426,9 @@ public:
 
     // seekability upgrade
 public:
-    /// Try to upgrade a non-seekable stream to its seekable variant in place. On success the seekable stream
-    /// is returned and *this becomes invalid; on failure returns nullopt and *this stays valid. Uses a dry
-    /// probe, so the buffer is never disturbed either way.
+    /// Try to upgrade a non-seekable stream to its seekable variant in place.
+    /// On success the seekable stream is returned and *this becomes invalid; on failure it returns nullopt and *this stays valid.
+    /// Uses a dry probe, so the buffer is never disturbed either way.
     cc::optional<typename public_stream<Access, true>::type> try_as_seekable() &&
         requires(!is_seekable)
     {
@@ -447,17 +453,17 @@ public:
     // narrowing conversion
 public:
     /// Take over a WIDER public stream's state, narrowing it (drop seekable, read_write -> read or write).
-    /// `source` must be a public stream type; it is left invalid, so only one live view onto the adapter can
-    /// survive. Reachable only from the public types' converting constructors — the engine is a private base,
-    /// so this never becomes part of a stream's API. `stream_narrows_to` gates which pairs get here.
+    /// `source` must be a public stream type, and it is left invalid, so only one live view onto the adapter can survive.
+    /// Reachable only from the public types' converting constructors — the engine is a private base, so this never becomes part of a stream's API.
+    /// `stream_narrows_to` gates which pairs get here.
     template <class From>
     void impl_narrow_from(From& source)
     {
         using from_engine = typename From::engine;
         auto& src = static_cast<from_engine&>(source); // legal: every public type befriends every stream
 
-        // Pending writes live in the source's buffer and drain only through ITS write bound. Dropping write
-        // capability would strand them with no way to flush, so they have to be gone already.
+        // Pending writes live in the source's buffer and drain only through ITS write bound.
+        // Dropping write capability would strand them with no way to flush, so they have to be gone already.
         if constexpr (from_engine::can_write && !can_write)
             CC_ASSERT(src._first_write == nullptr, "flush pending writes before narrowing away write capability");
 

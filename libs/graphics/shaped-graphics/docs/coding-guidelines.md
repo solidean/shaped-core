@@ -32,10 +32,11 @@ Callers hold and pass handles, and do not construct these types by value.
 **Why** (not obvious): an sg resource fronts a GPU-resident object that several in-flight command lists may reference, so shared ownership is the only model that fits.
 The `_handle` suffix is the one vocabulary that makes "reference-counted GPU-side thing" legible at every call site.
 
-**`std::shared_ptr` is a placeholder whose replacement has landed.**
-[`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) is an 8 B intrusive-refcount handle.
-Switching the typedefs over is what keeps sg inside the `cc` vocabulary, and is tracked in [TODO](TODO.md).
-Until then `std::shared_ptr` is the one sanctioned `std::` ownership type in sg.
+**`std::shared_ptr` is the sanctioned ownership type here, and stays that way for now.**
+[`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) is an 8 B intrusive-refcount handle, but its Traits protocol is provisional.
+See [systems/shared-ptr](../../../base/clean-core/docs/systems/shared-ptr.md).
+Switching the typedefs over is what would keep sg inside the `cc` vocabulary, and [TODO](TODO.md) tracks it against that API settling.
+So `std::shared_ptr` remains the one sanctioned `std::` ownership type in sg.
 A new handle follows the existing pattern; do not invent a second ownership mechanism.
 
 ## `context` / `command_list` are mutable drivers; resources are shared-immutable

@@ -42,9 +42,8 @@
 /// budget or a total-possible size anchored at `obj_start`. Containers are free to define their own
 /// `capacity()` (or `capacity_total()`) in terms of the directional primitives if they want.
 ///
-/// Member functions with the `_stable` suffix guarantee that they will never reallocate the buffer
-/// or move/invalidate live objects. They keep existing references, pointers, and iterators stable.
-/// These functions will typically assert that sufficient allocation capacity is already present.
+/// Member functions with the `_stable` suffix never reallocate the buffer and never move or invalidate live objects, so existing references, pointers and iterators stay valid.
+/// They typically assert that enough allocation capacity is already present.
 ///
 ///
 /// === Exception & reference guarantees ===
@@ -887,7 +886,8 @@ public:
     /// Removes and returns the element at the given index by swapping with the last element.
     /// Does not preserve relative order of elements (hence _unordered suffix).
     /// Precondition: 0 <= idx < size().
-    /// O(1) complexity. All references remain valid except for the last element.
+    /// O(1) complexity.
+    /// All references remain valid except for the last element.
     /// Preferred over pop_at() when element order doesn't matter.
     /// NOTE: Prefer remove_at_unordered() if you don't need the return value (avoids an extra move).
     [[nodiscard("use remove_at_unordered() if you don't need the return value")]] constexpr T pop_at_unordered(isize idx)
@@ -912,7 +912,8 @@ public:
     /// Removes the element at the given index by swapping with the last element.
     /// Does not preserve relative order of elements (hence _unordered suffix).
     /// Precondition: 0 <= idx < size().
-    /// O(1) complexity. All references remain valid except for the last element.
+    /// O(1) complexity.
+    /// All references remain valid except for the last element.
     /// Preferred over remove_at() when element order doesn't matter.
     /// Fast path: avoids the extra move required by pop_at_unordered().
     constexpr void remove_at_unordered(isize idx)
@@ -1036,7 +1037,8 @@ public:
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Predicate is invoked as pred(element) or pred(idx, element) for each element.
     /// Stops calling the predicate once a match is found.
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     template <class Pred>
     constexpr cc::optional<isize> remove_first_where(Pred&& pred)
     {
@@ -1065,7 +1067,8 @@ public:
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Predicate is invoked as pred(element) or pred(idx, element) for each element.
     /// Stops calling the predicate once a match is found (scanning backward).
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     template <class Pred>
     constexpr cc::optional<isize> remove_last_where(Pred&& pred)
     {
@@ -1104,7 +1107,8 @@ public:
     /// Removes the first element that compares equal to the given value.
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Stops searching once a match is found.
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     constexpr cc::optional<isize> remove_first_value(T const& value)
     {
         static_assert(requires { bool(value == value); }, "remove_first_value: T must support operator==");
@@ -1114,7 +1118,8 @@ public:
     /// Removes the last element that compares equal to the given value.
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Stops searching once a match is found (scanning backward).
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     constexpr cc::optional<isize> remove_last_value(T const& value)
     {
         static_assert(requires { bool(value == value); }, "remove_last_value: T must support operator==");

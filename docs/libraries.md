@@ -26,7 +26,7 @@ Highlights:
   `to_string` / `to_debug_string`.
 - **Fallible values** — `optional` and `result<T, E>` for expected-error handling.
 - **Callables** — non-owning `function_ref`, move-only `unique_function`.
-- **Memory** — `allocation` / `node_allocation` handles over `memory_resource`s.
+- **Memory** — `allocation` / `node_allocation` handles over `memory_resource`s, plus `shared_ptr`, an 8 B intrusive handle whose Traits protocol is still provisional.
 - **Foundations** — a lean assertion suite (`CC_ASSERT` …), compiler/OS macros,
   bit utilities, `mutex`, and the lazy `sequence` ranges API.
 

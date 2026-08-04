@@ -230,9 +230,10 @@ enum class submission_token : u64
     not_submitted = u64(-1), ///< sentinel that always compares "not yet complete"
 };
 
-/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type. context, buffer, and memory_heap get
-/// handles; command_list does not — it's a single-use temporary held by std::unique_ptr, passed by
-/// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
+/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type.
+/// context, buffer and memory_heap get handles; command_list does not, being a single-use temporary held by std::unique_ptr and passed by reference.
+/// cc::shared_ptr exists, but its Traits protocol is still provisional and sg's resources need a base-keyed Traits it does not have, so the switch is deliberately deferred.
+/// See libs/graphics/shaped-graphics/docs/coding-guidelines.md.
 using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
 using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutable: shape is fixed at creation

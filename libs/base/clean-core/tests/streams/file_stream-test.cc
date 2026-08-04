@@ -308,8 +308,8 @@ TEST("file_stream - read_write grows while writing past the end")
 
 TEST("file_stream - read_write appends at EOF via seek-to-end then write")
 {
-    // the fresh-append case: seek to EOF (window empty for reads) then write with nothing buffered. The
-    // separate write-capacity end makes free_bytes() non-empty at EOF, so the append just works.
+    // the fresh-append case: seek to EOF, with the window empty for reads, then write with nothing buffered.
+    // the separate write-capacity end makes free_bytes() non-empty at EOF, so the append just works.
     temp_file tf("cc-stream-rw-append.tmp");
     auto const original = make_bytes(40, 0);
     write_file(tf.view(), original);

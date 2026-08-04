@@ -32,8 +32,8 @@ from matplotlib.ticker import ScalarFormatter
 ROOT = Path(__file__).resolve().parents[4]  # scripts -> clean-core -> base -> libs -> repo root
 TEST_NAME = "bench-node-design (fast-path variants)"
 
-# Draw order + style per variant. Okabe-Ito colorblind-safe palette; solid = metadata in one cache line,
-# dashed = remote bitmap on a 2nd line; references (single/mimalloc/system) get their own dashes.
+# Draw order + style per variant.
+# Okabe-Ito colorblind-safe palette; solid = metadata in one cache line, dashed = remote bitmap on a 2nd line, and the references (single/mimalloc/system) get their own dashes.
 # "node" is the REAL shipped cc::node_allocator — drawn thick black on top so it reads as the ground truth.
 # key: (label, color, linestyle, marker, linewidth, zorder)
 STYLE: dict[str, tuple] = {

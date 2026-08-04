@@ -14,7 +14,7 @@ clean-core/
   common/       # macros, utility/meta, flags, hash, assertions
   platform/     # native (demangling), source_location, stacktrace
   math/         # bit utilities
-  memory/       # allocation, node_allocation (+ impl/)
+  memory/       # allocation, node_allocation, shared_ptr (+ impl/)
   container/    # array/vector families, map, set, span, strided_span, … (+ impl/)
   sequence/     # the lazy ranges API
   string/       # string, string_view, char_predicates, to_string, to_debug_string
@@ -53,11 +53,11 @@ list.
 
 Deep dives on the internal machinery, including holes and gotchas not obvious from the headers:
 
-- [systems/allocation](systems/allocation.md) — `cc::allocation<T>`, the owning storage handle
-  under `array`/`vector`/`devector`, and the `memory_resource` interface. The extract/adopt escape
-  hatch across container types works today; `retype` and the ergonomic API around it do not yet.
-- [systems/node-allocation](systems/node-allocation.md) — the slab allocator for small nodes:
-  size classes, wait-free cross-thread free, and the by-design slab leak in the current refill path.
+- [systems/allocation](systems/allocation.md) — `cc::allocation<T>`, the owning storage handle under `array`/`vector`/`devector`, and the `memory_resource` interface.
+  The extract/adopt escape hatch across container types works today; `retype` and the ergonomic API around it do not yet.
+- [systems/node-allocation](systems/node-allocation.md) — the slab allocator for small nodes: size classes, wait-free cross-thread free, and the slab lifecycle across thread exit and adoption.
+- [systems/shared-ptr](systems/shared-ptr.md) — `cc::shared_ptr` / `cc::weak_ptr`, the 8 B intrusive-refcount handle pair over one slab node.
+  The Traits protocol is provisional and shaped by async's needs; the lifetime and release/adopt contracts are not.
 - [systems/async](systems/async.md) — `cc::async<T, E>`, the value/dataflow async.
   The frame model, the never-blocking poll loop, the 64 B node layout, the work-stealing pool, and what a node costs.
 

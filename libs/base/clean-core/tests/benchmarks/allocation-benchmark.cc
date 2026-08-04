@@ -1,14 +1,8 @@
 // Standalone allocation throughput benchmark.
 //
-// Compares the mimalloc-backed default resource (cc::default_memory_resource) against the platform
-// malloc/free resource (cc::system_memory_resource) across allocation sizes. The pattern is a churn: a small
-// ring of concurrently-live allocations, each cycle freeing the oldest and allocating a fresh block (the
-// common short-lived-object workload). Reports millions of alloc+free cycles per second.
-//
-// Companion to the xxHash investigation: checks whether the vendored mimalloc suffers the same RelWithDebInfo
-// /Ob1 under-inlining penalty. It does, but mildly — ~1.6x on small allocations vs xxHash's ~11x — since its
-// hot malloc/free are force-inlined upstream. The project-wide /Ob2 promotion (root CMakeLists) covers it.
-// See libs/base/clean-core/docs/benchmarks/allocation-benchmark.md.
+// Compares the mimalloc-backed default resource (cc::default_memory_resource) against the platform malloc/free resource (cc::system_memory_resource) across allocation sizes.
+// The pattern is a churn: a small ring of concurrently-live allocations, each cycle freeing the oldest and allocating a fresh block.
+// The results, the machine they were taken on, and the /Ob1 inlining story are in libs/base/clean-core/docs/benchmarks/allocation-benchmark.md.
 //
 // Guide benchmark (GUIDE_BENCHMARK): prints the table and records mimalloc/system throughput at 64 B and
 // 4 KiB via nx::guide for the PGO speedup report.
@@ -103,16 +97,13 @@ double alloc_mops(cc::memory_resource const& res, isize size)
 }
 
 // Millions of alloc+free cycles per second for the thread-local node allocator at `Size` bytes.
-// `Size` is a template parameter so the class index is a compile-time constant, which is how the node
-// allocator is actually used (node_allocation<T> derives its class from the type) and what the force-inlined
-// fast path needs to fold the size-class branch and the shift away — passing a runtime index badly
-// undersells it. Alignment is 8 (natural node/pointer alignment), so class = bit_width(max(Size, 8) - 1);
-// sizes above 256 B fall off the small-class fast path onto the header-backed large path.
+// `Size` is a template parameter so the class index is a compile-time constant, which is how the node allocator is actually used — node_allocation<T> derives its class from the type.
+// That is also what the force-inlined fast path needs in order to fold the size-class branch and the shift away; passing a runtime index badly undersells it.
+// Alignment is 8, the natural node/pointer alignment, so class = bit_width(max(Size, 8) - 1).
+// Sizes above 256 B fall off the small-class fast path onto the header-backed large path.
 //
-// The live set is kept small (32) on purpose: a single slab holds 62-63 usable slots for these classes,
-// so the whole working set fits one slab and every cycle stays on the wait-free fast path. Growing the
-// live set past a slab would trigger refill, which currently leaks the old slab
-// (see libs/base/clean-core/docs/systems/node-allocation.md) — not what this benchmark is measuring.
+// The live set is kept small (32) on purpose: a single slab holds 62-63 usable slots for these classes, so the whole working set fits one slab.
+// Every cycle therefore stays on the wait-free fast path, and growing the live set past a slab would trigger refill, which is not what this benchmark is measuring.
 template <isize Size>
 double node_mops()
 {
@@ -155,12 +146,11 @@ double node_mops()
 // --- Steady-state small-batch benchmark -----------------------------------------------------------------
 //
 // The intended strongest case for the node allocator: a hot thread-local batch that never exceeds one slab.
-// Each iteration allocates a fixed batch of N nodes, then frees all N in a fixed *permuted* order; this
-// repeats `iters` times. Only the alloc+free work is timed — the permutation is precomputed once and reused
-// for the whole run, so no shuffling/RNG cost leaks into the measurement. Because every batch is fully freed
-// before the next, the slab returns to the same freemap each iteration: fully deterministic, cache-hot, and
-// entirely on the wait-free fast path (no refill, no rolling index, no page-touch). This isolates the raw
-// per-op allocator cost. We run it 3x and print all three numbers as the simplest possible noise measure.
+// Each iteration allocates a fixed batch of N nodes, then frees all N in a fixed *permuted* order, and this repeats `iters` times.
+// Only the alloc+free work is timed: the permutation is precomputed once and reused for the whole run, so no shuffling or RNG cost leaks into the measurement.
+// Because every batch is fully freed before the next, the slab returns to the same freemap each iteration — deterministic, cache-hot, and entirely on the wait-free fast path.
+// That isolates the raw per-op allocator cost.
+// It runs 3x and prints all three numbers as the simplest possible noise measure.
 //
 // Metric: millions of alloc+free PAIRS per second (one pair = one allocate + one matching free). Each
 // iteration contributes N pairs, so a run of `iters` iterations is iters*N pairs.
@@ -172,8 +162,8 @@ constexpr isize batch_n = 10;      // nodes allocated/freed per iteration
 constexpr isize iters = 1'000'000; // iterations per timed run
 constexpr int runs = 3;            // repeated timed runs (noise measure)
 
-// A fixed permutation of 0..batch_n-1: the order in which the batch is freed. Non-sequential on purpose so
-// the free order is neither pure-LIFO nor pure-FIFO, which could unrealistically flatter one allocator.
+// A fixed permutation of 0..batch_n-1: the order in which the batch is freed.
+// Non-sequential on purpose, so the free order is neither pure-LIFO nor pure-FIFO, either of which could unrealistically flatter one allocator.
 constexpr int free_order[batch_n] = {4, 0, 8, 2, 6, 9, 1, 5, 3, 7};
 
 // Runs the batch loop 3x with the given alloc/free callables and prints one labeled result row.
@@ -312,11 +302,10 @@ void row_interleaved(bool touch)
                              { run3_interleaved(label, Size, touch, alloc_one, free_one); });
 }
 
-// A uniquely-named, non-inlined copy of one hot iteration of the node fast path, extracted so it compiles
-// to a single searchable symbol: `dev.py assembly show node_alloc_free_hotloop_probe` lands exactly on the
-// alloc (atomic bitmap load + fetch_and) and free (atomic_or) codegen — the metal this whole investigation
-// is about. Not part of any timing; it exists purely as a disassembly target and is kept alive by a
-// reference from the steady-state test below (TU-local + noinline would otherwise be dead-code-eliminated).
+// A uniquely-named, non-inlined copy of one hot iteration of the node fast path, extracted so it compiles to a single searchable symbol.
+// `dev.py assembly show node_alloc_free_hotloop_probe` then lands exactly on the owner's alloc and free codegen, which is non-atomic on the threaded frontend.
+// Not part of any timing; it exists purely as a disassembly target.
+// A reference from the steady-state test below keeps it alive, since TU-local plus noinline would otherwise be dead-code-eliminated.
 CC_DONT_INLINE u64 node_alloc_free_hotloop_probe(cc::node_allocator& alloc, byte** nodes, int const* free_perm)
 {
     constexpr isize Size = 16;
@@ -360,9 +349,9 @@ void run_all()
 }
 } // namespace steady
 
-// Sweeps `sizes`, printing one mimalloc/system row each. When `record`, the 64 B and 4 KiB points are also
-// reported as guide metrics — pass the representative-only sizes for a fast guide benchmark, or the full set
-// (record=false) for the human analysis table.
+// Sweeps `sizes`, printing one mimalloc/system row each.
+// When `record`, the 64 B and 4 KiB points are also reported as guide metrics.
+// So pass the representative-only sizes for a fast guide benchmark, or the full set with record=false for the human analysis table.
 void run(cc::span<isize const> sizes, bool record)
 {
     isize const align = 16; // typical malloc alignment; both resources honor it
@@ -398,11 +387,9 @@ void comparison_row()
     std::printf("%10lld %14.1f %16.1f %14.1f\n", (long long)Size, mi, al, nd);
 }
 
-// Compares the three allocation paths across `Sizes`: the bare mimalloc resource, the owning
-// cc::allocation<byte> handle over it, and the thread-local node allocator. Node small classes (<= 256 B)
-// are the point of interest; the larger rows show the node header-path cliff (its large path is just
-// mimalloc + a 24 B header) and the handle overhead converging with the raw resource once the allocation
-// itself dominates.
+// Compares the three allocation paths across `Sizes`: the bare mimalloc resource, the owning cc::allocation<byte> handle over it, and the thread-local node allocator.
+// Node small classes (<= 256 B) are the point of interest.
+// The larger rows show the node header-path cliff — its large path is just mimalloc plus a 24 B header — and the handle overhead converging with the raw resource once the allocation itself dominates.
 template <isize... Sizes>
 void run_comparison()
 {
@@ -424,7 +411,8 @@ GUIDE_BENCHMARK("bench-alloc (mimalloc vs system)")
     run(guide_sizes, /*record*/ true);
 }
 
-// Full human-facing sweep (manual): the complete size table the docs analyze. Run by exact name.
+// Full human-facing sweep (manual): the complete size table the docs analyze.
+// Run by exact name.
 TEST("bench-alloc (mimalloc vs system, full sweep)", nx::config::manual)
 {
     run(full_sizes, /*record*/ false);
