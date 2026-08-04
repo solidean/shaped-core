@@ -242,8 +242,8 @@ struct scanner
         diag(start, cc::string("unterminated string literal"));
     }
 
-    /// A raw string body: text is at the opening `"` of `"delim(...)delim"`. The prefix was already
-    /// consumed by the caller (start points at the prefix).
+    /// A raw string body.
+    /// `p` must be at the opening `"` of `"delim(...)delim"`, with the prefix already consumed; `start` points at that prefix.
     void lex_raw_string(isize start)
     {
         ++p; // opening "
@@ -333,7 +333,6 @@ struct scanner
         {
             if (is_raw_prefix(word))
             {
-                p = start; // rewind; lex_raw_string re-reads from the prefix
                 lex_raw_string(start);
                 return;
             }
