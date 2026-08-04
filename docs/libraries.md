@@ -133,16 +133,13 @@ DXC has been fetched (`extern/dxc` downloads a pinned release on demand).
 [cheat-sheet](../libs/graphics/shaped-shader-library/cheat-sheet.md) ·
 [docs](../libs/graphics/shaped-shader-library/docs/_index.md)
 
-The shader package + hot-reload mechanism, also a side utility. Any target — a library, an app, or a
-test binary — declares its own **shader package** in its own CMakeLists (`sc_add_shader_package`), gets
-typed C++ symbols for its shaders, and gets hot reloading; sg itself does not depend on it. You
-`acquire(ctx)` with the context you will use the shader on, and get bytecode in a format *it* accepts —
-so one authored shader can feed several backends. Compilers are a registered seam (HLSL→DXIL today),
-shader sources are reached only through a mountable virtual filesystem, and the generator embeds every
-source so a shipped binary is self-contained without a mode flag.
+The shader package + hot-reload mechanism, also a side utility.
+Any target — a library, an app, or a test binary — declares its own **shader package** in its own CMakeLists (`sc_add_shader_package`), gets typed C++ symbols for its shaders, and gets hot reloading.
+sg itself does not depend on it.
+You `acquire(ctx)` with the context you will use the shader on and get bytecode in a format *it* accepts, so one authored shader can feed several backends.
+Compilers are a registered seam (HLSL→DXIL today), and shader sources are reached only through a mountable virtual filesystem.
 
-**How the shader system fits together —
-[shaped-graphics/docs/shaders.md](../libs/graphics/shaped-graphics/docs/shaders.md).**
+**How the shader system fits together — [shaped-graphics/docs/shaders.md](../libs/graphics/shaped-graphics/docs/shaders.md).**
 
 ### shaped-rendering — namespace `sr` — depends on shaped-graphics
 

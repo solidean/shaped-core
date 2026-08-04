@@ -103,31 +103,22 @@ See the [shaped-shader-compiler-dxc readme](../libs/graphics/shaped-shader-compi
 
 ### shaped-shader-library — `slib::`
 
-The other side utility: the shader **package** + hot-reload mechanism, on top of sg (and, where DXC
-exists, ssc::dxc). Any target declares its own shaders in its own CMakeLists and gets typed C++ symbols
-for them — sg does not depend on slib, yet `shaped-graphics-test` declares a package and it works.
+The other side utility: the shader **package** + hot-reload mechanism, on top of sg and, where DXC exists, ssc::dxc.
+Any target declares its own shaders in its own CMakeLists and gets typed C++ symbols for them — sg does not depend on slib, yet `shaped-graphics-test` declares a package and it works.
 
 ```cmake
 sc_add_shader_package(TARGET my-renderer NAME my_shaders NAMESPACE my::shaders
-                      SOURCE_DIR shaders SHADERS post/vignette.hlsl:compute:main)
+                      SOURCE_DIR shaders SHADERS vignette.hlsl:compute:main)
 ```
 ```cpp
 auto cs = my::shaders::vignette.compute.main->acquire(ctx);   // sg::async_compiled_shader
 ```
 
-- **You pass the context, not a format.** A shader is authored once but may be consumed by several
-  backends, so the bytecode format is the consumer's property, not the shader's. `acquire(ctx)` picks a
-  registered compiler that reaches a format the context accepts, and reports an error if none does.
-- **Hot reload never blocks a consumer**: the watcher recompiles on its own thread and only *stages* the
-  result; a broken edit leaves the last good shader running.
-- **Dev vs shipping is not a mode.** The generator embeds every source (plus the `#include` closure) and
-  bakes the source dir; the library mounts the embedded copy, then the source dir over it if it exists.
-- Shader sources are reached only through a **mountable virtual filesystem**, which is what gives shared
-  includes a stable path and lets reload tests run with no disk and no sleeps.
+- **You pass the context, not a format.** `acquire(ctx)` picks a registered compiler that reaches a format the context accepts, so one authored shader can feed several backends.
+- **Hot reload never blocks a consumer**, and dev-vs-shipping is not a mode flag.
 
-**The whole shader system in one place —
-[shaped-graphics/docs/shaders.md](../libs/graphics/shaped-graphics/docs/shaders.md)**; then the
-[shaped-shader-library readme](../libs/graphics/shaped-shader-library/readme.md).
+**How it all works — [shaped-graphics/docs/shaders.md](../libs/graphics/shaped-graphics/docs/shaders.md).**
+Then the [shaped-shader-library readme](../libs/graphics/shaped-shader-library/readme.md).
 
 ## Building & testing
 
