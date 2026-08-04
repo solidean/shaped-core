@@ -7,8 +7,8 @@
 #include <instruction-tracer/report/trace_formatter.hh> // format_address
 #include <instruction-tracer/report/trace_stats.hh>     // collect_stats, strip_template_args
 
-// Generated at build time from report/html/{app.css,app.js} by embed-html-assets.py. Provides
-// itrace::html::app_css and itrace::html::app_js as inline constexpr raw-string literals.
+// Generated at build time from report/html/{app.css,app.js} by embed-html-assets.py.
+// Provides itrace::html::app_css and itrace::html::app_js as inline constexpr raw-string literals.
 #include <html_assets.hh>
 
 namespace itrace
@@ -69,8 +69,7 @@ cc::string_view region_name(access_region r)
     return "heap";
 }
 
-// The status flags the trace reports, mirroring trace_formatter.cc. TF/IF/RF are excluded there for
-// the same reasons (TF is the tracer's own single-step bit).
+// The status flags the trace reports, mirroring trace_formatter.cc — which is where TF/IF/RF are excluded, and why.
 struct flag_bit
 {
     u32 bit;
@@ -84,8 +83,8 @@ bool flag_set(u64 rflags, u32 bit)
     return ((rflags >> bit) & 1) != 0;
 }
 
-/// The first whitespace-delimited token of the disassembly, i.e. the mnemonic. Empty for an
-/// undecoded instruction (whose `text` is empty).
+/// The first whitespace-delimited token of the disassembly, i.e. the mnemonic.
+/// Empty for an undecoded instruction, whose `text` is empty.
 cc::string_view mnemonic_of(cc::string_view text)
 {
     auto const space = text.find(' ');
@@ -107,8 +106,8 @@ cc::string display_text(recorded_instruction const& insn)
     return out;
 }
 
-/// {name, value} pairs for the GPRs and flags this instruction changed — the same set the terminal's
-/// register-diff shows. Values are strings (a register can hold a full 64-bit pointer).
+/// {name, value} pairs for the GPRs and flags this instruction changed — the same set the terminal's register-diff shows.
+/// Values are strings, since a register can hold a full 64-bit pointer.
 void write_regdiff(json_writer& j, register_snapshot const& before, register_snapshot const& after)
 {
     j.begin_array();

@@ -23,9 +23,8 @@ cc::string render(trace const& t, format_options opts = {})
     return format_trace(t, 1, opts, sources);
 }
 
-/// The first line containing `needle`, or empty. A register diff lives on its own instruction's line,
-/// and the entry dump names every register — so an assertion about a diff has to be line-scoped or it
-/// would match the dump instead.
+/// The first line containing `needle`, or empty.
+/// A register diff lives on its own instruction's line and the entry dump names every register, so an assertion about a diff has to be line-scoped or it would match the dump instead.
 cc::string_view line_containing(cc::string_view text, cc::string_view needle)
 {
     isize start = 0;
@@ -257,8 +256,8 @@ TEST("formatter - register diffs show only what changed")
 
 TEST("formatter - the last instruction's effect is shown, not dropped")
 {
-    // Snapshots are sampled *before* each instruction, so the final one needs the trailing snapshot
-    // the session records after its last step. Without it a `ret`'s rsp move is invisible.
+    // Snapshots are sampled *before* each instruction, so the final one needs the trailing snapshot the session records after its last step.
+    // Without it a `ret`'s rsp move is invisible.
     trace t;
     t.index = 1;
     t.entry_symbol = "foo";
@@ -321,8 +320,7 @@ TEST("formatter - a cleared flag reads as 0, not as absent")
 
 TEST("formatter - the trap flag is the tracer's own, and is never reported")
 {
-    // We set TF to single-step. Reporting it would describe the debugger, not the debuggee. Same for
-    // IF and RF, which the traced code does not author either.
+    // Pins that TF never reaches the output: it is the tracer's own single-step bit, and IF/RF are not the debuggee's either.
     trace t;
     t.index = 1;
     t.entry_symbol = "foo";

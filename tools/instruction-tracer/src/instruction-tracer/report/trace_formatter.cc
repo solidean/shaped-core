@@ -36,8 +36,8 @@ cc::string hex_bytes(recorded_instruction const& insn)
     return out;
 }
 
-/// Pad from `visible` columns out to `width`, or a single space if already past it. Takes the
-/// visible width rather than measuring `out`, whose bytes may include invisible color codes.
+/// Pad from `visible` columns out to `width`, or a single space if already past it.
+/// Takes the visible width rather than measuring `out`, whose bytes may include invisible color codes.
 void pad_to(cc::string& out, isize visible, isize width)
 {
     for (isize i = 0, n = cc::max<isize>(width - visible, 1); i < n; ++i)
@@ -84,8 +84,8 @@ struct flag_bit
 
 /// The status flags — what the code computes with, and what a conditional branch reads.
 ///
-/// TF (8) is deliberately absent: it is the trap bit *we* set to single-step, so reporting it would
-/// report the tracer. IF (9) and RF (16) are system state the debuggee does not author either.
+/// TF (8) is deliberately absent: it is the trap bit *we* set to single-step, so reporting it would report the tracer.
+/// IF (9) and RF (16) are system state the debuggee does not author either.
 constexpr flag_bit flag_bits[] = {
     {0, "CF"}, {2, "PF"}, {4, "AF"}, {6, "ZF"}, {7, "SF"}, {10, "DF"}, {11, "OF"},
 };
@@ -106,8 +106,8 @@ cc::string format_flags(u64 rflags)
     return out;
 }
 
-/// The full state at entry, so the per-instruction diffs have a baseline to be read against. Without
-/// it "rcx=0x64" says what rcx became but never what it was.
+/// The full state at entry, so the per-instruction diffs have a baseline to be read against.
+/// Without it "rcx=0x64" says what rcx became but never what it was.
 void append_register_dump(cc::string& out, register_snapshot const& s)
 {
     using namespace cc::console;

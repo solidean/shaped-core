@@ -9,16 +9,16 @@ namespace itrace
 {
 /// What one symbol did, summed over every recorded trace.
 ///
-/// Self, not cumulative: each instruction is charged to the function containing its rip, so a callee's
-/// work never lands on its caller. Needs `owner_symbol`, i.e. enrichment run with want_owner.
+/// Self, not cumulative: each instruction is charged to the function containing its rip, so a callee's work never lands on its caller.
+/// Needs `owner_symbol`, i.e. enrichment run with want_owner.
 struct symbol_stats
 {
     cc::string symbol;
     u32 instructions = 0;
     /// Locked RMWs — the column with the highest instruction-to-cycle ratio.
     u32 atomics = 0;
-    /// Instructions that are not single-cycle (idiv, rdtsc, a fence, …). Usually 0; when it is not,
-    /// stats_summary::slow_ops names them.
+    /// Instructions that are not single-cycle (idiv, rdtsc, a fence, …).
+    /// Usually 0; when it is not, stats_summary::slow_ops names them.
     u32 slow = 0;
     u32 direct_calls = 0;
     /// Through a register or memory: a vtable, function_ref or unique_function hop.
@@ -32,8 +32,8 @@ struct symbol_stats
 
 /// One kind of expensive instruction, and the symbol it ran in.
 ///
-/// Named rather than merely counted because the bag is heterogeneous: "3" says nothing, while
-/// "idiv x2" says where to look. Rare enough that it is worth a line each.
+/// Named rather than merely counted because the bag is heterogeneous: "3" says nothing, while "idiv x2" says where to look.
+/// Rare enough that it is worth a line each.
 struct slow_op
 {
     cc::string mnemonic;
@@ -46,8 +46,8 @@ struct stats_summary
 {
     /// Sorted by instructions descending, then by symbol for a stable table.
     cc::vector<symbol_stats> rows;
-    /// Every expensive instruction encountered, by count descending. Empty is the normal case — and
-    /// is itself a result: it means the instruction count is a fair proxy for cost here.
+    /// Every expensive instruction encountered, by count descending.
+    /// Empty is the normal case — and is itself a result: the instruction count is a fair proxy for cost here.
     cc::vector<slow_op> slow_ops;
     u32 traces = 0;
     /// Some trace hit --instructions, so the counts below it are incomplete.
@@ -60,7 +60,8 @@ stats_summary collect_stats(cc::span<trace const> traces);
 /// The table: one row per symbol, a totals row, and a warning when the counts are truncated.
 cc::string format_stats(stats_summary const& summary);
 
-/// "foo<int>::bar<T>" -> "foo::bar". Real symbol names run to 300+ chars, almost all of it template
-/// arguments. Returns `name` unchanged when the angle brackets do not balance, rather than mangling it.
+/// "foo<int>::bar<T>" -> "foo::bar".
+/// Real symbol names run to 300+ chars, almost all of it template arguments.
+/// Returns `name` unchanged when the angle brackets do not balance, rather than mangling it.
 cc::string strip_template_args(cc::string_view name);
 } // namespace itrace

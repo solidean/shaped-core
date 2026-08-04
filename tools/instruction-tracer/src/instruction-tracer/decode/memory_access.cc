@@ -6,9 +6,9 @@ namespace itrace
 {
 namespace
 {
-/// Fill a Zydis register context from our snapshot. gpr[i] is register i in x86-64 encoding order,
-/// which is exactly ZYDIS_REGISTER_RAX + i (RAX..R15 are contiguous in that order). rip is set for
-/// the rare register-form rip use; rip-relative addressing goes through the runtime_address arg.
+/// Fill a Zydis register context from our snapshot.
+/// gpr[i] is register i in x86-64 encoding order, which is exactly ZYDIS_REGISTER_RAX + i — RAX..R15 are contiguous in that order.
+/// rip is set for the rare register-form rip use; rip-relative addressing goes through the runtime_address arg.
 ZydisRegisterContext register_context_of(register_snapshot const& regs, u64 rip)
 {
     ZydisRegisterContext ctx = {};
@@ -40,8 +40,8 @@ cc::vector<mem_operand> decode_memory_operands(recorded_instruction const& insn,
         if (op.type != ZYDIS_OPERAND_TYPE_MEMORY)
             continue;
 
-        // An address computed but not dereferenced (lea) has neither action — skip it, it touches
-        // no memory. Explicit and implicit accesses are both kept, so push/pop/call/ret count.
+        // An address computed but not dereferenced (lea) has neither action, and touches no memory.
+        // Explicit and implicit accesses are both kept, so push/pop/call/ret count.
         bool const reads = (op.actions & ZYDIS_OPERAND_ACTION_MASK_READ) != 0;
         bool const writes = (op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE) != 0;
         if (!reads && !writes)
@@ -70,9 +70,9 @@ access_region classify_region(u64 address, u64 stack_low, u64 stack_high, cc::sp
     if (stack_low == 0 || address < stack_low || address >= stack_high)
         return access_region::heap;
 
-    // On the stack. The owning frame is the innermost one whose base is still above the address —
-    // a frame's own memory grows down from its base until the next inner frame begins. Bases run
-    // outermost (highest) to current (lowest), so the last base greater than the address wins.
+    // On the stack.
+    // The owning frame is the innermost one whose base is still above the address — a frame's own memory grows down from its base until the next inner frame begins.
+    // Bases run outermost (highest) to current (lowest), so the last base greater than the address wins.
     isize best = -1;
     for (isize k = 0; k < frame_bases.size(); ++k)
         if (frame_bases[k] > address)
@@ -80,7 +80,8 @@ access_region classify_region(u64 address, u64 stack_low, u64 stack_high, cc::sp
 
     if (best < 0)
     {
-        // Above every tracked frame: a caller we never entered. Still stack, owner unknown.
+        // Above every tracked frame: a caller we never entered.
+        // Still stack, owner unknown.
         return access_region::stack;
     }
 

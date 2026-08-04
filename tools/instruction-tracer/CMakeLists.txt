@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.28)
 
-# instruction-tracer: Windows x64 single-step instruction tracer. See readme.md.
-# Windows-only (Win32 debug API + dbghelp); the root gates this directory on
-# SC_BUILD_TOOLS AND WIN32 AND TARGET zydis.
+# instruction-tracer: Windows x64 single-step instruction tracer.
+# See readme.md.
+# Windows-only — Win32 debug API plus dbghelp — so the root gates this directory on SC_BUILD_TOOLS AND WIN32 AND TARGET zydis.
 
-# The HTML export embeds its front-end (report/html/app.css, app.js) into a generated header, so the
-# shipped .exe needs no external files. Regenerated at build time whenever a source asset changes.
+# The HTML export embeds its front end (report/html/app.css, app.js) into a generated header, so the shipped .exe needs no external files.
+# Regenerated at build time whenever a source asset changes.
 set(ITRACE_HTML_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/instruction-tracer/report/html")
 set(ITRACE_HTML_ASSETS "${CMAKE_CURRENT_BINARY_DIR}/generated/html_assets.hh")
 add_custom_command(
@@ -55,16 +55,15 @@ target_include_directories(instruction-tracer-core PUBLIC "${CMAKE_CURRENT_SOURC
 target_include_directories(instruction-tracer-core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(instruction-tracer-core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
-# dbghelp and zydis stay PRIVATE: neither appears in our headers (symbol_session hides dbghelp behind
-# opaque void* handles, and only instruction_decoder.cc includes Zydis.h), so dependents need neither.
-# dbghelp via target_link_libraries rather than the #pragma comment(lib) used in clean-core's native.cc.
+# dbghelp and zydis stay PRIVATE: neither appears in our headers, so dependents need neither.
+# symbol_session hides dbghelp behind opaque void* handles, and only instruction_decoder.cc includes Zydis.h.
 target_link_libraries(instruction-tracer-core PUBLIC clean-core PRIVATE dbghelp zydis)
 
 add_executable(instruction-tracer src/instruction-tracer/main.cc)
 target_link_libraries(instruction-tracer PRIVATE instruction-tracer-core)
 
-# Trace target for self-test.py: its functions are built to survive the optimizer. Not a *-test
-# binary — it is a debuggee, not a nexus suite.
+# Trace target for self-test.py: its functions are built to survive the optimizer.
+# Not a *-test binary — it is a debuggee, not a nexus suite.
 add_executable(instruction-tracer-fixture fixture/main.cc)
 target_link_libraries(instruction-tracer-fixture PRIVATE clean-core)
 

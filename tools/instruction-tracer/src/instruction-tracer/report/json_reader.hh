@@ -13,13 +13,11 @@ namespace itrace
 {
 using namespace cc::primitive_defines;
 
-/// A minimal recursive-descent JSON reader, scoped to what `llvm-mca -json` emits: objects, arrays,
-/// strings (with `\uXXXX` escapes), numbers (int and float), bool, null. Not spec-complete and not a
-/// general library — lookup is first-key-wins, big integers lose precision past a double's 2^53.
+/// A minimal recursive-descent JSON reader, scoped to what `llvm-mca -json` emits: objects, arrays, strings (with `\uXXXX` escapes), numbers (int and float), bool, null.
+/// Not spec-complete and not a general library — lookup is first-key-wins, and big integers lose precision past a double's 2^53.
 ///
-/// TODO: replace with a clean-core JSON reader once one exists. clean-core has only a JSON *writer*
-/// today (report/json_writer.hh); this fills the reader gap locally until that lands, at which point
-/// json_value / parse_json here should be dropped in favor of the shared one.
+/// TODO: drop json_value / parse_json for a shared reader once clean-core grows one.
+/// There is no JSON reader below this tool today, so this fills the gap locally.
 struct json_value
 {
     enum class kind
@@ -84,8 +82,8 @@ struct json_value
 
 namespace impl
 {
-/// Single-pass cursor with sticky error state: on the first malformed token a parser records the
-/// message and every later parse_* short-circuits to a default. parse_json converts that to a result.
+/// Single-pass cursor with sticky error state: on the first malformed token a parser records the message, and every later parse_* short-circuits to a default.
+/// parse_json converts that to a result.
 struct json_parser
 {
     char const* begin = nullptr;
@@ -400,7 +398,8 @@ struct json_parser
 };
 } // namespace impl
 
-/// Parse a complete JSON document. Trailing whitespace is allowed; trailing junk is an error.
+/// Parse a complete JSON document.
+/// Trailing whitespace is allowed; trailing junk is an error.
 inline cc::result<json_value> parse_json(cc::string_view text)
 {
     impl::json_parser parser;

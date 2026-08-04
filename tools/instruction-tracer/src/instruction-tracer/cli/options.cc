@@ -217,7 +217,8 @@ cc::result<options> parse_options(cc::span<char const* const> args)
             continue;
         }
 
-        // Flags taking a value. `need_value` keeps the "missing value" error in one place.
+        // Flags taking a value.
+        // `need_value` keeps the "missing value" error in one place.
         auto const need_value = [&](cc::string_view& out) -> cc::result<cc::unit>
         {
             if (i + 1 >= args.size())

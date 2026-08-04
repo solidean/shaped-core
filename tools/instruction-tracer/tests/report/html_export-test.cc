@@ -65,7 +65,7 @@ TEST("html export - a symbol containing </script> cannot break out")
     source_cache sources;
     auto const out = export_html(traces, html_export_meta{}, sources);
 
-    // The raw injection must not appear; the '<' is escaped to <, which the JS parser reverses.
+    // The raw injection must not appear; the '<' comes out as `\u003c`, which the JS parser reverses.
     CHECK(!out.contains("evil</script>"));
     CHECK(out.contains("evil\\u003c/script>"));
 }

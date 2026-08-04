@@ -10,15 +10,14 @@ namespace itrace
 {
 using namespace cc::primitive_defines;
 
-/// A minimal JSON emitter, just enough to serialize the trace model for the HTML export. Not a
-/// general library — no pretty-printing, no validation beyond nesting bookkeeping.
+/// A minimal JSON emitter, just enough to serialize the trace model for the HTML export.
+/// Not a general library — no pretty-printing, and no validation beyond nesting bookkeeping.
 ///
 /// Two rules the export depends on:
-///   * u64 values go out as JSON *strings* — JS numbers are IEEE doubles and lose precision past
-///     2^53, which every address exceeds. Emit addresses/register values with value_string.
-///   * Every string escapes '<' as <, so a symbol or source line containing "</script>" cannot
-///     break out of the <script> tag it is embedded in. The JS parser turns < back into '<',
-///     so the data is unchanged — only the byte sequence in the file is made safe.
+///   * u64 values go out as JSON *strings*, because JS numbers are IEEE doubles and lose precision past 2^53, which every address exceeds.
+///     Emit addresses and register values with value_string.
+///   * Every string escapes `<` as `\u003c`, so a symbol or source line containing `</script>` cannot break out of the `<script>` tag it is embedded in.
+///     The JS parser turns it back into `<`, so the data is unchanged — only the byte sequence in the file is made safe.
 class json_writer
 {
 public:
@@ -45,7 +44,8 @@ public:
         _first.remove_back();
     }
 
-    /// Emit a key. The next value belongs to it (no separator before that value).
+    /// Emit a key.
+    /// The next value belongs to it, so no separator is written before that value.
     void key(cc::string_view k)
     {
         sep();
@@ -116,7 +116,8 @@ public:
     [[nodiscard]] cc::string const& str() const { return _out; }
 
 private:
-    /// Emit the comma between siblings. A value right after a key is not a sibling, so it is skipped.
+    /// Emit the comma between siblings.
+    /// A value right after a key is not a sibling, so it is skipped.
     void sep()
     {
         if (_after_key)
