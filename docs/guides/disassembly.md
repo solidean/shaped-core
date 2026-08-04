@@ -99,7 +99,7 @@ Reach for it when the question is *which* path ran, not which paths exist: real 
 **Windows x64 only**, and it needs a `relwithdebinfo-*` preset — release has no PDB, so the trace degrades to raw addresses.
 
 `dev.py assembly trace` mirrors the tracer's own flags, except that `--target` here names a *build target* of this repo and the tracer's `--target` spec is spelled `--spec`.
-A flag you omit is not passed on at all, so the defaults documented in the tracer's [readme](../../tools/instruction-tracer/readme.md) are the ones you get.
+A flag you omit is not passed on, so the tracer's own defaults stand — except that `dev.py` always settles the color question, and always supplies `--mca` when it finds llvm-mca.
 
 ### What `trace` can print
 
@@ -107,7 +107,8 @@ A flag you omit is not passed on at all, so the defaults documented in the trace
 The names are `trace`, `stats`, `memory`, `cachelines`, `memory-stats` and `timing`, and `--stats` is the shortcut for `--sections stats`.
 
 - **`stats`** answers "where did the instructions go" without reading an 800-line trace: one row per symbol, sorted by cost.
-  The columns are self instructions, atomics, direct/indirect calls, memory reads/writes and branches taken.
+  The columns are self instructions, atomics, `slow` ops, direct/indirect calls, memory reads/writes and branches taken.
+  `slow` is the one worth knowing about: instructions that are categorically not single-cycle, which an instruction count silently misprices.
   Usually the first move on a new probe; read the trace afterwards for the rows that look wrong.
 - **`memory` / `cachelines` / `memory-stats`** resolve each memory operand's effective address at run time and show what the run actually touched.
   This is as close as the tracer gets to the cache miss `stats` cannot see.
@@ -126,8 +127,7 @@ Single-stepping costs a debug-event round trip per instruction, so a full captur
 
 ## Other projects
 
-Nothing about the machinery is shaped-core-specific — objects are objects, and the tracer takes a
-path to an `.exe`.
+Nothing about the machinery is shaped-core-specific — objects are objects, and the tracer takes a path to an `.exe`.
 Three flags open all of it up to any other project, whatever built it:
 
 ```bash
@@ -143,37 +143,26 @@ uv run dev.py assembly trace --exe D:/proj/out/bin/app.exe --symbol "render::dra
     --skip 50 --sections stats,cachelines -- --scene foo.json
 ```
 
-`--build-dir` (one tree) and `--objects` (a directory or a single `.obj`/`.o`, comma-list and
-repeatable) both switch `search`/`show` into **external mode**: no `CMakePresets.json` is read, no
-CMake discovery runs, nothing is configured or built.
-They therefore don't combine with `--preset`, which would silently do nothing — that's an error.
+`--build-dir` (one tree) and `--objects` (a directory or a single `.obj`/`.o`, comma-list and repeatable) both switch `search`/`show` into **external mode**.
+No `CMakePresets.json` is read, no CMake discovery runs, and nothing is configured or built.
+They therefore don't combine with `--preset`, which would silently do nothing — that is an error.
 
-**Target grouping degrades gracefully.** A CMake tree still names targets exactly, from the
-`.../CMakeFiles/<target>.dir/...` path segment.
-Anything else — MSBuild, cargo, a hand-rolled makefile — groups by the object's directory relative
-to the scan root, so an MSBuild tree lists `WPFDXInterop/samples/D3D11Image/x64/Debug` rather than
-one undifferentiated bucket, and `--target "WPFDXInterop/*"` still filters it.
+**Target grouping degrades gracefully.** A CMake tree still names targets exactly, from the `.../CMakeFiles/<target>.dir/...` path segment.
+Anything else — MSBuild, cargo, a hand-rolled makefile — groups by the object's directory relative to the scan root.
+So an MSBuild tree lists `WPFDXInterop/samples/D3D11Image/x64/Debug` rather than one undifferentiated bucket, and `--target "WPFDXInterop/*"` still filters it.
 
-**`trace --exe` skips the build**, because there is nothing here that could build it, and
-`--target` / `--exe` are mutually exclusive.
-`instruction-tracer` itself is still built and located from *this* repo's preset — it is our tool,
-and the preset only decides which build of it runs.
-The debuggee's working directory defaults to the exe's own directory (an external app resolves its
-DLLs and data relative to itself); `--cwd PATH` overrides it.
-Instead of guessing from a preset name, the PDB check is direct: `trace` warns when no `.pdb` sits
-beside the exe, since without one the trace degrades to raw addresses.
+**`trace --exe` skips the build**, because there is nothing here that could build it, and `--target` / `--exe` are mutually exclusive.
+`instruction-tracer` itself is still built and located from *this* repo's preset — the preset only decides which build of the tool runs.
+The debuggee's working directory defaults to the exe's own directory, so an external app resolves its DLLs and data relative to itself; `--cwd PATH` overrides it.
+The PDB check is direct rather than guessed from a preset name: `trace` warns when no `.pdb` sits beside the exe, since without one the trace degrades to raw addresses.
 
-**Relative paths in `--build-dir`, `--objects`, `--exe`, `--cwd` and `--html` resolve against your
-current directory**, not the shaped-core root — so you can `cd` into the other project and type
-short paths.
-That is the *only* thing the working directory decides: `dev.py` never infers which project it is
-looking at from where you stand, and never changes directory itself.
+**Relative paths in `--build-dir`, `--objects`, `--exe`, `--cwd` and `--html` resolve against your current directory**, not the shaped-core root.
+So you can `cd` into the other project and type short paths.
+That is the *only* thing the working directory decides: `dev.py` never infers which project it is looking at from where you stand, and never changes directory itself.
 
-**Finding LLVM.** `llvm-nm` / `llvm-objdump` are looked up in the env override, then `PATH`, then
-beside the compiler recorded in the scanned tree's `CMakeCache.txt`, and finally beside the one in
-this repo's default preset.
-That last fallback is what makes an MSVC-built or non-CMake tree work on Windows, where LLVM's
-`bin/` is usually off `PATH`.
+**Finding LLVM.** `llvm-nm` / `llvm-objdump` are looked up in the env override, then `PATH`, then beside the compiler recorded in the scanned tree's `CMakeCache.txt`.
+The last fallback is beside the compiler in this repo's default preset.
+That last fallback is what makes an MSVC-built or non-CMake tree work on Windows, where LLVM's `bin/` is usually off `PATH`.
 `LLVM_NM` / `LLVM_OBJDUMP` / `LLVM_MCA` override all of it.
 
 ## Limitations

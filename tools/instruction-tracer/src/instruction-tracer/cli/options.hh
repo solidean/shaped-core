@@ -74,7 +74,7 @@ struct options
     /// Empty means host (`-mcpu=native`) with a baseline fallback.
     cc::string mca_cpu;
 
-    /// Which output sections to print; parsing never leaves this empty.
+    /// Which output sections to print; never empty once parse_options returns successfully.
     output_sections sections;
     /// Whether --sections / --stats explicitly named a section.
     /// Lets --html choose between replacing stdout with a summary and also printing the requested sections.

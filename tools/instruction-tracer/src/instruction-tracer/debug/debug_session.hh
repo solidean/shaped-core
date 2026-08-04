@@ -15,10 +15,7 @@
 namespace itrace
 {
 /// What one debug_session run needs: the process to launch, where to break, and how much to record.
-/// The seam from the parsed options into the whole debug half — main.cc fills it, and nothing else writes it.
-///
-/// `skip` is entry hits to ignore before the first recorded trace, and `traces` is how many invocations to record, counted across all threads.
-/// `terminate_after_traces` kills the debuggee once the last one lands, instead of letting it run to completion.
+/// Its fields mirror the like-named ones on `options`, which is where they are documented.
 struct debug_config
 {
     cc::string exe;

@@ -56,7 +56,7 @@ def main() -> int:
             )
             return 1
         # MSVC caps a single string literal at ~16 KB (C2026), so the asset is split into adjacent raw-string literals the compiler concatenates.
-        # 4000 chars stays well under the limit even if every char were a 4-byte UTF-8 sequence.
+        # 4000 chars is under the limit even if every char were a 4-byte UTF-8 sequence.
         # The chunk boundary can fall anywhere: the delimiter token is asserted absent above, so no chunk can close the literal early.
         parts.append(f"inline constexpr char const* {name} =")
         for start in range(0, len(text), 4000):

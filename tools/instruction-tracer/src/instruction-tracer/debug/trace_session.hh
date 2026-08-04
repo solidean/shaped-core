@@ -12,6 +12,7 @@ struct trace_config
     u32 max_instructions = 100;
     bool until_return = true;
     bool stop_at_syscall = true;
+    /// Also gates the stack-bounds capture, which region classification needs.
     bool capture_registers = false;
     bool capture_stack = true;
 };
@@ -36,6 +37,7 @@ public:
                symbol_session const& symbols);
 
     /// Feed one single-step event.
+    /// Only valid while is_active(); asserted.
     /// Returns true while more stepping is wanted.
     bool on_step(void const* context);
 

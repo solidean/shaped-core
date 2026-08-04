@@ -104,7 +104,7 @@ mca_run_result run_once(cc::string_view mca_exe, cc::string_view cpu, cc::string
     }
     rewind(h_in); // the child reads stdin from the start
 
-    // Fixed command line — the flags are the ones run_llvm_mca documents.
+    // Fixed command line.
     cc::string cmd;
     cmd += '"';
     cmd += mca_exe;

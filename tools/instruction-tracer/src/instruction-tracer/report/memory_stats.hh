@@ -24,8 +24,10 @@ struct memory_symbol_stats
     u64 bytes = 0;
 };
 
-/// Per-symbol rows plus the totals row, and what the reader needs to judge them.
-/// `truncated` means some trace hit --instructions, so every count below is incomplete.
+/// Per-symbol rows plus a totals row.
+///
+/// `total.cachelines` is the distinct-line union across every symbol, not the sum of the rows' `cachelines` — two functions touching one line count it once here and once each above.
+/// The other totals are plain column sums.
 struct memory_stats_summary
 {
     cc::vector<memory_symbol_stats> rows; // sorted by accesses descending, then symbol

@@ -30,7 +30,7 @@ cc::vector<mem_operand> decode_memory_operands(recorded_instruction const& insn,
 /// `frame_bases` holds the return-address-slot rsp of every active frame, outermost (highest address) first and the current function last.
 /// That is what separates the current frame's own memory from a caller's.
 ///
-///   - heap when the address is outside [stack_low, stack_high), or no stack bounds are known,
+/// Returns:
 ///   - frame when it belongs to the current (innermost) frame,
 ///   - stack when it belongs to a shallower frame — a stack array reached through a passed-in span.
 ///

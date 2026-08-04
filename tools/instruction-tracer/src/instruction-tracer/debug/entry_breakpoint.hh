@@ -19,7 +19,7 @@ public:
 
     /// Save the original byte and write 0xCC.
     /// Idempotent.
-    /// False if the memory could not be written.
+    /// False if the original byte could not be read, or the trap could not be written.
     bool arm();
 
     /// Restore the original byte.

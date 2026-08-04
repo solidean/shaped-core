@@ -207,7 +207,6 @@ TEST("decoder - fences and the spin hint are flagged slow")
     CHECK(cc::string_view(mfence.slow_mnemonic) == "mfence");
 
     // F3 90 = pause.
-    // A contended spinlock is exactly where this shows up.
     auto const pause = decoded({0xF3, 0x90});
     REQUIRE(pause.slow_mnemonic != nullptr);
     CHECK(cc::string_view(pause.slow_mnemonic) == "pause");

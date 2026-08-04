@@ -104,7 +104,7 @@ struct recorded_instruction
 
     /// This instruction's name when it is one of the categorically-not-single-cycle ones — `idiv`, `rdtsc`, a fence, a `rep`-prefixed string op.
     /// Null otherwise, and a static string valid for the process lifetime.
-    /// See slow_mnemonic_of for what qualifies.
+    /// What the column claims, and what it cannot see, is the readme's `slow` section.
     char const* slow_mnemonic = nullptr;
 
     cc::string file;
@@ -113,11 +113,11 @@ struct recorded_instruction
     /// Only set when control actually diverged.
     cc::string target_symbol;
     /// The function containing `rip`, without an offset.
-    /// Only filled when stats are requested.
+    /// Filled whenever a per-symbol table or any memory section is requested, and always for --html.
     cc::string owner_symbol;
 
     /// Every memory location this instruction touched, resolved from the before-instruction register snapshot.
-    /// Filled only when a memory section is requested; empty otherwise.
+    /// Filled only for a memory section or --html; empty otherwise.
     cc::vector<memory_access> memory_accesses;
 };
 
@@ -165,7 +165,7 @@ struct trace
 
     /// The traced thread's stack reservation [low, high), captured at entry.
     /// Lets memory enrichment tell a stack address from a heap/global one.
-    /// Both 0 when not captured.
+    /// Both 0 unless trace_config::capture_registers was set — the same flag gates these bounds — and classification reads [0, 0) as "no stack known".
     u64 stack_low = 0;
     u64 stack_high = 0;
 
@@ -173,7 +173,8 @@ struct trace
     cc::vector<recorded_instruction> instructions;
     /// One snapshot sampled *before* each instruction, plus a trailing one holding what the last instruction left behind.
     /// So instruction i's effect is registers[i] vs registers[i+1], and size is instructions.size() + 1.
-    /// The trailing entry is absent where the last instruction never retired — the syscall stop, which records the gate but refuses to step it.
+    /// The trailing entry is absent wherever the last instruction never retired: the syscall stop, and any stop that came in through trace_session::abort.
+    /// `reason` does not tell the two apart, so size against instructions.size() is the only authority.
     /// Empty unless registers were captured at all.
     cc::vector<register_snapshot> registers;
 

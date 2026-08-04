@@ -18,7 +18,7 @@ struct mca_run_result
 ///
 /// `cpu` picks the model: empty means host (`-mcpu=native`), falling back to a baseline (`x86-64`, then `skylake`) if native yields nothing.
 /// A non-empty value is passed through verbatim.
-/// The rest of the command line is fixed: timeline, bottleneck analysis, skip-unsupported.
+/// The rest of the command line is fixed: an x86-64 Windows triple, `-json`, a single-iteration timeline, bottleneck analysis, and skip-unsupported.
 /// A soft failure — tool missing, launch error — returns `ran == false`, and the caller degrades without timing.
 mca_run_result run_llvm_mca(cc::string_view mca_exe, cc::string_view cpu, cc::string_view input_asm);
 } // namespace itrace

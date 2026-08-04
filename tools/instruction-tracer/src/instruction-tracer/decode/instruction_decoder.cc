@@ -64,8 +64,7 @@ bool is_indirect_transfer(ZydisDisassembledInstruction const& d)
 /// Instructions that are categorically not single-cycle — tens to hundreds of cycles each, where everything around them is ~1.
 /// Returns Zydis's static mnemonic string, or nullptr.
 ///
-/// Membership is the only claim: nothing here estimates or weighs, since exact latencies are microarchitecture-specific.
-/// What the column can and cannot tell you is the readme's `slow` section.
+/// What the column claims, and the cost it cannot see, is the readme's `slow` section.
 char const* slow_mnemonic_of(ZydisDisassembledInstruction const& d)
 {
     switch (d.info.mnemonic)

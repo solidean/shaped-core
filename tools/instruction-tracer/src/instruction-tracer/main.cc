@@ -24,7 +24,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// 0 = traced something.
+// 0 = traced something, or printed --help.
 // 1 = bad usage, or the --html write failed.
 // 2 = nothing traced: the target was never resolved or entered, or the debuggee never launched.
 constexpr int exit_ok = 0;

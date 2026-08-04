@@ -42,9 +42,11 @@ See [Other projects](../../docs/guides/disassembly.md#other-projects) for the `s
 
 ## Usage
 
-`dev.py assembly trace` mirrors the flags below, with two differences.
+`dev.py assembly trace` mirrors the flags below, with a few differences.
 `--target` there names a *build target* of this repo, and `--exe` takes an arbitrary path instead — exactly like this tool's `--exe`.
 The tracer's own `--target` spec is spelled `--spec` there, since the name is taken.
+There is no `--mca`: `dev.py` finds `llvm-mca` itself and passes it whenever it resolves.
+It also adds `--preset` and `--no-build`, which mean nothing to this tool.
 
 ```
 uv run dev.py assembly trace (--target <build-target> | --exe <path>)
@@ -120,7 +122,6 @@ Exit codes: `0` traced something, `1` bad usage or a failed `--html` write, `2` 
 
 The output is a set of sections you combine with `--sections <list>`; the default is `trace` alone.
 Every selected section is rendered from **one** capture, since the memory data cannot be reliably reproduced across separate runs.
-So there is no way to get it except together with whatever else you asked for.
 The names:
 
 | section | what it prints |
@@ -237,7 +238,8 @@ Template arguments are stripped (`cc::vector<int>::push_back` → `cc::vector::p
 
 Every column above assumes one instruction ≈ one cycle.
 `slow` is where that assumption is *known* to break.
-The members: `idiv`, `div`, float divide and `sqrt`, `cpuid`, `rdtsc`, `rdrand`, fences, `pause`, `rep`-prefixed string ops, gathers/scatters, x87 transcendentals.
+The members: `idiv`, `div`, float divide and `sqrt`, fences and `clflush`, `pause`, `rep`-prefixed string ops, gathers/scatters, x87 transcendentals.
+Plus the serializing and timing reads: `cpuid`, `rdtsc`, `rdtscp`, `rdpmc`, `rdrand`, `rdseed`, `xgetbv`, `wbinvd`.
 Tens to hundreds of cycles each, sitting in a stream where everything else is one.
 
 They are named rather than only counted, because which one it is *is* the finding:
@@ -355,7 +357,7 @@ When `--mca` is available a **block summary** and a **port-pressure / bottleneck
 The source view collects every line the trace touched, grows each by context, merges them into ranges, and renders them with syntax highlighting and an executed-line marker.
 Hovering an executed line highlights the instructions that ran it, and vice versa.
 
-When timing data is present a second tab level appears below the per-trace tabs: **trace view**, the two-column layout, and **waterfall view**.
+When timing data is present and its alignment held, a second tab level appears below the per-trace tabs: **trace view**, the two-column layout, and **waterfall view**.
 The waterfall is a full-width pipeline diagram whose rows are instructions and columns cycles, each bar segmented dispatch → execute → retire.
 The [model's caveats](#timing-llvm-mca) apply to these views too.
 
@@ -409,7 +411,7 @@ It is fetched on demand (`uv run extern/zydis/fetch-zydis.py`, which `dev.py` ru
 - **Recursion during a trace is not counted.** The breakpoint stays unarmed for the duration of a trace, so a recursive re-entry is stepped as ordinary instructions rather than starting a new one.
 - **`--stop-at-syscall` rarely fires.** Raw `syscall` lives in ntdll, not in user code, so a trace with a big budget usually walks into ntdll stubs long before reaching one.
   A "stop on leaving the module" condition is probably what you actually want; it does not exist yet.
-- **`--skip` is linear** in breakpoint hits, at roughly 10–50µs each — `--skip 1000000` takes ~30s.
+- **`--skip` is linear** in breakpoint hits, at roughly 10–50µs each, so `--skip 1000000` costs tens of seconds.
 - **`popfq` / `iretq` can clear the trap flag** mid-trace, and the debuggee then runs away.
   Rare in user code; a backstop breakpoint at the return address would fix it.
 - **Anti-debug targets** will see `IsDebuggerPresent`.
@@ -424,7 +426,8 @@ Two layers, split by what they need:
 - `uv run tools/instruction-tracer/self-test.py` — the real thing: builds the tracer and `fixture/main.cc`, traces it, and checks the results.
   Windows-only and needs PDBs, which is why it is not part of the `dev.py test` sweep.
 
-The self-test's assertions are optimizer-independent by construction, and one of them is load-bearing for the whole tool; `self-test.py`'s own header says which, and why.
+The self-test's assertions are optimizer-independent by construction, and one of them is load-bearing for the whole tool.
+`self-test.py` says which in its module docstring, and why in that check's own.
 
 ## Layout
 
@@ -438,7 +441,7 @@ src/instruction-tracer/
 ```
 
 `report/mca.{hh,cc}` is pure — asm builder, `-json` parse, alignment — and unit-tested against a checked-in fixture; `debug/mca_runner.cc` is the Win32 subprocess that feeds `llvm-mca`.
-The JSON is read by a minimal in-tree reader (`report/json_reader.hh`), a stopgap until clean-core grows a JSON reader.
+The JSON is read by a minimal in-tree reader (`report/json_reader.hh`) rather than babel-serializer's, which this tool does not depend on.
 
 `report/html/` is not compiled: `embed-html-assets.py` turns `app.js` and `app.css` into a generated `html_assets.hh` at build time, which `html_export.cc` inlines into the page.
 So the front end is edited in those two files, never in the generated header.

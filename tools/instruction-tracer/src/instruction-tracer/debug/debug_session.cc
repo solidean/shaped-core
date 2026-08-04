@@ -186,7 +186,7 @@ void debug_session::register_module(void* file_handle, u64 base)
     if (auto const* m = _modules.find_by_address(base))
         _symbols->on_module_loaded(*m, file_handle);
 
-    // Held, not closed: dbghelp reads the PDB through this handle on its first deferred query.
+    // Held, not closed: the symbol session reads the PDB through this handle on its first deferred query.
     if (file_handle != nullptr)
         _module_files[base] = file_handle;
 }

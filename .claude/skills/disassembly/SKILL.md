@@ -19,7 +19,7 @@ The mock is usually the optimistic one: it hoists, folds and DCEs what the real 
 ```bash
 uv run dev.py assembly search <pattern> [--preset P | --build-dir D | --objects P] [--target T] [--regex] [--all] [--limit N]
 uv run dev.py assembly show   <symbol>  [--preset P | --build-dir D | --objects P] [--target T] [--source] [--att] [--bytes]
-uv run dev.py assembly trace  (--target T | --exe P) [--cwd D] (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--mca-cpu C] [--html P] -- <args>
+uv run dev.py assembly trace  (--target T | --exe P) [--cwd D] (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--instructions N] [--stats] [--register-diffs] [--sections L] [--memory-regions L] [--mca-cpu C] [--html P] -- <args>
 ```
 
 **`search`/`show` are static — `trace` is dynamic.** Use `trace` when the question is "what *did* it do" rather than "what *might* it do".
@@ -63,7 +63,7 @@ It forces a full capture and replaces stdout with a one-line summary.
 **It is not limited to shaped-core.** `--build-dir D` / `--objects P` point `search`/`show` at any build tree — an object file or a directory, with no preset resolved and nothing configured or built.
 `trace --exe P` traces any executable, and the tracer binary still comes from a shaped-core build.
 Targets outside a CMake tree group by the object's directory relative to the scan root, so `--target` still filters.
-Relative paths — `--build-dir`, `--objects`, `--exe`, `--cwd`, `--html` — are relative to *your* current directory, and `--cwd` defaults to the traced exe's own directory.
+Relative paths — `--build-dir`, `--objects`, `--exe`, `--cwd`, `--html` — are relative to *your* current directory, and with `--exe` the debuggee's `--cwd` defaults to that exe's own directory.
 Details: [Other projects](../../../docs/guides/disassembly.md#other-projects).
 
 ## The loop
@@ -105,7 +105,6 @@ Trace that and you will confidently describe a path the benchmark never actually
 
 So: call the probe **several times on the same state** the benchmark reuses, and trace with `--skip N` to land on a settled call.
 Say which N in the probe's comment, so the next reader doesn't re-learn it.
-comment, so the next reader doesn't re-learn it.
 
 ```cpp
 // Called repeatedly on ONE scheduler: the first enqueue grows the queue vector
