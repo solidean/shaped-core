@@ -174,4 +174,11 @@ TEST("shaped-linter - prose - markdown body text, never its code")
     {
         CHECK(extract("text\n\n| a. b | c |\n", "a.md").lines() == "text");
     }
+    SECTION("frontmatter is metadata, not prose")
+    {
+        // A skill file's `description:` is one scalar the harness consumes whole, so no prose rule may
+        // ask it to split at a seam.
+        auto const e = extract("---\nname: x\ndescription: One sentence. Then another.\n---\n\nbody\n", "a.md");
+        CHECK(e.lines() == "body");
+    }
 }

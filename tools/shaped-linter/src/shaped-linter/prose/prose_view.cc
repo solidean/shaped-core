@@ -194,7 +194,7 @@ prose_view extract_from_tokens(source_buffer const& buffer, source_language lang
 }
 
 /// Markdown: every line the scanner called text.
-/// A blank line, a fence or a table row ends the block.
+/// A blank line, a fence, a table row or a frontmatter line ends the block.
 prose_view extract_from_markdown(source_buffer const& buffer)
 {
     prose_view view;

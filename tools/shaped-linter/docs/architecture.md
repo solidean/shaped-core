@@ -23,7 +23,7 @@ Below that call every layer is already language-correct, so a rule reads what it
 * **Python** — `lex_python` produces the *same* `token_stream`, so spans, the renderer and `--fix` work unchanged.
   It lexes and nothing more, except that it tracks indentation as zero-width `indent` / `dedent` tokens — enough to tell a nested block from a top-level one without a grammar.
   There is no Python parser and no plan for one until a rule needs it.
-* **Markdown** — `scan_markdown` tags each line prose / blank / fence / code / table, and that is the whole front end.
+* **Markdown** — `scan_markdown` tags each line prose / blank / fence / code / table / frontmatter, and that is the whole front end.
   Deliberately not babel::markdown: babel gives a block's starting line but no byte offsets, and `shaped-linter-core` stays on clean-core alone.
   babel is still the corpus reader in the *test* binary, where line granularity is all it needs.
 
