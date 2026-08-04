@@ -1,10 +1,7 @@
 """Generic pre-commit check runner.
 
-A `Check` is a named gate the CLI can run; the registry of which checks exist
-(and the project policy each enforces) lives in dev.py. This module only knows
-how to *run* a selected set: static checks first, then the slow `requires_green`
-tail (only if every static check passed and tests weren't skipped), with a
-colored verdict at the end.
+A `Check` is a named gate the CLI can run, and the registry of which gates exist is cmd/check.py's.
+This module only knows how to *run* a selected set: static checks first, then the slow `requires_green` tail, with a colored verdict at the end.
 """
 
 from __future__ import annotations
@@ -49,9 +46,8 @@ def run_checks(
 ) -> bool:
     """Run the selected checks and print a verdict; return True if all passed.
 
-    Static checks run first; each `requires_green` check (the test suite) runs
-    only if no static check failed and `no_test` is False — there's no point
-    building and testing a tree that already fails a cheap lint.
+    Static checks run first, and a `requires_green` check runs only if none of them failed and `no_test` is False.
+    There is no point building and testing a tree that already fails a cheap lint.
     """
     failed: list[str] = []
 

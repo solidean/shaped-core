@@ -70,9 +70,8 @@ _NINJA_EDGE_RE = re.compile(r"^\[\d+/\d+\]")
 def ninja_built_count(stdout_log: Path) -> int:
     """Count the build edges ninja executed, from a captured build stdout.
 
-    Ninja prints one `[done/total] <action>` line per edge it runs, so the
-    number of such lines is how many files/actions were (re)built. Returns 0
-    when nothing was rebuilt ("ninja: no work to do.") or the log is missing.
+    Ninja prints one `[done/total] <action>` line per edge it runs, so the number of such lines is how many actions were rebuilt.
+    Returns 0 when nothing was rebuilt ("ninja: no work to do.") or the log is missing.
     """
     try:
         text = stdout_log.read_text(encoding="utf-8", errors="replace")
@@ -98,8 +97,7 @@ _BRACKET_LOG_RE = re.compile(r"^\[[^\]]*\]\[[^\]]*\]")
 
 
 def strip_log_lines(text: str) -> str:
-    """Drop '[timestamp][severity] ...' lines some libs print to stdout, so the
-    remaining text parses cleanly as JSON (used by --list-json)."""
+    """Drop '[timestamp][severity] ...' lines some libs print to stdout, so the remaining text parses cleanly as JSON (used by --list-json)."""
     return "\n".join(
         line for line in text.splitlines() if not _BRACKET_LOG_RE.match(line)
     )
@@ -114,10 +112,8 @@ def write_step_junit(
 ) -> TestSummary:
     """Synthesize a per-binary JUnit XML from a captured run.
 
-    The test runner here does not emit JUnit itself, so we model each binary as a
-    single test case: failed when the process returned non-zero, with the tail of
-    its captured stderr embedded as the failure body. This keeps a machine-
-    readable result around for `test_diag` and is framework-agnostic.
+    A runner that does not emit JUnit itself is modelled as one test case per binary: failed when the process returned non-zero, with the tail of its captured stderr as the failure body.
+    That keeps a machine-readable result around for `test_diag`, whatever the framework.
     """
     failed = result.returncode != 0
     failures = 1 if failed else 0

@@ -46,7 +46,7 @@ See [Other projects](../../docs/guides/disassembly.md#other-projects) for the `s
 `--target` there names a *build target* of this repo, and `--exe` takes an arbitrary path instead — exactly like this tool's `--exe`.
 The tracer's own `--target` spec is spelled `--spec` there, since the name is taken.
 There is no `--mca`: `dev.py` finds `llvm-mca` itself and passes it whenever it resolves.
-It also adds `--preset` and `--no-build`, which mean nothing to this tool.
+It also adds `--preset`, `--no-build` and `--cwd`, which mean nothing to this tool.
 
 ```
 uv run dev.py assembly trace (--target <build-target> | --exe <path>)
@@ -92,7 +92,7 @@ narrow the spec, or use --target module!symbol / --address.
 |---|---|---|
 | `--skip <n>` | `0` | Ignore the first n entry hits. The first recorded trace is hit n+1. |
 | `--traces <n>` | `1` | Record n invocations, counted across all threads. |
-| `--instructions <n>` | `100` (`100000` when a non-trace section is on) | Max retired instructions per trace. |
+| `--instructions <n>` | `100` (`100000` when a non-trace section or `--html` is on) | Max retired instructions per trace. |
 | `--until-return` | on | Stop once the entry frame returns. |
 | `--stop-at-syscall` | on | Stop before executing a syscall, rather than stepping into the kernel. |
 | `--sections <list>` | `trace` | Comma-separated output sections, all from one capture. See [Sections](#sections). |

@@ -54,7 +54,7 @@ def _platform_preset(ctx: Context, table: dict[str, str], what: str) -> dev.Pres
 
 
 def _presets(args: argparse.Namespace, ctx: Context) -> tuple[dev.Preset, dev.Preset, dev.Preset]:
-    """Resolve (generate, use, baseline) presets. --preset overrides the generate/use pair."""
+    """Resolve the (generate, use, baseline) presets, with --preset overriding the generate/use pair."""
     if args.preset:
         gen = ctx.resolve_presets(args.preset)[0]
         # Derive the matching use preset from the generate name (…-generate… → …-use…).

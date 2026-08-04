@@ -27,9 +27,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
-    # The browser test runner is Emscripten-only. No library arg -> the aggregate page (all libraries);
-    # a library arg -> just that library's page. Either way we build the module(s), then serve+open the
-    # page with emrun (the page loads its wasm test module(s) and runs them one per animation frame).
+    # No library arg means the aggregate page; a library arg means just that library's page.
+    # Either way: build the module(s), then serve and open the page with emrun.
     presets = ctx.resolve_presets(args.preset or [ctx.policy.web_preset])
     preset = presets[0]
     if not preset.is_emscripten:
@@ -64,8 +63,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if emrun is None:
         ctx.die("emrun not found in the emsdk environment")
 
-    # emrun serves the page's directory (the build root) so the page can reach its libs/ modules, and
-    # opens the default browser. It runs in the foreground until you stop it (Ctrl-C). .bat needs cmd.
+    # emrun serves the page's directory, the build root, so the page can reach its libs/ modules.
+    # It runs in the foreground until Ctrl-C, and the .bat wrapper needs cmd.
     launch = ["cmd", "/c", emrun] if emrun.lower().endswith((".bat", ".cmd")) else [emrun]
     print(console.dim(f"serving {ctx.rel(page_path)} via emrun (Ctrl-C to stop)..."), file=sys.stderr)
     result = subprocess.run([*launch, str(page_path)], env=env, cwd=str(preset.build_dir))

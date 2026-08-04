@@ -1,20 +1,10 @@
 """Pre-flight test-eligibility query.
 
-Before running a *filtered* `dev.py test`, ask each test binary which of its
-registered tests the filter actually selects. The in-repo nexus runner exposes
-this via `--list-tests-json -`: it prints a JSON listing (every test plus whether
-it `would_run` under the given args) and exits without running anything.
+Before running a *filtered* `dev.py test`, ask each test binary which of its registered tests the filter actually selects.
+The in-repo nexus runner answers `--list-tests-json -` with a JSON listing — every test, plus whether it `would_run` under the given args — and exits without running anything.
 
-We use it to run only the binaries that contain a matching test, instead of
-firing the filter at every `*-test` binary and papering over the resulting
-"did not select any tests" errors. When a filter matches nothing *anywhere* we
-fail loudly with a diagnostic — closest test-name suggestions, or the exact fix
-when a name matched but was excluded by its bucket or disabled status.
-
-The query is best-effort: a binary that doesn't understand the flag (non-nexus,
-or built before this feature) or can't be launched yields `None`, and such a
-binary is always kept (run anyway) rather than silently dropped. So a binary is
-skipped only when it *positively* reports zero eligible tests.
+The query is best-effort: a binary that does not understand the flag, or cannot be launched, yields `None` and is always kept.
+So a binary is skipped only when it *positively* reports zero eligible tests.
 
 Public API:
     select_eligible_binaries(preset, targets, binary_names, ...) -> (runnable, diagnostic)
@@ -65,9 +55,7 @@ def query_listing(
 ) -> BinaryListing | None:
     """Run the listing query for one binary; return its listing or None on any failure.
 
-    None means "could not determine" (artifact missing, launch failed, non-zero
-    exit, or unparseable output) — the caller keeps such binaries rather than
-    dropping them.
+    None means "could not determine" — artifact missing, launch failed, non-zero exit, or unparseable output.
     """
     if target.artifact is None:
         return None
@@ -98,10 +86,9 @@ def query_listing(
 def _partial_ratio(needle: str, haystack: str) -> float:
     """Best similarity of `needle` against any same-length window of `haystack`.
 
-    A filter is meant as a substring of a test name, so we score how close the
-    pattern comes to *some* slice of the name — a typo'd substring ("shedule")
-    still aligns tightly with its slice ("schedule"), while an unrelated string
-    aligns with none. Symmetric in length (the shorter slides over the longer).
+    A filter is meant as a substring of a test name, so the score is how close the pattern comes to *some* slice of the name.
+    A typo'd substring ("shedule") still aligns tightly with its slice ("schedule"), while an unrelated string aligns with none.
+    Symmetric in length: the shorter slides over the longer.
     """
     if not needle or not haystack:
         return 0.0
@@ -118,10 +105,8 @@ def _partial_ratio(needle: str, haystack: str) -> float:
 def _suggest(pattern: str, names: list[str]) -> list[str]:
     """Up to three test names close to `pattern`, for a "did you mean".
 
-    Test names are descriptive sentences, so a short filter is rarely similar to a
-    whole name; we score each name by how closely the pattern aligns with a window
-    of it (so a typo'd substring is caught) and keep only strong, near-substring
-    matches — an unrelated pattern yields nothing.
+    Test names are descriptive sentences, so a short filter is rarely similar to a whole name.
+    Each name is scored by how closely the pattern aligns with a window of it, and only strong, near-substring matches are kept, so an unrelated pattern yields nothing.
     """
     hits = difflib.get_close_matches(pattern, names, n=3, cutoff=0.6)
     if hits:
@@ -136,8 +121,7 @@ def _suggest(pattern: str, names: list[str]) -> list[str]:
 def _diagnose(test_name: str, zero_listings: list[BinaryListing]) -> str:
     """Build the failure message when a filter matched no eligible test anywhere.
 
-    Prefers a targeted fix when the name *did* match a test that was excluded by
-    its bucket or disabled status; otherwise suggests the closest test names.
+    Prefers a targeted fix when the name *did* match a test excluded by its bucket or disabled status, and otherwise suggests the closest test names.
     """
     matched_but_excluded = [
         t
@@ -187,11 +171,9 @@ def select_eligible_binaries(
 ) -> tuple[list[str], str | None]:
     """Narrow `binary_names` to those that contain a test matching `test_name`.
 
-    Queries each binary's listing on `preset`'s artifacts (eligibility is identical
-    across presets — same registered tests). Returns (runnable_names, diagnostic):
-    on success diagnostic is None; when every binary positively reports zero
-    eligible tests, runnable is empty and diagnostic explains why (suggestions or
-    the bucket/disabled fix). Binaries whose query fails are kept (run anyway).
+    Queries each binary's listing on `preset`'s artifacts; eligibility is identical across presets, since the registered tests are the same.
+    Returns (runnable_names, diagnostic), where diagnostic is None on success.
+    When every binary positively reports zero eligible tests, runnable is empty and diagnostic explains why.
     """
     extra_args = list(extra_args or [])
     by_name = {t.name: t for t in targets}

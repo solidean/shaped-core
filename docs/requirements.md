@@ -107,7 +107,7 @@ Pair `clang-format`, `clangd` and — on the clang path — the compiler from th
 Builds wrap the compiler and linker with [tools/bin/diag-launcher.exe](../tools/bin/diag-launcher.exe), set as `CMAKE_<LANG>_COMPILER_LAUNCHER` / `..._LINKER_LAUNCHER` in the presets.
 It captures per-invocation diagnostics into `.diag.json` sidecars that the `repo_tools` `build_diag` MCP tool reads.
 It is checked into the repo, so there is no install step.
-But it is a Windows binary, so the launcher wiring is currently Windows-specific.
+The `.exe` is Windows-only, so the POSIX presets wire `diag_launcher.sh` → `diag_launcher.py` instead — see [guides/ci.md](guides/ci.md) for which preset gets which.
 
 ## What `dev.py doctor` validates
 

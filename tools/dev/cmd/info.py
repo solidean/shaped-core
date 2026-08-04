@@ -1,9 +1,7 @@
 """`info` — read-only inspection of resolved compile/link flags and per-file commands.
 
-`build-flags`/`link-flags` print the per-target settings from the CMake File API
-(TU-flag-set aware: one block per distinct compile group); `compile-command`
-prints the exact per-file invocation from compile_commands.json — the ground
-truth the compiler sees.
+`build-flags` / `link-flags` read the CMake File API, one block per distinct compile group.
+`compile-command` reads compile_commands.json, which is the exact invocation the compiler sees.
 """
 
 from __future__ import annotations

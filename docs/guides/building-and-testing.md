@@ -85,8 +85,7 @@ The default preset only exercises the assertions-on branch the table above names
 ### Pinning toolset versions
 
 A preset names a compiler *family* (clang / gcc / msvc); the concrete version is otherwise whatever the environment defaults to.
-A preset names a compiler *family* (clang / gcc / msvc); the concrete version is otherwise whatever the environment defaults to.
-`--toolset` pins a specific one, and is a per-subcommand flag on `configure`, `build`, `test`, `run` and `doctor`.
+`--toolset` pins a specific one, and is a per-subcommand flag on `configure`, `build`, `test`, `run`, `doctor` and `profiling counters`.
 So the same dev.py can drive clang 19 / 20 / 21, or two Visual Studio toolsets, on one machine:
 
 ```bash
@@ -179,7 +178,6 @@ So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 | test run   | `test_diag`  | `test_diag path="build/<preset>/**/*.results.xml" errors_only=true` |
 
 These read the artifacts dev.py already emitted, which beats scrolling raw logs.
-These read the artifacts dev.py already emitted, which beats scrolling raw logs.
 Mirroring is additive to capture, so the logs read the same either way; to watch something live as well, reach for the mirror flags under [Useful flags](#useful-flags).
 **Don't pipe dev.py into `tail`/`head`/`grep`.**
 The output is already terse, and `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
@@ -261,7 +259,7 @@ Builds are warm at commit time — code you didn't compile, you didn't test — 
 On failure it prints the `test_diag` selector, same as `dev.py test`.
 Windows has no sanitizer leg — see [Sanitizers](#sanitizers) for why.
 
-New gates plug into the check registry in [dev.py](../../dev.py) without changing the command surface.
+New gates plug into the check registry in [cmd/check.py](../../tools/dev/cmd/check.py) without changing the command surface.
 
 ## clangd / IDE code intelligence
 

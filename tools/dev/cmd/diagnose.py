@@ -48,10 +48,9 @@ def _clangd(args: argparse.Namespace, ctx: Context) -> None:
     if clangd_bin is None:
         ctx.die("clangd not found on PATH. Install LLVM/clangd or add it to PATH.")
 
-    # Default: reproduce the editor exactly — let clangd discover the database the
-    # same way it does in the IDE (via .clangd's CompilationDatabase and its own
-    # upward search). That way a misconfigured .clangd shows up here too, instead
-    # of being masked. With --preset, force that preset's per-preset database.
+    # By default clangd discovers the database exactly as it does in the IDE, through .clangd and its own upward search.
+    # That is what makes a misconfigured .clangd show up here rather than being masked.
+    # --preset forces that preset's own database instead.
     if args.preset:
         preset = ctx.resolve_presets(args.preset)[0]
         cc_dir = preset.build_dir

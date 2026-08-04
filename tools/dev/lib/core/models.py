@@ -1,9 +1,6 @@
 """Plain data containers shared across the dev tooling.
 
-These are frozen dataclasses with no behavior — just typed bags of fields that
-the helper modules produce and consume. Keeping them dumb keeps the rest of the
-tooling explicit: functions take and return these, nothing hides logic in a
-method.
+Frozen dataclasses with no behavior, so a function's inputs and outputs are visible rather than hidden in a method.
 """
 
 from __future__ import annotations
@@ -31,8 +28,8 @@ class Preset:
     def family(self) -> str:
         """Compiler family, inferred from the configure-preset name.
 
-        Drives how a pinned --toolset is applied: clang/gcc swap the compiler binary,
-        msvc selects a Visual Studio toolset via vcvars. 'unknown' if it can't be told.
+        It is what decides how a pinned --toolset is applied, and toolchain/toolset.py owns that.
+        'unknown' when the name does not say.
         """
         cp = self.configure_preset
         if "msvc" in cp:
@@ -49,9 +46,8 @@ class Preset:
     def arch(self) -> str:
         """Target CPU architecture, inferred from the configure-preset name.
 
-        Only matters for MSVC: it picks the vcvars `-arch` so a native arm64
-        Windows build gets the arm64 toolchain instead of x64. 'x64' unless the
-        preset name says otherwise.
+        Only matters for MSVC, where it picks the vcvars `-arch` so a native arm64 Windows build gets the arm64 toolchain instead of x64.
+        'x64' unless the preset name says otherwise.
         """
         return "arm64" if "arm64" in self.configure_preset else "x64"
 
@@ -59,10 +55,8 @@ class Preset:
     def is_emscripten(self) -> bool:
         """Whether this preset cross-compiles to WebAssembly via Emscripten.
 
-        Such presets need the emsdk environment (emcc on PATH for configure/build,
-        node to run the resulting .js/.wasm test artifacts); see process.emsdk_env.
-        Keyed off the wasm-emscripten-* configure preset / emscripten-* build preset
-        naming so no extra metadata has to be threaded through.
+        Such presets need the emsdk environment: emcc on PATH to configure and build, node to run the resulting .js/.wasm test artifacts (see process.emsdk_env).
+        Keyed off the preset naming, so no extra metadata has to be threaded through.
         """
         return "emscripten" in self.configure_preset or self.name.startswith("emscripten-")
 
@@ -80,10 +74,8 @@ class Target:
 class CompileGroup:
     """One set of compile flags shared by a subset of a target's sources.
 
-    CMake emits a separate group per distinct flag-set, so more than one group
-    means the target's translation units do not all compile the same way (e.g. a
-    vendored source built with `/W0`). `sources` lists the files this group
-    covers; `flags` are the raw fragment strings as CMake passes them.
+    CMake emits a separate group per distinct flag-set, so more than one group means the target's translation units do not all compile the same way.
+    `sources` lists the files this group covers, and `flags` are the raw fragment strings as CMake passes them.
     """
 
     language: str | None  # "CXX", "C", ...
@@ -98,9 +90,8 @@ class CompileGroup:
 class TargetFlags:
     """Resolved compile and link flags for a target, from the CMake File API.
 
-    `compile_groups` holds one entry per distinct flag-set (see CompileGroup);
-    link info is empty for targets without a link step (static libraries are
-    archived, not linked).
+    `compile_groups` holds one entry per distinct flag-set (see CompileGroup).
+    Link info is empty for a target with no link step, since a static library is archived rather than linked.
     """
 
     name: str
@@ -114,9 +105,8 @@ class TargetFlags:
 class StepResult:
     """Outcome of a single captured subprocess step.
 
-    `step_type` is the kind of step ("configure"/"build"/"test"); `name` is the
-    specific thing it acted on (a target, "all", or a test binary). Together they
-    drive the banner and the log-file name.
+    `step_type` is the kind of step ("configure"/"build"/"test") and `name` the specific thing it acted on — a target, "all", or a test binary.
+    Together they drive the banner and the log-file name.
     """
 
     step_type: str
@@ -137,8 +127,7 @@ class StepResult:
 class TestSummary:
     """Parsed totals from a JUnit XML report.
 
-    `assertions` is the total number of checks evaluated (the nexus runner emits
-    it; synthesized single-case sidecars report 0).
+    `assertions` is the total number of checks evaluated: the nexus runner emits it, and a synthesized single-case sidecar reports 0.
     """
 
     binary: str

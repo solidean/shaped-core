@@ -1,10 +1,8 @@
 """Opinionated CLI presentation for a dev.py-style driver.
 
-This is project presentation policy, not generic tooling: it knows the exact
-wording, the diag-tool hints, and the success/warning/failure coloring dev.py
-wants. The rest of tools/dev returns plain data (StepResult, run records, totals);
-the functions here turn that data into the lines a developer reads, colored via
-`console`. They print and return a bool (or nothing) — the caller owns sys.exit.
+Project presentation policy rather than generic tooling: it knows the exact wording, the diag-tool hints, and the coloring dev.py wants.
+The rest of tools/dev returns plain data — StepResult, run records, totals — and the functions here turn that into the lines a developer reads.
+They print and return a bool (or nothing); the caller owns sys.exit.
 """
 
 from __future__ import annotations
@@ -53,9 +51,8 @@ def test_diag_hint(presets: list[Preset], root: Path) -> str:
 def print_build_failure(results: list[StepResult], presets: list[Preset], root: Path) -> None:
     """Report a failed build phase with the right diagnosis hint.
 
-    A configure failure leaves no per-translation-unit sidecars, so the
-    build_diag hint would point at an empty scan. Point at the captured configure
-    log instead; only genuine compile/link failures get the build_diag hint.
+    A configure failure leaves no per-translation-unit sidecars, so the build_diag hint would point at an empty scan.
+    It gets the captured configure log instead, and only a genuine compile or link failure gets the build_diag hint.
     """
     cfg_fail = next((r for r in results if not r.ok and r.step_type == "configure"), None)
     if cfg_fail is not None:
@@ -150,9 +147,8 @@ def summarize_coverage(results: list[dict], root: Path) -> bool:
 def summarize_perf(metrics: list[dict]) -> None:
     """Print a baseline -> PGO delta table (per metric, oriented % change).
 
-    ASCII-only: dev.py output is captured/redisplayed through Windows consoles
-    (cp1252), where arrow/dot glyphs turn to mojibake. The signed % and the
-    green/red coloring carry the direction.
+    ASCII-only: this output is redisplayed through Windows consoles (cp1252), where arrow and dot glyphs turn to mojibake.
+    The signed % and the green/red coloring carry the direction instead.
     """
     if not metrics:
         print(console.yellow("  no comparable metrics (did the guide benchmarks record any?)"), file=sys.stderr)

@@ -1,11 +1,8 @@
 """clang-format integration: locate clang-format, check its version, and run it.
 
-This backs `dev.py format`. clang-format output is not stable across major
-versions, so the tooling pins to the major version declared in `.clang-format`'s
-`Requires: clang-format >= N` header (single source of truth — the same file
-that defines the style). `format_sources` runs a single clang-format invocation
-through the shared `run_step`, either rewriting files in place or, in check
-mode, reporting which files do not conform.
+This backs `dev.py format`.
+clang-format output is not stable across major versions, so the tooling pins to the major declared by `.clang-format`'s `Requires: clang-format >= N` header — the same file that defines the style.
+`format_sources` runs a single clang-format invocation through the shared `run_step`, either rewriting files in place or, in check mode, reporting which files do not conform.
 """
 
 from __future__ import annotations
@@ -24,8 +21,7 @@ from ..core.process import response_file, run_step
 
 
 class FormatSetupError(Exception):
-    """Unrecoverable setup problem for a format run (clang-format missing or a
-    version mismatch), carrying the message the CLI should surface."""
+    """Unrecoverable setup problem for a format run — clang-format missing, or a version mismatch — carrying the message the CLI should surface."""
 
 
 @dataclass(frozen=True)
@@ -45,9 +41,8 @@ class FormatResult:
     stderr_log: Path | None = None
     offenders: list[Path] = field(default_factory=list)
 
-# Default if `.clang-format`'s `Requires:` header can't be read.
-# Keep in sync
-# with the header, which remains the authoritative source.
+# Default if `.clang-format`'s `Requires:` header cannot be read.
+# Keep in sync with the header, which remains the authoritative source.
 _DEFAULT_MAJOR = 22
 
 _SOURCE_SUFFIXES = (".cc", ".hh")
@@ -61,16 +56,16 @@ _FALLBACK_PATHS = (
 
 # clang-format --dry-run -Werror emits one diagnostic per non-conforming file:
 #   path/to/foo.cc:12:5: error: code should be clang-formatted [-Wclang-format-violations]
-# (the level is "warning" without -Werror, "error" with it). The leading path can
-# itself contain colons on Windows ("C:\..."), so the non-greedy capture stops at
-# the first ":<line>:<col>:" position, which is the real separator.
+# The level is "warning" without -Werror and "error" with it.
+# The leading path can itself contain colons on Windows ("C:\..."), so the non-greedy capture stops at the first ":<line>:<col>:", which is the real separator.
 _VIOLATION_RE = re.compile(r"^(?P<file>.+?):\d+:\d+:\s+(?:error|warning):", re.MULTILINE)
 
 
 def find_clang_format(explicit: str | None = None) -> str | None:
-    """Locate the clang-format executable: an explicit path/name, then PATH, then
-    the common LLVM install locations.
-    Returns None if nothing usable is found."""
+    """Locate the clang-format executable: an explicit path or name, then PATH, then the common LLVM install locations.
+
+    None when nothing usable is found.
+    """
     if explicit:
         if Path(explicit).is_file():
             return explicit
@@ -85,8 +80,7 @@ def find_clang_format(explicit: str | None = None) -> str | None:
 
 
 def clang_format_version(exe: str) -> tuple[int, ...] | None:
-    """Return clang-format's version as a tuple (e.g. (21, 1, 0)), or None if it
-    cannot be run or parsed."""
+    """clang-format's version as a tuple, e.g. (21, 1, 0), or None when it cannot be run or parsed."""
     try:
         result = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.TimeoutExpired):
@@ -100,10 +94,8 @@ def clang_format_version(exe: str) -> tuple[int, ...] | None:
 def required_major(root: Path) -> int:
     """The major clang-format version declared by `.clang-format`.
 
-    Parses the `Requires: clang-format >= N` header so the version check enforces
-    exactly what the style file declares, with no second constant to keep in
-    sync.
-    Falls back to _DEFAULT_MAJOR if the header is missing or unreadable.
+    Parses the `Requires: clang-format >= N` header, so the version check enforces exactly what the style file declares with no second constant to keep in sync.
+    Falls back to _DEFAULT_MAJOR when the header is missing or unreadable.
     """
     try:
         text = (root / ".clang-format").read_text(encoding="utf-8")
@@ -114,11 +106,11 @@ def required_major(root: Path) -> int:
 
 
 def _git_dirty_files(root: Path) -> list[Path]:
-    """Files that are git-dirty or untracked — what's reasonably part of the next
-    commit.
-    Deletions are dropped (nothing to format); renames yield their new
-    path.
-    Returns absolute paths; nonexistent entries are filtered out."""
+    """Files that are git-dirty or untracked — what is reasonably part of the next commit.
+
+    Deletions are dropped, since there is nothing to format, and a rename yields its new path.
+    Returns absolute paths, with nonexistent entries filtered out.
+    """
     try:
         out = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
@@ -133,8 +125,8 @@ def _git_dirty_files(root: Path) -> list[Path]:
     for line in out.stdout.splitlines():
         if len(line) < 4:
             continue
-        # Porcelain v1: 2-char status field, a space, then the path; renames are
-        # 'R  <old> -> <new>'. A 'D' in either status column is a deletion.
+        # Porcelain v1: a 2-char status field, a space, then the path; a rename is 'R  <old> -> <new>'.
+        # A 'D' in either status column is a deletion.
         status, rest = line[:2], line[3:]
         if "D" in status:
             continue
@@ -224,10 +216,8 @@ def format_changed_line_spec(ranges: dict[Path, list[tuple[int, int]]]) -> str:
 def source_roots(root: Path) -> list[Path]:
     """The directories whose `.cc`/`.hh` files clang-format owns.
 
-    A whitelist, not a repo-wide sweep: extern/ is vendored third-party code we must not reformat,
-    and a stray source elsewhere should not silently become our problem.
-    Add a root here when the
-    repo grows first-party C++ outside libs/.
+    A whitelist rather than a repo-wide sweep: extern/ is vendored third-party code we must not reformat, and a stray source elsewhere should not silently become our problem.
+    Add a root here when the repo grows first-party C++ outside libs/.
     """
     return [
         root / "libs",
@@ -350,9 +340,8 @@ def format_sources(
 ) -> StepResult:
     """Run clang-format over `files` in a single invocation via run_step.
 
-    In apply mode rewrites files in place (`-i`). In check mode runs
-    `--dry-run -Werror`, which exits non-zero and names each non-conforming file
-    in its output without modifying anything.
+    In apply mode it rewrites files in place (`-i`).
+    In check mode it runs `--dry-run -Werror`, which exits non-zero and names each non-conforming file in its output without modifying anything.
     """
     cmd = [clang_format]
     cmd += ["--dry-run", "-Werror"] if check else ["-i"]
@@ -381,11 +370,9 @@ def run_format(
 ) -> FormatResult:
     """Locate clang-format, enforce its version, and format the selected sources.
 
-    Raises FormatSetupError for unrecoverable setup problems (clang-format
-    missing, version undeterminable, or a major mismatch without
-    `allow_different_version` — which otherwise downgrades to a yellow warning).
-    Returns a FormatResult describing what happened (including the "no files in
-    scope" success); the caller prints the summary (see report.summarize_format).
+    Raises FormatSetupError for an unrecoverable setup problem: clang-format missing, its version undeterminable, or a major mismatch.
+    `allow_different_version` downgrades that last one to a yellow warning instead.
+    Returns a FormatResult describing what happened, including the "no files in scope" success; the caller prints the summary (see report.summarize_format).
     """
     clang_format = find_clang_format()
     if clang_format is None:
@@ -394,10 +381,8 @@ def run_format(
             "or add it to PATH."
         )
 
-    # clang-format output is not stable across major versions, so enforce the
-    # major declared by .clang-format.
-    # allow_different_version downgrades the
-    # mismatch to a warning instead of failing.
+    # clang-format output is not stable across major versions, so enforce the major declared by .clang-format.
+    # allow_different_version downgrades the mismatch to a warning instead of failing.
     have = clang_format_version(clang_format)
     need = required_major(root)
     if have is None:
@@ -433,8 +418,7 @@ def run_format(
 
 
 def violating_files(result: StepResult, root: Path) -> list[Path]:
-    """Parse a check-mode StepResult's captured output for the files clang-format
-    flagged as non-conforming, as paths relative to `root` where possible."""
+    """Parse a check-mode StepResult's captured output for the files clang-format flagged as non-conforming, as paths relative to `root` where possible."""
     try:
         text = result.stderr_log.read_text(encoding="utf-8", errors="replace")
     except OSError:

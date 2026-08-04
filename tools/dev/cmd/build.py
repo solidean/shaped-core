@@ -54,8 +54,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         emsdk_path=args.emsdk_path,
         keep_going=args.keep_going,
     )
-    # Bundle the diag sidecars before the pass/fail gate: a failed build is
-    # exactly when its per-invocation compiler errors are worth capturing.
+    # Bundle the diag sidecars before the pass/fail gate: a failed build is exactly when its per-invocation compiler errors are worth capturing.
     if args.diag_archive:
         n = dev.archive_diag([p.build_dir for p in presets], Path(args.diag_archive), ctx.root)
         print(f"Diagnostics archive written to {args.diag_archive} ({n} sidecar(s))", file=sys.stderr)

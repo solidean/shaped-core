@@ -4,53 +4,14 @@
 # dependencies = []
 # ///
 
-"""
-Build & test CLI for shaped-core.
+"""shaped-core's build & test entry point: project policy plus CLI wiring.
 
-Usage:
-    uv run dev.py configure                 Configure the CMake project
-    uv run dev.py build [--target T]        Build (optionally specific targets)
-    uv run dev.py test [--target T] [NAME]  Run tests (optionally a binary / test name)
-    uv run dev.py test-web [LIBRARY]        Open the browser test runner (Emscripten; all libs, or one)
-    uv run dev.py format [--dirty-only]     Format libs/ sources with clang-format
-    uv run dev.py lint clang-tidy           Run the clang-tidy whitelist gates (must be zero to commit)
-    uv run dev.py check [NAME...] [--fix]   Run pre-commit checks (format, lint, crossrefs, test)
-    uv run dev.py coverage run [NAME]       Collect LLVM test coverage (run/merge/report)
-    uv run dev.py pgo run                    Profile-guided optimization (instrument/train/optimize/measure)
-    uv run dev.py clean [--all]             Remove build artifacts
-    uv run dev.py info build-flags TARGET   Show resolved compile/link flags (or compile-command FILE)
-    uv run dev.py assembly search PATTERN   Search symbols in built objects (or show SYMBOL to disassemble)
-    uv run dev.py diagnose clangd FILE      Show clangd diagnostics for a source file
-    uv run dev.py doctor                    Sanity-check the toolchain
-    uv run dev.py list-presets              List available build presets
-    uv run dev.py list-targets             List discovered targets
-    uv run dev.py list-toolsets             List installed compiler toolsets (for --toolset)
+The preset tables below are the policy — which presets each command reaches for, on each platform.
+Those tables and the COMMANDS registry are what a downstream fork edits; the rest of this file is argparse wiring and dispatch.
+The reusable machinery lives in tools/dev/ (flat facade in tools/dev/__init__.py), and each command's implementation under tools/dev/cmd/.
 
-Presets and targets accept comma-lists, repeated flags, and shell-style
-wildcards, and operate on as many as you select:
-    --preset debug-clang,release-clang
-    --preset "x64-linux-*" --preset debug-clang
-    --target "*-test"
-
-The default preset is chosen by platform but can be overridden with --preset.
-'build' and 'test' auto-configure when cmake inputs or the source listing change
-(fingerprinted); pass --no-configure to skip.
-
-dev.py is quiet by default: child stdout/stderr is captured to
-build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt rather than
-mirrored to the terminal — pass --mirror-output to stream all of it live, or
---mirror-test-output to stream only the test binaries (quiet build, loud test).
-Each command also writes a machine-readable sidecar (configure.json /
-build.json / test.json) next to the build directory.
-
-Output is colored (green/orange/red) when stdout and stderr are both a terminal,
-and plain when either is piped (e.g. run by an agent). Force it either way with
---colored / --plain; in auto mode NO_COLOR / FORCE_COLOR are also honored.
-
-This file is project policy + wiring: the preset tables below, plus the argparse
-loop and dispatch. The reusable, project-agnostic machinery lives in tools/dev/
-(facade in tools/dev/__init__.py); each command's implementation lives in
-tools/dev/cmd/. See docs/dev-py-driver.md for the design and how to extend it.
+`uv run dev.py --help` is the CLI reference.
+docs/guides/building-and-testing.md is the workflow, and docs/dev-py-driver.md the design and how to extend the driver.
 """
 
 from __future__ import annotations
@@ -86,10 +47,8 @@ from tools.dev.cmd import (  # noqa: E402
     test_web,
 )
 
-# The command registry: one module per command, in the order they appear in
-# `dev.py --help`. This is the map of the CLI — click through to a command's
-# module for its flags and logic. Adding a command is a new module in
-# tools/dev/cmd/ plus one line here.
+# The map of the CLI: one module per command, in the order `dev.py --help` lists them.
+# A command's flags and logic live in its own module under tools/dev/cmd/.
 COMMANDS = [
     configure,
     build,
@@ -113,61 +72,46 @@ COMMANDS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Project policy
-#
-# Which presets each command reaches for, keyed by platform.system(). This is the
-# one place a downstream fork edits to point the driver at its own presets; the rest is
-# generic wiring. The tables are bundled into a cmd.Policy and handed to each
-# command via the Context (see tools/dev/cmd/context.py).
+# Project policy — the tables below, bundled into a cmd.Policy and reaching commands through the Context (tools/dev/cmd/context.py).
 # ---------------------------------------------------------------------------
 
-# Default build preset per platform. Override with --preset.
+# Default build preset per platform, overridable with --preset.
 DEFAULT_BUILD_PRESETS: dict[str, str] = {
     "Windows": "relwithdebinfo-clang",
     "Linux": "relwithdebinfo-linux-clang",
     "Darwin": "macos-arm-llvm-relwithdebinfo",
 }
 
-# Debug sibling of each default preset. Run by the `test` check alongside the
-# others: -O0 plus mimalloc's debug heap (MI_DEBUG) catch bugs the optimized
-# presets miss.
+# Debug sibling of each default preset, run by the `test` check alongside the others.
 DEFAULT_DEBUG_PRESETS: dict[str, str] = {
     "Windows": "debug-clang",
     "Linux": "debug-linux-clang",
     "Darwin": "macos-arm-llvm-debug",
 }
 
-# Release sibling of each default preset, run alongside it by the `test` check so
-# precommit exercises both CC_ASSERT on (debug/relwithdebinfo) and off (release).
+# Release sibling of each default preset — the `test` check's CC_ASSERT-off leg.
 DEFAULT_RELEASE_PRESETS: dict[str, str] = {
     "Windows": "release-clang",
     "Linux": "release-linux-clang",
     "Darwin": "macos-arm-llvm-release",
 }
 
-# Single-threaded sibling of each default preset (SC_THREADS=OFF -> CC_HAS_THREADS 0), run by the `test`
-# check so precommit exercises both threading modes rather than only the threaded one. RelWithDebInfo, so
-# it also carries CC_ASSERT. Without it this mode is only reachable via a wasm build, which is how it came
-# to be under-exercised in the first place. Deliberately one preset, not a matrix: it is a compile-time
-# axis, and the check tail is already the slow part.
+# Single-threaded sibling of each default preset (SC_THREADS=OFF -> CC_HAS_THREADS 0), run by the `test` check.
+# Deliberately one preset rather than a matrix: threading is a compile-time axis, and the check's test tail is already the slow part.
 DEFAULT_SINGLETHREADED_PRESETS: dict[str, str] = {
     "Windows": "singlethreaded-clang",
     "Linux": "singlethreaded-linux-clang",
     "Darwin": "singlethreaded-macos-arm-llvm",
 }
 
-# Sanitizer (ASan+UBSan) preset per platform, run by the `test` check as an extra
-# defensive pass. Windows is intentionally absent: clang-cl's ASan is broken with
-# C++ exceptions (any throw/catch faults during EH dispatch — a toolchain bug, not
-# ours), and nexus catches test exceptions, so it can never be green there. The
-# sanitize-clang preset still exists for manual non-throwing runs; see
-# docs/guides/building-and-testing.md.
+# Sanitizer (ASan+UBSan) preset per platform, run by the `test` check.
+# Windows is absent deliberately, and the Sanitizers section of docs/guides/building-and-testing.md says why.
 DEFAULT_SANITIZE_PRESETS: dict[str, str] = {
     "Linux": "sanitize-linux-clang",
     "Darwin": "sanitize-macos-arm-llvm",
 }
 
-# Default coverage preset per platform (instrumented Debug build; SC_COVERAGE ON).
+# Default coverage preset per platform (RelWithDebInfo, SC_COVERAGE ON).
 # `coverage` uses these instead of DEFAULT_BUILD_PRESETS when no --preset is given.
 COVERAGE_BUILD_PRESETS: dict[str, str] = {
     "Windows": "coverage-clang",
@@ -175,9 +119,9 @@ COVERAGE_BUILD_PRESETS: dict[str, str] = {
     "Darwin": "coverage-macos-arm-llvm",
 }
 
-# PGO presets per platform: the instrumented (-fprofile-generate) and optimized
-# (-fprofile-use) Release builds, plus the clean Release baseline the speedup is
-# measured against. `pgo` uses these when no --preset is given.
+# PGO presets per platform: the instrumented (-fprofile-generate) and optimized (-fprofile-use) Release builds.
+# PGO_BASELINE is the clean Release the speedup is measured against.
+# `pgo` uses all three when no --preset is given.
 PGO_GENERATE_PRESETS: dict[str, str] = {
     "Windows": "pgo-generate-clang",
     "Linux": "pgo-generate-linux-clang",
@@ -221,12 +165,9 @@ def build_policy() -> cmd.Policy:
 def _force_utf8_streams() -> None:
     """Make dev.py's own stdout/stderr UTF-8, however they are attached.
 
-    Everything on both ends of this process is UTF-8: the tools we run set their console to CP_UTF8, the
-    child pipes are decoded as UTF-8, and the run logs are written as UTF-8. Python's own streams are the
-    one link that is not — attached to a Windows console they go through the console API and take any
-    character, but *redirected* they fall back to the locale encoding (cp1252 here), and a single source
-    line containing e.g. `⊍` then raises UnicodeEncodeError mid-mirror. `errors="replace"` is the second
-    belt: a stream we cannot reconfigure at all still degrades to `?` rather than throwing.
+    Python's streams are the one link in this process that is not already UTF-8: redirected on Windows they fall back to the locale encoding.
+    `errors="replace"` is the second belt, so a stream that cannot be reconfigured at all degrades to `?` rather than throwing.
+    docs/dev-py-driver.md says why a mid-mirror encoding failure mattered far more than the garbled character.
     """
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -262,13 +203,10 @@ def main() -> None:
     for module in COMMANDS:
         module.add_parser(sub)
 
-    # parse_known_args (not parse_args) so `test` and `run` can forward unrecognized trailing tokens
-    # verbatim to the child process (`-c <section>` for nexus section scoping, `--fix` for a tool under
-    # `run`) while dev.py's own options — crucially --preset — are still parsed no matter where they sit
-    # relative to the positional. A REMAINDER positional used to swallow everything after the name,
-    # silently eating a trailing `--preset` and running the default preset instead (a real hazard:
-    # a `--preset release-clang` verify could actually run relwithdebinfo). For every other command
-    # unknown args stay a hard error, mirroring argparse's strict default so typos fail loudly.
+    # parse_known_args (not parse_args) so `test` and `run` can forward unrecognized trailing tokens verbatim to the child process.
+    # dev.py's own options must still parse wherever they sit relative to the positional.
+    # --preset above all: a catch-all positional would silently drop it and run the default preset instead.
+    # Everywhere else an unknown argument stays a hard error, so a typo fails loudly.
     args, forwarded = parser.parse_known_args()
     if forwarded and args.command not in ("test", "run"):
         parser.error("unrecognized arguments: %s" % " ".join(forwarded))
@@ -276,8 +214,7 @@ def main() -> None:
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
     dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
 
-    # Capture logs on the way out regardless of how the command exits (including
-    # sys.exit on a failed build/test) — atexit fires on SystemExit too.
+    # atexit fires on SystemExit too, so the archive is written however the command exits — a failed build or test included.
     if args.collect_logs:
         import atexit
 

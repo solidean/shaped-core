@@ -56,7 +56,8 @@ It is grouped by responsibility, with a strict one-way dependency direction — 
 
 This is the same layering rule the C++ libraries follow: no upward or cyclic dependencies.
 If two groups both want something, it belongs in a lower group.
-The lone exception is a deliberate **function-local** import: `core/process.py` reaches into `toolchain` for MSVC env setup, but only when a toolset is pinned.
+The lone exception is a deliberate **function-local** import: `core/process.py` reaches into `toolchain` for MSVC env setup.
+It fires only for a bare-version `--toolset`, since a path-valued one takes the compiler-override path instead.
 Keeping it off the module-load path preserves the import-time layering.
 
 **`tools/dev/cmd/` — the commands.** One module per command (`build.py`, `test.py`,
@@ -73,7 +74,7 @@ A command owns its full CLI surface, so its flags live next to its logic and cop
 Shared argparse fragments — `--preset`, the build-dir overrides, `--emsdk-path` — live in [cmd/args.py](../tools/dev/cmd/args.py) so they are defined once.
 
 **`dev.py` — policy and wiring.** What is left is small and readable.
-The module docstring is the user-facing usage block.
+The module docstring names the two things only this file answers and points at the rest; `dev.py --help` is the user-facing CLI surface.
 The **preset tables** are project policy, naming which presets each command reaches for per platform.
 The **`COMMANDS` registry** is the map of the CLI: one import and one list entry per command.
 Then a `main()` builds the top-level parser, loops over `COMMANDS` to register subparsers, parses, configures color and the optional log archive, then constructs one `Context` and dispatches.

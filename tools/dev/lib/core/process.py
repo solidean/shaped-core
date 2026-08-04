@@ -1,8 +1,7 @@
-"""Subprocess execution: MSVC environment setup and the quiet-by-default run_step.
+"""Subprocess execution: MSVC and emsdk environment setup, and the quiet-by-default run_step.
 
-`run_step` is the single choke point for every external command the tooling
-runs. It captures stdout/stderr to per-step log files (optionally mirroring them
-live) and returns a StepResult describing the outcome.
+`run_step` is the single choke point for every external command the tooling runs.
+It captures stdout/stderr to per-step log files, optionally mirroring them live, and returns a StepResult describing the outcome.
 """
 
 from __future__ import annotations
@@ -36,11 +35,9 @@ _mirror_test_output = False
 def configure_mirroring(*, mirror_test_output: bool = False) -> None:
     """Mirror every "test" step live, whatever its caller passed for `mirror`.
 
-    Process-wide presentation, set once from the CLI (like console.configure) — `run_step` is the
-    only reader. Backs --mirror-test-output: the common case is a quiet build and a loud test
-    binary, and setting it here rather than at each dev.test() call site also covers the paths that
-    run test binaries without going through one (coverage run, pgo train). Mirroring is additive to
-    capture, so this never affects the logs.
+    Process-wide presentation, set once from the CLI like console.configure, and `run_step` is the only reader.
+    Setting it here rather than at each dev.test() call site also covers the paths that run test binaries without going through one, such as `coverage run` and `pgo train`.
+    Mirroring is additive to capture, so this never affects the logs.
     """
     global _mirror_test_output
     _mirror_test_output = mirror_test_output
@@ -53,10 +50,8 @@ def configure_mirroring(*, mirror_test_output: bool = False) -> None:
 def _find_vsdevcmd(toolset: str | None = None) -> str | None:
     """Locate VsDevCmd.bat via vswhere or well-known paths.
 
-    With `toolset` set (a bare version like "14.51", not a path), pick the instance whose
-    VC\\Tools\\MSVC actually has that toolset (prerelease included), so a pinned --toolset
-    selects the right Visual Studio. Without one, use the latest instance, then fall back to
-    the known VS 2022 install paths.
+    With `toolset` set — a bare version like "14.51", not a path — pick the instance whose VC\\Tools\\MSVC actually has that toolset, prerelease included.
+    Without one, use the latest instance, then fall back to the known VS 2022 install paths.
     """
     if toolset is not None and not ("/" in toolset or "\\" in toolset):
         # Function-local: keeps msvc env setup off core's import path (toolchain sits above core).
@@ -94,12 +89,11 @@ def _find_vsdevcmd(toolset: str | None = None) -> str | None:
 def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | None:
     """Return an environment dict with MSVC tools on PATH, or None if not needed.
 
-    Returns None on non-Windows or when VsDevCmd.bat cannot be found. With no `toolset`,
-    an already-on-PATH cl.exe is taken as-is (returns None to inherit the env). When a
-    `toolset` is pinned, the ambient cl is ignored: the matching Visual Studio instance is
-    located and `-vcvars_ver=<toolset>` selects that exact toolset (a path-valued toolset
-    is handled by the clang/gcc compiler-override path, not here). `arch` selects the
-    vcvars target architecture (`-arch`), so an arm64 preset gets the arm64 toolchain.
+    Returns None on non-Windows, or when VsDevCmd.bat cannot be found.
+    With no `toolset`, an already-on-PATH cl.exe is taken as-is and None is returned to inherit the env.
+    With one pinned, the ambient cl is ignored: the matching Visual Studio instance is located and `-vcvars_ver=<toolset>` selects that exact toolset.
+    A path-valued toolset never reaches here — it is the clang/gcc compiler-override path's.
+    `arch` selects the vcvars target architecture, so an arm64 preset gets the arm64 toolchain.
     """
     if platform.system() != "Windows":
         return None
@@ -140,10 +134,8 @@ def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | 
 def find_emsdk_root(emsdk_path: str | None = None) -> Path | None:
     """Locate an emsdk installation directory, or None if none is found.
 
-    Resolution order (the first that points at a real emsdk wins): the explicit
-    `emsdk_path` (e.g. --emsdk-path), the `SC_EMSDK_PATH` env var, an already
-    activated `EMSDK`, then deriving the root from `emcc` on PATH. This lets a
-    developer use a bare emsdk checkout without permanently/system-activating it.
+    First match wins, in order: the explicit `emsdk_path` (--emsdk-path), `SC_EMSDK_PATH`, an already activated `EMSDK`, then the root derived from `emcc` on PATH.
+    A bare emsdk checkout therefore works without permanent or --system activation.
     """
     env_script = "emsdk_env.bat" if platform.system() == "Windows" else "emsdk_env.sh"
 
@@ -172,8 +164,7 @@ def emsdk_toolchain_file(root: Path) -> Path:
 
 
 def _emsdk_path_additions(root: Path) -> list[Path]:
-    """Directories emsdk prepends to PATH: the SDK root, the emscripten tools
-    (where emcc/em++ live), and emsdk's bundled node/python when present."""
+    """Directories emsdk prepends to PATH: the SDK root, the emscripten tools where emcc and em++ live, and emsdk's bundled node/python when present."""
     dirs = [root, root / "upstream" / "emscripten"]
     node_bins = sorted((root / "node").glob("*/bin"))
     if node_bins:
@@ -195,14 +186,9 @@ def _first_glob(root: Path, *patterns: str) -> Path | None:
 def emsdk_env(emsdk_path: str | None = None) -> dict[str, str] | None:
     """Return a full environment dict with the Emscripten toolchain active, or None.
 
-    The overlay is derived deterministically from the emsdk layout rather than by
-    capturing emsdk's own activation script: that script emits shell-specific
-    output (it detects bash vs cmd and may print `export ...` instead of mutating
-    the cmd session), so capturing it via `set` silently dropped emsdk's PATH
-    entries. Here we prepend the SDK dirs (including upstream/emscripten, where
-    emcc lives) onto the inherited PATH and set EMSDK / EMSDK_NODE / EMSDK_PYTHON /
-    EM_CONFIG ourselves, so a bare emsdk checkout works with no permanent or
-    --system activation. Returns None when emsdk cannot be located.
+    The overlay is derived from the emsdk layout rather than by capturing emsdk's own activation script, whose output is shell-specific and cannot be read back reliably.
+    So the SDK dirs are prepended onto the inherited PATH and EMSDK / EMSDK_NODE / EMSDK_PYTHON / EM_CONFIG are set here.
+    Returns None when emsdk cannot be located.
     """
     root = find_emsdk_root(emsdk_path)
     if root is None:
@@ -231,10 +217,8 @@ def emsdk_env(emsdk_path: str | None = None) -> dict[str, str] | None:
 def env_for_preset(preset: Preset, emsdk_path: str | None = None) -> dict[str, str] | None:
     """Pick the subprocess environment a preset's commands need.
 
-    Emscripten presets get the emsdk environment (emcc/node on PATH); every other
-    preset falls back to the MSVC environment on Windows (None elsewhere, meaning
-    "inherit the parent env unchanged"). Returned dicts are full environments, so
-    callers pass them straight to run_step.
+    Emscripten presets get the emsdk environment; every other preset falls back to the MSVC environment on Windows, and to None elsewhere.
+    None means "inherit the parent env unchanged"; a returned dict is a full environment, ready to hand straight to run_step.
     """
     if preset.is_emscripten:
         return emsdk_env(emsdk_path)
@@ -255,15 +239,10 @@ def response_file(args: list[str], prefix: str) -> Iterator[list[str]]:
     """Yield the argv tail to pass for `args`, spilling to a response file when too long.
 
     LLVM tools (clang-format, llvm-nm, llvm-objdump) expand `@file`, one argument per line.
-    A full-tree file list blows past the Windows command-line limit, so anything over
-    _ARGV_LIMIT chars is written to a temp file and passed as a single `@path`.
-
-    Short lists are yielded verbatim, which keeps real paths in the step logs for repro --
-    an `@C:\\...\\tmp.rsp` there would point at an already-deleted file.
-
-    LLVM tokenizes response files Windows-style on Windows hosts, so native backslash
-    paths need no escaping; POSIX hosts use forward slashes, where GNU tokenization's
-    backslash-escaping never triggers.
+    A full-tree file list blows past the Windows command-line limit, so anything over _ARGV_LIMIT chars is written to a temp file and passed as a single `@path`.
+    A short list is yielded verbatim, which keeps real paths in the step logs for repro — an `@C:\\...\\tmp.rsp` there would point at an already-deleted file.
+    LLVM tokenizes response files Windows-style on Windows hosts, so native backslash paths need no escaping.
+    POSIX hosts use forward slashes, where GNU tokenization's backslash-escaping never triggers.
     """
     if sum(len(a) + 1 for a in args) <= _ARGV_LIMIT:
         yield list(args)
@@ -289,10 +268,9 @@ def response_file(args: list[str], prefix: str) -> Iterator[list[str]]:
 def _pump(src, log_file, mirror_to) -> None:
     """Read `src` line by line, writing to `log_file` and (optionally) `mirror_to`.
 
-    This loop must not die while the child is alive. Nothing else drains the pipe, so a pump thread that
-    raises leaves the child blocked on a full OS pipe buffer forever, and `proc.wait()` with it — a hang,
-    not an error, which is far harder to diagnose than the write that caused it. So every per-line failure
-    is reported once and swallowed, and draining continues to the end of the stream.
+    This loop must not die while the child is alive.
+    Nothing else drains the pipe, so a pump thread that raises leaves the child blocked on a full OS pipe buffer forever, and `proc.wait()` with it.
+    So every per-line failure is reported once and swallowed, and draining continues to the end of the stream.
     """
     reported = False
 
@@ -329,19 +307,18 @@ def _pump(src, log_file, mirror_to) -> None:
             pass
 
 
-# How long a timed-out child gets to report where it is before it is killed outright. Long enough for a
-# crash handler to symbolize every thread and write, short enough to be noise against any real timeout.
+# How long a timed-out child gets to report where it is before it is killed outright.
+# Long enough for a crash handler to symbolize every thread and write, short enough to be noise against any real timeout.
 _CRASH_REPORT_GRACE_S = 2.0
 
 
 def _request_crash_report(proc: subprocess.Popen) -> bool:
     """Ask a hung child to say where it is, and report whether the request went out.
 
-    A killed process says nothing, and a timeout with no stack is the hardest failure to chase. But our
-    binaries already know how to answer: nexus installs cc::install_crash_handler(), which on a fatal fault
-    prints the running test, the faulting thread's stack, and every other thread's — including the one that
-    is actually stuck. So provoke that report and let it reach the stderr we are already capturing, rather
-    than terminating the process mid-hang and learning nothing.
+    A killed process says nothing, and a timeout with no stack is the hardest failure to chase.
+    Our binaries already know how to answer, because nexus installs cc::install_crash_handler().
+    On a fatal fault it prints the running test, the faulting thread's stack, and every other thread's — including the one that is actually stuck.
+    So provoke that report and let it reach the stderr we are already capturing, rather than terminating the process mid-hang and learning nothing.
 
     Best-effort throughout: a child that ignores the request, or is not one of ours, is killed as before.
     """
@@ -349,16 +326,13 @@ def _request_crash_report(proc: subprocess.Popen) -> bool:
         try:
             import ctypes
 
-            # A remote thread with a NULL entry point faults on its first instruction, and that fault is
-            # genuinely unhandled, so it reaches the top-level SetUnhandledExceptionFilter — which is the
-            # whole point. DebugBreakProcess does NOT work here and is the obvious-looking trap: ntdll's
-            # DbgUiRemoteBreakin wraps its DbgBreakPoint in an __except of its own, so with no debugger
-            # attached the breakpoint is handled, never becomes unhandled, and the filter never runs.
+            # A remote thread with a NULL entry point faults on its first instruction, and that fault is genuinely unhandled, so it reaches the top-level SetUnhandledExceptionFilter.
+            # DebugBreakProcess does NOT work here, and is the obvious-looking trap.
+            # ntdll's DbgUiRemoteBreakin wraps its DbgBreakPoint in an __except of its own.
+            # So with no debugger attached the breakpoint is handled, never becomes unhandled, and the filter never runs.
             #
-            # The injected thread's own frames say nothing; the running-test hook and the per-thread walk
-            # are what carry the answer, and both are process-wide. Note the process SURVIVES this (the
-            # filter's EXCEPTION_EXECUTE_HANDLER unwinds only the injected thread), so the caller's kill
-            # is not a fallback but the normal path.
+            # The injected thread's own frames say nothing; the running-test hook and the per-thread walk are what carry the answer, and both are process-wide.
+            # The child usually dies of the poke, since the handler returns EXCEPTION_EXECUTE_HANDLER and lets the fault run its course, so the caller's kill is only the fallback.
             kernel32 = ctypes.windll.kernel32
             handle = kernel32.OpenProcess(0x1F0FFF, False, proc.pid) # PROCESS_ALL_ACCESS
             if not handle:
@@ -374,7 +348,7 @@ def _request_crash_report(proc: subprocess.Popen) -> bool:
         except Exception:
             return False
 
-    # POSIX: the handler's signal path does the same job, and here the process really does die of it.
+    # POSIX: the handler's signal path does the same job.
     try:
         proc.send_signal(signal.SIGABRT)
         return True
@@ -397,16 +371,12 @@ def run_step(
 ) -> StepResult:
     """Run a subprocess as a named step and return a StepResult.
 
-    `step_type` is the kind of step ("configure"/"build"/"test") and `name` the
-    specific thing it acts on (a target, "all", or a test binary). Prints a
-    one-line `[ts] [step_type] name` banner, captures both streams to per-step
-    log files under build_dir/run-logs/ (mirrored live when `mirror`, or when a
-    "test" step and configure_mirroring enabled it), then
-    prints capture pointers and a pass/fail summary. `summary_extra`, when given,
-    is called with the finished StepResult and its return value is appended to
-    the summary line (e.g. build/test stats); it is skipped on timeout and any
-    exception it raises is swallowed. On timeout the process is killed and the
-    step reports returncode 124 (conventional timeout code).
+    `step_type` is the kind of step ("configure"/"build"/"test") and `name` the specific thing it acts on — a target, "all", or a test binary.
+    Prints a one-line `[ts] [step_type] name` banner, captures both streams under build_dir/run-logs/, then prints capture pointers and a pass/fail summary.
+    Streams are mirrored live when `mirror`, or on a "test" step once configure_mirroring enabled it.
+    `summary_extra`, when given, is called with the finished StepResult and its return value is appended to the summary line.
+    It is skipped on timeout, and any exception it raises is swallowed.
+    On timeout the process is killed and the step reports returncode 124, the conventional timeout code.
     """
     mirror = mirror or (_mirror_test_output and step_type == "test")
 
@@ -436,8 +406,7 @@ def run_step(
             proc.wait(timeout=timeout if timeout else None)
         except subprocess.TimeoutExpired:
             timed_out = True
-            # Ask where it is before killing it — see _request_crash_report. The child usually dies of the
-            # poke itself (the handler lets the fault run its course), so the kill below is the fallback.
+            # Ask where it is before killing it — see _request_crash_report.
             asked = _request_crash_report(proc)
             if asked:
                 try:
@@ -497,9 +466,8 @@ def run_step(
     return result
 
 
-# Windows surfaces a fatal SEH fault as the NTSTATUS exception code (returned signed by
-# subprocess); POSIX returns the negated terminating signal. Name the common crash codes so a
-# bare non-zero exit reads as "access violation" rather than an opaque number.
+# Windows surfaces a fatal SEH fault as the NTSTATUS exception code, returned signed by subprocess; POSIX returns the negated terminating signal.
+# Name the common crash codes so a bare non-zero exit reads as "access violation" rather than an opaque number.
 _NTSTATUS_NAMES = {
     0xC0000005: "access violation (segfault)",
     0x80000003: "breakpoint / __debugbreak",

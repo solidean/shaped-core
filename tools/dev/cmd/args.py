@@ -1,8 +1,6 @@
 """Shared argparse fragments reused across command subparsers.
 
-Each command module owns its own subparser (see cmd/__init__.py); these helpers
-keep the common flags — preset selection, the build-dir overrides, and the emsdk
-path — defined once instead of copied per command.
+A command owns its own subparser; these keep the flags several of them share — preset selection, the build-dir overrides, the emsdk path — defined once.
 """
 
 from __future__ import annotations

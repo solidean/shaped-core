@@ -1,11 +1,10 @@
 """Build: build targets for one or more presets.
 
+Per preset: optionally auto-configure, which is cheap when the fingerprint is current, then build either the named targets or the whole project.
+A build.json sidecar describing what ran is written alongside.
+
 Public API:
     build(presets, targets, ...) -> list[StepResult]
-
-Per preset: optionally auto-configure (cheap when fingerprint is current), then
-build either the named targets or the whole project, writing a build.json
-sidecar describing what ran.
 """
 
 from __future__ import annotations
@@ -37,12 +36,11 @@ def build(
     emsdk_path: str | None = None,
     keep_going: bool = False,
 ) -> list[StepResult]:
-    """Build `targets` (or everything when None/empty) across all presets.
+    """Build `targets`, or everything when None or empty, across all presets.
 
-    Returns every StepResult produced, in order. A failed step does not stop the
-    remaining presets/targets — the caller inspects the results for failures.
-    `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env).
-    `keep_going` passes ninja -k 0 so a build surfaces every error, not just the first.
+    Returns every StepResult produced, in order.
+    A failed step does not stop the remaining presets or targets, so the caller inspects the results for failures.
+    `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env), and `keep_going` passes ninja -k 0.
     """
     results: list[StepResult] = []
 
