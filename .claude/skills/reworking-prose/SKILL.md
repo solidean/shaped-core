@@ -64,6 +64,11 @@ Work it out in this order, before any new text is written:
 Verbosity is the enemy and so is missing documentation — the concept is what lets you cut hard without stranding a reader.
 Every line has to pull its weight, and a fringe concept documented at three levels is the same defect as an undocumented central one.
 
+**Before cutting a recap, name the level that owns the answer — then check that level exists.**
+Deleting a "what this already does" recap is right when a concept doc owns it, and wrong the moment none does.
+That failure is invisible downstream: every span validates, every rule passes, and the answer is simply gone from the tree.
+A missing owner is a step-1 gap that has just turned urgent — write the doc, or keep the recap until someone does.
+
 **Backstory is the first thing to cut**, per [Code Comments](../../../docs/coding-guidelines.md#code-comments).
 No narration of why an approach was chosen, and above all no cross-module causal annotation — "because *(some implementation fact three libraries over)*" reads as insight and ages into a lie.
 Delete it by default: a real Chesterton's fence is rare enough (roughly 20:1 against on this tree) to be the exception you argue for.
@@ -107,6 +112,9 @@ Apply each chunk before writing the next: applying shifts line numbers, so a lat
 - Spans ascend and may not overlap; line numbers are the file as you read it.
 - Everything after `| ` is verbatim final text — comment marker and indentation included, and nothing is inferred.
 - A bare `|` is an empty line inside a block.
+- **Every line of replacement text needs the `| ` prefix**, including one that is itself a comment.
+  A bare `// …` on the second line of a block parses as a plan directive and fails the whole file.
+- A markdown **fenced block is editable too** — the code-unchanged check does not read ``` ``` ``` as code, so a stale status tree or table does not need a hand-edit.
 
 **Take every span's line numbers from a fresh read of that file, in the same session as writing the plan.**
 An off-by-one span silently swallows the declaration under the comment block, which is the one mistake this format makes easy.
@@ -131,6 +139,11 @@ Both are hard failures — fix the plan, do not work around the tool.
 **One dry run reports every problem the plan has**, so fix them as a batch rather than re-running per finding.
 Prose findings come back with carets over the *rewritten* text, which is the text to correct in the plan — not what is still on disk.
 
+**Budget two dry runs per chunk, because your own rewrites will trip `no-long-prose-line`.**
+Joining a justified block into one semantic point routinely lands at 210–290 characters, over the 200 ceiling — it is structural, not carelessness, and it fires on nearly every chunk.
+So the rhythm is: write, dry-run, split each flagged line at its seam, dry-run again, apply.
+Do not hand-count characters while writing the plan; the dry run finds them for free and you will guess wrong.
+
 `--stats` prints the prose delta per file and in total, which is where step 3's budget gets checked.
 Read it on the dry run: a surface that was meant to shrink and came back `+40` is a plan to revise, not a result to land.
 A file whose delta is `+0 / +0` usually means the rewrite only moved words around, which is worth a second look before it lands as churn.
@@ -151,6 +164,14 @@ So is "one line longer, and now findable".
 Point it at the code as well as the prose, and ask it to check the claims:
 which exception types a scope actually throws, whether the stated preconditions match the `CC_ASSERT`s, whether a doc still describes a capability the type has since grown.
 A cold reader finds factual drift that no prose rule can see, and that is often the most valuable thing it returns.
+
+Three lines in the prompt raise the yield a lot:
+
+- **Name the two or three deletions you are least sure about**, and ask directly whether each stranded a reader.
+  "Did anything get lost" returns generalities; a named deletion returns a verdict.
+- **Say that factual errors have already been found and fixed in this pass**, so it assumes more survive instead of reading the prose as trustworthy.
+- **Ask it to separate what it verified against code from what it suspects.**
+  The verified half is actionable as-is; the suspected half is where its judgement calls sit, and you will decline some of them.
 
 ### 7. Correction pass
 
