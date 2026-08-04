@@ -112,6 +112,16 @@ bool opens_logical_line(cc::span<token const> tokens, isize index)
     return true; // the first token of the file
 }
 
+} // namespace
+
+bool is_python_docstring(cc::span<token const> tokens, isize index)
+{
+    auto const& t = tokens[index];
+    return t.is(token_kind::string_literal) && is_triple_quoted(t.text) && opens_logical_line(tokens, index);
+}
+
+namespace
+{
 /// C++ and Python alike: comments come out of the token stream, and adjacent line comments group.
 /// A `/* … */` is one block of its own lines, with the decorative leading `*` of each continuation cut.
 prose_view extract_from_tokens(source_buffer const& buffer, source_language language, token_stream const& tokens)
@@ -132,8 +142,7 @@ prose_view extract_from_tokens(source_buffer const& buffer, source_language lang
             continue;
         }
 
-        auto const docstring = language == source_language::python && t.is(token_kind::string_literal)
-                            && is_triple_quoted(t.text) && opens_logical_line(all, index);
+        auto const docstring = language == source_language::python && is_python_docstring(all, index);
         if (!t.is(token_kind::block_comment) && !docstring)
             continue;
 

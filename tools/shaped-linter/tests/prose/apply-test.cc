@@ -157,6 +157,24 @@ TEST("prose apply - python comments go through the python lexer")
     CHECK(problems(r, original) == 0);
 }
 
+TEST("prose apply - a python docstring is prose, not code")
+{
+    // It lexes as a string literal, but every prose rule reads it as prose, so the rule and the
+    // code-unchanged check would otherwise disagree: flagged and unfixable.
+    auto const original = cc::string("def f():\n    \"\"\"Old. Two points.\"\"\"\n    return 1\n");
+    auto const r = build("## a.py\n[2]\n|     \"\"\"One point per line.\"\"\"\n", original);
+
+    CHECK(problems(r, original) == 0);
+}
+
+TEST("prose apply - a triple-quoted string used as data is still code")
+{
+    auto const original = cc::string("x = \"\"\"payload\"\"\"\n");
+    auto const r = build("## a.py\n[1]\n| x = \"\"\"changed\"\"\"\n", original);
+
+    CHECK(problems(r, original) > 0);
+}
+
 TEST("prose apply - changing python code is rejected")
 {
     auto const original = cc::string("x = 1  # note\n");

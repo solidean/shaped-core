@@ -65,6 +65,12 @@ struct prose_stats
     isize words = 0;
 };
 
+/// Whether the token at `index` is a Python docstring: a triple-quoted string opening a logical line.
+///
+/// Every prose rule reads one as prose, so `prose apply`'s code-unchanged check must not read it as code.
+/// The caller is responsible for only asking about a Python token stream.
+bool is_python_docstring(cc::span<token const> tokens, isize index);
+
 /// Extract the prose of `buffer`, reading it as `language`.
 /// `tokens` is that file's token stream and is unused for markdown, which has no lexer.
 prose_view extract_prose(source_buffer const& buffer, source_language language, token_stream const& tokens);
