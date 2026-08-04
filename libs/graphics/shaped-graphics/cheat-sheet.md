@@ -404,7 +404,7 @@ v.aspect_ratio()             // -> float  width/height; both clamped >= 1, so ne
 sg::is_render_target_format(f) // bool — a renderable color format (not depth, not compressed, not undefined)
 ```
 
-## swapchain — window presentation  (dx12 real; via ctx.create_swapchain)
+## swapchain — window presentation  (see docs/concepts/presentation.md; dx12 real, via ctx.create_swapchain)
 
 ```cpp
 #include <shaped-graphics/present/swapchain.hh>

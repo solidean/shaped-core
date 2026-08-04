@@ -29,7 +29,7 @@ namespace sg
 
 /// The layout a bound texture view of this class needs (the single inference point for the texture bind
 /// path): a sampled/read view wants `shader_readonly`, a read-write storage view wants `shader_readwrite`.
-/// Unused until the texture bind path lands — buffers have no layout and never call this.
+/// Only textures reach this — buffers have no layout, and neither does an acceleration structure.
 [[nodiscard]] constexpr texture_layout shader_layout_of(view_class c)
 {
     switch (c)

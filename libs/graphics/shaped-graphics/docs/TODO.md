@@ -82,7 +82,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
-- **Swapchain / presentation.** The windowed-presentation path is in; dx12 is real, and vulkan is a not-implemented `cc::error` stub.
+- **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
+  dx12 is real; vulkan is a not-implemented `cc::error` stub.
   Still open:
   - the **vulkan** implementation — `VkSurfaceKHR` + `VkSwapchainKHR` + acquire/present semaphores;
   - a proper **`native_window_handle` type** to replace the opaque `void*` in `swapchain_description`.

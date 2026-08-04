@@ -100,6 +100,7 @@ The context is where these mechanisms are reached, not where they are explained:
 - [inline upload](upload.inline.md) / [inline download](download.inline.md) — the `cmd.upload` / `cmd.download` siblings that record into a list instead.
 - [caches](caches.md) — `ctx.cached` vs `ctx.uncached`, the content-addressed keys, and the tiered cache behind them.
 - [barriers](barriers.md) — the access tracking a backend emits barriers from, which is why recording never asks you for one.
+- [presentation](presentation.md) — `create_swapchain`, `acquire_backbuffer` and `submit_command_list_and_present`, and why the acquired view carries this frame's size.
 
 ## See also
 

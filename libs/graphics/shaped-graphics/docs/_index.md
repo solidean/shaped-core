@@ -76,6 +76,8 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [raster pipeline](concepts/raster-pipeline.md) — the graphics path:
   a `raster_pipeline` (PSO) with its fixed-function state baked in, why the target formats live in the description,
   and how draws record on the `rendering_scope` handle as well as `cmd.raster` / `cmd.raster.manual`.
+- [presentation](concepts/presentation.md) — the swapchain: why the acquired view rather than the swapchain is this frame's size,
+  back buffers as ordinary borrowed textures, the present handshake split around the submit, and the present fence beside the epoch fence.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue (`ctx.upload`), off the frame path, with automatic per-resource sync so later lists auto-wait.
 - [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.

@@ -38,7 +38,7 @@ enum class sampler_border_color
 };
 
 /// Comparison function for a comparison ("shadow") sampler — compares the fetched texel against the
-/// reference value the shader passes to `SampleCmp`. Also the vocabulary a future depth test will reuse.
+/// reference value the shader passes to `SampleCmp`. Shared with `depth_stencil_state`'s depth test.
 enum class compare_op
 {
     never,

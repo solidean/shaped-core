@@ -322,9 +322,12 @@ void dx12_command_list::compute_declare_array_texture_access(cc::string_view bin
                                                              cc::span<sg::array_texture_access const> elements)
 {
     CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
-    // Texture arrays are blocked on sg::texture (no texture resource exists yet). The API is in place; the
-    // per-element layout + subresource declaration will be applied once textures + the array binding path land.
-    CC_ASSERT(elements.empty(), "texture array access declaration is not implemented yet (no sg::texture)");
+    // Applying the per-element layout + subresource declaration needs a binding-name → bound-resources
+    // reflection map and an array binding path, neither of which exists yet.
+    // Unlike the buffer form above this rejects a non-empty declaration rather than dropping it, since
+    // silently ignoring a required layout would leave the texture in the wrong one.
+    CC_ASSERT(elements.empty(), "texture array access declaration is not implemented yet (needs the array binding "
+                                "path)");
 }
 
 void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
