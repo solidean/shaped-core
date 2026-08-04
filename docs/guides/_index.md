@@ -1,11 +1,12 @@
 # Guides
 
-Task-oriented how-tos for working in shaped-core. (Back to [docs/_index.md](../_index.md).)
+Task-oriented how-tos for working in shaped-core.
+(Back to [docs/_index.md](../_index.md).)
 
 - [building-and-testing.md](building-and-testing.md) — drive `dev.py` (build / test / doctor /
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
-- [disassembly.md](disassembly.md) — `dev.py assembly search` / `show`: a local godbolt over the
-  built object files, for reading the optimizer's actual codegen (a hot loop, an atomic, an inline).
+- [disassembly.md](disassembly.md) — `dev.py assembly`: `search` / `show` are a local godbolt over the built object files, for reading the optimizer's actual codegen.
+  `trace` is the dynamic half — what one invocation really ran, the data it touched, and a static cost model over that.
 - [profiling.md](profiling.md) — measure what the code actually cost at run time: nexus/bench hardware
   performance counters (instructions, cache misses, branch mispredicts) via `nx::bench` and
   `dev.py profiling`.

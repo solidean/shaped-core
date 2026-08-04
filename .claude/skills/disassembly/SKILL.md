@@ -7,17 +7,14 @@ allowed-tools: Bash mcp__repo_tools__repo_search Read
 
 ## What this is
 
-`dev.py assembly` reads the **object files** the current preset built and lets you
-search symbols and disassemble a function — a local godbolt. Full reference:
-[docs/guides/disassembly.md](../../../docs/guides/disassembly.md). Activate the
-`building-and-testing` skill first if the preset isn't built yet.
+`dev.py assembly` reads the **object files** the current preset built and lets you search symbols and disassemble a function — a local godbolt.
+Full reference: [docs/guides/disassembly.md](../../../docs/guides/disassembly.md).
+Activate the `building-and-testing` skill first if the preset isn't built yet.
 
-**Before you attribute a perf delta to a cause, come here.** "It's slower because of
-the TLS access / an extra load / a branch" is a *claim* — verify it in the codegen,
-don't infer it from the numbers. And when a microbenchmark's mock disagrees with the
-real code, pin the **real** symbol into the benchmark (a `CC_DONT_INLINE` probe) and
-diff its disassembly against the mock's; the mock is usually the optimistic one
-(it hoists / folds / DCEs what the real code can't).
+**Before you attribute a perf delta to a cause, come here.** "It's slower because of the TLS access / an extra load / a branch" is a *claim*.
+Verify it in the codegen; don't infer it from the numbers.
+And when a microbenchmark's mock disagrees with the real code, pin the **real** symbol into the benchmark (a `CC_DONT_INLINE` probe) and diff its disassembly against the mock's.
+The mock is usually the optimistic one: it hoists, folds and DCEs what the real code cannot.
 
 ```bash
 uv run dev.py assembly search <pattern> [--preset P | --build-dir D | --objects P] [--target T] [--regex] [--all] [--limit N]
@@ -25,74 +22,60 @@ uv run dev.py assembly show   <symbol>  [--preset P | --build-dir D | --objects 
 uv run dev.py assembly trace  (--target T | --exe P) [--cwd D] (--symbol S | --address A | --spec X) [--skip N] [--traces N] [--sections L] [--memory-regions L] [--mca-cpu C] [--html P] -- <args>
 ```
 
-**`search`/`show` are static — `trace` is dynamic.** When the question is "what *did* it do" rather
-than "what *might* it do" — which branch was taken, where an indirect/virtual call landed, how many
-instructions an invocation actually retired — use `trace`. It runs the binary under a debugger,
-breaks on the symbol, and single-steps one invocation
-([tools/instruction-tracer](../../../tools/instruction-tracer/readme.md); Windows x64, needs a
-`relwithdebinfo-*` preset for symbols). `--skip N` walks past warm-up hits to reach a steady-state
-call — see the warm-up rule below, it is not optional.
+**`search`/`show` are static — `trace` is dynamic.** Use `trace` when the question is "what *did* it do" rather than "what *might* it do".
+That is: which branch was taken, where an indirect/virtual call landed, how many instructions an invocation actually retired.
+It runs the binary under a debugger, breaks on the symbol, and single-steps one invocation ([tools/instruction-tracer](../../../tools/instruction-tracer/readme.md)).
+Windows x64 only, and it needs a `relwithdebinfo-*` preset for symbols.
+`--skip N` walks past warm-up hits to reach a steady-state call — see the warm-up rule below, it is not optional.
 
-**`--stats` first, then read the trace.** It replaces the trace with one row per symbol — self
-instructions, atomics, slow ops, direct/indirect calls, memory reads/writes, branches taken — sorted
-by cost. An 800-line trace is a bad first look; the table tells you which rows are worth reading, and
-the atomics column earns its keep (10 of 797 instructions were ~43% of the cycles on the async probe).
+**`--stats` first, then read the trace.** It replaces the trace with one row per symbol, sorted by cost.
+The columns: self instructions, atomics, slow ops, direct/indirect calls, memory reads/writes, branches taken.
+An 800-line trace is a bad first look, and the table tells you which rows are worth reading.
+The atomics column earns its keep: 10 of 797 instructions were ~43% of the cycles on the async probe.
 Do not hand-bucket a trace with a throwaway script — that is what this flag is.
 
-The `slow` column catches what an instruction count cannot: `idiv` (a `%` on a non-power-of-two),
-`rdtsc`, fences, `pause` (a spinlock actually spinning), `rep` string ops. A footer names them — it
-is how we found that `std::unordered_map` float-divides on every insert for its load factor. All
-zeros is also a result: it means the count is a fair proxy. It cannot see a cache miss, which is
-usually what actually costs you.
+The `slow` column catches what an instruction count cannot: `idiv` (a `%` on a non-power-of-two), `rdtsc`, fences, `pause` (a spinlock actually spinning), `rep` string ops.
+A footer names them — it is how we found that `std::unordered_map` float-divides on every insert for its load factor.
+All zeros is also a result: it means the count is a fair proxy.
+It cannot see a cache miss, which is usually what actually costs you.
 
-**Where the data went, not just the code.** `--sections` composes any of `trace,stats,memory,`
-`cachelines,memory-stats` into one capture (`--stats` is the shortcut for `stats`). The memory
-sections resolve each memory operand's *runtime* address and show what the invocation actually
-touched: a raw chronological list, a **cacheline** view (per-line access count + how many of the 64
-bytes were touched — the "am I using the whole line or 8 bytes of it" check), and a per-symbol
-memory table. Every address is tagged by region — `heap` (allocations + named globals), `stack`
-(another function's frame, reached through a passed-in span), `frame` (the current function's own,
-off by default), `instructions` (code fetches / I-cache footprint, off by default); `--memory-regions`
-picks the set. This is the closest the tracer gets to the cache miss `--stats` is blind to: it shows
-*which* data you touch and how densely, so a scattered-access or half-used-cacheline pattern is
-visible even though the miss latency itself is not.
+**Where the data went, not just the code.** `--sections` composes any of `trace,stats,memory,cachelines,memory-stats,timing` into one capture (`--stats` is the shortcut for `stats`).
+The memory sections resolve each memory operand's *runtime* address and show what the invocation actually touched.
+Three views: a raw chronological list, a **cacheline** view, and a per-symbol memory table.
+Reach for `cachelines` when you suspect the layout rather than the code — it is the closest the tracer gets to the cache miss `--stats` is blind to, showing which data you touch and how densely.
+`--memory-regions` picks which regions show; the default `heap,stack` is what you want unless you are chasing the function's own spills or its I-cache footprint.
+The region taxonomy and the exact limits are in the [readme](../../../tools/instruction-tracer/readme.md#memory).
 
 ```bash
 uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 \
     --sections stats,cachelines -- "<test name>"
 ```
 
-**Put a number on `slow`.** The `timing` section feeds the retired stream to `llvm-mca` (resolved
-automatically) for a static cost model: µops / latency / throughput per instruction, IPC, per-port
-pressure, and a bottleneck breakdown. It is whole-stream (assumes the block loops) and blind to cache
-misses — the same landmine `--stats` can't see — so it tells you what the scheduler would do with the
-instruction mix, not where wall-clock went. `--mca-cpu` overrides the modeled micro-arch (default:
-host). Best viewed in `--html` (timing toggle, side boxes, a pipeline waterfall).
+**Put a number on `slow`.** The `timing` section feeds the retired stream to `llvm-mca`, resolved automatically, for a static cost model.
+Out come µops / latency / throughput per instruction, IPC, per-port pressure, and a bottleneck breakdown.
+It is blind to cache misses — the same landmine `--stats` can't see — so it tells you what the scheduler would do with the instruction mix, not where wall-clock went.
+`--mca-cpu` overrides the modeled micro-arch, and the caveats in full are in the [readme](../../../tools/instruction-tracer/readme.md#timing-llvm-mca).
 
-**A shareable page.** `--html <path>` writes the whole capture — every section plus a godbolt-style
-source view with executed-line highlighting, and the `llvm-mca` timing views when available — to one
-self-contained `.html` file for a browser. It forces a full capture and replaces stdout with a
-one-line summary.
+**A shareable page.** `--html <path>` writes the whole capture to one self-contained `.html` file for a browser.
+That is every section, plus a godbolt-style source view with executed-line highlighting, plus the timing views when available.
+It forces a full capture and replaces stdout with a one-line summary.
 
-**It is not limited to shaped-core.** `--build-dir D` / `--objects P` point `search`/`show` at any
-build tree (an object file or a directory; no preset is resolved, nothing is configured or built),
-and `trace --exe P` traces any executable — the tracer binary still comes from a shaped-core build.
-Targets outside a CMake tree group by the object's directory relative to the scan root, so
-`--target` still filters. Relative paths — `--build-dir`, `--objects`, `--exe`, `--cwd`, `--html` —
-are relative to *your* current directory, and `--cwd` defaults to the traced exe's own directory.
+**It is not limited to shaped-core.** `--build-dir D` / `--objects P` point `search`/`show` at any build tree — an object file or a directory, with no preset resolved and nothing configured or built.
+`trace --exe P` traces any executable, and the tracer binary still comes from a shaped-core build.
+Targets outside a CMake tree group by the object's directory relative to the scan root, so `--target` still filters.
+Relative paths — `--build-dir`, `--objects`, `--exe`, `--cwd`, `--html` — are relative to *your* current directory, and `--cwd` defaults to the traced exe's own directory.
 Details: [Other projects](../../../docs/guides/disassembly.md#other-projects).
 
 ## The loop
 
 1. **Build** the preset you want to inspect (`release-clang` for optimized code;
-   `relwithdebinfo-clang` if you need `--source` interleave). `assembly` is
-   read-only — it does not build for you.
-2. **`search`** for the function. Pattern is a case-insensitive substring (or
-   `--regex`) matched against mangled *and* demangled names; results group by
-   target. Copy the symbol you want.
-3. **`show`** it — exact mangled or demangled name (or a unique substring). Intel
-   syntax, local branches labeled `.L0/.L1`, `call` targets folded from
-   relocations, `lock`/atomics in red.
+   `relwithdebinfo-clang` if you need `--source` interleave).
+   `assembly` is read-only — it does not build for you.
+2. **`search`** for the function.
+   Pattern is a case-insensitive substring (or `--regex`) matched against mangled *and* demangled names, and results group by target.
+   Copy the symbol you want.
+3. **`show`** it — exact mangled or demangled name, or a unique substring.
+   Intel syntax, local branches labeled `.L0/.L1`, `call` targets folded from relocations, `lock`/atomics in red.
 
 ## Why objects, and the gotchas
 
@@ -108,24 +91,20 @@ Details: [Other projects](../../../docs/guides/disassembly.md#other-projects).
 
 ## Pinpointing a hot loop
 
-To land `show` on exactly one loop, extract it into a **uniquely-named,
-`CC_DONT_INLINE`, anonymous-namespace function** and keep it referenced from a
-test (an unreferenced TU-local noinline function is dead-code-eliminated). One
-clean symbol, trivially searchable. Worked examples:
-`node_alloc_free_hotloop_probe` in
-[allocation-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/allocation-benchmark.cc),
-`single_lazy_probe` in
-[async-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/async/async-benchmark.cc).
+To land `show` on exactly one loop, extract it into a **uniquely-named, `CC_DONT_INLINE`, anonymous-namespace function** and keep it referenced from a test.
+An unreferenced TU-local noinline function is dead-code-eliminated.
+One clean symbol, trivially searchable.
+Worked examples: `node_alloc_free_hotloop_probe` in [allocation-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/allocation-benchmark.cc).
+Also `single_lazy_probe` in [async-benchmark.cc](../../../libs/base/clean-core/tests/benchmarks/async/async-benchmark.cc).
 
 ### Warm the probe, then `--skip` past the cold hits
 
-**A probe's first invocation is not the steady state, and `trace` breaks on the
-first hit by default.** One-time costs hide there — a container's first growth (a
-real `malloc`), a lazy init, a cold branch predictor, an unresolved icall. Trace
-that and you will confidently describe a path the benchmark never actually pays.
+**A probe's first invocation is not the steady state, and `trace` breaks on the first hit by default.**
+One-time costs hide there — a container's first growth (a real `malloc`), a lazy init, a cold branch predictor, an unresolved icall.
+Trace that and you will confidently describe a path the benchmark never actually pays.
 
-So: call the probe **several times on the same state** the benchmark reuses, and
-trace with `--skip N` to land on a settled call. Say which N in the probe's
+So: call the probe **several times on the same state** the benchmark reuses, and trace with `--skip N` to land on a settled call.
+Say which N in the probe's comment, so the next reader doesn't re-learn it.
 comment, so the next reader doesn't re-learn it.
 
 ```cpp
