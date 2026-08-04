@@ -5,7 +5,8 @@
 #include <clean-core/fwd.hh>
 #include <clean-core/string/string.hh>
 
-/// Windows x64 single-step instruction tracer. See tools/instruction-tracer/readme.md.
+/// Windows x64 single-step instruction tracer.
+/// See tools/instruction-tracer/readme.md.
 namespace itrace
 {
 using namespace cc::primitive_defines;
@@ -22,7 +23,8 @@ inline constexpr char const* gpr_names[gpr_count] = {
     "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15", //
 };
 
-/// What an instruction does to control flow. Drives branch annotation and the syscall stop.
+/// What an instruction does to control flow.
+/// Drives branch annotation and the syscall stop.
 enum class insn_category
 {
     other,
@@ -33,8 +35,8 @@ enum class insn_category
     syscall,
 };
 
-/// The 16 GPRs plus rflags, sampled before an instruction. Captured with --register-diffs or any
-/// memory section (the effective-address computation reads base/index registers from here).
+/// The 16 GPRs plus rflags, sampled before an instruction.
+/// Captured with --register-diffs, any memory section or --html: the effective-address computation reads base/index registers from here.
 struct register_snapshot
 {
     cc::fixed_array<u64, gpr_count> gpr = {};
@@ -43,11 +45,10 @@ struct register_snapshot
 
 /// Where a touched address lives.
 ///
-/// frame is the executing function's own stack frame (its locals, spills, and the return-address /
-/// saved-register machinery); stack is another function's stack — the case that matters when a
-/// stack array is passed around as a span and reached through a pointer; instructions is code
-/// memory (the instruction fetch itself, giving an I-cache footprint when opted in). heap is
-/// everything else: dynamic allocations and globals (globals keep their name in the access).
+/// frame is the executing function's own stack frame: its locals, spills, and the return-address / saved-register machinery.
+/// stack is *another* function's stack — the case that matters when a stack array is passed around as a span and reached through a pointer.
+/// instructions is code memory, the instruction fetch itself, giving an I-cache footprint when opted in.
+/// heap is everything else: dynamic allocations and globals, and a global keeps its name in the access.
 enum class access_region
 {
     heap,
@@ -56,13 +57,10 @@ enum class access_region
     instructions,
 };
 
-/// One memory location an instruction touched, with the effective address resolved from the
-/// register snapshot taken before the instruction ran.
+/// One memory location an instruction touched, with the effective address resolved from the register snapshot taken before the instruction ran.
 ///
-/// Every memory operand is recorded — explicit data operands, the implicit stack traffic of
-/// push/pop/call/ret (which lands in `frame`), and the instruction fetch. Noise is dropped by
-/// region *filtering* at print time, never by omission here, so one capture serves every region
-/// selection.
+/// Every memory operand is recorded: explicit data operands, the implicit stack traffic of push/pop/call/ret (which lands in `frame`), and the instruction fetch.
+/// Noise is dropped by region *filtering* at print time, never by omission here, so one capture serves every region selection.
 struct memory_access
 {
     u64 address = 0;
@@ -70,20 +68,21 @@ struct memory_access
     bool is_read = false;
     bool is_write = false;
     access_region region = access_region::heap;
-    /// A global's name for a heap-region hit, or the function owning the frame for a stack/frame
-    /// hit, or the containing function for an instruction fetch. Empty when nothing is known.
+    /// A global's name for a heap-region hit, the function owning the frame for a stack/frame hit, or the containing function for an instruction fetch.
+    /// Empty when nothing is known.
     cc::string symbol;
 };
 
 /// One retired instruction.
 ///
-/// The live loop fills only rip/next_rip/rsp/bytes; `length`, `text`, `category` and the is_/…_memory
-/// flags come from the decoder afterwards, and file/line/target_symbol/owner_symbol from symbol
-/// enrichment. Everything past the raw capture is best-effort and stays empty/false when unavailable.
+/// The live loop fills only rip/next_rip/rsp/bytes.
+/// `length`, `text`, `category` and the is_/…_memory flags come from the decoder afterwards, and file/line/target_symbol/owner_symbol from symbol enrichment.
+/// Everything past the raw capture is best-effort and stays empty/false when unavailable.
 struct recorded_instruction
 {
     u64 rip = 0;
-    /// Where the CPU actually went next — the authority for branch annotation. 0 for the last record.
+    /// Where the CPU actually went next — the authority for branch annotation.
+    /// 0 for the last record.
     u64 next_rip = 0;
     u64 rsp = 0;
 
@@ -98,33 +97,32 @@ struct recorded_instruction
     bool is_atomic = false;
     /// A call/jmp through a register or memory — a vtable, function_ref or unique_function hop.
     bool is_indirect = false;
-    /// Has an explicit memory operand it reads / writes. Both are true for a read-modify-write.
+    /// Has an explicit memory operand it reads / writes.
+    /// Both are true for a read-modify-write.
     bool reads_memory = false;
     bool writes_memory = false;
 
-    /// This instruction's name when it is one that costs tens to hundreds of cycles where the rest of
-    /// the stream costs ~1 — `idiv`, `rdtsc`, a fence, a `rep`-prefixed string op. Null otherwise.
-    /// A static string, valid for the process lifetime.
-    ///
-    /// Deliberately not a cost model: it flags that the instruction count will mislead here, and
-    /// leaves the reader to look. See slow_mnemonic_of.
+    /// This instruction's name when it is one of the categorically-not-single-cycle ones — `idiv`, `rdtsc`, a fence, a `rep`-prefixed string op.
+    /// Null otherwise, and a static string valid for the process lifetime.
+    /// See slow_mnemonic_of for what qualifies.
     char const* slow_mnemonic = nullptr;
 
     cc::string file;
     u32 line = 0;
-    /// Where a taken transfer landed, symbolized. Only set when control actually diverged.
+    /// Where a taken transfer landed, symbolized.
+    /// Only set when control actually diverged.
     cc::string target_symbol;
-    /// The function containing `rip`, without an offset. Only filled when stats are requested.
+    /// The function containing `rip`, without an offset.
+    /// Only filled when stats are requested.
     cc::string owner_symbol;
 
-    /// Every memory location this instruction touched, resolved from the before-instruction
-    /// register snapshot. Filled only when a memory section is requested; empty otherwise.
+    /// Every memory location this instruction touched, resolved from the before-instruction register snapshot.
+    /// Filled only when a memory section is requested; empty otherwise.
     cc::vector<memory_access> memory_accesses;
 };
 
-/// True when control did not simply fall through to the next instruction — the authority for whether
-/// a conditional branch was taken. False when unknowable: an undecoded record, or the last one (whose
-/// successor we never saw).
+/// True when control did not simply fall through to the next instruction — the authority for whether a conditional branch was taken.
+/// False when unknowable: an undecoded record, or the last one, whose successor we never saw.
 inline bool diverged(recorded_instruction const& insn)
 {
     if (insn.next_rip == 0 || insn.length == 0)
@@ -165,18 +163,18 @@ struct trace
     cc::string entry_symbol;
     cc::string return_symbol;
 
-    /// The traced thread's stack reservation [low, high), captured at entry. Lets memory
-    /// enrichment tell a stack address from a heap/global one. Both 0 when not captured.
+    /// The traced thread's stack reservation [low, high), captured at entry.
+    /// Lets memory enrichment tell a stack address from a heap/global one.
+    /// Both 0 when not captured.
     u64 stack_low = 0;
     u64 stack_high = 0;
 
     cc::vector<stack_frame> entry_stack;
     cc::vector<recorded_instruction> instructions;
-    /// One snapshot sampled *before* each instruction, plus a trailing one holding what the last
-    /// instruction left behind — so instruction i's effect is registers[i] vs registers[i+1], and
-    /// size is instructions.size() + 1. The trailing entry is absent where the last instruction never
-    /// retired (the syscall stop, which records the gate but refuses to step it). Empty unless
-    /// --register-diffs.
+    /// One snapshot sampled *before* each instruction, plus a trailing one holding what the last instruction left behind.
+    /// So instruction i's effect is registers[i] vs registers[i+1], and size is instructions.size() + 1.
+    /// The trailing entry is absent where the last instruction never retired — the syscall stop, which records the gate but refuses to step it.
+    /// Empty unless registers were captured at all.
     cc::vector<register_snapshot> registers;
 
     step_reason reason = step_reason::instruction_budget;

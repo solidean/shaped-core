@@ -100,7 +100,8 @@ cc::result<target_spec> parse_target_spec(cc::string_view spec)
         return out;
     }
 
-    // 0xN — an absolute address. A bare hex run stays a symbol: `abc` is a plausible function name.
+    // 0xN — an absolute address.
+    // A bare hex run stays a symbol: `abc` is a plausible function name.
     if (spec.starts_with("0x") || spec.starts_with("0X"))
     {
         out.form = target_spec::kind::address;

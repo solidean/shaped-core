@@ -20,10 +20,8 @@ cc::vector<char16_t> to_utf16_z(cc::string_view s)
 
 /// Resolve `exe` to a full path for CreateProcessW's lpApplicationName.
 ///
-/// Needed because passing only a command line makes CreateProcessW parse the executable out of it,
-/// which does not accept a relative forward-slash path — exactly what a shell hands us. Empty when
-/// the path does not name an existing file, in which case the caller lets CreateProcessW do its own
-/// PATH search instead (so a bare "foo.exe" still works).
+/// Passing only a command line makes CreateProcessW parse the executable out of it, which does not accept a relative forward-slash path.
+/// Empty when the path does not name an existing file; the caller then lets CreateProcessW do its own PATH search, so a bare "foo.exe" still works.
 cc::vector<char16_t> resolve_exe_path(cc::string_view exe)
 {
     auto exe_w = to_utf16_z(exe);
@@ -97,7 +95,8 @@ cc::string build_command_line(cc::string_view exe, cc::span<cc::string const> ar
     return out;
 }
 
-/// The image's SizeOfImage, read from its in-memory PE header. 0 when it cannot be read.
+/// The image's SizeOfImage, read from its in-memory PE header.
+/// 0 when it cannot be read.
 u64 read_image_size(void* process, u64 base)
 {
     IMAGE_DOS_HEADER dos = {};
@@ -114,7 +113,8 @@ u64 read_image_size(void* process, u64 base)
     return nt.OptionalHeader.SizeOfImage;
 }
 
-/// The on-disk path behind a debug event's hFile. Empty when it cannot be resolved.
+/// The on-disk path behind a debug event's hFile.
+/// Empty when it cannot be resolved.
 cc::string path_of_handle(void* file_handle)
 {
     if (file_handle == nullptr || file_handle == INVALID_HANDLE_VALUE)
@@ -211,12 +211,12 @@ void debug_session::try_resolve_and_arm()
     auto address = _symbols->resolve(_config.target);
     if (address.has_error())
     {
-        // Not found yet is not fatal — the symbol may live in a DLL that has not loaded. Keep the
-        // last error so run() can report something useful if it never does resolve.
+        // Not found yet is not fatal — the symbol may live in a DLL that has not loaded.
+        // Keep the last error so run() can report something useful if it never does resolve.
         _resolve_error = address.error();
 
-        // Ambiguity is different: a later module can only add candidates, never remove them. Give
-        // up now rather than running the debuggee to completion first.
+        // Ambiguity is different: a later module can only add candidates, never remove them.
+        // Give up now rather than running the debuggee to completion first.
         if (!address.error().candidates.empty())
             _state = state::finished;
 
@@ -366,7 +366,8 @@ u32 debug_session::on_exception(void const* raw, u32 thread_id)
     if (code == EXCEPTION_SINGLE_STEP)
         return on_single_step(thread_id, thread);
 
-    // A real fault. Stop any trace in flight, then let the debuggee's own handlers deal with it.
+    // A real fault.
+    // Stop any trace in flight, then let the debuggee's own handlers deal with it.
     if (_state == state::tracing && thread_id == _traced_thread && _tracer != nullptr)
     {
         _tracer->abort(step_reason::exception);
@@ -434,8 +435,8 @@ cc::result<cc::vector<trace>, symbol_error> debug_session::run(cc::function_ref<
             break;
 
         case EXIT_PROCESS_DEBUG_EVENT:
-            // A trace still in flight never finished; keep what it got. Symbolize before the
-            // continue below lets the process go — this is the last moment the PDB session is live.
+            // A trace still in flight never finished; keep what it got.
+            // Symbolize before the continue below lets the process go — the PDB session is live only until then.
             if (_tracer != nullptr && _tracer->is_active())
             {
                 _tracer->abort(step_reason::process_exited);

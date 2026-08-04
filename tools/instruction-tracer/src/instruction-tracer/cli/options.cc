@@ -7,7 +7,8 @@ namespace itrace
 {
 namespace
 {
-/// Parse a non-negative decimal. Fails on empty/garbage/overflow so a typo'd --skip is loud.
+/// Parse a non-negative decimal.
+/// Fails on empty/garbage/overflow, so a typo'd --skip is loud.
 cc::result<u64> parse_u64(cc::string_view text, cc::string_view flag)
 {
     if (text.empty())
@@ -28,8 +29,9 @@ cc::result<u64> parse_u64(cc::string_view text, cc::string_view flag)
     return value;
 }
 
-/// Apply `fn` to each comma-separated, whitespace-free token of `value`. Empty tokens are skipped,
-/// so "a,,b" and a trailing comma are tolerated. Stops and forwards the first error `fn` returns.
+/// Apply `fn` to each comma-separated, whitespace-free token of `value`.
+/// Empty tokens are skipped, so "a,,b" and a trailing comma are tolerated.
+/// Stops and forwards the first error `fn` returns.
 template <class F>
 cc::result<cc::unit> for_each_token(cc::string_view value, F&& fn)
 {
@@ -328,7 +330,7 @@ cc::result<options> parse_options(cc::span<char const* const> args)
             continue;
         }
 
-        // Back-compat shortcut for `--sections stats`; `--no-stats` clears just that section.
+        // Shortcut for `--sections stats`; `--no-stats` clears just that section.
         {
             bool stats = opts.sections.stats;
             if (match_bool(arg, "stats", stats))
@@ -362,13 +364,12 @@ cc::result<options> parse_options(cc::span<char const* const> args)
     if (!has_target)
         return cc::error("one of --symbol / --address / --target is required (see --help)");
 
-    // No section selected means the trace alone — today's default.
+    // No section selected means the trace alone.
     if (opts.sections.none())
         opts.sections.trace = true;
 
-    // Order-independent: a table/memory section only raises the cap where the user set none,
-    // whichever came first on the command line. A short trace silently corrupts every aggregate.
-    // The HTML export bundles every aggregate, so it wants the same full budget.
+    // Order-independent: the cap is only raised where the user set none, whichever flag came first on the command line.
+    // The HTML export bundles every aggregate, so it takes the same budget.
     if ((opts.sections.any_non_trace() || !opts.html_path.empty()) && !explicit_instructions)
         opts.instructions = stats_instruction_default;
 

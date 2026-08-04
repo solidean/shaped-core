@@ -24,12 +24,14 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// 0 = traced something, 1 = bad usage / launch failure, 2 = the target never resolved.
+// 0 = traced something.
+// 1 = bad usage, or the --html write failed.
+// 2 = nothing traced: the target was never resolved or entered, or the debuggee never launched.
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_unresolved = 2;
 
-// --- HTML export metadata: gathered post-run from the environment, all best-effort. ---
+// --- HTML export metadata: gathered post-run from the environment, all best-effort ---
 
 /// Current wall clock in UTC, ISO 8601 (e.g. "2026-07-18T14:03:21Z").
 cc::string current_iso_utc()
@@ -40,8 +42,9 @@ cc::string current_iso_utc()
                       st.wSecond);
 }
 
-/// The OS name and version, e.g. "Windows 11 Pro 10.0.26200". RtlGetVersion is accurate where
-/// GetVersionEx lies under a manifest; the friendly name comes from the registry (may lag on Win11).
+/// The OS name and version, e.g. "Windows 11 Pro 10.0.26200".
+/// RtlGetVersion is accurate where GetVersionEx lies under a manifest.
+/// The friendly name comes from the registry, which may lag on Win11.
 cc::string os_version_string()
 {
     OSVERSIONINFOW vi = {};
@@ -83,9 +86,9 @@ cc::result<cc::unit> write_text_file(cc::string_view path, cc::string_view conte
     return cc::unit{};
 }
 
-/// Run llvm-mca over every trace and align its analysis back onto the full instruction stream. One
-/// mca_result per trace (parallel to `traces`); a launch/parse failure yields an unavailable result
-/// rather than aborting. `tool` must be non-empty (the caller gates on --mca).
+/// Run llvm-mca over every trace and align its analysis back onto the full instruction stream.
+/// One mca_result per trace, parallel to `traces`; a launch or parse failure yields an unavailable result rather than aborting.
+/// `tool` must be non-empty — the caller gates on --mca.
 cc::vector<itrace::mca_result> gather_mca(cc::span<itrace::trace const> traces, cc::string_view tool, cc::string_view cpu)
 {
     cc::vector<itrace::mca_result> results;
@@ -134,10 +137,10 @@ int run(itrace::options const& opts)
     auto const& sections = opts.sections;
     bool const html = !opts.html_path.empty();
 
-    // Source lines only feed the trace section, and each is a PDB lookup per instruction; the owner
-    // feeds the tables and the memory attribution; the memory pass needs the register snapshots, so
-    // it forces register capture even without --register-diffs. The HTML export bundles every view,
-    // so it forces all of them on.
+    // Source lines only feed the trace section, and each one is a PDB lookup per instruction.
+    // The owner feeds the tables and the memory attribution.
+    // The memory pass needs the register snapshots, so it forces register capture even without --register-diffs.
+    // The HTML export bundles every view, so it forces all of them on.
     bool const want_source = html || (sections.trace && opts.source);
     bool const want_owner = html || sections.stats || sections.memory_stats;
     bool const want_memory = html || sections.any_memory();
@@ -145,8 +148,7 @@ int run(itrace::options const& opts)
 
     itrace::debug_session session(cc::move(config));
 
-    // Enrichment needs the debuggee's symbols, so it happens inside run()'s lifetime via the
-    // callback below rather than after the session tears down.
+    // Enrichment needs the debuggee's symbols, so it runs inside run()'s lifetime via the callback below.
     auto traces = session.run(
         [&](itrace::trace& t, itrace::symbol_session const& symbols)
         {
@@ -174,15 +176,14 @@ int run(itrace::options const& opts)
     mem.instructions = opts.regions.instructions;
     mem.instruction_addresses = opts.memory_instruction_addresses;
 
-    // llvm-mca is the headline of both the timing section and the HTML report. It needs only the
-    // decoded instruction text (no extra capture), and soft-degrades when --mca is absent or fails.
+    // llvm-mca needs only the decoded instruction text, no extra capture.
+    // It soft-degrades when --mca is absent or fails.
     cc::vector<itrace::mca_result> mca_results;
     if ((sections.timing || html) && !opts.mca_tool.empty())
         mca_results = gather_mca(traces.value(), opts.mca_tool, opts.mca_cpu);
 
-    // The HTML export bundles every view into one self-contained file. It is an output *format*,
-    // orthogonal to --sections: without an explicit --sections it replaces the stdout rendering with
-    // a one-line summary; with one, it writes the file and still prints the requested sections.
+    // Without an explicit --sections, --html replaces the stdout rendering with a one-line summary.
+    // With one, it writes the file and still prints the requested sections.
     if (html)
     {
         itrace::html_export_meta meta;
@@ -214,8 +215,7 @@ int run(itrace::options const& opts)
         }
     }
 
-    // Print each selected section in a fixed order, all from this one capture. A blank line
-    // separates them.
+    // Print each selected section in a fixed order, all from this one capture.
     bool need_separator = false;
     auto const separate = [&]
     {
@@ -279,8 +279,8 @@ int main(int argc, char const* const* argv)
 {
     auto opts = itrace::parse_options(cc::span<char const* const>(argv, isize(argc)));
 
-    // Resolve color before the first byte of output, including the usage error below. A parse
-    // failure has no options to read, so that path auto-detects.
+    // Resolve color before the first byte of output, including the usage error below.
+    // A parse failure has no options to read, so that path auto-detects.
     cc::console::configure(opts.has_value() ? opts.value().color : cc::console::color_mode::automatic);
 
     if (opts.has_error())
