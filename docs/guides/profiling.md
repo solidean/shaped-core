@@ -3,7 +3,8 @@
 Measuring what code actually cost when it ran — not what it might do.
 Back to [guides](_index.md).
 
-This is the dynamic counterpart to [disassembly.md](disassembly.md): that guide reads the *static* codegen (what the optimizer emitted), while this one measures the *runtime* cost (what the CPU actually spent).
+This is the dynamic counterpart to [disassembly.md](disassembly.md): that guide reads the *static* codegen the optimizer emitted.
+This one measures the *runtime* cost the CPU actually spent.
 More profiling tooling will land here over time; today it covers hardware performance counters.
 
 ## Hardware performance counters
@@ -37,8 +38,8 @@ auto const m2 = nx::bench::measure_hw_counters([&] { work(); }, {
 
 The counters (`hw_counter`): `elapsed_nanoseconds`, `reference_cycles`, `instructions_retired`, `branch_instructions`, `branch_misses`, `cache_l1d_misses`, `cache_llc_references`, `cache_llc_misses`.
 
-The call is **best-effort and never fails as a whole**.
-It always yields the baseline — elapsed time, and on x86 a reference-cycle count — with no privileges anywhere, including virtualized CI.
+The call is **best-effort and never fails as a whole**, which is the contract [hardware_counters.hh](../../libs/base/nexus/src/nexus/bench/hardware_counters.hh) states.
+It always yields the baseline — elapsed time plus a reference-cycle count — with no privileges anywhere, including virtualized CI.
 A PMU counter the machine cannot read this run comes back with `value_of() == nullopt` rather than erroring, so gate hard assertions on `has_value()`, not on a machine assumption.
 
 ### Discovering what a machine can measure
@@ -107,5 +108,6 @@ uv run dev.py --mirror-test-output test "nexus bench - 2d traversal cache effect
 
 ## See also
 
-- [disassembly.md](disassembly.md) — the static side: read the emitted codegen, and with `dev.py assembly trace` see which path an invocation actually ran plus the data it touched (a cache footprint the counters here quantify but do not localize).
+- [disassembly.md](disassembly.md) — the static side: read the emitted codegen, and with `dev.py assembly trace` see which path an invocation actually ran plus the data it touched.
+  That gives a cache footprint the counters here quantify but do not localize.
 - [perf-results.md](perf-results.md) — recording benchmark *metrics* over time (`GUIDE_BENCHMARK` + `nx::guide`), distinct from the ad-hoc per-region counters here.
