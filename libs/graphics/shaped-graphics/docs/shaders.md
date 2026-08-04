@@ -13,9 +13,9 @@ shaped-shader-compiler-dxc (ssc::dxc::)   HLSL -> DXIL
 shaped-graphics (sg::)           compiled_shader, shader_stage, shader_format, context
 ```
 
-sg owns only the **vocabulary** — what a compiled shader *is* and what a context accepts. Everything
-that reads, compiles, reloads or ships one sits above it. That is why you can use sg with no shader
-library at all, and why a shader library can be replaced without touching sg.
+sg owns only the **vocabulary**: what a compiled shader *is*, and what a context accepts.
+Everything that reads, compiles, reloads or ships one sits above it.
+That is why sg is usable with no shader library at all, and why a shader library can be replaced without touching sg.
 
 ## What sg owns
 
@@ -27,13 +27,13 @@ library at all, and why a shader library can be replaced without touching sg.
 | `sg::async_compiled_shader` | `cc::shared_async<compiled_shader>` — compilation is asynchronous and fallible |
 | `ctx.accepted_shader_formats()` / `ctx.accepts_shader_format(f)` | what bytecode *this* context can consume (dx12 → DXIL, vulkan → SPIR-V) |
 
-A `compiled_shader` is a pure value. sg never produces one — it only consumes them, through
-[pipelines](concepts/raster-pipeline.md) and [caches](concepts/caches.md).
+A `compiled_shader` is a pure value.
+sg never produces one — it only consumes them, through [pipelines](concepts/raster-pipeline.md) and [caches](concepts/caches.md).
 
 ## Declaring shaders: a package
 
-A **shader package** is one target's shaders. Any target declares its own — a library, an app, or a
-test binary — in its own CMakeLists:
+A **shader package** is one target's shaders.
+Any target declares its own — a library, an app, or a test binary — in its own CMakeLists:
 
 ```cmake
 sc_add_shader_package(
@@ -87,8 +87,8 @@ lib.add_package(my::shaders::package());                 // fills in the symbols
 lib.start_hot_reload();                                  // after every package
 ```
 
-Nothing else touches the library — call sites go through the generated symbols. It is not a singleton,
-but the generated symbols *are* process-wide globals, so only one library may exist at a time.
+Nothing else touches the library; call sites go through the generated symbols.
+It is not a singleton, but the generated symbols *are* process-wide globals, so only one library may exist at a time.
 
 ## Hot reload
 
@@ -98,14 +98,17 @@ that pull it in.
 
 The contract that matters:
 
-- **A reload never blocks a consumer.** The watcher recompiles on its own thread and only *stages* the
-  result. `acquire` promotes it once it is ready; until then you keep getting the shader you already had.
-- **A broken edit is survivable.** If the new shader does not compile, the last good one keeps running
-  and `asset->last_error()` says why. Fix the file, save again, and it recovers.
-- **You are told when it changed.** `asset->generation()` moves when a shader is replaced — cache it to
-  know when to rebuild a pipeline. `lib.generation()` is the coarse "something, somewhere changed".
-- **An idle watcher costs nothing.** The OS says when a file moved, so there is no interval and no
-  periodic wakeup — a save reaches the watcher directly rather than being noticed on the next tick.
+- **A reload never blocks a consumer.**
+  The watcher recompiles on its own thread and only *stages* the result.
+  `acquire` promotes it once ready; until then you keep getting the shader you already had.
+- **A broken edit is survivable.**
+  If the new shader does not compile, the last good one keeps running and `asset->last_error()` says why.
+  Fix the file, save again, and it recovers.
+- **You are told when it changed.**
+  `asset->generation()` moves when a shader is replaced — cache it to know when to rebuild a pipeline.
+  `lib.generation()` is the coarse "something, somewhere changed".
+- **An idle watcher costs nothing.**
+  The OS says when a file moved, so there is no interval and no periodic wakeup: a save reaches the watcher directly rather than being noticed on the next tick.
 
 ```cpp
 if (auto const g = my::shaders::vignette.compute.main->generation(); g != known_generation)
@@ -118,11 +121,10 @@ if (auto const g = my::shaders::vignette.compute.main->generation(); g != known_
 Where there are no threads (`SC_THREADS=OFF`, WebAssembly), pass `{.unthreaded = true}` and call
 `lib.poll_hot_reload()` yourself — it is a no-op otherwise, so it is safe to call every frame either way.
 
-Where the OS cannot be asked to notify — no threads, a platform whose watch backend is not written yet
-(today: everything but Windows), or a source directory that is not there — the watcher quietly falls back
-to rescanning every `reload_config::interval_ms`. Nothing about the contract above changes; only the
-latency and the idle cost do. `{.force_polling = true}` takes that path deliberately, which is only worth
-doing to test it.
+Where the OS cannot be asked to notify, the watcher quietly falls back to rescanning every `reload_config::interval_ms`.
+That covers a build without threads, a platform whose watch backend is not written yet (today, everything but Windows), and a source directory that is not there.
+Nothing about the contract above changes — only the latency and the idle cost do.
+`{.force_polling = true}` takes that path deliberately, which is only worth doing to test it.
 
 ## Dev vs shipping
 
@@ -131,18 +133,18 @@ There is **no mode flag**. The package generator does two things at build time:
 1. bakes the absolute path of your `SOURCE_DIR` into the generated code, and
 2. embeds every shader source — including the transitive `#include` closure — into the binary.
 
-At startup the library mounts the embedded copy, then mounts the source directory *over* it if that
-directory exists. A dev machine has the sources, so it reads and watches them. A shipped binary does
-not, so it falls back to what was embedded and is entirely self-contained. Same code, same build, no
-probing for "am I installed".
+At startup the library mounts the embedded copy, then mounts the source directory *over* it if that directory exists.
+A dev machine has the sources, so it reads and watches them.
+A shipped binary does not, so it falls back to what was embedded and is entirely self-contained.
+Same code, same build, and no probing for "am I installed".
 
-Shipping still compiles at startup, so DXC ships with the binary today. Precompiled bytecode — baked at
-build time and shipped instead of source — is [planned](../../shaped-shader-library/docs/structure.md).
+Shipping still compiles at startup, so DXC ships with the binary today.
+Precompiled bytecode — baked at build time and shipped instead of source — is [planned](../../shaped-shader-library/docs/structure.md).
 
 ## Where shader sources come from
 
-slib reaches every shader through a **mounted virtual filesystem**, never a raw path. A package mounts
-at its own name; anything else can be mounted anywhere:
+slib reaches every shader through a **mounted virtual filesystem**, never a raw path.
+A package mounts at its own name, and anything else can be mounted anywhere:
 
 ```cpp
 lib.mount("common", std::make_shared<slib::real_filesystem>(shared_shader_dir));

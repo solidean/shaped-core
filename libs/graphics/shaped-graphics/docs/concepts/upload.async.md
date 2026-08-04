@@ -99,7 +99,7 @@ Not invariants — v1 shortcuts:
 - **Persistent buffers only**, and **single-writer**: an async upload to a buffer concurrently used by an in-flight list is the caller's hazard to avoid.
 - **In-order copies (head-of-line blocking).**
   Copies run strictly in submission order on the transfer queue, so a reverse wait on a slow command list stalls *all* later async copies behind it, not just the ones on that buffer.
-  The prototype avoided this by pulling blocked jobs out of order — carefully, to keep same-buffer uploads composing — and filling around them, which remains a deferred optimization.
+  Pulling blocked jobs out of order and filling around them is the deferred optimization, and it has to keep same-buffer uploads composing.
 - **Coarser than per-buffer state**: the stamps are single monotonic values per buffer, a down-payment on the per-resource state-tracking layer landing separately, which should replace them.
 - **No CPU-observable completion** — no `upload_token`, no future.
   Completion is expressed purely as the automatic GPU wait; a cheap poll on the completion fence could be exposed later if a "safe to reference now" signal is wanted.

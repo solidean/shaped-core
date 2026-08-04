@@ -4,7 +4,8 @@ Graphics-API wrapper.
 Namespace `sg`.
 Depends on clean-core + typed-geometry.
 Headers are included by full path from `src/`, and the tree is grouped by topic: `#include <shaped-graphics/<folder>/<name>.hh>`.
-The folders are `barrier/ binding/ command_list/ compute/ context/ memory/ present/ query/ raster/ raytracing/ resource/ routine/`; only `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh` and `bytes_future.hh` sit at the root.
+The folders are `barrier/ binding/ command_list/ compute/ context/ memory/ present/ query/ raster/ raytracing/ resource/ routine/`.
+Only `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh` and `bytes_future.hh` sit at the root.
 See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.
@@ -12,13 +13,12 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 > The **vulkan** backend implements device / buffer creation, and its recording, barrier, raster and raytracing paths are still stubs.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
-> **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): resource creates
-> come in two flavors — a throwing default `create_*` (returns the handle, raises a typed
-> `sg::exception` on failure) and a fallible `try_create_*` (returns `cc::result`, for exception-free
-> callers / local fallback). `create_command_list()` is infallible (returns the handle; throws only on
-> device loss). Contract violations (bad size, missing usage, null args, using a transient resource past
-> its epoch) `CC_ASSERT` — they are bugs, not runtime failures. Device loss is sticky: `is_device_lost()`
-> / `device_loss_reason()`, and submit / advance / fence waits throw `sg::device_lost_exception`.
+> **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
+> A throwing default `create_*` returns the handle and raises a typed `sg::exception` on failure; a fallible `try_create_*` returns `cc::result`, for exception-free callers and local fallback.
+> `create_command_list()` is infallible — it returns the list, and throws only on device loss.
+> Contract violations `CC_ASSERT`: a bad size, a missing usage, a null argument, a transient resource used past its epoch.
+> Those are bugs, not runtime failures.
+> Device loss is sticky — `is_device_lost()` / `device_loss_reason()` — and submit / advance / fence waits throw `sg::device_lost_exception`.
 
 How to read this: each block leads with the include; one symbol per line with a trailing
 comment giving the return type / intuition.
@@ -354,8 +354,8 @@ tex.as_depth_stencil_view()                    // -> depth_stencil_view  (needs 
 tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face as a 2D target (also _depth_stencil_)
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
-// bind a texture view in a compute dispatch → it auto-transitions to shader_read (SRV) / storage (UAV).
-// NOTE: SRV/UAV/RTV/DSV + samplers exist; texture upload/download/copy and the render-pass consumer remain future.
+// bind a texture view in a compute dispatch → it auto-transitions via shader_layout_of:
+// sampled → texture_layout::shader_readonly (SRV), storage → shader_readwrite (UAV).
 ```
 
 ## views — strongly-typed resource views  (see docs/concepts/views.md)

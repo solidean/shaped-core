@@ -18,7 +18,8 @@ Derive from the CRTP base `sg::render_routine<Derived>` and override up to three
 
 Most routines need only `init_declare`; the other two default to no-ops.
 Re-init is driven by sg's **process-global reload generation** (`sg::reload_generation()`):
-when content derived state is invalidated it moves (the shader library calls `sg::signal_reload()` on hot reload), and the next `acquire` re-runs declare + materialize while `init_once` state is preserved.
+When content-derived state is invalidated it moves — the shader library calls `sg::signal_reload()` on hot reload.
+The next `acquire` then re-runs declare and materialize, while `init_once` state is preserved.
 
 The customary call shape is a **static `execute()`** taking the command list.
 It opens with `acquire(cmd)` or `acquire_exclusive(cmd)` — which finds (or lazily creates) this routine's per-context instance, initializes it, and hands it back —
@@ -97,7 +98,7 @@ The memo holds only a weak reference, so it can never keep a routine alive past 
 ## Threading
 
 A routine is a per-context singleton handed to every caller on that context, so the threading model has to be explicit.
-It is three guarantees, and all three are now the framework's:
+Three guarantees, all of them the framework's:
 
 1. **The registry is guarded.** Acquiring is safe from parallel command-list recording.
 2. **There is one lock per routine, and it covers both the init phases and everything the routine owns.**
@@ -128,19 +129,23 @@ private:
 };
 ```
 
-`acquire_exclusive` is the one to reach for: a routine is expected to hold state — a pipeline cache keyed by target format, a resource registry, a scratch buffer that grows — and the guard is what makes writing it safe.
+`acquire_exclusive` is the one to reach for.
+A routine is expected to hold state — a pipeline cache keyed by target format, a resource registry, a scratch buffer that grows — and the guard is what makes writing it safe.
 Keep the guard to the scope that actually mutates; it serializes every other thread recording that routine for as long as it lives.
 
-`acquire` is the other half, and it takes **no lock at all** — it returns `Derived const&`, so only non-mutating members are reachable.
-That makes it a real contract rather than a guarantee: **whatever the const path can reach must be immutable after init, or self-guarded on its own** (`sr::keyed_pipeline_cache` is, which is why its whole acquire path is `const`).
-A reload on another thread re-runs `init_declare` while this thread reads, so **a routine whose `execute` touches anything `init_declare` writes belongs on `acquire_exclusive`** — which in practice is nearly all of them.
+`acquire` is the other half, and it takes **no lock at all**: it returns `Derived const&`, so only non-mutating members are reachable.
+That makes it a contract rather than a guarantee — **whatever the const path can reach must be immutable after init, or self-guarded on its own**.
+`sr::keyed_pipeline_cache` is self-guarded, which is why its whole acquire path is `const`.
+A reload on another thread re-runs `init_declare` while this thread reads.
+So **a routine whose `execute` touches anything `init_declare` writes belongs on `acquire_exclusive`**, which in practice is nearly all of them.
 
 Taking a *different* routine's guard while holding your own is fine — `sv::view_renderer` drives its leaf routines under its own guard, and today they take none of their own.
 The lock is not recursive, so the two rules are: never re-acquire the *same* routine under its own guard, and take any two routines in the same order everywhere.
 
 Both halves of that are an approximation of the model this actually wants, and the gap is a missing clean-core type:
 **the init phases should exclude every `execute`, while `execute` calls that only read should run in parallel with each other.**
-A read-only routine like `sr::blit_routine` has no reason to serialize against another thread's `execute`, and `acquire`'s no-lock path is not the same thing as a shared one — a reload can still land mid-read.
+A read-only routine like `sr::blit_routine` has no reason to serialize against another thread's `execute`.
+And `acquire`'s no-lock path is not the same thing as a shared one — a reload can still land mid-read.
 Closing it needs a `cc::shared_mutex<T>` beside `cc::mutex<T>`; it is tracked in the [sg TODO](TODO.md).
 
 Do not `clear()` / `evict()` a registry while another thread is still recording against the same context.

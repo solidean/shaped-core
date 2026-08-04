@@ -30,11 +30,11 @@ asynchronously; `ctx.uncached.create_raytracing_pipeline` is the synchronous esc
 
 ## Two phases: a handle registers, an index places
 
-Registering a shader in the pipeline returns a **handle** (`raygen_shader_handle`, `miss_shader_handle`,
-`hit_shader_handle`, `callable_shader_handle`) — its slot in the pipeline. Adding that handle to a
-[`raytracing_shader_table`](../../src/shaped-graphics/raytracing/raytracing_shader_table.hh) returns an **index**
-(`raygen_index`, …) — its slot in the *table*, which is what HLSL `TraceRay` / `dispatch_rays` address at
-launch. The table maps handle → index, so the same pipeline can back several tables with different layouts.
+Registering a shader on the `raytracing_pipeline_description` returns a **handle**: its slot in the pipeline.
+One per category — `raygen_shader_handle`, `miss_shader_handle`, `hit_shader_handle`, `callable_shader_handle`.
+Adding that handle to a [`raytracing_shader_table_description`](../../src/shaped-graphics/raytracing/raytracing_shader_table.hh) returns an **index** (`raygen_index`, …), its slot in the *table*.
+The index is what HLSL `TraceRay` and `dispatch_rays` address at launch.
+The table maps handle → index, so the same pipeline can back several tables with different layouts.
 
 ```
 raytracing_pipeline_description        raytracing_shader_table
@@ -45,24 +45,22 @@ raytracing_pipeline_description        raytracing_shader_table
 
 ## "Shader table", not "SBT" — and why it holds only an identifier
 
-The type is named `raytracing_shader_table` (the friendly name), not "SBT". Each record stores **only** the
-backend's 32-byte shader identifier — no local root arguments. That is deliberate: local-record data has no
-portable HLSL→SPIR-V spelling across dx12/vulkan, and the table is a hot path. Resources are bound the same
-way as compute — through the pipeline's one **global** root signature (`cmd.raytracing.bind_group`, which
-binds through the compute root signature). Local root signatures are deferred.
+The type is named `raytracing_shader_table` — the friendly name, not "SBT".
+Each record stores **only** the backend's 32-byte shader identifier, with no local root arguments.
+That is deliberate: local-record data has no portable HLSL→SPIR-V spelling across dx12 and vulkan, and the table is a hot path.
+Resources bind the same way as in compute, through the pipeline's one **global** root signature — `cmd.raytracing.bind_group` binds through the compute root signature.
+Local root signatures are deferred.
 
-The dx12 table lays out four sections (raygen / miss / hit / callable) with the DXR alignments — records at
-32 bytes, sections at 64 — copies the pipeline's stored identifiers by handle index, and uploads them into
-a shader-readable buffer, exposing the GPU address ranges `DispatchRays` needs. (It is backed by a plain
-readable buffer for now; `types.hh` reserves a dedicated `shader_binding_table` usage as future work.)
+The dx12 table lays out four sections (raygen / miss / hit / callable) with the DXR alignments: records at 32 bytes, sections at 64.
+It copies the pipeline's stored identifiers by handle index, uploads them into a shader-readable buffer, and exposes the GPU address ranges `DispatchRays` needs.
+That plain readable buffer is the storage today, and the table's own abstraction is the open item — [types.hh](../../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately.
 
 ## dispatch_rays reuses the compute bind/hazard machinery
 
-[`cmd.raytracing.dispatch_rays(table, raygen, width, height, depth)`](../../src/shaped-graphics/command_list/raytracing.hh)
-records the trace. In dx12 it binds the state object with `SetPipelineState1`, binds groups through the
-compute root signature, then runs the same **declare-hazards → flush → op** rhythm as `compute_dispatch`
-at `pipeline_stage_flags::raytracing`: a bound `tlas` surfaces as `accel_read`, and the shader-table buffer
-is declared `shader_read`, before `ID3D12GraphicsCommandList4::DispatchRays`.
+[`cmd.raytracing.dispatch_rays(table, raygen, width, height, depth)`](../../src/shaped-graphics/command_list/raytracing.hh) records the trace.
+In dx12 it binds the state object with `SetPipelineState1` and binds groups through the compute root signature.
+It then runs the same **declare-hazards → flush → op** rhythm as `compute_dispatch`, at `pipeline_stage_flags::raytracing`.
+A bound `tlas` surfaces as `accel_read` and the shader-table buffer is declared `shader_read`, before `ID3D12GraphicsCommandList4::DispatchRays`.
 
 ## See also
 

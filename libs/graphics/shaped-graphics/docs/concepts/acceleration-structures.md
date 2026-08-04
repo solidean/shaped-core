@@ -1,23 +1,21 @@
 # Concept: acceleration structures
 
-A ray-tracing **acceleration structure** is an opaque, driver-built spatial index the GPU traverses to
-find ray/geometry hits. sg exposes two: a **`blas`** (bottom-level) indexes the triangles or procedural
-primitives of one mesh; a **`tlas`** (top-level) indexes a set of *instances*, each placing a `blas` into
-the world with a transform. A ray tracer traces against a `tlas`.
+A ray-tracing **acceleration structure** is an opaque, driver-built spatial index the GPU traverses to find ray/geometry hits.
+sg exposes two.
+A **`blas`** (bottom-level) indexes the triangles or procedural primitives of one mesh; a **`tlas`** (top-level) indexes a set of *instances*, each placing a `blas` into the world with a transform.
+A ray tracer traces against a `tlas`.
 
-Two ideas shape the design: the resources are **plain vocabulary types with no typed wrapper**, and
-**creating one is a recorded GPU build**, not a `ctx.*` allocation like every other sg resource.
+Two ideas shape the design.
+The resources are **plain vocabulary types with no typed wrapper**, and **creating one is a recorded GPU build** rather than a `ctx.*` allocation like every other sg resource.
 
 ## `blas` / `tlas` are the vocabulary types — no `raw_`/typed split
 
-[`raw_buffer`](../../src/shaped-graphics/resource/raw_buffer.hh) and `raw_texture` split into a raw resource plus a
-typed wrapper (`buffer<T>`, `texture<Traits>`) because they carry a *user-defined element type* worth
-layering type safety over. An acceleration structure has none — it is an opaque structure the driver
-builds and the tracer reads; there is nothing to type. So there is no `raw_blas`: **`blas` and `tlas` are
-the resources directly**, handled as `blas_handle` / `tlas_handle` (`std::shared_ptr<... const>`, shared-
-immutable, like every sg resource handle). Each is abstract; a backend subclasses it and owns one opaque
-[`accel_structure_storage`](../../src/shaped-graphics/types.hh) buffer plus cheaply-derived stats. That a
-backend may represent BLAS and TLAS with the same native object is its business — sg keeps them distinct.
+[`raw_buffer`](../../src/shaped-graphics/resource/raw_buffer.hh) and `raw_texture` split into a raw resource plus a typed wrapper — `buffer<T>`, `texture<Traits>`.
+They do so because they carry a *user-defined element type* worth layering type safety over.
+An acceleration structure has none: it is an opaque structure the driver builds and the tracer reads, with nothing to type.
+So there is no `raw_blas` — **`blas` and `tlas` are the resources directly**, handled as `blas_handle` / `tlas_handle` (`std::shared_ptr<... const>`, shared-immutable like every sg resource handle).
+Each is abstract; a backend subclasses it and owns one opaque [`accel_structure_storage`](../../src/shaped-graphics/types.hh) buffer plus cheaply-derived stats.
+That a backend may represent BLAS and TLAS with the same native object is its business — sg keeps them distinct.
 
 ## A BLAS is built from geometry; a TLAS from instances that reference BLASes
 
@@ -29,9 +27,8 @@ fields (below). Holding the handle is the ownership edge: **a TLAS instance keep
 **BLAS must be fully built before the TLAS that references it is built** — the top-level build reads each
 referenced BLAS's storage.
 
-Build-input buffers (vertices, indices, AABBs, transforms) must carry the
-[`accel_structure_build_input`](../../src/shaped-graphics/types.hh) usage; the result lives in an
-`accel_structure_storage` buffer. Both usages already exist in `buffer_usage`.
+Build-input buffers — vertices, indices, AABBs, transforms — must carry the [`accel_structure_build_input`](../../src/shaped-graphics/types.hh) usage.
+The result lives in an `accel_structure_storage` buffer.
 
 ## Build inputs are a backend-neutral common denominator
 
@@ -61,25 +58,21 @@ Flags select trade-offs the driver bakes into the structure; they cannot be chan
 
 ## Building is a recorded command, so it lives on `cmd.raytracing`
 
-Every other sg resource is created by a `ctx.*` factory that just allocates. An acceleration structure
-cannot be: its result size comes from a **prebuild query over the build inputs**, and producing it is GPU
-work. Allocation and build are therefore one **recorded** step — and sg never records command work from a
-`ctx.*` method. So creation is a command-list op on a new **`cmd.raytracing`** scope (mirroring
-[`cmd.compute`](../../src/shaped-graphics/command_list/compute.hh) / `cmd.copy`, and the future home of
-trace-rays): `cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the result buffer,
-record the build with **transient** scratch, and return the handle.
+Every other sg resource is created by a `ctx.*` factory that just allocates.
+An acceleration structure cannot be: its result size comes from a **prebuild query over the build inputs**, and producing it is GPU work.
+Allocation and build are therefore one **recorded** step, and sg never records command work from a `ctx.*` method.
+So creation is a command-list op on the **`cmd.raytracing`** scope, which also carries `dispatch_rays`.
+`cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the result buffer, record the build with **transient** scratch, and return the handle.
 
-The returned handle is **persistent — valid across epochs**. "How long may I use this handle" *is* the
-persistent-vs-transient axis (see [memory](memory.md)): persistent structures outlive the epoch that built
-them and are rebuilt/refit only when their geometry changes. A **transient (single-epoch) variant may come
-later** for structures rebuilt from scratch every frame; it would be a property of the build call's result,
-not a separate scope. Build scratch is transient either way.
+The returned handle is **persistent — valid across epochs**.
+"How long may I use this handle" *is* the persistent-vs-transient axis — see [memory](memory.md).
+A persistent structure outlives the epoch that built it, and is rebuilt or refit only when its geometry changes.
+A **transient (single-epoch) variant may come later** for structures rebuilt from scratch every frame, and it would be a property of the build call's result rather than a separate scope.
+Build scratch is transient either way.
 
-Ordering is inferred, never hand-synchronized: a build declares
-[`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over its
-storage and `accel_read` over each referenced BLAS; a later trace declares `accel_read` on the
-`raytracing` stage. The [barriers](barriers.md) system turns those into the right GPU barriers — the
-`accel_*` accesses and stages already exist, and `is_unordered_write` already covers `accel_write`.
+Ordering is inferred, never hand-synchronized.
+A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over its storage, and `accel_read` over each referenced BLAS.
+A later trace declares `accel_read` on the `raytracing` stage, and the [barriers](barriers.md) system turns those into the right GPU barriers.
 
 ## Load-bearing invariants
 
@@ -114,28 +107,22 @@ Placed allocations, which a future transient variant would want, are not impleme
 
 ## What's implemented today vs deferred
 
-**Today:** the single-shot build path is implemented. `sg::blas` / `sg::tlas` +
-`blas_handle`/`tlas_handle`, the input vocabulary (`blas_triangles`, `blas_aabbs`, `tlas_instance`,
-`accel_build_flags`, `instance_cull_mode`, `index_format`), and the `cmd.raytracing` scope
-(`build_blas` for triangles and procedural AABBs, `build_tlas`, `is_supported()`) all exist. **dx12** is the
-reference realization (prebuild-sized result + transient scratch, `BuildRaytracingAccelerationStructure`,
-gated on `D3D12_RAYTRACING_TIER`); it runs on WARP. **vulkan** stubs the build (`CC_UNREACHABLE`) and reports
-`is_supported() == false` until its raytracing milestone. The supporting vocabulary and dx12 barrier
-translation were already in place.
+**Today:** the single-shot build path.
+`sg::blas` / `sg::tlas` with `blas_handle` / `tlas_handle`, plus the input vocabulary: `blas_triangles`, `blas_aabbs`, `tlas_instance`, `accel_build_flags`, `instance_cull_mode`, `index_format`.
+On the `cmd.raytracing` scope: `build_blas` for triangles and procedural AABBs, `build_tlas`, and `is_supported()`.
+**dx12** is the reference realization — prebuild-sized result plus transient scratch, `BuildRaytracingAccelerationStructure`, gated on `D3D12_RAYTRACING_TIER` — and it runs on WARP.
+**vulkan** stubs the build (`CC_UNREACHABLE`) and reports `is_supported() == false` until its raytracing milestone.
 
-**The trace side is in.** A `tlas` binds as a shader resource via the `acceleration_structure` binding-type
-and view kind (inline `RayQuery` in a compute dispatch), and the full DXR pipeline path —
-`raytracing_pipeline` (a DXR state object), `raytracing_shader_table`, and `cmd.raytracing.dispatch_rays` —
-runs a raygen→miss→closest-hit trace on WARP. See
-[raytracing-pipeline.md](raytracing-pipeline.md).
+**The trace side is in.**
+A `tlas` binds as a shader resource through the `acceleration_structure` binding type and view kind — inline `RayQuery` in a compute dispatch.
+The full DXR pipeline path runs a raygen→miss→closest-hit trace on WARP: `raytracing_pipeline` (a DXR state object), `raytracing_shader_table`, and `cmd.raytracing.dispatch_rays`.
+See [raytracing-pipeline](raytracing-pipeline.md).
 
 **Deferred** (see [TODO.md](../TODO.md)):
 
-- the **transient (single-epoch) variant** and the **refit/update + compaction** runtime path;
-- a **dedicated shader-table buffer usage** — the table is backed by a plain readable buffer for now
-  (`types.hh` reserves `shader_binding_table` as future work);
-- **local root signatures** (records currently store only a 32-byte shader identifier — one global root
-  signature).
+- the **transient (single-epoch) variant**, and the **refit / update + compaction** runtime path;
+- the shader table's own storage abstraction — it is backed by a plain readable buffer today, and [types.hh](../../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately;
+- **local root signatures** — a record stores only a 32-byte shader identifier today, under one global root signature.
 
 ## See also
 
@@ -143,5 +130,5 @@ runs a raygen→miss→closest-hit trace on WARP. See
 - [resource_access.hh](../../src/shaped-graphics/barrier/resource_access.hh) — the `accel_*` access flags and stages.
 - [barriers](barriers.md) — how AS build/trace accesses are tracked and ordered.
 - [memory](memory.md) — the persistent-vs-transient lifetime axis the handle sits on.
-- [bindings](bindings.md) — the future `acceleration_structure` binding used to trace against a `tlas`.
-- [cheat-sheet](../../cheat-sheet.md) — the AS API at a glance (once it lands).
+- [bindings](bindings.md) — the `acceleration_structure` binding used to trace against a `tlas`.
+- [cheat-sheet](../../cheat-sheet.md) — the AS API at a glance.

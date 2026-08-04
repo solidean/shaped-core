@@ -162,16 +162,16 @@ Not invariants — v1 shortcuts:
 
 ## Backend note: vulkan needs a second-transfer-queue fallback
 
-The separate-queue design assumes async upload and async download can each hold their **own** transfer
-queue. dx12 grants this freely — `CreateCommandQueue` makes as many `COPY` queues as wanted (WARP included).
-Vulkan does **not**: queues come from **queue families fixed at device creation**, and a dedicated
-transfer family often exposes `queueCount == 1`, so two independent transfer queues are not guaranteed. A
-vulkan backend must select capability-driven with a fallback — a second queue from a transfer-capable family
-(graphics/compute queues implicitly support transfer) when available, else route one stream onto another
-queue, or fall back to a single shared queue. **A single shared transfer queue reintroduces the FIFO
-deadlock above**, so the shared-queue fallback must serialize upload/download differently (e.g. the old CPU
-block, or one actor for both) rather than run two independent actors on it. This is unimplemented — the
-vulkan backend is still a stub — but the constraint is load-bearing for its design.
+The separate-queue design assumes async upload and async download can each hold their **own** transfer queue.
+dx12 grants this freely — `CreateCommandQueue` makes as many `COPY` queues as wanted, WARP included.
+Vulkan does **not**: queues come from **queue families fixed at device creation**.
+A dedicated transfer family often exposes `queueCount == 1`, so two independent transfer queues are not guaranteed.
+A vulkan backend must therefore pick its queues capability-driven, with a fallback.
+First choice is a second queue from a transfer-capable family, since graphics and compute queues implicitly support transfer.
+Failing that, route one stream onto another queue, or fall back to a single shared queue.
+**A single shared transfer queue reintroduces the FIFO deadlock above.**
+That fallback must therefore serialize upload against download — one actor for both, say — rather than run two independent actors on it.
+The vulkan backend is still a stub, but the constraint is load-bearing for its design.
 
 ## See also
 

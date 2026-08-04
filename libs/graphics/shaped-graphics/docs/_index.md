@@ -39,12 +39,14 @@ A folder's own umbrella, where it has one, is the same-named header inside it (`
 
 - [shaders](shaders.md) — how a shader gets from a file you edit to something a context can build a pipeline from: declaring a package, `acquire(ctx)`, hot reload, and dev-vs-shipping.
   Most of that machinery lives *downstream* of sg (shaped-shader-library, shaped-shader-compiler-dxc) — sg owns only `compiled_shader` and what a context accepts — but this is where to start looking.
-- [render-routines](render-routines.md) — the render-routine framework: `sg::render_routine<Derived>` (3-phase, hot-reload-aware init, reached by type via `acquire(cmd)` / `prewarm(ctx)` / `evict(ctx)`),
-  the per-context `ctx.routines` registry (lazy self-registration, `clear()`), and the `sg::reload_generation` counter.
+- [render-routines](render-routines.md) — the render-routine framework.
+  `sg::render_routine<Derived>` is 3-phase and hot-reload-aware, reached by type via `acquire(cmd)` / `prewarm(ctx)` / `evict(ctx)`.
+  The per-context `ctx.routines` registry self-registers lazily and has `clear()`; `sg::reload_generation` is the counter that invalidates.
   Concrete routines live in shaped-rendering.
 - [structure](structure.md) — the module roadmap with `[done]`/`[in progress]`/`[planned]` status.
   This is the living design document; update it as the API lands.
-- [coding-guidelines](coding-guidelines.md) — sg-specific conventions on top of the repo-wide ones: handles, mutable-vs-immutable types, the backend bridge, backend smurf naming, and the duplication-over-abstraction stance.
+- [coding-guidelines](coding-guidelines.md) — the sg-specific conventions on top of the repo-wide ones.
+  Handles, mutable-vs-immutable types, abstract interfaces backends derive from directly, smurf naming, and the duplication-over-abstraction stance.
   Extend it whenever generic advice turns out not to fit sg.
 - [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
 - [TODO](TODO.md) — running list of known follow-ups.

@@ -2,23 +2,20 @@
 
 ## What GPU queries are
 
-A **GPU query** records a value the GPU produces while executing a command list, read back on the host
-afterward. Today the only kind is a **timestamp**: `cmd.query.record_gpu_timestamp()` records a
-point-in-time GPU tick at that point in the list and returns a
-[`gpu_timestamp`](../../src/shaped-graphics/query/gpu_timestamp.hh). Two timestamps around some work give that
-work's GPU duration — only *differences* between ticks are meaningful, never the absolute value.
+A **GPU query** records a value the GPU produces while executing a command list, read back on the host afterward.
+The only kind today is a **timestamp**.
+`cmd.query.record_gpu_timestamp()` records a point-in-time GPU tick at that point in the list, and returns a [`gpu_timestamp`](../../src/shaped-graphics/query/gpu_timestamp.hh).
+Two timestamps around some work give that work's GPU duration — only *differences* between ticks are meaningful, never the absolute value.
 
 The result surfaces as a small, copyable value type (the query analogue of a `bytes_future`):
 
-- `is_valid()` — backed by a real recorded query. False for a default-constructed query and for a
-  backend without timestamp support (`cmd.query.is_supported()` reports that up front).
-- `is_ready()` — the tick has been read back to the host. Poll it; the normal per-frame usage is to
-  read a timestamp a frame or two after recording, not to block on it.
-- `try_get_ticks()` / `try_get_seconds()` — the raw GPU tick and the tick converted to seconds (via
-  `1 / timestamp_frequency`), once ready.
-- `ctx.wait_for_ticks(timestamp)` / `ctx.wait_for_seconds(timestamp)` — the blocking path (mirrors
-  `wait_for` on a download); returns the raw tick / seconds once delivered. Waitable only after the
-  recording list is submitted.
+- `is_valid()` — backed by a real recorded query.
+  False for a default-constructed query, and for a backend without timestamp support (`cmd.query.is_supported()` reports that up front).
+- `is_ready()` — the tick has been read back to the host.
+  Poll it; the normal per-frame usage is to read a timestamp a frame or two after recording, not to block on it.
+- `try_get_ticks()` / `try_get_seconds()` — the raw GPU tick, and the tick converted to seconds by dividing by the timestamp frequency, once ready.
+- `ctx.wait_for_ticks(timestamp)` / `ctx.wait_for_seconds(timestamp)` — the blocking path, mirroring `wait_for` on a download, returning the raw tick or seconds once delivered.
+  Waitable only after the recording list is submitted.
 
 ## How the dx12 backend implements it (the load-bearing decisions)
 
