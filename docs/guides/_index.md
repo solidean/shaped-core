@@ -5,6 +5,8 @@ Task-oriented how-tos for working in shaped-core.
 
 - [building-and-testing.md](building-and-testing.md) — drive `dev.py` (build / test / doctor /
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
+- [prose.md](prose.md) — `dev.py lint`'s prose half: when to run it, why dirty-only is line-exact,
+  and when a pile of findings is a rework rather than a run of local edits.
 - [disassembly.md](disassembly.md) — `dev.py assembly`: `search` / `show` are a local godbolt over the built object files, for reading the optimizer's actual codegen.
   `trace` is the dynamic half — what one invocation really ran, the data it touched, and a static cost model over that.
 - [profiling.md](profiling.md) — measure what the code actually cost at run time: nexus/bench hardware

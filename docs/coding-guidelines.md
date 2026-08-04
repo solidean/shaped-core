@@ -99,20 +99,22 @@ Concretely:
 **C++ Standard:** C++23 minimum
 
 **Supported Platforms:**
-- **64-bit only** — no 32-bit targets are planned (WASM's `wasm32` is a 64-bit register target with a 32-bit address space, and counts as 64-bit here).
+- **64-bit only** — no 32-bit targets are planned.
+  WASM's `wasm32` is a 64-bit register target with a 32-bit address space, and counts as 64-bit here.
 - Architectures: x64, ARM64, wasm32.
-- Tiered: Windows/Linux/macOS/Emscripten single-threaded (Tier 1, CI-tested), iOS/Android (Tier 2), the other WASM combinations, WASI, and consoles (Tier 3, planned). See [platforms.md](platforms.md)
-  for the full matrix.
+- Tiered: Windows / Linux / macOS / Emscripten single-threaded are Tier 1 and CI-tested, iOS and Android are Tier 2, and the other WASM combinations, WASI and consoles are Tier 3.
+  [platforms.md](platforms.md) has the full matrix.
 
 **Compiler Support:**
-- **First-class:** Clang and MSVC *(TODO: minimum versions)*
+- **First-class:** Clang and MSVC — [requirements.md](requirements.md#compilers) carries the known-good version per platform.
 - **Second-class:** GCC (temporary issues may occur, fixes welcome)
 
 ---
 
 ## Repository Structure
 
-The repo is a growing collection of libraries under `libs/<category>/<lib>` (today `libs/base/clean-core` and `libs/base/nexus`; more will follow). Each library is laid out consistently:
+The repo is a growing collection of libraries under `libs/<category>/<lib>`, catalogued in [libraries.md](libraries.md).
+Each library is laid out consistently:
 
 - **`src/<lib>/`** — Library implementation (`.hh` and `.cc` files colocated)
 - **`tests/`** — Test code using nexus (separate build target named `<lib>-test`)
@@ -439,8 +441,9 @@ T& operator=(T&&) = default;
 
 ## Error Handling
 
-Tiered error handling philosophy — the full authority (decision guide, the `try_*` + throwing-façade pattern, why device resets / alloc failures are *not* assertions)
-lives in [error-handling.md](error-handling.md):
+Tiered error handling philosophy.
+[error-handling.md](error-handling.md) is the full authority: the decision guide, the `try_*` + throwing-façade pattern, and the propagation idioms.
+It is also where "why device resets and allocation failures are *not* assertions" is answered.
 
 | Mechanism                 | Use Case                                                             |
 |---------------------------|----------------------------------------------------------------------|
@@ -448,8 +451,8 @@ lives in [error-handling.md](error-handling.md):
 | `cc::result` / `optional` | Frequent or expected failures the caller can handle locally          |
 | Exceptions                | Exceptional errors requiring non-local control flow                  |
 
-**Assertions:** Use `CC_ASSERT(cond, msg)` liberally in headers and `.cc` files to check preconditions, postconditions, and invariants.
-Assertions must be side-effect free (the expression must not be load-bearing for correctness; temporary debug output is fine) and **must never fire on user input or environment** — those are `result`/exceptions, since a release build (assertions compiled out) must still handle them.
+**Assertions:** use `CC_ASSERT(cond, msg)` liberally in headers and `.cc` files, for preconditions, postconditions and invariants.
+Never on user input or environment, which are `result` or exceptions — [error-handling.md](error-handling.md#assertions--for-broken-contracts-only) has the rules and the reasoning.
 
 **Undefined behavior:** Avoid relying on UB.
 Each explicit UB usage must be heavily documented and justified.
@@ -503,8 +506,10 @@ Each explicit UB usage must be heavily documented and justified.
 
 **Avoid `std::` code.** Almost always use `cc::` equivalents instead.
 
-**Exception:** a small set of *blessed* stdlib headers is allowed where re-creating them is infeasible or pointless—`<type_traits>`, `<typeinfo>` / `<typeindex>`, `<atomic>`, `<initializer_list>`. These are thin wrappers around compiler/runtime machinery that we don't re-wrap.
-clean-core keeps the authoritative list (with justifications) in [libs/base/clean-core/docs/blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md); the list grows by targeted addition only.
+**Exception:** a small set of *blessed* stdlib headers is allowed where re-creating them is infeasible or pointless — `<type_traits>`, `<typeinfo>` / `<typeindex>`, `<atomic>`, `<initializer_list>`.
+These are thin wrappers around compiler and runtime machinery that we don't re-wrap.
+clean-core keeps the authoritative list, with justifications, in [blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md).
+The list grows by targeted addition only.
 
 **Rationale:** Keep compiler intrinsics and `__builtin`s encapsulated in `cc::` implementations so downstream code avoids compiler and platform specifics.
 Provides a consistent, cohesive foundational library from a single source.
@@ -528,7 +533,8 @@ This applies equally to features like logging levels.
 All functions and types are **single-threaded** ("externally synchronized") by default unless noted.
 Thread-safe types typically include `atomic_` in their name.
 
-**A build may have no threads at all** — WebAssembly, or any build configured `-DSC_THREADS=OFF` (see [platforms.md](platforms.md#threading-sc_threads)). `CC_HAS_THREADS` reports which you are in.
+**A build may have no threads at all** — WebAssembly, or any build configured `-DSC_THREADS=OFF`; `CC_HAS_THREADS` reports which you are in.
+[platforms.md](platforms.md#threading-sc_threads) owns the knob.
 Two rules follow:
 
 - **Use `cc::atomic`, never `std::atomic` directly** ([clean-core/thread/atomic.hh](../libs/base/clean-core/src/clean-core/thread/atomic.hh)).
@@ -756,7 +762,9 @@ container* inner = reinterpret_cast<container*>(outer._data);
 
 Components in these libraries should aim to provide subobject-safe move assignment, or clearly document when they do not.
 
-This property is essential for composability: if a type `T` is subobject-safe move-assignable, then wrappers and aggregates (e.g., `optional<T>`, containers, resource owners) should preserve that guarantee rather than weakening it through additional side effects on the source object.
+This property is essential for composability.
+If a type `T` is subobject-safe move-assignable, then wrappers and aggregates — `optional<T>`, containers, resource owners — should preserve that guarantee.
+Weakening it through additional side effects on the source object breaks every composition above.
 
 **Recommended pattern:**
 

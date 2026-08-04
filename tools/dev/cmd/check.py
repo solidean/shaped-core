@@ -140,7 +140,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                   True, check_format),
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("test",
-                  "build + run the full suite on the debug, default, release (and where supported, sanitizer) presets",
+                  "build + run the full suite on the debug, default, release, single-threaded "
+                  "(and where supported, sanitizer) presets",
                   False, check_tests, requires_green=True),
     ]
 
