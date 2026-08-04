@@ -27,8 +27,7 @@ void slib::shader_asset::promote_pending(shader_library& library, state& s, form
     if (entry.pending == nullptr)
         return;
 
-    // Only promote once the compile has finished. While it is still running we keep handing back the
-    // previous shader — a reload must never stall a consumer waiting on a compiler.
+    // Only promote once the compile has finished, so a consumer never waits on the compiler here.
     if (!entry.pending->is_ready())
         return;
 
@@ -41,7 +40,6 @@ void slib::shader_asset::promote_pending(shader_library& library, state& s, form
     }
     else
     {
-        // A broken edit keeps the last good shader. The error is worth surfacing, not dying on.
         auto const* const error = entry.pending->try_error();
         if (error == nullptr)
             s.last_error = cc::string("shader compilation failed");
@@ -88,10 +86,8 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format) 
             return entry->current;
         });
 
-    // A shader only tells anyone what it is built from once a compile has resolved its includes — and this
-    // one just did, on a consumer's thread. The watcher is parked on its mailbox and reads dependencies()
-    // rather than being handed them, so without this nudge it would go on watching nothing at all. Off the
-    // lock, because what it wakes turns straight around and reads us back.
+    // A first compile is what resolves the includes, so the dependency set only becomes real here, on a consumer's thread.
+    // Off the lock: what this wakes turns straight around and reads us back.
     if (recorded_dependencies)
         library->note_dependencies_changed();
 
@@ -165,16 +161,12 @@ void slib::shader_asset::stage_reload()
 
     for (auto const format : formats)
     {
-        // Read, preprocess and compile off the lock. A consumer's acquire only ever waits for the swap
-        // below, never for the compiler — which is the point of staging in the first place.
+        // Read, preprocess and compile off the lock, so a consumer's acquire only ever waits for the swap below.
         auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format);
 
-        // Drive the compile here, on the watcher's own thread. cc::async nodes are cold until a
-        // scheduler runs them, and nothing else will ever look at this one: a consumer only sees it once
-        // it is promoted, and promotion needs it ready. Without this, a build with no default async pool
-        // would stage reloads nobody ran and acquire would return the old shader forever. Where a pool
-        // *is* installed this returns nullopt because the pool already owns the node, and the pool
-        // finishes it — either way the next acquire finds it ready.
+        // Drive the compile here, on the watcher's own thread.
+        // A cc::async node is cold until a scheduler runs it, and nothing else ever looks at this one — a consumer only sees it after promotion, and promotion needs it ready.
+        // With a default async pool installed this returns nullopt because the pool already owns the node and finishes it; without one, this call is what runs the compile.
         (void)cc::try_async_blocking_get_singlethreaded(outcome.shader);
 
         _state.lock(

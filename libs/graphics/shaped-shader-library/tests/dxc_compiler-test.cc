@@ -10,9 +10,8 @@
 
 #include <memory>
 
-// The one place slib meets a real compiler. Everything else in the library is covered with a fake one so
-// it runs on every platform; these run only where DXC exists, and check that the real thing lines up with
-// the seam — that the package's HLSL actually builds, includes and all.
+// The one place slib meets a real compiler.
+// Everything else is covered with a fake one so it runs on every platform; these run only where DXC exists, and check that the real thing lines up with the seam.
 
 namespace
 {
@@ -114,8 +113,8 @@ TEST("slib - dxc reports a broken shader on the async channel")
 
 TEST("slib - dxc hot-reloads a real shader")
 {
-    // The whole stack against the real compiler: an edit, a scan, a recompile, a new shader. Unthreaded
-    // and in memory, so it is deterministic rather than a sleep-and-hope.
+    // The whole stack against the real compiler: an edit, a scan, a recompile, a new shader.
+    // Unthreaded and in memory, so it is deterministic rather than a sleep-and-hope.
     slib::shader_asset_handle asset;
     slib::shader_definition definitions[] = {
         {.path = "cs.hlsl", .stage = sg::shader_stage::compute, .entry_point = "main", .asset = &asset},

@@ -2,8 +2,8 @@
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
 
-// The two filesystems that need no disk. real_filesystem is covered where a real directory exists
-// (see the reload tests); everything else in slib goes through this interface.
+// The two filesystems that need no disk.
+// real_filesystem is covered where a real directory exists (see the reload tests); everything else in slib goes through this interface.
 
 TEST("slib - memory_filesystem reads what was written")
 {
