@@ -269,7 +269,7 @@ _LINT_SUFFIXES = (".cc", ".hh", ".md", ".py")
 _LINT_ROOTS = ("libs", "tools", "docs", ".claude/skills")
 
 # First-party files at the repo root, which is not a directory we can walk wholesale.
-_LINT_ROOT_FILES = ("CLAUDE.md", "readme.md", "dev.py")
+_LINT_ROOT_FILES = ("CLAUDE.md", "README.md", "dev.py")
 
 # Never ours to lint: vendored code, build output, and caches.
 _LINT_EXCLUDED_DIRS = frozenset({"extern", "build", ".venv", "__pycache__", "node_modules", ".git"})
