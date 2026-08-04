@@ -32,6 +32,8 @@ uv run dev.py lint prose-stats <path>...            # how much prose files carry
 ```
 
 It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
+[docs/guides/prose.md](../../docs/guides/prose.md) is the guide over this tool: where each answer lives, and when a pile of findings becomes a rework rather than a run of local edits.
+
 
 ## Usage
 
@@ -169,6 +171,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 |---|---|
 | `default-init-assignment` | A variable's initializer uses assignment form `name = …`, not brace form `name{…}` — data members, function locals and namespace-scope variables alike. |
 | `no-flow-prose` | Prose is one semantic point per line, so a sentence ending *mid-line* is a finding — in C++ and Python comments, Python docstrings, and markdown body text alike. A heuristic and a reminder: it carries no fix, because obeying the rule means modelling the prose rather than splicing in a newline. |
+| `no-long-prose-line` | A prose line over 200 characters, the hard ceiling above the otherwise free line length. A point that long almost always holds two and wants splitting at the seam. A line whose longest unbreakable run already exceeds the ceiling — a bare URL, a long path — is left alone, since no split can bring it under. |
 | `qualified-primitive` | The sized aliases (`u32`, `isize`, `byte`, …) are spelled bare, never qualified — `cc::u32`, and equally `sg::u32` through a namespace that re-exports them. At a `.cc`'s file scope — anonymous namespaces included — the fix adds the using-directive it needs; in a header, where that would leak into every including TU, the rule stays quiet; inside a named namespace it hints, because the answer is that library's `fwd.hh`. |
 
 ### `fix` and `hint`

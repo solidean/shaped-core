@@ -85,7 +85,9 @@ The default preset only exercises the assertions-on branch the table above names
 ### Pinning toolset versions
 
 A preset names a compiler *family* (clang / gcc / msvc); the concrete version is otherwise whatever the environment defaults to.
-`--toolset` (a per-subcommand flag on `configure` / `build` / `test`) pins a specific one, so the same dev.py can drive clang 19 / 20 / 21 — or two Visual Studio toolsets — on one machine:
+A preset names a compiler *family* (clang / gcc / msvc); the concrete version is otherwise whatever the environment defaults to.
+`--toolset` pins a specific one, and is a per-subcommand flag on `configure`, `build`, `test`, `run` and `doctor`.
+So the same dev.py can drive clang 19 / 20 / 21, or two Visual Studio toolsets, on one machine:
 
 ```bash
 uv run dev.py test --preset relwithdebinfo-linux-clang --toolset 21    # clang++-21 / clang-21 on PATH
@@ -177,8 +179,8 @@ So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 | test run   | `test_diag`  | `test_diag path="build/<preset>/**/*.results.xml" errors_only=true` |
 
 These read the artifacts dev.py already emitted, which beats scrolling raw logs.
-To watch something live instead, reach for the mirror flags under [Useful flags](#useful-flags).
-
+These read the artifacts dev.py already emitted, which beats scrolling raw logs.
+Mirroring is additive to capture, so the logs read the same either way; to watch something live as well, reach for the mirror flags under [Useful flags](#useful-flags).
 **Don't pipe dev.py into `tail`/`head`/`grep`.**
 The output is already terse, and `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
 
@@ -211,7 +213,7 @@ It auto-applies every unambiguous fix it can (clang-tidy, shaped-linter, then cl
 uv run dev.py check            # run every check -> one verdict
 uv run dev.py check --fix      # apply fixable checks (clang-format -i), then report
 uv run dev.py check --no-test  # static checks only — skip the build+test tail (docs-only re-check)
-uv run dev.py check --all      # widen the format check from dirty-only to the whole tree
+uv run dev.py check --all      # widen lint, shaped-lint and format from dirty-only to the whole tree
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
 ```

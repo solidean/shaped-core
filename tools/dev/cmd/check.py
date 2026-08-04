@@ -35,7 +35,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--fix", action="store_true",
                    help="Let fixable checks apply unambiguous fixes (e.g. clang-format -i)")
     p.add_argument("--all", action="store_true",
-                   help="Widen the format check from dirty-only to the whole tree")
+                   help="Widen lint, shaped-lint and format from dirty-only to the whole tree")
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")

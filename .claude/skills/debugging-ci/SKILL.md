@@ -30,17 +30,17 @@ The `--log-failed` tail tells you the **kind** of failure without the detail:
 
 ## 2. Download the diagnostics artifact into `build/.tmp/<name>/`
 
-One artifact per workflow, named `<platform>-diagnostics` (matrix legs are
-suffixed with the preset). Always download into `build/.tmp/` — it's gitignored,
-keeps cloud artifacts out of your real `build/<preset>` trees, and is the agreed
-scratch location.
+One artifact per workflow, named `<platform>-diagnostics`, and matrix legs are suffixed with the preset.
+Always download into `build/.tmp/` — it is gitignored, keeps cloud artifacts out of your real `build/<preset>` trees, and is the agreed scratch location.
 
 ```bash
 gh run download <run-id> --name windows-msvc-vs2026-diagnostics --dir build/.tmp/msvc
-# leaves: build/.tmp/msvc/windows-msvc-vs2026-diagnostics/{ci-diag.zip,ci-logs.zip,ci-test-results.xml}
+# a single --name extracts straight into --dir:
+#   build/.tmp/msvc/{ci-diag.zip,ci-logs.zip,ci-test-results.xml}
 ```
 
-(Omit `--name` to grab every artifact; `gh run view <run-id>` lists their names.)
+Omit `--name` to grab every artifact — then each one *does* get its own subdirectory, named after the artifact.
+`gh run view <run-id>` lists the names.
 
 ## 3. Diagnose straight off the archive — no unzip
 
@@ -49,10 +49,10 @@ gh run download <run-id> --name windows-msvc-vs2026-diagnostics --dir build/.tmp
 
 ```text
 # build failures — grouped per-TU error tree, unique first-errors surfaced:
-build_diag base_path="build/.tmp/msvc/windows-msvc-vs2026-diagnostics/ci-diag.zip" show_tags=["error"]
+build_diag base_path="build/.tmp/msvc/ci-diag.zip" show_tags=["error"]
 
 # test failures — failure-first results tree, green collapsed, every failure expanded:
-test_diag  base_path="build/.tmp/msvc/windows-msvc-vs2026-diagnostics/ci-logs.zip" errors_only=true limit=120
+test_diag  base_path="build/.tmp/msvc/ci-logs.zip" errors_only=true limit=120
 ```
 
 Which archive feeds which tool:

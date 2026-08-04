@@ -44,7 +44,8 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 
 - **`--preset` is a PER-SUBCOMMAND flag — it goes AFTER the subcommand.**
   `uv run dev.py test --preset release-clang`, *not* `dev.py --preset … test`.
-  Getting this wrong is an argparse error, not a wrong build, so it costs a round trip rather than a wrong answer.
+  Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs` and `--colored` / `--plain` go before it; everything else goes after.
+  Getting it wrong is an argparse error rather than a wrong build, so it costs a round trip, not an answer.
 
 - **Touching `CC_ASSERT`-gated code? Build a `release-*` preset too.**
   The default `relwithdebinfo-*` preset has assertions on and only a `release-*` preset has them off, so a change that compiles under the default can still fail the assertions-off branch.
@@ -52,7 +53,7 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 
 - **A crash shows up as a non-zero exit and a failure XML.**
   dev.py synthesizes a JUnit result from each binary's exit code, so a binary that crashes before printing anything is still reported as failed.
-  Re-run the culprit with `uv run dev.py --mirror-test-output test "<pattern>"` to see the live stream.
+  Re-run the culprit with `uv run dev.py --mirror-test-output test "<pattern>"` to see the live stream — that flag skips the build wall, which `--mirror-output` does not.
 
 ## Diagnose tips
 

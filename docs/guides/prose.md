@@ -18,7 +18,7 @@ Three levels answer three different questions, and none of them repeats another:
 | you want | look at |
 |---|---|
 | what good prose *is* here | [coding-guidelines.md](../coding-guidelines.md#prose-style--one-semantic-point-per-line) — the rule, its scope, and worked good/bad examples |
-| what the tool does, and the exact plan grammar | [tools/shaped-linter/readme.md](../../tools/shaped-linter/readme.md) — every rule, `--changed-lines`, `prose apply`'s two validations, `prose stats` |
+| what the tool does, and the exact plan grammar | [tools/shaped-linter/readme.md](../../tools/shaped-linter/readme.md) — the rules, `--changed-lines`, `prose apply`'s two validations, `prose stats` |
 | how to run a rework in a session | the [`reworking-prose` skill](../../.claude/skills/reworking-prose/SKILL.md) — scope, concept, plan, apply, cold read |
 
 This guide is the seam between them: when to reach for which, and what bites.

@@ -1,109 +1,81 @@
 # The graphics library family (sg / sr / sv)
 
-`libs/graphics/` is shaped-core's graphics stack: three libraries layered on top of the
-`base` foundation, each building on the one below.
+`libs/graphics/` is shaped-core's graphics stack: three layered libraries on the `base` foundation, plus two shader-side utilities.
+[libraries.md](libraries.md) is the catalog — what each library is, and what it depends on.
+This page is the family shape: how they fit together, and where the seams are.
 
-```text
-shaped-viewer     (sv::)   professional, RTX-enabled visualization renderer
-     ↓
-shaped-rendering  (sr::)   render routines & helpers on top of sg
-     ↓
-shaped-graphics   (sg::)   graphics-API wrapper (context / command_list / resources / backends)
-     ↑
-     ├── shaped-shader-library      (slib::)      shader packages + hot reload   ┐ side utilities:
-     └── shaped-shader-compiler-dxc (ssc::dxc::)  HLSL -> sg::compiled_shader    ┘ they depend on sg
+sg is the graphics-API wrapper; sr builds render routines, windowing and the ImGui renderer on it; sv is the visualization renderer on top of sr.
+slib and ssc::dxc hang off sg to the side: shader packages with hot reload, and HLSL compilation.
 
-typed-geometry (tg::) + clean-core (cc::)   under all of it
-```
-
-This is an **early-stage** family. Today it is docs + buildable skeletons: sg has stubbed
-core types and dx12/vulkan backend stubs; sr and sv are empty-but-buildable. The first real
-milestone is command-list buffer **upload / download / copy** in sg.
+This is an **early-stage family**, and the libraries are at very different depths.
+Each library's own docs carry its current state; this page does not try to track it.
 
 ## The libraries
 
 ### shaped-graphics — `sg::`
 
 The graphics-API wrapper.
-It exposes a small, backend-agnostic surface — `context`, `command_list`, and the GPU resource types (buffers, textures, views, layouts and pipelines) — over concrete graphics backends.
+It exposes a small, backend-agnostic surface — `context`, `command_list`, and the GPU resource types — over concrete graphics backends.
 
-- **Backends are separate static libraries** under [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/), one per API.
-  dx12 and vulkan are **tier 1** — dx12 is real, while vulkan creates devices and resources but stubs its recording paths.
-  metal and webgpu are **tier 2** (soon); opengl and webgl are **legacy compat** (planned).
-  A backend is built only where it is available for the platform and build.
-- **Abstract interfaces, backends derive directly.**
-  `sg::context`, `sg::command_list` and `sg::raw_buffer` are abstract; a backend subclasses them directly (`vulkan_context : sg::context`), with no bridge or impl layer between.
-  Cheap shared metadata, such as a buffer's size and usage, lives in the base as protected members, so reading it costs no virtual call and every backend inherits it.
+- **Backends are separate static libraries** under [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/), one per API, built only where the platform and build allow.
+  **dx12 and vulkan are the two that exist**, and they are not equally far along: dx12 is real, while vulkan creates devices and resources but stubs its recording paths.
+  metal and webgpu (tier 2) and opengl and webgl (legacy compat) are intended, with no backend written yet.
 - **sg does not depend on the backends.** The dependency arrow points one way, backends → sg, so there is no `sg::create_context` in the core.
   Each backend library exposes its own `sg::create_<backend>_context(config)` instead — see the [context concept doc](../libs/graphics/shaped-graphics/docs/concepts/context.md).
-  `backend_kind` is a coarse tag, not a backend identity: a debug, CPU or remote backend is just as valid as dx12 or vulkan.
-- **Resource model.** `context` and `command_list` are the mutable drivers.
-  Resources are **shared-immutable**: their shape is fixed, and they behave like a span over mutable GPU-resident memory.
-  There are **no host-visible buffers or textures** in the API — PCIe transfer is a globally shared resource that sg manages.
-- **Handles.** Every shared type has an `xyz_handle` typedef, `std::shared_ptr<sg::xyz>`, such as `sg::context_handle`.
+  `backend_kind` is a coarse tag rather than a backend identity: a debug, CPU or remote backend is just as valid as dx12 or vulkan.
+- **Resources are shared-immutable**, and the handle types say so.
+  A resource handle is `std::shared_ptr<sg::xyz const>`, while the mutable drivers `context_handle` and `swapchain_handle` carry no `const`.
+  `command_list` gets no handle at all, being a single-use temporary.
+- **There are no host-visible buffers or textures** in the API: PCIe transfer is a globally shared resource that sg manages.
 
-See the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md) and its [coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md) for the load-bearing conventions.
-Those are handles, backend smurf naming, and the duplication-over-abstraction stance.
+The load-bearing conventions are handles, backend smurf naming, and the duplication-over-abstraction stance.
+They belong to the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md) and its [coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md).
 
 ### shaped-rendering — `sr::`
 
-Render routines and helpers built on sg: the common building blocks of a renderer — mipmap
-generation, texture compression, tonemapping, and similar. The **render-routine framework** itself (the
-`sg::render_routine` base with 3-phase hot-reload-aware init, and the per-context `ctx.routines`
-registry) lives in **shaped-graphics** — see its
-[render-routines doc](../libs/graphics/shaped-graphics/docs/render-routines.md). `sr` hosts the
-**concrete** routines built on it. sr also depends on **shaped-shader-library** (concrete routines
-acquire their shaders through it).
+Render routines and helpers built on sg: the common building blocks of a renderer — mipmap generation, texture compression, tonemapping.
+The **render-routine framework** itself lives in **shaped-graphics**, documented in its [render-routines doc](../libs/graphics/shaped-graphics/docs/render-routines.md).
+sr hosts the *concrete* routines built on it, and acquires their shaders through shaped-shader-library.
 
-sr is also where the family meets the OS.
+sr is also home to the **Dear ImGui renderer**: `sr::imgui_context` + `sr::imgui_routine`, drawn entirely through sg over the vendored Dear ImGui + ImPlot + ImGuizmo bundle.
+See [imgui.md](../libs/graphics/shaped-rendering/docs/imgui.md).
+
+And sr is where the family meets the OS.
 `sr::window_system` / `sr::window` are the **window abstraction**, backed by SDL3 and exposing none of it.
 A window's `native_window_handle()` is what `sg::swapchain_description` consumes, so a windowed renderer can be written against sr alone.
 Multiple windows are supported today, which is the groundwork for imgui docking and multiple viewports.
 
-- **SDL3 is downloaded on demand**, not vendored: the first configure runs
-  [`extern/sdl3/fetch-sdl3.py`](../extern/sdl3/fetch-sdl3.py), which fetches the pinned source release
-  (`release-3.4.12`, SHA-256 verified) into `extern/sdl3/.install/` and builds it from source. One code
-  path on every platform, since upstream ships prebuilt dev packages only for Windows and macOS.
-  Roughly 35 s per preset cold, then cached; `SC_SKIP_SDL3=1` skips it.
-- **On Linux it needs X11 or wayland development headers**, and with X11 every extension SDL uses — see
-  [CI's system packages](guides/ci.md#system-packages) for the Ubuntu list, or
-  [SDL's own](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies).
-  Without them SDL3 is skipped rather than fatal: the rest of sr still configures and builds, just without
-  a window backend.
-- **Only the backend is optional, not the API.** Without SDL3, `sr::window_system::try_create` fails with a
-  reason rather than the types disappearing, so a caller compiles either way and finds out at run time.
+- **SDL3 is downloaded on demand**, not vendored.
+  The first configure runs [`extern/sdl3/fetch-sdl3.py`](../extern/sdl3/fetch-sdl3.py), which fetches a pinned, SHA-256-verified source release into `extern/sdl3/.install/` and builds it from source.
+  That is one code path on every platform, since upstream ships prebuilt dev packages only for Windows and macOS.
+  It costs tens of seconds per preset cold and is cached after; `SC_SKIP_SDL3=1` skips it, and the script is where the pinned version lives.
+- **On Linux it needs X11 or wayland development headers**, and with X11 every extension SDL uses.
+  [CI's system packages](guides/ci.md#system-packages) has the Ubuntu list, and [SDL's own docs](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies) the general one.
+  Without them SDL3 is skipped rather than fatal: the rest of sr still configures and builds, just without a window backend.
+- **Only the backend is optional, not the API.**
+  Without SDL3, `sr::window_system::try_create` fails with a reason rather than the types disappearing, so a caller compiles either way and finds out at run time.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
-
-See the [sr render-routines doc](../libs/graphics/shaped-rendering/docs/render-routines.md) and the
-[shaped-rendering readme](../libs/graphics/shaped-rendering/readme.md).
 
 ### shaped-viewer — `sv::`
 
-The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly
-API, serving Shaped Code's visualization needs. Built on sr. Early-stage skeleton today. See
-the [shaped-viewer readme](../libs/graphics/shaped-viewer/readme.md).
+The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, serving Shaped Code's visualization needs.
+Built on sr, and an early-stage skeleton today — see the [shaped-viewer readme](../libs/graphics/shaped-viewer/readme.md).
 
 ### shaped-shader-compiler-dxc — `ssc::dxc::`
 
-A side utility (not part of the sv→sr→sg chain): a lean wrapper over the DirectX Shader Compiler
-(DXC) that turns HLSL into an `sg::compiled_shader` — bytecode + reflected bindings + compute
-workgroup size — filling the "compilation is not part of sg yet" gap noted in
-[compiled_shader.hh](../libs/graphics/shaped-graphics/src/shaped-graphics/binding/compiled_shader.hh). It
-depends only on **shaped-graphics**. Two-step API: `preprocess` (resolve `#include`s via a
-caller-supplied resolver) then `compile` (already-flattened source → DXIL + reflection).
+A side utility rather than part of the sv → sr → sg chain.
+It is a lean wrapper over the DirectX Shader Compiler, turning HLSL into an `sg::compiled_shader`: bytecode, reflected bindings, compute workgroup size.
+It depends only on **shaped-graphics**.
+Two-step API: `preprocess` resolves `#include`s via a caller-supplied resolver, then `compile` turns already-flattened source into DXIL plus reflection.
+**Windows-only** today, since it links DXC and uses the Windows SDK's `d3d12shader.h` reflection.
 
-- **Windows-only** today: links DXC and uses the Windows SDK's `d3d12shader.h` reflection.
-- **DXC is downloaded on demand**, not vendored or built from source: the first Windows configure runs
-  [`extern/dxc/download-dxc.py`](../extern/dxc/download-dxc.py), which fetches the pinned official
-  release (`v1.9.2602.24`, SHA-256 verified) for the host arch into `extern/dxc/.install/` (a
-  few-second download; `SC_SKIP_DXC=1` skips it). The release ships `dxil.dll`, so emitted DXIL is
-  signed (runs on dx12 without developer mode), and includes `arm64` binaries.
-
-See the [shaped-shader-compiler-dxc readme](../libs/graphics/shaped-shader-compiler-dxc/readme.md).
+DXC is downloaded on demand rather than vendored.
+The [shaped-shader-compiler-dxc readme](../libs/graphics/shaped-shader-compiler-dxc/readme.md) owns that story: which release is pinned, what gets extracted, and `SC_SKIP_DXC`.
+The one consequence worth knowing here is that the release ships `dxil.dll`, so emitted DXIL is signed and runs on dx12 without developer mode.
 
 ### shaped-shader-library — `slib::`
 
-The other side utility: the shader **package** + hot-reload mechanism, on top of sg and, where DXC exists, ssc::dxc.
+The other side utility: the shader **package** and hot-reload mechanism, on top of sg and, where DXC exists, ssc::dxc.
 Any target declares its own shaders in its own CMakeLists and gets typed C++ symbols for them — sg does not depend on slib, yet `shaped-graphics-test` declares a package and it works.
 
 ```cmake
@@ -129,5 +101,4 @@ uv run dev.py test "sg "     # just the shaped-graphics tests (also "sr ", "sv "
 uv run dev.py build          # the whole repo, incl. platform-enabled backends
 ```
 
-See [guides/building-and-testing.md](guides/building-and-testing.md) for the full workflow
-and [libraries.md](libraries.md) for the full library catalog and dependency graph.
+[guides/building-and-testing.md](guides/building-and-testing.md) has the full workflow, and [libraries.md](libraries.md) the full library catalog.

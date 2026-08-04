@@ -73,37 +73,34 @@ cc::result<mesh> load_mesh(cc::string_view path)
     return parse_mesh(bytes.value());                         // safe: bytes has a value here
 }
 ```
-
 `CC_RETURN_IF_ERROR(r)` is the propagation idiom: it evaluates `r` exactly once, returns early when `r.has_error()`, and allows a trailing `.with_context("…")` on that return.
 Context is **additive** — every frame that propagates can name what it was doing, and `to_string()` renders the whole chain against the original site.
-`with_context_lazy` takes a callable instead, so a message that costs something to build is only built on the error path.
+On a `result` you can also use `with_context_lazy`, which takes a callable so a message that costs something to build is only built on the error path.
+It is not available on the macro's return expression, which carries an `as_error_t` rather than a `result`.
 
 Getting the value out has four forms, and they are **not** interchangeable:
 
 | Call | On error |
 |---|---|
-| `value()` | `CC_ASSERT` — aborts in debug, but the assert is compiled out in release, so it is **undefined behavior** there |
+| `value()` | `CC_ASSERT` — aborts wherever assertions are on, which is every default preset, but it is compiled out in release, so there it is **undefined behavior** |
 | `value_assert(msg)` | asserts in **every** configuration (`CC_ASSERTS_ALWAYS`): the release-safe abort |
 | `value_or(fallback)` | returns the fallback |
-| `or_throw<Exception>()` | throws, defaulting to `cc::result_exception` carrying the `any_error` |
+| `or_throw<Exception>()` | throws `cc::result_exception`, carrying the `any_error`; a custom `Exception` must provide a static `from_error` |
 
 **`value()` is for a result you have already checked**, never for asserting that it succeeded.
 Where an unhandled error must be fatal, `value_assert` says so and survives the release build; where it must escalate, `or_throw` does.
 
 ## Exceptions — for exceptional, non-local failures
 
-Exceptions are for failures that are **infrequent**, **must propagate up** past several frames that can't do
-anything useful, and yet **can ultimately be handled** somewhere. The canonical shape: a resource allocation
-deep in a call tree fails, and the only party who can recover is a coarse subsystem far above (an asset
-budget, a streaming manager, a "rebuild the device" handler).
+Exceptions are for failures that are **infrequent**, **must propagate up** past several frames that can't do anything useful, and yet **can ultimately be handled** somewhere.
+The canonical shape: a resource allocation deep in a call tree fails, and the only party who can recover is a coarse subsystem far above.
+That is an asset budget, a streaming manager, a "rebuild the device" handler.
 
-- **Handleable, not fatal.** If nobody can recover — a truly impossible state — that's a bug: assert, or
-  abort with a diagnostic. Exceptions are for failures with a real (if distant) handler.
-- **Non-local by nature.** If the immediate caller handles it, that's a `result`, not an exception.
-- **Infrequent.** Exceptions are not control flow. A failure that happens on a hot path or routinely is a
-  `result`.
-- **Typed and informative.** A library defines a small, purpose-built set of exception types carrying the
-  extra context a handler needs (not a single opaque type, not raw `std::` exceptions).
+- **Handleable, not fatal.** If nobody can recover, because the state is truly impossible, that is a bug: assert, or abort with a diagnostic.
+  Exceptions are for failures with a real, if distant, handler.
+- **Non-local by nature.** If the immediate caller handles it, that is a `result`, not an exception.
+- **Infrequent.** Exceptions are not control flow, so a failure that happens on a hot path or routinely is a `result`.
+- **Typed and informative.** A library defines a small, purpose-built set of exception types carrying the extra context a handler needs — not a single opaque type, and not raw `std::` exceptions.
 
 Crucially, a failure being *recoverable-but-not-locally* is exactly why device resets and allocation
 failures are **exceptions, not assertions**: "the program must keep working" rules assertions out, but a

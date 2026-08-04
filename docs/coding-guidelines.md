@@ -107,7 +107,7 @@ Concretely:
 
 **Compiler Support:**
 - **First-class:** Clang and MSVC — [requirements.md](requirements.md#compilers) carries the known-good version per platform.
-- **Second-class:** GCC (temporary issues may occur, fixes welcome)
+- **Second-class:** GCC — one CI preset and Tier 1, but it lags: expect the occasional temporary issue, and fixes are welcome.
 
 ---
 

@@ -5,6 +5,8 @@ when_to_use: "these files violate our doc policy", "fix the comments in", "rewor
 allowed-tools: Read Edit Write Bash Glob Grep mcp__repo_tools__repo_search mcp__repo_tools__repo_structure mcp__repo_tools__file_structure
 ---
 
+[docs/guides/prose.md](../../../docs/guides/prose.md) is the guide around this skill: when a pile of findings becomes a rework, and where each answer lives.
+
 ## What this is
 
 Fixing prose one finding at a time does not work.
@@ -69,6 +71,14 @@ Every line has to pull its weight, and a fringe concept documented at three leve
 Deleting a "what this already does" recap is right when a concept doc owns it, and wrong the moment none does.
 That failure is invisible downstream: every span validates, every rule passes, and the answer is simply gone from the tree.
 A missing owner is a step-1 gap that has just turned urgent — write the doc, or keep the recap until someone does.
+**A gap may be an unreachable owner rather than a missing one.**
+Before writing a new doc for a gap, grep for the answer outside the surface you scoped — a tool readme, a library-local doc, a `.cmake` comment.
+If it exists but nothing in the reader's reach links to it, the fix is a cross-link plus a short guide-level page, not a fourth copy of the mechanism.
+
+**Compression is where a rework introduces its own errors, and the tell is a word doing double duty.**
+Collapsing a list that mixes "what exists" with "what is intended" — tiers, roadmaps, support levels — reads afterwards as an assertion that all of it exists.
+When a sentence you are shortening carries a hedge, decide whether the hedge was the load-bearing half before dropping it.
+
 
 **Backstory is the first thing to cut**, per [Code Comments](../../../docs/coding-guidelines.md#code-comments).
 No narration of why an approach was chosen, and above all no cross-module causal annotation — "because *(some implementation fact three libraries over)*" reads as insight and ages into a lie.
@@ -82,6 +92,11 @@ Where a removed approach still matters it is a constraint on the *current* desig
 
 The budget is the anti-bloat device.
 It is not a shrink rule.
+A surface that has been reworked or edited often is already dense: its duplication is compressed restatement, not verbose blocks.
+Deleting a one-liner repeated at three levels saves twenty words, where a first pass over a young header sheds a whole mechanism.
+So budget by surface age, and expect a mature surface to come back near flat — the win there is correctness and findability, not volume.
+Correcting a stale claim costs words too: the truth is almost always longer than the wrong version it replaces.
+
 
 Set it against the numbers `prose-stats` gave you in step 1, and check it with `--stats` in step 5.
 **Budget on words, not lines.** Un-reflowing a justified block adds lines by construction, so `+lines` is not a failure — `+words` on a surface you meant to trim is.
