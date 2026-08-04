@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.28)
 project(shaped-shader-library LANGUAGES CXX)
 
-# shaped-shader-library (slib::) is the shader package + hot-reload mechanism: any target declares its
-# own shader package via sc_add_shader_package (cmake/ShaderPackage.cmake), gets typed C++ symbols for
-# its shaders, and gets hot reloading. Shader sources are reached only through a mounted slib::filesystem
-# -- real_filesystem is the one adaptor that touches the disk.
+# shaped-shader-library (slib::) is the shader package + hot-reload mechanism.
+# Any target declares its own shader package via sc_add_shader_package (cmake/ShaderPackage.cmake), gets
+# typed C++ symbols for its shaders, and gets hot reloading.
+# Shader sources are reached only through a mounted slib::filesystem -- real_filesystem is the one adaptor
+# that touches the disk.
 add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/memory_filesystem.cc
     src/shaped-shader-library/filesystem/embedded_filesystem.cc
@@ -17,8 +18,9 @@ add_library(shaped-shader-library
     src/shaped-shader-library/impl/reload_watcher.cc
 )
 
-# Public headers (co-located in src/, grouped by topic). impl/ headers are internal -- reachable via the
-# src/ include dir below, but intentionally not part of the public FILE_SET.
+# Public headers (co-located in src/, grouped by topic).
+# impl/ headers are internal -- reachable via the src/ include dir below, but intentionally not part of
+# the public FILE_SET.
 target_sources(shaped-shader-library
     PUBLIC
     FILE_SET public_headers
@@ -39,10 +41,10 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/shader_library.hh
 )
 
-# The OS file-watch backend behind real_filesystem::watch. real_filesystem and these are the only files in
-# slib that reach the OS. A platform without one gets watch_backend_none: watch() reports that it cannot
-# notify and the reload watcher polls, exactly as it did before any of this existed. No compile definition
-# goes with it -- nothing is gated on the answer, so nothing needs to agree on it.
+# The OS file-watch backend behind real_filesystem::watch.
+# real_filesystem and these are the only files in slib that reach the OS.
+# A platform without one gets watch_backend_none: watch() reports that it cannot notify, and its caller polls.
+# No compile definition goes with it -- nothing is gated on the answer, so nothing needs to agree on it.
 if(WIN32)
     target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/filesystem/impl/watch_backend_windows.cc)
 else()
@@ -65,9 +67,10 @@ target_compile_options(shaped-shader-library
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# The HLSL -> DXIL compiler is optional: DXC is Windows-only and fetched on demand, so slib's own
-# surface -- packages, mounts, reload -- builds and is tested everywhere without it. SLIB_HAS_DXC is
-# PUBLIC because dxc_compiler.hh gates its declaration on it, so a consumer must see the same answer.
+# The HLSL -> DXIL compiler is optional: DXC is Windows-only and fetched on demand, so slib's own surface
+# -- packages, mounts, reload -- builds and is tested everywhere without it.
+# SLIB_HAS_DXC is PUBLIC because dxc_compiler.hh gates its declaration on it, so a consumer must see the
+# same answer.
 # It changes no type's layout, only whether one factory exists.
 if(SC_HAS_DXC_COMPILER)
     target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/compiler/dxc_compiler.cc)
@@ -101,8 +104,8 @@ if(SC_BUILD_TESTS)
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
 
-    # slib declares a package of its own: the codegen has to be exercised by something, and the library
-    # that ships sc_add_shader_package is the honest place for it.
+    # slib declares a package of its own: the codegen has to be exercised by something, and the library that
+    # ships sc_add_shader_package is the honest place for it.
     sc_add_shader_package(
         TARGET     shaped-shader-library-test
         NAME       slib_test_shaders

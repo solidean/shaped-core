@@ -106,7 +106,8 @@ foreach(_shader IN LISTS _shaders)
     endif()
     list(APPEND _seen_triples "${_shader}")
 
-    # A stem is the file name turned into a C++ identifier: post-process/manga_render.hlsl -> manga_render.
+    # The path turned into one C++ identifier, directory included: post-process/manga_render.hlsl becomes
+    # post_process_manga_render, since '/' and '-' both map to '_'.
     get_filename_component(_stem "${_path}" NAME_WE)
     get_filename_component(_dir "${_path}" DIRECTORY)
     string(REPLACE "-" "_" _stem_id "${_stem}")
@@ -148,10 +149,12 @@ endforeach()
 # ---------------------------------------------------------------------------------------------------
 
 # A shipped binary reads its shaders from the embedded copy, and ssc::dxc has no filesystem fallback for
-# #include -- an unresolved one is a hard error. So every file a shader pulls in has to be embedded too,
-# not just the entry points. Scanning for `#include "..."` is a deliberate approximation: it does not know
-# about #if, so it over-approximates (embeds a file an #ifdef would have skipped). Over-approximating
-# costs binary size; under-approximating would break the shipped build, so the bias is the right way up.
+# #include -- an unresolved one is a hard error.
+# So every file a shader pulls in has to be embedded too, not just the entry points.
+# Scanning for `#include "..."` is a deliberate approximation: it does not know about #if, so it
+# over-approximates and embeds a file an #ifdef would have skipped.
+# Over-approximating costs binary size; under-approximating would break the shipped build, so the bias is
+# the right way up.
 set(_scan_queue ${_files_to_embed})
 while(_scan_queue)
     list(POP_FRONT _scan_queue _current)
@@ -161,8 +164,12 @@ while(_scan_queue)
     foreach(_include IN LISTS _includes)
         string(REGEX REPLACE "^#[ \t]*include[ \t]*\"([^\"]+)\"$" "\\1" _include_path "${_include}")
 
-        # Mirrors slib::shader_library's resolution: next to the including file, then the package root.
+        # Next to the including file, then the package root.
         # A path that resolves to neither lives in another mount (a shared library) and is not ours to embed.
+        #
+        # Deliberately wider than slib::shader_library, which resolves every include from the entry shader's
+        # own directory at any depth. Embedding a file the runtime would not have found costs binary size;
+        # the reverse would break the shipped build.
         get_filename_component(_current_dir "${_current}" DIRECTORY)
         if(_current_dir STREQUAL "")
             set(_sibling "${_include_path}")
