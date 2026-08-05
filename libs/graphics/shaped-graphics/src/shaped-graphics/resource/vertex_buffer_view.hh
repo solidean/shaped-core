@@ -2,9 +2,9 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// A vertex buffer bound to an input slot for a draw: the buffer, the byte sub-range to read, and the
-/// per-vertex stride. Built directly or via `raw_buffer::as_vertex_buffer<T>()`. A value type; keeps the
-/// buffer alive via the held handle.
+/// A vertex buffer bound to an input slot for a draw: the buffer, the byte sub-range to read, and the per-vertex stride.
+/// Built directly, or via `raw_buffer::as_vertex_buffer<T>()`.
+/// A value type, which keeps the buffer alive via the held handle.
 
 namespace sg
 {

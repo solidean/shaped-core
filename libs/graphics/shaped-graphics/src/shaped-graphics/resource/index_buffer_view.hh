@@ -2,9 +2,9 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// An index buffer bound for an indexed draw: the buffer, the element width, and the byte sub-range to
-/// read. Built directly or via `raw_buffer::as_index_buffer(format)`. A value type; keeps the buffer
-/// alive via the held handle.
+/// An index buffer bound for an indexed draw: the buffer, the element width, and the byte sub-range to read.
+/// Built directly, or via `raw_buffer::as_index_buffer(format)`.
+/// A value type, which keeps the buffer alive via the held handle.
 
 namespace sg
 {

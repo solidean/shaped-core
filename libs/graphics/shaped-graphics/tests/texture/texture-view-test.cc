@@ -6,11 +6,10 @@
 #include <memory>
 #include <variant>
 
-// Pure tests for texture views: the `as_*_view` factories on texture<Traits> build the right strongly-typed
-// descriptor, which erases to a `raw_view` with shape `texture`. Each factory takes a shape-specific
-// parameter bag (`Traits::*_params`) naming only the axes that shape has. No GPU — a minimal raw_texture
-// subclass (shape/usage metadata only) is enough. The dx12 backend turning these into SRV/UAV descriptors
-// is covered in backends/dx12/tests/dx12-texture-view-test.cc.
+// Pure tests for texture views: the `as_*_view` factories on texture<Traits> build the right strongly-typed descriptor, which erases to a `raw_view` with shape `texture`.
+// Each factory takes a shape-specific parameter bag, `Traits::*_params`, naming only the axes that shape has.
+// No GPU — a minimal raw_texture subclass carrying only shape and usage metadata is enough.
+// The dx12 backend turning these into SRV/UAV descriptors is covered in backends/dx12/tests/dx12-texture-view-test.cc.
 
 namespace
 {

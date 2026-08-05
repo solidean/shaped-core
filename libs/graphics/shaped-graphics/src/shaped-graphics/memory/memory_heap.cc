@@ -7,7 +7,7 @@ memory_heap::~memory_heap() = default;
 
 memory_heap::memory_heap(isize size_in_bytes) : _size_in_bytes(size_in_bytes)
 {
-    // Zero is allowed — an empty heap holds no placements. Only a negative size is programmer misuse.
+    // Zero is allowed — an empty heap holds no placements.
     CC_ASSERT(size_in_bytes >= 0, "memory heap size must be non-negative");
 }
 

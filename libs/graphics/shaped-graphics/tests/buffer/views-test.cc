@@ -92,8 +92,8 @@ TEST("sg views - readonly structured view")
     CHECK(raw.element_count == 20);
     CHECK(raw.stride_in_bytes == sizeof(particle));
 
-    // Sub-range in elements: offset is scaled by the stride. A storage view's byte offset must be 256-byte
-    // aligned, so element 64 of a u32 view (byte 256) is the first legal non-zero start.
+    // Sub-range in elements: offset is scaled by the stride.
+    // A storage view's byte offset must be 256-byte aligned, so element 64 of a u32 view (byte 256) is the first legal non-zero start.
     auto const sub = sg::buffer<u32>::from_raw(buf).as_readonly_buffer({.offset = 64, .size = 3});
     CHECK(sub.offset_in_bytes == 64 * sizeof(u32));
     CHECK(sub.element_count == 3);
@@ -374,8 +374,8 @@ TEST("sg views - structured views need a stride-aligned offset; recovery needs s
     CHECK(arm.shape == sg::view_shape::structured);
     CHECK(arm.offset_in_bytes == 256);
     CHECK(arm.element_count == 2);
-    // ...but a non-stride-multiple offset asserts at creation. 264 is 4-aligned and within bounds, yet is
-    // neither 256-aligned nor a multiple of the 16-byte stride.
+    // ...but a non-stride-multiple offset asserts at creation.
+    // 264 is 4-aligned and within bounds, yet is neither 256-aligned nor a multiple of the 16-byte stride.
     CHECK_ASSERTS(buf->as_raw_readonly({.offset = 264, .size = 32}, sizeof(particle)));
 
     // Guardrail 2: recovering the arm to buffer_view<T> requires sizeof(T) to match the structured stride.
@@ -386,10 +386,9 @@ TEST("sg views - structured views need a stride-aligned offset; recovery needs s
 
 TEST("sg views - heterogeneous buffer: whole-buffer raw view + in-shader Load")
 {
-    // The portable tool for a buffer packing different objects at hand-chosen byte offsets is a raw
-    // (byte-addressed) view: per-object addressing happens in-shader via Load<T>(byteOffset), so the view's
-    // element type is byte and each object's placement is decoupled from any T's size. The *view* start still
-    // obeys the 256-byte storage rule — which is exactly why the whole-buffer view (start 0) is the norm.
+    // The portable tool for a buffer packing different objects at hand-chosen byte offsets is a raw, byte-addressed view.
+    // Per-object addressing happens in-shader via Load<T>(byteOffset), so the view's element type is byte and each object's placement is decoupled from any T's size.
+    // The *view* start still obeys the 256-byte storage rule, which is exactly why the whole-buffer view (start 0) is the norm.
     auto const buf = make_buffer(1024, sg::buffer_usage::readonly_buffer);
 
     // Whole-buffer raw view (start 0) — the base you'd Load<T>(byteOffset) from in a shader.

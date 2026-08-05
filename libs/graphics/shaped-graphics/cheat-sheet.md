@@ -256,12 +256,12 @@ b.as_raw_readwrite({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED U
 //   as are the draw-input views (as_vertex_buffer / as_index_buffer).
 // Bypass: build the raw_buffer_view aggregate yourself. For a heterogeneous buffer: one WHOLE-buffer raw view
 //   + in-shader Load<T>(byteOffset) does per-object addressing — see docs/concepts/views.md.
-// try_ TWINS: every storage/uniform factory above has one (try_as_raw_readonly/readwrite/uniform_buffer, both
-//   overloads + whole-buffer) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
+// try_ TWINS: every storage/uniform factory above has one (try_as_raw_readonly/readwrite -> both overloads + whole-buffer;
+//   try_as_raw_uniform_buffer -> its one byte-range overload) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
 //   A missing buffer_usage flag still ASSERTS (you chose usage at creation). Draw-input views have no twin.
 b.as_raw_uniform_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (uniform_block; offset 256-aligned; size <= 64 KiB)
 b.as_raw_vertex_buffer({.offset=,.size=}, stride_in_bytes)  // -> vertex_buffer_view (explicit stride)
-b.as_index_buffer(format)                  // -> index_buffer_view (whole buffer)
+b.as_index_buffer(format=uint16)           // -> index_buffer_view (whole buffer)
 b.as_raw_index_buffer(format, {.offset=,.size=})            // -> index_buffer_view (byte range; width from format)
 // re-type up to the typed wrapper (inverse of buffer<T>::raw()); same shape check as buffer<T>::from_raw:
 b.as_buffer<T>()                           // -> buffer<T>              (asserts byte size is a whole number of T)
@@ -298,15 +298,17 @@ buf.as_index_buffer() / (range)            // -> index_buffer_view  (only buffer
 
 ```cpp
 #include <shaped-graphics/resource/pixel_format.hh>
-sg::pixel_format             // enum: undefined, r8/rg8/rgba8/bgra8 (unorm/snorm/uint/sint/srgb),
+sg::pixel_format             // enum: undefined, r8/rg8/rgba8 (unorm/snorm/uint/sint) + rgba8/bgra8 _unorm & _unorm_srgb,
                              //   r/rg/rgba 16f & 32f & int, rgb10a2_unorm, rg11b10_float,
                              //   depth16_unorm/depth32_float/depth32_float_stencil8, bc1..bc7 (feature-gated)
-sg::is_depth_format(f)       // bool  — depth or depth-stencil
-sg::has_stencil(f)           // bool  — carries a stencil plane
-sg::is_srgb_format(f)        // bool  — hardware applies the sRGB transfer function on read/write
-sg::is_compressed_format(f)  // bool  — BC block-compressed (4x4 blocks)
-sg::format_block_size(f)     // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
-sg::format_block_extent(f)   // int   — 1 (uncompressed) or 4 (BC)
+sg::is_depth_format(f)          // bool  — depth or depth-stencil
+sg::is_depth_stencil_format(f)  // bool  — depth AND stencil planes
+sg::has_stencil(f)              // bool  — carries a stencil plane
+sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer function on read/write
+sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
+sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
+sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
+sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)
 ```
 
 ## texture — GPU-resident texture  (raw resource + typed wrapper)
@@ -336,7 +338,7 @@ ctx.transient.create_texture_2d({...})         // -> sg::texture_2d  (transient;
 // typed wrapper: shape fixed at compile time; getters gated by concepts (depth() only on 3D, etc.)
 sg::texture_2d::from_raw(raw_handle)           // wrap a raw handle; asserts the raw shape matches (try_from_raw -> optional); .raw() -> raw_texture_handle
 raw->as_texture_2d() / raw->try_as_texture_2d()// same, straight off the handle (one accessor per typedef: as_texture_1d/2d/3d/cube/…/cube_array_ms; try_ -> optional)
-// Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count<0=all}.
+// Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count} where count<0 = to the end of the axis.
 // sampled (SRV) — needs readonly_texture usage. Natural dimension:
 tex.as_readonly_view({.mips={.start=1}})       // -> readonly_texture_view<VT>  (VT deduced; whole; params name only this shape's axes)
 //   read_only_params fields: .mips always; .slices (arrays); .cubes (cube arrays)
@@ -370,7 +372,8 @@ sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)     
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
 sg::readonly_texture_view<VT>  // sampled texture (SRV); VT = texture_view_traits<Dim> — view_class::readonly
 sg::readwrite_texture_view<VT> // storage texture (UAV); VT constrained to storage_view_dimension (no cube/MS)
-// each holds { raw_texture_handle, pixel_format, subresource_range }. Made via texture<Traits>.as_*_view() (returns the precise VT).
+// each holds { raw_texture_handle, pixel_format, subresource_range }, plus depth_slice_range on the storage view (3D).
+//   Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
 sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (access is a runtime field); leaves convert implicitly
 sg::texture_view<VT>         // access-erased middle: any access of a texture view of dimension VT::dimension
@@ -516,7 +519,7 @@ raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serial
 ## acceleration structures — ray-tracing blas / tlas  (see docs/concepts/acceleration-structures.md)
 
 ```cpp
-#include <shaped-graphics/raytracing/acceleration_structure.hh>   // resources + input structs (also via command_list.raytracing.hh)
+#include <shaped-graphics/raytracing/acceleration_structure.hh>   // resources + input structs (also via command_list/raytracing.hh)
 sg::blas_handle   // std::shared_ptr<sg::blas const>   — bottom-level (one mesh's triangles or AABBs); persistent
 sg::tlas_handle   // std::shared_ptr<sg::tlas const>   — top-level (instances of blas); a tlas keeps its blases alive
 // input structs (value types; build-input buffers need buffer_usage::accel_structure_build_input):
@@ -535,9 +538,10 @@ cmd.raytracing.is_supported()                    // bool — backend/device supp
 cmd.raytracing.build_blas(span<blas_triangles const>, flags=fast_trace)  // -> blas_handle
 cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> blas_handle  (a blas is triangles OR aabbs)
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
-// blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); geometry_count()/instance_count(); build_flags();
-//   allows_update(); is_expired()/expire()/add_finalizer(). dx12 real (WARP); vulkan is_supported()==false + stubs.
-tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RT / RayQuery)
+// blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
+//   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
+//   dx12 real (WARP); vulkan is_supported()==false + stubs.
+tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
 ```
 
 ## raytracing pipeline + shader table + dispatch_rays  (dx12 real on WARP; see docs/concepts/raytracing-pipeline.md)
@@ -588,7 +592,7 @@ ctx.cached.cache()                                             // -> pipeline_ca
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
 pc.acquire_binding_group_layout(ctx, bindings);  pc.acquire_pipeline_layout(ctx, {.groups={gl}});  pc.acquire_compute_pipeline(ctx, desc);
 pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provider(p);  pc.apply_bookkeeping();
-// TODO: graphics / raytracing pipeline caching once those pipeline types land in sg.
+// TODO: graphics pipeline caching once that pipeline type lands in sg.
 ```
 
 ## render routines — reusable GPU-work units  (see docs/render-routines.md)
@@ -625,7 +629,7 @@ sg::reload_generation()                    // -> u64   — process-global "conte
 sg::signal_reload()                        // void     — bump it (the shader library calls this on hot reload)
 ```
 
-## memory placement — heaps & alloc-info  (stub)
+## memory placement — heaps & alloc-info
 
 ```cpp
 #include <shaped-graphics/fwd.hh>
@@ -646,8 +650,8 @@ h.memory_requirements_for_buffer(size, usage)         // -> memory_requirements 
 h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info, const (validates offset alignment/bounds, mints handle back to h; no tracking)
 // protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
 // flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
-// create_raw_buffer takes the allocation_info, but only dedicated (null heap) works today — placement asserts.
-// NOT yet wired: no context.create_memory_heap; placed allocations not implemented in the backends yet
+// create_raw_buffer takes the allocation_info; dedicated and placed both work on dx12 (CreatePlacedResource).
+// Textures are not placeable — memory_heap only sizes buffers. vulkan stubs heaps and placement entirely.
 ```
 
 ## backends — subclass the abstract sg types

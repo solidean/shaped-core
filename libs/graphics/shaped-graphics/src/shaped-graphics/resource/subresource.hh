@@ -7,13 +7,12 @@
 /// A texture's subresource domain is the discrete grid of (mip level × array slice × aspect plane).
 /// Buffers are single-subresource and never use any of this.
 ///
-/// This is pure addressing vocabulary — the access state kept per subresource lives in
-/// `barrier/subresource_state.hh`, which builds its covering partition on top of these ranges.
+/// Pure addressing vocabulary: the access state kept per subresource lives in `barrier/subresource_state.hh`, which builds its covering partition on top of these ranges.
 
 namespace sg
 {
-/// Which plane of a (possibly multi-planar) texture a subresource addresses. Single-plane formats use
-/// `color` (or `depth`); depth-stencil and video formats expose several planes.
+/// Which plane of a possibly multi-planar texture a subresource addresses.
+/// Single-plane formats use `color`, or `depth`; depth-stencil and video formats expose several planes.
 enum class texture_aspect : u32
 {
     color,
@@ -24,8 +23,9 @@ enum class texture_aspect : u32
     plane2,
 };
 
-/// The size of a texture's subresource domain along each axis. `aspect_count` is the number of planes
-/// (1 for a plain color texture, 2 for depth+stencil, etc.). A buffer is `{1, 1, 1}`.
+/// The size of a texture's subresource domain along each axis.
+/// `aspect_count` is the number of planes — 1 for a plain color texture, 2 for depth+stencil.
+/// A buffer is `{1, 1, 1}`.
 struct subresource_extent
 {
     int mip_count = 1;
@@ -35,9 +35,9 @@ struct subresource_extent
     [[nodiscard]] int total() const { return mip_count * array_count * aspect_count; }
 };
 
-/// Addresses a single subresource: one (mip level, array layer, aspect) point in the grid — the point
-/// analog of `subresource_range`. Defaults to the first subresource (mip 0, layer 0, color).
-/// `array_layer` counts slices — a cube's faces are layers 0..5, a cube array's are `6*cube + face`.
+/// Addresses a single subresource: one (mip level, array layer, aspect) point in the grid — the point analog of `subresource_range`.
+/// Defaults to the first subresource: mip 0, layer 0, color.
+/// `array_layer` counts slices, so a cube's faces are layers 0..5 and a cube array's are `6*cube + face`.
 struct subresource_index
 {
     int mip_level = 0;
@@ -45,9 +45,9 @@ struct subresource_index
     texture_aspect aspect = texture_aspect::color;
 };
 
-/// A half-open box in the subresource grid: a `[start, end)` range on each of the mip, array-slice, and
-/// aspect-plane axes. Used to name the range an access covers. A single `subresource_index` converts to
-/// the one-wide box at its point, so ops that touch one subresource can pass it directly.
+/// A half-open box in the subresource grid: a `[start, end)` range on each of the mip, array-slice and aspect-plane axes.
+/// Used to name the range an access covers.
+/// A single `subresource_index` converts to the one-wide box at its point, so an op touching one subresource can pass it directly.
 struct subresource_range
 {
     cc::start_end mip_range = {.start = 0, .end = 1};

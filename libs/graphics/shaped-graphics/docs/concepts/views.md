@@ -86,7 +86,9 @@ Each leaf converts to it implicitly and it erases on to `raw_view`, which suits 
 
 Erasure is not one-way: each layer offers `as_<access>()` / `try_as_<access>()` back up toward the leaves.
 `as_*` asserts; `try_*` returns a `cc::optional`, nullopt on mismatch, and is the checked twin for genuinely runtime input.
-A `try_` tolerates only the runtime **access class** being wrong — a mismatched element type `T` or `Traits` still asserts, since that is a caller's claim rather than a runtime condition.
+A `try_` tolerates the runtime **access class** being wrong, and on a texture arm the view **dimension** too.
+`raw_texture_view::try_as_readonly<Traits>` is nullopt when `view_dimension != Traits::dimension`.
+A mismatched buffer element type `T` still asserts, since a wrong element size is a caller's claim the view's stride can disprove rather than a runtime condition.
 
 - **Access-erased middle → leaf.**
   `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and `texture_view<Traits>::as_readonly()` / `as_readwrite()` pin the runtime access class to the matching compile-time leaf.
