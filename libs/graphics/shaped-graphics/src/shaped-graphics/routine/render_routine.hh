@@ -44,7 +44,8 @@ private:
     cc::mutex_guard<render_routine_base::init_state> _lock;
 };
 
-/// CRTP base for a concrete render routine. Derive as
+/// CRTP base for a concrete render routine.
+/// Derive as
 ///
 ///   class my_routine : public sg::render_routine<my_routine> { ... };
 ///

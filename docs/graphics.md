@@ -17,19 +17,16 @@ Each library's own docs carry its current state; this page does not try to track
 The graphics-API wrapper.
 It exposes a small, backend-agnostic surface — `context`, `command_list`, and the GPU resource types — over concrete graphics backends.
 
-- **Backends are separate static libraries** under [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/), one per API, built only where the platform and build allow.
-  **dx12 and vulkan are the two that exist**, and they are not equally far along: dx12 is real, while vulkan creates devices and resources but stubs its recording paths.
-  metal and webgpu (tier 2) and opengl and webgl (legacy compat) are intended, with no backend written yet.
+- **Backends are separate static libraries**, one per API, under [shaped-graphics/backends/](../libs/graphics/shaped-graphics/backends/).
+  Each is built only where the platform and the build allow.
 - **sg does not depend on the backends.** The dependency arrow points one way, backends → sg, so there is no `sg::create_context` in the core.
-  Each backend library exposes its own `sg::create_<backend>_context(config)` instead — see the [context concept doc](../libs/graphics/shaped-graphics/docs/concepts/context.md).
+  Each backend library exposes its own `sg::create_<backend>_context(config)` instead.
+  See the [context concept doc](../libs/graphics/shaped-graphics/docs/concepts/context.md).
   `backend_kind` is a coarse tag rather than a backend identity: a debug, CPU or remote backend is just as valid as dx12 or vulkan.
-- **Resources are shared-immutable**, and the handle types say so.
-  A resource handle is `std::shared_ptr<sg::xyz const>`, while the mutable drivers `context_handle` and `swapchain_handle` carry no `const`.
-  `command_list` gets no handle at all, being a single-use temporary.
-- **There are no host-visible buffers or textures** in the API: PCIe transfer is a globally shared resource that sg manages.
 
-The load-bearing conventions are handles, backend smurf naming, and the duplication-over-abstraction stance.
-They belong to the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md) and its [coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md).
+Which backends exist, how far along each is, and sg's design at a glance: the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md).
+The load-bearing conventions are handles, backend smurf naming and the duplication-over-abstraction stance.
+They live in its [coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md).
 
 ### shaped-rendering — `sr::`
 

@@ -3,9 +3,9 @@
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// Backend-neutral texture **sampler** description: how a shader reads a texture (filtering, addressing,
-/// LOD, optional depth comparison). A sampler is a small immutable state value, not a GPU resource that
-/// owns memory. It reaches a shader two ways (see libs/graphics/shaped-graphics/docs/concepts/bindings.md):
+/// Backend-neutral texture **sampler** description: how a shader reads a texture — filtering, addressing, LOD, optional depth comparison.
+/// A sampler is a small immutable state value, not a GPU resource that owns memory.
+/// It reaches a shader two ways (see libs/graphics/shaped-graphics/docs/concepts/bindings.md):
 ///   - **static** — declared on a binding_group_layout and baked into the pipeline layout's root signature;
 ///   - **dynamic** — supplied per binding_group (a `named_sampler`), written into a sampler descriptor heap.
 
@@ -28,8 +28,8 @@ enum class sampler_address_mode
     mirror_clamp_edge, ///< mirror once, then clamp (Vk MIRROR_CLAMP_TO_EDGE / D3D MIRROR_ONCE)
 };
 
-/// The fixed border color used by `clamp_border` addressing. The portable set (the three every backend
-/// supports as a static sampler); an arbitrary float4 border is deferred.
+/// The fixed border color used by `clamp_border` addressing.
+/// The portable set — the three every backend supports as a static sampler; an arbitrary float4 border is deferred.
 enum class sampler_border_color
 {
     transparent_black, ///< (0, 0, 0, 0)
@@ -51,8 +51,9 @@ enum class compare_op
     always,
 };
 
-/// An immutable sampler state. Defaults are a trilinear repeating sampler with no anisotropy and no depth
-/// comparison — the common case. Value type: cheap to copy and compare.
+/// An immutable sampler state.
+/// Defaults are a trilinear repeating sampler with no anisotropy and no depth comparison — the common case.
+/// A value type: cheap to copy and compare.
 struct sampler
 {
     /// Sentinel `max_lod` meaning "no upper mip clamp" (FLT_MAX).

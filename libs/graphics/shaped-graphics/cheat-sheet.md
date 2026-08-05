@@ -162,7 +162,7 @@ cmd.context()                           // sg::context& — the context that cre
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
 ```
 
-## command_list — records GPU work  (abstract)
+## command_list — records GPU work  (abstract)  · [concept](docs/concepts/command-recording.md)
 
 ```cpp
 #include <shaped-graphics/command_list/command_list.hh>
@@ -185,10 +185,11 @@ cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
 // cmd.upload/download = INLINE (recorded in this list); ctx.upload/download = ASYNC (copy queue, off the
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
-// inline path: copy is recorded here; the download future is delivered by a separate actor after the
-// submitted list finishes on the GPU (no advance_epoch needed — but advance_epoch* / wait_for_idle do NOT
-// guarantee delivery either; use ctx.wait_for(future)). Uploading + downloading + copying the SAME buffer works in ONE list —
-// the access tracker orders them (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
+// a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
+// no advance_epoch is needed for that — but advance_epoch* / wait_for_idle do not force it either;
+//   ctx.wait_for(future) is the only completion guarantee. See docs/concepts/download.inline.md.
+// uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
+//   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // vulkan transfer is a TODO stub.
 
 // GPU queries (cmd.query scope). See docs/concepts/queries.md.

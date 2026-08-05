@@ -7,14 +7,15 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// A compiled shader: a bytecode blob plus the metadata and reflection needed to build pipelines and
-/// bind resources — produced by a future compiler/loader (compilation is not part of sg yet). See
-/// libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+/// A compiled shader: a bytecode blob plus the metadata and reflection needed to build pipelines and bind resources.
+/// sg only consumes one — producing it is shaped-shader-library's job, through a compiler such as shaped-shader-compiler-dxc.
+/// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+/// libs/graphics/shaped-graphics/docs/shaders.md has the shader path end to end.
 
 namespace sg
 {
-/// Pipeline stage a shader runs at. Compute and the ray-tracing stages are wired; the graphics stages
-/// fill in as pipelines land.
+/// Pipeline stage a shader runs at.
+/// Compute and the ray-tracing stages are wired; the graphics stages fill in as pipelines land.
 enum class shader_stage
 {
     vertex,
@@ -56,8 +57,8 @@ enum class shader_stage
     return s == shader_stage::compute;
 }
 
-/// Bytecode format of the blob — which backend can consume it. A backend-agnostic shader must record it,
-/// so a pipeline knows whether the blob is for it.
+/// Bytecode format of the blob — which backend can consume it.
+/// A backend-agnostic shader must record it, so a pipeline knows whether the blob is for it.
 enum class shader_format
 {
     dxil,      ///< DirectX Intermediate Language — dx12
@@ -66,8 +67,8 @@ enum class shader_format
     // Future: dxbc, wgsl.
 };
 
-/// Provenance of the compile — mostly a cache-invalidation / debugging aid. `signature` is a free-form
-/// string capturing the flags/defines/source identity a compiler folds into its cache key.
+/// Provenance of the compile — mostly a cache-invalidation / debugging aid.
+/// `signature` is a free-form string capturing the flags/defines/source identity a compiler folds into its cache key.
 struct compiler_info
 {
     cc::string name;      ///< e.g. "dxc"
@@ -83,9 +84,9 @@ struct compute_dimensions
     int z = 1;
 };
 
-/// A successfully compiled shader: the bytecode blob and its extracted metadata + reflection, ready to
-/// build a pipeline from or cache. Reflection (the `bindings`) is stored inline. A pure value; share it
-/// via compiled_shader_handle.
+/// A successfully compiled shader: the bytecode blob and its extracted metadata + reflection, ready to build a pipeline from or cache.
+/// Reflection (the `bindings`) is stored inline.
+/// A pure value; share it via compiled_shader_handle.
 struct compiled_shader
 {
     shader_stage stage = shader_stage::compute;

@@ -5,9 +5,9 @@
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/resource/texture_descriptions.hh>
 
-// Backend-agnostic texture creation: each is an INVOCABLE_TEST run against every available backend
-// (see tests/context/context-test.cc for the mechanism). Creation only — using a texture in a command
-// list (views, barriers, copies) is future work.
+// Backend-agnostic texture creation: each is an INVOCABLE_TEST run against every available backend.
+// See tests/context/context-test.cc for the mechanism.
+// Creation only — using a texture in a command list is covered by tests/transfer, tests/texture/texture-view-test.cc and the dx12 barrier suite.
 
 INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle const& ctx))
 {
@@ -94,8 +94,8 @@ INVOCABLE_TEST("sg - allocates a transient texture", (sg::context_handle const& 
     CHECK(tex->width() == 128);
 }
 
-// Typed factories: a shape-specific description (only the free params) -> the wrapped texture<Traits>,
-// with the shape-fixed fields filled in under the hood.
+// Typed factories: a shape-specific description, carrying only the free params, yields the wrapped texture<Traits>.
+// The shape-fixed fields are filled in under the hood.
 
 INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle const& ctx))
 {

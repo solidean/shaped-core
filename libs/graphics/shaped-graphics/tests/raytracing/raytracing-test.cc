@@ -51,8 +51,8 @@ INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle con
     tri.vertices = verts;
     tri.vertex_count = 3;
 
-    // Build the BLAS then, in the SAME list, a TLAS referencing it — exercises the intra-list
-    // accel_write -> accel_read ordering between the two builds.
+    // Build the BLAS then, in the SAME list, a TLAS referencing it.
+    // That exercises the intra-list accel_write -> accel_read ordering between the two builds.
     auto cmd = ctx->create_command_list();
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
     REQUIRE(blas != nullptr);

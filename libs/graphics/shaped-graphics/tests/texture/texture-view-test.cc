@@ -77,8 +77,8 @@ sg::texture_description desc_3d(sg::texture_usage usage, int depth, int mips = 1
     return d;
 }
 
-// A 2D texture with a chosen format (for render-target / depth-stencil format-validity tests: a depth DSV
-// target, or a deliberately wrong format).
+// A 2D texture with a chosen format, for the render-target / depth-stencil format-validity tests.
+// That is a depth DSV target, or a deliberately wrong format.
 sg::texture_description desc_2d_fmt(sg::texture_usage usage, sg::pixel_format format, int mips = 1)
 {
     auto d = desc_2d(usage, mips);
@@ -380,8 +380,8 @@ TEST("sg - access-erased texture_view<Traits> middle")
     CHECK(rw.access == sg::view_class::readwrite);
 }
 
-// -- Render-target / depth-stencil views (render_target / depth_stencil). These do not erase to raw_view;
-//    their getters ARE the surface, so the tests read them directly.
+// -- Render-target / depth-stencil views (render_target / depth_stencil).
+//    These do not erase to raw_view; their getters ARE the surface, so the tests read them directly.
 
 TEST("sg - as_render_target_view builds a single-mip color render-target view; getters report size / format")
 {

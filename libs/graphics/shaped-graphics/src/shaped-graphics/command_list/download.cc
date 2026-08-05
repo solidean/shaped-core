@@ -18,8 +18,8 @@ bytes_future command_list_download_scope::bytes_from_texture(raw_texture_handle 
                                                              subresource_index const& subresource,
                                                              cc::optional<texture_region> region)
 {
-    // No region reads the whole subresource; a given region is used as-is, bounds-checked, and an empty one
-    // returns a ready, empty future.
+    // No region reads the whole subresource.
+    // A given region is used as-is and bounds-checked, and an empty one returns a ready, empty future.
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);

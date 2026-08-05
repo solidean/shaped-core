@@ -20,8 +20,8 @@ command_list_slot command_list_slot_allocator::acquire()
                 return command_list_slot(i);
             }
 
-            // Overflow: all 64 base slots are live. This is almost always a leaked (never submitted/dropped)
-            // command list — warn once, then serve from a heap free-list.
+            // Overflow: all 64 base slots are live.
+            // Almost always a leaked command list, never submitted or dropped — warn once, then serve from a heap free-list.
             if (!s.overflow_warned)
             {
                 s.overflow_warned = true;

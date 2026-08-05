@@ -320,8 +320,8 @@ TEST("sg - a routine compiles a shader and dispatches it end to end")
 
 TEST("sg - concurrent acquires of one routine run each phase exactly once")
 {
-    // The phase engine is guarded, so racing acquires must not both run init_declare. Without that lock
-    // this is a plain data race on the phase flags, and the counts come out above one under contention.
+    // The phase engine is guarded, so racing acquires must not both run init_declare.
+    // Without that lock this is a plain data race on the phase flags, and the counts come out above one under contention.
     auto const ctx = make_warp_context();
     if (ctx == nullptr)
         SKIP("no dx12 WARP device");

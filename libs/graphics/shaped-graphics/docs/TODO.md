@@ -8,6 +8,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
     The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
+  - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
   - **vulkan** barrier emission — it reuses the shared vocabulary and state machine, and lands with vulkan's compute/transfer milestone;
   - `declare_array_buffer_access` / `declare_array_texture_access` **full wiring** — the API and its validation are in, but neither is applied.

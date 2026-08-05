@@ -3,20 +3,22 @@
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// The per-resource (or per-subresource) access-state machine that turns a stream of declared accesses
-/// into a minimal set of barriers. A reusable, backend-neutral building block: a backend accumulates
-/// declared accesses with `declare`, then calls `flush` before each GPU op to get the barrier to emit
-/// (if any) and roll the state forward. Buffers keep one of these; textures keep one per covering box.
+/// The per-resource (or per-subresource) access-state machine that turns a stream of declared accesses into a minimal set of barriers.
+/// A reusable, backend-neutral building block: a backend accumulates declared accesses with `declare`, then calls `flush` before each GPU op.
+/// `flush` returns the barrier to emit, if any, and rolls the state forward.
+/// Buffers keep one of these; textures keep one per covering box.
+/// See libs/graphics/shaped-graphics/docs/concepts/barriers.md for why the machine is shaped this way.
 ///
-/// Three timelines keep barriers minimal:
+/// The three timelines that keep barriers minimal:
 ///   curr_*           — what the *next* op will do (accumulated by declare, consumed by flush)
 ///   inflight_*       — everything issued since the last write / command-list start
 ///   barriered_read_* — the reads already synced against the last write (so read-after-read is free)
 
 namespace sg
 {
-/// The barrier `flush` asks the backend to emit. `needed == false` means the access was a freebie and no
-/// barrier is required. For buffers the layouts are always `general`; they matter for textures.
+/// The barrier `flush` asks the backend to emit.
+/// `needed == false` means the access was a freebie and no barrier is required.
+/// For buffers the layouts are always `general`; they matter for textures.
 struct access_barrier
 {
     bool needed = false;
@@ -66,9 +68,9 @@ struct resource_access_state
     [[nodiscard]] pipeline_stage_flags all_curr_stages() const { return curr_read_stages | curr_write_stages; }
     [[nodiscard]] access_flags all_curr_access() const { return curr_read_access | curr_write_access; }
 
-    /// Accumulate one declared access into `curr`. `layout` is the layout the access needs (`general` for
-    /// buffers). An unordered write, or a layout change, routes into the write bucket (a layout transition
-    /// is an implicit read+write); everything else is a read.
+    /// Accumulate one declared access into `curr`.
+    /// `layout` is the layout the access needs (`general` for buffers).
+    /// An unordered write, or a layout change, routes into the write bucket — a layout transition is an implicit read+write; everything else is a read.
     void declare(pipeline_stage_flags stages, access_flags access, texture_layout layout = texture_layout::general)
     {
         if (is_unordered_write(access) || layout != prev_layout)
@@ -84,8 +86,8 @@ struct resource_access_state
         }
     }
 
-    /// Compute the barrier that satisfies the accumulated `curr` access against in-flight work, roll the
-    /// three timelines forward, and clear `curr`. Returns `{needed=false}` for a freebie (nothing to emit).
+    /// Compute the barrier that satisfies the accumulated `curr` access against in-flight work, roll the three timelines forward, and clear `curr`.
+    /// Returns `{needed=false}` for a freebie, with nothing to emit.
     [[nodiscard]] access_barrier flush()
     {
         access_barrier b;
@@ -165,8 +167,8 @@ struct resource_access_state
     /// True if any access has been declared for the next op but not yet flushed.
     [[nodiscard]] bool has_pending_declares() const { return has_any(curr_read_access) || has_any(curr_write_access); }
 
-    /// Reset the timelines to a fresh state while preserving the achieved layout (so the committed layout
-    /// carries into the next command list). Used at command-list release.
+    /// Reset the timelines to a fresh state, preserving the achieved layout so the committed layout carries into the next command list.
+    /// Used at command-list release.
     void reset_keep_layout()
     {
         auto const layout = curr_layout;

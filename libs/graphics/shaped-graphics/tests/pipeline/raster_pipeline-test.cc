@@ -94,8 +94,8 @@ TEST("sg - raster fixed-function state defaults")
     CHECK(ds.stencil_test == false);
     CHECK(ds.depth_compare == sg::compare_op::less);
 
-    // A default-constructed description writes triangles with no depth / no color targets, and no optional
-    // geometry / tessellation stages.
+    // A default-constructed description writes triangles with no depth and no color targets.
+    // It also has no optional geometry / tessellation stages.
     sg::raster_pipeline_description const desc;
     CHECK(desc.topology == sg::primitive_topology::triangle_list);
     CHECK(desc.color_targets.empty());

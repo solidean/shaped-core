@@ -85,8 +85,8 @@ rendering_scope::~rendering_scope()
     _cmd.raster_end_rendering();
 }
 
-// Raster draw recording on the scope — the same thin forwarders as command_list_raster_scope,
-// reaching the command list's backend seams directly (rendering_scope is a friend of command_list).
+// Raster draw recording on the scope — the same thin forwarders as command_list_raster_scope.
+// They reach the command list's backend seams directly, since rendering_scope is a friend of command_list.
 
 void rendering_scope::bind_pipeline(raster_pipeline const& pipeline)
 {
@@ -156,8 +156,8 @@ rendering_scope command_list_raster_scope::render_to(rendering_info const& info)
     return rendering_scope(_cmd, info);
 }
 
-// Draw recording — identical thin forwarders on both raster facades (cmd.raster and cmd.raster.manual),
-// each delegating to the shared command_list backend seams.
+// Draw recording — identical thin forwarders on both raster facades, cmd.raster and cmd.raster.manual.
+// Each delegates to the shared command_list backend seams.
 
 void command_list_raster_scope::bind_pipeline(raster_pipeline const& pipeline)
 {

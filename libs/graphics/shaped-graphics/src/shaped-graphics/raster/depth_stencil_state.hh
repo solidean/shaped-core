@@ -3,8 +3,9 @@
 #include <shaped-graphics/binding/sampler.hh> // compare_op — shared depth/stencil comparison vocabulary
 #include <shaped-graphics/fwd.hh>
 
-/// Depth and stencil test state baked into a raster pipeline. Reuses `compare_op` (from sampler.hh) for
-/// the depth and stencil comparisons. Defaults describe "no depth, no stencil".
+/// Depth and stencil test state baked into a raster pipeline.
+/// Reuses `compare_op` (from sampler.hh) for the depth and stencil comparisons.
+/// Defaults describe "no depth, no stencil".
 
 namespace sg
 {
@@ -21,8 +22,8 @@ enum class stencil_op
     decrement_wrap,  // DX12 STENCIL_OP_DECR     / Vk STENCIL_OP_DECREMENT_AND_WRAP
 };
 
-/// The stencil operations + comparison for one face (front or back). `compare` tests the masked stencil
-/// value against the dynamic reference; the ops select what to write on stencil-fail / depth-fail / pass.
+/// The stencil operations + comparison for one face, front or back.
+/// `compare` tests the masked stencil value against the dynamic reference, and the ops select what to write on stencil-fail / depth-fail / pass.
 struct stencil_face
 {
     stencil_op fail = stencil_op::keep;       ///< stencil test failed
@@ -31,9 +32,10 @@ struct stencil_face
     compare_op compare = compare_op::always;  ///< stencil comparison function
 };
 
-/// Depth + stencil test configuration. Defaults leave both disabled — a pipeline with no depth-stencil
-/// target uses this as-is. `depth_compare` applies only when `depth_test` is set; the stencil fields
-/// apply only when `stencil_test` is set (the write reference is dynamic — cmd.raster.set_stencil_reference).
+/// Depth + stencil test configuration.
+/// Defaults leave both disabled, so a pipeline with no depth-stencil target uses this as-is.
+/// `depth_compare` applies only when `depth_test` is set, and the stencil fields only when `stencil_test` is.
+/// The stencil write reference is dynamic — cmd.raster.set_stencil_reference.
 struct depth_stencil_state
 {
     bool depth_test = false;                     ///< enable the depth comparison

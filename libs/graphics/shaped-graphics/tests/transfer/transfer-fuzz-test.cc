@@ -18,10 +18,10 @@ using namespace cc::primitive_defines;
 // "Fuzzing over external, shared state": the `trace` below drops its open command list in its destructor
 // and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
 //
-// TODO: investigate fuzz runtime. Per-op execution counts are capped below to keep it reasonable, and each
-// download + epoch-wait genuinely stalls on the GPU — but it still feels slower than the op mix should cost.
-// Profile where the time actually goes (GPU round-trips vs. per-op host overhead vs. the fuzz engine itself)
-// before raising the caps back up.
+// TODO: investigate fuzz runtime.
+// Per-op execution counts are capped below to keep it reasonable, and each download + epoch-wait genuinely stalls on the GPU.
+// It still feels slower than the op mix should cost.
+// Profile where the time actually goes (GPU round-trips vs. per-op host overhead vs. the fuzz engine itself) before raising the caps back up.
 
 INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
@@ -29,10 +29,9 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
 
     auto test = nx::fuzz::test::create();
 
-    // Fuzz state threaded through the ops. Holds the context so it can DROP a still-open list explicitly
-    // when the engine discards a partial state — a command list must be submitted or dropped, never just
-    // let leak (see command_list's lifecycle contract). This keeps the fuzz a good citizen: no reliance
-    // on the destructor's auto-drop safety net (which would flood the output with warnings).
+    // Fuzz state threaded through the ops.
+    // It holds the context so it can DROP a still-open list explicitly when the engine discards a partial state — a command list must be submitted or dropped, never just leaked.
+    // That keeps the fuzz a good citizen, relying on no auto-drop safety net, which would flood the output with warnings.
     struct trace
     {
         sg::context_handle ctx;
@@ -136,10 +135,10 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      t.cmd->upload.data_to_buffer(t.buffer, data, start);
                  });
 
-    // Async-upload op: mirror of "upload" onto the copy queue. Pick a random region, model it in t.data,
-    // submit any open list first so recorded GPU order matches the model, then ctx->upload.data_to_buffer.
-    // (The copy actor's window-level reverse-sync deadlock this once tripped is fixed in dx12_upload_async;
-    // upload-async-test.cc pins the exact shape as a deterministic regression test.)
+    // Async-upload op: the mirror of "upload" onto the copy queue.
+    // Pick a random region, model it in t.data, submit any open list first so recorded GPU order matches the model, then ctx->upload.data_to_buffer.
+    // The copy actor's window-level reverse-sync deadlock this once tripped is fixed in dx12_upload_async.
+    // upload-async-test.cc pins the exact shape as a deterministic regression test.
     test->add_op("async upload",
                  [&](cc::random& rng, trace& t)
                  {
@@ -156,9 +155,8 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      for (auto i = 0; i < cnt; ++i)
                          t.data[start + i] = data[i];
 
-                     // Async upload streams on the copy queue, ordered after already-submitted work. Submit
-                     // any open list first so the recorded GPU order matches our reference model — an open
-                     // list's inline writes would race the async copy otherwise.
+                     // Async upload streams on the copy queue, ordered after already-submitted work.
+                     // Submit any open list first so the recorded GPU order matches our reference model — an open list's inline writes would race the async copy otherwise.
                      t.ensure_submitted_cmd();
                      ctx->upload.data_to_buffer<u32>(t.buffer, cc::make_pinned_data(cc::move(data)), start);
                  });
@@ -167,9 +165,9 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
         "copy region",
         [&](cc::random& rng, trace& t)
         {
-            // Pick two equal-length, non-overlapping regions. Cap the length at half the buffer so
-            // two blocks always fit, then lay them out with the leftover space split into random
-            // gaps (before / between) — a direct construction, no rejection sampling.
+            // Pick two equal-length, non-overlapping regions.
+            // Cap the length at half the buffer so two blocks always fit, then lay them out with the leftover space split into random gaps, before and between.
+            // A direct construction, with no rejection sampling.
             auto n = int(t.data.size());
             auto cnt = rng.uniform(1, n / 2);
             auto slack = n - 2 * cnt;             // free space to distribute around the two blocks

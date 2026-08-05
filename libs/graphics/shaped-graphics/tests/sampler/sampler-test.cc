@@ -3,9 +3,8 @@
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/sampler.hh>
 
-// Pure value/vocabulary tests for samplers: the backend-neutral sampler, the sampler
-// binding_type, and named_sampler. No GPU — the dx12 translation + heap wiring live in
-// backends/dx12/tests/dx12-sampler-test.cc.
+// Pure value/vocabulary tests for samplers: the backend-neutral sampler, the sampler binding_type, and named_sampler.
+// No GPU — the dx12 translation and heap wiring live in backends/dx12/tests/dx12-sampler-test.cc.
 
 TEST("sg sampler - description defaults are a trilinear repeating sampler")
 {

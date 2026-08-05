@@ -13,9 +13,8 @@
 
 using namespace cc::primitive_defines;
 
-// Goal of this topic (see docs/error-handling.md): pin that every backend's PUBLIC entry point performs
-// its cheap contract validation, so it can't be silently dropped. Each test is an INVOCABLE_TEST run
-// against every available backend (see tests/backends/backends.cc).
+// Goal of this topic (see docs/error-handling.md): pin that every backend's PUBLIC entry point performs its cheap contract validation, so it cannot be silently dropped.
+// Each test is an INVOCABLE_TEST run against every available backend (see tests/backends/backends.cc).
 //
 //   - CHECK_ASSERTS(expr): the expr must trip a CC_ASSERT (contract violation — null args, bad bounds,
 //     missing usage flags, ...). NOTE: when assertions are compiled out (release), CHECK_ASSERTS reports
@@ -23,9 +22,8 @@ using namespace cc::primitive_defines;
 //   - CHECK_THROWS_AS(expr, T): the throwing façade must raise the typed sg exception T.
 //
 // Deliberately NOT covered here (documented so the gap is visible, not accidental):
-//   - Out-of-memory sg::allocation_exception and descriptor-heap exhaustion: provoking them is expensive
-//     / non-deterministic. The recoverable persistent-descriptor-exhaustion path is exercised on the GPU
-//     by backends/dx12/tests/dx12-compute-test.cc ("persistent binding groups free and reuse ...").
+//   - Out-of-memory sg::allocation_exception and descriptor-heap exhaustion: provoking them is expensive or non-deterministic.
+//     The recoverable persistent-descriptor-exhaustion path is exercised on the GPU by backends/dx12/tests/dx12-compute-test.cc ("persistent binding groups free and reuse ...").
 //   - compute dispatch / bind validation: needs a full pipeline + shader; covered by dx12-compute-test.
 //   - wrong-epoch submit/drop and negative advance_epoch(allowed_in_flight): the latter asserts only
 //     after mutating epoch state, so it isn't cleanly catchable by CHECK_ASSERTS; both are lifecycle
@@ -190,8 +188,8 @@ INVOCABLE_TEST("sg error handling - advance rejects an epoch with open command l
     REQUIRE(ctx != nullptr);
 
     auto cmd = ctx->create_command_list();
-    // A command list opened this epoch must be submitted or dropped before advancing. The assert is at
-    // the top of advance_epoch (before any state change), so it is cleanly catchable here.
+    // A command list opened this epoch must be submitted or dropped before advancing.
+    // The assert is at the top of advance_epoch, before any state change, so it is cleanly catchable here.
     CHECK_ASSERTS(ctx->advance_epoch_and_wait_for_idle());
     ctx->drop_command_list(cc::move(cmd)); // clean up so the context stays usable
 }

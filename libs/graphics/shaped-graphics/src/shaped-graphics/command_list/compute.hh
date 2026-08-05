@@ -21,7 +21,7 @@ struct array_buffer_access
 };
 
 /// Per-element access for a *texture* array bound to a shader — the payload of `declare_array_texture_access`.
-/// Adds the layout the element must be in (and, later, a subresource range).
+/// It adds the layout the element must be in.
 struct array_texture_access
 {
     int index = 0;                                            ///< element index within the bound array
@@ -31,48 +31,46 @@ struct array_texture_access
     // A subresource range (which mips / array slices / aspects) is a future addition — see resource/subresource.hh.
 };
 
-/// Compute recording facade for a command list, reached as `cmd.compute`: bind a pipeline + resource
-/// groups, then dispatch.
-///
-/// A thin facade over its owning command list: it forwards each op to the list's backend impl.
+/// Compute recording facade for a command list, reached as `cmd.compute`: bind a pipeline and resource groups, then dispatch.
+/// See libs/graphics/shaped-graphics/docs/concepts/bindings.md for the bind path.
 class command_list_compute_scope
 {
 public:
-    /// Makes `pipeline` the active compute pipeline for subsequent bind_group / dispatch calls, and
-    /// caches its workgroup size for dispatch_threads.
+    /// Makes `pipeline` the active compute pipeline for subsequent bind_group / dispatch calls.
+    /// Caches its workgroup size for dispatch_threads.
     void bind_pipeline(compute_pipeline const& pipeline);
 
-    /// Binds `group` to descriptor set `set` of the active pipeline. The group's layout must match the
-    /// pipeline's for that set.
+    /// Binds `group` to descriptor set `set` of the active pipeline.
+    /// The group's layout must match the pipeline's for that set.
     void bind_group(int set, binding_group const& group);
 
     /// Dispatches `x`*`y`*`z` **workgroups** of the active pipeline.
     void dispatch_groups(int x, int y = 1, int z = 1);
 
-    /// Dispatches enough workgroups to cover `x`*`y`*`z` **threads**, rounding up per axis by the bound
-    /// pipeline's workgroup size (`ceil(threads / workgroup_size)`). A pipeline must be bound first.
+    /// Dispatches enough workgroups to cover `x`*`y`*`z` **threads**, rounding up per axis by the bound pipeline's workgroup size (`ceil(threads / workgroup_size)`).
+    /// A pipeline must be bound first.
     void dispatch_threads(int x, int y = 1, int z = 1);
 
-    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch
-    /// only** (declare again before each dispatch that needs it). Scalar bindings have their access inferred
-    /// from the shader + bound view; array element usage cannot be — a shader may index only some elements,
-    /// or use them differently — so it is declared explicitly here. `binding_name` is the array binding's
-    /// reflection name; each `array_buffer_access` names one element and how it is accessed.
+    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch only**.
+    /// Declare again before each dispatch that needs it.
+    /// A scalar binding has its access inferred from the shader and the bound view.
+    /// Array element usage cannot be, since a shader may index only some elements, or use them differently.
+    /// `binding_name` is the array binding's reflection name, and each `array_buffer_access` names one element and how it is accessed.
     void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
 
-    /// Declares per-element access for a *texture* array / bindless binding — like the buffer form (next
-    /// dispatch only), but each element also names the layout it must be in.
+    /// Declares per-element access for a *texture* array / bindless binding.
+    /// Like the buffer form it applies to the next dispatch only, but each element also names the layout it must be in.
     void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
 
-    /// Writes inline constants into the bound pipeline layout's `inline_constants` block (dx12 root
-    /// constants / vulkan push constants) — small per-dispatch data, no descriptor space. A pipeline
-    /// whose layout declares inline_constants must be bound first. `offset` unset => full replace, and
-    /// `data.size()` must equal the declared block_size; a value => partial update at that byte offset.
+    /// Writes inline constants into the bound pipeline layout's `inline_constants` block — dx12 root constants / vulkan push constants.
+    /// Small per-dispatch data, with no descriptor space.
+    /// A pipeline whose layout declares inline_constants must be bound first.
+    /// `offset` unset => full replace, and `data.size()` must equal the declared block_size; a value => partial update at that byte offset.
     /// Both `data.size()` and `offset` must be multiples of 4.
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
 
-    /// POD convenience: bit-copies `value` as the inline-constants payload. `T` must be trivially
-    /// copyable with a size that is a multiple of 4 bytes.
+    /// POD convenience: bit-copies `value` as the inline-constants payload.
+    /// `T` must be trivially copyable with a size that is a multiple of 4 bytes.
     template <class T>
     void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
@@ -88,15 +86,14 @@ public:
     command_list_compute_scope& operator=(command_list_compute_scope&&) = delete;
 
 private:
-    // Only a command list constructs its own scope; the scope in turn reaches the list's protected
-    // backend virtuals (mutual friendship).
+    // Only a command list constructs its own scope, and the scope reaches the list's protected backend virtuals — mutual friendship.
     friend class command_list;
     explicit command_list_compute_scope(command_list& cmd) : _cmd(cmd) {}
 
     command_list& _cmd;
 
-    // Workgroup size of the currently-bound pipeline (defaults to 1s so dispatch_threads == groups
-    // until a pipeline is bound). Kept as plain scalars to keep this header dependency-light.
+    // Workgroup size of the currently-bound pipeline; defaults to 1s, so dispatch_threads == dispatch_groups until a pipeline is bound.
+    // Plain scalars, to keep this header dependency-light.
     int _bound_wg_x = 1;
     int _bound_wg_y = 1;
     int _bound_wg_z = 1;

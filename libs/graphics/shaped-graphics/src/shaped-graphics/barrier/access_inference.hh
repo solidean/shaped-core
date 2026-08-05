@@ -3,14 +3,14 @@
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/resource/views.hh>
 
-/// Shared inference policy: which access / layout an operation or a bound view implies. Backends call
-/// these so the *semantics* of "declare access is never public — infer it from the op" stay consistent
-/// across backends, while each backend keeps full freedom over how it tracks and emits barriers.
+/// Shared inference policy: which access / layout an operation or a bound view implies.
+/// Backends call these so the semantics of "declare access is never public — infer it from the op" stay consistent across backends.
+/// Each backend keeps full freedom over how it tracks and emits barriers.
 
 namespace sg
 {
-/// The access a shader performs on a bound view of this class (the inferred replacement for an explicit
-/// per-binding declaration). Uniform blocks read; readonly storage reads; readwrite storage writes.
+/// The access a shader performs on a bound view of this class — the inferred replacement for an explicit per-binding declaration.
+/// Uniform blocks read, readonly storage reads, readwrite storage writes.
 [[nodiscard]] constexpr access_flags shader_access_of(view_class c)
 {
     switch (c)

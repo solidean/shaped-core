@@ -3,9 +3,10 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 
-// dx12 entry-point drivers inside the sg API test binary (shaped-graphics-test). Each creates a dx12 context
-// and invokes every sg::context_handle API test against it. Compiled only where the dx12 backend builds
-// (Windows). Two adapters are covered, both with the debug layer on:
+// dx12 entry-point drivers inside the sg API test binary (shaped-graphics-test).
+// Each creates a dx12 context and invokes every sg::context_handle API test against it.
+// Compiled only where the dx12 backend builds, so Windows.
+// Two adapters are covered, both with the debug layer on:
 //   - WARP (software): present on any Windows host, so it also runs headless on CI.
 //   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI).
 

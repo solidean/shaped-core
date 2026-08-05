@@ -7,9 +7,10 @@
 #include <shaped-graphics/resource/subresource.hh>
 
 /// The covering partition that tracks per-subresource access state for a texture.
-/// State is kept as a set of range-boxes that always exactly tile the whole subresource domain — the *covering invariant*.
+/// State is a set of range-boxes that always exactly tile the whole subresource domain — the *covering invariant*.
 /// An access to a range first splits boxes so it aligns to box boundaries, keeping the tiling exact, then touches only the covered boxes.
 /// Boxes merge back to one when all their states are equivalent, so a uniform texture stops paying per-box cost.
+/// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
 namespace sg
 {
@@ -20,8 +21,8 @@ struct subresource_box
     resource_access_state state;
 };
 
-/// A covering partition of a texture's subresource domain: a set of non-overlapping boxes that always
-/// tile the whole `[0,mips)×[0,slices)×[0,planes)` grid. Starts as a single whole-domain box.
+/// A covering partition of a texture's subresource domain: non-overlapping boxes that always tile the whole `[0,mips)×[0,slices)×[0,planes)` grid.
+/// Starts as a single whole-domain box.
 struct subresource_partition
 {
     explicit subresource_partition(subresource_extent extent = {}) : _extent(extent)
@@ -33,8 +34,9 @@ struct subresource_partition
     [[nodiscard]] cc::span<subresource_box const> boxes() const { return _boxes; }
     [[nodiscard]] isize box_count() const { return _boxes.size(); }
 
-    /// Split boxes so `range` aligns to box boundaries, then invoke `fn` on each box's state that lies
-    /// within `range`. Preserves the covering invariant. Use to declare an access over a subresource range.
+    /// Split boxes so `range` aligns to box boundaries, then invoke `fn` on each box's state lying within `range`.
+    /// Preserves the covering invariant.
+    /// Use it to declare an access over a subresource range.
     void for_each_in(subresource_range range, cc::function_ref<void(resource_access_state&)> fn)
     {
         if (range.is_empty())
@@ -51,9 +53,8 @@ struct subresource_partition
                 fn(box.state);
     }
 
-    /// Same as `for_each_in`, but `fn` also receives each covered box's range — a backend needs it to scope
-    /// the barrier it emits to that box's subresources. (A distinct name, not an overload: `cc::function_ref`
-    /// isn't arity-constrained, so overloading by callback signature is ambiguous.)
+    /// Same as `for_each_in`, but `fn` also receives each covered box's range — a backend needs it to scope the barrier it emits to that box's subresources.
+    /// A distinct name rather than an overload: `cc::function_ref` is not arity-constrained, so overloading by callback signature is ambiguous.
     void for_each_box_in(subresource_range range,
                          cc::function_ref<void(subresource_range const&, resource_access_state&)> fn)
     {
@@ -71,9 +72,9 @@ struct subresource_partition
                 fn(box.range, box.state);
     }
 
-    /// Collapse the partition back to a single whole-domain box iff every box's state is equivalent (same
-    /// full-timeline state). No-op otherwise. Call after flushing so an all-uniform texture stops paying
-    /// per-box cost.
+    /// Collapse the partition back to a single whole-domain box iff every box's state is equivalent — the same full-timeline state.
+    /// No-op otherwise.
+    /// Call it after flushing, so an all-uniform texture stops paying per-box cost.
     void try_merge()
     {
         if (_boxes.size() <= 1)

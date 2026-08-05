@@ -15,27 +15,25 @@
 
 namespace sg
 {
-/// Records GPU work, submitted through the context that created it. Single-use and single-threaded:
-/// recorded by one thread, then submitted or dropped once — in the epoch it was opened in (command
-/// lists must not span epochs; see libs/graphics/shaped-graphics/docs/concepts/epochs.md).
-///
-/// Submit or drop every list explicitly through the context (`ctx.submit_command_list` /
-/// `ctx.drop_command_list`); after either it is consumed. Letting a list go out of scope un-consumed
-/// auto-drops it but prints a warning — a safety net, not the intended path.
+/// Records GPU work, and is submitted through the context that created it.
+/// Single-use and single-threaded: recorded by one thread, then submitted or dropped exactly once, in the epoch it was opened in.
+/// Letting a list go out of scope un-consumed auto-drops it and warns — a safety net, not the intended path.
+/// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 class command_list
 {
 public:
     virtual ~command_list();
 
-    /// The epoch this list was opened in. It must be submitted or dropped before that epoch advances.
+    /// The epoch this list was opened in.
+    /// It must be submitted or dropped before that epoch advances.
     [[nodiscard]] epoch created_in_epoch() const { return _epoch; }
 
-    /// The context that created this list — it always outlives the list. Lets a consumer that only holds
-    /// the command list reach the context (e.g. to acquire a pipeline) without threading it separately.
+    /// The context that created this list, which always outlives it.
+    /// Lets a consumer holding only the command list reach the context — to acquire a pipeline, say — without threading it separately.
     /// (`class context` disambiguates the type from this accessor of the same name.)
     [[nodiscard]] class context& context() const { return *_context; }
 
-    // buffer transfer — host↔device copies recorded at this point in the list
+    // Transfer facades — the host↔device and device→device copies recorded at this point in the list.
 
     /// Host→device upload facade: `cmd.upload.bytes_to_buffer(...)` / `cmd.upload.data_to_buffer(...)`.
     command_list_upload_scope upload;
@@ -46,14 +44,14 @@ public:
     /// Device→device copy facade: `cmd.copy.buffer_bytes_region(...)` / `cmd.copy.buffer_data_region<T>(...)`.
     command_list_copy_scope copy;
 
-    /// Compute facade: `cmd.compute.bind_pipeline(...)` / `.bind_group(...)` / `.dispatch(...)`.
+    /// Compute facade: `cmd.compute.bind_pipeline(...)` / `.bind_group(...)` / `.dispatch_groups(...)` / `.dispatch_threads(...)`.
     command_list_compute_scope compute;
 
     /// Raster facade: `cmd.raster.render_to(...)` opens a rendering scope over a set of targets;
     /// `cmd.raster.manual.begin_rendering(...)` / `.end_rendering()` do it by hand.
     command_list_raster_scope raster;
 
-    /// Ray-tracing facade: `cmd.raytracing.build_blas(...)` / `.build_tlas(...)` / `.is_supported()`.
+    /// Ray-tracing facade: `cmd.raytracing.build_blas(...)` / `.build_tlas(...)` / `.bind_pipeline(...)` / `.dispatch_rays(...)` / `.is_supported()`.
     command_list_raytracing_scope raytracing;
 
     /// GPU-query facade: `cmd.query.record_gpu_timestamp()` / `.is_supported()`.
@@ -62,8 +60,8 @@ public:
 protected:
     command_list(sg::context& ctx, epoch created_in);
 
-    // Backend seams the upload/download/copy/compute scopes forward to (contracts documented there);
-    // friends so the scopes can reach them.
+    // Backend seams the seven scopes forward to; each op's contract is documented on its scope.
+    // They are friends so the scopes can reach these.
     friend class command_list_upload_scope;
     friend class command_list_download_scope;
     friend class command_list_copy_scope;
@@ -107,17 +105,18 @@ protected:
     virtual void compute_declare_array_texture_access(cc::string_view binding_name,
                                                       cc::span<array_texture_access const> elements) = 0;
 
-    // Raster rendering scope (reached through cmd.raster). begin_rendering transitions each target to
-    // its render-target / depth-stencil layout, binds the color/depth targets to the output-merger, and
-    // applies each target's clear / discard; end_rendering closes the scope and releases its RTV/DSV
-    // descriptors. Calls must be balanced.
+    // Raster rendering scope (reached through cmd.raster).
+    // begin_rendering transitions each target to its render-target / depth-stencil layout, binds the
+    // color/depth targets to the output-merger, and applies each target's clear / discard.
+    // end_rendering closes the scope and releases its RTV/DSV descriptors.
+    // Calls must be balanced.
     virtual void raster_begin_rendering(rendering_info const& info) = 0;
     virtual void raster_end_rendering() = 0;
 
-    // Raster draw recording (reached through cmd.raster / cmd.raster.manual). bind_pipeline sets the
-    // graphics PSO + root signature and the IA topology; bind_group binds through that root signature;
-    // the set/bind ops configure IA + dynamic state; draw / draw_indexed record the draw. All are valid
-    // only inside an open rendering scope (backend asserts).
+    // Raster draw recording (reached through cmd.raster / cmd.raster.manual).
+    // bind_pipeline sets the graphics PSO + root signature and the IA topology, bind_group binds through
+    // that root signature, and the set/bind ops configure IA + dynamic state.
+    // All are valid only inside an open rendering scope, which the backend asserts.
     virtual void raster_bind_pipeline(raster_pipeline const& pipeline) = 0;
     virtual void raster_bind_group(int set, binding_group const& group) = 0;
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
@@ -130,10 +129,11 @@ protected:
     virtual void raster_draw(draw_config const& config) = 0;
     virtual void raster_draw_indexed(draw_indexed_config const& config) = 0;
 
-    // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Split by geometry family
-    // (a BLAS is triangles or AABBs, never both) since span-element overloads can't dispatch through one
-    // vtable slot. Each sizes + allocates the persistent result buffer, records the build with transient
-    // scratch, and returns the handle. raytracing_is_supported gates them (a backend without RT returns false).
+    // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
+    // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot
+    // dispatch through one vtable slot.
+    // Each sizes and allocates the persistent result buffer, records the build with transient scratch, and returns the handle.
+    // raytracing_is_supported gates them; a backend without RT returns false.
     [[nodiscard]] virtual bool raytracing_is_supported() const = 0;
     [[nodiscard]] virtual blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
                                                                       accel_build_flags flags) = 0;
@@ -142,9 +142,9 @@ protected:
     [[nodiscard]] virtual tlas_handle raytracing_build_tlas(cc::span<tlas_instance const> instances,
                                                             accel_build_flags flags) = 0;
 
-    // Ray-tracing dispatch (reached through cmd.raytracing). bind_pipeline sets the DXR state object + global
-    // root signature; bind_group binds through that root signature (like compute); dispatch_rays traces a
-    // width x height x depth grid, launching the raygen at `raygen` in `table`.
+    // Ray-tracing dispatch (reached through cmd.raytracing).
+    // bind_pipeline sets the DXR state object + global root signature, and bind_group binds through that root signature, like compute.
+    // dispatch_rays traces a width x height x depth grid, launching the raygen at `raygen` in `table`.
     virtual void raytracing_bind_pipeline(raytracing_pipeline const& pipeline) = 0;
     virtual void raytracing_bind_group(int set, binding_group const& group) = 0;
     virtual void raytracing_dispatch_rays(raytracing_shader_table const& table,
@@ -153,9 +153,9 @@ protected:
                                           int height,
                                           int depth) = 0;
 
-    // GPU queries (reached through cmd.query). record_gpu_timestamp records a point-in-time timestamp and
-    // returns a handle whose tick is resolved + read back when the list is submitted. A backend without
-    // timestamp support answers false and returns an invalid query (record is always callable).
+    // GPU queries (reached through cmd.query).
+    // record_gpu_timestamp records a point-in-time timestamp and returns a handle whose tick is resolved and read back when the list is submitted.
+    // A backend without timestamp support answers false and returns an invalid query; record is always callable.
     [[nodiscard]] virtual bool query_timestamps_supported() const = 0;
     [[nodiscard]] virtual gpu_timestamp query_record_gpu_timestamp() = 0;
 

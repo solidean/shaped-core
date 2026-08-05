@@ -13,17 +13,16 @@ That is what keeps `sg` from overfitting to today's GPU APIs: an entirely differ
 
 Backend types are **smurf-named** and namespaced (`sg::backend::dx12::dx12_buffer`), so one backend's symbols are greppable and same-role types across backends never collide.
 Backend code is largely public and optimized for **readability over encapsulation** — from `sg`'s side the backend is already opaque, so a second wall inside it buys little.
-Backend types are **smurf-named** and namespaced (`sg::backend::dx12::dx12_buffer`), so one backend's symbols are greppable and same-role types across backends never collide.
-Backend code is largely public and optimized for **readability over encapsulation** — from `sg`'s side the backend is already opaque, so a second wall inside it buys little.
-We also **share very little code between backends**, and treat the resulting duplication as fine.
+And backends **share very little code with each other**, the resulting duplication being the deliberate trade.
 
-Every one of those is a rule with a reason, and the [coding-guidelines](../coding-guidelines.md) own both.
+Each of those is a rule with a reason, and the [coding-guidelines](../coding-guidelines.md) own all of them.
 Abstract-interfaces-not-a-bridge, smurf naming, backend-typed create methods, duplicate-rather-than-abstract, the escape hatch.
 Read them before working in a backend.
 
 The one part worth restating here is the direction it points.
 Genuinely shared code belongs *below* `sg` — the `sg` core, clean-core, typed-geometry — never in a cross-backend layer inside `backends/`.
 That is what lets each backend **evolve on its own schedule** as its API demands.
+
 ## Backends carry their own tests
 
 Each backend has its **own `*-test` binary** (`shaped-graphics-dx12-test`), built only where that backend builds.

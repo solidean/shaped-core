@@ -11,21 +11,23 @@
 namespace sg
 {
 /// Device→host download facade for a command list, reached as `cmd.download`.
-///
-/// A thin facade over its owning command list: it forwards each op to the list's backend impl.
+/// Inline: the copy is recorded into this list, and its bytes are delivered once the submitted list has run.
+/// `ctx.download` is the async counterpart — see libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 class command_list_download_scope
 {
-    // Typed-buffer overloads — the preferred form. `buffer<T>` supplies the element type, so `T` is deduced
-    // rather than spelled out and the offset / count are in units of that same `T`.
+    // Typed-buffer overloads — the preferred form.
+    // `buffer<T>` supplies the element type, so `T` is deduced rather than spelled out and the offset / count are in units of that same `T`.
 public:
-    /// Reads `count` elements of `T` from `src` starting at `offset_in_elements`. See bytes_from_buffer.
+    /// Reads `count` elements of `T` from `src` starting at `offset_in_elements`.
+    /// See bytes_from_buffer for the contract.
     template <class T>
     [[nodiscard]] data_future<T> data_from_buffer(buffer<T> const& src, isize offset_in_elements, isize count)
     {
         return data_from_buffer<T>(src.raw(), offset_in_elements, count);
     }
 
-    /// Reads the whole of `src` back. See bytes_from_buffer.
+    /// Reads the whole of `src` back.
+    /// See bytes_from_buffer for the contract.
     template <class T>
     [[nodiscard]] data_future<T> data_from_buffer(buffer<T> const& src)
     {
@@ -34,15 +36,15 @@ public:
 
     // Raw overloads — element type supplied by the call site rather than the buffer.
 public:
-    /// Reads `size_in_bytes` from `buffer` starting at `offset_in_bytes` back to the host. The buffer
-    /// must have been created with buffer_usage::copy_src. Returns a bytes_future that becomes ready
-    /// once the submitted list has finished on the GPU and the bytes have been copied to the host. A
-    /// zero-size read yields an already-ready, empty future. Precondition: offset_in_bytes +
-    /// size_in_bytes <= buffer size.
+    /// Reads `size_in_bytes` from `buffer` starting at `offset_in_bytes` back to the host.
+    /// The buffer must have been created with buffer_usage::copy_src.
+    /// Returns a bytes_future that becomes ready once the submitted list has finished on the GPU and the bytes have been copied to the host.
+    /// A zero-size read yields an already-ready, empty future.
+    /// Precondition: offset_in_bytes + size_in_bytes <= buffer size.
     [[nodiscard]] bytes_future bytes_from_buffer(raw_buffer_handle buffer, isize offset_in_bytes, isize size_in_bytes);
 
-    /// Downloads `count` elements of a trivially-copyable type; `offset_in_elements` and `count` are in
-    /// elements of T. See bytes_from_buffer.
+    /// Downloads `count` elements of a trivially-copyable type.
+    /// `offset_in_elements` and `count` are both in elements of T; see bytes_from_buffer.
     template <class T>
     [[nodiscard]] data_future<T> data_from_buffer(raw_buffer_handle buffer, isize offset_in_elements, isize count)
     {
@@ -51,12 +53,12 @@ public:
         return data_future<T>(bytes_from_buffer(cc::move(buffer), offset_in_elements * stride, count * stride));
     }
 
-    /// Reads one `subresource` of `texture` back to the host as tightly-packed bytes. `region` selects a box
-    /// within the subresource; passing none reads the **whole subresource**, and an empty region returns a
-    /// ready, empty future. The texture must have been created with texture_usage::copy_src. Returns a
-    /// bytes_future ready once the submitted list has finished on the GPU and the rows have been un-padded
-    /// into host memory. The result layout matches bytes_to_texture (rows = height-in-blocks, row bytes =
-    /// width-in-blocks × block-bytes). Precondition: a given `region` is in bounds + block-aligned.
+    /// Reads one `subresource` of `texture` back to the host as tightly-packed bytes.
+    /// `region` selects a box within the subresource; passing none reads the **whole subresource**, and an empty region returns a ready, empty future.
+    /// The texture must have been created with texture_usage::copy_src.
+    /// Returns a bytes_future ready once the submitted list has finished on the GPU and the rows have been un-padded into host memory.
+    /// The result layout matches bytes_to_texture — rows = height-in-blocks, row bytes = width-in-blocks × block-bytes.
+    /// Precondition: a given `region` is in bounds and block-aligned.
     [[nodiscard]] bytes_future bytes_from_texture(raw_texture_handle texture,
                                                   subresource_index const& subresource = {},
                                                   cc::optional<texture_region> region = {});
@@ -68,8 +70,7 @@ public:
     command_list_download_scope& operator=(command_list_download_scope&&) = delete;
 
 private:
-    // Only a command list constructs its own scope; the scope in turn reaches the list's protected
-    // backend virtuals (mutual friendship).
+    // Only a command list constructs its own scope, and the scope reaches the list's protected backend virtuals — mutual friendship.
     friend class command_list;
     explicit command_list_download_scope(command_list& cmd) : _cmd(cmd) {}
 

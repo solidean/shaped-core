@@ -7,9 +7,9 @@
 
 namespace sg
 {
-/// Arguments for a byte-granularity buffer→buffer region copy (cmd.copy.buffer_bytes_region). The
-/// required fields (src, dst, size_in_bytes) have no default, so omitting one warns; the offsets are
-/// optional and default to 0.
+/// Arguments for a byte-granularity buffer→buffer region copy (cmd.copy.buffer_bytes_region).
+/// The required fields — src, dst, size_in_bytes — have no default, so omitting one warns.
+/// The offsets are optional and default to 0.
 struct buffer_bytes_copy
 {
     raw_buffer_handle src;         ///< copy source; must not be null; needs buffer_usage::copy_src
@@ -19,9 +19,8 @@ struct buffer_bytes_copy
     isize dst_offset_in_bytes = 0; ///< byte offset into dst
 };
 
-/// Typed variant in units of T (cmd.copy.buffer_data_region<T>) — count and offsets are in elements
-/// of T, like taking a subspan on both sides. For sub-element (byte) granularity, use the
-/// buffer_bytes_region escape hatch.
+/// Typed variant in units of T (cmd.copy.buffer_data_region<T>) — count and offsets are in elements of T, like taking a subspan on both sides.
+/// For sub-element (byte) granularity, use the buffer_bytes_region escape hatch.
 template <class T>
 struct buffer_data_copy
 {
@@ -33,16 +32,15 @@ struct buffer_data_copy
 };
 
 /// Device→device copy facade for a command list, reached as `cmd.copy`.
-///
-/// A thin facade over its owning command list: it forwards each op to the list's backend impl.
-/// Texture copy ops land here later, following the same `<resource>_<bytes|data>_region` scheme.
+/// Buffer regions only today; texture copy ops land here later, following the same `<resource>_<bytes|data>_region` scheme.
+/// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 class command_list_copy_scope
 {
 public:
-    /// Copies `size_in_bytes` from `src` (must have buffer_usage::copy_src) to `dst` (must have
-    /// buffer_usage::copy_dst), each starting at its byte offset. The copy runs on the GPU and
-    /// executes in-order with other commands in this list. A zero-size copy is a no-op. Copying
-    /// within a single buffer is allowed only if the source and destination ranges do not overlap.
+    /// Copies `size_in_bytes` from `src` to `dst`, each starting at its byte offset.
+    /// `src` needs buffer_usage::copy_src and `dst` buffer_usage::copy_dst.
+    /// The copy runs on the GPU and executes in-order with the other commands in this list.
+    /// A zero-size copy is a no-op, and copying within one buffer is allowed only if the source and destination ranges do not overlap.
     /// Precondition: each offset + size_in_bytes <= that buffer's size.
     void buffer_bytes_region(buffer_bytes_copy args);
 
@@ -67,8 +65,7 @@ public:
     command_list_copy_scope& operator=(command_list_copy_scope&&) = delete;
 
 private:
-    // Only a command list constructs its own scope; the scope in turn reaches the list's protected
-    // backend virtuals (mutual friendship).
+    // Only a command list constructs its own scope, and the scope reaches the list's protected backend virtuals — mutual friendship.
     friend class command_list;
     explicit command_list_copy_scope(command_list& cmd) : _cmd(cmd) {}
 

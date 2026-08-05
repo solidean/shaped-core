@@ -5,8 +5,8 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// Process-global, not per-anything: only the aggregate "something reloaded" fact is tracked. Degrades
-// to a plain value where threads are off (cc::atomic keeps its API).
+// Process-global, not per-anything: only the aggregate "something reloaded" fact is tracked.
+// Degrades to a plain value where threads are off, since cc::atomic keeps its API.
 cc::atomic<u64> g_reload_generation = {0};
 } // namespace
 

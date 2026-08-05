@@ -7,15 +7,14 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
-/// A shader's reflected resource **bindings** — what a compiled_shader declares it needs at each slot,
-/// backend-agnostic. A binding is matched by name to a bound view when a binding_group is built. See
-/// libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+/// A shader's reflected resource **bindings** — what a compiled_shader declares it needs at each slot, backend-agnostic.
+/// A binding is matched by name to a bound view when a binding_group is built.
+/// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 
 namespace sg
 {
-/// The kind of resource a shader binding expects — the backend-agnostic reflection vocabulary (the
-/// portable stand-in for HLSL's D3D_SHADER_INPUT_TYPE). Buffer kinds map 1:1 to a view's
-/// (view_class, view_shape); see access_of / shape_of.
+/// The kind of resource a shader binding expects — the backend-agnostic reflection vocabulary, the portable stand-in for HLSL's D3D_SHADER_INPUT_TYPE.
+/// Buffer kinds map 1:1 to a view's (view_class, view_shape); see access_of / shape_of.
 enum class binding_type
 {
     uniform_buffer,              ///< uniform block   — CBV / UBO
@@ -29,8 +28,8 @@ enum class binding_type
     acceleration_structure,      ///< ray-tracing TLAS — SRV addressed by GPU VA (HLSL RaytracingAccelerationStructure)
 };
 
-/// Whether a binding is a sampler rather than a resource view. Sampler bindings carry no view (no access
-/// class / layout), so they are matched to a `sampler`, not a `raw_view`.
+/// Whether a binding is a sampler rather than a resource view.
+/// A sampler binding carries no view — no access class, no layout — so it is matched to a `sampler`, not a `raw_view`.
 [[nodiscard]] constexpr bool is_sampler(binding_type t)
 {
     return t == binding_type::sampler;
@@ -93,9 +92,9 @@ enum class binding_type
     return access_of(v) == access_of(t) && shape_of(v) == shape_of(t);
 }
 
-/// A single reflected shader resource binding: a named slot the shader reads. Identified by a
-/// backend-agnostic (set, index) address — SPIR-V set/binding, WGSL @group/@binding, Metal argument
-/// index; a D3D12 backend derives (register-type from `type`, register = index, space = set).
+/// A single reflected shader resource binding: a named slot the shader reads.
+/// Identified by a backend-agnostic (set, index) address — SPIR-V set/binding, WGSL @group/@binding, Metal argument index.
+/// A D3D12 backend derives (register-type from `type`, register = index, space = set).
 struct binding
 {
     cc::string name; ///< reflection name — the key a binding_group matches a bound view against
@@ -104,8 +103,8 @@ struct binding
     u32 count = 1;   ///< array length; 0 = unbounded array
     binding_type type = binding_type::uniform_buffer;
 
-    /// For `uniform_buffer` bindings: the declared block size in bytes, used to validate a bound
-    /// view's size. Absent for other kinds.
+    /// For `uniform_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
+    /// Absent for other kinds.
     cc::optional<isize> block_size;
 };
 

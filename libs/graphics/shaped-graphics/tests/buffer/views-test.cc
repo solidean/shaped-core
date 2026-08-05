@@ -8,9 +8,9 @@
 
 using namespace cc::primitive_defines;
 
-// Views are pure value types over a buffer, so they need no GPU backend — a minimal concrete
-// buffer subclass (shape metadata only) is enough to exercise every factory + the erased raw_view.
-// Buffers must be held via shared_ptr here: the factories call shared_from_this().
+// Views are pure value types over a buffer, so they need no GPU backend.
+// A minimal concrete buffer subclass, carrying shape metadata only, is enough to exercise every factory and the erased raw_view.
+// Buffers must be held via shared_ptr here, because the factories call shared_from_this().
 
 namespace
 {
@@ -368,8 +368,8 @@ TEST("sg views - structured views need a stride-aligned offset; recovery needs s
 {
     auto const buf = make_buffer(1024, sg::buffer_usage::readonly_buffer); // particle = 16 bytes
 
-    // Guardrail 1: a structured view addresses by element index, so its byte offset must be a multiple of
-    // the stride (on top of the 256-byte storage alignment). Byte 256 = element 16, both rules satisfied...
+    // Guardrail 1: a structured view addresses by element index, so its byte offset must be a multiple of the stride, on top of the 256-byte storage alignment.
+    // Byte 256 = element 16, so both rules are satisfied.
     auto const arm = buf->as_raw_readonly({.offset = 256, .size = 32}, sizeof(particle));
     CHECK(arm.shape == sg::view_shape::structured);
     CHECK(arm.offset_in_bytes == 256);

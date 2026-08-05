@@ -7,33 +7,9 @@ for repo-wide docs see [docs/_index.md](../../../../docs/_index.md).
 
 ## Source organization
 
-shaped-graphics' headers live in `src/shaped-graphics/`, grouped by topic.
-Only the cross-cutting vocabulary sits at the root; everything else is in the folder that owns it.
-
-```text
-shaped-graphics/
-  fwd.hh           # fwd decls + *_handle typedefs
-  all.hh           # umbrella
-  types.hh         # backend_kind, thread_model, buffer_usage, texture_usage
-  exceptions.hh    # the typed sg exceptions
-  bytes_future.hh  # the shared result type of every download
-  barrier/         # the access-tracking substrate a backend emits barriers from
-  binding/         # compiled shaders, reflected bindings, samplers, group + pipeline layouts
-  command_list/    # the abstract command_list and its seven recording scopes
-  compute/         # the compute pipeline
-  context/         # the abstract context, its six lifetime/transfer scopes, and the pipeline cache
-  memory/          # allocation_info + memory_heap (placed vs dedicated backing memory)
-  present/         # swapchain / presentation
-  query/           # GPU queries (timestamps today)
-  raster/          # the raster pipeline and the fixed-function state it aggregates
-  raytracing/      # acceleration structures, raytracing pipeline, shader table
-  resource/        # buffers, textures, views, pixel formats — the GPU resource surface
-  routine/         # the render-routine framework and its registry
-backends/          # concrete per-backend static libs (dx12/, vulkan/) that subclass the sg types
-```
-
-Headers are included by their full path from `src/`, e.g. `#include <shaped-graphics/resource/texture.hh>`.
-A folder's own umbrella, where it has one, is the same-named header inside it (`command_list/command_list.hh`, `context/context.hh`).
+Headers live in `src/shaped-graphics/`, one folder per topic.
+Only the cross-cutting vocabulary sits at the root — `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh`, `bytes_future.hh`.
+The [readme](../readme.md#file-organization) has the per-folder table, the include-path rule and the umbrella-header convention.
 
 ## Topics
 
@@ -63,6 +39,8 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [backends](concepts/backends.md) — what a backend is, why we duplicate rather than abstract across them, and how each backend carries its own tests (feature smoke + backend-internal invariants).
 - [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the epoch counter/fence, advance/retire, deferred deletion, and finalizers.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are concurrency-safe and which must be externally synchronized.
+- [command recording](concepts/command-recording.md) — `sg::command_list`: single-use, submit-or-drop-once, bound to its epoch,
+  and the seven recording scopes (`cmd.upload` … `cmd.query`) every GPU operation is reached through.
 - [barriers](concepts/barriers.md) — access tracking + GPU barriers: access inferred from each op, the three-timeline minimal-barrier state machine, and the concurrent-command-list slot model.
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
 - [textures](concepts/textures.md) — the `raw_texture` resource vs the typed `texture<Traits>` wrapper, the derived-not-flagged `texture_description` shape, and the restrictive `pixel_format` set.

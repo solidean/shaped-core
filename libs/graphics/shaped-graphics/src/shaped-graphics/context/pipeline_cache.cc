@@ -16,8 +16,8 @@ namespace sg
 {
 namespace
 {
-// Hash a sampler field by field (not add_pod on the whole struct — padding bytes would make the hash
-// nondeterministic for logically-equal samplers).
+// Hash a sampler field by field.
+// Not add_pod over the whole struct: padding bytes would make the hash nondeterministic for logically-equal samplers.
 void add_sampler(cc::byte_stream_builder& b, sampler const& s)
 {
     b.add_pod(s.min_filter);
@@ -136,8 +136,8 @@ cc::hash128 pipeline_cache::compute_compute_pipeline_key(compute_pipeline_descri
     b.add(desc.shader.bytecode.span());
     b.add_string(desc.shader.entry_point);
     b.add_string(desc.shader.compiler.signature);
-    // pipeline-layout identity — pointer is stable because cached layouts are shared/persistent, and it
-    // transitively covers its group layouts
+    // pipeline-layout identity — the pointer is stable because cached layouts are shared and persistent.
+    // It transitively covers its group layouts.
     b.add_pod(reinterpret_cast<u64>(desc.layout.get()));
     return cc::hash128::create(b.written_bytes(), 0);
 }
@@ -205,8 +205,8 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
     return _compute_cache.acquire(key,
                                   [&]() -> async_compute_pipeline
                                   {
-                                      // The build frame runs later (possibly on a worker), so own the shader copy + layout handle
-                                      // rather than the description's reference.
+                                      // The build frame runs later, possibly on a worker.
+                                      // So own the shader copy + layout handle rather than the description's reference.
                                       return cc::make_async_scheduled<compute_pipeline_handle>(
                                           [ctx_ptr = &ctx, shader = compiled_shader(desc.shader), layout = desc.layout](
                                               cc::async_context<compute_pipeline_handle>& actx) -> cc::async_step_status
@@ -228,8 +228,8 @@ async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& c
         key,
         [&]() -> async_raytracing_pipeline
         {
-            // The build frame runs later (possibly on a worker), so deep-copy the whole description (it owns
-            // its shader vectors + layout handle) rather than referencing the caller's.
+            // The build frame runs later, possibly on a worker.
+            // So deep-copy the whole description, which owns its shader vectors + layout handle, rather than referencing the caller's.
             return cc::make_async_scheduled<raytracing_pipeline_handle>(
                 [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](
                     cc::async_context<raytracing_pipeline_handle>& actx) -> cc::async_step_status

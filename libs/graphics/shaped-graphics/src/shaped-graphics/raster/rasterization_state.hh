@@ -2,9 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// Fixed-function rasterizer state baked into a raster pipeline: how primitives are filled, which
-/// faces are culled, winding, depth clipping, and a static depth bias. Backend-neutral; each field's
-/// trailing comment maps to the per-backend equivalent.
+/// Fixed-function rasterizer state baked into a raster pipeline: how primitives are filled, which faces are culled, winding, depth clipping, and a static depth bias.
+/// Backend-neutral — each field's trailing comment maps to the per-backend equivalent.
 
 namespace sg
 {
@@ -30,8 +29,8 @@ enum class front_face
     clockwise,         // DX12 FrontCounterClockwise = FALSE / Vk FRONT_FACE_CLOCKWISE
 };
 
-/// The rasterizer configuration of a raster pipeline. Defaults describe the common case: solid
-/// back-face culling, counter-clockwise front faces, depth clipping on, no depth bias.
+/// The rasterizer configuration of a raster pipeline.
+/// Defaults describe the common case: solid back-face culling, counter-clockwise front faces, depth clipping on, no depth bias.
 struct rasterization_state
 {
     fill_mode fill = fill_mode::solid;
