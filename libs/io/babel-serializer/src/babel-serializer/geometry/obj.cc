@@ -5,7 +5,8 @@
 
 #include <charconv> // std::from_chars
 
-// Line-oriented OBJ parser. One line at a time via read_stream::read_line — never buffers the whole file.
+// Line-oriented OBJ parser.
+// One line at a time via read_stream::read_line — never buffers the whole file.
 // Grouping directives (o / g / usemtl) open a face span that stays open until the next directive of the same
 // kind (or end of file); the span records which faces it covers.
 
@@ -13,8 +14,8 @@ namespace babel::impl
 {
 namespace
 {
-// A minimal whitespace tokenizer over one line. '\r' is treated as blank so a stray CR (already mostly handled
-// by read_line) never sticks to a token.
+// A minimal whitespace tokenizer over one line.
+// '\r' is treated as blank so a stray CR (already mostly handled by read_line) never sticks to a token.
 struct line_tokenizer
 {
     char const* p = nullptr;

@@ -28,8 +28,12 @@ One-liner per library:
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/io/babel-serializer`** — serialization / deserialization of various formats.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
-  Readers take a `cc::read_stream` and parse against its buffered window — except one that must hand back zero-copy views of its input (`gltf` takes a `cc::pinned_data<byte const>`).
-  So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`), Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`), and PNG/JPEG read+write under `babel::image` (`image/`).
+  Readers take a `cc::read_stream` and parse against its buffered window.
+  The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
+  So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`).
+  Plus Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`).
+  Also PNG/JPEG codecs in `babel::png` / `babel::jpg`, with the `babel::image` aggregator on top (`image/`).
+  Its [docs/coding-guidelines.md](libs/io/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
   Early stage — see its [docs/structure.md](libs/io/babel-serializer/docs/structure.md) roadmap.
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.

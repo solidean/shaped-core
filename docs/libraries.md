@@ -79,13 +79,9 @@ Layered on `base`, below the graphics stack.
 [docs](../libs/io/babel-serializer/docs/_index.md)
 
 Serialization and deserialization of various formats, often thin wrappers over existing libraries and often our own take on a parse.
-Two layers, kept distinct.
-Each format parses into an **unopinionated native structure**: JSON stays a tree of values, OBJ stays parallel attribute arrays.
-**Opinionated aggregators** — "load an image" or "load a mesh" across formats — sit on top of those.
-Reading is optimized for the read-once-into-a-basically-immutable-structure case: great to traverse and query, deliberately not for insertion.
-Writing gets a separate API.
-Readers take a `cc::read_stream` and parse against its buffered window rather than slurping the input.
-The one deviation is a format whose result must hand back zero-copy views *of* its input, which takes a `cc::pinned_data<byte const>` instead.
+Two layers, kept distinct: each format parses into an **unopinionated native structure**, and **opinionated aggregators** — "load an image", "load a mesh" — sit on top of those.
+Reading is optimized for the read-once case and takes a `cc::read_stream`, with one deviation for a format that must hand back zero-copy views of its input.
+[coding-guidelines.md](../libs/io/babel-serializer/docs/coding-guidelines.md) owns all of that.
 Today: a base64 codec, JSON and markdown readers plus a SQLite engine wrapper (`data/`), and Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`).
 Plus PNG/JPEG read+write, with the `babel::image` aggregator on top (`image/`).
 The roadmap lives in [structure.md](../libs/io/babel-serializer/docs/structure.md).

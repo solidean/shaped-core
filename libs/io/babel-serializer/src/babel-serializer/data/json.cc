@@ -8,10 +8,12 @@
 // Streaming recursive-descent JSON parser.
 //
 // It reads bytes straight out of the stream's buffered window (ready_bytes / consume / flush) through a tiny
-// peek/advance cursor — it never materializes the whole input. Values are appended to `nodes` in preorder; a
-// container's direct children are not contiguous in `nodes` (a child subtree sits between them), so each child's
-// node index is gathered on the C++ call stack and committed as one contiguous block into `child_indices`, which
-// is what gives O(1) child access. String and key bytes are unescaped once into the `text` arena.
+// peek/advance cursor, so it never materializes the whole input.
+// Values are appended to `nodes` in preorder.
+// A container's direct children are NOT contiguous in `nodes` — a child subtree sits between them — so each child's
+// node index is gathered on the C++ call stack and committed as one contiguous block into `child_indices`.
+// That is what gives O(1) child access.
+// String and key bytes are unescaped once into the `text` arena.
 //
 // Error handling mirrors a sticky cursor: the first malformed token records a message and every later parse
 // short-circuits, so the recursion unwinds cheaply.
@@ -48,7 +50,8 @@ struct json_parser
     // cursor
     // ---------------------------------------------------------------------------------------------
 
-    /// Make at least one byte available at window[wpos], refilling across flushes. False at end of data / on I/O error.
+    /// Make at least one byte available at window[wpos], refilling across flushes.
+    /// False at end of data / on I/O error.
     [[nodiscard]] bool ensure()
     {
         while (wpos >= window.size())

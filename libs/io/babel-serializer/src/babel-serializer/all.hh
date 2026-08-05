@@ -1,6 +1,7 @@
 #pragma once
 
-/// Umbrella include for babel-serializer. Prefer including a single format's header when that is all you need.
+/// Umbrella include for babel-serializer.
+/// Prefer including a single format's header when that is all you need.
 
 #include <babel-serializer/data/base64.hh>
 #include <babel-serializer/data/json.hh>

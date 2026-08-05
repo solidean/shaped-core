@@ -15,8 +15,10 @@
 //
 // WHAT IS POPULATED TODAY.
 // Pixels come from the stb backend (8-bit samples).
-// The structural SOF/JFIF fields (bit_depth / progressive / chroma / jfif_density) are parsed natively by walking the marker segments up to the first scan.
-// The variable-length metadata below the pixels in `data` is DESIGNED but [todo]: reassembling the ICC profile across APP2 markers, the APP1 EXIF block and the COM comments needs more of the marker walker.
+// The structural SOF/JFIF fields (bit_depth / progressive / chroma / jfif_density) are parsed natively,
+// by walking the marker segments up to the first scan.
+// The variable-length metadata below the pixels in `data` is DESIGNED but [todo].
+// Reassembling the ICC profile across APP2 markers, the APP1 EXIF block and the COM comments needs more of the marker walker.
 // The fields exist now so that lands without an API change.
 //
 //   auto const img = babel::jpg::read(bytes).value();
@@ -49,10 +51,11 @@ struct density
     int y = 0;
 };
 
-/// A faithful native decode of a JPEG. Read-once.
+/// A faithful native decode of a JPEG.
+/// Read-once.
 struct data
 {
-    // --- populated now ---
+    // --- populated now, best-effort: a field keeps the default below when its marker is absent ---
     int width = 0;
     int height = 0;
     int channels = 0;                          // samples per pixel in `pixels` (1 grey / 3 rgb)
@@ -73,7 +76,8 @@ struct data
 // reading
 // -------------------------------------------------------------------------------------------------
 
-/// Decode a whole JPEG buffer. Errors on a bad SOI marker or a decode failure.
+/// Decode a whole JPEG buffer.
+/// Errors on a bad SOI marker or a decode failure.
 [[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
 
 /// Convenience: slurp the stream to end, then decode.
@@ -82,13 +86,15 @@ struct data
 // writing
 // -------------------------------------------------------------------------------------------------
 
-/// JPEG encode knobs. JPEG is lossy.
+/// JPEG encode knobs.
+/// JPEG is lossy.
 struct write_options
 {
     int quality = 90; // 1..100
 };
 
-/// Encode `img`'s pixels to JPEG file bytes. Metadata fields stb cannot emit are ignored (see the header note).
+/// Encode `img`'s pixels to JPEG file bytes.
+/// Metadata fields stb cannot emit are ignored (see the header note).
 [[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});
 
 /// Encode and write to a stream.

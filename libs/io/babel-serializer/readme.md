@@ -1,7 +1,7 @@
 # babel-serializer
 
 Serialization and deserialization of various formats.
-Namespace `babel`. Depends on **clean-core** (streams, containers, `result`) and **typed-geometry** (`vec` / `pos` for the geometry formats).
+Namespace `babel`. Depends on **clean-core** (streams, containers, `result`) and **typed-geometry** (`vec` / `pos` / `mat` / `quat` for the geometry formats).
 
 ```cpp
 #include <babel-serializer/data/json.hh>
@@ -19,14 +19,16 @@ See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
 ## Design at a glance
 
+The three rules a caller notices first.
+[docs/coding-guidelines.md](docs/coding-guidelines.md) owns them, along with the rest of babel's own conventions.
+
 - **Native structure first.** Each format parses into a data structure that resembles the format itself — unopinionated.
-  Opinionated aggregators ("load an image", "load a mesh" across formats) sit *on top* of these, later.
+  Opinionated aggregators ("load an image", "load a mesh" across formats) sit *on top* of these; `babel::image` is the first.
 - **Read once, then query.** A parsed document is optimized for traversal and queries, deliberately not for insertion.
   JSON is a flat node array, not a tree of allocating nodes; OBJ is parallel attribute arrays, not a built mesh.
-  Writing, when it lands, gets a separate API.
-- **Reading takes a `cc::read_stream`.** The readers parse straight against the stream's buffered window
-  (`ready_bytes` / `consume` / `flush`) — the buffering is inlined in the caller, so they never slurp the whole input first.
-  Convenience overloads accept a `cc::string_view` or a byte span (they wrap a `span_read_stream_adapter`).
+  Writing gets a separate API.
+- **Reading takes a `cc::read_stream`**, parsed against its buffered window rather than slurping the input first.
+  `cc::string_view` and byte-span overloads wrap a `span_read_stream_adapter`.
   The one deviation is a format whose result must hand back views *of* its input: `gltf` takes a `cc::pinned_data<byte const>` instead.
 
 ## File organization
@@ -40,34 +42,32 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 | `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`); `gltf` — the glTF 2.0 / GLB reader (`data` + `accessor_view`, `read` over pinned bytes) |
 | `image/`    | `png` / `jpg` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
 
-`sqlite` deviates from the "reader over a `cc::read_stream`" shape on purpose: SQLite is a live database *engine*, so it is a
-thin RAII wrapper over an open connection (open a file / `:memory:` / a byte image, `exec` / `query`, iterate rows), full read/write.
-Its engine backend is fetched on demand and may be absent — the API stays always-callable, reporting absence at runtime via `is_available()`.
-See [docs/coding-guidelines.md](docs/coding-guidelines.md) for that always-available-API convention.
+`sqlite` deviates on purpose: SQLite is a live database *engine*, so it is a thin RAII wrapper over an open connection rather than a one-shot parser.
+Open a file / `:memory:` / a byte image, `exec` / `query`, iterate rows — full read/write.
+Its engine backend is fetched on demand and may be absent, so probe `is_available()`; the API is declared and callable either way.
 
 `image` is babel's first **writer** and first **committed** third-party backend.
 The per-format `png` / `jpg` codecs read *and* write, exposing each format's own metadata (much of it still `[todo]`); `image` sits on top for the plain-pixels case.
-The backend is the vendored **stb** single-file libraries — always in-tree and always linked, so no availability probe, but kept `PRIVATE` behind `image/impl/` so no stb header reaches a babel public header.
+The backend is the vendored **stb** single-file libraries, always in-tree and always linked — so no availability probe, unlike sqlite.
 
-`gltf` deviates on its **input**, for zero copy: it takes a `cc::pinned_data<byte const>`, so every embedded buffer (and every
-bufferView-backed image) comes back as a subview sharing the input's owner instead of a copy.
+`gltf` deviates on its **input**, for zero copy: every embedded buffer comes back as a subview sharing the input's owner instead of a copy.
 Its stream and span overloads exist for convenience and own a copy, which their `///` docs say outright.
-External `.bin` / image URIs are resolved through a caller-supplied `read_options::resolve_uri` callback — babel owns no
-filesystem policy — and an unresolved reference is recorded rather than an error.
-It is also the first format whose result carries an **import-issue list**: `data::issues` names everything the reader skipped,
-could not resolve, or tolerated, because "usable structure, but not everything the file described" is the normal outcome for a
-real-world asset and a `cc::result` cannot say it.
+External `.bin` / image URIs resolve through a caller-supplied `read_options::resolve_uri` callback, and an unresolved reference is recorded rather than an error.
+It is also the first format whose result carries an **import-issue list**, `data::issues` — check it before assuming you got everything the file described.
 
 ## Building & testing
 
 Build and test through the repo driver — never run the `babel-serializer-test` binary directly:
 
 ```bash
-uv run dev.py test            # build + run the full suite
-uv run dev.py test "json -"   # just the JSON tests while iterating
-uv run dev.py test "obj -"    # just the OBJ tests
-uv run dev.py test "gltf -"
+uv run dev.py test              # build + run the full suite
+uv run dev.py test "json -"     # just the JSON tests while iterating
 uv run dev.py test "markdown -"
+uv run dev.py test "base64 -"
+uv run dev.py test "sqlite -"
+uv run dev.py test "obj -"
+uv run dev.py test "gltf -"
+uv run dev.py test "image -"    # the aggregator; the codecs are "png -" and "jpg -"
 ```
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.

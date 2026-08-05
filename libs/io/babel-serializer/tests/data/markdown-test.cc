@@ -14,7 +14,8 @@ namespace
 namespace md = babel::markdown;
 
 // A non-seekable, chunked read source: serves the input in fixed-size chunks through a tiny buffer, so the
-// parser must refill mid-line. Exercises the streaming path (lines split across windows).
+// parser must refill mid-line.
+// Exercises the streaming path, with lines split across windows.
 class chunked_reader
 {
 public:

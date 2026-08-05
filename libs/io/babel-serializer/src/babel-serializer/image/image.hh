@@ -8,8 +8,9 @@
 
 // Image aggregator (image/) — the "I just want pixel data" layer.
 //
-// Every image format decodes to the same shape (a packed pixel buffer), so this is babel's opinionated aggregator: one `image` struct, format-detecting read, explicit-format write.
-// It sits ON TOP of the low-level per-format codecs (babel::png / babel::jpg) and delegates to them — it never touches the stb backend directly.
+// Every image format decodes to the same shape, a packed pixel buffer, so this is babel's opinionated aggregator:
+// one `image` struct, format-detecting read, explicit-format write.
+// It sits ON TOP of the low-level per-format codecs (babel::png / babel::jpg) and delegates to them.
 // Reach for a low-level codec instead when you need a format's metadata (color profile, gamma, EXIF, ...).
 //
 //   auto const img = babel::image::read(bytes).value();
@@ -24,7 +25,8 @@ enum class format : u8
     jpg,
 };
 
-/// Decoded sample type. Only `u8` is produced today; `u16` / `f32` are API-ready (16-bit PNG, HDR).
+/// Decoded sample type.
+/// Only `u8` is produced today; `u16` / `f32` are API-ready (16-bit PNG, HDR).
 enum class component : u8
 {
     u8,
@@ -53,7 +55,8 @@ struct image
 // reading
 // -------------------------------------------------------------------------------------------------
 
-/// Sniff the container format from the leading magic bytes. Errors if it matches no supported format.
+/// Sniff the container format from the leading magic bytes.
+/// Errors if it matches no supported format.
 [[nodiscard]] cc::result<format> detect_format(cc::span<byte const> bytes);
 
 /// Decode any supported image, auto-detecting the format and delegating to the matching low-level codec.
@@ -65,7 +68,8 @@ struct image
 // writing
 // -------------------------------------------------------------------------------------------------
 
-/// Aggregator write knobs. `jpg_quality` is ignored for PNG.
+/// Aggregator write knobs.
+/// `jpg_quality` is ignored for PNG.
 struct write_options
 {
     int jpg_quality = 90; // 1..100

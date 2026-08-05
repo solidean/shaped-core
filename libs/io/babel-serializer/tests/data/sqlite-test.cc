@@ -6,9 +6,9 @@
 
 using namespace cc::primitive_defines;
 
-// These tests compile unconditionally and branch on is_available() at runtime — the babel::sqlite API is always
-// present; only the backend is fetched-on-demand. No #if here: that is the always-available-API policy
-// (see docs/coding-guidelines.md). The last test pins the not-compiled-in contract directly.
+// These tests compile unconditionally and branch on is_available() at runtime, with no #if anywhere.
+// That is the always-available-API policy in docs/coding-guidelines.md.
+// The last test pins the not-compiled-in contract directly.
 
 namespace
 {
@@ -212,8 +212,8 @@ TEST("sqlite - error paths")
 
 TEST("sqlite - availability contract holds in both build modes")
 {
-    // The API is always present. Whether the backend was compiled in decides success vs. a runtime error —
-    // never a missing symbol or a crash. This test asserts the same contract whichever way babel was built.
+    // Whether the backend was compiled in decides success vs. a runtime error, never a missing symbol or a crash.
+    // This test asserts the same contract whichever way babel was built.
     if (sql::is_available())
     {
         CHECK(sql::database::open_memory().has_value());

@@ -22,10 +22,10 @@ A one-off quirk of one format belongs in a comment next to the code, not here.
 `make_scaling(tg::vec<3, T>)`, and a `make_from_trs(translation, rotation, scale)` that composes the three in the
 conventional order.
 
-**Why:** glTF is the direct case. A node's local transform is *either* a 4×4 `matrix` *or* a translation / rotation / scale
-triple, and the spec makes them mutually exclusive — so a consumer walking the node hierarchy has to convert the TRS form to a
-matrix before it can multiply anything. That conversion is pure typed-geometry work: a quaternion, a translation and a scale to
-one matrix, with the composition order fixed once instead of per caller.
+**Why:** glTF is the direct case.
+A node's local transform is *either* a 4×4 `matrix` *or* a translation / rotation / scale triple, mutually exclusive per the spec.
+So a consumer walking the node hierarchy has to convert the TRS form to a matrix before it can multiply anything.
+That conversion is pure typed-geometry work: a quaternion, a translation and a scale to one matrix, with the composition order fixed once instead of per caller.
 `.gltf` files in the wild use both forms freely, so this is not an edge case.
 
 **Today:** [linalg/mat.hh](../../../base/typed-geometry/src/typed-geometry/linalg/mat.hh) offers only `make_from_cols`,
@@ -41,8 +41,8 @@ babel, which is exactly the silent workaround the repo rule forbids.
 **Wanted:** the transform type typed-geometry's roadmap already anticipates, plus the affine products that distinguish a
 **point** (translated) from a **direction** (not translated).
 
-**Why:** it is the other half of the same job. Once a glTF node's local transform exists, composing parent × child down the
-hierarchy and applying the result to positions and normals is the whole of "place this mesh in the scene".
+**Why:** it is the other half of the same job.
+Once a glTF node's local transform exists, composing parent × child down the hierarchy and applying the result to positions and normals is the whole of placing a mesh in a scene.
 `mat4f * vec4f` alone pushes every caller into homogeneous-coordinate bookkeeping that the type system should be doing.
 
 **Today:** `tg::mat` multiplies `mat<C,R> * vec<C>` only, so there is no affine application at all.
@@ -58,17 +58,16 @@ queries/measures/factories yet".
 a single buffer byte** — the cheapest useful thing in the format (fit a camera, cull, size a scene). It wants to be a
 `tg::aabb3f`.
 
-**Today:** `data::min_of` / `max_of` hand back `cc::span<f32 const>` of `component_count()` floats. Honest, dimension-agnostic
-(bounds exist for `VEC2` and `MAT4` accessors too), and untyped — the caller assembles the box.
+**Today:** `data::min_of` / `max_of` hand back `cc::span<f32 const>` of `component_count()` floats.
+Honest and dimension-agnostic, since bounds exist for `VEC2` and `MAT4` accessors too — but untyped, so the caller assembles the box.
 
 ### `tg::mesh`, for the `load_mesh` aggregator
 
 **Wanted:** the mesh type on typed-geometry's roadmap.
 
-**Why:** it is the one thing standing between babel and its second aggregator. With OBJ and glTF both landed there are now two
-native geometry shapes to reconcile, which is what makes `load_mesh` a real design rather than a rename of one reader's output.
+**Why:** it is the one thing standing between babel and its second aggregator.
 
-**Today:** `[planned]` in [structure.md](structure.md); the format readers hand back their native structures.
+**Today:** `[planned]` in [structure.md](structure.md), which carries the rest; the format readers hand back their native structures.
 
 ---
 
@@ -78,9 +77,9 @@ native geometry shapes to reconcile, which is what makes `load_mesh` a real desi
 
 **Wanted:** an mmap-backed pin — a `cc::pinned_data<byte const>` over a mapped file, with the unmap living in the pin's deleter.
 
-**Why:** this is the piece that would make babel's zero-copy story end-to-end. `babel::gltf::read` already returns every
-embedded buffer as a subview of its input pin, so a 200 MB `.glb` never copies its vertex data *inside* babel — but getting
-those bytes in still costs one full read into memory, because a file is only reachable as a stream today.
+**Why:** this is the piece that would make babel's zero-copy story end-to-end.
+`babel::gltf::read` already returns every embedded buffer as a subview of its input pin, so a 200 MB `.glb` never copies its vertex data *inside* babel.
+Getting those bytes in still costs one full read into memory, because a file is only reachable as a stream today.
 With a mapped pin, "load a glTF" would touch the vertex bytes only when the caller reads them.
 
 **Today:** nothing in the repo maps a file (no `mmap` / `MapViewOfFile` wrapper anywhere), so the composition is
@@ -135,7 +134,5 @@ expressive than a generic pinned strided span would be, and it is not obvious a 
 Recorded so they do not get re-raised:
 
 - **base64** is a serialization codec, so it belongs in `babel::base64` (`data/base64.hh`), not clean-core.
-  [structure.md](structure.md) claimed it as babel's from the start.
-- **URI handling** — percent-decoding, joining against a base directory, deciding whether a relative path may escape it — is
-  deliberately *not* wanted anywhere below babel. It is filesystem policy, and it stays with the caller through
-  `gltf::read_options::resolve_uri`. See [coding-guidelines.md](coding-guidelines.md).
+- **base64** is a serialization codec, so it belongs in `babel::base64` (`data/base64.hh`), not clean-core.
+  [coding-guidelines.md](coding-guidelines.md) has the rule, and `gltf::read_options::resolve_uri` is the seam.

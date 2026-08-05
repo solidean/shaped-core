@@ -12,7 +12,8 @@ using namespace cc::primitive_defines;
 namespace
 {
 // A non-seekable, chunked read source: serves the input in fixed-size chunks through a tiny buffer, so the
-// parser must refill mid-value. Exercises the streaming path (strings / tokens split across windows).
+// parser must refill mid-value.
+// Exercises the streaming path, with strings and tokens split across windows.
 class chunked_reader
 {
 public:
@@ -138,9 +139,9 @@ TEST("json - parsing over a chunked stream matches in-memory")
 {
     auto const text = cc::string_view(R"({"msg": "hello world", "nums": [1, 2, 3], "nested": {"ok": true}})");
 
-    for (auto const chunk : {cc::isize(1), cc::isize(2), cc::isize(5)})
+    for (auto const chunk : {isize(1), isize(2), isize(5)})
     {
-        chunked_reader reader{text, chunk};
+        auto reader = chunked_reader(text, chunk);
         auto stream = reader.stream();
         auto const doc = babel::json::read(stream).value();
         auto const root = doc.root();

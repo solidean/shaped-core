@@ -54,7 +54,8 @@ f32 read_le_f32(cc::span<byte const> bytes, isize offset)
 }
 
 /// The binary payload every geometry test shares: three u16 indices, two padding bytes so the positions
-/// start 4-byte aligned, then three vec3 f32 positions. 44 bytes in total.
+/// start 4-byte aligned, then three vec3 f32 positions.
+/// 44 bytes in total.
 cc::vector<byte> triangle_bin()
 {
     auto out = cc::vector<byte>();
@@ -335,7 +336,7 @@ TEST("gltf - reads through the read_stream overload")
 {
     auto const glb = make_glb(triangle_json(R"({"byteLength": 44})"), triangle_bin());
 
-    cc::span_read_stream_adapter adapter{cc::span<byte const>(glb)};
+    auto adapter = cc::span_read_stream_adapter(cc::span<byte const>(glb));
     cc::read_stream stream = adapter;
 
     auto const doc = babel::gltf::read(stream).value();

@@ -2,26 +2,27 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/streams/span_stream.hh>
 
-// Line-oriented markdown block parser. One line at a time via read_stream::read_line — never buffers the
-// whole file.
+// Line-oriented markdown block parser.
+// One line at a time via read_stream::read_line — never buffers the whole file.
 //
 // Each line goes through the standard three phases: match the already-open containers as far as the
 // line's prefixes allow, open whatever new containers the remainder starts, then interpret what is left
 // as a leaf (fence / heading / thematic break / paragraph text).
 //
 // Containers nest, so the parse builds a real tree of `build_node`s with child vectors, then flattens it
-// once into the document's preorder arrays. The scratch tree is the parse's only concession — the
-// structure handed to the caller is flat, like every other babel reader.
+// once into the document's preorder arrays.
+// The scratch tree is the parse's only concession: the structure handed to the caller is flat, like every other babel reader.
 //
-// Only the BLOCK grammar is implemented; inline spans are left as raw text. Indentation counts columns
+// Only the BLOCK grammar is implemented; inline spans are left as raw text.
+// Indentation counts columns with tabs at 4-column stops.
 // with tabs at 4-column stops.
 
 namespace babel::impl
 {
 namespace
 {
-/// Container nesting cap. The parse recurses once per level when flattening, and markdown that nests
-/// deeper than this is pathological rather than authored.
+/// Container nesting cap.
+/// The parse recurses once per level when flattening, and markdown that nests deeper than this is pathological rather than authored.
 constexpr isize k_max_nesting = 32;
 
 bool is_space(char c)
@@ -60,8 +61,8 @@ i32 scan_indent(cc::string_view s, i32 pos, i32& out_pos)
     return col;
 }
 
-/// Consume at most `want` columns of indentation, returning the byte index reached. Stops early on a tab
-/// that would overshoot, so a partially-consumed tab is never split.
+/// Consume at most `want` columns of indentation, returning the byte index reached.
+/// Stops early on a tab that would overshoot, so a partially-consumed tab is never split.
 i32 advance_indent(cc::string_view s, i32 pos, i32 want)
 {
     auto col = i32(0);
@@ -104,7 +105,8 @@ bool is_thematic_break(cc::string_view s, i32 pos)
     return count >= 3;
 }
 
-/// An opening code fence: three or more backticks or tildes. `out_info` is the trimmed info string.
+/// An opening code fence: three or more backticks or tildes.
+/// `out_info` is the trimmed info string.
 /// A backtick fence may not carry a backtick in its info string — that is inline code, not a fence.
 bool scan_fence_open(cc::string_view s, i32 pos, char& out_char, i32& out_length, cc::string_view& out_info)
 {
@@ -224,8 +226,9 @@ list_marker scan_list_marker(cc::string_view s, i32 pos, i32 column)
     return r;
 }
 
-/// One block while parsing. Containers keep their children in a vector; the whole tree is flattened once
-/// at the end. `content_indent` and `marker` are build-time bookkeeping and do not reach the document.
+/// One block while parsing.
+/// Containers keep their children in a vector; the whole tree is flattened once at the end.
+/// `content_indent` and `marker` are build-time bookkeeping and do not reach the document.
 struct build_node
 {
     markdown::node_kind kind = markdown::node_kind::document;

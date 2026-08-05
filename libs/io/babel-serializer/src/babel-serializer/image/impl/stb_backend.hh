@@ -29,7 +29,8 @@ struct stb_image
 /// stb owns its buffer only transiently — the pixels are copied out and stb's buffer freed before returning.
 [[nodiscard]] cc::result<stb_image> stb_decode(cc::span<byte const> bytes, int req_channels = 0);
 
-/// Encode tightly-packed 8-bit pixels to the format's file bytes. width / height / channels describe `pixels`.
+/// Encode tightly-packed 8-bit pixels to the format's file bytes.
+/// width / height / channels describe `pixels`.
 [[nodiscard]] cc::result<cc::vector<byte>> stb_encode_png(cc::span<byte const> pixels, int width, int height, int channels);
 [[nodiscard]] cc::result<cc::vector<byte>> stb_encode_jpg(cc::span<byte const> pixels,
                                                           int width,
