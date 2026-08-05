@@ -22,14 +22,12 @@ constexpr cc::string_view k_rationale
 // Why this is its own rule rather than part of no-flow-prose.
 //
 // no-flow-prose finds a reflowed block by its tell: a sentence that ends in the middle of a line.
-// A line can break the same guideline with no interior full stop anywhere — one enormous sentence that
-// simply runs on, or a single point padded with clauses — and that shape is invisible to it.
-// The ceiling is what catches it, and it is a flat measurement rather than a heuristic, so it carries none
-// of no-flow-prose's false-positive caveats.
+// A line can break the same guideline with no interior full stop anywhere — one enormous sentence that simply runs on, or a single point padded with clauses.
+// That shape is invisible to it.
+// The ceiling is what catches it, and it is a flat measurement rather than a heuristic, so it carries none of no-flow-prose's false-positive caveats.
 //
 // Characters, not bytes.
-// This tree's prose is full of em dashes and ellipses, each three bytes in UTF-8, so a byte count would
-// report a comfortable 190-character line as over the ceiling.
+// This tree's prose is full of em dashes and ellipses, each three bytes in UTF-8, so a byte count would report a comfortable 190-character line as over the ceiling.
 
 bool is_continuation_byte(char c)
 {

@@ -2,7 +2,9 @@
 
 A **self-contained custom linter** for shaped-core, written in C++ on shaped-core's own libraries.
 
-It is the "custom parsing" sibling of the [clang-tidy gate framework](../lint/): where clang-tidy expresses standard checks, shaped-linter expresses **our own rules** — including ones clang-tidy structurally cannot, such as rules about specific macro placements.
+It is the "custom parsing" sibling of the [clang-tidy gate framework](../lint/).
+Where clang-tidy expresses standard checks, shaped-linter expresses **our own rules**.
+That includes ones clang-tidy structurally cannot, such as rules about specific macro placements.
 
 **Not only C++.** It lints `.cc` / `.hh`, `.py` and `.md`, because a rule about how we *write* — a comment, a docstring, a paragraph — binds all three.
 Each language has its own front end; only C++ has a parser.
@@ -18,7 +20,7 @@ Namespace `scl` (internals `scl::impl`).
 Drive it through `dev.py`, which builds it and resolves its path — never construct build paths by hand:
 
 ```bash
-uv run dev.py lint shaped              # lint the first-party sources: libs/ tools/ docs/ .claude/skills/, plus CLAUDE.md / readme.md / dev.py
+uv run dev.py lint shaped              # lint the first-party sources: libs/ tools/ docs/ .claude/skills/, plus CLAUDE.md / README.md / dev.py
 uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh/.py/.md
 uv run dev.py lint shaped --fix        # apply the suggested fixes in place (then `dev.py format`)
 
@@ -31,14 +33,15 @@ uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]  # apply a plan of p
 uv run dev.py lint prose-stats <path>...            # how much prose files carry, before writing a plan
 ```
 
-It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates, so the rules adopt incrementally (a changed file with a brace-form initializer is flagged, the existing tree is not swept).
+It is also a `check` gate: `uv run dev.py check` runs `shaped-lint` **dirty-only** alongside the clang-tidy gates.
+So the rules adopt incrementally — a changed file with a brace-form initializer is flagged, and the existing tree is not swept.
 [docs/guides/prose.md](../../docs/guides/prose.md) is the guide over this tool: where each answer lives, and when a pile of findings becomes a rework rather than a run of local edits.
 
 
 ## Usage
 
 ```
-shaped-linter [options] <file>...
+shaped-linter [options] <file>... [-- <file>...]
 shaped-linter prose apply [options] <plan>
 shaped-linter prose stats [options] <file>...
 
@@ -52,6 +55,8 @@ prose apply also takes:
   --dry-run                validate the plan and report, but write nothing
   --stats                  report the prose delta per file and in total
 ```
+
+Everything after a `--` is taken as a file, even when it starts with a `-`.
 
 A fix is a byte-range edit, so a rewrite that shortens a line leaves the continuation lines under it aligned to where the text used to be.
 Run `uv run dev.py format` after a manual `--fix` sweep and clang-format puts that right.
@@ -72,8 +77,7 @@ Without it, touching a paragraph of a 400-line doc drags every older violation i
 
 ## `prose apply` — many prose rewrites in one pass
 
-Repairing prose one finding at a time does not work: the finding says a line was reflowed, while the defect is usually that the comment says three things, two of which belong elsewhere or nowhere.
-`prose apply` exists so a whole surface can be re-decided at once and land as a single invocation.
+`prose apply` exists so a whole documentation surface can be re-decided at once and land as a single invocation.
 
 The plan names line spans and the prose to put there:
 
@@ -88,13 +92,16 @@ The plan names line spans and the prose to put there:
 ```
 
 `[a-b]` replaces those lines, `[a]` one line, `[+n]` inserts before line n, and a span with no `| ` lines deletes.
-Spans ascend and may not overlap.
+Spans ascend and may not overlap, and their line numbers are the file as you read it.
 Everything after `| ` is the verbatim final line, comment marker and indentation included — the applier infers neither.
+**Every line of replacement text needs its own `| ` prefix**, including one that is itself a comment.
+A bare `// …` on the second line of a block parses as a plan directive, and that fails the plan before any file is read.
 A bare `|` is an empty line, and the file's existing line terminator is preserved.
+A markdown fenced block is editable like any other line, because the code-unchanged check does not run on markdown at all.
 
 Two validations run over every file before anything is written, and either one rejects the whole plan.
-Both keep going after a failure: a plan is authored across many files at once, so stopping at the first problem would cost the author one round trip per problem.
-One run therefore reports every problem the plan has — prose findings rendered with carets over the **rewritten** text, since none of it is on disk yet.
+A failing file does not stop the pass: every remaining file is still built and judged, so one run reports every *file* that is wrong rather than only the first.
+Prose findings come back with carets over the **rewritten** text, since none of it is on disk yet.
 
 
 * **code is unchanged** — the non-trivia token sequence must be identical to the original's.
@@ -161,7 +168,7 @@ Findings print in file/line order, each rule's mandatory rationale once at the e
 **All of that is framework-level.** A rule reports a span, a message and optionally a fix or a hint, and formats nothing itself.
 That holds for multi-line spans, several labels on one line, and a second labelled span in another file alike — see [docs/writing-a-rule.md](docs/writing-a-rule.md#what-you-do-not-write).
 
-A whole-tree run batches files across several invocations, so the rationale section and the summary repeat per batch.
+Findings print per invocation, so a whole-tree run repeats the rationale section and the summary once per batch of files.
 
 ## Rules
 
@@ -189,7 +196,8 @@ In the rendered output they are two labelled lines: `fix:` says it will be appli
 
 A fix may carry **several edits**, applied together — that is how a rewrite which only compiles once the file also gains a line gets to be a fix rather than a hint.
 An edit with an **empty span** is an insertion.
-Because "safe to apply unattended" is a promise about each fix on its own, the shared edit rides on every finding; `collect_fix_edits` merges the byte-identical copies, so the line still lands exactly once.
+Because "safe to apply unattended" is a promise about each fix on its own, the shared edit rides on every finding.
+`collect_fix_edits` merges the byte-identical copies, so the line still lands exactly once.
 `qualified-primitive` is the worked example: at a `.cc`'s file scope it drops the qualifier *and* splices `using namespace cc::primitive_defines;` in after the leading `#…` block.
 
 ## How it works
@@ -205,20 +213,21 @@ source_buffer ─▶ lexer ─▶ token_stream                 ├─▶ rule en
 The file's extension picks the front end, in one place, and the engine builds only what an enabled rule asked for.
 A rule never sees a language it did not declare, so the C++ rules are structurally safe from ever meeting a markdown file.
 
-See [docs/writing-a-rule.md](docs/writing-a-rule.md) to add a rule and [docs/architecture.md](docs/architecture.md) for how the layers fit together.
+[docs/_index.md](docs/_index.md) is the docs hub.
+[writing-a-rule](docs/writing-a-rule.md) is the one to follow when adding a rule; [architecture](docs/architecture.md) covers how the layers fit together.
+[coding-guidelines](docs/coding-guidelines.md) owns the tool's own conventions, including the corpus annotation format.
 
 ## Tests
 
 ```bash
 uv run dev.py test shaped-linter-test
-uv run dev.py test "shaped-linter - corpus files" -c default_init_assignment.md   # one corpus file (substring match)
+uv run dev.py test "shaped-linter - corpus files" -c cpp-style/default-init-assignment/default_init_assignment.md   # one corpus file
 ```
 
 Two layers, both nexus:
 
-* **Smoke tests** per rule (`<rule>-test.cc`, in the rule's folder) — the scratchpad, kept small and debuggable.
+* **Smoke tests** per rule (`<rule>-test.cc`, in the rule's folder) — small, debuggable, and where an interesting regression gets pinned.
 * **A markdown corpus** (`<rule>.md`, in the same folder) — ordinary prose with annotated `cpp` blocks, one invocation per file.
-  This is where breadth lives, and adding a case needs no C++ and no CMake change.
 
 [docs/coding-guidelines.md](docs/coding-guidelines.md) specifies the annotation format and which layer a case belongs in.
 
@@ -232,13 +241,11 @@ src/shaped-linter/   the framework the rules stand on
   prose/     the comments, docstrings and body text a prose rule walks, plus the `prose apply` plan and applier
   rules/     the rule and finding types, the registry, the engine
   report/    the diagnostic renderer: snippet (source view + carets), renderer, style, reporter
-  compdb/    (reserved) compile_commands.json reader
   main.cc    executable entry point
 rules/       the rules themselves, one folder each: <group>/<rule>/{rule.hh,.cc,-test.cc,.md}
-docs/        architecture, writing a rule, coding guidelines
+docs/        _index, architecture, writing a rule, coding guidelines
 tests/       mirrors src/ — the framework's own tests
 ```
 
-**A rule is a folder.** `rules/cpp-style/default-init-assignment/` holds the header (where the rule's documentation lives), the implementation, its smoke tests and its corpus,
-so a slug read off a finding is the path to everything about it.
+**A rule is a folder**, so a slug read off a finding is the path to everything about it.
 Nothing about a rule sits anywhere else except one line in `registry.cc` and its file names in the group's `CMakeLists.txt`.

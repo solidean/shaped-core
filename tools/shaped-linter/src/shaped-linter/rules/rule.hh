@@ -32,29 +32,24 @@ struct text_edit
 
 /// A suggested fix: one or more edits applied together.
 ///
-/// A fix must be safe to apply unattended: wherever the rule fires, applying it compiles and preserves
-/// behavior.
+/// A fix must be safe to apply unattended: wherever the rule fires, applying it compiles and preserves behavior.
 /// A rewrite that is a judgement call belongs in a `hint` instead.
 ///
-/// That contract is per-fix, which is what the second edit is usually for: a rewrite that only compiles
-/// once the file also gains an include or a using-directive carries BOTH edits on every finding, rather
-/// than putting the shared one on the first finding alone.
-/// `collect_fix_edits` merges the byte-identical
-/// copies, so the shared line still lands exactly once however many findings asked for it.
+/// That contract is per-fix, which is what the second edit is usually for.
+/// A rewrite that only compiles once the file also gains an include or a using-directive carries both edits on every finding.
+/// Putting the shared one on the first finding alone would break that contract.
+/// `collect_fix_edits` merges the byte-identical copies, so the shared line still lands exactly once however many findings asked for it.
 struct fix
 {
     cc::vector<text_edit> edits;
 };
 
-/// A suggested rewrite that `--fix` deliberately does NOT apply — the nicer form that only a human can
-/// sign off on, because it may fail to compile or (worse) change what the code means.
+/// A suggested rewrite that `--fix` deliberately does not apply: the nicer form that only a human can sign off on.
+/// It may fail to compile, or — worse — change what the code means.
 ///
 /// `message` is what to weigh, and is always printed.
-/// `edits` are optional: a hint whose better form
-/// cannot be spelled mechanically carries prose alone.
-/// Nothing in the engine applies a hint's edits;
-/// they exist so the reporter can show the exact replacement, and so a future `--apply-hints` could
-/// offer them one at a time.
+/// `edits` are optional: a hint whose better form cannot be spelled mechanically carries prose alone.
+/// Nothing in the engine applies a hint's edits; they exist so the reporter can show the exact replacement.
 struct hint
 {
     cc::string message;

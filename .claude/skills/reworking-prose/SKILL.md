@@ -124,13 +124,13 @@ Apply each chunk before writing the next: applying shifts line numbers, so a lat
 | /// Eviction is deliberately crude — see apply_bookkeeping.
 ```
 
+The grammar is specified in full by [the shaped-linter readme](../../../tools/shaped-linter/readme.md).
+That includes the `| `-prefix rule: a replacement line missing it parses as a plan directive, which fails the plan before any file is read.
+Three things bite while writing a plan, so they are repeated here:
+
 - `[a-b]` replaces those lines, `[a]` one line, `[+n]` inserts before line n, and a span with no `| ` lines **deletes**.
-- Spans ascend and may not overlap; line numbers are the file as you read it.
-- Everything after `| ` is verbatim final text — comment marker and indentation included, and nothing is inferred.
-- A bare `|` is an empty line inside a block.
-- **Every line of replacement text needs the `| ` prefix**, including one that is itself a comment.
-  A bare `// …` on the second line of a block parses as a plan directive and fails the whole file.
-- A markdown **fenced block is editable too** — the code-unchanged check does not read ``` ``` ``` as code, so a stale status tree or table does not need a hand-edit.
+- Spans ascend, may not overlap, and their line numbers are the file **as you read it**.
+- A markdown **fenced block is editable too**, so a stale status tree or table does not need a hand-edit.
 
 **Take every span's line numbers from a fresh read of that file, in the same session as writing the plan.**
 An off-by-one span silently swallows the declaration under the comment block, which is the one mistake this format makes easy.

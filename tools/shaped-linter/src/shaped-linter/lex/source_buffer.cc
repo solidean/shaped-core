@@ -39,7 +39,8 @@ line_col source_buffer::line_col_at(u32 byte_offset) const
     auto const n = u32(cc::string_view(_text).size());
     auto const off = byte_offset < n ? byte_offset : n;
 
-    // Largest line-start index <= off. Binary search over the sorted _line_starts.
+    // Largest line-start index <= off.
+    // Binary search over the sorted _line_starts.
     isize lo = 0;
     isize hi = _line_starts.size(); // first index whose start is > off
     while (lo < hi)

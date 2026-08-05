@@ -1,15 +1,14 @@
 # qualified-primitive
 
-The sized aliases of `cc::primitive_defines` — `u32`, `isize`, `byte`, … — are vocabulary, and are always
-spelled bare. Every namespace-qualified spelling of one is a finding, wherever it appears.
+The sized aliases of `cc::primitive_defines` — `u32`, `isize`, `byte`, … — are vocabulary, and are always spelled bare.
+Every namespace-qualified spelling of one is a finding, wherever it appears.
+[qualified_primitive.hh](qualified_primitive.hh) states the boundary and where a fix is offered.
 
-Each `cpp` block below is linted with the full rule set and the finding count must match its annotations
-exactly. `[qualified-primitive]` means "one finding here", `~[qualified-primitive]` means "must stay
-quiet", and `fix="…"` pins a replacement text — usually the empty string, since the rule's fix *deletes*
-the qualifier. What it deletes is a byte range, which the corpus cannot express; the smoke test pins that.
+The rule's fix *deletes* the qualifier, so most blocks below pin `fix=""`.
+What it deletes is a byte range, which the corpus cannot express; the smoke test pins that.
+At a `.cc`'s file scope the fix carries a second edit that *inserts* a using-directive, and that one has a text to pin.
 
-At a `.cc`'s file scope the fix carries a second edit that *inserts* a using-directive, and that one has a
-text to pin. Where a block is judged by the kind of file it is, `path="…"` names one.
+The block annotations are specified in [docs/coding-guidelines.md](../../../docs/coding-guidelines.md#the-corpus-format).
 
 ## Every alias is covered
 
@@ -66,8 +65,8 @@ namespace sg { void f(::cc::u64 x); }
 
 ## Where the bare name is reachable
 
-Only a reachable bare name gets a fix. Inside a namespace that re-exports the aliases through its own
-`fwd.hh`, or under a using-directive this file actually shows, it is reachable — so these pin a fix.
+Only a reachable bare name gets a fix.
+Inside a namespace that re-exports the aliases through its own `fwd.hh`, or under a using-directive this file actually shows, it is reachable — so these pin a fix.
 
 ```cpp [qualified-primitive] fix=""
 namespace babel { void f(cc::isize n); }
@@ -90,10 +89,9 @@ namespace zzz { using namespace cc::primitive_defines; }
 namespace zzz { void f(zzz::u32 x); }
 ```
 
-Only the namespace the directive sits *directly* in gains the names. A directive inside `outer::inner`
-does nothing for `outer`, so `outer::u32` names nothing and stays quiet — while `inner::u32` is a finding.
-The uses sit in a namespace of their own here because a *file-scope* use is judged by the file's kind
-instead (see the section after next), which would drown this point.
+Only the namespace the directive sits *directly* in gains the names.
+A directive inside `outer::inner` does nothing for `outer`, so `outer::u32` names nothing and stays quiet — while `inner::u32` is a finding.
+The uses sit in a namespace of their own here because a *file-scope* use is judged by the file's kind instead (see the section after next), which would drown this point.
 
 ```cpp [qualified-primitive]
 namespace outer { namespace inner { using namespace cc::primitive_defines; } }
@@ -102,9 +100,8 @@ namespace some_lib { void f(outer::u32 a); void g(inner::u32 b); }
 
 ## Where it is not reachable, the finding carries no fix
 
-A directive's reach ends with its scope, so the second call below is outside it. Both are findings; only
-the first can be rewritten, and pinning `fix=""` as a *set* covers exactly that — one rewrite over two
-findings.
+A directive's reach ends with its scope, so the second call below is outside it.
+Both are findings; only the first can be rewritten, and pinning `fix=""` as a *set* covers exactly that — one rewrite over two findings.
 
 ```cpp [qualified-primitive] [qualified-primitive] fix=""
 namespace zzz {
@@ -118,8 +115,8 @@ void h() { cc::u32 b = g(); }
 None of the above applies to a name written outside every namespace, because there the second edit is not
 about a library at all — it is a using-directive at the top of this one file.
 
-In a **`.cc`** that is exactly right, so the fix carries both edits: the qualifier goes, and the directive
-is spliced in after the leading `#…` block. `path=` says what the block is linted as.
+In a **`.cc`** that is exactly right, so the fix carries both edits: the qualifier goes, and the directive is spliced in after the leading `#…` block.
+`path=` says what the block is linted as.
 
 ```cpp [qualified-primitive] [qualified-primitive] fix="" fix="\nusing namespace cc::primitive_defines;\n" path="hash.cc"
 #include "hash.hh"
@@ -127,12 +124,12 @@ is spliced in after the leading `#…` block. `path=` says what the block is lin
 cc::u64 hash_of(cc::isize n);
 ```
 
-Two findings, one insertion: every finding carries the shared edit so that each fix is safe applied alone,
-and the byte-identical copies merge into one. That is why a single `fix="\n…\n"` pins both.
+Two findings, one insertion: every finding carries the shared edit so that each fix is safe applied alone, and the byte-identical copies merge into one.
+That is why a single `fix="\n…\n"` pins both.
 
-An **anonymous** namespace counts as file scope too. It is the file's own, and unqualified lookup inside it
-escapes to the global namespace — exactly where the directive nominates — so the helper block at the top of
-a test file is fixed by the same one line as the bodies below it.
+An **anonymous** namespace counts as file scope too.
+It is the file's own, and unqualified lookup inside it escapes to the global namespace — exactly where the directive nominates.
+So the helper block at the top of a test file is fixed by the same one line as the bodies below it.
 
 ```cpp [qualified-primitive] fix="" fix="\nusing namespace cc::primitive_defines;\n" path="x-test.cc"
 #include "a.hh"
@@ -140,8 +137,8 @@ a test file is fixed by the same one line as the bodies below it.
 namespace { void helper(cc::u32 a); }
 ```
 
-A **named** namespace is a library's, and its `fwd.hh` is where the directive belongs — a call about that
-library, not about this file. So that one stays a hint however the file is spelled.
+A **named** namespace is a library's, and its `fwd.hh` is where the directive belongs — a call about that library, not about this file.
+So that one stays a hint however the file is spelled.
 
 ```cpp [qualified-primitive] path="x.cc"
 #include "a.hh"
@@ -172,9 +169,9 @@ extern void g();
 void f(cc::u32 x);
 ```
 
-But an `#include` *past* the anchor silences it. The directive can only nominate `cc::primitive_defines`
-once that is declared, and which include declares it cannot be told from one file — so a file whose real
-includes are nested inside the conditional is left alone rather than guessed at.
+But an `#include` *past* the anchor silences it.
+The directive can only nominate `cc::primitive_defines` once that is declared, and which include declares it cannot be told from one file.
+So a file whose real includes are nested inside the conditional is left alone rather than guessed at.
 
 ```cpp ~[qualified-primitive] path="thread.cc"
 #include "macros.hh"
@@ -202,8 +199,8 @@ The bare spelling is the whole point of the rule.
 namespace cc { void f(u32 a, isize b, byte c, nullptr_t d); }
 ```
 
-A longer identifier that merely starts like an alias is a different name. The scan matches whole tokens,
-which is what keeps `cc::byte_stream_builder` out of a rule about `cc::byte`.
+A longer identifier that merely starts like an alias is a different name.
+The scan matches whole tokens, which is what keeps `cc::byte_stream_builder` out of a rule about `cc::byte`.
 
 ```cpp ~[qualified-primitive]
 namespace cc { void f(cc::byte_stream_builder& b, cc::u32string const& s, cc::i64_traits const& t); }
@@ -247,9 +244,8 @@ Member access is not qualification.
 namespace cc { void f(thing& a, thing* b) { a.cc::u32; b->cc::isize; } }
 ```
 
-A comment, a string literal and a preprocessor directive each lex as **one** token of their own kind, so
-a qualified spelling inside any of them never reaches the scan. That is the boundary, and it also means
-the rule cannot see into a macro body.
+A comment, a string literal and a preprocessor directive each lex as **one** token of their own kind, so a qualified spelling inside any of them never reaches the scan.
+That is the boundary, and it also means the rule cannot see into a macro body.
 
 ```cpp ~[qualified-primitive]
 // cc::u32 in a line comment

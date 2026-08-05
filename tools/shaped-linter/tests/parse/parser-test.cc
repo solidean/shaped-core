@@ -129,8 +129,8 @@ TEST("shaped-linter - parser - empty and multi-element braces")
 
 TEST("shaped-linter - parser - the declarator span reaches past an array bound")
 {
-    // `name` identifies the variable; `declarator` is where an initializer rewrite may start. They differ
-    // exactly when a suffix sits between the two — an array bound — and conflating them drops it.
+    // `name` identifies the variable; `declarator` is where an initializer rewrite may start.
+    // They differ exactly when a suffix sits between the two — an array bound — and conflating them drops it.
     SECTION("array member")
     {
         auto const p = parse_text("struct S { T a[N]{1, 2}; };");
@@ -313,8 +313,8 @@ TEST("shaped-linter - parser - a control-flow header is a declaration scope")
     }
     SECTION("range-for over a braced list")
     {
-        // The `{…}` behind the `:` initializes the range, not the declarator — a range-declaration
-        // carries no initializer at all. Reading it as one is what made the linter report itself.
+        // The `{…}` behind the `:` initializes the range, not the declarator — a range-declaration carries no initializer at all.
+        // Reading it as one is what made the linter report itself.
         CHECK(parse_text("void f() { for (auto const p : {1, 2}) {} }").brace_vars().size() == 0);
         CHECK(parse_text("void f() { for (auto& x : cc::vector<int>{1, 2}) {} }").brace_vars().size() == 0);
     }
@@ -375,8 +375,8 @@ TEST("shaped-linter - parser - a control-flow body is one statement, braced or n
     }
     SECTION("a lambda in a header is reached exactly once")
     {
-        // The header is parsed as a scope, which reaches the lambda by itself. Sweeping the same group
-        // for lambda bodies on top of that would report every declaration inside it twice.
+        // The header is parsed as a scope, which reaches the lambda by itself.
+        // Sweeping the same group for lambda bodies on top of that would report every declaration inside it twice.
         auto const p = parse_text("void f() { if (any_of(v, [] { int y{0}; return y; })) {} }");
         auto const m = p.brace_vars_in(decl_scope::function_scope);
         REQUIRE(m.size() == 1);

@@ -32,8 +32,6 @@ Each rule is tested twice, and the two layers answer different questions.
   This is where **breadth** lives: every fix shape, every scope, every look-alike that must stay quiet.
   Adding a case is adding a fenced block, not writing C++.
 
-The split is deliberate.
-A rule accumulates dozens of cases, and dozens of hand-written `SECTION`s is ceremony that buries the interesting ones.
 Put a case in the smoke test when *you* will want to read it while debugging; put it in the corpus otherwise.
 
 ## The corpus format
@@ -59,7 +57,7 @@ void f() { g({1, 2}); }
 |------------|---------|
 | `[rule-id]` | this rule must produce one finding here — repeat the annotation for N findings |
 | `~[rule-id]` | this rule must produce **no** finding here |
-| `fix="…"` | one replacement text the **preceding** rule produces; chain it for more |
+`~[rule-id]` may not carry a `fix=` or a `hint=` — a rule that must not fire produces no rewrite to pin, and the loader rejects the block.
 | `hint="…"` | the same, over that rule's `hint` edits — the rewrites `--fix` does not apply |
 | `path="…"` | the file name the **block** is linted as — which also picks its language (default `<memory>`, so C++) |
 
@@ -80,10 +78,10 @@ All fixes written for one rule form a **set**, and it is matched against the rep
 Naming no fix for a rule leaves its fixes unchecked; naming one means naming them all.
 Because it is a set, order is irrelevant and these two are the same pin:
 
-```text
+````text
 ```cpp [r] fix=" = 1" [r] fix=" = 2"
 ```cpp [r] [r] fix=" = 1" fix=" = 2"
-```
+````
 
 Finding *counts* come from the `[rule-id]` annotations alone — a `fix=` never adds one.
 
@@ -95,12 +93,14 @@ Rules for writing one:
 * **The finding count must match the annotations exactly.** A block is linted with `all_rules()`, so a *second* rule firing on it is a failure until the block names it too.
   That is the point — it surfaces cross-talk between rules instead of hiding it.
 * **A block with no annotation is illustration** and is not checked, as is any block in a language the loader does not lint.
-  Use that for prose examples; the loader counts them so the skipping is not silent.
+  The loader counts the unannotated lintable ones into `lint_corpus_group::skipped`, but nothing reads that field yet, so the skipping is silent in practice.
 * **A malformed annotation is an error**, never "no expectations" — a typo must fail loudly.
 * **Prose carries the why.** The heading names the case and appears in the test output; the sentence above a block says what it is demonstrating.
   Write it for a human first.
 * **Pin corner-cuts as they behave, not as they should.** When the parser cuts a corner, the corpus records today's behavior so the boundary cannot move silently.
   Say so in the prose.
+* **A fenced block is the assertion, so editing one is a test change.** Its info string carries the expectations and its body is the input, both byte-for-byte.
+  Nothing outside `shaped-linter-test` checks that: the prose rules skip fenced code, so a bad edit to a block is invisible to `lint shaped` and to `prose apply` alike.
 
 The nearest preceding heading and the fence's line number name the case, and every comparison carries `{file}:{line}` as a chained `.context()`, so a failure says *which* block broke —
 plus a `.dump("rule", …)` naming the rule when the check is per-rule.

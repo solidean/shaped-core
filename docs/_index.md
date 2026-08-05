@@ -61,8 +61,8 @@ Library-local docs live next to their library, under `libs/<category>/<lib>/docs
 
 ## Tool docs
 
-- [shaped-linter](../tools/shaped-linter/readme.md) — our own C++ and prose linter.
-  Its [architecture](../tools/shaped-linter/docs/architecture.md), and [how to write a rule](../tools/shaped-linter/docs/writing-a-rule.md).
+- [shaped-linter](../tools/shaped-linter/readme.md) — our own C++ and prose linter, and the `prose apply` plan grammar.
+  Start at its [docs hub](../tools/shaped-linter/docs/_index.md), which covers the architecture, how to write a rule, and the corpus format.
 - [instruction-tracer](../tools/instruction-tracer/readme.md) — what optimized code actually executed, driven by `dev.py assembly trace`.
 
 > Place new repo-wide docs here, with kebab-case names, in the matching subfolder.

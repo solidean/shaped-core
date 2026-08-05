@@ -9,9 +9,9 @@ using namespace scl;
 
 namespace
 {
-/// Owns the buffer AND its tokens: tokens borrow the buffer's text, so the buffer must outlive them.
-/// The buffer is heap-boxed (stable address) — small strings are SSO, so a plain move would relocate
-/// the bytes out from under the token views. Keep a `lexed` as a named local for the test's lifetime.
+/// Owns the buffer and its tokens: tokens borrow the buffer's text, so the buffer must outlive them.
+/// The buffer is heap-boxed for a stable address — small strings are SSO, so a plain move would relocate the bytes out from under the token views.
+/// Keep a `lexed` as a named local for the test's lifetime.
 struct lexed
 {
     cc::unique_ptr<source_buffer> buf;

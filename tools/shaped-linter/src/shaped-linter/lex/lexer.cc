@@ -31,8 +31,8 @@ bool is_raw_prefix(cc::string_view s)
     return s == "R" || s == "LR" || s == "uR" || s == "UR" || s == "u8R";
 }
 
-/// The single-pass tokenizer. Cursor over the file text; every token spans a byte range, and the
-/// tokens tile the file gap-free (trivia included).
+/// The single-pass tokenizer.
+/// Cursor over the file text; every token spans a byte range, and the tokens tile the file gap-free (trivia included).
 struct scanner
 {
     cc::string_view src;
@@ -89,7 +89,8 @@ struct scanner
             return;
         }
 
-        // Backslash-newline: line continuation, spliced away. Kept as trivia so spans stay gap-free.
+        // Backslash-newline: line continuation, spliced away.
+        // Kept as trivia so spans stay gap-free.
         if (c == '\\' && (at(1) == '\n' || at(1) == '\r'))
         {
             p += (at(1) == '\r' && at(2) == '\n') ? 3 : 2;
@@ -389,7 +390,8 @@ struct scanner
         emit(is_float ? token_kind::floating_literal : token_kind::integer_literal, start);
     }
 
-    /// Maximal-munch punctuator, longest first. Returns false if the current char is not a punctuator.
+    /// Maximal-munch punctuator, longest first.
+    /// Returns false if the current char is not a punctuator.
     bool lex_punctuation(isize start)
     {
         static constexpr cc::string_view three[] = {"<<=", ">>=", "<=>", "...", "->*"};

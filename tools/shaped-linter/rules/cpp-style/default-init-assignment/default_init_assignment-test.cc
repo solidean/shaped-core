@@ -4,9 +4,9 @@
 #include <nexus/test.hh>
 #include <shaped-linter/rules/engine.hh>
 
-// Smoke tests for `default-init-assignment` — the scratchpad the rule was built in, and where an
-// interesting regression gets pinned. Breadth lives in default_init_assignment.md, next to this file;
-// see docs/coding-guidelines.md for which of the two a new case belongs in.
+// Smoke tests for `default-init-assignment` — the scratchpad the rule was built in, and where an interesting regression gets pinned.
+// Breadth lives in default_init_assignment.md, next to this file.
+// See docs/coding-guidelines.md for which of the two a new case belongs in.
 
 using namespace scl;
 
@@ -90,8 +90,8 @@ TEST("shaped-linter - default-init - fires outside record bodies too")
     }
 }
 
-// The hint channel. `--fix` never applies it (engine-test.cc pins that), so what matters here is that the
-// right shapes get one, that its edit is the braceless form, and that its wording never invents a type.
+// The hint channel, which `--fix` never applies (engine-test.cc pins that).
+// What matters here is that the right shapes get one, that its edit is the braceless form, and that its wording never invents a type.
 TEST("shaped-linter - default-init - the member hint drops the braces")
 {
     SECTION("a whitelisted type is stated without a caveat")

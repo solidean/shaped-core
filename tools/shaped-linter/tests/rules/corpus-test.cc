@@ -11,10 +11,9 @@
 #include <algorithm> // std::sort
 #include <filesystem>
 
-// The data-driven half of rule testing: every markdown file under rules/ becomes one invocation,
-// addressable by its relative path — a corpus sits in its own rule's folder, next to the rule and its
-// smoke tests. See lint_corpus.hh for the annotation format and
-// ../../docs/coding-guidelines.md for which cases belong here rather than in a rule's smoke tests.
+// The data-driven half of rule testing: every markdown file under rules/ becomes one invocation, addressable by its relative path.
+// A corpus sits in its own rule's folder, next to the rule and its smoke tests.
+// See ../../docs/coding-guidelines.md for the annotation format, and for which cases belong here rather than in a rule's smoke tests.
 
 #ifndef SCL_CORPUS_DIR
 #error "SCL_CORPUS_DIR must be defined by the build (see tools/shaped-linter/CMakeLists.txt)"
@@ -90,9 +89,9 @@ cc::vector<cc::string_view> mentioned_rules(cc::span<lint_corpus_expectation con
     return out;
 }
 
-/// The set of replacement texts, rendered sorted and comma-joined so two sets compare as one readable
-/// string. Each is bracketed, not quoted — a fix normally starts with a space, and nexus already quotes
-/// the whole rendered string. Duplicates are merged: what is pinned is WHICH rewrites a rule offers.
+/// The set of replacement texts, rendered sorted and comma-joined so two sets compare as one readable string.
+/// Each is bracketed rather than quoted — a fix normally starts with a space, and nexus already quotes the whole rendered string.
+/// Duplicates are merged: what is pinned is *which* rewrites a rule offers.
 cc::string render_fix_set(cc::span<cc::string_view const> texts)
 {
     auto sorted = cc::vector<cc::string_view>();
@@ -133,7 +132,8 @@ cc::vector<cc::string_view> fixes_produced_by(cc::span<finding const> found, cc:
     return out;
 }
 
-/// The same over the hint channel. A prose-only hint has no edits and so contributes nothing.
+/// The same over the hint channel.
+/// A prose-only hint has no edits and so contributes nothing.
 cc::vector<cc::string_view> hints_produced_by(cc::span<finding const> found, cc::string_view id)
 {
     auto out = cc::vector<cc::string_view>();
@@ -189,8 +189,8 @@ INVOCABLE_TEST("shaped-linter - corpus cases", (lint_corpus_group const& group))
             for (auto const& e : c.expect)
                 expected_total += e.negated ? 0 : 1;
 
-            // Every finding must be accounted for. A rule firing without an annotation is real signal
-            // (rules cross-talk), so it fails until the block names it.
+            // Every finding must be accounted for.
+            // A rule firing without an annotation is real signal — rules cross-talk — so it fails until the block names it.
             CHECK(found.size() == expected_total).context(where);
 
             for (auto const& id : mentioned_rules(c.expect))

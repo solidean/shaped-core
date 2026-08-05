@@ -24,15 +24,14 @@ constexpr cc::string_view k_primitives[]
 /// The directive this rule inserts to make the bare spelling reachable at a `.cc`'s file scope.
 constexpr cc::string_view k_using_directive = "using namespace cc::primitive_defines;";
 
-/// The extensions that mark a translation unit rather than a header. Everything else — `.hh`, and a path
-/// with no extension at all — counts as a header, because only a TU can take the directive privately.
+/// The extensions that mark a translation unit rather than a header.
+/// Everything else — `.hh`, and a path with no extension at all — counts as a header, because only a TU can take the directive privately.
 constexpr cc::string_view k_implementation_extensions[] = {".cc", ".cpp", ".cxx", ".c"};
 
-/// The namespaces that re-export the aliases with a `using namespace cc::primitive_defines;` in their own
-/// fwd.hh. Qualified lookup searches a nominated namespace, so `sg::u32` names the same alias as `cc::u32`
-/// and reads exactly as wrong. The list is spelled out because that directive lives in a header, and a
-/// single-file linter never sees the include — a file that nominates the namespace itself is picked up on
-/// top of this, so a new library needs no edit here to be covered inside its own fwd.hh.
+/// The namespaces that re-export the aliases with a `using namespace cc::primitive_defines;` in their own fwd.hh.
+/// Qualified lookup searches a nominated namespace, so `sg::u32` names the same alias as `cc::u32` and reads exactly as wrong.
+/// The list is spelled out because that directive lives in a header, and a single-file linter never sees the include.
+/// A file that nominates the namespace itself is picked up on top of this, so a new library needs no edit here to be covered inside its own fwd.hh.
 constexpr cc::string_view k_reexporting_namespaces[]
     = {"cc", "tg", "nx", "babel", "sg", "sr", "sv", "slib", "ssc", "scl", "itrace"};
 
@@ -164,9 +163,8 @@ bool declarator_is_reexporting(cc::span<token const> toks,
 /// with it: everything written AFTER it is looked up in `cc`, so the bare spelling is already reachable.
 /// Without this the rule would offer a whole file-scope using-directive for names that never needed one.
 ///
-/// The span therefore starts at the parameter list, not at the brace — a parameter type is as much "after
-/// the declarator-id" as the body is. What comes BEFORE it, the return type, is left out and correctly so:
-/// that one really is looked up at file scope.
+/// The span therefore starts at the parameter list, not at the brace — a parameter type is as much "after the declarator-id" as the body is.
+/// What comes before it, the return type, is left out and correctly so: that one really is looked up at file scope.
 cc::vector<source_span> out_of_line_bodies(lint_context const& ctx,
                                            cc::span<isize const> sig,
                                            cc::span<cc::string_view const> reexporters)
@@ -235,11 +233,10 @@ bool covered_by_any(cc::span<source_span const> spans, u32 offset)
 
 /// Is `offset` outside every NAMED namespace — reachable from the file's own scope?
 ///
-/// An anonymous namespace is not a barrier here. It is this file's own, and unqualified lookup inside it
-/// escapes outward to the global namespace, which is exactly where a file-scope using-directive nominates.
-/// So the helper block at the top of a test file is fixed by the same one line as the `TEST(…)` bodies
-/// below it. A NAMED namespace is a library's, and its fwd.hh is where the directive belongs instead —
-/// which is a judgement call about that library, so the rule only ever hints there.
+/// An anonymous namespace is not a barrier here.
+/// It is this file's own, and unqualified lookup inside it escapes outward to the global namespace, which is exactly where a file-scope using-directive nominates.
+/// So the helper block at the top of a test file is fixed by the same one line as the `TEST(…)` bodies below it.
+/// A named namespace is a library's, and its fwd.hh is where the directive belongs instead — a judgement call about that library, so the rule only ever hints there.
 bool at_file_scope(lint_context const& ctx, u32 offset)
 {
     for (auto const& n : ctx.tree.nodes)
@@ -270,19 +267,18 @@ cc::string_view directive_word(cc::string_view text)
 
 /// Where a file-scope `using namespace cc::primitive_defines;` can go, and the text to put there.
 ///
-/// The anchor is the file's leading `#…` block, taken as the last directive that sits at conditional
-/// depth 0 — not the last `#include`. Depth is what makes the offset safe: a prologue that opens
-/// `#if CC_HAS_THREADS` and runs into the code without closing it would otherwise anchor INSIDE that
-/// branch, and the aliases would then be defined in one configuration only. Falling back to the last
-/// depth-0 directive puts the line before the conditional instead, where it holds for every build.
+/// The anchor is the file's leading `#…` block, taken as the last directive that sits at conditional depth 0 — not the last `#include`.
+/// Depth is what makes the offset safe.
+/// A prologue that opens `#if CC_HAS_THREADS` and runs into the code without closing it would otherwise anchor inside that branch.
+/// The aliases would then be defined in one configuration only.
+/// Falling back to the last depth-0 directive puts the line before the conditional instead, where it holds for every build.
 ///
-/// Nothing comes back when no directive reaches depth 0 at all — a file that opens with `#ifdef
-/// __EMSCRIPTEN__` and never leaves it has no such common ground, and the rule then stays quiet about it.
+/// Nothing comes back when no directive reaches depth 0 at all.
+/// A file that opens with `#ifdef __EMSCRIPTEN__` and never leaves it has no such common ground, and the rule then stays quiet about it.
 ///
-/// Nothing comes back either when ANY `#include` follows the anchor. `cc::primitive_defines` has to be
-/// declared before the directive can nominate it, and which include declares it is precisely what a
-/// single-file linter cannot know — so a file that keeps including past the anchor (its real includes
-/// nested inside `#if CC_HAS_THREADS`, say) is left alone rather than guessed at.
+/// Nothing comes back either when any `#include` follows the anchor.
+/// `cc::primitive_defines` has to be declared before the directive can nominate it, and which include declares it is what a single-file linter cannot know.
+/// So a file that keeps including past the anchor — its real includes nested inside `#if CC_HAS_THREADS`, say — is left alone rather than guessed at.
 ///
 /// A file with no directives at all takes offset 0. The insertion leaves a blank line on each side, so
 /// the directive reads as its own paragraph between the includes and the code.
@@ -325,8 +321,8 @@ cc::optional<text_edit> using_directive_insertion(lint_context const& ctx)
     if (anchor < 0 && saw_directive)
         return {};
 
-    // An `#include` past the anchor may be the one that declares the aliases, and the directive has to sit
-    // after that. Which include it is cannot be told from this file alone, so the answer is to not guess.
+    // An `#include` past the anchor may be the one that declares the aliases, and the directive has to sit after that.
+    // Which include it is cannot be told from this file alone, so the answer is to not guess.
     for (auto j = anchor + 1; j < toks.size(); ++j)
         if (toks[j].is(token_kind::preprocessor_directive) && directive_word(toks[j].text) == "include")
             return {};
@@ -380,9 +376,9 @@ bool ends_a_qualifier(token const& t)
 
 void check(lint_context& ctx)
 {
-    // Trivia only. A comment, a string literal and a whole `#…` line each lex as ONE token of a kind that
-    // is not `identifier`, so a `cc::u32` spelled inside any of them can never match the pattern below,
-    // and keeping them in the sequence makes each a barrier rather than something to see through.
+    // Trivia only.
+    // A comment, a string literal and a whole `#…` line each lex as one token of a kind that is not `identifier`.
+    // So a `cc::u32` inside any of them can never match the pattern below, and keeping them in the sequence makes each a barrier rather than something to see through.
     cc::vector<isize> sig;
     for (auto i = isize(0); i < ctx.tokens.tokens.size(); ++i)
         if (!ctx.tokens.tokens[i].is_trivia())
@@ -434,15 +430,14 @@ void check(lint_context& ctx)
         auto const drop_qualifier = text_edit{
             .span = {.file_id = span.file_id, .byte_begin = span.byte_begin, .byte_end = primitive.span.byte_begin}};
 
-        // Dropping it alone is safe only where the bare name is already reachable. Where it is not, what
-        // the second edit should be depends entirely on where the name sits:
-        //   - at a `.cc`'s file scope — anonymous namespaces included, since they are the file's own — the
-        //     directive belongs at the top of that file, which is mechanical, so the fix carries both
-        //     edits and `--fix` lands the whole thing;
-        //   - at a HEADER's file scope there is no such edit — a using-directive there leaks the aliases
-        //     into the global namespace of every TU that includes it — so the rule says nothing at all;
-        //   - inside a namespace the right edit is a `using namespace` in that library's fwd.hh, which is
-        //     a judgement call about the library, not about this line. That one stays a hint.
+        // Dropping it alone is safe only where the bare name is already reachable.
+        // Where it is not, what the second edit should be depends entirely on where the name sits:
+        //   - at a `.cc`'s file scope — anonymous namespaces included, since they are the file's own — the directive belongs at the top of that file.
+        //     That is mechanical, so the fix carries both edits and `--fix` lands the whole thing.
+        //   - at a header's file scope there is no such edit, since a using-directive there leaks the aliases into the global namespace of every TU that includes it.
+        //     So the rule says nothing at all.
+        //   - inside a namespace the right edit is a `using namespace` in that library's fwd.hh, a judgement call about the library rather than about this line.
+        //     That one stays a hint.
         auto suggested_fix = cc::optional<fix>();
         auto suggested_hint = cc::optional<hint>();
         if (bare_name_reachable(ctx, reexporters, out_of_line, span.byte_begin))
