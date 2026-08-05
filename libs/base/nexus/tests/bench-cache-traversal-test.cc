@@ -6,14 +6,14 @@
 
 using namespace cc::primitive_defines;
 
-// The classic cache lesson: two traversals of a large 2D array that do the *same* work (n*n element reads,
-// the same instruction count) but in different memory order. Row-major walks each row contiguously (cache
-// friendly); column-major strides by a whole row per step (cache hostile), so almost every access misses.
+// The classic cache lesson: two traversals of a large 2D array doing the *same* work — n*n element reads, the same instruction count — in different memory order.
+// Row-major walks each row contiguously and is cache friendly; column-major strides a whole row per step and is cache hostile, so almost every access misses.
 // Same instructions, far more cycles and cache misses.
 //
-// Manual + prints: it allocates ~256 MiB and is a demonstration, not a fast unit test. Run it with
-// `dev.py profiling ...` or by exact name. Vectorization/unrolling are disabled on the inner loops so both
-// walks retire the same scalar instruction stream and the only variable left is the memory access pattern.
+// Manual and print-only: it allocates ~256 MiB and is a demonstration rather than a fast unit test, so run it by exact name.
+// Vectorization and unrolling are disabled on the inner loops, so both walks retire the same scalar instruction stream and the access pattern is the only variable left.
+//
+// docs/guides/profiling.md walks through the numbers this prints.
 
 namespace
 {
@@ -68,9 +68,9 @@ TEST("nexus bench - 2d traversal cache effect", nx::config::manual)
     for (auto i = isize(0); i < data.size(); ++i)
         data[i] = u32(i); // touch every page so we do not measure first-touch faults
 
-    // Baseline (elapsed + ref cycles) plus two PMU counters. measure_all re-runs the walk across PMC subsets
-    // if the two do not fit at once, so instructions and cache misses are both measured regardless of how many
-    // counters other sessions are holding — the walks are deterministic, so the combined values are comparable.
+    // Baseline (elapsed + ref cycles) plus two PMU counters.
+    // measure_all re-runs the walk across PMC subsets if the two do not fit at once, so instructions and cache misses are both measured whatever other sessions hold.
+    // The walks are deterministic, so the combined values stay comparable.
     auto const cfg = nx::bench::hw_measure_config{
         .counters = cc::vector<hw_counter>{hw_counter::elapsed_nanoseconds, hw_counter::reference_cycles,
                                            hw_counter::instructions_retired, hw_counter::cache_llc_misses},

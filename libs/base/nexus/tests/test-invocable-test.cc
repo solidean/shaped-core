@@ -7,14 +7,13 @@
 #include <string>
 #include <vector>
 
-// Meta-tests: build a local registry with invocable tests + a driver, run it via execute_tests, and
-// inspect the resulting (nested) execution tree. Using a local registry keeps these tests out of the
-// static registry, so nx::invoke_tests (which targets the active run's registry) only sees what each test adds.
+// Meta-tests: build a local registry with invocable tests plus a driver, run it via execute_tests, and inspect the resulting (nested) execution tree.
+// A local registry keeps these tests out of the static registry, so nx::invoke_tests — which targets the active run's registry — only sees what each test adds.
 
 namespace
 {
-// Adds an invocable (inert) test to a local registry from a (possibly capturing) callable. Mirrors what
-// the INVOCABLE_TEST macro does for the static registry, but accepts lambdas so tests can observe side effects.
+// Adds an invocable (inert) test to a local registry from a possibly-capturing callable.
+// Mirrors what the INVOCABLE_TEST macro does for the static registry, but accepts lambdas so a test can observe side effects.
 template <class Fn>
 void add_invocable(nx::test_registry& reg, cc::string name, Fn fn, nx::config::cfg cfg = {})
 {

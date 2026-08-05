@@ -45,7 +45,8 @@ struct fuzz_machine
         cc::vector<op_index> invariant_ops; // invariants over this type
     };
 
-    /// Per-run mutable values, grouped by interned type. Slot growth is append-only within a run.
+    /// Per-run mutable values, grouped by interned type.
+    /// Slot growth is append-only within a run.
     struct state
     {
         cc::vector<cc::vector<typed_value>> values_by_type;
@@ -83,8 +84,8 @@ struct fuzz_machine
     /// Looks up the interned index of a runtime type, or type_index::invalid if the machine never saw it.
     [[nodiscard]] type_index index_of(std::type_index t) const;
 
-    /// Runs one step against the state. Detects thrown exceptions, captured CHECK/REQUIRE failures,
-    /// failed CC_ASSERTs, and false bool invariants, mapping any of them to a failing result.
+    /// Runs one step against the state.
+    /// Detects thrown exceptions, captured CHECK/REQUIRE failures, failed CC_ASSERTs and false bool invariants, mapping any of them to a failing result.
     [[nodiscard]] execute_result execute_operation(state& s, executed_operation const& exec) const;
 
     /// Checks the operation's preconditions against the prospective input slots (no mutation).

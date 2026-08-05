@@ -59,7 +59,8 @@ The shape is one flat array, each entry tagged with its test:
 ```
 
 `dev.py pgo` consumes these sidecars; [pgo.md](pgo.md) covers what it does with them.
-A binary with no guide benchmarks exits 0 and writes no sidecar.
+A binary with no guide benchmarks exits 0 and writes a sidecar whose `metrics` array is empty.
+Only top-level tests are collected: a metric recorded inside a test dispatched by `nx::invoke_tests` reaches neither the table nor the sidecar.
 
 ## Related
 
@@ -67,3 +68,4 @@ A binary with no guide benchmarks exits 0 and writes no sidecar.
 - [nexus cheat-sheet](../../libs/base/nexus/cheat-sheet.md) — `GUIDE_BENCHMARK`, `nx::guide`, and the CLI flags.
 - [catch2-runner-compat.md](../../libs/base/nexus/docs/catch2-runner-compat.md) — buckets, discovery and filtering.
 - [profiling.md](profiling.md) — ad-hoc hardware counters per region, as opposed to recorded metrics over time.
+- [nexus docs hub](../../libs/base/nexus/docs/_index.md) — the rest of the framework: invocable tests, fuzzing, and the runner internals.

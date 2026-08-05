@@ -8,13 +8,11 @@
 
 // Linux backend: hardware counters via perf_event_open(2).
 //
-// The PMU counters are opened as one event group (a leader plus members sharing its group_fd) so a single
-// read() returns all of them consistently. Access is gated by /proc/sys/kernel/perf_event_paranoid and is
-// commonly blocked inside containers/sandboxes; when opening fails we degrade to the baseline (elapsed time
-// + reference cycles) and warn once. We measure user space only (exclude_kernel/exclude_hv).
+// The PMU counters are opened as one event group — a leader plus members sharing its group_fd — so a single read() returns all of them consistently.
+// Measurement is user space only (exclude_kernel / exclude_hv).
+// Access is gated by /proc/sys/kernel/perf_event_paranoid and is commonly blocked inside containers and sandboxes; a failed open degrades to the baseline and warns once.
 //
-// reference_cycles stays the rdtsc baseline (not a perf event) so it matches the other platforms and is
-// always available regardless of perf access.
+// reference_cycles stays the rdtsc baseline rather than a perf event, so it matches the other platforms and is available regardless of perf access.
 
 namespace nx::bench::impl
 {
@@ -34,8 +32,8 @@ constexpr u64 hw_cache_config(u64 cache, u64 op, u64 result)
     return cache | (op << 8) | (result << 16);
 }
 
-// The PMU counters this backend knows how to open. reference_cycles/elapsed_nanoseconds are baseline, not
-// here. L2 as a distinct counter is not portable in generic perf and is left for a future raw-event pass.
+// The PMU counters this backend knows how to open; reference_cycles and elapsed_nanoseconds are baseline and not here.
+// L2 as a distinct counter is not portable in generic perf, and is left for a future raw-event pass.
 constexpr perf_event_desc s_pmu_events[] = {
     {hw_counter::instructions_retired, PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS, "instructions"},
     {hw_counter::branch_instructions, PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_INSTRUCTIONS, "branch-instructions"},
@@ -68,7 +66,8 @@ long perf_event_open(perf_event_attr* attr, pid_t pid, int cpu, int group_fd, un
 }
 
 // Open one perf event for the current thread (user space only), optionally joining `group_fd`'s group.
-// Returns the fd, or -1 on failure. The leader (group_fd == -1) is created disabled.
+// Returns the fd, or -1 on failure.
+// The leader (group_fd == -1) is created disabled.
 int open_event(perf_event_desc const& e, int group_fd)
 {
     auto attr = perf_event_attr{};

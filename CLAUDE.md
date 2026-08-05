@@ -19,6 +19,7 @@ One-liner per library:
 * **`libs/base/clean-core`** — foundational data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, fixed containers,
   `function_ref`, …). Namespace `cc`. No dependencies.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
+  Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   Namespace `nx`. Depends on clean-core.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry (`vec`/`pos`/`comp`; `bivec`/`mat`/`quat`/transforms/geometry/mesh planned).
   Namespace `tg`. Depends on clean-core.
@@ -303,6 +304,6 @@ See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format an
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Coding standards & conventions   | [docs/coding-guidelines.md](docs/coding-guidelines.md)           |
 | Recall a library's API fast      | its `cheat-sheet.md` (e.g. [clean-core](libs/base/clean-core/cheat-sheet.md), [nexus](libs/base/nexus/cheat-sheet.md)) |
-| Write a test (nexus)             | [libs/base/nexus/cheat-sheet.md](libs/base/nexus/cheat-sheet.md) + [catch2-runner-compat.md](libs/base/nexus/docs/catch2-runner-compat.md) |
+| Write a test (nexus)             | [cheat-sheet](libs/base/nexus/cheat-sheet.md), then the [docs hub](libs/base/nexus/docs/_index.md) for invocables, fuzzing and the CLI layer |
 | Explore the repo                 | `repo_tools` MCP (`repo_search` / `repo_structure`)              |
 | All docs                         | [docs/_index.md](docs/_index.md)                                 |

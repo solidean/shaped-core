@@ -1,8 +1,7 @@
 # Invocable tests (parametrized / data-driven / generator)
 
-`INVOCABLE_TEST` declares a test that takes **arguments**; `nx::invoke_tests` runs
-every invocable test matching a signature, feeding it data a *driver* test produced.
-The two names go together: an `INVOCABLE_TEST` is inert until you `invoke_tests` it.
+`INVOCABLE_TEST` declares a test that takes **arguments**; `nx::invoke_tests` runs every invocable test matching a signature, feeding it data a *driver* test produced.
+The two names go together: an `INVOCABLE_TEST` is inert until a driver invokes it.
 
 This one mechanism covers what other frameworks split into several features:
 
@@ -10,8 +9,8 @@ This one mechanism covers what other frameworks split into several features:
 - **data-driven tests** — the arguments are a "case" loaded from a file / JSON / dir;
 - **generator tests** — a driver generates a matrix of configs/enums and feeds each.
 
-The point is to **separate the test from its data**: one body, data driven however
-you like. Namespace `nx`; include `<nexus/test.hh>` (pulls in `nx::invoke_tests`).
+The point is to **separate the test from its data**: one body, driven by data from wherever you like.
+Namespace `nx`; include `<nexus/test.hh>`, which pulls in `nx::invoke_tests`.
 
 ## The two pieces
 
@@ -37,22 +36,19 @@ TEST("mesh cases")
 
 `nx::invoke_tests(name, args...)`:
 
-- Runs every `INVOCABLE_TEST` whose signature matches `args...` (see *matching*
-  below), passing them. Each match runs as an **addressable child** under the
-  section segment `name`, with the test's own name and sections nested below.
+- Runs every `INVOCABLE_TEST` whose signature matches `args...`, passing them; *matching* is below.
+  Each match runs as an **addressable child** under the section segment `name`, with the test's own name and sections nested below it.
 - Returns an `invocation_result { matched, executed }`.
-- **Leave the template argument to deduce** by default (`invoke_tests("case", x)`);
-  the key is the decayed types of `args...`. Spell it explicitly
-  (`invoke_tests<sg::context_handle>(...)`) only to pin a type deduction can't reach.
-- `name` is **authored**, never derived from a value — so output and addresses stay
-  stable even when an argument (e.g. a handle) has no meaningful string form.
+- **Leave the template argument to deduce** by default (`invoke_tests("case", x)`) — the key is the decayed types of `args...`.
+  Spell it explicitly (`invoke_tests<sg::context_handle>(...)`) only to pin a type deduction cannot reach.
+- `name` is **authored**, never derived from a value.
+  Output and addresses therefore stay stable even when an argument — a handle, say — has no meaningful string form.
 
 ## Mental model: addressable iteration, not sections
 
-`SECTION` is *parallel exploration* — the body re-runs once per leaf. `invoke_tests`
-is *linear iteration*: the driver body runs **once**, and each matched test is driven
-to completion internally (its own sections replayed inside a nested run). That is what
-lets a driver do expensive setup **once**, run everything, then tear down:
+`SECTION` is *parallel exploration*: the body re-runs once per leaf.
+`invoke_tests` is *linear iteration*: the driver body runs **once**, and each matched test is driven to completion internally, its own sections replayed inside a nested run.
+That is what lets a driver do expensive setup **once**, run everything, then tear down:
 
 ```cpp
 TEST("sg backend - vulkan")
@@ -62,47 +58,40 @@ TEST("sg backend - vulkan")
 }                                                        // ctx destroyed once
 ```
 
-Put the setup at the top of the driver body and invoke there. **Don't** combine a
-top-level `invoke_tests` with sibling `SECTION`s in the same driver — the sections
-force the driver body to replay, which re-runs the invocation (and the setup) per pass.
+Put the setup at the top of the driver body and invoke there.
+**Don't** combine a top-level `invoke_tests` with sibling `SECTION`s in the same driver.
+The sections force the driver body to replay, which re-runs the invocation and the setup on every pass.
 
 ## Matching: prefer a unique key type
 
-The join key is the **decayed** argument signature (`T` and `T const&` are the same
-key; matching is exact on the decayed types otherwise). This means **every**
-`INVOCABLE_TEST(int)` is matched by **any** `invoke_tests(int)` — matching is
-deliberately coarse.
+The join key is the **decayed** argument signature: `T` and `T const&` are the same key, and matching is exact on the decayed types otherwise.
+So **every** `INVOCABLE_TEST(int)` is matched by **any** `invoke_tests(int)` — matching is deliberately coarse.
 
-- **Do** use a domain-specific type as the key (`sg::context_handle`, a `mesh_case`,
-  or an invented tag type). That makes matches unambiguous and orphan detection exact.
-- Matching on a bare primitive (`int`, `bool`) with no other discriminator is
-  **discouraged** — you will co-invoke unrelated tests.
+- **Do** use a domain-specific type as the key — `sg::context_handle`, a `mesh_case`, or an invented tag type.
+  That makes matches unambiguous and orphan detection exact.
+- Matching on a bare primitive (`int`, `bool`) with no other discriminator is **discouraged**: you will co-invoke unrelated tests.
 
-Parameters must be **by value or `const&`** — a mutable lvalue-reference parameter is
-rejected at compile time (arguments are boxed by decayed value and shared read-only
-across the matched tests, so a `T&` would silently share/mutate one box). Prefer
-cheap-to-copy / handle types; pass large data behind a handle or `case const*`.
+Parameters must be **by value or `const&`** — a mutable lvalue-reference parameter is rejected at compile time.
+Arguments are boxed by decayed value and shared read-only across the matched tests, so a `T&` would silently share and mutate one box.
+Prefer cheap-to-copy / handle types, and pass large data behind a handle or a `case const*`.
 
 ## Addressing a single instance
 
-An instance's address is its section path: `<driver name>` (matched by the test-name
-filter) then `<invoke name> / <test name> / <its sections>`, each segment matched by a
-`-c` flag — **repeat `-c` to descend the path**:
+An instance's address is its section path: `<driver name>`, matched by the test-name filter, then `<invoke name> / <test name> / <its sections>`.
+Each segment is matched by a `-c` flag — **repeat `-c` to descend the path**:
 
 ```bash
 uv run dev.py test "sg vulkan backend" -c vulkan -c "sg - clears backbuffer"
 ```
 
-runs just that one instance on just that backend. Nesting composes: an invoked test
-can itself invoke tests, and the paths stack. `dev.py test` forwards everything after
-the test name straight to the binary, so the `-c` flags reach the nexus runner.
+runs just that one instance, on just that backend.
+Nesting composes: an invoked test can itself invoke tests, and the paths stack.
+`dev.py test` forwards everything after the test name straight to the binary, so the `-c` flags reach the nexus runner.
 
 ## Running an instance by name (aliases)
 
-A driver is addressable, but an individual invocable isn't — until an **alias** binds
-its name to a driver plus a section path. Define aliases in an `NX_TEST_SETUP` block,
-which runs once at startup (before any listing or scheduling) with full read access to
-the registry:
+A driver is addressable; an individual invocable is not, until an **alias** binds its name to a driver plus a section path.
+Define aliases in an `NX_TEST_SETUP` block, which runs once at startup — before any listing or scheduling — with full read access to the registry:
 
 ```cpp
 NX_TEST_SETUP(nx::setup& s)
@@ -125,61 +114,50 @@ The invocable is then runnable by its own name, expanding to one scoped run per 
 uv run dev.py test "sg - clears backbuffer"   # runs it on every backend
 ```
 
-An alias participates in name filtering like a real test, with rules that keep anything
-from running twice:
+An alias participates in name filtering like a real test, with rules that keep anything from running twice:
 
-- A **full, unfiltered run** ignores aliases — every driver already runs and invokes
-  everything, so expansion would only duplicate.
-- If a filter also selects a fragment's **driver by name** (the driver then runs
-  unscoped, covering all its invocables), that fragment is dropped.
-- A fragment's section path is authoritative; a global `-c` does not further scope an
-  alias-expanded instance (it applies only to directly-named instances).
+- A **full, unfiltered run** ignores aliases: every driver already runs and invokes everything, so expansion would only duplicate.
+- If a filter also selects a fragment's **driver by name**, that fragment is dropped — the driver then runs unscoped and covers all its invocables.
+- A fragment's section path is authoritative, and a global `-c` does not further scope an alias-expanded instance; it applies only to directly-named instances.
 
-Aliases are per binary (the registry is), so an alias can only reference drivers in its
-own binary; `dev.py test` unions the matches across binaries. `nx::setup` also exposes
-`tests()` (all declarations) and `find_test(name)` for building fragments.
+Aliases are per binary, because the registry is, so an alias can only reference drivers in its own binary; `dev.py test` unions the matches across binaries.
+`nx::setup` also exposes `tests()` — every declaration — and `find_test(name)` for building fragments.
 
 ## Orphan safety net
 
-In a **full, unfiltered normal run**, every enabled `INVOCABLE_TEST` must be invoked by
-some driver. Any that isn't fails the run:
+In a **full, unfiltered normal run**, every enabled `INVOCABLE_TEST` must be invoked by some driver.
+Any that is not fails the run:
 
 ```
 Orphan invocable tests (declared but never invoked):
   sg - clears backbuffer at .../sg_tests.cc:42
 ```
 
-So you can't declare an invocable test and forget to wire it into a driver. The check
-is silent under any filter (`dev.py test "<pattern>"`, `-c`, `--manual`, …).
+So you cannot declare an invocable test and forget to wire it into a driver.
+The check is silent under any filter — `dev.py test "<pattern>"`, `-c`, `--manual`, and so on.
 
 ## Patterns
 
-- **Backend matrix** — one driver per backend, each invoking on the backend handle
-  (above). Setup/teardown happens once per backend.
-- **Data-driven** — one driver loads cases and invokes each; write several
-  `INVOCABLE_TEST`s on the same case type to check different aspects, and one
-  `invoke_tests` feeds them all.
-- **Config/enum matrix** — a driver loops over configs and invokes each; use a
-  distinct config/tag type as the key.
+- **Backend matrix** — one driver per backend, each invoking on the backend handle, as above.
+  Setup and teardown happen once per backend.
+- **Data-driven** — one driver loads cases and invokes each.
+  Write several `INVOCABLE_TEST`s on the same case type to check different aspects, and one `invoke_tests` feeds them all.
+- **Config/enum matrix** — a driver loops over configs and invokes each; use a distinct config or tag type as the key.
 
 ## Templated tests (not yet implemented)
 
-A *type*-parametrized test is a compile-time expansion (`name<int>`, `name<float>`),
-not a registry query: an instantiation can't be type-erased across a TU that doesn't
-see the template, so an open type set only works where the template is visible. The
-planned shape registers one concrete (value-parametrized) declaration per type in a
-list — separable declaration and instantiation so long type lists live apart from the
-body — each then driven by `nx::invoke_tests` like any other. Value parametrization
-(this document) is the part that composes across the registry today.
+A *type*-parametrized test is a compile-time expansion (`name<int>`, `name<float>`), not a registry query.
+An instantiation cannot be type-erased across a TU that does not see the template, so an open type set only works where the template is visible.
+The **planned** shape registers one concrete value-parametrized declaration per type in a list, each then driven by `nx::invoke_tests` like any other.
+Declaration and instantiation stay separable there, so long type lists can live apart from the body.
+Value parametrization, this document, is the part that composes across the registry **today**.
 
 ## Gotchas
 
-- **Inert by default.** An `INVOCABLE_TEST` never runs on its own; it needs a driver.
-- **No trailing `;`** after an `INVOCABLE_TEST` body — it is a function definition (the
-  params are a macro argument, which is why they are parenthesized).
-- **Coarse matching.** Use a unique key type; a bare `int`/`bool` key co-invokes.
+- **Inert by default** — an `INVOCABLE_TEST` never runs on its own, and needs a driver.
+- **No trailing `;`** after an `INVOCABLE_TEST` body — it is a function definition, and the params are a macro argument, which is why they are parenthesized.
+- **Coarse matching** — use a unique key type; a bare `int` / `bool` key co-invokes.
 - **By value or `const&` only** — mutable lvalue-ref parameters are a compile error.
 - **Setup-once requires no sibling `SECTION`s** around a top-level `invoke_tests`.
-- A driver that only invokes tests needs no `CHECK` of its own (it's exempt from the
-  no-assertion rule); but if a call matches **nothing**, the driver has neither checks
-  nor children and is flagged.
+- A driver that only invokes tests needs no `CHECK` of its own, being exempt from the no-assertion rule.
+  But a call that matches **nothing** leaves the driver with neither checks nor children, and it is flagged.

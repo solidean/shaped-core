@@ -12,10 +12,9 @@ namespace nx::fuzz
 {
 namespace
 {
-// A run, re-expressed in producer/SSA form for analysis and minimization. Each step references the
-// step that produced each of its inputs (or `random_producer` for a synthesized cc::random&), so
-// the representation is stable under deletion: we delete steps and regenerate fresh absolute slot
-// indices, instead of trying to patch absolute indices in place.
+// A run, re-expressed in producer/SSA form for analysis and minimization.
+// Each step references the step that produced each of its inputs, or `random_producer` for a synthesized cc::random&.
+// That makes the representation stable under deletion: steps are deleted and fresh absolute slot indices regenerated, rather than patching absolute indices in place.
 constexpr int random_producer = -1;
 
 struct logical_step

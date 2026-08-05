@@ -36,9 +36,8 @@ Library-local docs live next to their library, under `libs/<category>/<lib>/docs
 
 - [clean-core](../libs/base/clean-core/readme.md) — the `cc` foundational library.
   [cheat-sheet](../libs/base/clean-core/cheat-sheet.md) for the API at a glance, deeper notes in its [docs hub](../libs/base/clean-core/docs/_index.md).
-- [nexus](../libs/base/nexus/cheat-sheet.md) — the `nx` test framework; it has no readme, so the cheat-sheet is the front door.
-  [catch2-runner-compat](../libs/base/nexus/docs/catch2-runner-compat.md) covers discovery, filtering and buckets.
-  There are also docs on [fuzz testing](../libs/base/nexus/docs/fuzz-testing.md) and [invocable tests](../libs/base/nexus/docs/invocable-tests.md).
+- [nexus](../libs/base/nexus/readme.md) — the `nx` test framework.
+  [cheat-sheet](../libs/base/nexus/cheat-sheet.md) for the API at a glance, deeper notes in its [docs hub](../libs/base/nexus/docs/_index.md).
 - [typed-geometry](../libs/base/typed-geometry/readme.md) — the `tg` math & geometry library.
   [cheat-sheet](../libs/base/typed-geometry/cheat-sheet.md) and [docs hub](../libs/base/typed-geometry/docs/_index.md).
 - [babel-serializer](../libs/io/babel-serializer/readme.md) — the `babel` format readers and writers.

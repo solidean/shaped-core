@@ -81,8 +81,8 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
     {
         ++result.matched;
 
-        // Reduce to the scopes consistent with this (group, child). The child descends with just those, so a
-        // divergent sibling scope can't spuriously match deeper. Unscoped (empty) stays unscoped ⇒ run all.
+        // Reduce to the scopes consistent with this (group, child), and the child descends with just those.
+        // A divergent sibling scope then cannot spuriously match deeper, and unscoped (empty) stays unscoped, meaning run all.
         cc::vector<cc::vector<cc::string>> child_scopes;
         if (!scopes.empty())
         {
@@ -93,8 +93,8 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
                 continue; // this child is scoped out
         }
 
-        // Cycle guard: this invocable is already running further up the chain, so invoking it again would
-        // recurse forever. Fail the current test with a clear message instead of overflowing the stack.
+        // Cycle guard: this invocable is already running further up the chain, so invoking it again would recurse forever.
+        // Fail the current test with a clear message instead of overflowing the stack.
         if (is_declaration_active(decl))
         {
             report_invocation_cycle(decl);

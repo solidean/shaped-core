@@ -41,12 +41,9 @@ struct test_section
     double duration_seconds = 0.0;
 
     // accumulates stats for non-leaf sections
-    // adds errors for "no checks" and "unreachable subsections"
-    // computes "in_considered_failing"
-    // populates the result with that
-    // require_checks: whether an empty section (no CHECK/REQUIRE anywhere below it) is treated as a failure.
-    // True for normal tests — a test with no assertions is almost always a bug. False for manual tests
-    // (benchmarks and the like), which legitimately only print.
+    // Adds errors for "no checks" and "unreachable subsections", computes is_considered_failing, and populates the result with both.
+    // `require_checks` says whether an empty section — no CHECK/REQUIRE anywhere below it — counts as a failure.
+    // True for a normal test, where no assertions is almost always a bug; false for a manual test or benchmark, which legitimately only prints.
     void finalize_section_to(test_execution::section& sec, bool require_checks) const
     {
         sec.name = name;
@@ -153,9 +150,9 @@ thread_local cc::vector<test_context> g_context_stack;
 // dispatches within that same registry). Saved/restored around execute_tests to support nesting.
 thread_local nx::test_registry const* g_active_registry = nullptr;
 
-// Plain globals tracking the currently running test, read by the crash-context hook
-// (report_running_test). Kept as a raw pointer + length so the hook needs no allocation
-// and no cc::string access. Updated just before each test/section runs.
+// Plain globals tracking the currently running test, read by the crash-context hook report_running_test.
+// Kept as a raw pointer plus length so the hook needs no allocation and no cc::string access.
+// Updated just before each test or section runs.
 char const* g_running_test_data = nullptr;
 int g_running_test_size = 0;
 int g_running_test_section = 0;
@@ -170,8 +167,8 @@ bool scope_allows(cc::span<test_section* const> curr_section,
                   cc::span<cc::string const> scope,
                   int filter_offset)
 {
-    // A dispatched child's path already consumed `filter_offset` leading segments (the dispatch group + child
-    // name); its own sections match against the remainder. Consumed past the end ⇒ everything below is allowed.
+    // A dispatched child's path already consumed `filter_offset` leading segments — the dispatch group plus the child name — so its own sections match the remainder.
+    // Consumed past the end means everything below is allowed.
     if (filter_offset >= scope.size())
         return true;
     auto const filter = scope.subspan(filter_offset);
@@ -235,9 +232,8 @@ void test_execute_end()
     auto& ctx = g_context_stack.back();
     CC_ASSERT(ctx.execution != nullptr, "should always have a valid execution");
 
-    // Only normal tests must contain a CHECK/REQUIRE; manual tests and guide benchmarks may legitimately
-    // have none — don't flag that as failure. A driver that dispatches parametrized tests (nested non-empty)
-    // is also exempt: its assertions live in the dispatched children, not its own body.
+    // Only a normal test must contain a CHECK/REQUIRE; a manual test or guide benchmark may legitimately have none.
+    // A driver that dispatches parametrized tests (nested non-empty) is exempt too, since its assertions live in the dispatched children rather than its own body.
     bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal
                              && ctx.execution->nested.empty();
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
@@ -425,8 +421,7 @@ nx::impl::raii_section_opener::~raii_section_opener()
 
 nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
 {
-    // nested captures are allowed; the innermost sink wins. We do not chain on purpose:
-    // the fuzz engine never nests captures, and a flat pointer keeps the hot path cheap.
+    // Nesting is not supported: a flat pointer keeps the hot path cheap, and the fuzz engine never nests captures.
     CC_ASSERT(g_check_capture == nullptr, "nested check captures are not supported");
     g_check_capture = &sink;
 }
@@ -520,9 +515,9 @@ void nx::impl::record_metric(cc::string_view name, double value, cc::string_view
 
 void nx::impl::report_check_result(check_result result)
 {
-    // Capture mode: a tool (e.g. the fuzz engine) is driving user code that is expected to fail
-    // often. Tally the outcome and suppress both the host-test side effects and the control-flow
-    // throws (REQUIRE/SKIP), so a single failing operation does not abort or pollute the host test.
+    // Capture mode: a tool such as the fuzz engine is driving user code that is expected to fail often.
+    // Tally the outcome and suppress both the host-test side effects and the control-flow throws (REQUIRE/SKIP).
+    // One failing operation then neither aborts nor pollutes the host test.
     if (g_check_capture != nullptr)
     {
         auto& sink = *g_check_capture;

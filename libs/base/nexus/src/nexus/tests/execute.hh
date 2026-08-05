@@ -64,10 +64,10 @@ struct test_execution
     // note: global stats == root stats
     section root;
 
-    // Executions dispatched from this test's body via nx::invoke_tests (parametrized-test instances run as
-    // addressable children). Empty for ordinary tests. invocation_group is the nx::invoke_tests(name) segment
-    // under which this execution ran (empty for a top-level test); the child's own name is
-    // instance.declaration->name, so its addressable path is invocation_group / declaration name / sections.
+    // Executions dispatched from this test's body via nx::invoke_tests, so a parametrized-test instance runs as an addressable child.
+    // Empty for an ordinary test.
+    // invocation_group is the nx::invoke_tests(name) segment this execution ran under, and is empty for a top-level test.
+    // The child's own name is instance.declaration->name, so its addressable path is invocation_group / declaration name / sections.
     cc::vector<test_execution> nested;
     cc::string invocation_group;
 
@@ -92,22 +92,23 @@ test_schedule_execution execute_tests(test_schedule const& schedule, test_schedu
 
 namespace nx::impl
 {
-// Runs one test body through the section-replay loop under a freshly pushed (possibly nested) context,
-// finalizing stats into `execution.root`. `body` is invoked once per section-exploration pass. Shared by
-// the top-level scheduler and nx::invoke_tests (which runs parametrized-test bodies as nested executions).
-// `filter_offset` shifts which scope element the context's first section level matches against (0 at top
-// level; deeper for dispatched children whose path already consumed leading segments).
-// `section_scopes` is the effective set of allowed section paths for this instance (the grouped alias
-// fragments' paths, or the run-global config.section_filters as a single scope). A section or dispatch runs
-// if it matches ANY scope; a dispatched child passes down the reduced subset consistent with its path.
+// Runs one test body through the section-replay loop under a freshly pushed, possibly nested context, finalizing stats into `execution.root`.
+// `body` is invoked once per section-exploration pass.
+// Shared by the top-level scheduler and by nx::invoke_tests, which runs parametrized-test bodies as nested executions.
+//
+// `filter_offset` shifts which scope element the context's first section level matches against.
+// It is 0 at top level, and deeper for a dispatched child whose path already consumed leading segments.
+// `section_scopes` is the effective set of allowed section paths for this instance.
+// That is the grouped alias fragments' paths, or the run-global config.section_filters as a single scope.
+// A section or dispatch runs if it matches ANY scope, and a dispatched child passes down the reduced subset consistent with its path.
 void run_test_body(nx::test_execution& execution,
                    nx::test_schedule_config const& config,
                    cc::function_ref<void()> body,
                    cc::span<cc::vector<cc::string> const> section_scopes,
                    int filter_offset);
 
-// Accessors into the innermost running test context, used by nx::invoke_tests. Must be called from within a
-// running test body (the context stack is non-empty).
+// Accessors into the innermost running test context, used by nx::invoke_tests.
+// Must be called from within a running test body, so the context stack is non-empty.
 nx::test_execution* current_execution(); // where dispatched children attach
 nx::test_schedule_config const* current_config();
 int current_filter_consumed(); // scope segments already matched by this path + ancestors
@@ -129,9 +130,9 @@ void report_invocation_cycle(nx::test_declaration const* decl);
 namespace nx::impl
 {
 // Everything one CHECK/REQUIRE evaluation reports.
-// The three sources of text are separate fields on purpose: rendering picks the operands or the diagnostic
-// per op and ALWAYS appends the user annotations, so a chained .context() can never be shadowed by one of
-// the framework's own strings (which is exactly what a single shared vector used to do).
+// The three sources of text are separate fields on purpose.
+// Rendering picks the operands or the diagnostic per op, and ALWAYS appends the user annotations.
+// So a chained .context() can never be shadowed by one of the framework's own strings.
 struct check_result
 {
     check_kind kind;
@@ -152,11 +153,12 @@ struct check_result
 
 void report_check_result(check_result result);
 
-// Appends a metric to the active test's execution. No-op when no test is running. Used by nx::guide.
+// Appends a metric to the active test's execution, and is a no-op when no test is running.
+// nx::guide is the public face.
 void record_metric(cc::string_view name, double value, cc::string_view unit, bool higher_is_better);
 
-// Crash-context hook (cc::crash_context_hook): writes the currently running test (and section index)
-// to stderr. Registered with cc::add_crash_context_hook so a fatal fault points at the offending test.
-// Reads only plain globals updated per test; safe to call from a constrained crash context.
+// Crash-context hook (cc::crash_context_hook): writes the currently running test and section index to stderr.
+// Registered with cc::add_crash_context_hook, so a fatal fault points at the offending test.
+// Reads only plain globals updated per test, so it is safe to call from a constrained crash context.
 void report_running_test() noexcept;
 } // namespace nx::impl

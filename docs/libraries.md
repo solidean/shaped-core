@@ -34,10 +34,12 @@ The source tree is organized by topic, and the [readme](../libs/base/clean-core/
 
 ### nexus — namespace `nx` — depends on clean-core
 
-[docs](../libs/base/nexus/docs/catch2-runner-compat.md)
+[readme](../libs/base/nexus/readme.md) · [docs](../libs/base/nexus/docs/_index.md)
 
 Lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML), so IDE test integration works out of the box.
 This is what every `<lib>-test` binary is built on.
+Beyond `TEST` / `CHECK`, it carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks, and hardware performance counters.
+The source tree is organized by responsibility, and the [readme](../libs/base/nexus/readme.md#file-organization) has the map.
 
 ### typed-geometry — namespace `tg` — depends on clean-core
 

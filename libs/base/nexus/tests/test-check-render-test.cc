@@ -7,17 +7,16 @@
 
 #include <stdexcept>
 
-// How a failing check RENDERS. The counts are covered by test-check-test.cc; here we look at the text a
-// developer actually sees — `test_error::expanded`, which is what both exporters serialize.
+// How a failing check RENDERS; the counts are covered by test-check-test.cc.
+// What is under test here is the text a developer actually sees: `test_error::expanded`, which is what both exporters serialize.
 //
-// The invariant under test: the auto-captured operands and the framework's own explanation are one field
-// each, and every chained .context() / .note() / .dump() is appended after them. Nothing a user chains may
-// be dropped, and nothing a user chains may displace what the framework had to say.
+// The invariant: the auto-captured operands and the framework's own explanation are one field each, and every chained .context() / .note() / .dump() is appended after them.
+// Nothing a user chains may be dropped, and nothing a user chains may displace what the framework had to say.
 
 namespace
 {
-// Run `body` as a nested test and return the first failure it recorded. The body is expected to fail exactly
-// once; the inner execution absorbs it, so this test stays green.
+// Run `body` as a nested test and return the first failure it recorded.
+// The body is expected to fail exactly once, and the inner execution absorbs it, so this test stays green.
 nx::test_error const& first_error(nx::test_schedule_execution const& exec)
 {
     REQUIRE(exec.executions.size() == 1);

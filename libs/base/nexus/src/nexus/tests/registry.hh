@@ -22,27 +22,26 @@ struct test_declaration
     // Ordinary (nullary) tests: `signature` is empty and `function` is the body.
     cc::unique_function<void()> function;
 
-    // Invocable tests (INVOCABLE_TEST): `signature` is the decayed argument-type list (the invoke_tests
-    // join key) and `invocable_function` runs the body with args sourced from typed_value slots. These are
-    // inert — a sweep never schedules them; they run only when a driver calls nx::invoke_tests with a
-    // matching signature. For an invocable decl `function` is left invalid.
+    // Invocable tests (INVOCABLE_TEST): `signature` is the decayed argument-type list, the invoke_tests join key.
+    // `invocable_function` runs the body with args sourced from typed_value slots, and `function` is left invalid.
+    // These are inert: a sweep never schedules them, and they run only when a driver calls nx::invoke_tests with a matching signature.
     cc::vector<std::type_index> signature;
     cc::unique_function<void(cc::span<nx::typed_value*>)> invocable_function;
 
     [[nodiscard]] bool is_invocable() const { return !signature.empty(); }
 };
 
-// One runnable target an alias expands to: a driver test plus the section path that scopes into it. For a
-// per-backend invocable, the path is {invoke-group, invocable-name} (e.g. {"dx12", "sg - clears backbuffer"}),
-// so running the alias drives just that one instance under that one backend's driver.
+// One runnable target an alias expands to: a driver test, plus the section path that scopes into it.
+// For a per-backend invocable the path is {invoke-group, invocable-name}, e.g. {"dx12", "sg - clears backbuffer"}.
+// Running the alias then drives just that one instance, under that one backend's driver.
 struct alias_fragment
 {
     test_declaration const* driver = nullptr;
     cc::vector<cc::string> section_path;
 };
 
-// A pseudo test-name that stands for a set of scoped runs. Defined at startup by NX_TEST_SETUP with full
-// registry access; a filter matching an alias name expands into one scheduled instance per fragment.
+// A pseudo test-name standing for a set of scoped runs, defined at startup by NX_TEST_SETUP with full registry access.
+// A filter matching an alias name expands into one scheduled instance per fragment.
 struct test_alias
 {
     cc::string name;

@@ -76,6 +76,24 @@ Sign out and back in afterward (the group and privilege enter the token at logon
 `uv run dev.py doctor` reports whether this is in place.
 Without it, `nx::bench` degrades to the baseline and warns once.
 
+### How the Windows backend measures
+
+There is no user-mode API that reads PMU counters directly on Windows, so `nx::bench` gets them out of ETW:
+
+- `TraceQueryInformation(TraceProfileSourceListInfo)` enumerates the CPU's named PMU sources, and the logical counters are mapped onto them **by name**.
+  The names differ per CPU and per Windows version, which is expected rather than a problem.
+- nexus starts its own private `SystemTraceProvider` session under a fixed GUID, enables `CSWITCH`, and attaches the chosen PMC sources.
+  `TracePmcCounterListInfo` picks the counters and `TracePmcEventListInfo` stamps them onto context-switch events.
+  Both calls are required: counters attached to no event produce context-switch records carrying no PMC payload at all.
+- A background thread runs `ProcessTrace` and tracks the benchmark thread across every scheduling interval.
+  It snapshots that CPU's counters on switch-in and adds the delta on switch-out.
+  Summing the intervals gives the count for the measured region, so multi-quantum runs and CPU migration both fall out for free.
+- A short loop can run entirely inside one quantum, with no context switch at all.
+  So the measurement forces a switch just before and just after the body, and bounds counting to that window.
+
+**`ReadThreadProfilingData` is deliberately not used.**
+It reads back all zeros in user mode on every machine tried, because its `HwCountersCount` is gated on a global PMC list that cannot be set from user mode.
+
 ### Caveats
 
 - **Limited PMC budget.**

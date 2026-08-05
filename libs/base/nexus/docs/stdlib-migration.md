@@ -1,16 +1,13 @@
 # Stdlib Migration
 
-Nexus dogfoods clean-core: the data model, public API, and most internals use
-`cc::` types. This document tracks the **remaining `std::` usages** and what each
-is waiting on, so the migration can finish as clean-core grows.
+Nexus dogfoods clean-core: the data model, the public API and most internals use `cc::` types.
+This document tracks the **remaining `std::` usages** and what each is waiting on, so the migration can finish as clean-core grows.
 
 Two kinds of remaining usage:
 
-1. **Blocked on a missing clean-core symbol** — we want a `cc::` equivalent and
-   will switch as soon as it exists.
-2. **Interop bridges** — glue that only exists because we still cross the
-   `cc` ↔ `std` boundary. These disappear once the surrounding usage migrates,
-   not because clean-core needs a new symbol.
+1. **Blocked on a missing clean-core symbol** — a `cc::` equivalent is wanted, and the site switches as soon as it exists.
+2. **Interop bridges** — glue that exists only because the `cc` ↔ `std` boundary is still crossed here.
+   These disappear when the surrounding usage migrates, not when clean-core grows a symbol.
 
 Each site is also flagged with a short `// std::… : …` comment at the use site.
 
@@ -25,8 +22,7 @@ Each site is also flagged with a short `// std::… : …` comment at the use si
 | `std::type_index` / `typeid` (`<typeindex>`) | [typed_value.hh](../src/nexus/tests/typed_value.hh) (the shared type-erased value box), `nx::fuzz` — [signature.hh](../src/nexus/fuzz/signature.hh), [machine.hh](../src/nexus/fuzz/machine.hh) / [machine.cc](../src/nexus/fuzz/machine.cc), [run.cc](../src/nexus/fuzz/run.cc) — runtime type identity for the type-erased value box and operation/type tables | `cc::type_id` (identity + name) | clean-core has no non-RTTI type identity. Names come from `cc::demangle_symbol(typeid(T).name())`. The single biggest gap the fuzzer hit. |
 | `std::index_sequence` / `std::declval` (`<utility>`) | [signature.hh](../src/nexus/fuzz/signature.hh) — variadic operation invocation and signature deduction | a `cc` index-sequence / `declval` | Compile-time arg-pack machinery; no clean-core equivalent. |
 
-Also wanted, even though there is no `std::` left at the call site because it was
-worked around:
+Also wanted, though the call site has no `std::` left because it was worked around:
 
 - **`cc::string_view::find_last_of`** — `program_name` in [run.cc](../src/nexus/run.cc)
   emulates it with `cc::max(name.rfind('/'), name.rfind('\\'))`.
@@ -35,8 +31,7 @@ worked around:
 
 ## Interop bridges (go away when the `std` boundary does)
 
-These are not requests for new clean-core symbols — they exist only because a
-`cc::string` currently has to reach a `std` API.
+These are not requests for new clean-core symbols — they exist only because a `cc::string` currently has to reach a `std` API.
 
 - **Console output via `std::cout` / `std::cerr`.**
   [execute.cc](../src/nexus/tests/execute.cc), [schedule.cc](../src/nexus/tests/schedule.cc).
@@ -61,24 +56,19 @@ and includes no `<iostream>`.
 
 ## Expected to stay on `std`
 
-- **`std::exception` (and bare `catch (...)`).** [execute.cc](../src/nexus/tests/execute.cc)
-  catches whatever a test body throws so an uncaught exception becomes a reported
-  failure rather than a crash. [fuzz/machine.cc](../src/nexus/fuzz/machine.cc) does the
-  same around each fuzzed operation. Both run arbitrary user code that throws
-  `std::exception` subclasses, so this boundary stays regardless of clean-core's surface.
-- **Core type traits (`<type_traits>`).** `nx::fuzz` uses `std::decay_t`,
-  `std::is_*`, `std::remove_cvref_t` for signature deduction. These are
-  language-level traits with no clean-core replacement intended.
+- **`std::exception` (and bare `catch (...)`).** [execute.cc](../src/nexus/tests/execute.cc) catches whatever a test body throws.
+  An uncaught exception becomes a reported failure rather than a crash, and [fuzz/machine.cc](../src/nexus/fuzz/machine.cc) does the same around each fuzzed operation.
+  Both run arbitrary user code that throws `std::exception` subclasses, so this boundary stays whatever clean-core grows.
+- **Core type traits (`<type_traits>`).** `nx::fuzz` uses `std::decay_t`, `std::is_*` and `std::remove_cvref_t` for signature deduction.
+  These are language-level traits with no clean-core replacement intended.
 
 ---
 
 ## Already migrated
 
-For reference, the pieces that moved fully onto clean-core: `cc::string` /
-`cc::string_view`, `cc::vector`, `cc::span`, `cc::unique_ptr` / `cc::make_unique`,
-`cc::source_location`, and `cc::unique_function<void()>` for the registered test
-body (a single handle — no `unique_ptr<move_only_function>` wrapper). The XML
-exporters return a `cc::string` instead of writing to a `std::ostream`.
+The pieces that moved fully onto clean-core: `cc::string` / `cc::string_view`, `cc::vector`, `cc::span`, `cc::unique_ptr` / `cc::make_unique`, and `cc::source_location`.
+The registered test body is a single `cc::unique_function<void()>` handle, with no `unique_ptr<move_only_function>` wrapper.
+The XML exporters return a `cc::string` instead of writing to a `std::ostream`.
 
 - **`cc::span::subspan`** now exists, so `is_section_allowed` in
   [execute.cc](../src/nexus/tests/execute.cc) uses `curr_section.subspan(1)` instead of
