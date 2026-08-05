@@ -9,11 +9,10 @@ namespace tg
 {
 /// A scalar angle — a domain newtype over T whose storage is always radians.
 ///
-/// angle exists to stop radian/degree mix-ups: you cannot construct one from a bare scalar, only
-/// via the explicit make_from_radians / make_from_degree factories, and you read it back with the
-/// explicit .radians() / .degree() accessors. It supports addition and scalar multiplication (it is
-/// a 1D vector space over T) but performs no wrap-around — it is a unit-checked number, not a
-/// modular [0, 2pi) value.
+/// angle exists to stop radian/degree mix-ups.
+/// You cannot construct one from a bare scalar, only via the explicit make_from_radians / make_from_degree factories, and you read it back with .radians() / .degree().
+/// It supports addition and scalar multiplication — it is a 1D vector space over T — but performs no wrap-around.
+/// It is a unit-checked number, not a modular [0, 2pi) value.
 ///
 ///     auto const a = tg::angle_f::make_from_degree(90);
 ///     auto const r = a.radians();               // ~1.5708
@@ -113,8 +112,8 @@ private:
     T _radians = {};
 };
 
-/// User-defined literals for angles. Kept in their own namespace; tg re-exports them so tg-internal
-/// code can write `90_deg_f` directly. Downstream code can opt in with `using namespace tg::literals;`.
+/// User-defined literals for angles, kept in their own namespace.
+/// tg re-exports them so tg-internal code can write `90_deg_f` directly; downstream code opts in with `using namespace tg::literals;`.
 namespace literals
 {
 [[nodiscard]] constexpr angle_f operator""_rad_f(long double v)

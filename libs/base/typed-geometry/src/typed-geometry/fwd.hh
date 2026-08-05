@@ -1,8 +1,8 @@
 #pragma once
 
-/// Aggregate forward declarations for all of typed-geometry. Each module owns its own `fwd.hh`
-/// (forward decls + dimensional/typed aliases) and this header just pulls them together — include
-/// a single module's fwd directly when that is all you need.
+/// Aggregate forward declarations for all of typed-geometry.
+/// Each module owns its own `fwd.hh`, holding its forward decls and dimensional/typed aliases, and this header only pulls them together.
+/// Include a single module's fwd directly when that is all you need.
 
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>

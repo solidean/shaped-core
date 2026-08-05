@@ -7,16 +7,13 @@
 
 /// Scalar trait seam for typed-geometry.
 ///
-/// tg avoids the std type-traits / <cmath> directly because they are not extensible enough for
-/// the scalar types we want to support later (expression trees, double-double, bigint/bigrat, ...).
-/// Instead every scalar capability is routed through tg::scalar_traits<T>, a primary template that
-/// is specialized per scalar type. The tg::traits::* helpers and the free functions in scalar.hh
-/// (tg::one, tg::sqrt, tg::sin, tg::cos, tg::sin_cos, tg::atan2) are thin wrappers over the entries.
+/// Every scalar capability is routed through tg::scalar_traits<T>, a primary template specialized per scalar type.
+/// The tg::traits::* helpers and the free functions in scalar.hh (tg::one, tg::sqrt, tg::sin, tg::cos, tg::sin_cos, tg::atan2) are thin wrappers over its entries.
+/// libs/base/typed-geometry/docs/modules/scalar.md has the why.
 ///
-/// IMPORTANT: the trait kernels here are the *raw numeric* layer — sin/cos/atan2 work in bare radian
-/// T values (sin/cos: T radians -> T, atan2: T,T -> T radians). The angle typing lives one layer up
-/// in scalar.hh, where the public tg::sin/tg::cos take a tg::angle and tg::atan2 returns one. Keep
-/// scalar specializations free of tg::angle so a new scalar only has to provide plain math.
+/// The kernels here are the *raw numeric* layer: sin/cos take a bare radian T and return T, atan2 takes two T and returns radians.
+/// The angle typing lives one layer up in scalar.hh, where the public tg::sin/tg::cos take a tg::angle and tg::atan2 returns one.
+/// A specialization must stay free of tg::angle, so a new scalar only ever has to provide plain math.
 ///
 /// To teach tg about a new scalar type, specialize tg::scalar_traits for it.
 ///
@@ -32,8 +29,8 @@
 
 namespace tg
 {
-/// Primary template — no capabilities by default. Specialize for each scalar type to opt in.
-/// Note there is deliberately no default one()/sqrt()/...: a scalar must declare what it supports.
+/// Primary template — no capabilities by default.
+/// Specialize it per scalar type to opt in; there is deliberately no default one()/sqrt()/..., so a scalar must declare what it supports.
 template <class T>
 struct scalar_traits
 {
@@ -41,9 +38,8 @@ struct scalar_traits
     static constexpr bool has_trigonometry = false;
 };
 
-// NOTE: std::sqrt and the std trig functions honor errno, which is a historic mistake and produces
-// worse codegen. We route through them for now but intend to replace them — see
-// libs/base/typed-geometry/docs/TODO.md.
+// std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
+// Routed through them for now; libs/base/typed-geometry/docs/TODO.md tracks the replacement.
 template <>
 struct scalar_traits<f32>
 {
@@ -82,8 +78,8 @@ struct scalar_traits<f64>
     [[nodiscard]] static f64 atan2(f64 y, f64 x) { return std::atan2(y, x); }
 };
 
-// All integer types are scalars. `signed char` / `unsigned char` count as integers here, but plain
-// `char` deliberately does not (it falls through to the primary, with no scalar capabilities), and
+// All integer types are scalars, `signed char` and `unsigned char` included.
+// Plain `char` deliberately is not: it falls through to the primary and has no scalar capabilities.
 // `bool` has its own specialization below.
 template <class T>
     requires(std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>)

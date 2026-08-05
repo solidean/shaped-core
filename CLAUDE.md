@@ -21,7 +21,9 @@ One-liner per library:
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, guide benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   Namespace `nx`. Depends on clean-core.
-* **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry (`vec`/`pos`/`comp`; `bivec`/`mat`/`quat`/transforms/geometry/mesh planned).
+* **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
+  The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
+  Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/io/babel-serializer`** — serialization / deserialization of various formats.

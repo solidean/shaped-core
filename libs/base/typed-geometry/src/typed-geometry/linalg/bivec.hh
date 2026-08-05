@@ -9,13 +9,12 @@ namespace tg
 {
 /// Bivector in D dimensions — an oriented area element.
 ///
-/// A bivector has C(D, 2) = D*(D-1)/2 components (one per pair of basis axes): 1 in 2D, 3 in 3D,
-/// 6 in 4D. It is the result of the wedge product of two vectors; in 3D, cross(a, b) returns a
-/// bivec3 and dual()/undual() bridge to/from vec3 (see linalg/cross.hh). bivec is a linear space,
-/// so it supports addition and scalar multiplication.
+/// A bivector has C(D, 2) = D*(D-1)/2 components, one per pair of basis axes: 1 in 2D, 3 in 3D, 6 in 4D.
+/// It is the result of the wedge product of two vectors, so in 3D cross(a, b) returns a bivec3 and dual()/undual() bridge to and from vec3 (linalg/cross.hh).
+/// bivec is a linear space, so it supports addition and scalar multiplication.
 ///
-/// Storage is the public C array member `data`; components are accessed via `data` or operator[]
-/// (the index runs over the C(D, 2) components, not over D). Default construction zero-initializes.
+/// Components live in the public array member `data`, reached through `data` or operator[], and the index runs over the C(D, 2) components rather than over D.
+/// Default construction zero-initializes every component.
 ///
 ///     tg::bivec3f b;                                // {0, 0, 0}
 ///     auto const c = tg::cross(tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0));  // bivec3
@@ -60,7 +59,8 @@ public:
 
     // special values
 public:
-    /// all components zero. Runtime constant, not usable in constant expressions.
+    /// all components zero.
+    /// Runtime constant, not usable in constant expressions.
     static bivec const zero;
 
     // access

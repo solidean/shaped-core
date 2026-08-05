@@ -4,9 +4,8 @@
 
 namespace tg
 {
-// Pull in the shaped-core vocabulary types (i32, f32, isize, ...) so we can write them bare
-// inside typed-geometry without leaking them into the global namespace. This is the lowest tg
-// fwd header, so every module fwd ends up with the vocabulary types via the dependency chain.
+// Pull in the shaped-core vocabulary types (i32, f32, isize, ...) so tg can write them bare without leaking them into the global namespace.
+// This is the lowest tg fwd header, so every module fwd picks them up along the dependency chain.
 using namespace cc::primitive_defines;
 
 //
