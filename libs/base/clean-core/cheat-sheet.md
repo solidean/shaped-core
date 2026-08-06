@@ -208,6 +208,7 @@ str.capacity_back();  str.capacity_front();  // -> isize free bytes at back / fr
 str.shrink_to_fit();                         // release excess capacity; content that fits inline ALWAYS returns to SSO
 str.size();  str.empty();  str[i];  str.data();   // data() is NOT null-terminated
 str.front();  str.back();  str.compare(o);  str.find(x,pos=0);  str.rfind(x,pos=-1);   // string_view reads forwarded
+str == o;  str < o;                          // o = string / string_view / literal, on either side (operator<=>)
 str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (dies on the next non-const operation)
 str.substring(off / {.offset,.size} / {.start,.end}); // -> owning cc::string copy
 str.replace_all(from, to);                        // -> isize count; char/char or sv/sv (empty from = no-op)
@@ -227,7 +228,7 @@ sv.subview_clamped(off, len);
 sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
-sv.compare(o);  sv == o;  sv < o;                       // lexicographic; two cc::strings have no <, so use compare
+sv.compare(o);  sv == o;  sv < o;                       // lexicographic by byte (no locale/collation)
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...

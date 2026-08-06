@@ -87,10 +87,14 @@ Move leaves the source empty and small.
 
 Equality is by content and works across the two types: `cc::string` has a member `operator==` accepting anything convertible to `string_view`.
 
-**Ordering is asymmetric today.**
-`string_view`'s `<`, `>`, `<=` and `>=` are hidden friends, so they are found when at least one operand is already a `string_view`.
-They are not found for two `cc::string`s, where ADL never reaches `string_view` at all.
-`a < b` on two strings does not compile; `a.compare(b) < 0` and `string_view(a) < b` both do.
+Ordering is lexicographic by byte, so it sorts by raw UTF-8 rather than by any locale or collation, and a prefix sorts before the string that extends it.
+
+The two types reach it differently.
+`string_view` spells out `<`, `>`, `<=` and `>=` as hidden friends, which ADL finds whenever one operand is already a `string_view`.
+`cc::string` instead has an `operator<=>` accepting anything convertible to `string_view`, and C++20 synthesizes the four relational operators from it.
+That includes the reversed forms, so `"lemon" < s` works as well as `s < "nectarine"`.
+
+`compare()` is still there on both types when you want all three outcomes from one pass rather than two comparisons.
 
 Hashing is structural over the bytes, via `cc::make_hash_of_bytes` (XXH3-64).
 `cc::string` delegates to `cc::string_view`, so **equal content hashes equally** regardless of inline-vs-heap storage or which of the two types holds it.

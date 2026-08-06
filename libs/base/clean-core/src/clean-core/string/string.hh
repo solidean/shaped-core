@@ -5,6 +5,7 @@
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/string/string_view.hh>
 
+#include <compare>
 #include <cstring>
 #include <type_traits>
 
@@ -363,7 +364,7 @@ public:
     // string_view read forwarding
 public:
     /// Lexicographically compares with another view, returning <0, 0 or >0.
-    /// Two cc::strings have no relational operators, so this is how you order them.
+    /// The relational operators are built on this; reach for it directly when you want the three states at once.
     [[nodiscard]] int compare(string_view other) const { return string_view(*this).compare(other); }
 
     /// Finds the first occurrence of substring at or after pos, or -1.
@@ -861,6 +862,15 @@ public:
 
     /// Compares against another string for equality of size and content.
     [[nodiscard]] bool operator==(string const& rhs) const { return string_view(*this) == string_view(rhs); }
+
+    /// Orders against anything convertible to string_view, lexicographically by byte.
+    /// <, >, <= and >= are all synthesized from this, and work with the string on either side.
+    template <class S>
+    [[nodiscard]] std::strong_ordering operator<=>(S const& rhs) const
+        requires std::convertible_to<S const&, string_view>
+    {
+        return compare(string_view(rhs)) <=> 0;
+    }
 
     /// Structural hash over the bytes; delegates to string_view so equal content hashes equally regardless of SSO vs heap storage (and matches a string_view of the same content).
     [[nodiscard]] friend u64 hash(string const& s) { return hash(string_view(s)); }
