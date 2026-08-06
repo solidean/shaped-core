@@ -4,8 +4,8 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string_view.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/impl/dxc_common.hh>
 
 namespace ssc::dxc::impl

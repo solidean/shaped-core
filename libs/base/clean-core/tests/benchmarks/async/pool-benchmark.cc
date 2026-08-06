@@ -3,12 +3,11 @@
 // The concurrent scheduler needs OS threads; this file compiles to nothing where they are unavailable (wasm).
 #if CC_HAS_THREADS
 
-// cc::async_thread_pool benchmark — Phase 2 of the async performance gate.
+// cc::async_thread_pool benchmark: the concurrent half of the async performance picture.
 //
-// Phase 1 (async-benchmark.cc) answered the single-thread question. This one asks the two that decide the gate:
-// does a graph get near-linear speedup on the regular cases, and what does a fork-join task cost? Every case is
-// a hand-written fork-join graph over the raw primitives — the ergonomic parallel_for/reduce helpers are a
-// post-gate concern and must not block measurement.
+// async-benchmark.cc answers the single-thread question; this one asks whether a graph gets near-linear speedup on the regular cases, and what a fork-join task costs.
+// Every case is a hand-written fork-join graph over the raw primitives, since no ergonomic parallel_for / reduce helpers exist yet.
+// libs/base/clean-core/docs/benchmarks/async-benchmark.md has the method, the numbers, and how much to trust each column of a run.
 //
 // The five canonical shapes:
 //   parallel quicksort   recursive, irregular subproblem sizes -> the steal-quality stress
@@ -17,25 +16,10 @@
 //   nested parallel-for  a parallel-for whose leaf is itself a parallel-for -> deque depth + nested spawn
 //   spawn tree           trivial leaves, so per-node scheduling overhead IS the measurement
 //
-// Four things about the numbers, none obvious from a table and each one learned by getting it wrong:
-//
-// * A "w worker" row runs w+1 THREADS. blocking_get makes the calling thread participate as a worker for the
-//   duration (see async_thread_pool.hh), so the sweep tops out at hardware-concurrency MINUS ONE, and the "vs
-//   1w" column is anchored on a 2-thread config rather than a serial one. Compare rows, not absolutes.
-// * The machine matters and this file cannot know it. A heterogeneous part (P+E cores, SMT) bends the curve at
-//   the E-core and hyperthread boundaries, which is a property of the machine and not a defect in the
-//   scheduler. Judge the knee, not the top, against the count of *performance* cores on whatever you ran.
-// * Leaf work must stay compute-bound, and that is a live constraint, not a note: a memory-bound leaf caps
-//   speedup at DRAM bandwidth and measures the machine instead of the scheduler. It broke exactly once already
-//   — see mix(), whose eight LCG rounds were folded into one multiply-add by clang until it was made
-//   non-affine. If a case stops scaling past ~8 workers, check the codegen before blaming the pool.
-// * The spawn tree is the only case whose leaf does nothing, so it is the only one where per-node scheduling
-//   cost IS the measurement — and correspondingly the one most sensitive to idle-worker policy.
-//
-// Every fork-join frame is kept at or under the node's 32 B inline frame slot: a closure over 32 B falls back
-// to a heap-boxed cc::unique_function, which would put an allocation in every task. That is why the grain sizes
-// are namespace-scope constants rather than captures, and why a two-child frame captures exactly
-// span(16) + two shared_async(8+8). Adding one capture to any of these silently changes what is measured.
+// Two constraints bind every edit here, and breaking either corrupts the numbers silently.
+// Leaf work must stay compute-bound — see mix(), which clang folded into a single multiply-add until it was made non-affine.
+// And every fork-join frame must stay at or under the node's 32 B inline slot, which is why the grain sizes are namespace-scope constants rather than captures.
+// A two-child frame captures exactly span(16) + two shared_async(8+8), so adding one capture to any of these silently changes what is measured.
 
 #include "../bench_util.hh"
 
@@ -61,10 +45,11 @@ namespace
 {
 // make_async_lazy<i64>, but pinning the frame to the node's inline slot first.
 //
-// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here —
-// if that budget ever changes, this assert is what will (loudly) notice. The zero-dependency make_async_lazy
-// form wraps the frame in a lambda whose only capture is the frame itself, so sizeof(F) IS the installed frame
-// size; the variadic dep form would additionally store the dep handles, and none of these use it.
+// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here.
+// If that budget ever changes, this assert is what will loudly notice.
+// The zero-dependency make_async_lazy form wraps the frame in a lambda whose only capture is the frame itself,
+// so sizeof(F) IS the installed frame size.
+// The variadic dep form would additionally store the dep handles, and none of these use it.
 template <class F>
 [[nodiscard]] cc::shared_async<i64> spawn(F&& f)
 {
@@ -86,8 +71,8 @@ constexpr isize pfor_grain = 8192;
 constexpr isize reduce_n = 1 << 22;
 constexpr isize reduce_grain = 8192;
 
-// nested: the outer bisects down to outer_grain, then each leaf spawns an inner parallel-for over its own
-// range. Two frame types, each with its own grain, so neither has to capture one.
+// nested: the outer bisects down to outer_grain, then each leaf spawns an inner parallel-for over its own range.
+// Two frame types, each with its own grain, so neither has to capture one.
 constexpr isize nested_n = 1 << 22;
 constexpr isize nested_outer_grain = 1 << 16;
 constexpr isize nested_inner_grain = 4096;
@@ -96,10 +81,10 @@ constexpr int tree_depth = 16; // 2^17 - 1 = 131071 nodes, trivial leaves
 
 // --- leaf work -------------------------------------------------------------------------------------------
 
-// An empty inline-asm barrier: makes `v` un-analyzable, and (being volatile) gives its containing function
-// side effects. The second half is the one that matters here — without it a CC_DONT_INLINE serial baseline is
-// still a pure function of unchanging arguments, so clang hoists the whole call out of the timing loop and the
-// baseline measures 0.00 ns. Same barrier, same reason, as async-benchmark.cc.
+// An empty inline-asm barrier: it makes `v` un-analyzable and, being volatile, gives its containing function side effects.
+// The side effects are the load-bearing half.
+// Without them a CC_DONT_INLINE serial baseline is still a pure function of unchanging arguments, so clang hoists the whole call out of the timing loop.
+// The baseline then measures 0.00 ns.
 CC_FORCE_INLINE void opaque(i64& v)
 {
 #if defined(__clang__) || defined(__GNUC__)
@@ -110,16 +95,12 @@ CC_FORCE_INLINE void opaque(i64& v)
 #endif
 }
 
-// Cheap, data-dependent, compute-bound mixing, so the benchmark measures scheduling rather than DRAM
-// bandwidth. Shared verbatim by the serial baselines and the async leaves — the comparison is only honest if
-// both do exactly the same arithmetic.
+// Cheap, data-dependent, compute-bound mixing, so the benchmark measures scheduling rather than DRAM bandwidth.
+// Shared verbatim by the serial baselines and the async leaves — the comparison is only honest if both do exactly the same arithmetic.
 //
-// It must NOT be affine. This was eight rounds of `x = x*1664525 + 1013904223`, and clang composed all eight
-// into a single multiply-add — the emitted loop was one `imul` by 0xea890021 plus one `add` of 0xa3d95fa8,
-// which are exactly 1664525^8 and the matching addend mod 2^32. That silently turned the parallel-for and
-// reduction leaves into memory-bandwidth streamers, i.e. the precise failure this file's header warns against:
-// they measured the machine, not the scheduler, and capped out around 8 workers. lowbias32 (Chris Wellons'
-// hash-prospector search) is xor-shift/multiply and so is not affine over Z_2^32; rounds of it cannot collapse.
+// It must NOT be affine, and that is the one constraint to check before changing it.
+// An affine mix composes: a chain of `x = x*a + b` rounds collapses into a single multiply-add, which turns the parallel-for and reduction leaves into memory-bandwidth streamers.
+// lowbias32 (Chris Wellons' hash-prospector search) is xor-shift/multiply, so it is not affine over Z_2^32 and its rounds cannot collapse.
 CC_FORCE_INLINE i32 mix(i32 x)
 {
     cc::u32 h = cc::u32(x);
@@ -167,8 +148,8 @@ isize hoare_partition(cc::span<i32> d)
 }
 
 // --- serial baselines ------------------------------------------------------------------------------------
-// noinline so the compiler cannot fold a whole workload away or inline it into a shape the async version has
-// no counterpart for. These are the speedup denominators.
+// noinline so the compiler cannot fold a whole workload away, or inline it into a shape the async version has no counterpart for.
+// These are the speedup denominators.
 
 CC_DONT_INLINE void serial_quicksort(cc::span<i32> d)
 {
@@ -192,9 +173,9 @@ CC_DONT_INLINE void serial_pfor(cc::span<i32> d)
     mix_range(d);
 }
 
-// The reduce and tree baselines take the opaque() barrier because they are otherwise pure functions of
-// unchanging inputs: their mutating siblings (quicksort, pfor) cannot be hoisted out of the timing loop, but
-// these two can, and did — they measured 0.00 ns until this was added.
+// The reduce and tree baselines take the opaque() barrier because they are otherwise pure functions of unchanging inputs.
+// Their mutating siblings, quicksort and pfor, cannot be hoisted out of the timing loop, but these two can --
+// and measured 0.00 ns until the barrier was added.
 CC_DONT_INLINE i64 serial_reduce(cc::span<i32 const> d)
 {
     i64 s = sum_range(d);
@@ -202,8 +183,8 @@ CC_DONT_INLINE i64 serial_reduce(cc::span<i32 const> d)
     return s;
 }
 
-// Mirrors async_tree's shape: two recursive calls per internal node, a trivial leaf. So the comparison is
-// per-node call overhead vs per-node scheduling overhead, which is the point of the case.
+// Mirrors async_tree's shape: two recursive calls per internal node, a trivial leaf.
+// So the comparison is per-node call overhead vs per-node scheduling overhead, which is the point of the case.
 CC_DONT_INLINE i64 serial_tree(int depth)
 {
     if (depth == 0)
@@ -215,10 +196,8 @@ CC_DONT_INLINE i64 serial_tree(int depth)
     return serial_tree(depth - 1) + serial_tree(depth - 1);
 }
 
-// --- async fork-join graphs ------------------------------------------------------------------------------
-// Each is a raw two-phase frame: on the first poll it either does the leaf work inline or spawns its children
-// and parks; on the re-poll it joins. `l == nullptr` is the "have I spawned yet" test — using it instead of a
-// step counter is what keeps these frames inside the 32 B inline slot.
+// Each is a raw two-phase frame: on the first poll it either does the leaf work inline or spawns its children and parks; on the re-poll it joins.
+// `l == nullptr` is the "have I spawned yet" test, and using it instead of a step counter is what keeps these frames inside the 32 B inline slot.
 //
 // The children are captured, which is what keeps them alive: the pending-dependency list does not own anything.
 
@@ -322,8 +301,8 @@ cc::shared_async<i64> async_nested_inner(cc::span<i32> d)
         });
 }
 
-// The outer level: bisects to nested_outer_grain, then each leaf spawns ONE child — a whole inner parallel-for
-// over its range — and joins on it. `r` stays null in that case.
+// The outer level: bisects to nested_outer_grain, then each leaf spawns ONE child — a whole inner parallel-for over its range — and joins on it.
+// `r` stays null in that case.
 cc::shared_async<i64> async_nested_outer(cc::span<i32> d)
 {
     return spawn(
@@ -349,9 +328,8 @@ cc::shared_async<i64> async_nested_outer(cc::span<i32> d)
         });
 }
 
-// Spawned dynamically rather than built up front: a serially-built tree would put ~131k node constructions on
-// the calling thread and measure that instead of the schedule. This is the fork-join spawn shape, and with
-// trivial leaves it isolates per-node scheduling overhead.
+// Spawned dynamically rather than built up front: a serially-built tree would put ~131k node constructions on the calling thread and measure that instead of the schedule.
+// This is the fork-join spawn shape, and with trivial leaves it isolates per-node scheduling overhead.
 cc::shared_async<i64> async_tree(int depth)
 {
     return spawn(
@@ -384,10 +362,8 @@ cc::vector<i32> make_random(isize n)
     return v;
 }
 
-// The worker counts the full table sweeps. The top entry is P-1, NOT P: blocking_get makes the calling thread
-// participate as a worker, so a w-worker pool runs w+1 threads and P would oversubscribe the machine. That is
-// not a rounding detail — at 32 workers on 32 hardware threads the extra thread cost the reduction case 2x
-// (0.04 vs 0.02 ns/elem) purely in scheduler thrash, which reads as a scheduler defect and is not one.
+// The worker counts the full table sweeps.
+// The top entry is P-1, NOT P: blocking_get makes the calling thread participate as a worker, so a w-worker pool runs w+1 threads and P would oversubscribe the machine.
 cc::vector<int> sweep_workers()
 {
     int const p = cc::num_hardware_threads() - 1;
@@ -399,8 +375,8 @@ cc::vector<int> sweep_workers()
     return ws;
 }
 
-// What the guide benchmark measures: just the two ends. 1 worker anchors the scaling ratio, P-1 is the number
-// that matters; the intermediate points only shape the human-facing curve.
+// What the guide benchmark measures: just the two ends.
+// 1 worker anchors the scaling ratio and P-1 is the number that matters, so the intermediate points only shape the human-facing curve.
 cc::vector<int> guide_workers()
 {
     int const p = cc::num_hardware_threads() - 1;
@@ -410,12 +386,13 @@ cc::vector<int> guide_workers()
     return ws;
 }
 
-// What one swept case yields. Two different questions, so two numbers:
-//   vs_serial  — "is using the pool worth it at all", the user-facing speedup. Meaningless where the serial
-//                analog is trivially cheaper by construction (the spawn tree, whose serial form is a bare
-//                recursive call against a whole scheduled node) — read ns_at_p there instead.
-//   vs_one     — "does the SCHEDULER scale", pool at P vs pool at 1. Independent of how heavy the leaf work is,
-//                so it is the honest scaling number for every case, including the tree.
+// What one swept case yields.
+// Two different questions, so two numbers:
+//   vs_serial  — "is using the pool worth it at all", the user-facing speedup.
+//                Meaningless where the serial analog is trivially cheaper by construction, so read ns_at_p there instead.
+//                That is the spawn tree, whose serial form is a bare recursive call against a whole scheduled node.
+//   vs_one     — "does the SCHEDULER scale", pool at P vs pool at 1.
+//                Independent of how heavy the leaf work is, so it is the honest scaling number for every case, including the tree.
 struct sweep_result
 {
     double vs_serial = 0;
@@ -430,20 +407,11 @@ void print_header(char const* title, char const* unit)
     std::printf("%-10s %13s %13s %12s %12s\n", "-------", "------", "------", "---------", "-----");
 }
 
-// Measure one case across `workers` against its serial baseline; print the table.
+// Measure one case across `workers` against its serial baseline, and print the table.
 //
-// Two deliberate choices, both learned from wrong numbers:
-//
-// * The serial baseline is re-measured on EVERY row, immediately next to that row's pool run, and printed as
-//   its own column. Measuring it once up front made the speedup ratio a lie: this is a laptop, sustained
-//   all-core load downclocks it, so a baseline taken seconds earlier on a cool chip was being divided by a pool
-//   time taken on a hot one. The first version of this file read 0.65 ns/elem serial in the full sweep and 0.26
-//   in the guide run — same code, same machine, 2.5x apart, purely from what had run before it. Measuring
-//   adjacent makes both halves of the ratio see the same machine, and the serial column then doubles as a
-//   per-row contamination canary: nothing in this file touches it, so if it drifts down the table, the run is
-//   dirty and the ratios in it are not comparable to any other run.
-// * The pool is constructed OUTSIDE the timed pass: spawning threads is ~100 us and would otherwise land inside
-//   measure_units_per_sec's adaptive loop, where it would dominate every short pass.
+// Two deliberate choices, both learned from wrong numbers and both explained in the benchmark doc:
+//   * the serial baseline is re-measured on EVERY row, immediately next to that row's pool run, and printed as its own column, where it doubles as the run's contamination canary;
+//   * the pool is constructed OUTSIDE the timed pass, since spawning threads is ~100 us and would otherwise land inside measure_units_per_sec's adaptive loop.
 template <class SerialPass, class AsyncPass>
 sweep_result run_sweep(char const* title,
                        char const* unit,
@@ -476,10 +444,10 @@ sweep_result run_sweep(char const* title,
 
 // --- cases -----------------------------------------------------------------------------------------------
 
-// Each pass refills the working buffer from a pristine random source: sorting already-sorted data is a
-// different (and far easier) workload, so a reused buffer would measure a fiction. The refill is a ~4 MiB
-// memcpy against a multi-ms sort, and it is paid identically by the serial and async passes, so it biases the
-// absolute ns/elem slightly and the speedup ratio almost not at all.
+// Each pass refills the working buffer from a pristine random source.
+// Sorting already-sorted data is a different, and far easier, workload, so a reused buffer would measure a fiction.
+// The refill is a ~4 MiB memcpy against a multi-ms sort, and it is paid identically by the serial and async passes.
+// So it biases the absolute ns/elem slightly, and the speedup ratio almost not at all.
 sweep_result case_quicksort(cc::span<int const> workers)
 {
     auto const src = make_random(qsort_n);
@@ -600,10 +568,9 @@ void run_all()
 
 // The points that decide the gate, recorded for the perf tracker, at 1 and P workers only.
 //
-// Deliberately not "speedup" for both: parallel-for is the regular case where speedup-vs-serial is the question
-// a user would actually ask, whereas the spawn tree's leaves do nothing at all — so its cost per node IS the
-// pool's overhead, and its scaling only means anything against itself at one worker. The full sweep below is
-// the human-facing table.
+// Deliberately not "speedup" for both: parallel-for is the regular case, where speedup-vs-serial is the question a user would actually ask.
+// The spawn tree's leaves do nothing at all, so its cost per node IS the pool's overhead, and its scaling only means anything against itself at one worker.
+// The full sweep below is the human-facing table.
 GUIDE_BENCHMARK("bench-async-pool (work-stealing)")
 {
     auto const ws = guide_workers();
@@ -616,7 +583,8 @@ GUIDE_BENCHMARK("bench-async-pool (work-stealing)")
     nx::guide::report_raw("spawn-tree scaling@P (vs 1w)", tree.vs_one, "x", /*higher_is_better*/ true);
 }
 
-// The full canonical set across the worker sweep. Run by exact name:
+// The full canonical set across the worker sweep.
+// Run by exact name:
 //   uv run dev.py --mirror-test-output test "bench-async-pool (worker sweep)"
 TEST("bench-async-pool (worker sweep)", nx::config::manual)
 {

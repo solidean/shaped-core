@@ -14,32 +14,28 @@ namespace cc
 {
 struct debug_string_config
 {
-    // not strict for now
+    // a soft cap: it is tested before each element is appended, so the result can overshoot it
     isize max_length = 100;
 };
 
 // Converts a value to a developer-facing debug string.
 // Best-effort, non-semantic, and intended only for diagnostics.
 //
-// Strategy (in order):
-//   - String-likes: wrap in double quotes "..." (never empty output)
-//   - char: wrap in single quotes '...' with escape sequences for control/non-printable chars
-//     (printables and spaces show as-is, control chars like \n, \t are escaped,
-//      other non-printables show as \xHH hex codes)
-//   - Use to_string(v) if available
-//   - Use v.to_string() if available
-//   - For collections, recursively format elements as [v0, v1, ...]
-//   - For tuple-likes, recursively format elements as (v0, v1, ...)
-//   - Otherwise emit raw memory dump
-//
-// Design rationale:
-//   - String-likes and chars are wrapped in quotes to ensure non-empty output
-//     (e.g., empty string shows as "" instead of nothing)
-//   - Chars use escape sequences to make control/special characters visible
-//     (e.g., newline shows as '\n' instead of an actual line break)
-//
 // No stability, completeness, or user-facing guarantees.
-// Output may change, be lossy, or depend on build/configuration.
+// The output may change, be lossy, or depend on build and configuration, so never parse it.
+//
+// Strategy, in dispatch order:
+//   - anything comparable against nullptr, while null: "<nullptr>"
+//   - pointers: the address as ptr(0xHEX), never the pointee — char const* included, since its termination
+//     cannot be trusted
+//   - string-likes: wrapped in double quotes, so an empty string reads as "" rather than as nothing
+//   - char: wrapped in single quotes, with control and non-printable characters escaped so they stay visible
+//   - to_string(v), where it exists — an unqualified call, so ADL reaches a free to_string in T's namespace
+//   - v.to_string(), where it exists
+//   - optional-likes (has_value() plus value()): nullopt, or value(...)
+//   - iterables: elements recursively, as [v0, v1, ...]
+//   - tuple-likes: elements recursively, as (v0, v1, ...)
+//   - anything else: a raw memory dump
 template <class T>
 [[nodiscard]] string to_debug_string(T const& v, debug_string_config const& cfg = {});
 

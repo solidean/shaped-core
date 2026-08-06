@@ -5,10 +5,9 @@ namespace ssc::dxc::impl
 namespace
 {
 /// Maps a reflected resource binding onto the sg binding_type with the matching (view_class, view_shape).
-/// nullopt for kinds sg has no vocabulary for yet — the caller turns that into an error naming the
-/// resource, so growing sg::binding_type is a deliberate, visible step. The `Dimension` distinguishes a
-/// texture from a typed/texel buffer: both a `Texture2D` and a `Buffer<T>` reflect as a TEXTURE / RWTYPED
-/// kind, but the typed-buffer case reports a BUFFER dimension, which sg has no texel-buffer view for yet.
+/// nullopt for kinds sg has no vocabulary for yet — the caller turns that into an error naming the resource, so growing sg::binding_type is a deliberate, visible step.
+/// The `Dimension` distinguishes a texture from a typed/texel buffer: both a `Texture2D` and a `Buffer<T>` reflect as a TEXTURE / RWTYPED kind.
+/// The typed-buffer case is the one that reports a BUFFER dimension, which sg has no texel-buffer view for yet.
 [[nodiscard]] cc::optional<sg::binding_type> map_binding_type(D3D12_SHADER_INPUT_BIND_DESC const& bd)
 {
     switch (bd.Type)

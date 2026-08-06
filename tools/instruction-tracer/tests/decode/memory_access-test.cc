@@ -16,8 +16,7 @@ recorded_instruction at(u64 rip, cc::span<u8 const> bytes)
     return insn;
 }
 
-/// A snapshot with GPRs set by encoding-order index (rax=0, rcx=1, rdx=2, rbx=3, rsp=4, rbp=5,
-/// rsi=6, rdi=7).
+/// A snapshot with GPRs set by encoding-order index: rax=0, rcx=1, rdx=2, rbx=3, rsp=4, rbp=5, rsi=6, rdi=7.
 register_snapshot regs_with(int i, u64 v, int j = -1, u64 w = 0)
 {
     register_snapshot s;
@@ -91,7 +90,8 @@ TEST("memory - lea computes an address but touches no memory")
 
 TEST("memory - push writes the stack")
 {
-    // 50 = push rax. The exact slot (rsp vs rsp-8) is Zydis's to model; the write and size are ours.
+    // 50 = push rax.
+    // The exact slot (rsp vs rsp-8) is Zydis's to model; the write and size are ours.
     u8 const bytes[] = {0x50};
     auto const insn = at(0x140001000, bytes);
     auto const ops = decode_memory_operands(insn, regs_with(4, 0x9000));

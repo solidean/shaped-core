@@ -2,19 +2,16 @@
 
 The pipeline mirrors the LLVM workflow end to end:
 
-  1. run instrumented test binaries with a distinct LLVM_PROFILE_FILE each, so
-     every run drops a raw `*.profraw` (reusing the standard test runner);
+  1. run instrumented test binaries with a distinct LLVM_PROFILE_FILE each, so every run drops a raw `*.profraw` (reusing the standard test runner);
   2. `llvm-profdata merge` the raw files into one indexed `coverage.profdata`;
-  3. `llvm-cov export` that into a JSON sidecar (`coverage.llvm-cov.json`) and,
-     optionally, a browsable `llvm-cov show` HTML report.
+  3. `llvm-cov export` that into a JSON sidecar (`coverage.llvm-cov.json`) and, optionally, a browsable `llvm-cov show` HTML report.
 
-The export JSON is written at the build-dir root, suffixed `.llvm-cov.json`, on
-purpose: it is the machine-readable artifact a future `coverage_diag` MCP tool
-discovers, exactly like build.json/test.json feed build_diag/test_diag. A second
-`coverage.json` sidecar records the dev.py step metadata plus distilled totals.
+The export JSON is written at the build-dir root with the `.llvm-cov.json` suffix on purpose: it is the machine-readable artifact a future `coverage_diag` MCP tool discovers.
+That mirrors how build.json and test.json feed build_diag and test_diag.
+A second `coverage.json` sidecar records the dev.py step metadata plus distilled totals.
 
-Instrumentation itself is a build concern (the SC_COVERAGE CMake option, set by
-the *-coverage presets); this module only collects and post-processes.
+Instrumentation itself is a build concern — the SC_COVERAGE CMake option, set by the *-coverage presets — and this module only collects and post-processes.
+docs/guides/coverage.md is the workflow.
 
 Public API:
     coverage_run(...)    -> list[dict]   build-already-done; run + merge + report
@@ -46,9 +43,8 @@ __all__ = [
     "resolve_tool",
 ]
 
-# llvm-cov regex matching files to drop from the report. Separator-agnostic so it
-# works with Windows backslash paths too: we measure library sources, not the
-# tests that exercise them nor vendored third-party code under extern/.
+# llvm-cov regex matching the files to drop from the report.
+# Separator-agnostic, so it works with Windows backslash paths: we measure library sources, not the tests that exercise them nor vendored code under extern/.
 DEFAULT_IGNORE_REGEX = r"([/\\]extern[/\\]|[/\\]tests[/\\])"
 
 # Coverage metrics we surface in the distilled summary, in report order.
@@ -142,8 +138,8 @@ def _export_json(
         cmd, step_type="coverage", name="export",
         build_dir=build_dir, cwd=root, mirror=mirror, verbose=verbose,
     )
-    # llvm-cov prints only JSON to stdout (diagnostics go to stderr), so the
-    # captured stdout log *is* the report; publish it as the diag sidecar.
+    # llvm-cov prints only JSON to stdout, with diagnostics on stderr, so the captured stdout log *is* the report.
+    # Publish it as the diag sidecar.
     if result.ok:
         try:
             shutil.copyfile(result.stdout_log, out_json)
@@ -190,8 +186,8 @@ def _pct(covered: int, count: int) -> float:
 def summarize(json_path: Path) -> dict:
     """Distill an llvm-cov export JSON into overall + per-library totals.
 
-    Returns {"totals": {metric: {covered, count, percent}}, "libraries": {key:
-    {metric: {...}}}}. Empty dict when the export is missing/unparseable.
+    Returns {"totals": {metric: {covered, count, percent}}, "libraries": {key: {metric: {...}}}}.
+    Empty dict when the export is missing or unparseable.
     """
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
@@ -309,9 +305,9 @@ def coverage_run(
 ) -> list[dict]:
     """Run the instrumented tests, merge counters, and post-process per preset.
 
-    Assumes the coverage preset is already built. Returns one result dict per
-    preset (preset, ok, llvm_cov_json, profdata, html_dir, totals, libraries,
-    steps). Raises CoverageToolError if the llvm tools are missing.
+    Assumes the coverage preset is already built.
+    Returns one result dict per preset: preset, ok, llvm_cov_json, profdata, html_dir, totals, libraries, steps.
+    Raises CoverageToolError if the llvm tools are missing.
     """
     results: list[dict] = []
     for preset in presets:
@@ -388,10 +384,9 @@ def coverage_merge(
 ) -> dict:
     """Merge several presets' profdata into one combined report under output_dir.
 
-    Each input preset must already have a coverage.profdata (from coverage run).
-    The combined export covers the union of all presets' test binaries. Returns a
-    single result dict; writes coverage.profdata, coverage.llvm-cov.json, and
-    coverage.json under output_dir.
+    Each input preset must already have a coverage.profdata, from `coverage run`.
+    The combined export covers the union of all presets' test binaries.
+    Returns a single result dict, and writes coverage.profdata, coverage.llvm-cov.json and coverage.json under output_dir.
     """
     profdata_tool = resolve_tool("llvm-profdata", "LLVM_PROFDATA", presets[0].build_dir)
     cov_tool = resolve_tool("llvm-cov", "LLVM_COV", presets[0].build_dir)

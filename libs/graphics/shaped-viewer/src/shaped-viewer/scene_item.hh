@@ -16,7 +16,8 @@ enum class scene_item_kind : u8
 
 /// One concrete object in a view: a mesh placed into the world with a transform, shaded by a material set.
 ///
-/// It names its resources by id — `mesh` (geometry + BLAS) and `materials` (one PBR material per triangle, indexed by `PrimitiveIndex()` in the closest-hit) — which the view_renderer resolves through the managers.
+/// It names its resources by id — `mesh` (geometry + BLAS) and `materials` (one PBR material per triangle, indexed by `PrimitiveIndex()` in the closest-hit).
+/// The view_renderer resolves both through the managers.
 /// `transform` is a standard column-major `tg::mat4f`.
 /// The renderer repacks it into the row-major 3x4 the TLAS instance wants.
 struct scene_item

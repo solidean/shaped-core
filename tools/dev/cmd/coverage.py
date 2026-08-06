@@ -1,9 +1,6 @@
-"""`coverage` — LLVM source-based test coverage (run / merge / report).
+"""`coverage` — LLVM source-based test coverage: `run`, `merge`, `report`.
 
-Three phases map to subcommands: `run` (build + run tests + merge + report),
-`merge` (combine several presets' merged data), and `report` (re-post-process
-existing data without re-running). The raw `llvm-cov export` JSON lands as a
-`.llvm-cov.json` sidecar in the build dir for future tooling.
+Wiring only; the collection and post-processing are lib/perf/coverage.py's, and docs/guides/coverage.md is the workflow.
 """
 
 from __future__ import annotations

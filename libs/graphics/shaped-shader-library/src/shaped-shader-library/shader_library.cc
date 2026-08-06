@@ -2,7 +2,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
-#include <shaped-graphics/reload_generation.hh>
+#include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -13,8 +13,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// The generated package symbols are process-wide globals, so two libraries would fight over who owns
-// the assets they point at. One at a time, enforced rather than documented.
+// The generated package symbols are process-wide globals, so two libraries would fight over who owns the assets they point at.
 bool g_library_alive = false;
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
@@ -62,8 +61,7 @@ void slib::shader_library::start_hot_reload(reload_config config)
     _watcher = cc::make_threaded_actor<impl::reload_watcher>(*this, config.interval_ms, threaded, config.force_polling,
                                                              _watcher_stopping, _wake);
 
-    // Between the two: the watcher's constructor scanned with no actor to wake yet, and arming asks for the
-    // one scan that pass could not. Nothing is running until start(), so there is no gap to race.
+    // Arm before start: the constructor's scan had no actor to wake, and nothing runs until start(), so there is no gap to race.
     _wake->arm(_watcher.get());
     _watcher->start(threaded ? cc::threaded_actor_mode::threaded_if_possible : cc::threaded_actor_mode::unthreaded);
 }
@@ -121,8 +119,7 @@ void slib::shader_library::mount(cc::string_view virtual_dir, filesystem_handle 
 
 void slib::shader_library::add_package(shader_package const& package)
 {
-    // Embedded first, then the real source dir over it. real_filesystem over a missing directory simply
-    // finds nothing, so a shipped build lands on the embedded copy without asking which mode it is in.
+    // Embedded first, then the real source dir over it; a missing directory simply finds nothing.
     add_package(package, nullptr);
 }
 
@@ -224,15 +221,13 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     auto const source_dir = impl::parent_path(virtual_path);
 
-    // Every path the resolver hands back becomes a dependency, so an edit to any include reloads the
-    // shaders that pulled it in. Resolving the same file twice yields empty text (pragma-once semantics)
-    // rather than a duplicate expansion.
+    // Every path the resolver hands back becomes a dependency, so an edit to any include reloads the shaders that pulled it in.
+    // Resolving the same file twice yields empty text (pragma-once semantics) rather than a duplicate expansion.
     cc::set<cc::string> seen;
     seen.insert(cc::string::create_copy_of(virtual_path));
 
-    // Where an `#include "..."` is looked for, most specific first: next to the including file, then at
-    // the package's own root, then at the mount root — which is what reaches a shared library mounted
-    // outside any package (`#include "common/brdf.hlsli"`).
+    // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
+    // Fixed from the shader being compiled, so an include pulled in by another include resolves from here too, not from its includer.
     auto const search_roots = {source_dir, cc::string_view(package.name), cc::string_view()};
 
     // Non-const: cc::function_ref binds a mutable lvalue.

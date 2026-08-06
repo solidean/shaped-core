@@ -1,15 +1,15 @@
 #pragma once
 
-// Single include gate for the D3D12 / DXGI / WRL headers (Windows-sanitized via win32_sanitized)
-// plus the shared COM alias and error helper. dx12 TUs include this, not <d3d12.h> & friends.
+// Single include gate for the D3D12 / DXGI / WRL headers, Windows-sanitized via win32_sanitized, plus the shared COM alias and error helper.
+// dx12 TUs include this, not <d3d12.h> and friends.
 
 #include <clean-core/error/result.hh>
 #include <clean-core/platform/win32_sanitized.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
 
-// The D3D12 / DXGI / WRL headers reach <rpcndr.h> through <unknwn.h>, which WIN32_LEAN_AND_MEAN does not
-// stop — so the `byte` rename is repeated over them here. See win32_sanitized.hh for why it is needed.
+// The D3D12 / DXGI / WRL headers reach <rpcndr.h> through <unknwn.h>, which WIN32_LEAN_AND_MEAN does not stop, so the `byte` rename is repeated over them here.
+// See win32_sanitized.hh for why it is needed.
 // The clean-core includes stay above the bracket: a C++ header parsed under the macro would lose `std::byte`.
 #define byte win_byte_override
 #include <d3d12.h>
@@ -19,7 +19,8 @@
 
 namespace sg::backend::dx12
 {
-/// COM smart pointer for D3D12/DXGI object lifetime. Backend-internal — never crosses into sg/sr/sv.
+/// COM smart pointer for D3D12/DXGI object lifetime.
+/// Backend-internal: never crosses into sg/sr/sv.
 using Microsoft::WRL::ComPtr;
 
 /// Builds a cc::result error from a failed HRESULT, recording the call site (not this helper).
@@ -37,8 +38,9 @@ struct dx12_mapped_buffer
     void* mapped = nullptr; // byte 0 of the mapping; cast to cc::byte* at the call site
 };
 
-/// Creates a `size`-byte committed BUFFER on `heap_type`, left in `initial_state`, and persistently
-/// maps it. Used for the inline UPLOAD / READBACK ring buffers. `size` must be > 0.
+/// Creates a `size`-byte committed BUFFER on `heap_type`, left in `initial_state`, and persistently maps it.
+/// Used for the inline UPLOAD / READBACK ring buffers.
+/// `size` must be > 0.
 [[nodiscard]] inline cc::result<dx12_mapped_buffer> create_mapped_ring_buffer(ID3D12Device* device,
                                                                               D3D12_HEAP_TYPE heap_type,
                                                                               D3D12_RESOURCE_STATES initial_state,

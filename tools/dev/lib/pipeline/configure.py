@@ -1,12 +1,10 @@
 """Configure: run CMake configure for one or more presets.
 
+`configure` always reconfigures unless the fingerprint is current or `force` is set, and `ensure_configured` skips when nothing relevant changed.
+
 Public API:
     configure(presets, ...)        -> list[StepResult]
     ensure_configured(preset, ...) -> StepResult | None
-
-Fingerprinting lets `ensure_configured` skip the configure step when nothing
-relevant changed; `configure` always reconfigures unless the fingerprint is
-current (or `force` is set).
 """
 
 from __future__ import annotations
@@ -28,13 +26,9 @@ from ..toolchain import toolset
 def _publish_compile_commands(preset: Preset) -> None:
     """Copy the preset's compile_commands.json up to build/compile_commands.json.
 
-    All presets set CMAKE_EXPORT_COMPILE_COMMANDS, so the generator emits the
-    database into the per-preset build dir (build/<preset>/). clangd is pointed
-    at build/compile_commands.json (see .clangd), so we publish the active
-    preset's database there. This mirrors what the VSCode CMake Tools extension's
-    cmake.copyCompileCommands does, but works for any configure path. With
-    multiple presets the last one configured wins, which matches clangd's single
-    compilation database.
+    Every preset sets CMAKE_EXPORT_COMPILE_COMMANDS, so the generator emits the database into build/<preset>/.
+    .clangd points clangd at build/compile_commands.json, and publishing the active preset's database there is what connects the two.
+    With several presets the last one configured wins, which matches clangd's single compilation database.
     """
     src = preset.build_dir / "compile_commands.json"
     if not src.exists():
@@ -45,7 +39,7 @@ def _publish_compile_commands(preset: Preset) -> None:
 def _configure_one(
     preset: Preset, *, root: Path, mirror: bool, verbose: bool, emsdk_path: str | None = None
 ) -> StepResult:
-    # Ensure external prerequisites (DXC, Zydis, SDL3, SQLite) exist before cmake sees them. Cheap once built.
+    # Ensure the external prerequisites exist before cmake sees them; prereqs.py carries the policy.
     prereqs.ensure_dxc(root, preset.name)
     prereqs.ensure_zydis(root, preset.name)
     prereqs.ensure_sdl3(root, preset.name)
@@ -94,11 +88,10 @@ def configure(
     verbose: bool = False,
     emsdk_path: str | None = None,
 ) -> list[StepResult]:
-    """Configure each preset. Returns one StepResult per preset that ran.
+    """Configure each preset, returning one StepResult per preset that ran.
 
-    When `force` is False and a preset's fingerprint is already current, the
-    configure is skipped (no StepResult is produced for it). `emsdk_path` points
-    Emscripten presets at an emsdk install (see process.emsdk_env).
+    With `force` False, a preset whose fingerprint is already current is skipped and produces no StepResult.
+    `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env).
     """
     results: list[StepResult] = []
     for preset in presets:
@@ -116,8 +109,10 @@ def ensure_configured(
     preset: Preset, *, root: Path, mirror: bool = False, verbose: bool = False,
     emsdk_path: str | None = None,
 ) -> StepResult | None:
-    """Configure `preset` only if its fingerprint is stale. Returns the result, or
-    None if the configure was skipped."""
+    """Configure `preset` only if its fingerprint is stale.
+
+    Returns the result, or None when the configure was skipped.
+    """
     if fingerprint.is_current(preset.build_dir, root):
         return None
     return _configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path)

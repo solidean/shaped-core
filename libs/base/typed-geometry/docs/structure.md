@@ -1,25 +1,21 @@
-# typed-geometry structure proposal (tg::)
+# typed-geometry module roadmap
 
-This is the living roadmap for typed-geometry.
-Section headers carry a status tag:
-
-- **[done]** — implemented and tested
-- **[in progress]** — partially implemented
-- **[planned]** — not started
-
+The living roadmap for typed-geometry.
+Section headers carry a status tag: **[done]** implemented and tested, **[in progress]** partially implemented, **[planned]** not started.
 Update the tags as modules land.
-This document is design intent, not a guarantee of final API.
+This is design intent, not a guarantee of final API.
 
-> **Layout deviation from the original proposal:** headers live in `src/typed-geometry/` (the shaped-core convention — `.hh`/`.cc` colocated under `src/<lib>/`), **not** in `include/typed-geometry/`. Include paths are unchanged: `#include <typed-geometry/...>`.
+Headers live in `src/typed-geometry/` — the shaped-core convention of colocated `.hh`/`.cc` under `src/<lib>/` — and are included as `#include <typed-geometry/...>`.
 
 ## Goals
 
 - Strong semantic typing: `pos`, `vec`, `bivec`, `comp`, `mat`, `quat`, transforms, geometry objects.
-- Prefer member functions for intrinsic/local operations and discoverability.
-- Use free functions for symmetric, cross-type, heavy, or algorithmic operations.
 - Keep include dependencies manageable.
 - Avoid top-level dumping grounds like `algo/` or `util/`.
-- Matrices are linear algebra objects, not transformation types.
+
+The member-versus-free-function split lives in the [coding-guidelines](coding-guidelines.md), and "a `mat` is not a transform" in [modules/linalg.md](modules/linalg.md).
+The same guidelines own the storage rule (`T data[D]`, no `.x/.y/.z`), one-generic-type-per-family and the `make_*` naming.
+This file is the roadmap only — [docs/_index.md](_index.md) is the doc map, and the [readme](../readme.md) the front door.
 
 ## Top-Level Structure
 
@@ -77,14 +73,6 @@ linalg/
   all.hh
 ```
 
-## Representation note (current implementation)
-
-The implemented `comp` / `vec` / `pos` are a single generic type each (`vec<int D, class T>`), not per-dimension specializations.
-Typedefs exist for D = 2/3/4 (`vec2f`, `vec3f`, `vec4f`, … suffixes `f`=f32, `d`=f64, `i`=i32), but the types stay generic over `D`.
-
-Storage is a public raw C array member named `data` (`T data[D]`). **There are no `.x/.y/.z` members**, not even as accessor functions — components are reached via `data` or `operator[]`. Default construction zero-initializes.
-Dimension-specific behavior is gated with `requires`. We are deliberately seeing how far this minimal representation carries us.
-
 ## scalar/ [in progress]
 
 Special scalar-like types and scalar traits.
@@ -103,12 +91,7 @@ scalar/
   error.hh     [planned]
 ```
 
-`scalar_traits<T>` is the extensibility seam: every scalar capability (`has_sqrt`, `has_trigonometry`, `one`, `is_zero`, `is_one`, `sqrt`, `sin`, `cos`, `atan2`) routes through it, so custom scalar types (expression trees, double-double, bigint/bigrat) can opt in by specializing the trait — `is_zero`/`is_one` in particular let symbolic/exact scalars give a smarter answer than a raw comparison.
-tg avoids `std::` type-traits / `<cmath>` in user-facing code for this reason.
-`f32`/`f64` are fully featured; every integer type (incl. `signed`/`unsigned char` but **not** plain `char`) gets `one`/`is_zero`/`is_one`; `bool` has its own specialization.
-`bigint`/`bigrat` are expected to live here too (useful as scalars outside symbolic algebra).
-
-`angle<T>` stores radians, is built only via `make_from_radians`/`make_from_degree`, read via `.radians()`/`.degree()`, and has `_rad_f`/`_rad_d`/`_deg_f`/`_deg_d` literals (e.g. `90_deg_f`). It supports addition and scalar multiplication with no wrap-around.
+[modules/scalar.md](modules/scalar.md) covers the `scalar_traits` seam, which types count as scalars, and the `angle<T>` contract.
 
 ## linalg/ [in progress]
 
@@ -152,20 +135,8 @@ dual(bivec3)      -> vec3     // [done]  explicit Euclidean 3D escape hatch
 undual(vec3)      -> bivec3   // [done]  explicit pseudovector-to-bivector conversion
 ```
 
-`mat` is not a transform type.
-It is linear algebra data.
-
-Special values are exposed as static constants (`vec::zero`, `pos::zero`, `comp::zero`, `bivec::zero`, `mat::zero`, `mat::identity`, `quat::zero`, `quat::identity`). They are runtime constants (a static member can't be `constexpr` of its own incomplete type), not constant expressions.
-All factory methods are named `make_*` (e.g. `vec::make_unit`, `make_from_values`, `mat::make_rotation_z`).
-
-`comp` is the "semantics-free" building block in the sense that it is the raw component-wise type.
-It is therefore the home of **all** component-wise arithmetic: every operator is element-wise (including Hadamard `*`/`/`) and a scalar operand broadcasts, plus component-wise `min`/`max`. `vec` and `pos` deliberately omit these — they only make sense on plain components.
-
-`pos` is special: it is both a linalg and a geometric object.
-Geometric objects are sets of points, and `pos` is a singleton set — so `pos + pos -> pos` because adding translates the `{pos}` object.
-We treat `+ vec` and `+ pos` as applying a translation.
-
-Matrices will be **column-major** stored, with C++23 multi-argument `operator[]` for element access (lands with `mat`).
+[modules/linalg.md](modules/linalg.md) covers the rest — why `pos + pos` translates, why `comp` owns all component-wise arithmetic, and why a `mat` is data rather than a transform.
+`mat` is column-major, with the C++23 multi-argument `operator[]` for element access.
 
 ## transform/ [done]
 
@@ -280,7 +251,7 @@ Since the member's return type is `auto`, asking "is this supported?" would inst
 ## geometry/ [in progress]
 
 Geometric primitives and geometric queries.
-Primitive *types* and the `object_traits` seam have landed; queries/measures/construction are still planned.
+The primitive *types* and the `object_traits` seam have landed; queries, measures and construction are still planned.
 
 ```txt
 geometry/
@@ -303,37 +274,16 @@ geometry/
   all.hh            [done]
 ```
 
-Every primitive denotes a **set of points** and is classified by `object_traits` (specialized in its own header, colocated with the type): `intrinsic_dim` (the object's manifold dimension — a 3D triangle is a 2D object, so 2), `ambient_dim` (the surrounding space — 3 for that triangle), and `is_finite` (triangle/segment/aabb yes; ray/line/plane no). Representation is not interpretation: `plane` and the planned `halfspace` will share the `{normal, dist}` encoding but denote the points *on* vs. *on one side of* the hyperplane.
-`sphere` and the planned `ball` are the same pairing — `sphere` is the surface, so its `intrinsic_dim` is `D - 1`. See [modules/geometry.md](modules/geometry.md).
+Every primitive denotes a **set of points**, classified by an `object_traits` specialization colocated with the type.
+[modules/geometry.md](modules/geometry.md) covers what those facts mean, why representation is not interpretation, and why `sphere`/`ellipsoid` carry an embedding dimension.
 
-`sphere` and `ellipsoid` take **two** dimensions, `<D, DAmbient, T>`: the flat the object curves in, and the space that flat sits in.
-They coincide for the everyday cases (`sphere3f`, `ellipsoid2f`) and part when the object is embedded above its own dimension — `sphere2in3f` is a circle lying in 3D, `ellipsoid2in3f` an ellipse.
-An `ellipsoid`'s semi-axes span its flat, so one general template covers every pair — the embedded case stores nothing extra.
-A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so what it stores depends on the pair: its primary template is left undefined and each supported pair is a specialization (`sphere<D, D, T>` is `{center, radius}`, `sphere<2, 3, T>` adds the plane's normal).
-A pair with no specialization is an incomplete type, which is the same "opt in per case, never a silent default" stance `object_traits` takes.
-
-Each primitive also registers what it becomes under a transform; see the `transform/` section above.
-Which registrations exist is a statement about geometry, not about effort:
-
-| primitive | registered at | result |
-|---|---|---|
-| `sphere` | similarity / affine (unless embedded) | `sphere` / **`ellipsoid`** |
-| `ellipsoid` | affine | `ellipsoid` |
-| `aabb` | scaling + translation **only** | `aabb` |
-| `triangle`, `segment` | affine, projective | unchanged |
-| `plane` | affine, projective | `plane` |
-| `ray`, `line` | affine **only** | unchanged |
-
-The gaps are where a type is missing, not where work was skipped.
-A rotated `aabb` is an oriented box (`obb`); a projected `ray` is a bounded segment, because its point at infinity maps to a finite point; a projected `sphere` is a general quadric.
-The affine image of an *embedded* `sphere` is the one gap left in that table: it is an ellipse in the ambient space, but naming it needs an orthonormal basis of the circle's plane, which `linalg` has no routine for yet.
-Each of those is a compile error until the type — or the routine — that would hold the answer exists.
-
-A finite convex primitive given by its vertices does survive a projection: `w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
-An unbounded primitive generally does not.
+Each primitive also registers what it becomes under a transform.
+[modules/transform.md](modules/transform.md) carries the registration table and why its gaps are missing types rather than skipped work.
 
 Queries are intentionally **not** implemented yet — the representations settle first.
-When they land, member functions stay intrinsic/cheap (e.g. `ray.at(t)`, `aabb.center()`, `aabb.contains(p)`, `triangle.area()`), while symmetric/cross-type queries are free functions (`distance(a, b)`, `closest_point(p, primitive)`, `intersects(a, b)`, `intersection(a, b)`, `contains(a, b)`). Avoid making every pairwise query a member.
+When they land, members stay intrinsic and cheap (`ray.at(t)`, `aabb.center()`, `triangle.area()`).
+Symmetric or cross-type queries are free functions: `distance(a, b)`, `intersection(a, b)`.
+[plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) is the agreed shape for that layer.
 
 ## curves/ [planned]
 
@@ -363,13 +313,14 @@ Notes:
 
 - Some symbolic types are also valid scalar types.
 - Keep symbolic independent from geometry where possible.
-  Geometry may instantiate over symbolic scalars, but symbolic should not know geometry.
-- `bigint`/`bigrat` likely belong to `scalar/` because they are useful as scalars outside of symbolics.
+  Geometry may instantiate over symbolic scalars, but symbolic must not know geometry.
+- `bigint`/`bigrat` likely belong to `scalar/`, since they are useful as scalars outside symbolic algebra.
 
 ## calculus/ [planned]
 
-Differentiation, integration, and optimization (`autodiff`, `fwd_diff`, `rev_diff`, `integrate`, `optimize`, `root_find`, `minimization`). Thin wrappers may re-export scalar AD types.
-Heavy optimization/integration algorithms live here, not in a top-level `algo/`.
+Differentiation, integration and optimization (`autodiff`, `fwd_diff`, `rev_diff`, `integrate`, `optimize`, `root_find`, `minimization`).
+Thin wrappers may re-export scalar AD types.
+Heavy optimization and integration algorithms live here, not in a top-level `algo/`.
 
 ## sampling/ [planned]
 
@@ -395,41 +346,23 @@ b.closest(p)
 
 Mesh data structures and mesh-domain algorithms (`core/`, `polygon/`, `triangle/`, `halfedge/`, `attributes/`, `algorithms/`, `io/`). Mesh-specific algorithms (triangulate, rasterize, remesh, simplify, repair, weld, smooth, subdivide, boolean support, parameterize) live here, not at the top level.
 
-## Member vs Free Function Rule
-
-Use members for intrinsic, local, discoverable operations:
-
-```cpp
-v.length()        v.normalized()        q.inverse()
-ray.at(t)
-box.center()      box.extents()         box.contains(p)
-tri.area()        tri.area_bivec()      tri.centroid()      tri.bounds()
-```
-
-Use free functions for symmetric, cross-type, heavy, or extensible operations:
-
-```cpp
-distance(a, b)    closest_points(a, b)  intersects(a, b)    intersection(a, b)
-project(p, primitive)
-triangulate(poly) rasterize(mesh, target) sample(shape, rng) optimize(problem) integrate(f, domain)
-```
-
 ## Umbrella Include Policy
 
-Each module provides a curated common include (`module/module.hh`) and a complete, potentially expensive one (`module/all.hh`). The top-level `<typed-geometry/all.hh>` pulls in everything.
+Each module provides a curated common include (`module/module.hh`) and a complete, potentially expensive one (`module/all.hh`).
+The top-level `<typed-geometry/all.hh>` pulls in everything.
 
 ```cpp
-#include <typed-geometry/linalg/linalg.hh>     // vec/pos/comp/bivec/mat/quat and their operations
+#include <typed-geometry/linalg/linalg.hh>       // the common linalg types
 #include <typed-geometry/transform/transform.hh> // the transform type and its operations
-#include <typed-geometry/linalg/all.hh>        // everything in linalg
-#include <typed-geometry/all.hh>               // everything (expensive)
+#include <typed-geometry/linalg/all.hh>          // everything in linalg
+#include <typed-geometry/all.hh>                 // everything (expensive)
 ```
 
 ## Initial Implementation Order
 
 ```txt
 1.  scalar traits/constants            [in progress]  traits, constants, one/sqrt/sin/cos, angle done
-2.  linalg: vec, pos, comp             [done]         (comp arithmetic still planned)
+2.  linalg: vec, pos, comp             [done]
 3.  linalg: bivec + cross/dual/undual  [done]
 4.  linalg: mat, quat                  [done]
 5.  transform: the flag lattice, homogeneous_transform, transformed(pos/vec/bivec), the object handshake   [done]

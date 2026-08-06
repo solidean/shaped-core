@@ -1,16 +1,16 @@
 #include <clean-core/fwd.hh> // cc::u64: epoch is an enum over u64
 #include <nexus/test.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic sg API tests. Each is an INVOCABLE_TEST taking a live context, so it runs against every
-// available backend: the per-backend entry driver (tests/backends/<backend>-entry.cc) creates a context and
-// invokes all of these. An alias (tests/backends/backends.cc) makes each runnable by its own name across
-// backends, e.g. `uv run dev.py test "sg - context is live"`. To target one backend, run its driver:
-// `dev.py test "sg dx12 warp backend" -c dx12-warp "sg - context is live"`.
+// Backend-agnostic sg API tests.
+// Each is an INVOCABLE_TEST taking a live context, so it runs against every available backend.
+// The per-backend entry driver (tests/backends/<backend>-entry.cc) creates a context and invokes all of these.
+// An alias (tests/backends/backends.cc) makes each runnable by its own name across backends, e.g. `uv run dev.py test "sg - context is live"`.
+// To target one backend, run its driver: `dev.py test "sg dx12 warp backend" -c dx12-warp "sg - context is live"`.
 
 INVOCABLE_TEST("sg - context is live", (sg::context_handle const& ctx))
 {
@@ -29,8 +29,8 @@ INVOCABLE_TEST("sg - accepts at least one shader format", (sg::context_handle co
     for (auto format : formats)
         CHECK(ctx->accepts_shader_format(format));
 
-    // Each backend takes its own bytecode and nothing else. backend_kind is non-exhaustive, so a
-    // backend we don't name here only has to satisfy the checks above.
+    // Each backend takes its own bytecode and nothing else.
+    // backend_kind is non-exhaustive, so a backend we do not name here only has to satisfy the checks above.
     switch (ctx->backend())
     {
     case sg::backend_kind::dx12:

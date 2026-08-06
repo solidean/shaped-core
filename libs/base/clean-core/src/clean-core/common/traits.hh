@@ -9,10 +9,9 @@
 
 // Compile-time signature reflection for arbitrary callables.
 //
-// Any callable (free function, lambda/functor, member-function pointer) is reduced to a
-// signature<R(A...)>. From that we extract the decayed argument types, which arguments are mutable
-// (non-const lvalue references), and the return type. This is the generic machinery; callers wrap it
-// in their own invocation glue.
+// Any callable — a free function, a lambda or functor, a member-function pointer — is reduced to a signature<R(A...)>.
+// From that we extract the decayed argument types, which arguments are mutable (non-const lvalue references), and the return type.
+// This is the generic machinery; callers wrap it in their own invocation glue.
 
 namespace cc
 {

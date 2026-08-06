@@ -7,9 +7,8 @@
 
 using namespace cc::primitive_defines;
 
-// Inline texture copy on WARP: upload tightly-packed pixels into a texture, read them back, and verify
-// the round-trip — exercising the 256/512 row/placement padding, the region path, block-compressed
-// formats, and the copy_dst/copy_src layout barriers the copy drives.
+// Inline texture copy on WARP: upload tightly-packed pixels into a texture, read them back, and verify the round-trip.
+// Exercises the 256/512 row/placement padding, the region path, block-compressed formats, and the copy_dst/copy_src layout barriers the copy drives.
 
 namespace
 {
@@ -78,7 +77,8 @@ TEST("sg dx12 - texture footprint math (padding, subresource index, block sizing
         CHECK(fp.row_bytes == 16); // 4 texels * 4 bytes
     }
 
-    // Block-compressed: rows and widths are counted in 4×4 blocks. BC1 = 8 bytes/block.
+    // Block-compressed: rows and widths are counted in 4×4 blocks.
+    // BC1 is 8 bytes per block.
     {
         sg::texture_description const d = copy_desc(sg::pixel_format::bc1_rgba_unorm, 16, 16);
         auto const fp = dx12::compute_texture_footprint(
@@ -205,8 +205,8 @@ TEST("sg dx12 - an inline readback waits on a pending async texture upload")
     for (int i = 0; i < N; ++i)
         src[i] = float(i) * 2.0f + 1.0f;
 
-    // Async upload on the copy queue, then an inline readback in a direct-queue list. The inline list must
-    // wait on the async upload's completion fence (folded in via track_texture_access) to observe the write.
+    // Async upload on the copy queue, then an inline readback in a direct-queue list.
+    // The inline list must wait on the async upload's completion fence, folded in via track_texture_access, to observe the write.
     handle->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
 
     auto cmd = c.create_command_list();
@@ -226,8 +226,8 @@ TEST("sg dx12 - an inline readback waits on a pending async texture upload")
 
 TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slice split)")
 {
-    // 2D — one depth slice, 8 block-rows. A window that fits fewer rows than the whole slice yields a
-    // partial row-run; the next call finishes the slice.
+    // 2D — one depth slice, 8 block-rows.
+    // A window that fits fewer rows than the whole slice yields a partial row-run; the next call finishes the slice.
     {
         dx12::dx12_texture_footprint fp;
         fp.rows = 8;
@@ -247,7 +247,8 @@ TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slic
         CHECK(b.row_count == 5);
     }
 
-    // 3D — 4 rows/slice, 3 slices. A big window batches whole slices into one chunk; a small one splits.
+    // 3D — 4 rows/slice, 3 slices.
+    // A big window batches whole slices into one chunk; a small one splits.
     {
         dx12::dx12_texture_footprint fp;
         fp.rows = 4;

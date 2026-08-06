@@ -4,9 +4,9 @@
 #include <nexus/test.hh>
 #include <shaped-linter/rules/engine.hh>
 
-// Smoke tests for `qualified-primitive` — the scratchpad the rule was built in, and where an interesting
-// regression gets pinned. Breadth lives in qualified_primitive.md, next to this file; see
-// docs/coding-guidelines.md for which of the two a new case belongs in.
+// Smoke tests for `qualified-primitive` — the scratchpad the rule was built in, and where an interesting regression gets pinned.
+// Breadth lives in qualified_primitive.md, next to this file.
+// See docs/coding-guidelines.md for which of the two a new case belongs in.
 
 using namespace scl;
 
@@ -106,9 +106,9 @@ TEST("shaped-linter - qualified-primitive - the message names both spellings")
 
 TEST("shaped-linter - qualified-primitive - a non-zero file id")
 {
-    // Regression: a whole-tree run gives each file its own id, and `span_text` asserts a span belongs to
-    // the buffer it is read from. An anonymous namespace has no name, but that empty span is still this
-    // file's — `run_rules_on_text` uses id 0 throughout, so only a real id catches a span left at 0.
+    // Regression: a whole-tree run gives each file its own id, and `span_text` asserts a span belongs to the buffer it is read from.
+    // An anonymous namespace has no name, but that empty span is still this file's.
+    // `run_rules_on_text` uses id 0 throughout, so only a real id catches a span left at 0.
     auto const buf = source_buffer::from_text(cc::string("namespace { void f(cc::u32 x); }\n"), "mem.cc", 7);
     auto const found = run_rules(buf);
     REQUIRE(found.size() == 1);
@@ -201,8 +201,8 @@ TEST("shaped-linter - qualified-primitive - an out-of-line body is already in it
 
 TEST("shaped-linter - qualified-primitive - a header at file scope says nothing")
 {
-    // There is no safe edit: a file-scope using-directive in a header leaks the aliases into the global
-    // namespace of every TU that includes it. `<memory>` has no extension, so it counts as a header too.
+    // There is no safe edit: a file-scope using-directive in a header leaks the aliases into the global namespace of every TU that includes it.
+    // `<memory>` has no extension, so it counts as a header too.
     expect_none("void f(cc::u32 x);");
     CHECK(run_rules_on_text("void f(cc::u32 x);", "flags.hh").size() == 0);
     CHECK(run_rules_on_text("#include <x.hh>\n\ntemplate <cc::isize N>\nstruct cc::flags;\n", "flags.hh").size() == 0);
@@ -242,8 +242,8 @@ TEST("shaped-linter - qualified-primitive - the anchor is the last directive, no
 
     SECTION("an unclosed conditional falls back to the last directive before it")
     {
-        // Anchoring on the last directive would land inside the `#if`, defining the aliases for one
-        // configuration only. The last depth-0 directive is before the conditional, and holds for all.
+        // Anchoring on the last directive would land inside the `#if`, defining the aliases for one configuration only.
+        // The last depth-0 directive is before the conditional, and holds for all.
         auto const src = cc::string_view("#include <a.hh>\n"
                                          "\n"
                                          "#if CC_HAS_THREADS\n"
@@ -290,8 +290,8 @@ TEST("shaped-linter - qualified-primitive - the anchor is the last directive, no
 
 TEST("shaped-linter - qualified-primitive - every file-scope finding carries the same insertion")
 {
-    // Each fix must be safe on its own, so the shared edit rides on all of them; `collect_fix_edits` is
-    // what merges the copies. Byte-identical is the property that merge depends on.
+    // Each fix must be safe on its own, so the shared edit rides on all of them; `collect_fix_edits` is what merges the copies.
+    // Byte-identical is the property that merge depends on.
     auto const found = run_rules_on_text("#include <a.hh>\n"
                                          "\n"
                                          "cc::u32 f();\n"
@@ -313,9 +313,9 @@ TEST("shaped-linter - qualified-primitive - every file-scope finding carries the
 
 TEST("shaped-linter - qualified-primitive - an anonymous namespace is the file's own")
 {
-    // A nexus TEST(…) expands at column 0, so a test file has helpers in an anonymous namespace and bodies
-    // below it. One file-scope directive reaches both — lookup inside an unnamed namespace escapes to the
-    // global namespace, which is where the directive nominates — so both findings carry the same fix.
+    // A nexus TEST(…) expands at column 0, so a test file has helpers in an anonymous namespace and bodies below it.
+    // One file-scope directive reaches both, since lookup inside an unnamed namespace escapes to the global namespace — which is where the directive nominates.
+    // So both findings carry the same fix.
     auto const found = run_rules_on_text("#include <a.hh>\n"
                                          "\n"
                                          "namespace\n"

@@ -3,13 +3,13 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 
-/// Compilation knobs, mapped to DXC command-line flags. Closed enums (not raw strings/ints) so the
-/// valid set is fixed and typo-proof; each maps to one flag internally (see command_line_args.cc).
+/// Compilation knobs, mapped to DXC command-line flags.
+/// Closed enums (not raw strings/ints) so the valid set is fixed and typo-proof; each maps to one flag internally (see command_line_args.cc).
 
 namespace ssc::dxc
 {
-/// Bytecode format DXC should emit. DXIL (for dx12) is the only target wired today; spirv/metal_lib
-/// slot in later behind the same option.
+/// Bytecode format DXC should emit.
+/// DXIL (for dx12) is the only target wired today; spirv/metal_lib slot in later behind the same option.
 enum class compile_target
 {
     dxil,
@@ -29,8 +29,9 @@ enum class shader_model
     sm_6_8,
 };
 
-/// Optimization level — one DXC flag. `disabled` is `-Od` (optimizations off, source semantics
-/// preserved, best for stepping); `level_0`..`level_3` are `-O0`..`-O3`.
+/// Optimization level — one DXC flag.
+/// `disabled` is `-Od`: optimizations off, source semantics preserved, best for stepping.
+/// `level_0`..`level_3` are `-O0`..`-O3`.
 enum class optimization_level
 {
     disabled,
@@ -40,7 +41,8 @@ enum class optimization_level
     level_3,
 };
 
-/// Options for a single compile. Defaults produce optimized, warnings-as-errors DXIL.
+/// Options for a single compile.
+/// Defaults produce optimized, warnings-as-errors DXIL.
 struct compile_options
 {
     compile_target target = compile_target::dxil;

@@ -4,10 +4,10 @@
 
 using namespace cc::primitive_defines;
 
-// Device→device buffer copy: cmd.copy.buffer_bytes_region / buffer_data_region, on WARP. These tests
-// split upload → copy → download across separate command lists; recording all three in one list is also
-// correct now (dx12_command_list::record_transfer_barrier orders them) — the backend-agnostic tests
-// (tests/copy/) cover that single-list path. See libs/graphics/shaped-graphics/docs/concepts/backends.md.
+// Device→device buffer copy on WARP: cmd.copy.buffer_bytes_region / buffer_data_region.
+// These tests split upload → copy → download across separate command lists.
+// Recording all three in one list is equally correct — the list's own access tracking orders them — and tests/copy/ covers that single-list path.
+// See libs/graphics/shaped-graphics/docs/concepts/backends.md.
 
 namespace
 {

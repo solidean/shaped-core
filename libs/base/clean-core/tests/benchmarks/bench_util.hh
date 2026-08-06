@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <chrono>
 
-// Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/. These are guide benchmarks
-// (GUIDE_BENCHMARK) that print timing tables and record representative points via nx::guide; see
-// libs/base/clean-core/docs/benchmarks/ and docs/guides/perf-results.md.
+// Shared helpers for the clean-core micro-benchmarks under tests/benchmarks/.
+// These are guide benchmarks (GUIDE_BENCHMARK) that print timing tables and record representative points via nx::guide.
+// See libs/base/clean-core/docs/benchmarks/ and docs/guides/perf-results.md.
 
 namespace bench
 {
@@ -39,9 +39,10 @@ inline cc::vector<isize> hash_lengths()
 // Keeps benchmark results from being optimized away.
 inline u64 volatile sink = 0;
 
-// Adaptive timer. Runs `pass` (one full unit of work covering `units_per_pass` units, returning a u64 it
-// computed) repeatedly until at least ~50 ms elapses, then returns units processed per second. Callers turn
-// units/s into GB/s, Mops/s, etc. The returned accumulator is funneled into `sink` so the work stays live.
+// Adaptive timer.
+// Runs `pass` — one full unit of work covering `units_per_pass` units, returning a u64 it computed — repeatedly until at least ~50 ms elapses.
+// Returns units processed per second, which callers turn into GB/s, Mops/s, etc.
+// The returned accumulator is funneled into `sink` so the work stays live.
 template <class Pass>
 double measure_units_per_sec(double units_per_pass, Pass&& pass)
 {
@@ -66,9 +67,8 @@ double measure_units_per_sec(double units_per_pass, Pass&& pass)
     return (units_per_pass * double(reps)) / seconds;
 }
 
-// Median of `Runs` independent measure_units_per_sec calls (each does its own prewarm), returned as
-// units/second. The simplest robust noise filter for micro-benchmarks — call it in place of a single
-// measure_units_per_sec when run-to-run variance matters.
+// Median of `Runs` independent measure_units_per_sec calls, each doing its own prewarm, returned as units/second.
+// The simplest robust noise filter for micro-benchmarks — call it in place of a single measure_units_per_sec when run-to-run variance matters.
 template <int Runs = 5, class Pass>
 double median_units_per_sec(double units_per_pass, Pass&& pass)
 {

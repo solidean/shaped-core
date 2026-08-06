@@ -1,12 +1,9 @@
 // File stream throughput: cc::file_*_adapter vs std::ifstream / std::ofstream.
 //
-// The interesting axis is GRANULARITY. cc streams expose the buffer window directly, so byte-at-a-time I/O
-// (writable_bytes()/produce(), ready_bytes()/consume()) inlines to a pointer bump + store/load with no per-byte
-// virtual call; std streams route every put()/get() through the streambuf sentry + virtual overflow/underflow.
-// For bulk transfers both are a memcpy into a buffer plus the occasional syscall, so they converge and the
-// number is really the OS write-back / page cache. We time end-to-end (open -> transfer 4 MiB -> close); at
-// 4 MiB the open/close is well under a percent, and repeated passes stay in the OS cache so this measures the
-// stream layer's CPU cost, not the disk.
+// The interesting axis is GRANULARITY, and the results plus their analysis are in libs/base/clean-core/docs/benchmarks/file-stream-benchmark.md.
+// cc streams expose the buffer window directly, so byte-at-a-time I/O inlines to a pointer bump plus a store or load, with no per-byte virtual call.
+// std streams route every put()/get() through the streambuf sentry and a virtual overflow/underflow.
+// Each timed pass is end-to-end — open, transfer 4 MiB, close — and repeated passes stay in the OS cache, so this measures the stream layer's CPU cost rather than the disk.
 //
 // Guide benchmark: prints the full table and records the byte-at-a-time points (where the abstraction cost
 // lives) via nx::guide.
@@ -63,7 +60,8 @@ inline byte cc_get(cc::seekable_read_stream& s)
     return b;
 }
 
-// --- one pass = open, transfer `total_bytes`, close. chunk == 1 is byte-at-a-time, else bulk of `chunk`. ----
+// --- one pass = open, transfer `total_bytes`, close ------------------------------------------------------
+// chunk == 1 is byte-at-a-time; anything larger is a bulk transfer of `chunk` bytes.
 
 u64 cc_write(cc::string_view path, cc::span<byte const> chunk, isize chunk_n)
 {
@@ -177,10 +175,9 @@ void run()
     // std path takes a char*; char aliases anything, so the std side reuses cc_buf rather than a second buffer.
     char* const std_buf = reinterpret_cast<char*>(cc_buf.data());
 
-    // No explicit warmup: bench::measure_units_per_sec already discards one full pass per measurement, which
-    // warms that path's code + file cache. Each chunk's write rows run before its read rows, so the files
-    // exist when the reads are measured. (A fresh post-build run can still read low on the whole table — that
-    // is machine state, not per-metric cache; run on an idle machine and discard the first run.)
+    // No explicit warmup: bench::measure_units_per_sec already discards one full pass per measurement, which warms that path's code and file cache.
+    // Each chunk's write rows run before its read rows, so the files exist when the reads are measured.
+    // A fresh post-build run can still read low across the whole table — that is machine state rather than per-metric cache, so run on an idle machine and discard the first run.
     isize const chunks[] = {1, 2, 4, 8, 16, 64, 256, max_chunk};
 
     cc::println("\n=== file stream throughput (MB/s, {} MiB per pass, open->transfer->close) ===",

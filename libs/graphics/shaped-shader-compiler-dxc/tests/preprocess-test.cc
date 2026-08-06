@@ -14,8 +14,8 @@ TEST("ssc::dxc preprocess - resolves an include via the resolver and expands its
     desc.source = "#include \"common.hlsli\"\n"
                   "static const uint kValue = MAGIC;\n";
 
-    // Virtual file system: map the include path to in-memory source. DXC may hand us the path with a
-    // leading "./" (or a normalized form), so match on the basename.
+    // Virtual file system: map the include path to in-memory source.
+    // DXC may hand us the path with a leading "./" (or a normalized form), so match on the basename.
     auto resolver = [](cc::string_view path) -> cc::optional<cc::string>
     {
         if (path.contains("common.hlsli"))

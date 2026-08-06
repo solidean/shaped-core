@@ -19,8 +19,8 @@ struct module_info
     bool contains(u64 address) const { return address >= base && address < base + size; }
 };
 
-/// The debuggee's loaded images, tracked from the debug loop's load/unload events. Address ranges
-/// never overlap, so rip -> module is unambiguous.
+/// The debuggee's loaded images, tracked from the debug loop's load/unload events.
+/// Address ranges never overlap, so rip -> module is unambiguous.
 class module_registry
 {
 public:
@@ -30,8 +30,8 @@ public:
     /// The module whose address range covers `address`, if any.
     module_info const* find_by_address(u64 address) const;
 
-    /// The module whose file name matches `name`, case-insensitively. A bare stem also matches
-    /// ("mymodule" finds "mymodule.exe"), which is what people type.
+    /// The module whose file name matches `name`, case-insensitively.
+    /// A bare stem also matches ("mymodule" finds "mymodule.exe"), which is what people type.
     module_info const* find_by_name(cc::string_view name) const;
 
     cc::span<module_info const> all() const { return _modules; }

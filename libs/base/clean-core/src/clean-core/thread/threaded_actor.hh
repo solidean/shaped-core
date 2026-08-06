@@ -17,16 +17,15 @@
 #include <variant>
 
 // cc::threaded_actor: an actor with its own thread and a typed message mailbox.
-// Messages are moved into the mailbox and processed one at a time, in strict global send order,
-// on a private thread. Actor-local state therefore needs no locks, and blocking (e.g. a GPU wait)
-// only stalls this one actor.
+// Messages are moved into the mailbox and processed one at a time, in strict global send order, on a private thread.
+// Actor-local state therefore needs no locks, and blocking (a GPU wait, say) only stalls this one actor.
 //
-// Use it for a long-lived, stateful subsystem (uploads, IO); not for heavy CPU fan-out — use the
-// task system for that.
+// Use it for a long-lived, stateful subsystem such as uploads or IO.
+// Not for heavy CPU fan-out — cc::async and its thread pool are for that.
 //
-// Derive from cc::threaded_actor_impl<Msg...>, override on_message(Msg) for each type, then build
-// via cc::make_threaded_actor<YourImpl>(args...). start() spawns the thread; shutdown() drains and
-// joins (the destructor joins too).
+// Derive from cc::threaded_actor_impl<Msg...>, override on_message(Msg) for each type, then build via
+// cc::make_threaded_actor<YourImpl>(args...).
+// start() spawns the thread; shutdown() drains and joins, and the destructor joins too.
 //
 //   struct log_line { cc::string text; };
 //   class logger : public cc::threaded_actor_impl<log_line>
@@ -40,18 +39,18 @@
 //   actor->enqueue_message(log_line{"hello"});
 //   actor->shutdown();
 //
-// Threading modes (chosen at start()): by default an actor runs its own thread where the platform
-// has them (threaded_actor_mode::threaded_if_possible). Pass threaded_actor_mode::unthreaded — the
-// only real option on single-threaded platforms like WebAssembly — to run without a thread: nothing
-// is spawned and you drive processing yourself with process_messages_if_unthreaded[_for_ms](), which
-// is a no-op when a thread is running and so is safe to call unconditionally. This keeps one code
-// path and a uniform API across platforms; it is also handy for deterministic, race-free tests.
-// Caveat: unthreaded, on_message and the hooks run on the *calling* thread, so a blocking handler
-// stalls that thread — the "blocking only stalls this actor" property holds only in threaded mode.
+// Threading modes are chosen at start().
+// By default an actor runs its own thread where the platform has them (threaded_actor_mode::threaded_if_possible).
+// Pass threaded_actor_mode::unthreaded — the only real option on single-threaded platforms like WebAssembly —
+// to run without a thread.
+// Nothing is spawned, and you drive processing yourself with process_messages_if_unthreaded[_for_ms](), which
+// is a no-op when a thread is running and so is safe to call unconditionally.
+// That keeps one code path across platforms, and makes tests deterministic and race-free.
+// Caveat: unthreaded, on_message and the hooks run on the *calling* thread, so a blocking handler stalls it.
+// The "blocking only stalls this actor" property holds in threaded mode only.
 //
-// Note: messages are stored in a std::variant<Msg...> for now (mid-term: replace with a cc variant
-// once one exists), and the polymorphic impl is held by std::unique_ptr (cc::unique_ptr forbids the
-// upcast/downcast this needs). std::thread and the cc::atomic/condition_variable are kept as-is.
+// Note: messages are stored in a std::variant<Msg...> for now, to be replaced with a cc variant once one exists.
+// The polymorphic impl is held by std::unique_ptr, because cc::unique_ptr forbids the upcast/downcast this needs.
 
 namespace cc
 {
@@ -72,39 +71,36 @@ struct threaded_actor_enqueue_message;
 } // namespace cc
 
 /// Type-erased threading and lifecycle layer shared by every threaded_actor<Msg...>.
-/// Owns the thread, the shutdown flags, and the inbox condition variable; the typed actor supplies
-/// message dispatch through drain_inbox_messages.
+/// Owns the thread, the shutdown flags and the inbox condition variable; the typed actor supplies message dispatch through drain_inbox_messages.
 struct cc::threaded_actor_base
 {
     // lifecycle
 public:
-    /// Starts the actor. Call exactly once. In threaded mode spawns the actor thread; in unthreaded
-    /// mode runs no thread and you must drive it with process_messages_if_unthreaded[_for_ms]().
-    /// Messages enqueued before start() are kept. On single-threaded platforms the mode is forced
-    /// to unthreaded regardless of the argument.
+    /// Starts the actor; call exactly once.
+    /// In threaded mode this spawns the actor thread; unthreaded it runs no thread, and you must drive it with process_messages_if_unthreaded[_for_ms]().
+    /// Messages enqueued before start() are kept.
+    /// On single-threaded platforms the mode is forced to unthreaded regardless of the argument.
     void start(threaded_actor_mode mode = threaded_actor_mode::threaded_if_possible);
 
-    /// Requests shutdown without blocking; new messages are rejected immediately. Lets several
-    /// actors begin shutting down in parallel before any join. Call at most once, after start()
-    /// and before shutdown(); shutdown() calls it for you if you did not.
+    /// Requests shutdown without blocking; new messages are rejected immediately.
+    /// Lets several actors begin shutting down in parallel before any join.
+    /// Call at most once, after start() and before shutdown() — shutdown() calls it for you if you did not.
     void begin_shutdown();
 
-    /// Requests shutdown and blocks until all queued messages have been drained. In threaded mode
-    /// joins the thread; unthreaded, drains synchronously on the caller. Runs on_thread_shutdown
-    /// before returning. Call at most once, after start().
+    /// Requests shutdown and blocks until all queued messages have been drained.
+    /// In threaded mode it joins the thread; unthreaded, it drains synchronously on the caller.
+    /// Runs on_thread_shutdown before returning, and must be called at most once, after start().
     void shutdown();
 
     // manual pump (only meaningful when started unthreaded)
 public:
-    /// Runs one processing cycle on the calling thread (drain the inbox, dispatch, one on_process).
-    /// Returns true if there may be more work (something was dispatched or on_process asked to run
-    /// again). No-op returning false unless the actor was started unthreaded and is not shut down —
-    /// so it is safe to call unconditionally every frame regardless of platform or mode.
+    /// Runs one processing cycle on the calling thread: drain the inbox, dispatch, one on_process.
+    /// Returns true if there may be more work — something was dispatched, or on_process asked to run again.
+    /// A no-op returning false unless started unthreaded and not shut down, so it is safe to call unconditionally every frame.
     bool process_messages_if_unthreaded();
 
-    /// Repeats process_messages_if_unthreaded() until idle or max_ms of wall-clock elapses
-    /// (max_ms <= 0 runs a single cycle). Returns true if it stopped on the budget with work
-    /// still pending.
+    /// Repeats process_messages_if_unthreaded() until idle or max_ms of wall-clock elapses; max_ms <= 0 runs a single cycle.
+    /// Returns true if it stopped on the budget with work still pending.
     bool process_messages_if_unthreaded_for_ms(double max_ms);
 
     /// True once shutdown has begun: new messages are rejected and the thread is winding down.
@@ -125,12 +121,13 @@ protected:
 
     // internal
 private:
-    /// Drains pending inbox messages and dispatches them to on_message. When wait_on_cond_var is
-    /// true, blocks until messages arrive or shutdown begins. Returns true if any were dispatched.
+    /// Drains pending inbox messages and dispatches them to on_message.
+    /// When wait_on_cond_var is true, blocks until messages arrive or shutdown begins.
+    /// Returns true if any were dispatched.
     virtual bool drain_inbox_messages(bool wait_on_cond_var) = 0;
 
-    /// Actor thread entry point: on_thread_init, then a loop of drain + on_process until shutdown
-    /// drains empty, then on_thread_shutdown.
+    /// Actor thread entry point: on_thread_init, then a loop of drain + on_process until shutdown drains the
+    /// inbox empty, then on_thread_shutdown.
     void execute_actor_thread();
 
     // members
@@ -146,26 +143,26 @@ private:
     friend struct threaded_actor;
 };
 
-/// Base for actor implementations: lifecycle hooks that all run on the actor thread. Derive from
-/// threaded_actor_impl<Msg...> (which adds the typed on_message handlers), not from this directly.
+/// Base for actor implementations: lifecycle hooks that all run on the actor thread.
+/// Derive from threaded_actor_impl<Msg...>, which adds the typed on_message handlers, rather than from this directly.
 struct cc::threaded_actor_impl_base
 {
     virtual ~threaded_actor_impl_base() = default;
 
-    /// Label used as the OS thread name. Must outlive the actor thread (string literal or a member
-    /// that lives at least as long).
+    /// Label used as the OS thread name.
+    /// Must outlive the actor thread — a string literal, or a member that lives at least as long.
     [[nodiscard]] virtual cc::string_view actor_name() const noexcept { return "threaded_actor"; }
 
     /// Runs on the actor thread before any message, for thread-local setup.
     virtual void on_thread_init() {}
 
-    /// Runs on the actor thread after the loop exits; no messages follow. The impl outlives the
-    /// thread, so actor-local state is safe to touch here.
+    /// Runs on the actor thread after the loop exits; no messages follow.
+    /// The impl outlives the thread, so actor-local state is safe to touch here.
     virtual void on_thread_shutdown() {}
 
-    /// Called each loop after draining the inbox (even when it was empty). Return true to be called
-    /// again immediately (e.g. to work through a local queue); false to sleep until new messages
-    /// arrive. Spurious wakeups during shutdown are safe.
+    /// Called each loop after draining the inbox, even when it was empty.
+    /// Return true to be called again immediately, for instance to work through a local queue; false to sleep until new messages arrive.
+    /// Spurious wakeups during shutdown are safe.
     virtual bool on_process() { return false; }
 };
 
@@ -178,9 +175,9 @@ protected:
     virtual void on_message(MessageT msg) = 0;
 };
 
-/// Derive from this and override on_message(Msg) for each message type, then build via
-/// cc::make_threaded_actor<YourImpl>(args...). Actor-local state lives here and needs no locks;
-/// every hook runs on the actor thread. MessageT... must be movable.
+/// Derive from this and override on_message(Msg) per message type; the header comment shows the shape.
+/// Actor-local state lives here and needs no locks, since every hook runs on the actor thread.
+/// MessageT... must be movable.
 template <class... MessageT>
 struct cc::threaded_actor_impl : threaded_actor_impl_base, threaded_actor_message_handler<MessageT>...
 {
@@ -192,8 +189,8 @@ struct cc::threaded_actor_impl : threaded_actor_impl_base, threaded_actor_messag
     using threaded_actor_message_handler<MessageT>::on_message...;
 };
 
-/// One typed enqueue_message(Msg); threaded_actor mixes in one per message type (CRTP), forming an
-/// overload set that forwards into the actor's private queue.
+/// One typed enqueue_message(Msg); threaded_actor mixes in one per message type (CRTP), forming an overload
+/// set that forwards into the actor's private queue.
 template <class MessageT, class ActorT>
 struct cc::threaded_actor_enqueue_message
 {
@@ -201,19 +198,17 @@ struct cc::threaded_actor_enqueue_message
     bool enqueue_message(MessageT msg) { return static_cast<ActorT*>(this)->impl_enqueue_message(cc::move(msg)); }
 };
 
-/// Handle for an actor that processes heterogeneous messages one at a time on its own thread, in
-/// strict global send order. Build it with cc::make_threaded_actor<YourImpl>(...) — you do not
-/// derive from this. It owns the impl, so actor-local state cannot be touched cross-thread and the
-/// destructor shuts down cleanly. Lifecycle misuse (bad start/shutdown ordering) asserts.
+/// Handle for an actor, built with cc::make_threaded_actor<YourImpl>(...) — you do not derive from this.
+/// It owns the impl, so actor-local state cannot be touched cross-thread and the destructor shuts down cleanly.
+/// Lifecycle misuse, such as bad start/shutdown ordering, asserts.
 template <class... MessageT>
 struct cc::threaded_actor final : threaded_actor_base,
                                   threaded_actor_enqueue_message<MessageT, threaded_actor<MessageT...>>...
 {
     static_assert(sizeof...(MessageT) > 0, "a threaded_actor must accept at least one message type");
 
-    /// Enqueues a message for the actor thread; returns false if the actor is shutting down (the
-    /// message is rejected). All types share one global send order, and every message sent before
-    /// begin_shutdown is processed before the thread exits.
+    /// Enqueues a message for the actor thread; returns false if the actor is shutting down, in which case the message is rejected.
+    /// All types share one global send order, and every message sent before begin_shutdown is processed before the thread exits.
     using threaded_actor_enqueue_message<MessageT, threaded_actor<MessageT...>>::enqueue_message...;
 
     // ctor
@@ -223,8 +218,8 @@ public:
         CC_ASSERT(_impl != nullptr, "actor impl must not be null");
     }
 
-    /// Reclaims the impl after the actor has fully shut down (e.g. to read out results). Asserts the
-    /// actor is shut down and that ActorImplT is the actual impl type. The handle is unusable after.
+    /// Reclaims the impl after the actor has fully shut down, to read out results.
+    /// Asserts the actor is shut down and that ActorImplT is the actual impl type; the handle is unusable afterwards.
     template <std::derived_from<threaded_actor_impl_base> ActorImplT>
     [[nodiscard]] std::unique_ptr<ActorImplT> take_impl()
     {
@@ -238,8 +233,9 @@ public:
         return std::unique_ptr<ActorImplT>(derived);
     }
 
-    /// Joins the actor thread if still running. Must live here, not in ~threaded_actor_base, so
-    /// _impl outlives on_thread_shutdown. Exceptions cannot escape a destructor, so they are logged.
+    /// Joins the actor thread if still running.
+    /// Must live here, not in ~threaded_actor_base, so _impl outlives on_thread_shutdown.
+    /// Exceptions cannot escape a destructor, so they are logged.
     ~threaded_actor() override
     {
         if (this->is_running())
@@ -315,9 +311,9 @@ private:
 
 namespace cc
 {
-/// Builds a YourImpl and wraps it in its threaded_actor<Msg...> handle (deduced from
-/// YourImpl::threaded_actor_t). The impl type does not leak into the return type. Call start() to
-/// begin processing. YourImpl must derive from cc::threaded_actor_impl<Msg...>.
+/// Builds a YourImpl and wraps it in its threaded_actor<Msg...> handle, deduced from YourImpl::threaded_actor_t.
+/// The impl type does not leak into the return type.
+/// Call start() to begin processing; YourImpl must derive from cc::threaded_actor_impl<Msg...>.
 template <class ActorImplT, class... Args>
 [[nodiscard]] auto make_threaded_actor(Args&&... args)
 {

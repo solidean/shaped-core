@@ -13,8 +13,8 @@
 
 namespace nx
 {
-// Handle passed to an NX_TEST_SETUP body. It reads the registry and defines aliases against it. Aliases
-// land on the wrapped registry (the static registry for a real run; a local one in meta-tests).
+// Handle passed to an NX_TEST_SETUP body: it reads the registry and defines aliases against it.
+// Aliases land on the wrapped registry — the static one for a real run, a local one in meta-tests.
 struct setup
 {
     explicit setup(test_registry& registry) : _registry(&registry) {}
@@ -22,11 +22,12 @@ struct setup
     // All registered declarations (ordinary + invocable), in registration order.
     cc::span<test_declaration const> tests() const { return _registry->declarations; }
 
-    // The declaration named `name`, or nullptr. Used to resolve a driver for an alias fragment.
+    // The declaration named `name`, or nullptr when there is none.
+    // Used to resolve a driver for an alias fragment.
     test_declaration const* find_test(cc::string_view name) const;
 
-    // Every invocable test whose decayed signature is exactly `Args...` (the same join key nx::invoke_tests
-    // uses). Typically Args is the driver's argument, e.g. invocables_with<sg::context_handle>().
+    // Every invocable test whose decayed signature is exactly `Args...`, the same join key nx::invoke_tests uses.
+    // Args is typically the driver's argument, e.g. invocables_with<sg::context_handle>().
     template <class... Args>
     cc::vector<test_declaration const*> invocables_with() const
     {
@@ -53,8 +54,8 @@ namespace impl
 void register_setup(void (*fn)(nx::setup&), cc::source_location loc);
 } // namespace impl
 
-// Runs every registered NX_TEST_SETUP callback against `registry`, (re)building its aliases. Idempotent:
-// clears registry.aliases first, then sorts aliases and their fragments for a stable, reproducible listing.
+// Runs every registered NX_TEST_SETUP callback against `registry`, rebuilding its aliases.
+// Idempotent: it clears registry.aliases first, then sorts aliases and their fragments for a stable, reproducible listing.
 void run_setup_callbacks(test_registry& registry);
 
 } // namespace nx

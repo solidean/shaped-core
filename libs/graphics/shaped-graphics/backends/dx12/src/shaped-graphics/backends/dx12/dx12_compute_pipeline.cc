@@ -1,7 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/dx12/dx12_compute_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 
 namespace sg::backend::dx12
 {
@@ -31,8 +31,8 @@ cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Dev
 
     HRESULT hr = device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline->pipeline_state));
 
-    // A stale/mismatched blob (e.g. after a driver update) fails with E_INVALIDARG. The cached PSO is a
-    // best-effort accelerator, so degrade to a fresh build rather than hard-failing.
+    // A stale or mismatched blob (e.g. after a driver update) fails PSO creation.
+    // The cached PSO is a best-effort accelerator, so any failure with a blob present degrades to a fresh build rather than hard-failing.
     if (FAILED(hr) && !cached_pipeline.empty())
     {
         desc.CachedPSO = {};

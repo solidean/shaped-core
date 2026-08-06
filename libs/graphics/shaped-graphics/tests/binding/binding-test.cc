@@ -1,11 +1,11 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/binding_group_layout.hh>
-#include <shaped-graphics/buffer.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/pipeline_layout.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/resource/buffer.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 
 #include <memory>
 #include <type_traits>
@@ -18,8 +18,8 @@ static_assert(std::is_same_v<sg::pipeline_layout_handle, std::shared_ptr<sg::pip
 static_assert(std::is_same_v<sg::compute_pipeline_handle, std::shared_ptr<sg::compute_pipeline const>>);
 static_assert(std::is_same_v<sg::binding_group_handle, std::shared_ptr<sg::binding_group const>>);
 
-// The binding vocabulary + compiled_shader data model are pure CPU value types — no GPU backend. A
-// minimal concrete buffer subclass produces real views to validate bindings against.
+// The binding vocabulary + compiled_shader data model are pure CPU value types — no GPU backend.
+// A minimal concrete buffer subclass produces real views to validate bindings against.
 
 namespace
 {

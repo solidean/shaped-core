@@ -1,14 +1,14 @@
 #include <clean-core/fwd.hh> // cc::u64
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh> // sg::submission_token
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic command-list lifecycle: create → submit / drop, epoch stamping, and submission-token
-// completion. Run against every available backend (see tests/context/context-test.cc for the mechanism).
+// Backend-agnostic command-list lifecycle: create → submit / drop, epoch stamping, and submission-token completion.
+// Run against every available backend — see tests/context/context-test.cc for the mechanism.
 
 INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (sg::context_handle const& ctx))
 {
@@ -21,11 +21,10 @@ INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (s
     ctx->drop_command_list(cc::move(cmd)); // dropping an unsubmitted list is safe
 }
 
-// Regression (narrowed down from a transfer-fuzz finding): a command list left neither submitted nor
-// dropped must NOT leak the open-list count. If it did, a later advance_epoch would wrongly trip its
-// "every list must be submitted or dropped before advancing" assert — which is exactly how the fuzz's
-// shared context got polluted across replays and reported a false [mk_trace, advance] failure. Letting
-// a list leave scope auto-drops it (prints one warning to stderr, expected here), clearing the count.
+// Regression, narrowed down from a transfer-fuzz finding: a command list left neither submitted nor dropped must NOT leak the open-list count.
+// If it did, a later advance_epoch would wrongly trip its "every list must be submitted or dropped before advancing" assert.
+// That is exactly how the fuzz's shared context got polluted across replays and reported a false [mk_trace, advance] failure.
+// Letting a list leave scope auto-drops it, clearing the count, and prints one warning to stderr — expected here.
 INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

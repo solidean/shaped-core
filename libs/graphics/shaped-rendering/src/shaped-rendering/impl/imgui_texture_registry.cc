@@ -1,5 +1,5 @@
 #include <clean-core/common/asserts.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 #include <shaped-rendering/impl/imgui_texture_registry.hh>
 

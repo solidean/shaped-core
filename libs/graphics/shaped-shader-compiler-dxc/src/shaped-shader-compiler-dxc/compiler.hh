@@ -5,18 +5,20 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 #include <shaped-shader-compiler-dxc/preprocessed_source.hh>
 #include <shaped-shader-compiler-dxc/shader_description.hh>
 
 #include <memory>
 
-/// A lean wrapper over the DirectX Shader Compiler (DXC, IDxcCompiler3). Compiles HLSL into an
-/// sg::compiled_shader (bytecode + reflected bindings + compute workgroup size). Two steps:
+/// A lean wrapper over the DirectX Shader Compiler (DXC, IDxcCompiler3).
+/// Compiles HLSL into an sg::compiled_shader: bytecode plus reflected bindings, and a workgroup size for compute stages.
+/// Two steps:
 ///   1. preprocess() — expand macros + resolve #includes via a caller-supplied resolver
 ///   2. compile()    — turn already-preprocessed source into bytecode (rejects stray #includes)
-/// The DXC headers are kept out of this header (pimpl). See the library readme / cheat-sheet.
+/// The DXC headers are kept out of this header (pimpl).
+/// See the library readme / cheat-sheet.
 
 namespace ssc::dxc
 {
@@ -37,16 +39,17 @@ public:
     compiler& operator=(compiler&&) noexcept;
     ~compiler();
 
-    /// Expands macros and inlines `#include`s, without generating bytecode. `resolve_include` maps
-    /// an include path to source text. Returns the flattened source; error carries DXC diagnostics.
+    /// Expands macros and inlines `#include`s, without generating bytecode.
+    /// `resolve_include` maps an include path to source text.
+    /// Returns the flattened source; the error carries DXC diagnostics.
     [[nodiscard]] cc::result<preprocessed_source> preprocess(shader_description const& desc,
                                                              include_resolver resolve_include,
                                                              compile_options const& options = {});
 
-    /// Compiles fully-preprocessed source into an sg::compiled_shader. `desc.source` must not
-    /// contain `#include`s (they are rejected). Error carries DXC diagnostics; a resource kind sg
-    /// has no binding_type for yet (texel/typed buffers, acceleration structures, …) is also reported
-    /// as an error.
+    /// Compiles fully-preprocessed source into an sg::compiled_shader.
+    /// `desc.source` must not contain `#include`s — they are rejected.
+    /// The error carries DXC diagnostics.
+    /// A resource kind sg has no binding_type for yet (texel / typed buffers, append/consume/counter buffers) is also reported as an error.
     [[nodiscard]] cc::result<sg::compiled_shader> compile(shader_description const& desc,
                                                           compile_options const& options = {});
 

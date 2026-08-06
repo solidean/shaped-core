@@ -2,16 +2,16 @@
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/pixel_format.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-rendering/keyed_pipeline_cache.hh>
 
 #include <memory>
 
-// keyed_pipeline_cache on a dx12 WARP device. The cache is generic, so a stand-in "pipeline" (a
-// shared_ptr<int>) exercises its dedup / warm / clear / error behavior exactly — only `init` needs a real
-// context, which is why these are WARP-gated. The real sg::raster_pipeline path (the default template arg
-// building through ctx.uncached.try_create_raster_pipeline) is exercised by sr::blit_routine.
+// keyed_pipeline_cache on a dx12 WARP device.
+// The cache is generic, so a stand-in "pipeline" (a shared_ptr<int>) exercises its dedup / warm / clear / error behavior exactly.
+// Only `init` needs a real context, which is why these are WARP-gated.
+// The real sg::raster_pipeline path — the default template arg, building through ctx.uncached.try_create_raster_pipeline — is exercised by sr::blit_routine.
 
 namespace
 {

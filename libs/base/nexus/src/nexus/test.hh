@@ -20,18 +20,19 @@ namespace nx::impl
 {
 void register_test(char const* name, config::cfg test_config, void (*fn)(), cc::source_location loc);
 
-// Registers an invocable (inert) test. `signature` is the decayed argument-type join key and `fn` runs
-// the body with args sourced from typed_value slots. Non-template so test.hh stays light.
+// Registers an invocable (inert) test.
+// `signature` is the decayed argument-type join key, and `fn` runs the body with args sourced from typed_value slots.
+// Non-template so test.hh stays light.
 void register_invocable_test(char const* name,
                              config::cfg test_config,
                              cc::vector<std::type_index> signature,
                              cc::unique_function<void(cc::span<nx::typed_value*>)> fn,
                              cc::source_location loc);
 
-// Wraps a `void(A...)` test body into the type-erased invoker stored in the registry: it unpacks the
-// typed_value slots back into the concrete argument types and calls the body. Mutable lvalue-reference
-// parameters are rejected — matching decays the signature and the boxed args are shared read-only inputs,
-// so a `T&` parameter would silently share/mutate one box across instances. Use `T` or `T const&`.
+// Wraps a `void(A...)` test body into the type-erased invoker stored in the registry.
+// It unpacks the typed_value slots back into the concrete argument types and calls the body.
+// A mutable lvalue-reference parameter is rejected, because matching decays the signature and the boxed args are shared read-only inputs.
+// A `T&` would silently share and mutate one box across instances, so use `T` or `T const&`.
 template <class... A>
 cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*fn)(A...))
 {
@@ -60,14 +61,14 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 #define TEST(name, ...) NX_IMPL_TEST(name, __COUNTER__, __VA_ARGS__)
 
 // A guide benchmark: a test in the guide_benchmark bucket that reports metrics via nx::guide (see guide.hh).
-// Swept only via --guide-benchmarks (or named explicitly), never in a normal run. Extra config items compose
-// as with TEST, e.g. GUIDE_BENCHMARK("name", seed(42)).
+// Swept only via --guide-benchmarks, or named exactly, and never in a normal run.
+// Extra config items compose as with TEST, e.g. GUIDE_BENCHMARK("name", seed(42)).
 #define GUIDE_BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, guide_benchmark __VA_OPT__(, ) __VA_ARGS__)
 
-// An invocable test: an inert test body taking arguments, run only when a driver calls nx::invoke_tests
-// with a matching (decayed) argument signature (the parametrized / data-driven / generator pattern).
-// `params` is a parenthesized function parameter list; the body follows with no trailing ';'. Trailing
-// config items compose as with TEST.
+// An invocable test: an inert test body taking arguments, run only when a driver calls nx::invoke_tests with a matching (decayed) argument signature.
+// That is the parametrized / data-driven / generator pattern, and libs/base/nexus/docs/invocable-tests.md has the full mechanism.
+// `params` is a parenthesized function parameter list, and the body follows with no trailing ';'.
+// Trailing config items compose as with TEST.
 //
 //   INVOCABLE_TEST("mesh - decimate", (mesh_case const& c), nx::config::seed(3))
 //   {
@@ -91,9 +92,9 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 
 #define INVOCABLE_TEST(name, params, ...) NX_IMPL_INVOCABLE_TEST(name, __COUNTER__, params, __VA_ARGS__)
 
-// A startup hook: its body runs once, before any test listing or scheduling, with full access to the
-// registry (all declarations) via the `nx::setup` handle. Used to define aliases — pseudo test-names that
-// expand, under filter matching, into scoped runs of invocable tests. Multiple NX_TEST_SETUP blocks compose.
+// A startup hook: its body runs once, before any test listing or scheduling, with full access to the registry via the `nx::setup` handle.
+// Used to define aliases — pseudo test-names that expand, under filter matching, into scoped runs of invocable tests.
+// Multiple NX_TEST_SETUP blocks compose.
 //
 //   NX_TEST_SETUP(nx::setup& s)
 //   {

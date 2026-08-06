@@ -761,14 +761,10 @@ TEST("optional - assignment scenarios")
 
 TEST("optional - subobject-safe move assignment")
 {
-    // Test that move assignment is subobject-safe, meaning it remains well-defined
-    // even when the right-hand side aliases a subobject transitively owned by the
-    // left-hand side. In other words, x = std::move(y) must not assume that y is
-    // independent of x; y may live inside x.
+    // Move assignment must stay well-defined when the right-hand side aliases a subobject transitively owned by the left-hand side.
+    // That is, x = cc::move(y) must not assume y is independent of x — y may live inside x.
     //
-    // This test uses a recursive structure where a type contains a unique_ptr to
-    // an optional of itself, creating a situation where we can move-assign from
-    // a nested subobject.
+    // The structure below is recursive on purpose: a type holding a unique_ptr to an optional of itself is what makes such a nested move-assign reachable.
 
     struct self_ref_foo
     {
@@ -794,8 +790,7 @@ TEST("optional - subobject-safe move assignment")
 
     SECTION("move assignment from owned subobject")
     {
-        // Create an optional containing a self_ref_foo that itself contains
-        // an optional<self_ref_foo> as a nested subobject
+        // A self_ref_foo holding an optional<self_ref_foo> as a nested subobject.
         auto my_opt = cc::optional<self_ref_foo>{
             self_ref_foo{42, std::make_unique<cc::optional<self_ref_foo>>(self_ref_foo{99})}};
 
@@ -805,9 +800,8 @@ TEST("optional - subobject-safe move assignment")
         CHECK(my_opt.value().inner->has_value());
         CHECK(my_opt.value().inner->value().value == 99);
 
-        // This is the critical test: move-assign from a subobject that is transitively owned
-        // by the destination. The move assignment must not eagerly destroy or reset the
-        // left-hand side before completing the move, as that would destroy the source.
+        // The critical case: move-assign from a subobject transitively owned by the destination.
+        // Move assignment must not eagerly destroy or reset the left-hand side before completing the move, because that would destroy the source.
         my_opt = cc::move(*my_opt.value().inner);
 
         // After the move, my_opt should contain the inner value (99)

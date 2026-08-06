@@ -3,24 +3,22 @@
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/node_allocation.hh>
 
-/// Move-only owning callable wrapper with signature T
-/// Similar to std::function but move-only, allowing capture of unique resources
-/// Is actually even stronger: allows non-moveable "pinned" captures as well
-/// Uses a cc::node_memory_resource under the hood and is therefore extremely efficient
-/// Like unique_ptr<int>, const-ness of this object does not imply constness of the pointed-to object!
+/// Move-only owning callable wrapper with signature T.
+/// Like std::function but move-only, so it can capture unique resources — and stronger still, since it also takes non-moveable "pinned" captures.
+/// Like unique_ptr<int>, const-ness of this object does not imply const-ness of the closure it owns.
 ///
-/// Layout: a SINGLE pointer (8 B). The closure and its type-erased ops live together in one node — a header
-/// carrying a pointer to a static per-closure vtable (a plain data member, NOT a C++ vptr), followed by the
-/// closure. cc::poly_node_allocation reads that header to destroy + free without knowing the closure type, so
-/// the handle stays one pointer. (Previously an any_node_allocation + a separate thunk = 32 B.)
+/// Layout: a SINGLE pointer (8 B).
+/// The closure and its type-erased ops live together in one node from a cc::node_allocator: a header carrying a pointer to a static per-closure vtable, followed by the closure.
+/// That vtable pointer is a plain data member, NOT a C++ vptr.
+/// cc::poly_node_allocation reads the header to destroy and free the node without knowing the closure type, which is what keeps the handle one pointer wide.
 
 namespace cc::impl
 {
 template <class R, class... Args>
 struct unique_function_node;
 
-// Hand-rolled vtable for a type-erased callable node. Parameterized by the call signature only (not the
-// closure), so one node_base type serves every closure with that signature.
+// Hand-rolled vtable for a type-erased callable node.
+// Parameterized by the call signature only, not by the closure, so one node header type serves every closure with that signature.
 template <class R, class... Args>
 struct unique_function_vtable
 {
@@ -97,9 +95,8 @@ public:
 public:
     unique_function() = default;
 
-    // note: this ctor requires moveability
-    //       use the factory method for in-place construction or custom alloc
-    //       always uses the system node resource
+    // Requires a moveable F.
+    // Use create_from for in-place construction or a custom allocator; this ctor always takes cc::default_node_allocator(), which set_default_node_allocator can repoint.
     template <class F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, unique_function>)
     unique_function(F&& f)
@@ -114,8 +111,7 @@ public:
         *this = create_from<Fn>(cc::default_node_allocator(), cc::forward<F>(f));
     }
 
-    // takes an explicit allocator
-    // directly emplaces in target storage
+    // Takes an explicit allocator and emplaces the closure directly in the target storage.
     template <class F, class... FArgs>
     [[nodiscard]] static unique_function create_from(cc::node_allocator& alloc, FArgs&&... args)
     {
@@ -136,7 +132,6 @@ public:
 
     ~unique_function() = default;
 
-    // member
 private:
     cc::poly_node_allocation<cc::impl::unique_function_node<R, Args...>, cc::impl::unique_function_node_traits<R, Args...>> _node;
 };

@@ -2,7 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string_view.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/fwd.hh>
@@ -13,17 +13,17 @@ namespace slib
 /// write the asset handle back into.
 struct shader_definition
 {
-    cc::string_view path; ///< package-relative, e.g. "compute/invert.hlsl"
+    cc::string_view path; ///< package-relative and must stay inside the package, e.g. "compute/invert.hlsl"
     sg::shader_stage stage;
     cc::string_view entry_point;
 
-    /// The generated global that call sites read. shader_library::add_package fills it in; nothing else
-    /// writes it.
+    /// The generated global that call sites read; shader_library::add_package fills it in.
+    /// Required — add_package asserts on a definition that names no global.
     shader_asset_handle* asset = nullptr;
 };
 
-/// A target's shaders, as emitted by sc_add_shader_package. A pure description with static storage —
-/// generated code owns one and hands it out through its package() function.
+/// A target's shaders, as emitted by sc_add_shader_package.
+/// A pure description with static storage — generated code owns one and hands it out through its package() function.
 struct shader_package
 {
     /// Identifies the package and, by default, where it mounts.
@@ -31,8 +31,8 @@ struct shader_package
 
     shader_language language = shader_language::hlsl;
 
-    /// Absolute path to the shader sources, baked at configure time. May not exist — a shipped build
-    /// has no source tree, and then the embedded files answer instead.
+    /// Absolute path to the shader sources, baked at configure time.
+    /// May be empty, and may name a directory that is not there — a shipped build has no source tree, and the embedded files answer instead.
     cc::string_view source_dir;
 
     /// Every source file the package needs, including the transitive `#include` closure.

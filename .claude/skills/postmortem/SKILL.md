@@ -12,9 +12,8 @@ Background and rationale: [docs/guides/postmortem.md](../../../docs/guides/postm
 
 ## What this is
 
-An engineering-productivity review of *this session* — where it lost momentum,
-not where the code had bugs. Work from the conversation and diff already in
-context; only open a file to confirm a specific friction claim.
+An engineering-productivity review of *this session* — where it lost momentum, not where the code had bugs.
+Work from the conversation and diff already in context; only open a file to confirm a specific friction claim.
 
 If a `[focus area]` argument is given, weight the review toward that part of the
 session, but still report anything high-leverage elsewhere.
@@ -34,8 +33,8 @@ session, but still report anything high-leverage elsewhere.
 
 ## Discipline (this matters more than coverage)
 
-- **Not exhaustive. Sparse output is the goal.** Two sharp findings beat eight
-  padded ones.
+- **Not exhaustive — sparse output is the goal.**
+  Two sharp findings beat eight padded ones.
 - **Omit any section with no strong finding.** Empty is a valid result.
 - Only include issues that materially increased **uncertainty, retries, code
   archaeology, context switching, or implementation risk**.
@@ -53,8 +52,8 @@ session, but still report anything high-leverage elsewhere.
 
 ## Recommended output shape
 
-All sections optional except the final leverage summary. Include only those with
-real findings, in any order:
+All sections optional except the final leverage summary.
+Include only those with real findings, in any order:
 
 ```
 ### Exploration costs
@@ -71,9 +70,9 @@ real findings, in any order:
   already in place*.
 - **Self-reflection:** "What is one thing this postmortem format failed to ask
   that would have produced a more useful review?"
-- If that reflection points at a *recurring* missing dimension (not a one-session
-  quirk), propose a one- or two-line addition to this `SKILL.md` — show the exact
-  line and where it goes — and ask before applying. Do not silently rewrite it.
+- If that reflection points at a *recurring* missing dimension, rather than a one-session quirk, propose a one- or two-line addition to this `SKILL.md`.
+  Show the exact line and where it goes, and ask before applying.
+  Do not silently rewrite it.
 
 ## Example invocation
 

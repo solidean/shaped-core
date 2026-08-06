@@ -1,15 +1,14 @@
 # shaped-rendering cheat sheet
 
-Concrete render routines and helpers on top of shaped-graphics. Namespace `sr`. Depends on
-shaped-graphics + shaped-shader-library. Headers are included by full path from `src/`:
-`#include <shaped-rendering/<name>.hh>`.
+Concrete render routines and helpers on top of shaped-graphics.
+Namespace `sr`.
+Depends on shaped-graphics + shaped-shader-library.
+Headers are included by full path from `src/`: `#include <shaped-rendering/<name>.hh>`.
 
-> **Scope note:** the render-routine *framework* lives in **shaped-graphics** — `sg::render_routine`,
-> `ctx.routines`, `sg::reload_generation` (see
-> [shaped-graphics/cheat-sheet.md](../shaped-graphics/cheat-sheet.md) and
-> [shaped-graphics/docs/render-routines.md](../shaped-graphics/docs/render-routines.md)). `sr` hosts
-> the concrete routines — Dear ImGui today, mipmap gen / tonemapping later. Format conventions live in
-> [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+> **Scope note:** the render-routine *framework* lives in **shaped-graphics** — `sg::render_routine`, `ctx.routines`, `sg::reload_generation`.
+> See [shaped-graphics/cheat-sheet.md](../shaped-graphics/cheat-sheet.md) and [shaped-graphics/docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
+> `sr` hosts the concrete routines: Dear ImGui and `blit_routine` today, mipmap gen / tonemapping later.
+> Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
 #include <shaped-rendering/all.hh>   // umbrella (window API + concrete routines as they land)
@@ -17,7 +16,8 @@ shaped-graphics + shaped-shader-library. Headers are included by full path from 
 
 ## Windows
 
-Always available. Without a backend (SDL3 not fetched) `try_create` fails instead of the API disappearing;
+Always available.
+Without a backend (SDL3 not fetched) `try_create` fails instead of the API disappearing.
 `SR_HAS_WINDOW` (1/0) answers "is a backend compiled in" for the rare case you need it at compile time.
 
 ```cpp
@@ -92,7 +92,8 @@ win->start_text_input();              // begin text_events + IME for this window
 ```
 
 - **`events()` is invalidated by the next `poll_events()`**, text included — copy anything you keep.
-- **Physical vs character**: `scancode` is position, `character` is layout. Movement uses `scancode`, ctrl+Z uses `character`.
+- **Physical vs character**: `scancode` is position, `character` is layout.
+  Movement uses `scancode`, ctrl+Z uses `character`.
   `sr::scancode` is our own position vocabulary — its numeric values mean nothing outside sr.
 - **Never rebuild text from `key_event`s** — an IME commits a whole phrase, a dead key commits nothing until the
   next keystroke, and a paste arrives as one `text_event`.
@@ -143,28 +144,29 @@ ctx->submit_command_list_and_present(*sc, cc::move(cmd));
 
 Gotchas:
 
-- **The scope's color format must not be sRGB** — imgui's colors are already sRGB-encoded; asserts rather
-  than double-encoding. Bind a non-srgb view of the same resource.
+- **The scope's color format must not be sRGB** — imgui's colors are already sRGB-encoded, so it asserts rather than double-encoding.
+  Bind a non-srgb view of the same resource.
 - **One call, inside the scope.** Textures, geometry upload and draws all happen in `execute()`.
   `render_viewports` is the opposite — it opens its own scopes and submits, so never call it inside one.
 - **Viewports change what a coordinate means.** Mouse positions and `ImGui::SetNextWindowPos` become
   desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`. An `input_event` must
   name its `window` for `process_event` to translate it.
-- **Viewports make `update_viewports()` mandatory every frame.** Skip it and imgui stops hit-testing the
-  mouse entirely — nothing hovers. `begin_frame` asserts rather than letting that go quiet.
+- **Viewports make `update_viewports()` mandatory every frame.**
+  Skip it and imgui stops hit-testing the mouse entirely — nothing hovers.
+  `begin_frame` asserts rather than letting that go quiet.
 - **Present the viewports before the main window, not after.** A window that has moved keeps showing the
   content drawn for its old position until its next frame composites; a vsync-blocking main present in
   between makes that a full frame, and a dragged window's contents visibly lag it.
 - **One thread.** The state is mutex-guarded, so two threads cannot corrupt it — but the routine is a
   per-context singleton holding *this frame's* geometry, so record imgui from one thread.
-- **Cursors and clipboard are wired**: imgui sets the pointer shape through `window_system::set_cursor`,
-  but only while `wants_mouse()`, so an app drawing its own cursor over the 3D view is left alone. Copy and
-  paste reach the system clipboard.
+- **Cursors and clipboard are wired**: imgui sets the pointer shape through `window_system::set_cursor`, but only while `wants_mouse()`.
+  An app drawing its own cursor over the 3D view is left alone.
+  Copy and paste reach the system clipboard.
 
 ## Pipeline cache
 
-One pipeline per key, built once — the reusable form of the "small vector of {format, pipeline} plus a
-find-or-create" a routine otherwise grows. The key is almost always the render-target pixel format.
+One pipeline per key, built once — the reusable form of the "small vector of {format, pipeline} plus a find-or-create" a routine otherwise grows.
+The key is almost always the render-target pixel format.
 
 ```cpp
 #include <shaped-rendering/keyed_pipeline_cache.hh>
@@ -191,8 +193,9 @@ pipelines.prepare(format);        // warm the cache for `format` ahead of the dr
 - **`handle` is `std::shared_ptr<Pipeline const>`** — for the default it IS `sg::raster_pipeline_handle`.
 - **Use `try_acquire` inside a rendering scope**, never `acquire`: an exception unwinding out past an open
   command list would leave it unsubmitted.
-- **The build callback may run on a pool worker and concurrently for distinct keys** — capture only immutable
-  state (the layout + shaders), and do not race `init` with in-flight builds. With no pool, builds run inline.
+- **The build callback may run on a pool worker and concurrently for distinct keys.**
+  Capture only immutable state (the layout + shaders), and do not race `init` with in-flight builds.
+  With no pool, builds run inline.
 - **The whole acquire path is `const`** — `acquire` / `try_acquire` / `acquire_async` / `prepare` work on a `keyed_pipeline_cache const&`, so a routine's const draw path can build lazily.
   Only `init` mutates.
 
@@ -218,7 +221,7 @@ sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of t
 ## Writing a concrete routine
 
 ```cpp
-#include <shaped-graphics/render_routine.hh>
+#include <shaped-graphics/routine/render_routine.hh>
 class my_routine : public sg::render_routine<my_routine>   // CRTP base; override the phases you need
 {
 public:

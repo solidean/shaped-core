@@ -128,6 +128,34 @@ TEST("shaped-linter - prose - Python comments and docstrings")
     }
 }
 
+TEST("shaped-linter - prose - measuring counts extracted text only")
+{
+    SECTION("markers, leaders and code are outside the count")
+    {
+        auto const s = measure_prose(extract("/// one two\nint x = 1; // three\n", "a.cc").view);
+        CHECK(s.lines == 2);
+        CHECK(s.words == 3);
+    }
+    SECTION("a run of spaces is one separator, not several words")
+    {
+        CHECK(measure_prose(extract("//   one    two   \n", "a.cc").view).words == 2);
+    }
+    SECTION("a file with no prose measures zero")
+    {
+        auto const s = measure_prose(extract("int x = 1;\n", "a.cc").view);
+        CHECK(s.lines == 0);
+        CHECK(s.words == 0);
+    }
+    SECTION("markdown counts the markers it keeps")
+    {
+        // `# Title` extracts marker and all, so it measures as two words — the delta stays comparable
+        // because both sides are measured the same way.
+        auto const s = measure_prose(extract("# Title\n\nbody text\n", "a.md").view);
+        CHECK(s.lines == 2);
+        CHECK(s.words == 4);
+    }
+}
+
 TEST("shaped-linter - prose - markdown body text, never its code")
 {
     SECTION("paragraphs are blocks and fences are skipped")
@@ -145,5 +173,12 @@ TEST("shaped-linter - prose - markdown body text, never its code")
     SECTION("a table row is not")
     {
         CHECK(extract("text\n\n| a. b | c |\n", "a.md").lines() == "text");
+    }
+    SECTION("frontmatter is metadata, not prose")
+    {
+        // A skill file's `description:` is one scalar the harness consumes whole, so no prose rule may
+        // ask it to split at a seam.
+        auto const e = extract("---\nname: x\ndescription: One sentence. Then another.\n---\n\nbody\n", "a.md");
+        CHECK(e.lines() == "body");
     }
 }

@@ -133,8 +133,8 @@ TEST("shaped-linter - apply_edits - an insertion at a replacement's offset appli
 
 TEST("shaped-linter - collect_fix_edits merges a byte-identical edit")
 {
-    // Three findings, each carrying the same insertion so that each fix is safe alone. The file must still
-    // gain exactly one directive.
+    // Three findings, each carrying the same insertion so that each fix is safe alone.
+    // The file must still gain exactly one directive.
     auto const src = cc::string_view("#include <a.hh>\n"
                                      "\n"
                                      "cc::u32 f();\n"
@@ -166,8 +166,8 @@ TEST("shaped-linter - fix round-trip - a file-scope qualifier brings its using-d
 
 TEST("shaped-linter - apply_fixes ignores the hint channel")
 {
-    // The one behavior that makes a hint a hint. This member carries both channels — fix `= {false}` and
-    // hint `= false` — and the applied result must be the fix, with the hint's edit left on the floor.
+    // The one behavior that makes a hint a hint.
+    // This member carries both channels — fix `= {false}` and hint `= false` — and the applied result must be the fix, with the hint's edit left on the floor.
     auto const src = cc::string_view("struct S { cc::atomic<bool> _p{false}; };");
     auto const found = run_rules_on_text(src);
     REQUIRE(found.size() == 1);

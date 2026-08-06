@@ -9,8 +9,8 @@
 
 namespace
 {
-/// ssc::dxc::compiler is explicitly one-per-thread, and slib compiles from both the reload watcher's
-/// thread and whichever thread acquires — so the instance is thread_local and the seam stays const.
+/// ssc::dxc::compiler is explicitly one-per-thread, and slib compiles from both the reload watcher's thread and whichever thread acquires.
+/// So the instance is thread_local, and the seam stays const.
 ssc::dxc::compiler* thread_local_compiler()
 {
     static thread_local auto compiler = ssc::dxc::compiler::create();
@@ -40,8 +40,7 @@ public:
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
-        // The cache keys on the flattened source and options, so an identical recompile — a reload that
-        // touched a file without changing what it expands to — returns the node that already exists.
+        // The cache keys on the flattened source and options: a reload that touched a file without changing what it expands to returns the node that already exists.
         return _cache.compile(to_dxc(desc));
     }
 
@@ -51,8 +50,7 @@ private:
         return ssc::dxc::shader_description{.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage};
     }
 
-    // Mutable: compile() is const on the seam (it must be callable from several threads), and the cache
-    // is itself thread-safe.
+    // Mutable: compile() is const on the seam (it must be callable from several threads), and the cache is itself thread-safe.
     mutable ssc::dxc::shader_cache _cache;
 };
 } // namespace

@@ -7,8 +7,8 @@
 
 #include <stdexcept>
 
-// Exercises the recommended SECTION workflow: setup in the outer TEST, a SECTION to fuzz, and a
-// SECTION pinning a known behavior. This invariant always holds, so the fuzz SECTION passes.
+// Exercises the recommended SECTION workflow: setup in the outer TEST, a SECTION to fuzz, and a SECTION pinning a known behavior.
+// This invariant always holds, so the fuzz SECTION passes.
 TEST("fuzz engine - section workflow")
 {
     auto test = nx::fuzz::test::create();

@@ -11,10 +11,9 @@ struct random;
 
 namespace nx::fuzz
 {
-/// Generates a single fuzz program: on each step it rolls a type-correct operation, biased toward
-/// operations that still owe executions (execute_at_least), with a fallback that runs any eligible
-/// operation to manufacture missing prerequisite values. A non-progress guard aborts pathological
-/// setups (e.g. preconditions that can never be satisfied).
+/// Generates a single fuzz program: on each step it rolls a type-correct operation, biased toward operations that still owe executions (execute_at_least).
+/// The fallback runs any eligible operation, to manufacture missing prerequisite values.
+/// A non-progress guard aborts a pathological setup, such as a precondition that can never be satisfied.
 struct fuzz_runner
 {
     fuzz_runner(fuzz_machine const& machine, cc::random& rng);

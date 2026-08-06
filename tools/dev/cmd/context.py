@@ -1,11 +1,8 @@
 """Per-command execution context: project policy plus the shared resolver glue.
 
-`Policy` is pure project data — which presets each command reaches for — and is
-declared in dev.py (the one place a downstream fork edits). `Context` bundles the
-repo root with that policy and the cross-command helpers every command needs
-(preset/target resolution, the platform default, the `*-test` convention, error
-exit). dev.py builds one Context and hands it to each command's `run(args, ctx)`,
-so commands never reach back into dev.py.
+`Policy` is pure project data, declared in dev.py; `Context` adds the repo root and the helpers every command needs.
+dev.py builds one and hands it to each command's `run(args, ctx)`, so a command never reaches back into dev.py.
+docs/dev-py-driver.md is the line this seam defends.
 """
 
 from __future__ import annotations
@@ -95,11 +92,10 @@ class Context:
     def discover(self, preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
         """Discover targets for a preset, (re)configuring first when the tree is stale or unconfigured.
 
-        Configuring up front (not just on NotConfiguredError) is what keeps the target list current:
-        an already-configured tree happily answers with a stale list after CMakeLists/sources change,
-        so `list-targets` and `build -t <new-target>` would otherwise miss anything added since the
-        last configure. `ensure_configured` fingerprints the cmake inputs, so this is a no-op when
-        nothing relevant changed."""
+        Configuring up front, not only on NotConfiguredError, is what keeps the list current.
+        An already-configured tree answers with a stale list after CMakeLists or the source listing change, so `build -t <new-target>` would miss anything added since.
+        `ensure_configured` fingerprints the cmake inputs, so this is a no-op when nothing relevant changed.
+        """
         result = dev.ensure_configured(preset, root=self.root, emsdk_path=emsdk_path)
         if result is not None and not result.ok:
             self.die(f"Configure failed for {preset.name!r}")

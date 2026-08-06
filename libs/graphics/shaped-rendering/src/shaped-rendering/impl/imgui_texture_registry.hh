@@ -3,7 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <imgui/imgui.h> // ImTextureID / ImTextureData / ImDrawData — this is a backend-internal header
-#include <shaped-graphics/texture.hh>
+#include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/fwd.hh>
 
 namespace sr::impl

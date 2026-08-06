@@ -1,10 +1,10 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/blend_state.hh>
-#include <shaped-graphics/depth_stencil_state.hh>
-#include <shaped-graphics/primitive_topology.hh>
-#include <shaped-graphics/raster_pipeline.hh>
-#include <shaped-graphics/rasterization_state.hh>
-#include <shaped-graphics/vertex_input.hh>
+#include <shaped-graphics/raster/blend_state.hh>
+#include <shaped-graphics/raster/depth_stencil_state.hh>
+#include <shaped-graphics/raster/primitive_topology.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raster/rasterization_state.hh>
+#include <shaped-graphics/raster/vertex_input.hh>
 
 #include <cstddef> // offsetof
 
@@ -94,8 +94,8 @@ TEST("sg - raster fixed-function state defaults")
     CHECK(ds.stencil_test == false);
     CHECK(ds.depth_compare == sg::compare_op::less);
 
-    // A default-constructed description writes triangles with no depth / no color targets, and no optional
-    // geometry / tessellation stages.
+    // A default-constructed description writes triangles with no depth and no color targets.
+    // It also has no optional geometry / tessellation stages.
     sg::raster_pipeline_description const desc;
     CHECK(desc.topology == sg::primitive_topology::triangle_list);
     CHECK(desc.color_targets.empty());

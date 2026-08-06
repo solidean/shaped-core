@@ -10,6 +10,7 @@
 
 
 /// Mixin implementing the common "contiguous container over cc::allocation<T>" surface area.
+/// The shared container contracts it helps implement are in [containers](../../../../docs/containers.md).
 ///
 /// This is a CRTP-style helper: concrete containers privately inherit it as
 /// `cc::allocating_container<T, Derived>`, then selectively re-expose members via `using`.
@@ -32,19 +33,16 @@
 /// actual container type.
 ///
 /// Concrete containers can tailor:
-/// - growth behavior (no growth like `array`, back-only growth like `vector`, double-ended like `devector`)
+/// - growth behavior: none like `array`, back-only like `vector`, or double-ended (no such container exists yet)
 /// - invariants and allowed operations (push/pop/resize/rebalance)
 /// - copy semantics (keep/delete/replace the provided deep-copy defaults)
 ///
-/// Capacity is expressed directionally (`capacity_front` / `capacity_back` and corresponding
-/// `has_capacity_*_for`) because a single `capacity()` is semantically ambiguous across policies:
-/// for a vector it typically means "append capacity", whereas for a devector it could mean a pooled
-/// budget or a total-possible size anchored at `obj_start`. Containers are free to define their own
-/// `capacity()` (or `capacity_total()`) in terms of the directional primitives if they want.
+/// Capacity is expressed directionally (`capacity_front` / `capacity_back`, plus the matching `has_capacity_*_for`) because a single `capacity()` is ambiguous across policies.
+/// For a vector it typically means "append capacity", whereas a double-ended policy could mean a pooled budget or a total-possible size anchored at `obj_start`.
+/// Containers are free to define their own `capacity()` (or `capacity_total()`) in terms of the directional primitives.
 ///
-/// Member functions with the `_stable` suffix guarantee that they will never reallocate the buffer
-/// or move/invalidate live objects. They keep existing references, pointers, and iterators stable.
-/// These functions will typically assert that sufficient allocation capacity is already present.
+/// Member functions with the `_stable` suffix never reallocate the buffer and never move or invalidate live objects, so existing references, pointers and iterators stay valid.
+/// They typically assert that enough allocation capacity is already present.
 ///
 ///
 /// === Exception & reference guarantees ===
@@ -79,16 +77,13 @@ struct cc::allocating_container
     /// Combined with rounding allocation sizes to multiples of this value, this ensures that
     /// distinct container allocations never share a cache line, eliminating allocator-induced
     /// false sharing between containers.
-    /// This removes "spooky" cross-object performance interference while keeping alignment small
-    /// enough to avoid systematic cache set aliasing that can occur with larger alignments.
-    /// Larger-than-necessary alignment inside a single container (e.g. multiple elements per line)
-    /// remains the programmer's responsibility by design.
+    /// This removes "spooky" cross-object performance interference, while keeping alignment small enough to avoid the systematic cache-set aliasing larger alignments can cause.
+    /// Larger-than-necessary alignment inside a single container — multiple elements per cache line, say — remains the programmer's responsibility by design.
     ///
-    /// Deliberately a function, not a static constexpr variable: its body uses alignof(T), so as a data
-    /// member its initializer would require a complete T. MSVC evaluates that initializer eagerly when the
-    /// container specialization is instantiated, which breaks recursive/incomplete element types (e.g. a
-    /// struct holding a cc::vector of itself). As a function, alignof(T) is only evaluated on call, by
-    /// which point T is complete.
+    /// Deliberately a function, not a static constexpr variable: its body uses alignof(T), so as a data member its initializer would require a complete T.
+    /// MSVC evaluates that initializer eagerly when the container specialization is instantiated, which breaks recursive or incomplete element types.
+    /// A struct holding a cc::vector of itself is the case that breaks.
+    /// As a function, alignof(T) is only evaluated on call, by which point T is complete.
     static constexpr isize alloc_alignment()
     {
         return cc::max(alignof(T), std::hardware_destructive_interference_size);
@@ -101,13 +96,11 @@ struct cc::allocating_container
     /// allocations balloon uncontrollably.
     static constexpr isize alloc_max_slack = 4096;
 
-    /// Customization knob for deriving containers: if true, tries to preserve existing front capacity
-    /// on some reallocation calls.
+    /// Customization knob for deriving containers: if true, tries to preserve existing front capacity on some reallocation calls.
     ///
-    /// This signals that the container actively uses front capacity (e.g., devector with push_front).
-    /// When true, reallocations will attempt to preserve existing front space when growing the allocation.
-    /// When false (e.g., vector), reallocations for back-only growth will drop any existing front capacity
-    /// to avoid wasting memory on unused space.
+    /// True signals that the container actively uses front capacity, so a reallocation attempts to preserve existing front space while growing.
+    /// False — `vector`'s setting — lets a back-only growth drop any existing front capacity rather than waste memory on unused space.
+    /// No container sets it true today; it exists for a future double-ended policy.
     static constexpr bool uses_capacity_front = true;
 
     // element access
@@ -294,17 +287,15 @@ private:
             return &_data.obj_end;
 
         // otherwise we need a full new allocation
-        // TODO: think about re-center logic for cc::devector
+        // TODO: think about re-center logic if a double-ended container ever lands
         new_allocation = cc::allocation<T>::create_empty_bytes(new_size_request_min, new_size_request_max,
                                                                alloc_alignment(), _data.custom_resource);
 
-        // Construct new elements where they would be in the new allocation (after old elements)
-        // The old allocation remains valid during construction phase
-        // The new allocation's live range tracks only newly-constructed elements for exception safety:
-        // If we add multiple elements and construction throws, only the successfully constructed
-        // new elements (e.g. first k of push_back_range when at k+1) need cleanup via new_allocation's dtor
-        // Thus the live range semantically starts behind the old allocation's live range
-        // In finalize, when we move over old elements, we extend it to the full allocation
+        // Construct the new elements where they will sit in the new allocation, after the old ones.
+        // The old allocation stays valid throughout the construction phase.
+        // The new allocation's live range tracks only the newly-constructed elements, for exception safety:
+        // if construction throws partway, only those need cleanup through new_allocation's dtor — the first k of a push_back_range that fails at k+1.
+        // So the live range semantically starts behind the old allocation's live range, and finalize extends it to the full allocation once the old elements move over.
         new_allocation.obj_start += new_capacity_front + size();
         new_allocation.obj_end = new_allocation.obj_start;
         return &new_allocation.obj_end;
@@ -887,7 +878,8 @@ public:
     /// Removes and returns the element at the given index by swapping with the last element.
     /// Does not preserve relative order of elements (hence _unordered suffix).
     /// Precondition: 0 <= idx < size().
-    /// O(1) complexity. All references remain valid except for the last element.
+    /// O(1) complexity.
+    /// All references remain valid except for the last element.
     /// Preferred over pop_at() when element order doesn't matter.
     /// NOTE: Prefer remove_at_unordered() if you don't need the return value (avoids an extra move).
     [[nodiscard("use remove_at_unordered() if you don't need the return value")]] constexpr T pop_at_unordered(isize idx)
@@ -912,7 +904,8 @@ public:
     /// Removes the element at the given index by swapping with the last element.
     /// Does not preserve relative order of elements (hence _unordered suffix).
     /// Precondition: 0 <= idx < size().
-    /// O(1) complexity. All references remain valid except for the last element.
+    /// O(1) complexity.
+    /// All references remain valid except for the last element.
     /// Preferred over remove_at() when element order doesn't matter.
     /// Fast path: avoids the extra move required by pop_at_unordered().
     constexpr void remove_at_unordered(isize idx)
@@ -1036,7 +1029,8 @@ public:
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Predicate is invoked as pred(element) or pred(idx, element) for each element.
     /// Stops calling the predicate once a match is found.
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     template <class Pred>
     constexpr cc::optional<isize> remove_first_where(Pred&& pred)
     {
@@ -1065,7 +1059,8 @@ public:
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Predicate is invoked as pred(element) or pred(idx, element) for each element.
     /// Stops calling the predicate once a match is found (scanning backward).
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     template <class Pred>
     constexpr cc::optional<isize> remove_last_where(Pred&& pred)
     {
@@ -1104,7 +1099,8 @@ public:
     /// Removes the first element that compares equal to the given value.
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Stops searching once a match is found.
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     constexpr cc::optional<isize> remove_first_value(T const& value)
     {
         static_assert(requires { bool(value == value); }, "remove_first_value: T must support operator==");
@@ -1114,7 +1110,8 @@ public:
     /// Removes the last element that compares equal to the given value.
     /// Returns the index of the removed element, or cc::nullopt if no element matched.
     /// Stops searching once a match is found (scanning backward).
-    /// O(n) complexity. References and pointers to elements after the removed element are invalidated.
+    /// O(n) complexity.
+    /// References and pointers to elements after the removed element are invalidated.
     constexpr cc::optional<isize> remove_last_value(T const& value)
     {
         static_assert(requires { bool(value == value); }, "remove_last_value: T must support operator==");

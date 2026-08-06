@@ -1,19 +1,21 @@
 # babel-serializer cheat sheet
 
-Serialization / deserialization of various formats. Namespace `babel`; headers included by full path from `src/`.
-> Reading takes a `cc::read_stream` and parses against its buffered window — no whole-input buffering.
-> Each format parses into an unopinionated, read-once structure; string_view / span overloads wrap a `span_read_stream_adapter`.
+Serialization / deserialization of various formats.
+Namespace `babel`; headers included by full path from `src/`.
+> Each format parses into an unopinionated, read-once structure, and reading takes a `cc::read_stream`.
 > The deviation: `gltf` takes a `cc::pinned_data<byte const>` so its buffers are zero-copy subviews of the input.
+> [docs/coding-guidelines.md](docs/coding-guidelines.md) owns both rules.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (base64 + json + markdown + sqlite + obj + gltf + image)
+#include <babel-serializer/all.hh>   // umbrella (base64 + json + markdown + sqlite + obj + gltf + png + jpg + image)
 ```
 
 ---
 
 ## base64 (`babel::base64`)
 
-Tolerant on input, canonical on output. No streaming interface — data URIs and embedded blobs are already in memory.
+Tolerant on input, canonical on output.
+No streaming interface — data URIs and embedded blobs are already in memory.
 
 ```cpp
 #include <babel-serializer/data/base64.hh>
@@ -61,7 +63,8 @@ cc::string_view key = e.key();    // this node's key within its parent object ("
 
 ## Markdown (`babel::markdown`)
 
-Block level only — same flat `document` / `ref` shape as JSON. Inline spans (emphasis, links, code spans) are **not** parsed.
+Block level only — the same flat `document` / `ref` shape as JSON.
+Inline spans (emphasis, links, code spans) are **not** parsed.
 
 ```cpp
 #include <babel-serializer/data/markdown.hh>
@@ -134,10 +137,13 @@ struct read_options {   // by value; the default touches nothing outside the inp
 };
 
 cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte const> bytes, read_options = {}); // ZERO-COPY
-cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte> bytes, read_options = {});
+cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte> const& bytes, read_options = {});
 cc::result<babel::gltf::data> read(cc::read_stream& in, read_options = {});       // slurps, then pins (moves)
 cc::result<babel::gltf::data> read(cc::span<cc::byte const> bytes, read_options = {}); // COPIES into a pin
 cc::result<babel::gltf::data> read(cc::string_view text, read_options = {});           // COPIES into a pin
+
+// getting a pin from bytes you already own — cc::make_pinned_data moves, it does not copy
+auto pinned = cc::pinned_data<cc::byte const>(cc::make_pinned_data(cc::move(bytes)));
 ```
 
 ```cpp
@@ -192,7 +198,8 @@ cc::result<cc::vector<u32>> idx = doc.read_indices(ps[0]);  // widens a u8 / u16
 
 // accessor arithmetic, if you do it yourself:
 a.component_count(); // 1/2/3/4/4/9/16   a.component_size(); // 1/1/2/2/4/4
-a.element_size();    // packed element bytes INCLUDING per-column 4-byte matrix padding (MAT3 of u8 == 12)
+a.element_size();    // packed element bytes INCLUDING per-column 4-byte matrix padding (MAT3 of u8 == 12, of u16 == 24)
+                     // MAT4 / MAT3 of f32 match sizeof(tg::mat4f) / sizeof(tg::mat3f)
 ```
 
 ```cpp
@@ -203,7 +210,8 @@ n.has_matrix ? use(n.matrix) : use(n.translation, n.rotation, n.scale); // tg::m
 
 ## SQLite (`babel::sqlite`)
 
-A live database engine, not a stream parser — a thin RAII wrapper over an open connection. Full read/write.
+A live database engine, not a stream parser — a thin RAII wrapper over an open connection.
+Full read/write.
 
 ```cpp
 #include <babel-serializer/data/sqlite.hh>
@@ -249,7 +257,7 @@ stmt.reset();                    // re-execute (keeps bound parameters); clear_b
 ## Images (`babel::image` + `babel::png` / `babel::jpg`)
 
 Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
-Backend is the vendored, always-linked **stb** (`extern/stb`), kept behind `image/impl/stb_backend` — no stb header reaches a babel header.
+The backend is the vendored, always-linked **stb** — never visible from a babel header, and never reached by the aggregator.
 
 ```cpp
 #include <babel-serializer/image/image.hh>  // aggregator — the "I just want pixels" layer
@@ -288,35 +296,44 @@ babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stre
 
 ## Gotchas
 
-- **Read-once, not mutable.** `json::document` is great to traverse, has no insertion API by design.
-- **`ref` borrows the document.** It holds a `document*`; keep the `document` alive while traversing.
-  `as_string()` / `key()` return views into the document's arena — same lifetime.
-- **Kind-tolerant, never throws on shape.** `r["missing"]`, `r[99]`, `r.as_double()` on a string all return a fallback / invalid ref.
-  Check `is_valid()` when absence matters.
-- **OBJ indices are resolved.** 1-based and negative/relative OBJ indices are both converted to 0-based here; a missing corner attribute is `-1`.
-- **OBJ is faithful, not a mesh.** No triangulation, no dedup — polygons stay polygons. `usemtl` / `o` / `g` / `s` are recorded (or skipped), not applied.
-- **Errors carry an offset / line.** JSON errors report the byte offset; OBJ errors report the line number. Both come back as a `cc::result` error.
-- **base64 is tolerant decoding, canonical encoding.** Both alphabets and optional padding on the way in; standard alphabet with `=` padding on the way out. A single trailing character (`"Zm9vY"`) encodes no byte and is an error, not a truncation.
-- **glTF: which overload copies.** Only `read(cc::pinned_data<...>)` is zero-copy. The span / string_view overloads pin an owned **copy** (a span is a borrow, and the buffers must not dangle); the stream overload slurps once and *moves* that buffer into the pin.
-- **glTF buffer views outlive the document.** `buffer::data` and `accessor_view::bytes` carry the pin, so they stay valid after both the `data` and the caller's own handle are gone. `accessor_view::element(i)` does *not* — it is a plain span into the view.
-- **glTF `resolved` implies the exact length.** A resolved buffer has `data.size() == byte_length`; a GLB BIN chunk is trimmed past its padding. `resolved == false` with empty `data` means an external URI nobody fetched — supply `read_options::resolve_uri` (the URI arrives exactly as written; path policy is yours).
-- **glTF indices are strong enums, `find` means absence.** `invalid` is the only reason `find` returns nullptr — `read` validates every stored index, so out-of-range never reaches you. Cross into the integer with an explicit `int(x)`.
-- **glTF stride 0 means packed, and accessor offsets stack.** `buffer_view::byte_stride == 0` is "absent", not a stride; `accessor_view` resolves it to `element_size`. An accessor's `byte_offset` is *relative to* its bufferView's.
-- **glTF matrix accessors are column-padded.** `element_size()` includes the spec's per-column 4-byte padding: a `MAT3` of `u8` is 12 bytes (not 9), of `u16` is 24 (not 18). `MAT4`/`MAT3` of `f32` match `sizeof(tg::mat4f)` / `sizeof(tg::mat3f)`.
-- **glTF is strict about bytes, lenient about the rest.** Hard errors: sparse accessors, a non-empty `extensionsRequired` (so Draco / meshopt / basisu are refused by name), unknown `componentType` / `type` / `mode`, and any range escaping its bufferView or buffer. Skipped: unknown members, `extras`, morph targets, and the `skins` / `animations` / `cameras` arrays — a wrong JSON type on an *optional* scalar just falls back.
-- **glTF: `.value()` is not the whole answer — check `issues`.** Everything skipped (`unsupported`), unfollowable (`unresolved`) or tolerated (`malformed`) is recorded there with the element's index, so a usable-but-incomplete import is visible. An issue never *replaces* an error: anything that would make the structure wrong still fails the read. A fully understood file leaves `has_issues()` false.
-- **glTF hands back encoded image bytes, never pixels.** `image::data` is the PNG/JPEG payload — feed it to `babel::image::read`. `babel::gltf` does not depend on `babel::image`.
-- **glTF node transforms are not composed.** `has_matrix` picks which fields are authoritative; the reader never multiplies TRS into a matrix (typed-geometry has no TRS composition yet) and never flattens the hierarchy.
-- **Markdown never fails on content.** Every input is a valid document — its `cc::result` reports stream I/O failure only. An unterminated fence simply runs to end of input.
-- **Markdown parses blocks, not inlines.** `text()` is the raw source, so `**bold**` keeps its asterisks and there are no inline child nodes. Setext headings, indented code blocks, tables and HTML blocks are `[planned]`, not silently handled.
-- **Markdown `line()` is what makes a corpus debuggable.** Every block records the 1-based line it starts on, so a failure can point at the file and line rather than at a string literal.
-- **SQLite backend may be absent.** The API is *always* declared and callable; when the fetch-on-demand backend wasn't compiled in, `is_available()` is false and every `open_*` returns a `cc::result` error — never a missing symbol. Branch on `is_available()`, never on a macro.
-- **SQLite handles are live and non-owning downstream.** `database` / `statement` are move-only and own their handle. A `row` and any `as_string()` / `as_blob()` it hands back are only valid until the next step or the statement dies — copy out (`cc::string::create_copy_of`) to keep them.
-- **SQLite param vs. column indexing differs.** Bind parameters are **1-based** (`stmt.bind(1, …)`); result columns are **0-based** (`row.as_i64(0)`). A row-step error is sticky, not per-row: the range-for just ends — check `is_ok()` / `error()` after the loop.
-- **Images are top-left origin, tightly packed.** `row_stride() == width * channels * bytes_per_component()`; no padding. Pixels are 8-bit today regardless of the file's native `bit_depth` (a u16 / f32 path is API-ready but not yet decoded).
-- **JPG is lossy; PNG is lossless.** Round-trip PNG for exact pixels; expect small per-channel deltas through JPG. `channels` is the *decoded* count (palette PNGs are de-palettized, Adam7 is de-interlaced) — the native `color` / `interlace` fields still tell you the original encoding.
-- **Image metadata is mostly `[todo]`.** stb decodes pixels only. The structural header fields (`bit_depth` / `color` / `interlace`; `progressive` / `chroma` / `jfif_density`) are parsed natively, but the rich metadata fields (ICC, gamma, text chunks, EXIF, comments) are *designed but not yet populated* — a future native chunk/marker walker fills them without an API change.
-- **Aggregator vs. low-level.** `babel::image` is for "just the pixels" and dispatches by format; reach for `babel::png` / `babel::jpg` when you need a format's own metadata. The aggregator never touches stb — it delegates to the codecs.
+Only what the signatures above cannot tell you.
+
+- **`ref` borrows the document.** It holds a `document*`, so keep the `document` alive while traversing.
+  `as_string()` / `key()` return views into the document's arena, with the same lifetime.
+- **Kind-tolerant accessors never fail on shape**, so check `is_valid()` when absence is what you care about.
+  `r["missing"]`, `r[99]` and `r.as_double()` on a string each return a fallback or an invalid ref instead.
+- **Errors carry an offset or a line.** JSON reports the byte offset, OBJ the line number, both as a `cc::result` error.
+- **OBJ records, never applies.** No triangulation and no dedup, so polygons stay polygons; `usemtl` / `o` / `g` become named face spans and `s` is skipped outright.
+- **base64 rejects a lone trailing character.** `"Zm9vY"` is a final quantum encoding no byte at all, so it is an error rather than a truncation.
+- **Markdown never fails on content.** Every input is a valid document, so its `cc::result` reports stream I/O failure only.
+  An unterminated fence simply runs to end of input.
+- **Markdown `line()` is what makes a corpus debuggable**: a failing case points at a file and line rather than at a string literal.
+- **glTF buffer views outlive the document.** `buffer::data` and `accessor_view::bytes` carry the pin, so they survive both the `data` and the caller's own handle.
+  `accessor_view::element(i)` does *not* — it is a plain span into the view.
+- **glTF `resolved` implies the exact length.** A resolved buffer has `data.size() == byte_length`, and a GLB BIN chunk is trimmed past its padding.
+  `resolved == false` with empty `data` means an external URI nobody fetched, so supply `read_options::resolve_uri`.
+  The URI arrives exactly as the file spelled it; percent-decoding and base-path policy are yours.
+- **glTF is strict about bytes, lenient about everything else.**
+  Hard errors: a sparse accessor, an unknown `componentType` / `type` / `mode`, and any range escaping its bufferView or buffer.
+  A non-empty `extensionsRequired` is one too, which is what refuses Draco / meshopt / basisu by name.
+  Skipped: unknown members, `extras`, morph targets, and the `skins` / `animations` / `cameras` arrays.
+  A wrong JSON type on an *optional* scalar falls back to the default.
+- **glTF `.value()` is not the whole answer — check `issues`**, which names every element the reader skipped, could not resolve, or tolerated.
+  A usable-but-incomplete import is the normal case for a real asset, and a file the reader fully understood leaves `has_issues()` false.
+- **glTF hands back encoded image bytes, never pixels.** `image::data` is the PNG/JPEG payload — feed it to `babel::image::read`.
+  `babel::gltf` does not depend on `babel::image`.
+- **glTF node transforms are not composed.** The reader never multiplies TRS into a matrix and never flattens the hierarchy; `has_matrix` says which fields are authoritative.
+- **Cross into a glTF index enum explicitly**, with `int(x)` — the strong enums allow no implicit conversion.
+- **SQLite: branch on `is_available()`, never on a macro.** The fetch-on-demand backend may be absent, and the API is declared and callable either way.
+- **SQLite rows are valid only until the next step.** A `row`, and any `as_string()` / `as_blob()` it hands back, dies with it.
+  Copy out with `cc::string::create_copy_of` to keep it.
+  `database` and `statement` are move-only and own their handle.
+- **A SQLite step error is sticky, not per-row.** The range-for just ends, so read `is_ok()` / `error()` after the loop.
+- **JPG is lossy, PNG lossless.** Round-trip PNG for exact pixels, and expect small per-channel deltas through JPG.
+- **`channels` is the *decoded* count**, since palette PNGs are de-palettized and Adam7 is de-interlaced.
+  The native `color` / `interlace` fields still report the original encoding.
+- **Image pixels are 8-bit today**, whatever the file's native `bit_depth` says; the `u16` / `f32` paths are API-ready but not decoded.
+- **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
 
 ## Umbrellas
 

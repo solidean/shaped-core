@@ -44,9 +44,9 @@ struct expected_assertion_exception
 };
 
 // Sink that collects check outcomes instead of recording them on the active test.
-// Used by tools (e.g. the fuzz engine) that drive user code which is expected to fail often:
-// while a sink is installed, CHECK/REQUIRE failures are tallied here, no test error is recorded,
-// and REQUIRE/SKIP no longer throw to abort. The first failure message is kept for diagnostics.
+// Used by tools that drive user code expected to fail often, the fuzz engine above all.
+// While a sink is installed, CHECK/REQUIRE failures are tallied here, no test error is recorded, and REQUIRE/SKIP no longer throw to abort.
+// The first failure message is kept for diagnostics.
 struct check_capture_sink
 {
     int executed = 0;
@@ -191,10 +191,11 @@ struct check_handle final
 
     static check_handle make(check_kind kind, cmp_op op, char const* expr_text, bool passed, cc::source_location loc);
 
-    // Framework-internal, used by the make_check_handle* factories below. Kept apart from dump/context so the
-    // auto-captured operands and the framework's own explanation never occupy a user annotation slot.
+    // Framework-internal, used by the make_check_handle* factories below.
+    // Kept apart from dump/context so the auto-captured operands and the framework's own explanation never occupy a user annotation slot.
 
-    /// Record the decomposed operands of a comparison. Only stringifies on failure, like dump().
+    /// Record the decomposed operands of a comparison.
+    /// Only stringifies on failure, like dump().
     template <class L, class R>
     check_handle capture_operands(L const& lhs, R const& rhs) &&
     {

@@ -1,6 +1,6 @@
-// dx12 bind-path creation: binding_group_layout / pipeline_layout / compute_pipeline / binding_group. The
-// heavy bodies live in the respective dx12_*.cc; these are the context create_dx12_* entry points plus the
-// sg::context override forwarders (which unpack the description / downcast the abstract layout handles).
+// dx12 bind-path creation: binding_group_layout / pipeline_layout / compute_pipeline / binding_group.
+// The heavy bodies live in the respective dx12_*.cc; these are the context create_dx12_* entry points.
+// Plus the sg::context override forwarders, which unpack the description and downcast the abstract layout handles.
 
 #include <shaped-graphics/backends/dx12/dx12_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
@@ -11,11 +11,11 @@
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
-#include <shaped-graphics/compute_pipeline.hh>
-#include <shaped-graphics/pipeline_layout.hh>
-#include <shaped-graphics/raster_pipeline.hh>
-#include <shaped-graphics/raytracing_pipeline.hh>
-#include <shaped-graphics/raytracing_shader_table.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
 namespace sg::backend::dx12
 {

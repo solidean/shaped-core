@@ -5,9 +5,9 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group.hh>
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
 {
@@ -47,9 +47,9 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     group->transient = scope == sg::lifetime_scope::transient;
     group->creation_epoch = ctx.current_epoch();
 
-    // Allocate a range in each heap the layout uses. Persistent groups allocate from the free list (freed
-    // on release); transient groups ring-allocate (reclaimed collectively when their epoch retires). Stored
-    // on the group so the destructor frees a persistent range even if creation fails partway.
+    // Allocate a range in each heap the layout uses.
+    // Persistent groups allocate from the free list, freed on release; transient groups ring-allocate, reclaimed collectively when their epoch retires.
+    // Stored on the group so the destructor frees a persistent range even if creation fails partway.
     auto const alloc_table = [&](dx12_descriptor_heap& heap, int count) -> cc::result<dx12_descriptor_alloc>
     {
         if (count == 0)
@@ -134,8 +134,8 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
         }
     }
 
-    // Match each provided dynamic sampler to a sampler slot by name and create its descriptor. Static
-    // samplers live in the root signature, so they are not (and must not be) provided here.
+    // Match each provided dynamic sampler to a sampler slot by name and create its descriptor.
+    // Static samplers live in the root signature, so they must not be provided here.
     cc::vector<char> sampler_filled;
     for (isize i = 0; i < layout->sampler_slots.size(); ++i)
         sampler_filled.push_back(char(0));

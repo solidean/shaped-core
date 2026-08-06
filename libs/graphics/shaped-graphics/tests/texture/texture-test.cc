@@ -1,13 +1,12 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
-#include <shaped-graphics/texture.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/texture.hh>
 
 #include <memory>
 
-// Pure value/type tests: pixel_format helpers, texture_description shape, and the concept-gated
-// texture<Traits> surface — no GPU needed. Real texture creation lives in texture-create-test.cc
-// (INVOCABLE_TESTs run against each backend).
+// Pure value / type tests: pixel_format helpers, texture_description shape, and the concept-gated texture<Traits> surface.
+// No GPU needed — real texture creation lives in texture-create-test.cc, whose INVOCABLE_TESTs run against each backend.
 
 // --- pixel_format helpers ----------------------------------------------------------------------------
 
@@ -49,7 +48,8 @@ TEST("sg - pixel_format block size")
     CHECK(sg::format_block_size(pf::rgba32_float) == 16);
     CHECK(sg::format_block_size(pf::depth32_float_stencil8) == 8);
 
-    // BC1 / BC4 are 8-byte blocks; the rest of BC are 16-byte blocks. Every block spans 4x4 texels.
+    // BC1 / BC4 are 8-byte blocks; the rest of BC are 16-byte blocks.
+    // Every block spans 4x4 texels.
     CHECK(sg::format_block_size(pf::bc1_rgba_unorm) == 8);
     CHECK(sg::format_block_size(pf::bc4_r_unorm) == 8);
     CHECK(sg::format_block_size(pf::bc3_unorm) == 16);

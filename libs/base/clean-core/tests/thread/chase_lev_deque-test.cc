@@ -9,10 +9,9 @@
 
 // White-box tests for the Chase-Lev deque behind async_thread_pool's workers.
 //
-// The single-threaded tests pin the shape (LIFO owner end, FIFO steal end, growth, the empty/abort split). The
-// concurrent one pins the only two properties that actually matter for the pool's correctness: every pushed
-// value comes out EXACTLY ONCE -- never lost, never duplicated. Since the deque will hold strong refcounts,
-// losing a value leaks a whole graph and duplicating one double-frees it; "it didn't crash" would catch neither.
+// The single-threaded tests pin the shape: LIFO owner end, FIFO steal end, growth, the empty/abort split.
+// The concurrent one pins the only two properties that actually matter for the pool's correctness — every pushed value comes out EXACTLY ONCE, never lost and never duplicated.
+// Since the deque holds strong refcounts, losing a value leaks a whole graph and duplicating one double-frees it, and "it didn't crash" would catch neither.
 //
 // These carry more weight than usual: there is no TSan preset (all three sanitizer presets are address+undefined),
 // so nothing else here checks the hand-rolled memory orderings.
@@ -71,8 +70,8 @@ TEST("chase_lev_deque - the steal end is FIFO")
 
 TEST("chase_lev_deque - an empty deque reports empty, not abort")
 {
-    // The pool branches on this: `empty` means skip this victim, `abort` means retry. Collapsing them makes it
-    // either spin on a contended victim or stop looking while work exists.
+    // The pool branches on this: `empty` means skip this victim, `abort` means retry.
+    // Collapsing them makes it either spin on a contended victim or stop looking while work exists.
     deque d(16);
 
     int* out = nullptr;
@@ -170,10 +169,10 @@ TEST("chase_lev_deque - a fresh deque is empty")
 
 TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly once")
 {
-    // THE test for this type. One owner pushing and taking across several growths while K thieves steal;
-    // afterwards every value must have been claimed exactly once. Loss and duplication are the only two failure
-    // modes that matter -- in the pool they are a leaked graph and a double-free respectively -- and a crash-only
-    // check would notice neither.
+    // THE test for this type.
+    // One owner pushing and taking across several growths while K thieves steal; afterwards every value must have been claimed exactly once.
+    // Loss and duplication are the only two failure modes that matter: in the pool they are a leaked graph and a double-free respectively.
+    // A crash-only check would notice neither.
     constexpr int n = 1 << 13; // enough pushes to force several doublings out of the initial 8
     constexpr int thieves = 3;
 
@@ -258,8 +257,8 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
 
 TEST("chase_lev_deque - thieves racing for a single element never double-claim it")
 {
-    // Narrows the above onto the one case the Dekker in try_take/try_steal exists for: the deque holds exactly
-    // one entry and everybody wants it. Repeated so the interleaving actually gets hit.
+    // Narrows the above onto the one case the Dekker in try_take/try_steal exists for: the deque holds exactly one entry and everybody wants it.
+    // Repeated so the interleaving actually gets hit.
     constexpr int rounds = 2000;
     constexpr int thieves = 3;
 

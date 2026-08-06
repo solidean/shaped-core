@@ -1,8 +1,8 @@
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 
-// Path normalization is slib's traversal guard, not a tidiness pass: a mount can only reach outside
-// itself if normalize_path lets a '..' through. These pin that directly.
+// Path normalization is slib's traversal guard, not a tidiness pass: a mount can only reach outside itself if normalize_path lets a '..' through.
+// These pin that directly.
 
 using slib::impl::is_path_under;
 using slib::impl::join_path;

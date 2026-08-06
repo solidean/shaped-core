@@ -3,19 +3,18 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic async buffer download (ctx.download): GPU→CPU streaming on a dedicated copy queue, run
-// against every available backend. These pin the public contract — a fire-and-return-future readback with
-// automatic per-resource sync in BOTH directions (the read waits on the last writer; a later writer waits
-// on the read), and drop-the-future cancellation — while the copy pipelining / staging internals live with
-// the backend (backends/dx12/tests/dx12-download-async-test.cc). See
-// libs/graphics/shaped-graphics/docs/concepts/download.async.md and libs/graphics/shaped-graphics/docs/testing.md.
+// Backend-agnostic async buffer download (ctx.download): GPU→CPU streaming on a dedicated copy queue, run against every available backend.
+// These pin the public contract: a fire-and-return-future readback with automatic per-resource sync in BOTH directions.
+// The read waits on the last writer, a later writer waits on the read, and dropping the future cancels.
+// The copy pipelining and staging internals live with the backend, in backends/dx12/tests/dx12-download-async-test.cc.
+// See libs/graphics/shaped-graphics/docs/concepts/download.async.md and libs/graphics/shaped-graphics/docs/testing.md.
 
 namespace
 {
@@ -28,9 +27,9 @@ sg::raw_buffer_handle make_transfer_buffer(sg::context_handle const& ctx, isize 
     return buf;
 }
 
-// Seeds `buf` with fn(i) via an inline command-list upload (direct queue) and submits it. Returns the
-// submission token so a test can reason about ordering. The async download then reads committed bytes by
-// auto-waiting on this list (forward sync) — and this path avoids the pending-async-upload block.
+// Seeds `buf` with fn(i) via an inline command-list upload on the direct queue, and submits it.
+// Returns the submission token so a test can reason about ordering.
+// The async download then reads committed bytes by auto-waiting on this list (forward sync), and this path avoids the pending-async-upload block.
 void seed_buffer(sg::context_handle const& ctx, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 {
     cc::vector<byte> data;
@@ -127,9 +126,9 @@ INVOCABLE_TEST("sg - async download shares a buffer with a later reader", (sg::c
     CHECK(matches);
 }
 
-// Reverse per-resource sync: an async download reads the buffer; THEN a command list that WRITES it is
-// submitted immediately. The write must defer until the copy-queue read has finished, so the download reads
-// the *pre-write* bytes and the write still lands. Both hold only with the automatic reverse sync.
+// Reverse per-resource sync: an async download reads the buffer, THEN a command list that WRITES it is submitted immediately.
+// The write must defer until the copy-queue read has finished, so the download reads the *pre-write* bytes and the write still lands.
+// Both hold only with the automatic reverse sync.
 INVOCABLE_TEST("sg - a later write waits on an in-flight async download", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -193,9 +192,9 @@ INVOCABLE_TEST("sg - two async downloads of one buffer", (sg::context_handle con
     CHECK(both);
 }
 
-// Dropping the future cancels the copy — but its reverse-sync completion value is still signaled, so a later
-// writer that folded it does not hang. We drop the future without waiting, then write the buffer (folding the
-// dropped download's value) and advance-and-wait: pre-fix (no signal on the cancelled read) this hangs.
+// Dropping the future cancels the copy — but its reverse-sync completion value is still signaled, so a later writer that folded it does not hang.
+// Drop the future without waiting, then write the buffer (folding the dropped download's value) and advance-and-wait.
+// Pre-fix, with no signal on the cancelled read, this hangs.
 INVOCABLE_TEST("sg - dropping an async download future never hangs a later writer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -237,9 +236,8 @@ INVOCABLE_TEST("sg - dropping an async download future never hangs a later write
     CHECK(write_landed);
 }
 
-// The fringe path: an async UPLOAD followed by an async DOWNLOAD of the same buffer with no intervening
-// direct-queue op. The download blocks the caller on the upload (a documented v1 simplification, with a
-// warning), then reads the uploaded bytes.
+// The fringe path: an async UPLOAD followed by an async DOWNLOAD of the same buffer, with no intervening direct-queue op.
+// The download blocks the caller on the upload — a documented v1 simplification, with a warning — then reads the uploaded bytes.
 INVOCABLE_TEST("sg - async download after an async upload of the same buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

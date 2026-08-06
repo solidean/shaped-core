@@ -1,31 +1,32 @@
 # typed-geometry docs
 
 Documentation hub for typed-geometry.
-For the library overview, types, and how to include headers, start at the [readme](../readme.md). For repo-wide docs see [docs/_index.md](../../../../docs/_index.md).
+The [readme](../readme.md) is the front door — library overview, the types, how to include headers.
+Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
 
 ## Source organization
 
 typed-geometry's headers live in `src/typed-geometry/`, grouped by module.
-`scalar/`, `linalg/`, `transform/`, and the first `geometry/` primitives exist today; the rest of the modules in the roadmap are planned.
+`scalar/`, `linalg/`, `transform/` and the first `geometry/` primitives exist today; every other module in the roadmap is planned.
 
 ```text
 typed-geometry/
   fwd.hh        # aggregate forward decls (just includes the per-module <module>/fwd.hh)
   all.hh        # complete umbrella (expensive)
-  scalar/       # scalar_traits<T> seam + tg::sqrt (angle/complex/interval/... planned)
+  scalar/       # scalar_traits<T> seam, tg::sqrt + trig, angle, pi (complex/interval/... planned)
   linalg/       # vec, pos, comp, bivec, mat, quat (+ ops)
   transform/    # homogeneous_transform<DSource, DTarget, T, Flags> + composed/inverse + the object handshake
   geometry/     # object_traits seam + primitives (aabb/triangle/segment/ray/line/plane/sphere/ellipsoid); queries planned
 ```
 
-Forward declarations and the dimensional/typed aliases live in a per-module `fwd.hh` (`scalar/fwd.hh`, `linalg/fwd.hh`, `transform/fwd.hh`, `geometry/fwd.hh`), chained along the dependency order; the top-level `fwd.hh` just aggregates them.
-Include a single module's `fwd.hh` when that is all you need.
+Forward declarations and the dimensional/typed aliases live in a per-module `fwd.hh` — `scalar/fwd.hh`, `linalg/fwd.hh`, `transform/fwd.hh`, `geometry/fwd.hh` — chained along the dependency order.
+The top-level `fwd.hh` only aggregates them, so include a single module's when that is all you need.
 
 ## Module docs
 
-One doc per module under [modules/](modules/), answering **"what belongs here?"** and **"why is it this way?"** — motivation, scope, and the load-bearing design decisions (the kind that trip people up), in the spirit of an ADR.
-Not a cheat sheet, not the roadmap.
-Add one when a module lands; cover the big rationales (small ones stay in source comments).
+One doc per module under [modules/](modules/), answering **"what belongs here?"** and **"why is it this way?"**.
+Motivation, scope, and the load-bearing decisions, in the spirit of an ADR — not a cheat sheet, and not the roadmap.
+Add one when a module lands, and cover the big rationales there; the small ones stay in source comments.
 
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
 - [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos` translation rule and the `bivec != vec` decision.
@@ -34,12 +35,17 @@ Add one when a module lands; cover the big rationales (small ones stay in source
 
 ## Topics
 
-- [structure](structure.md) — the full module roadmap with per-section `[done]`/`[in progress]`/`[planned]` status.
+- [structure](structure.md) — the module roadmap, with a `[done]` / `[in progress]` / `[planned]` tag per section.
   This is the living design document; update it as modules land.
+- [coding-guidelines](coding-guidelines.md) — tg-specific conventions on top of the repo-wide ones.
+  Extend it whenever generic advice turns out not to fit tg.
+- [plans/geometry-query-matrix](plans/geometry-query-matrix.md) — the agreed shape of the future `geometry/query/` layer.
+  Kernels vs. derived verbs, a generic convex GJK floor, symmetry, and discoverability.
 - [TODO](TODO.md) — running list of known follow-ups.
-- [coding-guidelines](coding-guidelines.md) — tg-specific conventions on top of the repo-wide ones; extend it whenever generic advice turns out not to fit tg.
+- [cheat-sheet](../cheat-sheet.md) — the public API at a glance, one symbol per line.
 
 ## Conventions
 
 - Namespace `tg`; depends on clean-core (vocabulary types + assertions).
-- Code follows the repo [coding-guidelines](../../../../docs/coding-guidelines.md) plus the tg-specific [coding-guidelines](coding-guidelines.md) (scalar traits, raw `data` storage, generic-over-`D` types, …). `.clang-format` is authoritative for formatting.
+- Code follows the repo [coding-guidelines](../../../../docs/coding-guidelines.md) plus the tg-specific [coding-guidelines](coding-guidelines.md) (scalar traits, raw `data` storage, generic-over-`D` types, …).
+  `.clang-format` is authoritative for formatting.

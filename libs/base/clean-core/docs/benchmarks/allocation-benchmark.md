@@ -1,17 +1,16 @@
 # allocation benchmark (mimalloc vs system)
 
-Throughput of the mimalloc-backed default resource (`cc::default_memory_resource`) against the platform
-malloc/free resource (`cc::system_memory_resource`,
-[allocation.hh](../../src/clean-core/memory/allocation.hh)), across allocation sizes. The pattern is a churn:
-64 concurrently-live blocks, each cycle freeing the oldest and allocating a fresh one (the common
-short-lived-object workload), touching both ends of each block to fault the pages.
+Throughput of the mimalloc-backed default resource (`cc::default_memory_resource`) against the platform malloc/free resource (`cc::system_memory_resource`), across allocation sizes.
+Both are declared in [allocation.hh](../../src/clean-core/memory/allocation.hh).
+The pattern is a churn: 64 concurrently-live blocks, each cycle freeing the oldest and allocating a fresh one — the common short-lived-object workload.
+Both ends of every block are touched, so the pages are faulted in.
 
 Source: [tests/benchmarks/allocation-benchmark.cc](../../tests/benchmarks/allocation-benchmark.cc).
 
-This is the companion check to the [byte-hash benchmark](hash-benchmark.md): does the vendored mimalloc suffer
-the same RelWithDebInfo `/Ob1` under-inlining penalty as xxHash? It does, but only mildly — its hot
-`malloc`/`free` are force-inlined upstream, so `/Ob1` cannot fully de-optimize them (~1.6× isolated, vs
-xxHash's ~11×). The project-wide `/Ob2` promotion (see the hash benchmark) covers it regardless.
+This is the companion check to the [byte-hash benchmark](hash-benchmark.md): does the vendored mimalloc suffer the same RelWithDebInfo `/Ob1` under-inlining penalty as xxHash?
+It does, but only mildly.
+Its hot `malloc`/`free` are force-inlined upstream, so `/Ob1` cannot fully de-optimize them — ~1.6× isolated, against xxHash's ~11×.
+The project-wide `/Ob2` promotion (see the hash benchmark) covers it regardless.
 
 ## System under test
 
@@ -27,10 +26,9 @@ decimals.
 
 ## Reproducing
 
-This full table is the manual `bench-alloc (… full sweep)` benchmark. A lean `GUIDE_BENCHMARK` of the same
-base name records just the representative points (mimalloc/system at 64 B and 4 KiB) via `nx::guide` for
-`dev.py pgo`. Both are excluded from normal sweeps; the `"bench-alloc"` filter matches both — name them
-explicitly:
+This full table is the manual `bench-alloc (… full sweep)` benchmark.
+A lean `GUIDE_BENCHMARK` of the same base name records just the representative points — mimalloc/system at 64 B and 4 KiB — via `nx::guide` for `dev.py pgo`.
+Both are excluded from normal sweeps, and the `"bench-alloc"` filter matches both, so name them explicitly:
 
 ```bash
 uv run dev.py test "bench-alloc" --target clean-core-test --preset release-clang --timeout 0

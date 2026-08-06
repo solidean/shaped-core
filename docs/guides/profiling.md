@@ -3,7 +3,8 @@
 Measuring what code actually cost when it ran — not what it might do.
 Back to [guides](_index.md).
 
-This is the dynamic counterpart to [disassembly.md](disassembly.md): that guide reads the *static* codegen (what the optimizer emitted), while this one measures the *runtime* cost (what the CPU actually spent).
+This is the dynamic counterpart to [disassembly.md](disassembly.md): that guide reads the *static* codegen the optimizer emitted.
+This one measures the *runtime* cost the CPU actually spent.
 More profiling tooling will land here over time; today it covers hardware performance counters.
 
 ## Hardware performance counters
@@ -37,8 +38,8 @@ auto const m2 = nx::bench::measure_hw_counters([&] { work(); }, {
 
 The counters (`hw_counter`): `elapsed_nanoseconds`, `reference_cycles`, `instructions_retired`, `branch_instructions`, `branch_misses`, `cache_l1d_misses`, `cache_llc_references`, `cache_llc_misses`.
 
-The call is **best-effort and never fails as a whole**.
-It always yields the baseline — elapsed time, and on x86 a reference-cycle count — with no privileges anywhere, including virtualized CI.
+The call is **best-effort and never fails as a whole**, which is the contract [hardware_counters.hh](../../libs/base/nexus/src/nexus/bench/hardware_counters.hh) states.
+It always yields the baseline — elapsed time plus a reference-cycle count — with no privileges anywhere, including virtualized CI.
 A PMU counter the machine cannot read this run comes back with `value_of() == nullopt` rather than erroring, so gate hard assertions on `has_value()`, not on a machine assumption.
 
 ### Discovering what a machine can measure
@@ -75,6 +76,24 @@ Sign out and back in afterward (the group and privilege enter the token at logon
 `uv run dev.py doctor` reports whether this is in place.
 Without it, `nx::bench` degrades to the baseline and warns once.
 
+### How the Windows backend measures
+
+There is no user-mode API that reads PMU counters directly on Windows, so `nx::bench` gets them out of ETW:
+
+- `TraceQueryInformation(TraceProfileSourceListInfo)` enumerates the CPU's named PMU sources, and the logical counters are mapped onto them **by name**.
+  The names differ per CPU and per Windows version, which is expected rather than a problem.
+- nexus starts its own private `SystemTraceProvider` session under a fixed GUID, enables `CSWITCH`, and attaches the chosen PMC sources.
+  `TracePmcCounterListInfo` picks the counters and `TracePmcEventListInfo` stamps them onto context-switch events.
+  Both calls are required: counters attached to no event produce context-switch records carrying no PMC payload at all.
+- A background thread runs `ProcessTrace` and tracks the benchmark thread across every scheduling interval.
+  It snapshots that CPU's counters on switch-in and adds the delta on switch-out.
+  Summing the intervals gives the count for the measured region, so multi-quantum runs and CPU migration both fall out for free.
+- A short loop can run entirely inside one quantum, with no context switch at all.
+  So the measurement forces a switch just before and just after the body, and bounds counting to that window.
+
+**`ReadThreadProfilingData` is deliberately not used.**
+It reads back all zeros in user mode on every machine tried, because its `HwCountersCount` is gated on a global PMC list that cannot be set from user mode.
+
 ### Caveats
 
 - **Limited PMC budget.**
@@ -107,5 +126,6 @@ uv run dev.py --mirror-test-output test "nexus bench - 2d traversal cache effect
 
 ## See also
 
-- [disassembly.md](disassembly.md) — the static side: read the emitted codegen, and with `dev.py assembly trace` see which path an invocation actually ran plus the data it touched (a cache footprint the counters here quantify but do not localize).
+- [disassembly.md](disassembly.md) — the static side: read the emitted codegen, and with `dev.py assembly trace` see which path an invocation actually ran plus the data it touched.
+  That gives a cache footprint the counters here quantify but do not localize.
 - [perf-results.md](perf-results.md) — recording benchmark *metrics* over time (`GUIDE_BENCHMARK` + `nx::guide`), distinct from the ad-hoc per-region counters here.

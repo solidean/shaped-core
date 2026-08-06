@@ -1,9 +1,10 @@
-// Browser test-runner ABI. Each Emscripten `*-test-web` module exports this tiny C interface; a web page
-// (see web/nexus-web-driver.js) enumerates the module's tests and runs them one per animation frame,
-// rendering a live results table. Running a single instance per call mirrors what the CLI runner does,
-// but hands pacing and rendering to JavaScript. The whole file is Emscripten-only (empty elsewhere) and
-// is compiled directly into each runner by cmake/NexusWebRunner.cmake — not via libnexus, so the linker
-// can't drop its EMSCRIPTEN_KEEPALIVE exports as an unreferenced archive member (main is never called).
+// Browser test-runner ABI: each Emscripten `*-test-web` module exports this tiny C interface.
+// The page in web/nexus-web-driver.js enumerates the module's tests and runs them one per animation frame, rendering a live results table.
+// Running a single instance per call mirrors the CLI runner, but hands pacing and rendering to JavaScript.
+//
+// The whole file is Emscripten-only, and empty elsewhere.
+// cmake/NexusWebRunner.cmake compiles it directly into each runner rather than via libnexus.
+// main is never called, so as an archive member the linker would drop its EMSCRIPTEN_KEEPALIVE exports as unreferenced.
 
 #ifdef __EMSCRIPTEN__
 
@@ -17,9 +18,8 @@
 
 namespace
 {
-// One schedule instance per registered test, built once and kept registry-ordered so indices stay
-// stable across the calls the page makes. The module runs with INVOKE_RUN=0, so main() is never called;
-// the registry is still populated by the tests' static initializers before any export runs.
+// One schedule instance per registered test, built once and kept registry-ordered so indices stay stable across the calls the page makes.
+// The module runs with INVOKE_RUN=0, so main() is never called; the registry is still populated by the tests' static initializers before any export runs.
 nx::test_schedule& web_schedule()
 {
     static nx::test_schedule schedule
@@ -27,8 +27,8 @@ nx::test_schedule& web_schedule()
     return schedule;
 }
 
-// Buffers backing the `char const*` handed to JS. They must outlive each call, so they are static and
-// overwritten in place; the page reads the result synchronously before issuing the next call.
+// Buffers backing the `char const*` handed to JS.
+// They must outlive each call, so they are static and overwritten in place; the page reads each result synchronously before issuing the next call.
 std::string g_name_buffer;
 std::string g_report_buffer;
 
@@ -81,7 +81,8 @@ extern "C"
         return g_name_buffer.c_str();
     }
 
-    // Runs test i and records its stats. Returns 1 if the test passed, 0 otherwise.
+    // Runs test i and records its stats.
+    // Returns 1 if the test passed, 0 otherwise.
     EMSCRIPTEN_KEEPALIVE int nx_web_run_test(int i)
     {
         auto const& instances = web_schedule().instances;

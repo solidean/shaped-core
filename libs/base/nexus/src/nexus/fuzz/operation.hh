@@ -42,9 +42,9 @@ struct fuzz_operation
 
     // ---- builder (chainable) ---------------------------------------------------------------------
 
-    // The two bounds must stay ordered (_at_least <= _at_most): the runner keeps scheduling while any op is
-    // below its at-least, but never runs one past its at-most, so an at-least above the at-most would loop
-    // forever. Each setter pulls the other bound along to preserve that.
+    // The two bounds must stay ordered, _at_least <= _at_most.
+    // The runner keeps scheduling while any op is below its at-least but never runs one past its at-most, so an at-least above the at-most would loop forever.
+    // Each setter pulls the other bound along to preserve that.
     fuzz_operation* execute_at_least(int times)
     {
         _at_least = times;
@@ -71,8 +71,8 @@ struct fuzz_operation
         return this;
     }
 
-    /// Adds a precondition guard. Multiple guards all must hold. See call_precondition for the three
-    /// supported arities (nullary external gate / single-arg per-input / exact-arity tuple).
+    /// Adds a precondition guard; multiple guards must all hold.
+    /// call_precondition has the three supported arities: nullary external gate, single-arg per-input, exact-arity tuple.
     template <class F>
     fuzz_operation* when(F&& cond)
     {
@@ -107,8 +107,8 @@ struct fuzz_operation
 
     // ---- direct evaluation (used by regression code) ---------------------------------------------
 
-    /// Boxes the given arguments and invokes the operation. A typed_value argument is referenced
-    /// directly (so chained calls share and mutate the same value); anything else is boxed by copy.
+    /// Boxes the given arguments and invokes the operation.
+    /// A typed_value argument is referenced directly, so chained calls share and mutate the same value; anything else is boxed by copy.
     template <class... Args>
     [[nodiscard]] typed_value eval(Args&&... args) const
     {

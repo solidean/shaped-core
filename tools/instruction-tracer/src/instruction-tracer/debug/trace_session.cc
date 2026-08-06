@@ -31,11 +31,12 @@ register_snapshot snapshot_of(CONTEXT const& ctx)
     return s;
 }
 
-/// The traced thread's whole stack reservation, [low, high). A stack is one VirtualAlloc
-/// reservation split into guard / committed / reserved sub-regions that share an AllocationBase, so
-/// we start from the region holding rsp and walk up while the base still matches. Used to tell a
-/// stack address from a heap/global one; [0, 0) when it cannot be read (a non-stack rsp, or a dead
-/// process), which classification reads as "no stack known".
+/// The traced thread's whole stack reservation, [low, high).
+/// Used to tell a stack address from a heap/global one.
+///
+/// A stack is one VirtualAlloc reservation split into guard / committed / reserved sub-regions sharing an AllocationBase.
+/// So the walk starts from the region holding rsp and goes up while the base still matches.
+/// [0, 0) when it cannot be read — a non-stack rsp, or a dead process — which classification reads as "no stack known".
 void read_stack_bounds(void* process, u64 rsp, u64& low, u64& high)
 {
     low = 0;
@@ -82,13 +83,13 @@ void trace_session::begin(u32 index,
     _trace.entry_rip = ctx.Rip;
     _entry_rsp = ctx.Rsp;
 
-    // Memory enrichment needs to tell stack addresses from heap/global ones; capture the bounds now,
-    // while the debuggee is stopped and its stack is committed. Cheap and harmless when unused.
+    // Memory enrichment needs to tell stack addresses from heap/global ones.
+    // Capture the bounds now, while the debuggee is stopped and its stack is committed.
     if (_config.capture_registers)
         read_stack_bounds(_process, ctx.Rsp, _trace.stack_low, _trace.stack_high);
 
-    // The prologue has not run, so [rsp] is exactly the return address. This is the one moment where
-    // reading it needs no unwind info at all.
+    // The prologue has not run, so [rsp] is exactly the return address.
+    // This is the one moment where reading it needs no unwind info at all.
     u64 return_rip = 0;
     SIZE_T read = 0;
     if (ReadProcessMemory(_process, reinterpret_cast<void const*>(ctx.Rsp), &return_rip, sizeof(return_rip), &read)
@@ -143,8 +144,8 @@ bool trace_session::on_step(void const* context)
     if (!_trace.instructions.empty())
         _trace.instructions.back().next_rip = ctx.Rip;
 
-    // The entry frame returned. The rsp guard rejects a recursive call returning to the same address
-    // at a deeper frame — only the original frame has popped its return address by now.
+    // The entry frame returned.
+    // The rsp guard rejects a recursive call returning to the same address at a deeper frame: only the original frame has popped its return address by now.
     if (_config.until_return && _trace.return_rip != 0 && ctx.Rip == _trace.return_rip
         && ctx.Rsp >= _entry_rsp + sizeof(u64))
     {

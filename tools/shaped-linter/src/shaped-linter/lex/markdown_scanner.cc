@@ -41,6 +41,26 @@ bool is_blank(cc::string_view line)
             return false;
     return true;
 }
+
+/// Whether `line` is a bare `---`, unindented, with nothing after it but whitespace.
+bool is_frontmatter_delimiter(cc::string_view line)
+{
+    return line.starts_with("---") && is_blank(line.subview(3));
+}
+
+/// The closing delimiter's line if the file opens with frontmatter, else 0.
+/// An opener without a closer is a thematic break, so the whole block only exists once both are seen.
+u32 frontmatter_end(source_buffer const& buffer)
+{
+    if (buffer.line_count() == 0 || !is_frontmatter_delimiter(buffer.span_text(buffer.line_span(1))))
+        return 0;
+
+    for (u32 line = 2; line <= buffer.line_count(); ++line)
+        if (is_frontmatter_delimiter(buffer.span_text(buffer.line_span(line))))
+            return line;
+
+    return 0;
+}
 } // namespace
 
 cc::vector<markdown_line> scan_markdown(source_buffer const& buffer)
@@ -51,9 +71,19 @@ cc::vector<markdown_line> scan_markdown(source_buffer const& buffer)
     char open_char = 0;
     isize open_run = 0;
 
+    // Frontmatter needs the closer before the opener can be classified, so it is resolved up front.
+    auto const front_end = frontmatter_end(buffer);
+
     for (u32 line = 1; line <= buffer.line_count(); ++line)
     {
         auto const span = buffer.line_span(line);
+
+        if (line <= front_end)
+        {
+            out.push_back({.kind = markdown_line_kind::frontmatter, .span = span});
+            continue;
+        }
+
         auto const text = buffer.span_text(span);
         auto const indent = indent_of(text);
 

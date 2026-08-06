@@ -9,17 +9,15 @@
 #include <clean-core/thread/mutex.hh>
 
 #include <memory>        // std::shared_ptr, std::make_shared
-#include <unordered_map> // TODO: migrate to cc::map once clean-core's own hash map lands
+#include <unordered_map> // TODO: migrate to cc::map
 
-/// A thread-safe, tiered get-or-create cache. Providers are queried front-to-back (fastest first);
-/// the first hit backfills the faster tiers, a full miss runs the factory and writes every tier. The
-/// tier interface is the extension seam for on-disk / networked caches; only an in-memory tier ships
-/// today. Keys are hashed through cc's hashing, so cc::hash128 (and any cc-hashable key) works as-is.
+/// A tiered get-or-create cache: key_value_cache over a stack of key_value_provider tiers.
+/// The tier interface is the extension seam for on-disk / networked caches; only an in-memory tier ships today.
 
 namespace cc
 {
-/// One tier of a key_value_cache. Implementations are always called under the owning cache's lock, so
-/// they need not be individually thread-safe.
+/// One tier of a key_value_cache, fastest first.
+/// Implementations are always called under the owning cache's lock, so they need not be individually thread-safe.
 template <class K, class V>
 struct key_value_provider
 {
@@ -46,10 +44,11 @@ struct cc_key_hash
 };
 } // namespace impl
 
-/// In-memory tier backed by std::unordered_map. Eviction is deliberately crude — apply_bookkeeping
-/// clears the whole map once it exceeds max_entries; subclass for a smarter policy.
+/// In-memory tier backed by std::unordered_map.
+/// Eviction is crude: apply_bookkeeping clears the whole map once it exceeds max_entries.
+/// Subclass for a smarter policy.
 ///
-/// TODO: migrate std::unordered_map -> cc::map once clean-core's own hash map lands.
+/// TODO: migrate std::unordered_map -> cc::map.
 template <class K, class V, class Hash = impl::cc_key_hash<K>>
 struct in_memory_key_value_provider final : key_value_provider<K, V>
 {
@@ -76,7 +75,9 @@ private:
     std::unordered_map<K, V, Hash> _map;
 };
 
-/// Thread-safe, layered key-value cache. All operations serialize under an internal cc::mutex.
+/// Thread-safe, layered key-value cache.
+/// All operations serialize under an internal cc::mutex.
+/// Keys are hashed through cc's hashing, so cc::hash128 and any cc-hashable key work as-is.
 template <class K, class V>
 struct key_value_cache
 {
@@ -92,8 +93,8 @@ struct key_value_cache
         this->add_provider(std::make_shared<in_memory_key_value_provider<K, V>>(max_entries));
     }
 
-    /// The cached value for key, or the result of factory() stored into every tier. The first tier to
-    /// hit backfills all preceding tiers that missed.
+    /// The cached value for key, or the result of factory() stored into every tier.
+    /// Tiers are queried front-to-back, and the first to hit backfills every faster tier that missed.
     [[nodiscard]] V acquire(K const& key, cc::function_ref<V()> factory)
     {
         return _state.lock(

@@ -15,7 +15,8 @@
 /// span is expected; use .span() for the explicit view.
 /// Copying shares ownership (refcount bump); it does not deep-copy the elements.
 ///
-/// std::shared_ptr is used deliberately for now: clean-core has no shared-ownership pointer yet.
+/// The owner is std::shared_ptr, not cc::shared_ptr: it has to type-erase an arbitrary owner and alias a separate span.
+/// cc::shared_ptr supports neither — it requires cc::make_shared, and projection to a subobject is deferred.
 template <class T>
 struct cc::pinned_data
 {
@@ -51,7 +52,8 @@ public:
 
     // iterators
 public:
-    /// Returns a pointer to the first element; nullptr if empty. Enables range-based for.
+    /// Returns a pointer to the first element, or nullptr if empty.
+    /// Enables range-based for.
     [[nodiscard]] T* begin() const { return _span.begin(); }
     /// Returns a pointer to one past the last element.
     [[nodiscard]] T* end() const { return _span.end(); }
@@ -97,8 +99,8 @@ public:
 
     // reinterpretation
 public:
-    /// Reinterprets the pinned elements as U, sharing this pinned_data's owner. See span::reinterpret_as
-    /// for the constraints (U, T trivially copyable; sizeof(T) divisible by sizeof(U); const preserved).
+    /// Reinterprets the pinned elements as U, sharing this pinned_data's owner.
+    /// See span::reinterpret_as for the constraints: U and T trivially copyable, sizeof(T) divisible by sizeof(U), const preserved.
     template <class U>
     [[nodiscard]] pinned_data<U> reinterpret_as() const
     {
@@ -135,13 +137,15 @@ public:
         return pinned_data(data, cc::move(pin));
     }
 
-    /// Allocates and pins size default-constructed elements. Only valid for non-const T.
+    /// Allocates and pins size default-constructed elements.
+    /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_defaulted(isize size, cc::memory_resource const* resource = nullptr)
     {
         return create_owning(cc::array<T>::create_defaulted(static_cast<size_t>(size), resource));
     }
 
-    /// Allocates and pins size elements, each copy-constructed from value. Only valid for non-const T.
+    /// Allocates and pins size elements, each copy-constructed from value.
+    /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_filled(isize size, T const& value, cc::memory_resource const* resource = nullptr)
     {
         return create_owning(cc::array<T>::create_filled(static_cast<size_t>(size), value, resource));
@@ -153,7 +157,8 @@ public:
         return create_owning(cc::array<T>::create_uninitialized(static_cast<size_t>(size), resource));
     }
 
-    /// Allocates and pins a deep copy of source. Only valid for non-const T.
+    /// Allocates and pins a deep copy of source.
+    /// Only valid for non-const T.
     [[nodiscard]] static pinned_data create_copy_of(cc::span<T const> source,
                                                     cc::memory_resource const* resource = nullptr)
     {
@@ -206,8 +211,8 @@ template <class T>
     return p;
 }
 
-/// Creates a pinned_data from any contiguous container, pinning its elements. Chooses the
-/// cheapest safe strategy:
+/// Creates a pinned_data from any contiguous container, pinning its elements.
+/// Chooses the cheapest safe strategy:
 ///  1. c is already a pinned_data, or a shared_ptr of a contiguous container -> wrap it (zero copies).
 ///  2. c is an owning rvalue (not a borrow range) -> move it into a shared_ptr (zero element copies).
 ///  3. otherwise (a borrow range, or an lvalue) -> allocate an owned deep copy of the elements.

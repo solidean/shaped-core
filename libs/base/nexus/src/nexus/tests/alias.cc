@@ -9,8 +9,8 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// Callbacks registered via NX_TEST_SETUP. Function-local static so it is initialized on first use,
-// independent of static-init order across translation units (mirrors get_static_test_registry).
+// Callbacks registered via NX_TEST_SETUP.
+// Function-local static, so it is initialized on first use and independent of static-init order across translation units, mirroring get_static_test_registry.
 cc::vector<void (*)(nx::setup&)>& setup_callbacks()
 {
     static cc::vector<void (*)(nx::setup&)> callbacks;
@@ -59,8 +59,8 @@ void nx::run_setup_callbacks(test_registry& registry)
     for (auto const fn : setup_callbacks())
         fn(s);
 
-    // Stable order: aliases by name, and each alias's fragments by driver name then section path. Listings
-    // and expansion order then do not depend on static-init or callback registration order.
+    // Stable order: aliases by name, and each alias's fragments by driver name then section path.
+    // Listing and expansion order then do not depend on static-init or callback registration order.
     std::sort(registry.aliases.begin(), registry.aliases.end(), [](test_alias const& a, test_alias const& b)
               { return cc::string_view(a.name) < cc::string_view(b.name); });
 

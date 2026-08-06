@@ -6,6 +6,7 @@ Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines 
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sr is the home for the common building blocks of a renderer built on sg — mipmap generation, texture compression, tonemapping, and similar reusable render routines.
+Of that intended set only `sr::blit_routine` exists today; [docs/structure.md](docs/structure.md) tracks the rest.
 It is also home to the **window abstraction**, where the graphics family meets the OS.
 
 ## Windows
@@ -83,9 +84,11 @@ See [docs/render-routines.md](docs/render-routines.md) for the sr-side overview 
 The key is almost always the render-target pixel format: a routine draws the same shaders into whatever target it is handed, and each distinct format needs its own pipeline.
 It replaces the hand-rolled "small vector of `{format, pipeline}` plus a linear-search find-or-create" that routines otherwise grow (`sr::blit_routine` is the first user).
 
-The build callback — given the context and the key — does the actual creation, so the cache stays agnostic to what a pipeline needs; the caller captures its layout and shaders into the callback at `init` time.
+The build callback — given the context and the key — does the actual creation, so the cache stays agnostic to what a pipeline needs.
+The caller captures its layout and shaders into the callback at `init` time.
 `init` clears the cache, which is exactly what a hot-reload wants: a rebuilt layout invalidates every pipeline cached against the old one.
-The sync path is a `try_acquire` (→ `cc::result`) / `acquire` (→ throws) pair, mirroring sg's `try_create_*` / `create_*`; `acquire_async` is the fallible async form, and `prepare` warms a key ahead of the draw.
+The sync path is a `try_acquire` (→ `cc::result`) / `acquire` (→ throws) pair, mirroring sg's `try_create_*` / `create_*`.
+`acquire_async` is the fallible async form, and `prepare` warms a key ahead of the draw.
 
 See the [cheat-sheet](cheat-sheet.md) for the full surface.
 
@@ -121,6 +124,5 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
 - [docs/_index.md](docs/_index.md) — shaped-rendering's documentation hub.
 - [docs/structure.md](docs/structure.md) — the intended module roadmap.
-- [docs/coding-guidelines.md](docs/coding-guidelines.md) — sr-specific conventions (thin for
-  now), on top of the repo-wide ones.
+- [docs/coding-guidelines.md](docs/coding-guidelines.md) — sr-specific conventions on top of the repo-wide ones: the SDL quarantine, and the always-present window API.
 - [graphics.md](../../../docs/graphics.md) — the whole graphics family overview.

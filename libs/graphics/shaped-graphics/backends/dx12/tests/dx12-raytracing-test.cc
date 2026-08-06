@@ -2,16 +2,15 @@
 
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/acceleration_structure.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
+#include <shaped-graphics/raytracing/acceleration_structure.hh>
 
-// Ray-tracing smoke: build a triangle BLAS and a single-instance TLAS on WARP (which implements DXR),
-// then check the results. The build, the prebuild sizes, and the instance count are all public sg API; the
-// one dx12-exclusive inspection is the storage buffer's GPU virtual address (the acceleration-structure
-// location), which has no public equivalent — reached by a dynamic cast to the concrete dx12_blas/dx12_tlas
-// (the tier-2 "cast only to inspect" rule from the sg testing guidelines).
+// Ray-tracing smoke: build a triangle BLAS and a single-instance TLAS on WARP, then check the results.
+// The build, the prebuild sizes, and the instance count are all public sg API.
+// The one dx12-exclusive inspection is the storage buffer's GPU virtual address, which has no public equivalent.
+// It is reached by a dynamic cast to the concrete dx12_blas / dx12_tlas, under the tier-2 "cast only to inspect" rule in libs/graphics/shaped-graphics/docs/testing.md.
 
 namespace
 {

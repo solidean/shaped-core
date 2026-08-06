@@ -1,8 +1,7 @@
 """Locating LLVM tools (llvm-profdata, llvm-cov, ...) for coverage and PGO.
 
-Both pipelines need the same resolution rules: an env override wins, then PATH,
-then the directory beside the configured compiler (where a Windows LLVM install
-ships its tools off-PATH). Kept in one place so coverage and pgo stay in sync.
+Both pipelines need the same resolution rules: an env override wins, then PATH, then the directory beside the configured compiler, where a Windows LLVM install ships its tools off-PATH.
+Kept in one place so coverage and pgo stay in sync.
 """
 
 from __future__ import annotations
@@ -13,10 +12,10 @@ from pathlib import Path
 
 
 def find_tool(name: str, env_var: str) -> str | None:
-    """Locate an llvm-* tool by env override then PATH (no build dir needed).
+    """Locate an llvm-* tool by env override then PATH, with no build dir needed.
 
-    `env_var` (e.g. LLVM_PROFDATA) wins if set, so a user can pin a specific
-    install; otherwise PATH is searched. Returns the resolved path/command or None.
+    `env_var` (LLVM_PROFDATA, say) wins if set, so a specific install can be pinned; otherwise PATH is searched.
+    Returns the resolved path or command, or None.
     """
     override = os.environ.get(env_var)
     if override:
@@ -38,13 +37,11 @@ def _compiler_from_cache(build_dir: Path) -> str | None:
 def resolve_tool(name: str, env_var: str, *build_dirs: Path) -> str | None:
     """Like find_tool, but also looks beside the compiler configured in each build dir.
 
-    On Windows clang-cl and llvm-profdata/llvm-cov ship in the same LLVM bin/ that
-    often isn't on PATH; falling back to the compiler's directory keeps the
-    versions matched (the tools must match the clang that built the binaries).
+    On Windows, clang-cl and llvm-profdata/llvm-cov ship in the same LLVM bin/ that is often not on PATH.
+    Falling back to the compiler's directory keeps the versions matched, and the tools must match the clang that built the binaries.
 
-    Several build dirs may be offered, tried in order. That is for inspecting a
-    *foreign* build tree: it may be MSVC-built, or have no CMakeCache at all, in
-    which case a local tree that does know an LLVM install is the better guess.
+    Several build dirs may be offered and are tried in order.
+    That is for inspecting a *foreign* build tree, which may be MSVC-built or have no CMakeCache at all, in which case a local tree that does know an LLVM install is the better guess.
     """
     found = find_tool(name, env_var)
     if found:

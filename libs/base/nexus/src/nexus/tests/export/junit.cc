@@ -9,8 +9,8 @@ using nx::impl::xml_escape;
 
 namespace
 {
-// Collects all failed expressions across the (recursive) section tree of a test,
-// flattened in execution order. Pointers stay valid for the lifetime of `exec`.
+// Collects every failed expression across a test's recursive section tree, flattened in execution order.
+// The pointers stay valid for the lifetime of `exec`.
 void collect_errors(nx::test_execution::section const& sec, cc::vector<nx::test_error const*>& out)
 {
     for (auto const& error : sec.errors)
@@ -20,8 +20,9 @@ void collect_errors(nx::test_execution::section const& sec, cc::vector<nx::test_
         collect_errors(subsec, out);
 }
 
-// Emits one <testcase> for `exec` (failing only on its *own* tree; dispatched children are their own
-// testcases), then recurses into dispatched children. `prefix` accumulates the addressable path.
+// Emits one <testcase> for `exec`, then recurses into its dispatched children.
+// It fails only on its *own* tree, because a dispatched child is its own testcase.
+// `prefix` accumulates the addressable path.
 void emit_testcase(cc::string& out, cc::string const& suite, nx::test_execution const& exec, cc::string const& prefix)
 {
     CC_ASSERT(exec.instance.declaration != nullptr, "test instance is invalid");

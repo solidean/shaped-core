@@ -3,14 +3,16 @@
 #include <shaped-graphics/fwd.hh> // sg::epoch
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 
-// CPU-only tests for the managers' LRU/budget core. No GPU — the record type is a plain int and eviction is
-// driven purely by epochs and byte sizes.
+using namespace cc::primitive_defines;
+
+// CPU-only tests for the managers' LRU/budget core.
+// No GPU — the record type is a plain int and eviction is driven purely by epochs and byte sizes.
 
 namespace
 {
-enum class test_id : cc::u32
+enum class test_id : u32
 {
-    invalid = cc::u32(-1) // matches the production ids: the pool mints from 0 upward, so 0 is a real id
+    invalid = u32(-1) // matches the production ids: the pool mints from 0 upward, so 0 is a real id
 };
 
 // insert() / find_by_hash() are protected (only a concrete manager mints records); expose them for the test.
@@ -56,8 +58,8 @@ TEST("sv - lru_pool content-addressed find_by_hash")
 
 TEST("sv - lru_pool keys on the whole 128-bit hash")
 {
-    // The index hashes a cc::hash128 down to its low limb, so two keys sharing a low limb collide in the
-    // bucket. They must still resolve to their own records — the pool compares full keys, never truncated ones.
+    // The index hashes a cc::hash128 down to its low limb, so two keys sharing a low limb collide in the bucket.
+    // They must still resolve to their own records — the pool compares full keys, never truncated ones.
     auto p = test_pool{};
     auto const a = p.insert(cc::hash128{.low = 0x77, .high = 0x1}, /*record*/ 1, /*size*/ 8);
     auto const b = p.insert(cc::hash128{.low = 0x77, .high = 0x2}, /*record*/ 2, /*size*/ 8);

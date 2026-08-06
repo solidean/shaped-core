@@ -12,10 +12,11 @@
 
 // Wavefront OBJ reader (geometry/).
 //
-// A faithful, flat mirror of the file: parallel attribute arrays exactly as listed, plus faces as runs of
-// corners. NO triangulation, NO vertex dedup, NO mesh building — that belongs in a higher-level "load a mesh"
-// aggregator (which wants a tg::mesh; not built yet). All indices are resolved to 0-based here (OBJ's 1-based
-// and negative/relative forms are both applied), with -1 meaning "attribute absent" on a corner.
+// A faithful, flat mirror of the file: parallel attribute arrays exactly as listed, plus faces as runs of corners.
+// NO triangulation, NO vertex dedup, NO mesh building — that belongs in a higher-level "load a mesh" aggregator,
+// which wants a tg::mesh that is not built yet.
+// All indices are resolved to 0-based here (OBJ's 1-based and negative/relative forms are both applied),
+// with -1 meaning "attribute absent" on a corner.
 //
 // Parses line by line off a cc::read_stream (read_stream::read_line) — it never buffers the whole file.
 //
@@ -51,7 +52,8 @@ struct group
     i32 face_count = 0;
 };
 
-/// The faithful parse of a Wavefront .obj. Read-once; the vectors mirror the file's declaration order.
+/// The faithful parse of a Wavefront .obj.
+/// Read-once; the vectors mirror the file's declaration order.
 struct data
 {
     cc::vector<tg::pos3f> positions; // v  (optional w is dropped)
@@ -71,8 +73,9 @@ struct data
 // reading
 // -------------------------------------------------------------------------------------------------
 
-/// Parse a complete OBJ document from a stream. Unknown directives (incl. `s`) are skipped; blank lines and
-/// `#` comments are ignored. Fails with a line-numbered error on a malformed vertex / face.
+/// Parse a complete OBJ document from a stream.
+/// Unknown directives (incl. `s`) are skipped, and blank lines and `#` comments are ignored.
+/// Fails with a line-numbered error on a malformed vertex / face.
 [[nodiscard]] cc::result<data> read(cc::read_stream& in);
 
 /// Convenience: parse from an in-memory buffer (wraps a span_read_stream_adapter).

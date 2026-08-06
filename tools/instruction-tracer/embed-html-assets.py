@@ -8,13 +8,12 @@
 Embed the HTML-export front-end assets into a generated C++ header.
 
 Reads report/html/app.css and report/html/app.js and writes a header exposing them as
-`itrace::html::app_css` / `itrace::html::app_js` raw-string literals, so the shipped .exe needs no
-external files. Run by CMake as a build step whenever the sources change (see CMakeLists.txt); can
-also be run by hand:
+`itrace::html::app_css` / `itrace::html::app_js` raw-string literals, so the shipped .exe needs no external files.
+Run by CMake as a build step whenever the sources change (see CMakeLists.txt), and by hand as:
 
     uv run tools/instruction-tracer/embed-html-assets.py <out-header>
 
-Defaults the output to report/html/generated/html_assets.hh next to the sources when no path given.
+With no path the output defaults to report/html/generated/html_assets.hh, next to the sources.
 """
 
 import sys
@@ -23,8 +22,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 HTML_DIR = HERE / "src" / "instruction-tracer" / "report" / "html"
 
-# Raw-string delimiters chosen so ordinary CSS/JS never contains them. We still assert their absence
-# rather than silently emit a header that will not compile.
+# Raw-string delimiters chosen so ordinary CSS/JS never contains them.
+# Their absence is still asserted, rather than silently emitting a header that will not compile.
 ASSETS = [
     ("app_css", HTML_DIR / "app.css", "CSSRAW"),
     ("app_js", HTML_DIR / "app.js", "JSRAW"),
@@ -56,10 +55,9 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        # MSVC caps a single string literal at ~16 KB (C2026), so split the asset into adjacent
-        # raw-string literals the compiler concatenates. 4000 chars stays well under the limit even
-        # if every char were a 4-byte UTF-8 sequence. The chunk boundary can fall anywhere — the
-        # delimiter token is asserted absent above, so no chunk can close the literal early.
+        # MSVC caps a single string literal at ~16 KB (C2026), so the asset is split into adjacent raw-string literals the compiler concatenates.
+        # 4000 chars is under the limit even if every char were a 4-byte UTF-8 sequence.
+        # The chunk boundary can fall anywhere: the delimiter token is asserted absent above, so no chunk can close the literal early.
         parts.append(f"inline constexpr char const* {name} =")
         for start in range(0, len(text), 4000):
             parts.append(f'R"{delim}({text[start : start + 4000]}){delim}"')

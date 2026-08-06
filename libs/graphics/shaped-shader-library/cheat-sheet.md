@@ -1,10 +1,11 @@
 # shaped-shader-library cheat sheet
 
-Shader packages + hot reload. Namespace `slib`. Depends on shaped-graphics.
+Shader packages + hot reload.
+Namespace `slib`, depending on shaped-graphics.
 Headers are included by full path from `src/`: `#include <shaped-shader-library/<topic>/<name>.hh>`.
 
-> **Start at [shaders.md](../shaped-graphics/docs/shaders.md)** for how the whole shader system fits
-> together. Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+> **Start at [shaders.md](../shaped-graphics/docs/shaders.md)** for how the whole shader system fits together.
+> Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 How to read this: each block leads with the include; one symbol per line with a trailing comment.
 
@@ -20,7 +21,7 @@ sc_add_shader_package(
     SOURCE_DIR shaders          # relative to the calling CMakeLists (must define TARGET)
     LANGUAGE   hlsl             # optional; hlsl is the default and the only one today
     SHADERS
-        post/vignette.hlsl:compute:main     # path:stage:entry_point
+        vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
         blit.hlsl:fragment:main_ps)
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
@@ -28,6 +29,10 @@ sc_add_shader_package(
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
 # validates: the file exists, the stage is real, no duplicate entries, no two files colliding on one C++ id.
+# call sc_finalize_shader_packages() ONCE at the bottom of the root CMakeLists: it turns "slib was never
+#   added" into a clear message instead of a missing header inside generated code at build time.
+# on Windows+DXC an EXECUTABLE that declares a package also gets dxcompiler.dll + dxil.dll staged beside
+#   it; declared on a LIBRARY target it stages nothing, and the exe must copy them itself.
 ```
 
 ## generated symbols
@@ -36,6 +41,7 @@ sc_add_shader_package(
 #include <my_shaders.hh>                    // the NAME above
 my::shaders::vignette.compute.main          // slib::shader_asset_handle  — stem.stage.entry_point
 my::shaders::blit.vertex.main_vs            //   a typo here is a COMPILE error; that is the point
+// a subdirectory folds into the stem, and '-' becomes '_':  post/manga-render.hlsl -> post_manga_render
 my::shaders::package()                      // -> slib::shader_package const&  (pass to add_package)
 // the handles are null until add_package fills them in
 ```
@@ -46,15 +52,15 @@ my::shaders::package()                      // -> slib::shader_package const&  (
 #include <shaped-shader-library/shader_library.hh>
 slib::shader_library lib;                   // not a singleton, but only ONE may exist at a time
 lib.add_compiler(std::unique_ptr<shader_compiler>);   // a later compiler for the same edge replaces it
-lib.add_package(my::shaders::package());    // mounts embedded, then SOURCE_DIR over it if it exists
+lib.add_package(my::shaders::package());    // mounts embedded, then SOURCE_DIR over it (a missing dir finds nothing)
 lib.add_package(pkg, filesystem_handle fs); // explicit fs instead (tests: a memory_filesystem)
 lib.mount(virtual_dir, fs);                 // shared includes that belong to no package
 lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
 lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's). Reads the global below
-slib::current_reload_generation();          // -> u64; forwards to sg::reload_generation() (the counter now lives in sg). note_reload() bumps it via sg::signal_reload()
-// The counter itself is sg's (sg::reload_generation / sg::signal_reload): consumers like sg render routines read sg directly, no slib dependency.
+slib::current_reload_generation();          // -> u64; it *is* sg::reload_generation()
+// The counter is sg's: a consumer like an sg render routine reads it directly, with no slib dependency.
 lib.can_compile(language, format);          // -> bool;  lib.supported_formats(language) -> vector
 lib.assets();                               // -> span<shader_asset_handle const>
 lib.filesystem();                           // -> mount_table const&  (everything mounted)
@@ -105,8 +111,9 @@ slib::create_dxc_compiler()        // -> cc::result<std::unique_ptr<shader_compi
 ## include resolution
 
 ```
-#include "x.hlsli" is looked for, most specific first:
-  1. next to the including file        dir/a.hlsl  ->  dir/x.hlsli
+#include "x.hlsli" is looked for, most specific first — all three resolved from the SHADER being
+compiled, at every include depth, not from whichever file issued the #include:
+  1. the shader's own directory        dir/a.hlsl  ->  dir/x.hlsli
   2. at the package root               dir/a.hlsl  ->  x.hlsli
   3. at the mount root                 reaches a shared mount:  #include "common/brdf.hlsli"
 every resolved path is recorded as a dependency -> editing an .hlsli reloads what includes it.
@@ -170,7 +177,6 @@ slib::shader_package      // { string_view name; shader_language language; strin
 ```
 - ONE shader_library at a time, and a package added ONCE: the generated symbols are process-wide globals.
 - add every package BEFORE start_hot_reload (asserts): the watcher walks the asset list from its thread.
-- acquire() gives a COLD async node — install a pool or drive it. See the gotcha above.
 - an asset only WEAKLY references its library, because a generated global (a static) outlives it.
   Acquiring through a stale global reports an error rather than dangling.
 - a generated package header is PRIVATE to its target. To publish a shader, re-expose it from your own

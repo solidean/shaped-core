@@ -27,8 +27,8 @@ trace trace_of(cc::vector<recorded_instruction> instructions)
     return t;
 }
 
-/// Write a 30-line file to a unique temp path; line 10 is indented so indentation-preservation can be
-/// checked. Returns the path (caller removes it).
+/// Write a 30-line file to a unique temp path; line 10 is indented so indentation-preservation can be checked.
+/// Returns the path, which the caller removes.
 cc::string write_fixture()
 {
     auto const path = std::filesystem::temp_directory_path() / "itrace_source_view_test.cc";
@@ -44,7 +44,8 @@ cc::string write_fixture()
     return cc::string(cc::string_view(s.data(), isize(s.size())));
 }
 
-/// Write `content` verbatim to a temp path named `name`. Returns the path (caller removes it).
+/// Write `content` verbatim to a temp path named `name`.
+/// Returns the path, which the caller removes.
 cc::string write_file(char const* name, cc::string_view content)
 {
     auto const path = std::filesystem::temp_directory_path() / name;
@@ -62,8 +63,8 @@ void remove_file(cc::string_view path)
 
 TEST("source cache - a CRLF file yields lines with no carriage return")
 {
-    // raw_line preserves indentation but must never hand a '\r' on to a source view. The line ending is
-    // normalized where the file is read, so nothing downstream has to know which ending it had.
+    // raw_line preserves indentation but must never hand a carriage return on to a source view.
+    // The line ending is normalized where the file is read, so nothing downstream has to know which ending it had.
     auto const path = write_file("itrace_source_cache_crlf.cc", "  first\r\nsecond\r\n\r\nlast\r\n");
 
     source_cache sources;

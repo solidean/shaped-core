@@ -9,13 +9,13 @@
 
 namespace nx
 {
-/// A single, type-erased, heap-boxed value. The shared substrate for typed test-argument passing
-/// (nx::invoke_tests / INVOCABLE_TEST) and the fuzz engine's value slots.
+/// A single, type-erased, heap-boxed value.
+/// The shared substrate for typed test-argument passing (nx::invoke_tests / INVOCABLE_TEST) and for the fuzz engine's value slots.
 ///
-/// Move-only: a value lives in exactly one slot and is never silently copied. get<T&>() returns a
-/// reference *into* the box, so a callee taking `T&` mutates the stored value in place. A
-/// default-constructed value is "void" and not valid. The stored type is always the *decayed* type
-/// of whatever was boxed, so matching is on decayed identity (`T` and `T const&` box the same type).
+/// Move-only: a value lives in exactly one slot and is never silently copied.
+/// get<T&>() returns a reference *into* the box, so a callee taking `T&` mutates the stored value in place.
+/// A default-constructed value is "void" and not valid.
+/// The stored type is always the *decayed* type of whatever was boxed, so matching is on decayed identity — `T` and `T const&` box the same type.
 struct typed_value
 {
     /// Boxes a copy/move of `value`. The stored type is the decayed type of V.

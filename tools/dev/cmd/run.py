@@ -1,11 +1,8 @@
 """`run` — build one executable target and run it, forwarding the rest of the command line.
 
-The counterpart to `test` for everything that is not a test: shaped-linter, instruction-tracer, a
-benchmark, a sample. Without it the only way to invoke a tool is to hand-write its path under
-build/<preset>/…, which hard-codes the preset and silently runs a stale binary when the build is behind.
-
-Test binaries stay out of scope on purpose — `*-test` is `dev.py test`, which discovers, filters and
-records results. `run` refuses them rather than bypassing that.
+The counterpart to `test` for everything that is not a test: a tool, a benchmark, a sample.
+`*-test` targets are refused rather than bypassing `dev.py test`, which discovers, filters and records results.
+docs/guides/building-and-testing.md says why hand-writing an artifact path is the thing this replaces.
 """
 
 from __future__ import annotations
@@ -33,10 +30,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true",
                    help="Capture the program's output to the step log instead of mirroring it live")
     p.add_argument("target", help="Executable target to run (exact name, or a wildcard matching exactly one)")
-    # Everything dev.py does not recognize is forwarded verbatim to the program (collected by the
-    # top-level parse_known_args into args.runner_args); an optional leading `--` is dropped. dev.py's
-    # own options still bind here wherever they sit, so `run shaped-linter --fix --preset X` works —
-    # at the cost that a program flag colliding with one of ours needs the `--` separator.
+    # Everything dev.py does not recognize is forwarded verbatim to the program, collected by the top-level parse_known_args into args.runner_args.
+    # An optional leading `--` is dropped.
+    # dev.py's own options still bind wherever they sit, at the cost that a program flag colliding with one of ours needs the `--` separator.
     return p
 
 
@@ -59,8 +55,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                             emsdk_path=args.emsdk_path)
         if not all(r.ok for r in results):
             ctx.fail_build(results, [preset])
-        # The artifact path can only be trusted after the build: a first-time configure discovers the
-        # target but has not linked it yet.
+        # The artifact path can only be trusted after the build: a first-time configure discovers the target but has not linked it yet.
         targets = ctx.discover(preset, args.emsdk_path)
 
     artifact = next((t.artifact for t in targets if t.name == name and t.artifact), None)
@@ -75,8 +70,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         timeout=args.timeout if args.timeout else None,
         mirror=not args.quiet, verbose=args.verbose,
     )
-    # The program's own exit code, not a pass/fail verdict — a linter's non-zero "found something" has
-    # to reach the caller intact.
+    # The program's own exit code, not a pass/fail verdict: a linter's non-zero "found something" has to reach the caller intact.
     sys.exit(result.returncode)
 
 

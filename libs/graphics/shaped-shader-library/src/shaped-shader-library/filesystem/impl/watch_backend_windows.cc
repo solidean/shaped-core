@@ -3,8 +3,8 @@
 
 #if !CC_HAS_THREADS
 
-// A backend has to wait on the OS somewhere, and there is no thread to wait on. Reporting "cannot notify"
-// puts the reload watcher back on polling, which is the one thing that still works here.
+// A backend has to wait on the OS somewhere, and there is no thread to wait on.
+// Reporting "cannot notify" puts the caller back on polling, which is the one thing that still works here.
 std::unique_ptr<slib::impl::watch_backend> slib::impl::create_watch_backend()
 {
     return nullptr;
@@ -22,23 +22,22 @@ std::unique_ptr<slib::impl::watch_backend> slib::impl::create_watch_backend()
 
 #include <thread>
 
-// ReadDirectoryChangesW over one I/O completion port, on one thread for every directory this filesystem
-// watches — rather than a thread apiece. Together with real_filesystem.cc, this is the only part of slib
-// allowed to reach the OS (see libs/graphics/shaped-shader-library/docs/coding-guidelines.md).
+// ReadDirectoryChangesW over one I/O completion port, on one thread for every directory this filesystem watches — rather than a thread apiece.
+// With real_filesystem.cc, this is the only part of slib allowed to reach the OS (see libs/graphics/shaped-shader-library/docs/coding-guidelines.md).
 //
-// It never has to say *what* changed. A watch is a hint to rescan and revision() is the truth, so a buffer
-// overflow, an editor saving via write-temp-then-rename, and a plain modify all collapse to one action:
-// fire the sink.
+// It never has to say *what* changed.
+// A buffer overflow, an editor saving via write-temp-then-rename, and a plain modify all collapse to one action: fire the sink.
 
 namespace
 {
 using namespace cc::primitive_defines;
 
-/// Completion key that means "stop", posted by the destructor. Not a valid watch id, which start at 1.
+/// Completion key that means "stop", posted by the destructor.
+/// Not a valid watch id, which start at 1.
 constexpr ULONG_PTR k_quit_key = 0;
 
-/// Big enough that an ordinary save never fills it. If one does, the OS hands back zero bytes and we fire
-/// anyway — losing the details costs nothing when the details were never used.
+/// Big enough that an ordinary save never fills it.
+/// If one does, the OS hands back zero bytes and we fire anyway — losing the details costs nothing when they were never used.
 constexpr DWORD k_buffer_bytes = 16 * 1024;
 
 constexpr DWORD k_notify_filter = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE
@@ -73,8 +72,8 @@ public:
     [[nodiscard]] cc::optional<slib::watch_subscription> watch_dir(cc::string_view native_dir,
                                                                    slib::watch_sink sink) override;
 
-    /// Ends one watch. Called from the subscription's destructor, so by the time it returns the sink must be
-    /// neither running nor callable again.
+    /// Ends one watch.
+    /// Called from the subscription's destructor, so by the time it returns the sink must be neither running nor callable again.
     void unwatch(u64 id);
 
 private:
@@ -82,8 +81,8 @@ private:
 
     struct state
     {
-        // Keyed by id, not by address: unwatch frees the watch, and an id cannot be recycled into a
-        // different directory the way an address can — so a completion that arrives late is simply not found.
+        // Keyed by id, not by address: an id cannot be recycled into a different directory the way an address can.
+        // A completion that arrives late is then simply not found.
         cc::map<u64, std::shared_ptr<dir_watch>> watches;
         u64 next_id = 1;
     };
@@ -93,8 +92,8 @@ private:
     cc::mutex<state> _state;
 };
 
-/// Ends its watch on destruction. The backend must outlive it — real_filesystem owns both, and the reload
-/// watcher drops every subscription before the library tears its mounts down.
+/// Ends its watch on destruction.
+/// The backend must outlive it — real_filesystem owns both.
 struct dir_subscription final : slib::watch_subscription::impl_base
 {
     dir_subscription(iocp_watch_backend* backend, u64 id) : backend(backend), id(id) {}
@@ -106,8 +105,8 @@ struct dir_subscription final : slib::watch_subscription::impl_base
 
 iocp_watch_backend::~iocp_watch_backend()
 {
-    // Cancel every read still in flight before the thread goes, so nothing is left half-torn-down. Each
-    // wait below is bounded: the operation is already cancelled, we are only collecting it.
+    // Cancel every read still in flight before the thread goes, so nothing is left half-torn-down.
+    // Each wait below is bounded: the operation is already cancelled, we are only collecting it.
     _state.lock(
         [](state& s)
         {
@@ -132,8 +131,7 @@ cc::optional<slib::watch_subscription> iocp_watch_backend::watch_dir(cc::string_
     auto wide = cc::utf8_to_utf16(native_dir);
     wide.push_back(u'\0'); // utf8_to_utf16 does not terminate
 
-    // FILE_FLAG_BACKUP_SEMANTICS is what makes CreateFileW open a directory at all; the share flags let the
-    // editor we are watching for keep doing its job.
+    // FILE_FLAG_BACKUP_SEMANTICS is what makes CreateFileW open a directory at all; the share flags let the editor we are watching for keep doing its job.
     HANDLE const handle = CreateFileW(reinterpret_cast<wchar_t const*>(wide.data()), FILE_LIST_DIRECTORY,
                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                                       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
@@ -175,12 +173,12 @@ void iocp_watch_backend::unwatch(u64 id)
     if (w == nullptr)
         return;
 
-    // Before anything else: once this returns the sink is neither running nor callable again, which is the
-    // whole promise a watch_subscription makes. The run loop below can no longer find this watch either.
+    // Before anything else: once this returns the sink is neither running nor callable again, which is the promise watch_subscription makes.
+    // The run loop below can no longer find this watch either.
     w->slot->cancel();
 
-    // Cancel and *collect* rather than just CloseHandle: the OVERLAPPED and the buffer behind it die with
-    // this object, and only a completed operation is guaranteed not to be written to again.
+    // Cancel and *collect* rather than just CloseHandle: the OVERLAPPED and the buffer behind it die with this object.
+    // Only a completed operation is guaranteed not to be written to again.
     CancelIoEx(w->handle, &w->overlapped);
 
     DWORD bytes = 0;
@@ -210,26 +208,26 @@ void iocp_watch_backend::run()
                     w = *found;
             });
 
-        // A completion for a watch that has since been unsubscribed. Its sink is already silenced and its
-        // handle closed, so there is nobody left to tell.
+        // A completion for a watch that has since been unsubscribed.
+        // Its sink is already silenced and its handle closed, so there is nobody left to tell.
         if (w == nullptr)
             continue;
 
-        // Fire either way. `bytes == 0` means the buffer overflowed and the OS dropped the details, and a
-        // read that failed outright means the directory went out from under us — both are still "look
-        // again", and revision() is what will say what actually happened.
+        // Fire either way.
+        // `bytes == 0` means the buffer overflowed and the OS dropped the details; a read that failed outright means the directory went out from under us.
+        // Both are still "look again", and revision() is what says what actually happened.
         w->slot->fire();
 
-        // A failed read leaves nothing to re-arm: the directory is gone. The scan the sink above just asked
-        // for is what notices, so stop here rather than spin on a handle that will never work again.
+        // A failed read leaves nothing to re-arm: the directory is gone.
+        // The scan the sink above just asked for is what notices, so stop here rather than spin on a handle that will never work again.
         if (!ok)
             continue;
 
         _state.lock(
             [&](state& s)
             {
-                // Under the lock, so a concurrent unwatch cannot close the handle between the check and the
-                // call. If it already has, the watch is simply no longer here.
+                // Under the lock, so a concurrent unwatch cannot close the handle between the check and the call.
+                // If it already has, the watch is simply no longer here.
                 if (s.watches.get_ptr(u64(key)) != nullptr)
                     (void)queue_read(*w);
             });

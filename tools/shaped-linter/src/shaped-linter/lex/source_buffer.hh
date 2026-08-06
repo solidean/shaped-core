@@ -13,7 +13,8 @@ namespace scl
 /// Construction scans the text once to build the line index.
 struct source_buffer
 {
-    /// A buffer over in-memory text (tests, snippets) — no file IO. `path` is used only for reporting.
+    /// A buffer over in-memory text (tests, snippets) — no file IO.
+    /// `path` is used only for reporting.
     static source_buffer from_text(cc::string text, cc::string_view path, u32 file_id);
 
     cc::string_view text() const { return _text; }
@@ -23,10 +24,12 @@ struct source_buffer
     /// The bytes covered by `s`. `s` must refer to this buffer's file and be within bounds.
     cc::string_view span_text(source_span s) const;
 
-    /// The 1-based line/column of a byte offset. `offset` is clamped to `[0, size]`.
+    /// The 1-based line/column of a byte offset.
+    /// `offset` is clamped to `[0, size]`.
     line_col line_col_at(u32 byte_offset) const;
 
-    /// The number of lines. Always >= 1: an empty file is one empty line.
+    /// The number of lines.
+    /// Always >= 1: an empty file is one empty line.
     u32 line_count() const { return u32(_line_starts.size()); }
 
     /// The byte range of a 1-based line, without its trailing newline.

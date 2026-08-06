@@ -2,22 +2,22 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group.hh> // sg::named_view
-#include <shaped-graphics/buffer.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::named_view
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/buffer.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic tests for the transient lifetime scope (ctx->transient): per-epoch scratch buffers, the
-// shared bump-allocated heap and its deferred budget, and transient binding-group instantiation. Each is an
-// INVOCABLE_TEST run against every available backend (see tests/context/context-test.cc for the mechanism).
-// Per-backend transient internals — the dx12 bump-heap placement granularity and the CPU-fed descriptor
-// ring recycling end-to-end — live with the backend (backends/dx12/tests/dx12-transient-test.cc and
-// dx12-compute-test.cc). See libs/graphics/shaped-graphics/docs/testing.md for the split.
+// Backend-agnostic tests for the transient lifetime scope (ctx->transient).
+// Per-epoch scratch buffers, the shared bump-allocated heap and its deferred budget, and transient binding-group instantiation.
+// Each is an INVOCABLE_TEST run against every available backend — see tests/context/context-test.cc for the mechanism.
+// Per-backend transient internals live with the backend — the dx12 bump-heap placement granularity, and the CPU-fed descriptor ring recycling end to end.
+// Those are backends/dx12/tests/dx12-transient-test.cc and dx12-compute-test.cc.
+// See libs/graphics/shaped-graphics/docs/testing.md for the split.
 
 namespace
 {
@@ -149,8 +149,8 @@ INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::conte
     CHECK(!buf->is_valid());
 }
 
-// The transient heap resets its bump head each epoch, so successive epochs alias the same storage. Every
-// epoch's data must still round-trip while a couple of epochs stay in flight.
+// The transient heap resets its bump head each epoch, so successive epochs alias the same storage.
+// Every epoch's data must still round-trip while a couple of epochs stay in flight.
 INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -185,8 +185,8 @@ INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::co
     }
 }
 
-// The setter is repeatable and touches no GPU state; the last value before an advance wins. (The old API
-// asserted on a second call / after first use — this pins the new, forgiving contract.)
+// The setter is repeatable and touches no GPU state, so the last value before an advance wins.
+// The old API asserted on a second call, or after first use — this pins the new, forgiving contract.
 INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -239,9 +239,8 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf != nullptr);
 
-    // A view bound to a name the layout does not declare is rejected, not silently ignored. The fallible
-    // core surfaces it as an error; the throwing façade (create_binding_group) would raise
-    // sg::binding_group_exception instead (see tests/error-handling).
+    // A view bound to a name the layout does not declare is rejected, not silently ignored.
+    // The fallible core surfaces it as an error; the throwing façade (create_binding_group) would raise sg::binding_group_exception instead (see tests/error-handling).
     sg::named_view const wrong = {.name = "Nope", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
     auto group = ctx->transient.try_create_binding_group(layout, cc::span<sg::named_view const>(&wrong, 1));
     CHECK(group.has_error());

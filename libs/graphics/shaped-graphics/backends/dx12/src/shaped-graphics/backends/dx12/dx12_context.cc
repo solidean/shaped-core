@@ -24,15 +24,15 @@ void dx12_context::shutdown()
     // alive (the actor may block on it). The GPU is idle by now, so pending copies complete promptly.
     _download_inline.shutdown();
     _upload_inline.shutdown();
-    // The async upload + download actors run on the independent copy queue, which advance-and-wait did not
-    // drain, so their shutdown waits for that queue to idle. Do it while the copy queue + fences are alive.
+    // The async upload + download actors run on independent copy queues, which advance-and-wait did not drain, so their shutdown waits for those queues to idle.
+    // Do it while the copy queues and fences are alive.
     _upload_async.shutdown();
     _download_async.shutdown();
 
-    // Both the direct and copy queues are idle now. The async actor's own shutdown may have dropped the
-    // last reference to a buffer (its in-flight upload) after the final advance already ran, staging a
-    // fresh deferred deletion, and copy-deferred hold-backs may still be waiting on the (now fully
-    // signaled) copy fence. Nothing else will sweep these, so release them here while the device is alive.
+    // Both the direct and copy queues are idle now.
+    // The async actor's own shutdown may have dropped the last reference to a buffer — its in-flight upload — after the final advance already ran, staging a fresh deferred deletion.
+    // Copy-deferred hold-backs may also still be waiting on the now fully signaled copy fence.
+    // Nothing else will sweep these, so release them here while the device is alive.
     {
         cc::vector<dx12_expiring_resource> leftover = _epoch_state.lock(
             [](dx12_epoch_state& s)
@@ -57,7 +57,7 @@ void dx12_context::shutdown()
     _submission_fence.Reset();
     _epoch_fence.Reset();
 
-    // Release the device-level COM objects (live-object tracking will unwind here later too).
+    // Release the device-level COM objects.
     _queue.Reset();
     _device.Reset();
     _factory.Reset();

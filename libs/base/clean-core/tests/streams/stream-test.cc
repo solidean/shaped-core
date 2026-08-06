@@ -72,8 +72,8 @@ TEST("stream - narrowing consumes the source and keeps reading through the same 
 
 TEST("stream - narrowing read_write to write keeps the write bound, not the read one")
 {
-    // `end` is the read boundary on a read_write stream but the write bound on a write stream, so this
-    // narrowing has to carry over write_end. Taking `end` would silently shrink the sink to the readable part.
+    // `end` is the read boundary on a read_write stream but the write bound on a write stream, so this narrowing has to carry over write_end.
+    // Taking `end` would silently shrink the sink to the readable part.
     auto adapter = mock_split_bounds_read_write_adapter(/*readable*/ isize(4));
 
     cc::read_write_stream rw = adapter.stream();

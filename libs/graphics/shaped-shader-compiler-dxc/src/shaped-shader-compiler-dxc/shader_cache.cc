@@ -4,7 +4,7 @@
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/async.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
 #include <memory>
@@ -13,8 +13,8 @@ namespace ssc::dxc
 {
 namespace
 {
-// Per-thread DXC compiler: the compiler is one-per-thread / not thread-safe, so each worker that runs
-// a compile frame lazily builds its own. A broken DXC install yields nullptr and the compile fails.
+// Per-thread DXC compiler: the compiler is one-per-thread / not thread-safe, so each worker that runs a compile frame lazily builds its own.
+// A broken DXC install yields nullptr and the compile fails.
 compiler* thread_local_compiler()
 {
     static thread_local std::unique_ptr<compiler> const instance = []() -> std::unique_ptr<compiler>

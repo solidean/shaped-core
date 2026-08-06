@@ -4,10 +4,11 @@
 
 using namespace cc::primitive_defines;
 
-// dx12-specific transient-buffer invariant: the bump heap's 64 KiB placement granularity. The generic
-// transient contract (round-trips, independence, expiry, storage reuse, the deferred set_budget) is pinned
-// backend-agnostically in tests/transient/transient-test.cc and runs here too via the dx12 driver — this
-// file keeps only what is specific to the dx12 placement math. On WARP so it runs headless on CI.
+// dx12-specific transient-buffer invariant: the bump heap's 64 KiB placement granularity.
+// The generic transient contract — round-trips, independence, expiry, storage reuse, the deferred set_budget — is pinned backend-agnostically in tests/transient/transient-test.cc.
+// That suite runs here too, via the dx12 driver.
+// This file keeps only what is specific to the dx12 placement math.
+// On WARP so it runs headless on CI.
 // See libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/memory.md.
 
 namespace
@@ -15,10 +16,10 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-// Allocate one transient buffer per epoch for many epochs on a small budget. Each 256-byte buffer occupies
-// a 64 KiB placement (D3D12's default resource alignment), so a 512 KiB budget fits only a handful — yet
-// the bump head resets every epoch, so successive epochs alias the same storage and every epoch's data
-// still round-trips. The 512 KiB budget is set deferred and takes effect from the second epoch on.
+// Allocate one transient buffer per epoch for many epochs on a small budget.
+// Each 256-byte buffer occupies a 64 KiB placement (D3D12's default resource alignment), so a 512 KiB budget fits only a handful.
+// Yet the bump head resets every epoch, so successive epochs alias the same storage and every epoch's data still round-trips.
+// The 512 KiB budget is set deferred and takes effect from the second epoch on.
 TEST("sg dx12 - transient buffer storage reused across many epochs")
 {
     auto handle = dx12::acquire_warp_context();

@@ -158,7 +158,8 @@ TEST("sr::impl - packing a full-width rect is a straight copy")
 
 TEST("sr::impl - each pack allocates its own buffer")
 {
-    // ctx.upload is fire-and-forget and holds the pin until the copy runs, so two packs must not alias — reusing one scratch buffer would let a second repack overwrite bytes a pending copy still reads.
+    // ctx.upload is fire-and-forget and holds the pin until the copy runs, so two packs must not alias.
+    // Reusing one scratch buffer would let a second repack overwrite bytes a pending copy still reads.
     constexpr auto width = 2;
     constexpr auto bpp = 1;
     auto const image = cc::vector<byte>{byte(1), byte(2), byte(3), byte(4)};

@@ -4,10 +4,9 @@
 
 // Forward declarations and the logical counter vocabulary for the nx::bench benchmarking helpers.
 //
-// The first (and currently only) topic is hardware performance counters: cycles, instructions retired,
-// branch mispredictions, cache misses, ... measured around a single invocation of a callable. Counters are
-// addressed by a small platform-independent enum (nx::bench::hw_counter); the native, possibly cryptic name
-// and a best-effort description travel alongside each one in the query API (see hardware_counters.hh).
+// The first and currently only topic is hardware performance counters: cycles, instructions retired, branch mispredictions, cache misses.
+// They are measured around a single invocation of a callable, and addressed by the platform-independent nx::bench::hw_counter enum.
+// The native — possibly cryptic — name and a best-effort description travel alongside each counter in hardware_counters.hh's query API.
 
 namespace nx::bench
 {
@@ -15,9 +14,9 @@ using namespace cc::primitive_defines;
 
 /// A platform-independent hardware counter identity.
 ///
-/// The values here are the portable default set. Not every CPU/OS can measure every one; what is actually
-/// available right now is reported by available_hw_counters(). elapsed_nanoseconds and reference_cycles are
-/// the always-on baseline that works even with no PMU access (wall clock + a cheap cycle counter).
+/// The values here are the portable default set, and not every CPU/OS can measure every one.
+/// available_hw_counters() reports what is actually available right now.
+/// elapsed_nanoseconds and reference_cycles are the always-on baseline — wall clock plus a cheap cycle counter — and work with no PMU access at all.
 enum class hw_counter : u8
 {
     elapsed_nanoseconds,  ///< wall-clock time of the run (steady clock) — always available

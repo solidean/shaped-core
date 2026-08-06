@@ -9,21 +9,17 @@
 
 #include <memory>
 
-// The last test in this file is the one exception to "no disk, no sleeps" below, and it earns it: nothing
-// else here runs a real directory, a real OS watch and a real thread together, which is precisely the path
-// a dev build takes. It needs <filesystem> to make an edit the OS can see.
+// The last test in this file is the one exception to "no disk, no sleeps" below, and it earns it: nothing else here runs a real directory, a real OS watch and a real thread together.
+// It needs <filesystem> to make an edit the OS can see.
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 
-// Hot reload, with no disk and no sleeps: a memory_filesystem write is the edit, and an unthreaded
-// watcher makes the scan happen exactly when the test says so. That determinism is what the virtual
-// filesystem buys — the same paths through the watcher run threaded in a real app.
+// Hot reload with no disk and no sleeps: a memory_filesystem write is the edit, and an unthreaded watcher makes the scan happen exactly when the test says so.
+// The same paths through the watcher run threaded in a real app.
 //
-// memory_filesystem fires its watch straight from write(), so these run the notify path end to end without
-// an OS or a timer anywhere. counting_filesystem below is how the last few tell "the watcher rescanned"
-// apart from "the watcher never woke", which is the difference the whole design exists for.
+// counting_filesystem below is how the last few tell "the watcher rescanned" apart from "the watcher never woke".
 
 using slib_test::fake_compiler;
 
@@ -68,9 +64,9 @@ struct reload_fixture
     }
 };
 
-/// A memory_filesystem that counts what the watcher asks of it, and can be told to report that it cannot
-/// notify. A scan *is* a run of revision() calls, so counting them is how a test observes whether the
-/// watcher woke at all — and `can_watch` is what a platform with no watch backend looks like from here.
+/// A memory_filesystem that counts what the watcher asks of it, and can be told to report that it cannot notify.
+/// A scan *is* a run of revision() calls, so counting them is how a test observes whether the watcher woke at all.
+/// `can_watch` is what a platform with no watch backend looks like from here.
 struct counting_filesystem final : slib::filesystem
 {
     explicit counting_filesystem(bool can_watch) : _can_watch(can_watch) {}
@@ -149,7 +145,7 @@ TEST("slib - a scan with nothing changed reloads nothing")
     f.start();
 
     auto const generation_before = f.pkg.invert->generation();
-    auto const lib_generation_before = f.lib.generation(); // process-global now, so compare relatively
+    auto const lib_generation_before = f.lib.generation(); // process-global, so compare relatively
     f.lib.poll_hot_reload();
     f.lib.poll_hot_reload();
 
@@ -181,8 +177,7 @@ TEST("slib - a broken edit keeps the last good shader and reports why")
     f.fs->write("invert.hlsl", slib_test::k_broken_source);
     f.lib.poll_hot_reload();
 
-    // The point of staging rather than replacing: a shader that no longer compiles must not take the
-    // running one down with it.
+    // A shader that no longer compiles must not take the running one down with it.
     CHECK(f.source() == "v1");
     REQUIRE(f.pkg.invert->last_error().has_value());
     CHECK(f.pkg.invert->last_error().value().contains("fake compile error"));
@@ -219,8 +214,8 @@ TEST("slib - editing an included file reloads the shaders that include it")
     CHECK(f.pkg.invert->dependencies().size() == 2);
     f.start();
 
-    // The shader's own file is untouched — only something it pulled in changed. This is what recording
-    // every resolved include during preprocess is for.
+    // The shader's own file is untouched — only something it pulled in changed.
+    // This is what recording every resolved include during preprocess is for.
     f.fs->write("common.hlsli", "COMMON_V2");
     f.lib.poll_hot_reload();
 
@@ -241,8 +236,7 @@ TEST("slib - an include discovered by a reload is seeded, not treated as a chang
     CHECK(f.source() == "COMMON");
     CHECK(f.pkg.invert->generation() == 1);
 
-    // The newly discovered include must not read as changed on the next scan — that would reload the
-    // shader forever, once per poll.
+    // The newly discovered include must not read as changed on the next scan — that would reload the shader forever, once per poll.
     f.lib.poll_hot_reload();
     CHECK(f.pkg.invert->generation() == 1);
 }
@@ -296,10 +290,8 @@ TEST("slib - a shader first acquired after hot reload started is still watched")
     f.start();
     f.lib.poll_hot_reload(); // nothing is acquired yet, so this finds no dependencies and watches nothing
 
-    // The trap: a shader only reports what it is built from once a compile has resolved its includes, and
-    // the first acquire does that here — on a consumer's thread, after the watcher already went quiet. The
-    // watcher reads dependencies() rather than being handed them, so unless acquire tells it to look again
-    // it stays parked over an empty watch list and every edit below is lost.
+    // The trap: a shader only reports what it is built from once a compile has resolved its includes, and the first acquire does that here.
+    // It happens on a consumer's thread, after the watcher already went quiet, so unless acquire tells it to look again it stays parked over an empty watch list and every edit below is lost.
     CHECK(f.source() == "v1");
     f.lib.poll_hot_reload(); // only has anything to do because acquire asked for it
 
@@ -317,8 +309,7 @@ TEST("slib - a watched poll does no work while nothing changes")
     f.lib.poll_hot_reload(); // settles: the scan on start, and the one its first subscription asks for
     f.lib.poll_hot_reload();
 
-    // The whole point of the exercise. Polling, each of these re-stats every dependency of every asset —
-    // 20-50 ms at a couple of hundred shaders, every interval, forever, whether or not anyone is editing.
+    // Polling, each of these would re-stat every dependency of every asset, every interval, whether or not anyone is editing.
     auto const calls_before = f.fs->revision_calls;
     f.lib.poll_hot_reload();
     f.lib.poll_hot_reload();
@@ -339,8 +330,7 @@ TEST("slib - hot reload falls back to polling when the filesystem cannot notify"
     f.lib.start_hot_reload({.unthreaded = true});
     f.lib.poll_hot_reload();
 
-    // Nothing will ever wake this watcher, so every poll has to rescan — the behaviour every platform
-    // without a watch backend keeps, and the reason watch() may answer "poll me" rather than lie.
+    // Nothing will ever wake this watcher, so every poll has to rescan — what every platform without a watch backend does.
     auto const calls_before = f.fs->revision_calls;
     f.lib.poll_hot_reload();
     CHECK(f.fs->revision_calls > calls_before);
@@ -368,8 +358,8 @@ TEST("slib - force_polling ignores a filesystem that could notify")
 
 TEST("slib - a threaded watcher starts and stops cleanly")
 {
-    // The tests above pump by hand for determinism; this one takes the path a real app does. It only
-    // asserts the lifecycle — a real reload race would be flaky, and the scan logic is covered above.
+    // The tests above pump by hand for determinism; this one takes the path a real app does.
+    // It only asserts the lifecycle — a real reload race would be flaky, and the scan logic is covered above.
     reload_fixture f;
     CHECK(f.source() == "v1");
 
@@ -383,9 +373,8 @@ TEST("slib - a threaded watcher starts and stops cleanly")
 
 TEST("slib - a threaded watcher reloads through a real directory")
 {
-    // The whole thing, on the path a dev build actually takes: a real directory, the OS watch backend, a
-    // thread, and no polling anywhere. Everything above runs on memory_filesystem so it can be exact — but
-    // none of it would notice a backend that never fires, or a notification that never reaches the mailbox.
+    // The whole thing, on the path a dev build actually takes: a real directory, the OS watch backend, a thread, and no polling anywhere.
+    // Everything above runs on memory_filesystem so it can be exact, but none of it would notice a backend that never fires or a notification that never reaches the mailbox.
     auto const dir = std::filesystem::temp_directory_path() / "slib-threaded-real-reload";
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
@@ -411,9 +400,9 @@ TEST("slib - a threaded watcher reloads through a real directory")
     };
     CHECK(source() == "v1"); // the first acquire compiles, and tells the watcher what to watch
 
-    // No interval_ms and no unthreaded: on Windows this reloads because the OS said so. A platform with no
-    // backend falls back to the default 200 ms poll instead, and one with no threads at all runs unthreaded
-    // off poll_hot_reload() below — every one of them has to land well inside the wait.
+    // No interval_ms and no unthreaded: on Windows this reloads because the OS said so.
+    // A platform with no backend falls back to the default 200 ms poll, and one with no threads runs unthreaded off poll_hot_reload() below.
+    // Every one of them has to land well inside the wait.
     lib.start_hot_reload();
 
     write("a much longer v2");

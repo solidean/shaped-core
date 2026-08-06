@@ -3,8 +3,9 @@
 #include <clean-core/fwd.hh>
 
 /// Aggregate forward declarations for babel-serializer.
-/// Each format lives in its own sub-namespace (babel::base64, babel::json, babel::markdown, babel::sqlite, babel::obj, babel::gltf)
-/// and owns its own header; include that header directly when it is all you need.
+/// Each format lives in its own sub-namespace — babel::base64, babel::json, babel::markdown, babel::sqlite,
+/// babel::obj, babel::gltf, babel::png, babel::jpg — plus the babel::image aggregator on top of the last two.
+/// Each owns its own header; include that header directly when it is all you need.
 
 namespace babel
 {
@@ -39,7 +40,8 @@ struct data;
 
 namespace babel::gltf
 {
-// The index roles. A forward declaration must repeat the underlying type exactly, hence the `: int` here too.
+// The index roles.
+// A forward declaration must repeat the underlying type exactly, hence the `: int` here too.
 enum class buffer_index : int;
 enum class buffer_view_index : int;
 enum class accessor_index : int;

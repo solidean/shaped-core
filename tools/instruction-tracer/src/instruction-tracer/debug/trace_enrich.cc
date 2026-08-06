@@ -7,9 +7,9 @@ namespace itrace
 {
 namespace
 {
-/// Resolves the function containing an address, reusing the last hit. Traces run mostly straight
-/// through one function, so a single-entry range cache turns a lookup per instruction into a lookup
-/// per function. Symbols whose extent the PDB withholds (size 0) simply never cache.
+/// Resolves the function containing an address, reusing the last hit.
+/// Traces run mostly straight through one function, so a single-entry range cache turns a lookup per instruction into a lookup per function.
+/// Symbols whose extent the PDB withholds (size 0) simply never cache.
 class owner_cache
 {
 public:
@@ -23,8 +23,8 @@ public:
         auto const sym = _symbols.symbol_at(address);
         if (!sym.has_value())
         {
-            // No symbol: fall back to describe's module+offset / bare-address form. Never cached —
-            // each such address is its own row, which is the honest answer.
+            // No symbol: fall back to describe's module+offset / bare-address form.
+            // Never cached — each such address is its own row.
             _size = 0;
             _name = _symbols.describe(address);
             return _name;
@@ -44,9 +44,9 @@ private:
     cc::string _name;
 };
 
-/// A data symbol whose *extent* covers `address` — a global, a static. Empty when the address is
-/// inside no known symbol: unlike code, SymFromAddr's nearest-preceding match is meaningless for a
-/// stack or heap address, so we demand a real containment before naming it.
+/// A data symbol whose *extent* covers `address` — a global, a static.
+/// Empty when the address is inside no known symbol.
+/// Unlike code, SymFromAddr's nearest-preceding match is meaningless for a stack or heap address, so a real containment is required before naming it.
 cc::string data_symbol_at(symbol_session const& symbols, u64 address)
 {
     auto const sym = symbols.symbol_at(address);
@@ -72,8 +72,8 @@ cc::string function_name_at(symbol_session const& symbols, u64 address)
     return s.module.empty() ? s.name : cc::format("{}!{}", s.module, s.name);
 }
 
-/// Frames active at the current instruction, outermost first. Each entry is the return-address-slot
-/// rsp of a frame (its stack memory grows down from there) and the function that owns it.
+/// Frames active at the current instruction, outermost first.
+/// Each entry is the return-address-slot rsp of a frame — its stack memory grows down from there — and the function that owns it.
 struct frame_stack
 {
     cc::vector<u64> bases;
@@ -97,8 +97,8 @@ struct frame_stack
     }
 };
 
-/// Fill `insn.memory_accesses` for one instruction: every data operand plus the instruction fetch,
-/// each classified into a region and symbolized. `regs` is the state before `insn` ran.
+/// Fill `insn.memory_accesses` for one instruction: every data operand plus the instruction fetch, each classified into a region and symbolized.
+/// `regs` is the state before `insn` ran.
 void fill_accesses(recorded_instruction& insn,
                    register_snapshot const& regs,
                    trace const& t,
@@ -124,8 +124,8 @@ void fill_accesses(recorded_instruction& insn,
         insn.memory_accesses.push_back(cc::move(acc));
     }
 
-    // The instruction fetch itself — code memory, so an I-cache footprint once the `instructions`
-    // region is opted in. Charged to the function it lives in.
+    // The instruction fetch itself — code memory, so an I-cache footprint once the `instructions` region is opted in.
+    // Charged to the function it lives in.
     if (insn.length > 0)
     {
         memory_access fetch;
@@ -191,14 +191,11 @@ void enrich_trace(trace& t,
             }
         }
 
-        // The stats table and the memory-fetch attribution both charge instructions to their
-        // containing function; the plain trace never prints it, and a lookup per instruction is not
-        // free.
+        // The stats table and the memory-fetch attribution both charge instructions to their containing function; the plain trace never prints it.
         if (want_owner || want_memory)
             insn.owner_symbol = owners.owner_of(insn.rip);
 
-        // Only symbolize where control actually went somewhere — a fallthrough target is the next
-        // line of output anyway, and a lookup per instruction is not free.
+        // Only symbolize where control actually went somewhere — a fallthrough target is the next line of output anyway.
         if (diverged(insn))
             insn.target_symbol = symbols.describe(insn.next_rip);
     }

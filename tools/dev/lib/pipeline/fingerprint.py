@@ -1,9 +1,8 @@
 """Configure fingerprinting — skip CMake configure when nothing relevant changed.
 
-The fingerprint hashes the mtimes of CMakeLists.txt/*.cmake files plus the
-sorted listing of .cc/.hh source files across the repo. Content changes within
-existing sources are the build system's job; this only detects when configure
-itself needs to rerun (cmake input changed, or a source was added/removed).
+The fingerprint hashes the mtimes of CMakeLists.txt and *.cmake files, plus the sorted listing of .cc/.hh sources across the repo.
+A content change inside an existing source is the build system's job.
+This only detects when configure itself must rerun, because a cmake input changed or a source was added or removed.
 """
 
 from __future__ import annotations

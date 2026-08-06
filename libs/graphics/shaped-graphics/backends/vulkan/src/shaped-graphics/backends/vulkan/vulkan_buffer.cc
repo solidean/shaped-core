@@ -1,5 +1,5 @@
-// vulkan_buffer: GPU buffer creation and teardown. The buffer type is header-only (ctor + fields);
-// the allocating create path and the destructor live here.
+// vulkan_buffer: GPU buffer creation and teardown.
+// The buffer type itself is header-only, so the allocating create path and the destructor live here.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
@@ -20,13 +20,12 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usage usage)
         flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     if (sg::has_flag(usage, sg::buffer_usage::uniform_buffer))
         flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    // Vulkan doesn't distinguish read-only vs read-write storage at the usage-bit level (that's a
-    // descriptor/access concern), so both map to the same STORAGE_BUFFER_BIT.
+    // Vulkan does not distinguish read-only from read-write storage at the usage-bit level — that is a descriptor/access concern.
+    // So both map to the same STORAGE_BUFFER_BIT.
     if (sg::has_flag(usage, sg::buffer_usage::readonly_buffer) || sg::has_flag(usage, sg::buffer_usage::readwrite_buffer))
         flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-    // Vulkan rejects a zero-usage buffer; a usage-less non-empty buffer keeps a benign transfer dst
-    // so the handle stays valid (dx12's FLAG_NONE path has no such restriction).
+    // Vulkan rejects a zero-usage buffer, so a usage-less non-empty buffer keeps a benign transfer-dst bit and stays valid.
     if (flags == 0)
         flags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     return flags;
@@ -35,8 +34,8 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usage usage)
 
 vulkan_buffer::~vulkan_buffer()
 {
-    // Stage the GPU handles + finalizers for deletion once the current epoch retires. Empty buffers
-    // (null handles) with no finalizers own nothing GPU-side and need no deferral.
+    // Stage the GPU handles and finalizers for deletion once the current epoch retires.
+    // An empty buffer with no finalizers owns nothing GPU-side, so it needs no deferral.
     if (_buffer != VK_NULL_HANDLE || _memory != VK_NULL_HANDLE || !_finalizers.empty())
     {
         vulkan_expiring_resource expiring;
@@ -52,9 +51,8 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
                                                                       sg::allocation_info const& alloc)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
-    // TEMPORARY: only dedicated allocations are implemented. Placement into a memory_heap needs binding
-    // the buffer to a sub-range of the heap's VkDeviceMemory (vkBindBufferMemory at an offset) — not
-    // wired up yet.
+    // TEMPORARY: only dedicated allocations are implemented.
+    // Placement into a memory_heap needs vkBindBufferMemory at an offset into the heap's VkDeviceMemory, which is not wired up.
     CC_ASSERT(alloc.is_dedicated(), "placed allocations (non-null memory_heap) not implemented yet");
 
     VkBuffer buffer = VK_NULL_HANDLE;
@@ -76,7 +74,6 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
         VkMemoryRequirements req = {};
         vkGetBufferMemoryRequirements(_device, buffer, &req);
 
-        // GPU-resident: sg exposes no host-visible buffers.
         u32 const type = find_memory_type(u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (type == UINT32_MAX)
         {

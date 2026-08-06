@@ -7,6 +7,22 @@
 
 using namespace cc::primitive_defines;
 
+// string_view's relational operators are hidden friends, so ADL alone never reaches them for two cc::strings.
+// cc::string carries its own operator<=>, which is what makes each of these orderings resolve.
+namespace
+{
+template <class A, class B>
+concept has_equal = requires(A const& a, B const& b) { a == b; };
+template <class A, class B>
+concept has_less = requires(A const& a, B const& b) { a < b; };
+} // namespace
+static_assert(has_equal<cc::string, cc::string>);
+static_assert(has_less<cc::string, cc::string>);
+static_assert(has_less<cc::string, cc::string_view>);
+static_assert(has_less<cc::string_view, cc::string>);
+static_assert(has_less<cc::string, char const*>);
+static_assert(has_less<char const*, cc::string>);
+
 TEST("string - SSO behavior")
 {
     SECTION("small strings stay in SSO mode")
@@ -710,6 +726,46 @@ TEST("string - comparisons")
         CHECK(s == cc::string_view{""});
     }
 
+    SECTION("ordering between two strings")
+    {
+        cc::string const a = cc::string("apple");
+        cc::string const b = cc::string("banana");
+        CHECK(a < b);
+        CHECK(b > a);
+        CHECK(a <= b);
+        CHECK(!(a >= b));
+        CHECK(a <= cc::string("apple"));
+        CHECK(a >= cc::string("apple"));
+    }
+
+    SECTION("ordering is lexicographic by byte, and a prefix sorts first")
+    {
+        CHECK(cc::string("abc") < cc::string("abd"));
+        CHECK(cc::string("abc") < cc::string("abcd"));
+        CHECK(cc::string() < cc::string("a"));
+        // uppercase sorts before lowercase, as raw bytes rather than by any locale
+        CHECK(cc::string("Z") < cc::string("a"));
+    }
+
+    SECTION("ordering with a string_view or a literal on either side")
+    {
+        cc::string const s = cc::string("mango");
+        CHECK(s < cc::string_view{"nectarine"});
+        CHECK(cc::string_view{"lemon"} < s);
+        CHECK(s < "nectarine");
+        CHECK("lemon" < s);
+    }
+
+    SECTION("ordering survives the SSO boundary")
+    {
+        // one inline, one on the heap: the comparison must see content, not storage
+        cc::string const small = cc::string("b");
+        cc::string const large = cc::string::create_filled(100, 'a');
+        CHECK(large < small);
+        CHECK(small > large);
+        CHECK(large.compare(cc::string_view(small)) < 0);
+    }
+
     SECTION("starts_with")
     {
         cc::string s = cc::string("hello world");
@@ -1065,7 +1121,9 @@ TEST("string - resize and capacity")
         return true;
     };
 
-    // The inline SSO capacity, derived the same way as cc::string::small_capacity: the allocation header's four pointers and one isize fill the space before custom_resource, minus one byte for the size tag.
+    // The inline SSO capacity, derived the same way as cc::string::small_capacity.
+    // The allocation header's four pointers and one isize fill the space before custom_resource, minus one
+    // byte for the size tag.
     // 39 on 64-bit, fewer where pointers are smaller (23 on wasm32).
     isize const small_capacity = isize(4 * sizeof(void*) + sizeof(isize) - 1);
 
@@ -1229,7 +1287,7 @@ TEST("string - resize and capacity")
         s.resize_down_to(5);
         CHECK(!s.is_small()); // still heap after the shrink
         s.shrink_to_fit();
-        CHECK(s.is_small()); // reallocation was due anyway, so it returned to SSO
+        CHECK(s.is_small()); // content that fits inline always returns to SSO
         CHECK(s == cc::string_view{"aaaaa"});
     }
 

@@ -10,8 +10,8 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// One watch over several mounts. The child sinks all fire the same slot, so cancelling that one slot is
-/// the whole teardown — the children are dropped afterwards only to release the OS watches they hold.
+/// One watch over several mounts.
+/// The child sinks all fire the same slot, so cancelling that one slot is the whole teardown — the children are dropped afterwards only to release the OS watches they hold.
 struct mount_subscription final : slib::watch_subscription::impl_base
 {
     mount_subscription(std::shared_ptr<slib::impl::watch_slot> fan_in, cc::vector<slib::watch_subscription> children)
@@ -21,8 +21,8 @@ struct mount_subscription final : slib::watch_subscription::impl_base
 
     ~mount_subscription() override
     {
-        // Silence the caller's sink first, so an in-flight child notification cannot reach it while we
-        // are still tearing down. Each child then guarantees the same for its own sink as it goes.
+        // Silence the caller's sink first, so an in-flight child notification cannot reach it while we are still tearing down.
+        // Each child then guarantees the same for its own sink as it goes.
         fan_in->cancel();
         children.clear();
     }
@@ -31,9 +31,9 @@ struct mount_subscription final : slib::watch_subscription::impl_base
     cc::vector<slib::watch_subscription> children;
 };
 
-/// Folds a mount's salt into a revision it served. Without this, a file that starts being served by a
-/// *different* mount — a source file appearing over an embedded one — could report the revision the old
-/// mount happened to give it and read as unchanged. Never yields `none`, so an existing file stays existing.
+/// Folds a mount's salt into a revision it served.
+/// Without this, a file that starts being served by a *different* mount — a source file appearing over an embedded one — could report the old mount's revision and read as unchanged.
+/// Never yields `none`, so an existing file stays existing.
 slib::file_revision mix_revision(u64 salt, slib::file_revision revision)
 {
     auto const mixed = cc::make_hash_finalized(salt, u64(revision));
@@ -51,9 +51,7 @@ void slib::mount_table::mount(cc::string_view virtual_dir, filesystem_handle fs)
     _state.lock(
         [&](state& s)
         {
-            // Insert ahead of every equal-or-shorter prefix. One rule keeps the vector in resolution
-            // order: longest prefix first, and among equal lengths the newest first (so a later mount
-            // at the same prefix shadows the earlier one).
+            // Insert ahead of every equal-or-shorter prefix, which keeps the vector in resolution order.
             isize at = s.mounts.size();
             for (isize i = 0; i < s.mounts.size(); ++i)
             {
@@ -99,10 +97,8 @@ cc::vector<slib::mount_table::watch_target> slib::mount_table::watch_targets_for
             for (auto const& mount : s.mounts)
             {
                 // A mount and a watched prefix can meet two ways, and they rebase in opposite directions.
-                // Note a lookup only ever asks the first question: it names one file, so a mount *below*
-                // that file cannot answer it. A watch is the other way round — a mount below the prefix is
-                // precisely one that can serve a change under it, and missing those is how a composed
-                // watch silently stops seeing half the tree.
+                // A lookup only asks the first: it names one file, so a mount *below* that file cannot answer it.
+                // A watch is the other way round, and missing the mounts below the prefix is how a composed watch silently stops seeing half the tree.
                 if (impl::is_path_under(prefix, mount.prefix))
                     result.push_back(
                         watch_target{.prefix = cc::string::create_copy_of(impl::relative_to(prefix, mount.prefix)),
@@ -120,8 +116,8 @@ cc::optional<slib::watch_subscription> slib::mount_table::watch(cc::string_view 
     if (!normalized.has_value())
         return watch_subscription(); // nothing is reachable under a prefix that escapes the root
 
-    // One slot every child fires. Coalescing the N notifications one edit can produce is the caller's job;
-    // cancelling them is ours, and sharing a slot makes that a single act.
+    // One slot every child fires.
+    // Coalescing the N notifications one edit can produce is the caller's job; cancelling them is ours, and sharing a slot makes that a single act.
     auto fan_in = std::make_shared<impl::watch_slot>(cc::move(sink));
 
     cc::vector<watch_subscription> children;
@@ -158,8 +154,7 @@ slib::file_revision slib::mount_table::revision(cc::string_view path) const
         return file_revision::none;
     auto const& resolved = normalized.value();
 
-    // The first mount holding the file decides — the same one read_text takes, so a revision always
-    // describes the content a read returns.
+    // The first mount holding the file decides — the same one read_text takes, so a revision always describes the content a read returns.
     for (auto const& c : candidates_for(resolved))
         if (auto const rev = c.fs->revision(c.path); rev != file_revision::none)
             return mix_revision(c.salt, rev);

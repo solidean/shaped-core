@@ -12,10 +12,9 @@ namespace tg
 /// Hyperplane in D dimensions, stored in Hesse normal form.
 ///
 /// Represents the set of points {x : dot(normal, x) == dist} — the plane *itself*, not a side of it.
-/// dist is the signed offset of the plane from the origin measured along normal,
-/// so the closest point to the origin is dist * normal (when normal is unit-length).
+/// dist is the signed offset of the plane from the origin measured along normal, so the closest point to the origin is dist * normal when normal is unit-length.
 /// It is a codimension-1 object (intrinsic_dim == D - 1) in D-dimensional space and is unbounded (is_finite == false).
-/// In 2D this is a line; in 3D an ordinary plane.
+/// In 2D this is a line, in 3D an ordinary plane.
 ///
 /// normal is expected to be unit-length so that dist and dot(normal, x) read as true distances;
 /// this is not enforced at construction.

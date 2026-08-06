@@ -13,23 +13,28 @@
 // =========================================================================================================
 // Rendering backend for cc::format (implementation detail of <clean-core/string/format.hh>).
 //
-// Holds the concrete sinks, the value→text seam (the only boundary touching std::to_chars, in format.cc),
-// the decoration helpers, and the (no-ADL) per-argument dispatch + render plumbing. The built-in types are
-// formatted here via cc::format_value; user types go through cc::custom::formatter<T> (formatter.hh). The
-// public surface is cc::format_value / cc::validate_format_spec (delegation helpers) plus the cc::format /
-// format_append / format_to functions (format.hh).
+// Holds the concrete sinks, the value→text seam, the decoration helpers, and the no-ADL per-argument
+// dispatch and render plumbing.
+// Built-in types are formatted here via cc::format_value; user types go through cc::custom::formatter<T>
+// (formatter.hh).
+//
+// cc::format_value and cc::validate_format_spec are declared here but are public, being the delegation
+// helpers a cc::custom::formatter calls.
+// Users reach them by including <clean-core/string/format.hh>, never this header.
 // =========================================================================================================
 
 namespace cc::impl
 {
 // -----------------------------------------------------------------------------------------------------
-// Concrete sinks backing cc::format_sink: one appends to a cc::string, one writes into a fixed
-// cc::span<char> with snprintf semantics (counting would-be bytes for truncation detection).
+// Concrete sinks backing cc::format_sink.
+// One appends to a cc::string; the other writes into a fixed cc::span<char> with snprintf semantics,
+// counting would-be bytes so the caller can detect truncation.
 // -----------------------------------------------------------------------------------------------------
 
 format_sink format_make_string_sink(cc::string& out);
 
-/// Mutable state for a span-backed sink. total counts bytes that WOULD be written (may exceed capacity).
+/// Mutable state for a span-backed sink.
+/// total counts bytes that WOULD be written, so it may exceed capacity.
 struct format_span_sink_state
 {
     char* data = nullptr;
@@ -39,20 +44,25 @@ struct format_span_sink_state
 format_sink format_make_span_sink(format_span_sink_state& state);
 
 // -----------------------------------------------------------------------------------------------------
-// Value → raw text seam. This is the ONLY boundary that touches std::to_chars (in format.cc); a vendored
-// number-formatting backend can replace just these definitions. The functions emit raw digits/text (no
-// sign, prefix, padding) — decoration is layered on top by format_write_decorated_*.
+// Value → raw text seam, defined in format.cc, which is where <charconv> is included.
+// A vendored number-formatting backend can replace just these definitions.
+// The functions emit raw digits and text with no sign, prefix or padding — decoration is layered on top by
+// format_write_decorated_*.
 // -----------------------------------------------------------------------------------------------------
 
 inline constexpr isize format_chars_int_max = 66;    // 64 binary digits + sign + prefix headroom
 inline constexpr isize format_chars_float_max = 512; // ample for any double rendering
 
-/// Writes the base-`base` digits of `v` (no sign, no prefix). Uppercases hex when `upper`. Returns count.
+/// Writes the base-`base` digits of `v`, with no sign and no prefix.
+/// Uppercases hex when `upper`.
+/// Returns the number of chars written.
 isize format_chars_from_u64(span<char> buf, u64 v, int base, bool upper);
-/// Writes a float; mode is 's' (shortest round-trip), 'f', 'e', or 'g'. precision < 0 means shortest.
+/// Writes a float; mode is 's' (shortest round-trip), 'f', 'e', or 'g'.
+/// A precision below 0 means shortest.
 isize format_chars_from_f32(span<char> buf, float v, char mode, isize precision);
 isize format_chars_from_f64(span<char> buf, double v, char mode, isize precision);
-/// Writes "0x" followed by the hex address. Returns count.
+/// Writes "0x" followed by the hex address.
+/// Returns the number of chars written.
 isize format_chars_from_ptr(span<char> buf, void const* p);
 
 // -----------------------------------------------------------------------------------------------------
@@ -104,8 +114,10 @@ inline constexpr bool format_always_false = false;
 namespace cc
 {
 /// Formats a built-in value (arithmetic, char, bool, byte, pointer, or anything string_view-convertible)
-/// into `out` using the standard format spec grammar. This is the delegation target a cc::custom::formatter
-/// can call to reuse the built-in formatting for its sub-values. `spec` is the raw spec text (may be empty).
+/// into `out` using the standard format spec grammar.
+/// This is the delegation target a cc::custom::formatter calls to reuse the built-in formatting for its
+/// sub-values.
+/// `spec` is the raw spec text, and may be empty.
 template <class T>
 void format_value(format_sink const& out, string_view spec, T const& v)
 {
@@ -179,9 +191,9 @@ void format_value(format_sink const& out, string_view spec, T const& v)
     }
 }
 
-/// Validates that `spec` is a well-formed standard format spec (syntax only). Intended for delegation from
-/// a cc::custom::formatter<T>::validate hook that accepts the standard grammar. Reaching an error during
-/// constant evaluation turns a malformed spec into a compile error.
+/// Validates that `spec` is a well-formed standard format spec (syntax only).
+/// Intended for delegation from a cc::custom::formatter<T>::validate hook that accepts the standard grammar.
+/// Reaching an error during constant evaluation turns a malformed spec into a compile error.
 consteval void validate_format_spec(string_view spec)
 {
     (void)cc::impl::format_parse_spec(spec);
@@ -239,11 +251,12 @@ void format_arg_thunk(format_sink const& sink, string_view spec, void const* ptr
 }
 
 /// Walks an already-validated format string, appending literals to the sink and dispatching each
-/// replacement field to its argument. Non-templated (defined in format.cc) to keep template bloat low.
+/// replacement field to its argument.
+/// Non-templated (defined in format.cc) to keep template bloat low.
 void format_render(format_sink const& sink, string_view fmt, span<format_arg_entry const> entries);
 
-/// Builds the type-erased argument table and runs the render loop against the given sink. Shared by
-/// cc::format / format_append / format_to.
+/// Builds the type-erased argument table and runs the render loop against the given sink.
+/// Shared by cc::format / format_append / format_to.
 template <class... Args>
 void format_dispatch(format_sink const& sink, string_view fmt, Args&&... args)
 {

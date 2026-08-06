@@ -6,13 +6,11 @@
 
 namespace nx
 {
-/// Returns Catch2-compatible test discovery XML (a <MatchingTests> document) for
-/// the registry. This is what C++ TestMate consumes to enumerate the available
-/// tests of a binary.
+/// Returns Catch2-compatible test discovery XML for the registry: a <MatchingTests> document.
+/// This is what C++ TestMate consumes to enumerate a binary's available tests.
 cc::string write_catch2_discovery_xml(test_registry const& registry);
 
-/// Returns Catch2-compatible result XML (a <TestRun> document) for a completed
-/// execution. Failed expressions are emitted per section; the number of
-/// expressions per test case is capped to keep the output bounded.
+/// Returns Catch2-compatible result XML for a completed execution: a <TestRun> document.
+/// Failed expressions are emitted per section, and the count per test case is capped to keep the output bounded.
 cc::string write_catch2_results_xml(test_schedule_execution const& execution);
 } // namespace nx

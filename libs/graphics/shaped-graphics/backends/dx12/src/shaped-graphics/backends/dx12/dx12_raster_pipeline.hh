@@ -5,13 +5,12 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/raster_pipeline.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg::backend::dx12
 {
-/// dx12 raster pipeline: an ID3D12PipelineState compiled from a vertex (+ optional fragment) shader and
-/// fixed-function state against a pipeline layout's root signature. Holds the pipeline layout to keep the
-/// root signature alive, and the IA primitive topology to set at bind time.
+/// dx12 raster pipeline: an ID3D12PipelineState compiled from a vertex (+ optional fragment) shader and fixed-function state, against a pipeline layout's root signature.
+/// Holds the pipeline layout to keep the root signature alive, and the IA primitive topology to set at bind time.
 class dx12_raster_pipeline final : public sg::raster_pipeline
 {
 public:

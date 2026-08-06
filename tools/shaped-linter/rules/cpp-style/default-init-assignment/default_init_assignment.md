@@ -1,23 +1,15 @@
 # default-init-assignment
 
-Every variable initializer uses assignment form `T v = value;`, never brace form `T v{value};` —
-data members, function locals and namespace-scope variables alike.
+Every variable initializer uses assignment form `T v = value;`, never brace form `T v{value};`.
+Data members, function locals and namespace-scope variables alike.
 
 The rewrite moves the `=` in and leaves the braces alone: `T v{x}` becomes `T v = {x}`, never `T v = x`.
-Dropping the braces reads better but changes direct-list-init into copy-init, and a linter with no type
-information cannot tell when that is legal — an aggregate has no converting constructor to fall back on,
-and neither does a type whose constructor is `explicit`. `= {x}` is copy-*list*-init, which every
-aggregate and every implicit constructor accepts.
+[default_init_assignment.hh](default_init_assignment.hh) states the boundary.
+The block comment in [default_init_assignment.cc](default_init_assignment.cc) says which hazard rules out which rewrite.
 
-The nicer forms — a member's plain `= value` and a local's `auto v = T(value)` — ride along as a **hint**,
-which `--fix` never applies. Both can fail to compile or change which constructor runs, so a human signs
-off on them; see the block comment in [default_init_assignment.cc](default_init_assignment.cc)
-for exactly which hazard belongs to which form.
+The nicer forms — a member's plain `= value` and a local's `auto v = T(value)` — ride along as a **hint**, which `--fix` never applies.
 
-Blocks below are annotated with `[default-init-assignment]` for "fires once here",
-`~[default-init-assignment]` for "must stay quiet", and `fix="…"` for a replacement text the preceding
-rule produces — chained once per distinct rewrite, since a rule's fixes are pinned as a set.
-`hint="…"` pins the hint channel the same way.
+The block annotations below are specified in [docs/coding-guidelines.md](../../../docs/coding-guidelines.md#the-corpus-format).
 
 ## The fix shapes
 
@@ -98,8 +90,8 @@ A file-scope variable, with no namespace around it.
 cc::atomic<int> g{7};
 ```
 
-An out-of-line static member definition. Its declarator-id carries a `::`, but the leading `int` is the
-type, so this stays a declaration — the mirror image of the qualified temporaries further down.
+An out-of-line static member definition.
+Its declarator-id carries a `::`, but the leading `int` is the type, so this stays a declaration — the mirror image of the qualified temporaries further down.
 
 ```cpp [default-init-assignment] fix=" = {8}"
 int S::x{8};
@@ -117,8 +109,8 @@ A local inside a loop body.
 void f() { for (auto const& x : v) { int y{3}; } }
 ```
 
-A declaration in a `for` header. The header is a scope of its own, so the declaration starts at `int`
-rather than at the keyword, and the second and third clauses stay expressions.
+A declaration in a `for` header.
+The header is a scope of its own, so the declaration starts at `int` rather than at the keyword, and the second and third clauses stay expressions.
 
 ```cpp [default-init-assignment] fix=" = {0}"
 void f() { for (int i{0}; i < n; ++i) { g(i); } }
@@ -224,8 +216,8 @@ So is a braced temporary in statement position.
 void f() { T{1}; }
 ```
 
-A *qualified* temporary just as much. `cc::T` is one name, not a type plus a declarator, so there is no
-variable here to rewrite — counting the tokens before the brace would have found three and been wrong.
+A *qualified* temporary just as much.
+`cc::T` is one name, not a type plus a declarator, so there is no variable here to rewrite — counting the tokens before the brace would have found three and been wrong.
 
 ```cpp ~[default-init-assignment]
 void f() { cc::T{1}; }
@@ -260,9 +252,9 @@ A leading `::` roots the name at global scope and still leaves no type ahead of 
 void f() { ::cc::T{1}; }
 ```
 
-A temporary as the right-hand side of a compound assignment. Here there *are* tokens ahead of the qualified
-name — `s +=` — so a type-is-in-front test passes and only the operator gives it away.
-This is what turned `s += cc::string_view{" world"}` into the uncompilable `s += cc::string_view = {" world"}`.
+A temporary as the right-hand side of a compound assignment.
+Here there *are* tokens ahead of the qualified name — `s +=` — so a type-is-in-front test passes and only the operator gives it away.
+Without that second half, `s += cc::string_view{" world"}` rewrites to the uncompilable `s += cc::string_view = {" world"}`.
 
 ```cpp ~[default-init-assignment]
 void f() { s += cc::string_view{" world"}; }
@@ -284,8 +276,8 @@ A ternary whose branches are both temporaries.
 void f() { g(c ? P{1} : P{2}); }
 ```
 
-A comparison. A real declaration reaches its `>` only inside a template-argument skip, so a `>` left at
-top level means the segment started mid-expression.
+A comparison.
+A real declaration reaches its `>` only inside a template-argument skip, so a `>` left at top level means the segment started mid-expression.
 
 ```cpp ~[default-init-assignment]
 void f() { a > T{1}; }
@@ -309,21 +301,22 @@ An array initializer is already assignment form and keeps its own shape.
 int a[] = {1, 2};
 ```
 
-A condition that is a braced temporary. Nothing is left over ahead of it to be a type, exactly as in
-statement position.
+A condition that is a braced temporary.
+Nothing is left over ahead of it to be a type, exactly as in statement position.
 
 ```cpp ~[default-init-assignment]
 void f() { if (T{1}) { g(); } }
 ```
 
-A condition comparing against one. The `<` opens a template-argument skip that lands on the brace, so the
-declarator-id is still `x`, whose run starts the header.
+A condition comparing against one.
+The `<` opens a template-argument skip that lands on the brace, so the declarator-id is still `x`, whose run starts the header.
 
 ```cpp ~[default-init-assignment]
 void f() { while (x < T{1}) { g(); } }
 ```
 
-A condition in assignment form. It declares a local, but not one this rule reports.
+A condition in assignment form.
+It declares a local, but not one this rule reports.
 
 ```cpp ~[default-init-assignment]
 void f() { while (auto e = next()) { g(e); } }
@@ -335,8 +328,8 @@ A range-for header carries no initializer at all — the `:` is declarator punct
 void f() { for (auto const& x : v) { g(x); } }
 ```
 
-And behind that `:` is the range, whose braced-init-list belongs to no declarator. A range-declaration
-cannot carry an initializer, so the brace group here is never one.
+And behind that `:` is the range, whose braced-init-list belongs to no declarator.
+A range-declaration cannot carry an initializer, so the brace group here is never one.
 
 ```cpp ~[default-init-assignment]
 void f() { for (auto const p : {"a", "b"}) { g(p); } }
@@ -360,8 +353,8 @@ Recorded so the boundary cannot move silently — not because the behavior is ri
 
 `&&` is legal declarator punctuation (an rvalue reference), so it does not break the run that decides
 whether a type is left over, and `T` reads as a declarator-id with `ok && n <` in front of it.
-Separating a binary `&&` from a declarator one needs a notion of declarator position, which the parser
-does not have yet. A condition is only the likeliest place to meet this; statement position does the same.
+Separating a binary `&&` from a declarator one needs a notion of declarator position, which the parser does not have yet.
+A condition is only the likeliest place to meet this; statement position does the same.
 
 ```cpp [default-init-assignment] fix=" = {1}"
 void f() { if (ok && n < T{1}) { g(); } }

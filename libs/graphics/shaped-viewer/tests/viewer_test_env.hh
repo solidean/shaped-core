@@ -13,20 +13,21 @@
 
 // Shared setup for shaped-viewer's GPU tests (Windows + DXC only).
 //
-// The generated shader symbols are process-wide globals, and a package may be registered only once per
-// process — so the shader library is created exactly once for the whole test binary, here, and every test
-// that traces goes through it.
+// The generated shader symbols are process-wide globals, and a package may be registered only once per process.
+// So the shader library is created exactly once for the whole test binary, here, and every test that traces goes through it.
 
 namespace sv_test
 {
+using namespace cc::primitive_defines;
+
 struct env
 {
     slib::shader_library* lib = nullptr; // intentionally leaked: process-wide, lives for the test binary
     bool has_compiler = false;
 };
 
-/// The one shader library for this test binary, with sv's and sr's packages registered. `has_compiler` is
-/// false when DXC is not installed — a caller SKIPs, since nothing will compile.
+/// The one shader library for this test binary, with sv's and sr's packages registered.
+/// `has_compiler` is false when DXC is not installed — a caller SKIPs, since nothing will compile.
 ///
 /// sr's package carries the blit shader (sr::blit_routine), which the view_renderer drives — so both packages
 /// must be registered, or acquiring the blit shader faults.
@@ -49,8 +50,8 @@ inline env const& shared_env()
 /// A tiny deterministic LCG, so a cloud is reproducible across runs (headless test) yet varied.
 struct rng
 {
-    cc::u64 state;
-    explicit rng(cc::u64 seed) : state(seed != 0 ? seed : 1) {}
+    u64 state;
+    explicit rng(u64 seed) : state(seed != 0 ? seed : 1) {}
 
     float unit()
     {
@@ -67,7 +68,7 @@ struct triangle_cloud
 };
 
 /// A random cloud of `triangle_count` small triangles scattered in a box, each with its own PBR material.
-inline triangle_cloud make_triangle_cloud(int triangle_count, cc::u64 seed = 0x5EED1234u)
+inline triangle_cloud make_triangle_cloud(int triangle_count, u64 seed = 0x5EED1234u)
 {
     auto out = triangle_cloud{};
     auto r = rng(seed);
@@ -93,18 +94,18 @@ inline triangle_cloud make_triangle_cloud(int triangle_count, cc::u64 seed = 0x5
 struct indexed_mesh
 {
     cc::vector<tg::pos3f> positions;
-    cc::vector<cc::u32> indices;
+    cc::vector<u32> indices;
 };
 
-/// Welds `triangle_list` (3 positions per triangle) into an indexed_mesh, preserving triangle order — so a
-/// material set indexed by PrimitiveIndex() still lines up. O(n²): test-sized meshes only.
+/// Welds `triangle_list` (3 positions per triangle) into an indexed_mesh, preserving triangle order — so a material set indexed by PrimitiveIndex() still lines up.
+/// O(n²): test-sized meshes only.
 inline indexed_mesh weld_triangle_list(cc::span<tg::pos3f const> triangle_list)
 {
     auto out = indexed_mesh{};
     for (auto const& p : triangle_list)
     {
         auto index = out.positions.size(); // stays == size() while p is unseen
-        for (auto i = cc::isize(0); i < out.positions.size(); ++i)
+        for (auto i = isize(0); i < out.positions.size(); ++i)
             if (out.positions[i] == p)
             {
                 index = i;
@@ -112,14 +113,14 @@ inline indexed_mesh weld_triangle_list(cc::span<tg::pos3f const> triangle_list)
             }
         if (index == out.positions.size())
             out.positions.push_back(p);
-        out.indices.push_back(cc::u32(index));
+        out.indices.push_back(u32(index));
     }
     return out;
 }
 
-/// The rectangular ceiling light of a Cornell box. The geometry (a quad in `positions`) emits, and these
-/// fields let the caller fill the path tracer's pt_frame_constants_gpu so its next-event estimation samples the
-/// exact same rectangle.
+/// The rectangular ceiling light of a Cornell box.
+/// The geometry (a quad in `positions`) is what emits.
+/// These fields let the caller fill the path tracer's pt_frame_constants_gpu so its next-event estimation samples the exact same rectangle.
 struct area_light
 {
     tg::vec3f center;   // rect center in world space (on the ceiling plane)
@@ -136,8 +137,8 @@ struct cornell_box
     area_light light;
 };
 
-/// Appends a quad (a-b-c + a-c-d) carrying material `m` to a Cornell box. Winding is irrelevant — the
-/// closest-hit shades two-sided.
+/// Appends a quad (a-b-c + a-c-d) carrying material `m` to a Cornell box.
+/// Winding is irrelevant — the closest-hit shades two-sided.
 inline void cb_push_quad(cornell_box& cb, tg::pos3f a, tg::pos3f b, tg::pos3f c, tg::pos3f d, sv::pbr_material const& m)
 {
     cb.positions.push_back(a);
@@ -169,9 +170,9 @@ inline void cb_push_box(cornell_box& cb, tg::pos3f lo, tg::pos3f hi, sv::pbr_mat
     cb_push_quad(cb, tg::pos3f(x1, y0, z0), tg::pos3f(x1, y1, z0), tg::pos3f(x1, y1, z1), tg::pos3f(x1, y0, z1), m); // right
 }
 
-/// A classic Cornell box in a unit-ish cube centered at the origin, open toward -z (the camera side): white
-/// floor / ceiling / back, a red left wall and a green right wall, two white boxes on the floor, and a
-/// rectangular emitter just below the ceiling. All geometry is already in world space (identity transform).
+/// A classic Cornell box in a unit-ish cube centered at the origin, open toward -z (the camera side).
+/// White floor / ceiling / back, a red left wall and a green right wall, two white boxes on the floor, and a rectangular emitter just below the ceiling.
+/// All geometry is already in world space (identity transform).
 inline cornell_box make_cornell_box()
 {
     auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f),

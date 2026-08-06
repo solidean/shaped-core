@@ -10,10 +10,10 @@ namespace tg
 {
 /// Line: an infinite straight line through a point along a direction.
 ///
-/// Represents the set of points {origin + t*dir : t in R} — unbounded in both directions.
+/// Represents the set of points {origin + t*dir : t in R}, unbounded in both directions.
 /// It is a 1D object (intrinsic_dim == 1) in D-dimensional space and is infinite (is_finite == false).
 /// Unlike a ray it extends behind the origin as well.
-/// dir is expected non-zero (conventionally unit-length); this is not enforced at construction.
+/// dir is expected non-zero, conventionally unit-length, and neither is enforced at construction.
 ///
 ///     tg::line3f l(tg::pos3f(0, 0, 0), tg::vec3f(1, 0, 0));   // the x axis
 template <int D, class T>

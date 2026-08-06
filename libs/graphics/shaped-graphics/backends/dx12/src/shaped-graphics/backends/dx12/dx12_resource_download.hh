@@ -13,9 +13,10 @@
 
 namespace sg::backend::dx12
 {
-/// A window inside the persistently-mapped READBACK ring buffer, handed to execute_next_job. The GPU
-/// copies into [offset, offset + size); the deferred CPU copy later reads from base + offset. `base`
-/// points at byte 0 of the mapped buffer. Non-owning.
+/// A window inside the persistently-mapped READBACK ring buffer, handed to execute_next_job.
+/// The GPU copies into [offset, offset + size); the deferred CPU copy later reads from base + offset.
+/// `base` points at byte 0 of the mapped buffer.
+/// Non-owning.
 struct dx12_download_allocation
 {
     ID3D12Resource* buffer = nullptr;
@@ -31,9 +32,8 @@ struct dx12_pending_copy
     isize bytes = 0;
 };
 
-/// Records the readback copy commands for one resource through the inline READBACK ring buffer,
-/// hiding buffer vs texture. Mirrors dx12_resource_upload; because readback is asynchronous, each job
-/// also yields a deferred CPU copy to run once the GPU work has finished.
+/// Records the readback copy commands for one resource through the inline READBACK ring buffer, hiding buffer vs texture.
+/// Mirrors dx12_resource_upload, except that each job also yields a deferred CPU copy to run once the GPU work has finished.
 struct dx12_resource_download
 {
     virtual ~dx12_resource_download() = default;
@@ -53,11 +53,10 @@ struct dx12_resource_download
                                                              dx12_download_allocation const& alloc) = 0;
 };
 
-/// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into
-/// `dst`. Resumable — each execute_next_job reads as much as the window holds and yields that chunk's
-/// deferred copy, so a download larger than the readback window is split across successive calls (it fits
-/// one job when the window is big enough; the async copy queue chunks large ones). `dst` must outlive
-/// every deferred copy (kept alive via the future's pin).
+/// Buffer download: CopyBufferRegion from `src` into the readback window, then a deferred memcpy into `dst`.
+/// Resumable — each execute_next_job reads as much as the window holds and yields that chunk's deferred copy.
+/// A read larger than the window therefore splits across successive calls.
+/// `dst` must outlive every deferred copy; the future's pin is what keeps it alive.
 struct dx12_buffer_download final : dx12_resource_download
 {
     dx12_buffer_download(dx12_buffer const& src, isize src_offset, cc::span<byte> dst)
@@ -65,8 +64,7 @@ struct dx12_buffer_download final : dx12_resource_download
     {
     }
 
-    // Raw-resource overload: the async path holds only the ID3D12Resource* (kept alive by the job's
-    // buffer handle), not a dx12_buffer reference.
+    // Raw-resource overload: `src` must outlive the recorded copies.
     dx12_buffer_download(ID3D12Resource* src, isize src_offset, cc::span<byte> dst)
       : _src(src), _src_offset(src_offset), _dst(dst)
     {
@@ -104,14 +102,12 @@ private:
     isize _consumed = 0;
 };
 
-/// Texture readback: records CopyTextureRegion from the source subresource's region into the readback
-/// buffer (rows padded to 256), plus a deferred CPU copy per chunk that *un-pads* the rows into the
-/// tightly-packed host destination. Resumable at row/slice granularity, mirroring dx12_texture_upload:
-/// each execute_next_job **self-aligns** its byte window to 512, reads the largest chunk that fits, yields
-/// its own deferred copy, and returns bytes consumed *including* the alignment waste (0 if the window can't
-/// fit an aligned padded row). A region larger than the window — or one straddling the seam — splits across
-/// successive calls. The driver emits the copy_src barrier. `dst` must outlive every deferred copy (kept
-/// alive via the future's pin).
+/// Texture readback: records CopyTextureRegion from the source subresource's region into the readback buffer, rows padded to 256.
+/// Each chunk also yields a deferred CPU copy that *un-pads* those rows into the tightly-packed host destination.
+/// Resumable at row/slice granularity on dx12_texture_upload's self-align contract, with `dx12_pending_copy::bytes` in place of its returned byte count.
+/// A region larger than the window, or one straddling the seam, splits across successive calls.
+/// The driver emits the copy_src barrier.
+/// `dst` must outlive every deferred copy; the future's pin is what keeps it alive.
 struct dx12_texture_download final : dx12_resource_download
 {
     dx12_texture_download(ID3D12Resource* src, dx12_texture_footprint const& fp, cc::span<byte> dst)
@@ -123,8 +119,8 @@ struct dx12_texture_download final : dx12_resource_download
     void prepare(dx12_command_list&) override {}
     [[nodiscard]] bool is_finished() const override { return _rows_done >= total_rows(); }
 
-    /// Staged bytes not yet read (padded). The inline driver reserves this (+ one placement alignment of
-    /// slack) so a fits-before-the-seam region lands in a single reservation.
+    /// Staged bytes not yet read (padded).
+    /// The inline driver reserves this plus one placement alignment of slack, so a fits-before-the-seam region lands in one reservation.
     [[nodiscard]] isize remaining_bytes() const { return (total_rows() - _rows_done) * _fp.padded_pitch; }
 
     [[nodiscard]] dx12_pending_copy execute_next_job(ID3D12GraphicsCommandList& list,
@@ -151,9 +147,9 @@ struct dx12_texture_download final : dx12_resource_download
         int const bottom
             = whole_slices ? _fp.height : cc::min((chunk.row_start + chunk.row_count) * _fp.block_extent, _fp.height);
 
-        // D3D12 requires a block-compressed source box to have block-aligned (multiple of 4) edges. At a mip
-        // edge the extent may be a partial block, so round the box up to the block boundary there (the readback
-        // stays tightly packed — only the source box grows to a whole block).
+        // D3D12 requires a block-compressed source box to have block-aligned (multiple of 4) edges.
+        // At a mip edge the extent may be a partial block, so round the box up to the block boundary there.
+        // The readback stays tightly packed — only the source box grows to a whole block.
         int box_right = _fp.x + _fp.width;
         int box_bottom = _fp.y + bottom;
         if (_fp.block_extent > 1)

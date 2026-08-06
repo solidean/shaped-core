@@ -10,7 +10,7 @@ using namespace scl;
 namespace
 {
 /// The line kinds of `s`, as a string of one character per line — `t`ext, `b`lank, `f`ence, `c`ode,
-/// `|` table.
+/// `|` table, `y` frontmatter.
 /// Compact enough that a whole document's shape is one CHECK.
 cc::string shape_of(cc::string_view s)
 {
@@ -34,6 +34,9 @@ cc::string shape_of(cc::string_view s)
             break;
         case markdown_line_kind::table:
             out += '|';
+            break;
+        case markdown_line_kind::frontmatter:
+            out += 'y';
             break;
         }
     return out;
@@ -83,5 +86,29 @@ TEST("shaped-linter - markdown - fence closing rules")
     SECTION("a fence indented more than three columns is not a fence")
     {
         CHECK(shape_of("     ```\n") == "tb");
+    }
+}
+
+TEST("shaped-linter - markdown - frontmatter only where it is unambiguous")
+{
+    SECTION("a leading block is frontmatter, delimiters included")
+    {
+        CHECK(shape_of("---\nname: x\n---\n\nbody\n") == "yyybtb");
+    }
+    SECTION("a blank line inside it does not end it")
+    {
+        CHECK(shape_of("---\nname: x\n\ndescription: y\n---\nbody\n") == "yyyyytb");
+    }
+    SECTION("without a closer the opener is a thematic break")
+    {
+        CHECK(shape_of("---\nname: x\n\nbody\n") == "ttbtb");
+    }
+    SECTION("a rule below line one is never an opener")
+    {
+        CHECK(shape_of("intro\n\n---\n\nbody\n") == "tbtbtb");
+    }
+    SECTION("a --- inside a fenced block stays code")
+    {
+        CHECK(shape_of("```\n---\n```\n") == "fcfb");
     }
 }

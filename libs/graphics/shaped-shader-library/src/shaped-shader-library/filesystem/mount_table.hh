@@ -6,14 +6,12 @@
 
 namespace slib
 {
-/// A filesystem assembled from other filesystems mounted at virtual paths. This is how slib addresses
-/// shader sources without naming a disk layout anywhere: a package's folder, a shared include library,
-/// and the binary's embedded copy all answer under paths the mounting code picked.
+/// A filesystem assembled from other filesystems mounted at virtual paths.
+/// This is how slib addresses shader sources without naming a disk layout anywhere.
+/// A package's folder, a shared include library, and the binary's embedded copy all answer under paths the mounting code picked.
 ///
-/// Among the mounts whose prefix matches a path, lookup goes **longest prefix first, then most recently
-/// mounted first**, and the first mount holding the file answers. Two consequences worth knowing:
-/// a mount at "common" beats one at the root for "common/brdf.hlsli", and re-mounting a prefix shadows
-/// what was there — which is all an overlay is (mount the embedded copy, then the source folder over it).
+/// Among the mounts whose prefix matches a path, lookup goes longest prefix first, then most recently mounted first, and the first mount holding the file answers.
+/// So a mount at "common" beats one at the root for "common/brdf.hlsli", and re-mounting a prefix shadows what was there — which is all an overlay is.
 ///
 /// Mounting is thread-safe against lookups, so a filesystem may be mounted while the reload watcher runs.
 class mount_table final : public filesystem
@@ -22,19 +20,16 @@ public:
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
 
-    /// Composes the mounts' own watches: every mount intersecting `prefix` is subscribed to, and the
-    /// returned subscription owns all of them.
+    /// Composes the mounts' own watches: every mount intersecting `prefix` is subscribed to, and the returned subscription owns all of them.
     ///
-    /// All-or-nothing — if any intersecting mount cannot notify, this returns nullopt and the caller polls
-    /// everything. Watching what we can and polling only the rest is a real refinement, deferred in
-    /// libs/graphics/shaped-shader-library/docs/structure.md.
+    /// All-or-nothing — if any intersecting mount cannot notify, this returns nullopt and the caller polls everything.
     ///
-    /// A mount added while a watch is live is not picked up. In practice mounts stop moving when hot
-    /// reload starts, which is what makes that affordable.
+    /// A mount added while a watch is live is not picked up.
+    /// In practice mounts stop moving when hot reload starts, which is what makes that affordable.
     [[nodiscard]] cc::optional<watch_subscription> watch(cc::string_view prefix, watch_sink sink) const override;
 
-    /// Mounts `fs` so its own root answers `virtual_dir` (empty = the table's root). `fs` must not be
-    /// null, and `virtual_dir` must not escape the root.
+    /// Mounts `fs` so its own root answers `virtual_dir` (empty = the table's root).
+    /// `fs` must not be null, and `virtual_dir` must not escape the root.
     void mount(cc::string_view virtual_dir, filesystem_handle fs);
 
     [[nodiscard]] isize mount_count() const;
@@ -61,16 +56,16 @@ private:
         u64 next_salt = 1;
     };
 
-    /// One mount a watch has to reach, with the watched prefix rebased onto that mount's own root. Owned
-    /// where a candidate's path is borrowed: a watch outlives the call that registered it.
+    /// One mount a watch has to reach, with the watched prefix rebased onto that mount's own root.
+    /// Owned where a candidate's path is borrowed: a watch outlives the call that registered it.
     struct watch_target
     {
         cc::string prefix;
         filesystem_handle fs;
     };
 
-    /// The mounts that could serve `path` (already normalized), in resolution order. Copied out so the
-    /// lock is not held across a read — real_filesystem hits the disk.
+    /// The mounts that could serve `path` (already normalized), in resolution order.
+    /// Copied out so the lock is not held across a read — real_filesystem hits the disk.
     [[nodiscard]] cc::vector<candidate> candidates_for(cc::string_view path) const;
 
     /// The mounts intersecting `prefix` (already normalized), in resolution order.

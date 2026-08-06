@@ -10,6 +10,7 @@ cmake_minimum_required(VERSION 3.28)
 
 # Split from the exe so shaped-linter-test can link the lexer / parser / rule-engine code.
 add_library(shaped-linter-core STATIC
+    src/shaped-linter/cli/changed_lines.cc
     src/shaped-linter/cli/options.cc
 
     src/shaped-linter/lex/source_buffer.cc
@@ -22,6 +23,8 @@ add_library(shaped-linter-core STATIC
 
     src/shaped-linter/parse/parser.cc
 
+    src/shaped-linter/prose/apply.cc
+    src/shaped-linter/prose/plan.cc
     src/shaped-linter/prose/prose_view.cc
 
     src/shaped-linter/rules/registry.cc
@@ -52,6 +55,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-linter-test
         tests/main.cc
 
+        tests/cli/changed_lines-test.cc
         tests/cli/options-test.cc
 
         tests/lex/source_buffer-test.cc
@@ -62,6 +66,8 @@ if(SC_BUILD_TESTS)
 
         tests/parse/parser-test.cc
 
+        tests/prose/apply-test.cc
+        tests/prose/plan-test.cc
         tests/prose/prose_view-test.cc
 
         tests/report/display_width-test.cc

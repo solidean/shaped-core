@@ -92,17 +92,13 @@ isize system_try_resize_bytes_in_place(byte* p, isize old_bytes, isize min_bytes
 
     // Standard malloc/aligned_alloc do not support in-place resize.
     // Return -1 to signal failure (contract: allocation remains valid at p with size old_bytes).
-    // Rationale: Unlike realloc, we cannot move the allocation here because that would
-    //            invalidate pointers into the allocation (e.g., vec.push_back(vec[0])).
-    //            Containers must handle resize failure by allocating a new block separately.
+    // Not realloc: moving the block would invalidate pointers into it — see try_resize_bytes_in_place in allocation.hh.
     return -1;
 }
 
 } // namespace
-
-/// Platform malloc/free resource, stored in the data segment (not on heap) so it remains valid
-/// during static initialization. The mimalloc-backed default lives in mimalloc_resource.cc; this
-/// is the explicit opt-out, reachable as a custom resource. See allocation.hh for usage.
+/// Platform malloc/free resource, stored in the data segment so it stays valid during static initialization.
+/// The explicit opt-out from the mimalloc-backed default in mimalloc_resource.cc, reachable as a custom resource.
 constinit cc::memory_resource const cc::system_memory_resource = {
     .allocate_bytes = system_allocate_bytes,
     .try_allocate_bytes = system_try_allocate_bytes,

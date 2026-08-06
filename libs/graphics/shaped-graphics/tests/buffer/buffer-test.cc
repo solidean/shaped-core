@@ -1,7 +1,7 @@
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh> // typed buffer<T> wrapper + ctx.*.create_buffer<T>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh> // sg::raw_buffer::size_in_bytes / usage (raw_buffer_handle operator-> target)
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/buffer.hh> // typed buffer<T> wrapper + ctx.*.create_buffer<T>
+#include <shaped-graphics/resource/raw_buffer.hh> // sg::raw_buffer::size_in_bytes / usage (raw_buffer_handle operator-> target)
 #include <shaped-graphics/types.hh>
 
 #include <variant> // std::get — raw_view is a variant; buffer views live in its raw_buffer_view arm

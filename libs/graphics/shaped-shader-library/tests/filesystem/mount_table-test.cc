@@ -35,8 +35,8 @@ TEST("slib - mount_table serves a mounted filesystem")
 TEST("slib - mount_table rebases a path onto the mount's own root")
 {
     slib::mount_table mounts;
-    // The filesystem knows nothing of "common" — that prefix is where the table hangs it. This is the
-    // point of mounting: a shared library keeps a stable include path wherever its files actually live.
+    // The filesystem knows nothing of "common" — that prefix is where the table hangs it.
+    // This is the point of mounting: a shared library keeps a stable include path wherever its files actually live.
     mounts.mount("common", make_fs("brdf.hlsli", "brdf"));
 
     CHECK(mounts.read_text("common/brdf.hlsli").value() == "brdf");
@@ -89,9 +89,8 @@ TEST("slib - mount_table falls through to a shadowed mount for files the top one
 
 TEST("slib - mount_table revisions distinguish which mount answered")
 {
-    // The trap this guards: a file served by the embedded mount, then shadowed by a source file whose
-    // own revision happens to equal the embedded constant. Without folding the mount's identity in, the
-    // watcher would see an unchanged revision and never reload.
+    // The trap this guards: a file served by the embedded mount, then shadowed by a source file whose own revision happens to equal the embedded constant.
+    // Without folding the mount's identity in, the watcher would see an unchanged revision and never reload.
     slib::mount_table mounts;
 
     static constexpr slib::embedded_file k_embedded[] = {{.path = "a.hlsl", .text = "embedded"}};

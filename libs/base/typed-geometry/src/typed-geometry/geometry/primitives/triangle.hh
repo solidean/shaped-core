@@ -9,10 +9,10 @@ namespace tg
 {
 /// Triangle (filled) with D-dimensional vertices.
 ///
-/// Represents the solid triangle — the convex hull of its three vertices,
-/// i.e. the set of points {a*pos0 + b*pos1 + c*pos2 : a,b,c >= 0, a+b+c == 1}.
+/// Represents the solid triangle — the convex hull of its three vertices.
+/// That is the set of points {a*pos0 + b*pos1 + c*pos2 : a,b,c >= 0, a+b+c == 1}.
 /// It is a 2D surface patch (intrinsic_dim == 2) living in D-dimensional space (ambient_dim == D), and it is finite.
-/// A triangle whose three vertices are collinear is degenerate; this is not enforced at construction.
+/// A triangle whose three vertices are collinear is degenerate, which is not enforced against at construction.
 ///
 ///     tg::triangle3f t(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0));
 template <int D, class T>

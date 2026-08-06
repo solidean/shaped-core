@@ -1,26 +1,14 @@
-// Single-thread cc::async drive benchmark — Phase 1 of the async performance gate.
+// Single-thread cc::async drive benchmark: the per-async cost of create -> drive-to-completion -> destroy on ONE thread, with nothing multithreaded involved.
+// It is measured first because if this is expensive, no amount of work-stealing quality can rescue the concurrent case.
+// What each case is for, the anti-fold discipline behind the baselines, and the numbers are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
-// Measures the "async tax": the per-async overhead of create -> drive-to-completion -> destroy on ONE
-// thread (a singlethreaded_scheduler), with nothing multithreaded involved. If this is expensive, no
-// work-stealing work matters, so it is measured first.
+// Each case builds a small async graph, drives it on a reused singlethreaded_scheduler + async_worker_scope, and reads the result zero-copy via try_value().
+// Every case is reported next to a hand-written DIRECT baseline computing the same thing, so the tax (async ns / direct ns) is explicit.
+// One "op" = one async node processed, so the reported rate is nodes/second: Mop/s = nodes/s / 1e6, ns/op = 1e9 / (nodes/s).
+// Each number is the median of 5 measurements, each doing its own prewarm via bench::measure_units_per_sec.
 //
-// For each case we build a small async graph, drive it to completion with a reused singlethreaded_scheduler +
-// async_worker_scope, and read the result zero-copy via try_value(). Every case is reported next to a
-// hand-written DIRECT baseline that computes the same thing, so the tax (async ns / direct ns) is
-// explicit. One "op" = one async node processed; units are chosen so the reported rate is nodes/second,
-// hence Mop/s = nodes/s / 1e6 and ns/op = 1e9 / (nodes/s). Each number is the median of 5 measurements
-// (each measurement does its own prewarm via bench::measure_units_per_sec).
-//
-// Anti-constant-fold discipline (so the tax is not skewed by the compiler collapsing the baseline to a
-// constant): (1) every graph's leaf value is seeded from the runtime loop index g, so each graph
-// computes different, data-dependent output; (2) the direct baseline mirrors the graph shape through
-// CC_DONT_INLINE step functions, so a chain of x+1 cannot strength-reduce to x+N. The baseline is thus a
-// realistic hand-written call-based analog, NOT maximally-optimized straight-line code — that is the
-// honest per-node comparison. Results are XOR-folded into the u64 returned from each pass -> bench::sink.
-//
-// Two entry points: a GUIDE_BENCHMARK recording three representative points for the perf gate (this is what
-// guards Phase 1's result against regression), and a manual full sweep printing the whole table. Neither runs
-// in the normal test sweep; both are reachable by exact name.
+// Two entry points, neither in the normal test sweep and both reachable by exact name.
+// A GUIDE_BENCHMARK recording three representative points for the perf gate, and a manual full sweep printing the whole table.
 
 #include "../bench_util.hh"
 
@@ -38,11 +26,9 @@ using cc::u64;
 namespace
 {
 // --- direct (hand-written) baselines --------------------------------------------------------------------
-// noinline is not enough on its own: clang infers these are pure and propagates their return values, so a
-// run of steps still folds to a closed form (x+N) or a compile-time constant — the exact skew we must
-// avoid. `opaque` is an empty inline-asm barrier that makes its argument un-analyzable, so the compiler
-// can neither fold the arithmetic nor prove the return relationship: each direct_* stays a genuine,
-// non-collapsing call — the honest cost of the equivalent hand-written call-based computation per node.
+// noinline is not enough on its own: clang infers these are pure and propagates their return values, so a run of steps still folds to a closed form (x+N) or a constant.
+// `opaque` is an empty inline-asm barrier that makes its argument un-analyzable, so the compiler can neither fold the arithmetic nor prove the return relationship.
+// Each direct_* therefore stays a genuine, non-collapsing call — the honest cost of the equivalent hand-written call-based computation per node.
 CC_FORCE_INLINE void opaque(i64& v)
 {
 #if defined(__clang__) || defined(__GNUC__)
@@ -70,8 +56,8 @@ CC_DONT_INLINE i64 direct_add(i64 a, i64 b)
     return a + b;
 }
 
-// Direct analog of the balanced sum-tree: leaf/add are noinline, so the whole tree is not folded to a
-// constant. Call count ~= node count, matching the async tree.
+// Direct analog of the balanced sum-tree: leaf/add are noinline, so the whole tree is not folded to a constant.
+// Call count ~= node count, matching the async tree.
 i64 direct_sum_tree(int depth, i64 seed)
 {
     if (depth == 0)
@@ -81,7 +67,8 @@ i64 direct_sum_tree(int depth, i64 seed)
 
 // --- async builders -------------------------------------------------------------------------------------
 
-// A cold chain of N nodes: leaf(seed) then (N-1) x+1 transforms. Result == seed + (N-1).
+// A cold chain of N nodes: leaf(seed) then (N-1) x+1 transforms.
+// Result == seed + (N-1).
 cc::shared_async<i64> build_chain(int n, i64 seed)
 {
     auto node = cc::make_async_lazy<i64>([seed] { return seed; });
@@ -90,8 +77,9 @@ cc::shared_async<i64> build_chain(int n, i64 seed)
     return node;
 }
 
-// A balanced binary sum-tree of the given depth (2^(depth+1) - 1 nodes). Leaves return `seed`, internal
-// nodes sum their two children. Mirrors the correctness test's build_sum_tree, without the leaf counter.
+// A balanced binary sum-tree of the given depth (2^(depth+1) - 1 nodes).
+// Leaves return `seed`, internal nodes sum their two children.
+// Mirrors the correctness test's build_sum_tree, without the leaf counter.
 cc::shared_async<i64> build_sum_tree(int depth, i64 seed)
 {
     if (depth == 0)
@@ -117,12 +105,12 @@ void report(char const* label, isize nodes, double async_ops_per_sec, double dir
         nx::guide::report_raw(label, a_ns, "ns/node", /*higher_is_better*/ false);
 }
 
-// Drive a freshly-built root to completion on the calling thread's scheduler, return its value.
+// Drive a freshly-built root to completion on the calling thread's scheduler, and return its value.
 //
-// The scheduler is reused across every iteration, so this only measures the graph if the queue settles on its
-// own. It does: a singlethreaded_scheduler has no steal-capable peers, so the poll loop never publishes a
-// dependency it is about to drive inline, and nothing is left queued to pin nodes alive. Were that not so, the
-// live-node set would grow without bound and this would degrade into a memory-growth benchmark.
+// The scheduler is reused across every iteration, so this only measures the graph if the queue settles on its own.
+// It does: a singlethreaded_scheduler has no steal-capable peers, so the poll loop never publishes a dependency it is about to drive inline.
+// Nothing is left queued to pin nodes alive.
+// Were that not so, the live-node set would grow without bound and this would degrade into a memory-growth benchmark.
 i64 drive(cc::singlethreaded_scheduler& sched, cc::shared_async<i64> const& root)
 {
     root->schedule();
@@ -130,14 +118,11 @@ i64 drive(cc::singlethreaded_scheduler& sched, cc::shared_async<i64> const& root
     return *root->try_value(); // zero-copy; ready by construction
 }
 
-// One full single-lazy cycle — create, schedule, drive, read, destroy — pinned as one searchable symbol so its
-// codegen can be disassembled or traced directly:
-//   dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 \
-//     -- "bench-async (single-thread drive)"
-// This is the "single lazy inline" row: the born-ready floor plus the scheduler push/pop, try_begin_running,
-// one poll turn through the (inline) frame, finish_value, and teardown. `sched` must already be bound by an
-// async_worker_scope. Kept alive by a reference from the test below (a TU-local noinline function is otherwise
-// dead-code-eliminated).
+// One full single-lazy cycle — create, schedule, drive, read, destroy — pinned as one searchable symbol so its codegen can be disassembled or traced directly.
+// This is the "single lazy inline" row: the born-ready floor plus the scheduler push/pop, try_begin_running, one poll turn through the (inline) frame, finish_value, and teardown.
+// `sched` must already be bound by an async_worker_scope.
+// Kept alive by a reference from the test below — a TU-local noinline function is otherwise dead-code-eliminated.
+// The trace command that targets it is in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 CC_DONT_INLINE u64 single_lazy_probe(cc::singlethreaded_scheduler& sched, i64 seed)
 {
     auto n = cc::make_async_lazy<i64>([seed] { return seed; });
@@ -247,8 +232,8 @@ void case_single_dep(cc::singlethreaded_scheduler& sched, bool record)
     report("single-dep a->b", nodes, a, d, record);
 }
 
-// Deep linear chain: amortized per-node cost. `n` straddles the inline depth cap (async_max_inline_depth
-// == 128): below it the drive is depth-first inline, above it the poll loop falls back to subscribe+park.
+// Deep linear chain: amortized per-node cost.
+// `n` straddles the inline depth cap (async_max_inline_depth == 128): below it the drive is depth-first inline, above it the poll loop falls back to subscribe+park.
 void case_chain(cc::singlethreaded_scheduler& sched, char const* label, int n, bool record)
 {
     isize const nodes = n;
@@ -367,11 +352,10 @@ void run_all(bool record)
     std::fflush(stdout);
 }
 
-// The three points the guide benchmark records. Chosen to cover the distinct cost shapes with the fewest
-// measurements: the undriven floor, one full scheduler round-trip, and the amortized per-node cost at scale
-// (which is also the only case that exercises the dependency path). The full sweep's other rows are
-// interpolations between these, so they add runtime without adding regression coverage — and guide benchmarks
-// are swept across every binary by dev.py pgo.
+// The three points the guide benchmark records.
+// Chosen to cover the distinct cost shapes with the fewest measurements: the undriven floor, one full scheduler round-trip, and the amortized per-node cost at scale.
+// That last one is also the only case exercising the dependency path.
+// The full sweep's other rows interpolate between these, so they add runtime without adding regression coverage — and guide benchmarks are swept across every binary by dev.py pgo.
 void run_guide()
 {
     std::printf("\n=== cc::async single-thread drive (guide points, median of 5) ===\n");
@@ -388,31 +372,29 @@ void run_guide()
 }
 } // namespace
 
-// The regression guard for Phase 1's single-thread result: three representative points, recorded for the perf
-// gate. Also hosts the disassembly probe, so the documented trace command targets this (leaner) test:
-//   uv run dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 --stats \
-//     -- "bench-async (single-thread drive)"
-// An exact (non-wildcard) name runs a test regardless of bucket, so this is also reachable via a plain
-// `dev.py test "bench-async (single-thread drive)"`.
+// The regression guard for the single-thread result: three representative points, recorded for the perf gate.
+// Also hosts the single_lazy_probe disassembly probe, so the documented trace command targets this (leaner) test.
+// An exact (non-wildcard) name runs a test regardless of bucket, so a plain `dev.py test "bench-async (single-thread drive)"` reaches it too.
 GUIDE_BENCHMARK("bench-async (single-thread drive)")
 {
     run_guide();
 
-    // Keep the disassembly probe alive (TU-local + noinline would otherwise be dead-code-eliminated). Called
-    // repeatedly on ONE scheduler so a trace can skip past the cold hits: the first enqueue grows the
-    // scheduler's queue vector from zero capacity (a real mimalloc call), which the reused-scheduler steady
-    // state never pays. Trace the settled path with --skip 2.
+    // Keep the disassembly probe alive: TU-local + noinline would otherwise be dead-code-eliminated.
+    // Called repeatedly on ONE scheduler so a trace can skip past the cold hits.
+    // The first enqueue grows the scheduler's queue vector from zero capacity, a real mimalloc call the reused-scheduler steady state never pays.
+    // Trace the settled path with --skip 2.
     cc::singlethreaded_scheduler sched;
     cc::async_worker_scope const scope(sched);
     for (i64 i = 0; i < 3; ++i)
         bench::sink ^= single_lazy_probe(sched, 7 + i);
 }
 
-// The full human-facing table: every case, no recording. Run by exact name, e.g.
+// The full human-facing table: every case, no recording.
+// Run by exact name, e.g.
 //   uv run dev.py --mirror-test-output test "bench-async (single-thread drive - full sweep)"
 //
-// No comma in the name: nexus splits a filter on commas, so "a, b" is two filters and would also run whatever
-// else happens to contain " b" (a comma here matched bench-hash's own "..., full sweep" and ran that instead).
+// No comma in the name: nexus splits a filter on commas, so "a, b" is two filters and would also run whatever else happens to contain " b".
+// A comma here matched bench-hash's own "..., full sweep" and ran that instead.
 TEST("bench-async (single-thread drive - full sweep)", nx::config::manual)
 {
     run_all(/*record*/ false);

@@ -74,9 +74,9 @@ type_index fuzz_machine::index_of(std::type_index t) const
 
 bool fuzz_machine::assert_is_properly_set_up(cc::string& out_error) const
 {
-    // A type is "satisfied" if it is unneeded or constructible. We seed every type as satisfied,
-    // then mark types used as (non-random) arguments unsatisfied, then iterate a creatability
-    // fixpoint: a type becomes satisfied once some creating op has all-satisfied argument types.
+    // A type is "satisfied" if it is unneeded or constructible.
+    // Every type is seeded as satisfied, then types used as non-random arguments are marked unsatisfied.
+    // A creatability fixpoint then iterates: a type becomes satisfied once some creating op has all-satisfied argument types.
     cc::vector<bool> satisfied;
     for (int i = 0; i < int(_types.size()); ++i)
         satisfied.push_back(true);

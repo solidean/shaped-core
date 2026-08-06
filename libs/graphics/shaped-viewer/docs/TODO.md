@@ -1,12 +1,11 @@
 # shaped-viewer TODO
 
-Running list of known follow-ups. Bigger design intent lives in [structure.md](structure.md).
+Running list of known follow-ups.
+Bigger design intent lives in [structure.md](structure.md).
 
-- Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the
-  underlying render routines.
+- Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
-- Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes
-  shape.
+- Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
 - **`mesh_is_indexed` belongs on the mesh, not the frame.**
   Geometry layout is a per-BLAS property.
   It rides in `frame_constants_gpu` / `pt_frame_constants_gpu` only because the trace binds one mesh per view.

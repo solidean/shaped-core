@@ -62,9 +62,9 @@ void print_section_recursive(cc::string& out,
     }
 }
 
-// Renders dispatched (nested) executions as sections: one <Section> per dispatch group, containing one
-// <Section> per instance (named by the parametrized test), whose own sections/children nest below. This
-// mirrors the executor's section path (group / instance / ...) so IDE "run this section" (-c) works.
+// Renders dispatched (nested) executions as sections: one <Section> per dispatch group, containing one <Section> per instance, named by the parametrized test.
+// Each instance's own sections and children nest below it.
+// This mirrors the executor's section path (group / instance / ...), which is what makes an IDE's "run this section" (-c) work.
 void print_nested_executions(cc::string& out,
                              nx::test_execution const& parent,
                              cc::string const& indent,
@@ -135,8 +135,8 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
         out += "  </TestCase>\n";
     }
 
-    // Aliases are runnable (unlike bare invocable decls): clicking one runs its name as a filter, which the
-    // scheduler expands into the fragment runs. Advertise them so IDEs can offer them directly.
+    // Aliases are runnable, unlike a bare invocable declaration: running one uses its name as a filter, which the scheduler expands into the fragment runs.
+    // Advertise them so an IDE can offer them directly.
     for (auto const& alias : registry.aliases)
     {
         out += "  <TestCase>\n";

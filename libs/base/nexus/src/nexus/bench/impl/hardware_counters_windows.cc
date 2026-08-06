@@ -7,42 +7,20 @@
 
 #include <atomic>
 
-// The PMC counter values ETW attaches to an event live in an extended-data item of this type; the payload is
-// an array of ULONG64, one per configured source, in the order the source list was set. Older SDKs omit the
-// macro even though the runtime emits it.
+// The PMC values ETW attaches to an event live in an extended-data item of this type.
+// The payload is an array of ULONG64, one per configured source, in the order the source list was set.
+// Older SDKs omit the macro even though the runtime emits it.
 #ifndef EVENT_HEADER_EXT_TYPE_PMC_COUNTERS
 #define EVENT_HEADER_EXT_TYPE_PMC_COUNTERS 0x0008
 #endif
 
-// Windows backend.
+// Windows backend: PMU counters via a real-time ETW context-switch session, over a baseline that always works.
 //
-// Always-on baseline: elapsed time and, on x86, an rdtsc reference-cycle count — works with no privileges
-// anywhere, including the virtualized CI runners where the PMU is hidden.
+// docs/guides/profiling.md owns the mechanism — the profile-source mapping, the two TraceSetInformation calls,
+// the consumer thread that sums per-scheduling-interval deltas, and why ReadThreadProfilingData is not used.
+// Read it before changing anything here.
 //
-// Full PMU counters use the ETW profile sources + a real-time context-switch consumer:
-//   - TraceQueryInformation(TraceProfileSourceListInfo) enumerates the CPU's named PMU sources; we map our
-//     logical counters onto them by name (names differ per CPU/Windows version, and that is fine).
-//   - We start our own private SystemTraceProvider session (a fixed GUID, EVENT_TRACE_SYSTEM_LOGGER_MODE),
-//     enable CSWITCH, and attach the chosen PMC sources with two calls: TracePmcCounterListInfo picks the
-//     counters, TracePmcEventListInfo stamps them onto context-switch events. ETW then tags every CSwitch
-//     with that CPU's PMC counter values.
-//   - A background thread runs ProcessTrace and, for each CSwitch, tracks our benchmark thread across all of
-//     its scheduling intervals: on switch-in it snapshots that CPU's counters, on switch-out it adds the
-//     delta. Summing every interval the thread ran gives the counts for the measured region — multi-quantum
-//     and CPU migration both fall out for free (each interval is bracketed by a switch-in/out on one CPU).
-//   - Because a short loop can run entirely inside one quantum (no context switch during it), measure()
-//     forces a switch just before and just after body() so the region is bracketed by real CSwitch events,
-//     and bounds counting to that time window.
-//
-// Reading counters this way needs a non-admin to be able to start the session: run tools/setup-pmu-access.ps1
-// once (Performance Log Users + SeSystemProfilePrivilege + EventAccessControl DACLs on the session and
-// System-Trace-Provider GUIDs). Without that StartTrace returns ERROR_ACCESS_DENIED and we degrade to the
-// baseline. The legacy ReadThreadProfilingData hardware-counter path is deliberately NOT used: it reads back
-// all zeros in user mode on every machine tried (its HwCountersCount is gated on a global PMC list that
-// cannot be set from user mode).
-//
-// Anything unavailable (no privilege, virtualized, unsupported source) degrades to the baseline and warns
-// once.
+// Anything unavailable — no privilege, virtualized, unsupported source — degrades to the baseline and warns once.
 
 namespace nx::bench::impl
 {
@@ -64,8 +42,8 @@ constexpr char const* s_setup_hint = "run tools/setup-pmu-access.ps1 (elevated, 
                                      "session-GUID ACLs — then sign out and back in, or run elevated.";
 
 // Private logger name and fixed session GUID for our SystemTraceProvider session.
-// A non-admin process may start this session only if setup-pmu-access.ps1 has ACL'd the user's SID onto this
-// exact GUID (EventAccessControl) — the GUID here and in the script MUST stay identical.
+// A non-admin process may start this session only if setup-pmu-access.ps1 has ACL'd the user's SID onto this exact GUID (EventAccessControl).
+// The GUID here and the one in the script MUST stay identical.
 constexpr char const* s_session_name = "nexus-bench-pmu";
 constexpr GUID s_session_guid = {0x6b3c9a10, 0x2f4d, 0x4e8a, {0x9c, 0x1b, 0x7d, 0x5e, 0x3a, 0x2f, 0x8b, 0x60}};
 
@@ -206,7 +184,8 @@ void enable_system_profile_privilege()
     ::CloseHandle(token);
 }
 
-// Fill a zeroed EVENT_TRACE_PROPERTIES for our private real-time system logger. `buffer` must be s_props_size.
+// Fill a zeroed EVENT_TRACE_PROPERTIES for our private real-time system logger.
+// `buffer` must be s_props_size bytes.
 EVENT_TRACE_PROPERTIES* init_session_props(unsigned char* buffer)
 {
     for (auto i = isize(0); i < s_props_size; ++i)
@@ -221,7 +200,8 @@ EVENT_TRACE_PROPERTIES* init_session_props(unsigned char* buffer)
     return p;
 }
 
-// Start our session, replacing any stale instance left by a crashed run. `props` must be s_props_size.
+// Start our session, replacing any stale instance left by a crashed run.
+// `props` must be s_props_size bytes.
 ULONG start_session(TRACEHANDLE& session, unsigned char* props)
 {
     auto status = ::StartTraceA(&session, s_session_name, init_session_props(props));
@@ -233,9 +213,9 @@ ULONG start_session(TRACEHANDLE& session, unsigned char* props)
     return status;
 }
 
-// Attach the PMC counters to context-switch events. Both TraceSetInformation calls are required: without the
-// event-list call the counters are configured but attached to no event, so every CSwitch arrives with no PMC
-// extended-data item. Returns true when both succeed.
+// Attach the PMC counters to context-switch events; returns true when both calls succeed.
+// Both TraceSetInformation calls are required.
+// Without the event-list call the counters are configured but attached to no event, so every CSwitch arrives with no PMC extended-data item.
 bool configure_session_pmc(TRACEHANDLE session, ULONG const* source_ids, isize count)
 {
     auto flags = ULONG(EVENT_TRACE_FLAG_CSWITCH);
@@ -251,11 +231,10 @@ bool configure_session_pmc(TRACEHANDLE session, ULONG const* source_ids, isize c
     return pmc_status == ERROR_SUCCESS && evt_status == ERROR_SUCCESS;
 }
 
-// Can this process actually read PMU counters right now? Probed once by really starting the session, then
-// stopping it — the honest test of the privilege + ACL setup, which is the whole gate (StartTrace returns
-// ERROR_ACCESS_DENIED without it). Deliberately does NOT bind PMC sources: that would leave configuration
-// residue that makes the next real measure's TracePmcCounterListInfo fail. Cached: the answer is stable for
-// the process (re-running setup-pmu-access.ps1 needs a fresh process to take effect here).
+// Can this process actually read PMU counters right now?
+// Probed once by really starting the session and stopping it again, which is the honest test of the privilege + ACL gate — StartTrace returns ERROR_ACCESS_DENIED without it.
+// Deliberately does NOT bind PMC sources: that leaves configuration residue which makes the next real measure's TracePmcCounterListInfo fail.
+// The answer is cached and stable for the process, so re-running setup-pmu-access.ps1 needs a fresh process to take effect here.
 bool pmu_readable()
 {
     static auto const readable = []
@@ -277,13 +256,13 @@ bool pmu_readable()
 }
 
 // Shared state between the measuring thread and the real-time consumer thread.
-// The consumer is the only writer of totals/last_in/running; the measuring thread reads totals only after the
-// consumer has stopped and been joined, so no locking is needed there. t_arm / t_disarm bound the counted
-// window and are read live by the consumer, so they are atomic.
+// The consumer is the only writer of totals / last_in / running.
+// The measuring thread reads totals only after the consumer has stopped and been joined, so no locking is needed there.
+// t_arm / t_disarm bound the counted window and are read live by the consumer, so they are atomic.
 struct pmc_state
 {
-    // Logical processors we track per-CPU counter snapshots for. Events on a higher-numbered CPU are ignored
-    // (that interval goes uncounted) — only reachable on >256-way machines.
+    // Logical processors we track per-CPU counter snapshots for.
+    // An event on a higher-numbered CPU is ignored and that interval goes uncounted, which is only reachable on a >256-way machine.
     static constexpr int max_cpus = 256;
 
     u32 target_tid = 0;
@@ -296,8 +275,8 @@ struct pmc_state
     u64 totals[MAX_HW_COUNTERS] = {};
 };
 
-// ProcessTrace callback: one call per delivered event. We care only about context switches that carry PMC
-// extended data, and only while our benchmark thread is the one being switched in/out.
+// ProcessTrace callback, one call per delivered event.
+// Only context switches carrying PMC extended data matter, and only while our benchmark thread is the one being switched in or out.
 void WINAPI on_event(EVENT_RECORD* rec)
 {
     auto* st = static_cast<pmc_state*>(rec->UserContext);
@@ -442,11 +421,10 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
         for (auto i = isize(0); i < mapped.size(); ++i)
             source_ids[i] = mapped[i].source;
 
-        // Only a limited number of hardware PMC counters can be programmed at once (a few per core, minus
-        // whatever other ETW sessions currently hold), so configuring all requested sources can fail with
-        // ERROR_BUSY. Degrade to as many as fit right now: drop the last-requested source and retry, so a
-        // caller always gets its highest-priority counters rather than nothing. Each attempt needs a fresh
-        // session — a session whose PMC configuration was rejected once will not accept a smaller one.
+        // Only a limited number of PMC counters can be programmed at once: a few per core, minus whatever other ETW sessions hold.
+        // So configuring every requested source can fail with ERROR_BUSY.
+        // Degrade to as many as fit: drop the last-requested source and retry, so a caller gets its highest-priority counters rather than nothing.
+        // Each attempt needs a fresh session, because one whose PMC configuration was rejected will not then accept a smaller one.
         for (auto want = mapped.size(); want >= 1; --want)
         {
             if (start_session(trace_session, session_props) == ERROR_SUCCESS
@@ -482,8 +460,8 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
         }
     }
 
-    // Arm the counted window, bracket the single body() call with forced context switches, and read the
-    // baseline as tightly as possible around it. The window clock must match the event timestamps (FILETIME).
+    // Arm the counted window, bracket the single body() call with forced context switches, and read the baseline as tightly as possible around it.
+    // The window clock must match the event timestamps (FILETIME).
     auto now_ts = [&]
     {
         auto ft = FILETIME{};
@@ -540,8 +518,8 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
             continue;
         }
 
-        // A PMU counter: its value sits at the same index in state.totals as in our mapped list. Only the
-        // first `configured` sources were actually programmed (the rest lost the PMC-counter budget race).
+        // A PMU counter: its value sits at the same index in state.totals as in our mapped list.
+        // Only the first `configured` sources were actually programmed; the rest lost the PMC-counter budget race.
         auto value = u64(0);
         auto valid = false;
         for (auto i = isize(0); i < mapped.size(); ++i)

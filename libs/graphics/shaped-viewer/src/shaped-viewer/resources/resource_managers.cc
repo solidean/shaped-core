@@ -31,8 +31,8 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
 
     auto vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage);
 
-    // Upload the geometry, then build its BLAS. Two lists so the build sees the upload finished; both submit
-    // in order on the direct queue, so a later trace that references this BLAS is correctly ordered after.
+    // Upload the geometry, then build its BLAS.
+    // Two lists so the build sees the upload finished; both submit in order on the direct queue, so a later trace that references this BLAS is correctly ordered after.
     auto up = _ctx.create_command_list();
     up->upload.data_to_buffer(vertices, positions);
     auto stand_in = _acquire_index_stand_in(*up);

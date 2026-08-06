@@ -1,12 +1,14 @@
 # shaped-shader-library structure (slib::)
 
-The living roadmap for shaped-shader-library. Section headers carry a status tag:
+The living roadmap for shaped-shader-library.
+Section headers carry a status tag:
 
 - **[done]** — implemented and tested
 - **[in progress]** — partially implemented
 - **[planned]** — not started
 
-Update the tags as the API lands. This document is design intent, not a guarantee of final API.
+Update the tags as the API lands.
+This document is design intent, not a guarantee of final API.
 
 ## Goals
 
@@ -61,75 +63,55 @@ direct lookup for `(package language, requested format)`.
 
 The shape the seam is built for, and what is still `[planned]`:
 
-- **more compilers** — HLSL→SPIR-V, Slang, GLSL, WGSL. Each is another edge; nothing else changes.
-- **chains** — a shader is authored in one language but consumed as several backend formats, and the
-  path may need an intermediate hop (`slang -> hlsl -> dxil`). That needs a language→language transpile
-  edge and a graph search to replace the direct lookup. Call sites do not change: `acquire(ctx)` already
-  asks "reach a format this context accepts", which is a path query either way.
-- **fan-out helpers** — the intent is not "every shader runs on every backend" but "properly written,
-  lightly annotated HLSL can". What that annotation is, and what checks it, is undesigned.
+- **more compilers** — HLSL→SPIR-V, Slang, GLSL, WGSL.
+  Each is another edge; nothing else changes.
+- **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
+  That needs a language→language transpile edge and a graph search to replace the direct lookup.
+  Call sites do not change: `acquire(ctx)` already asks "reach a format this context accepts", which is a path query either way.
+- **fan-out helpers** — the intent is not "every shader runs on every backend" but "properly written, lightly annotated HLSL can".
+  What that annotation is, and what checks it, is undesigned.
 
 ## Shipping
 
-**Today [done]:** the generator embeds every shader source, including the transitive `#include`
-closure, and bakes the absolute source dir. The library mounts the embedded copy and then the source dir
-over it when that dir exists — so a dev build reads and watches the tree and a shipped binary is
-self-contained, with no mode flag and no probing.
+**Today [done]:** source embedding plus the baked source dir, mounted as an overlay — see [shaders.md](../../shaped-graphics/docs/shaders.md) for what that gives a consumer.
 
 **[planned] — precompiled bytecode.** A shipped binary still compiles at startup, so DXC ships with it.
-Building the bytecode at build time and embedding *that* would remove the compiler from a shipped build
-entirely. The natural shape: a build-time compile step whose output plugs into `ssc::dxc::shader_cache`
-as a `cc::key_value_provider` tier — the seam that exists for exactly this — with the embedded source
-staying as the fallback. Note DXC is Windows-only, so a cross-platform build cannot precompile
-everything itself.
+Building the bytecode at build time and embedding *that* would remove the compiler from a shipped build entirely.
+The natural shape: a build-time compile step whose output plugs into `ssc::dxc::shader_cache` as a `cc::key_value_provider` tier, with the embedded source staying as the fallback.
+DXC is Windows-only, so a cross-platform build cannot precompile everything itself.
 
 ## Reload
 
-**[done]:** revision diffing over each asset's recorded dependencies (its source plus every resolved
-include), staged recompiles promoted on the consuming thread, per-asset `generation()`, a broken edit
-kept off the running shader with `last_error()`, and an unthreaded mode for `SC_THREADS=OFF` /
-WebAssembly (and for deterministic tests).
+**[done]:** revision diffing over each asset's recorded dependencies, staged recompiles promoted on the consuming thread, per-asset `generation()`, `last_error()`, and an unthreaded mode.
 
-**[done] — OS file watching.** `filesystem::watch(prefix, sink)` is an optional capability that
-`mount_table` composes across mounts, and the reload watcher subscribes to the distinct parent directory
-of each dependency. The notification wakes the actor's mailbox, so a watched watcher has no interval and
-no periodic wakeup at all; `revision()` stays the source of truth and the diff logic never changed, which
-is what makes the notification a mere hint and lets every implementation coalesce and over-fire freely.
+**[done] — OS file watching.** `filesystem::watch` is an optional capability that `mount_table` composes across mounts.
+The reload watcher subscribes to the distinct parent directory of each dependency.
+The notification wakes the actor's mailbox, so a watched watcher has no interval and no periodic wakeup at all.
+`nullopt` selects the polling fallback instead — [`filesystem::watch`](../src/shaped-shader-library/filesystem/filesystem.hh) carries the contract.
 
-`watch()` returning `nullopt` means "I cannot notify — poll me", and everything falls back to the old
-interval scan there. That is the honest answer under `SC_THREADS=OFF` (no thread to wait on), for a
-directory that does not exist, and on every platform without a backend.
-
-**[in progress] — the other two backends.** Windows has `ReadDirectoryChangesW` over one IOCP and one
-thread. **Linux (inotify)** and **macOS (FSEvents)** are next; both currently take `watch_backend_none`
-and poll. Note `APPLE` also covers iOS, which has no FSEvents, and Android is inotify-flavoured Linux.
+**[in progress] — the other two backends.** Windows has `ReadDirectoryChangesW` over one IOCP and one thread.
+**Linux (inotify)** and **macOS (FSEvents)** are next; both currently take `watch_backend_none` and poll.
+`APPLE` also covers iOS, which has no FSEvents, and Android is inotify-flavoured Linux.
 
 **[planned] / deferred:**
 
-- **Partial watching.** `mount_table::watch` is all-or-nothing: if any intersecting mount cannot notify,
-  the whole watch reports `nullopt` and the caller polls everything. Watching what it can and polling only
-  the rest is a real refinement. In practice "cannot notify" is a platform property, so today it is
-  all-or-nothing anyway.
-- **Re-watching after a directory disappears.** A watched directory that is deleted fires once and then
-  goes quiet; the reload watcher only re-subscribes when the *dependency set* moves, so hot reload for
-  that directory stops until something else changes. Recreating a deleted source directory mid-session is
-  the only way to hit it.
-- **Mounting while a watch is live.** A mount added afterwards is not picked up. Registration freezes at
-  `start_hot_reload` today, which is what makes that affordable.
-- **A timed wait on the actor.** The polling fallback's interval is still a `std::this_thread::sleep_for`
-  in 5 ms slices, because there is no `cc::sleep_for` and `cc::threaded_actor` has no timed wait. A
-  `wait_for` hook on the actor would replace both. The watched path no longer needs either — it parks on
-  the mailbox, which shutdown already wakes.
-- **Reload for a format nobody acquired.** Deliberate: recompiling a format no one asked for burns the
-  compiler on a shader that is never used.
+- **Partial watching.** `mount_table::watch` is all-or-nothing: if any intersecting mount cannot notify, the whole watch reports `nullopt` and the caller polls everything.
+  Watching what it can and polling only the rest is a real refinement.
+  In practice "cannot notify" is a platform property, so today it is all-or-nothing anyway.
+- **Re-watching after a directory disappears.** A watched directory that is deleted fires once and then goes quiet.
+  The reload watcher only re-subscribes when the *dependency set* moves, so hot reload for that directory stops until something else changes.
+  Recreating a deleted source directory mid-session is the only way to hit it.
+- **Mounting while a watch is live.** A mount added afterwards is not picked up.
+  Registration freezes at `start_hot_reload` today, which is what makes that affordable.
+- **A timed wait on the actor.** The polling fallback's interval is a `std::this_thread::sleep_for` in 5 ms slices, because there is no `cc::sleep_for` and `cc::threaded_actor` has no timed wait.
+  A `wait_for` hook on the actor would replace both.
+  Only the polling path needs it: a watched one parks on the mailbox, which shutdown already wakes.
+- **Reload for a format nobody acquired.** Deliberate: recompiling a format no one asked for burns the compiler on a shader that is never used.
 
 ## Deferred
 
-- **Per-shader compile options** (defines, optimization level). `shader_source_description` carries only
-  source / entry point / stage today; the DSL has nowhere to put a define.
-- **Package-level include paths.** Resolution is fixed at: next to the includer, the package root, the
-  mount root. A package cannot declare extra search roots.
-- **A shared-include package.** A mount with no `SHADERS` entries already works via `lib.mount`, but
-  there is no CMake-level way to declare "this target publishes an include-only shader library".
-- **Promoting the VFS to clean-core.** This library's `filesystem` is the deliberate trial run for a
-  future `cc` virtual filesystem; `real_filesystem` is the only piece that would have to move.
+- **Per-shader compile options** (defines, optimization level).
+  `shader_source_description` carries only source / entry point / stage today; the DSL has nowhere to put a define.
+- **Package-level include paths.** A package cannot declare extra search roots beyond the three slib already searches.
+- **A shared-include package.** A mount with no `SHADERS` entries already works via `lib.mount`, but there is no CMake-level way to declare "this target publishes an include-only shader library".
+- **Promoting the VFS to clean-core.** This library's `filesystem` is the deliberate trial run for a future `cc` virtual filesystem; `real_filesystem` is the only piece that would have to move.

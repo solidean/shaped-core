@@ -3,10 +3,10 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 
-// Backends compiled into the sg API test binary (shaped-graphics-test). Each backend entry file
-// (tests/backends/<backend>-entry.cc) registers its driver here at static-init; the alias setup
-// (tests/backends/backends.cc) reads the table to build, per context_handle invocable, one alias
-// fragment per backend. See libs/base/nexus/docs/invocable-tests.md for the alias mechanism.
+// Backends compiled into the sg API test binary (shaped-graphics-test).
+// Each backend entry file (tests/backends/<backend>-entry.cc) registers its driver here at static-init.
+// The alias setup (tests/backends/backends.cc) reads the table to build, per context_handle invocable, one alias fragment per backend.
+// See libs/base/nexus/docs/invocable-tests.md for the alias mechanism.
 
 namespace sg_test
 {

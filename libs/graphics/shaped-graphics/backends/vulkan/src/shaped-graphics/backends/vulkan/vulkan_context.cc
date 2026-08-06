@@ -1,5 +1,5 @@
-// vulkan_context: device-level lifetime bodies (shutdown / teardown) plus small shared helpers. The
-// heavier bring-up path lives in vulkan_context.create.cc.
+// vulkan_context: device-level lifetime bodies (shutdown / teardown) plus small shared helpers.
+// Bring-up lives in vulkan_context.create.cc, the epoch bodies in vulkan_epoch.cc.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
@@ -7,8 +7,6 @@ namespace sg::backend::vulkan
 {
 char const* vk_result_name(VkResult r)
 {
-    // Core results up to Vulkan 1.2 (our declared baseline). Extension / newer codes fall through to
-    // the default; vulkan_error still prints the numeric value.
     switch (r)
     {
     // 1.0 success codes

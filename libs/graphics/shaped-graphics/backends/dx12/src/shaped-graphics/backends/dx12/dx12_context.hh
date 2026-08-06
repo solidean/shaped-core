@@ -2,8 +2,6 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/thread/mutex.hh>
-#include <shaped-graphics/allocation_info.hh>
-#include <shaped-graphics/backend/command_list_slot.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_allocator_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_command_list.hh>
@@ -20,66 +18,73 @@
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/memory/allocation_info.hh>
 
 #include <atomic>
 #include <memory>
 
 namespace sg::backend::dx12
 {
-/// Creation config for the dx12 context. The flags are independent.
+/// Creation config for the dx12 context.
+/// The flags are independent.
 struct dx12_config
 {
-    /// Enable the D3D12 debug/validation layer. Best-effort — skipped if it isn't installed.
+    /// Enable the D3D12 debug/validation layer.
+    /// Best-effort: skipped when it isn't installed.
     bool enable_debug_layer = false;
 
-    /// Use the WARP software adapter instead of a hardware GPU. Runs headless (good for CI).
+    /// Use the WARP software adapter instead of a hardware GPU.
+    /// Runs headless, which is what CI uses.
     bool use_warp = false;
 
-    /// Capacity of the inline UPLOAD ring buffer, in bytes. Bounds the per-epoch inline upload volume.
+    /// Capacity of the inline UPLOAD ring buffer, in bytes.
+    /// Bounds the per-epoch inline upload volume.
     isize upload_ring_bytes = isize(16) * 1024 * 1024;
 
-    /// Capacity of the inline READBACK ring buffer, in bytes. Bounds the in-flight inline download volume.
+    /// Capacity of the inline READBACK ring buffer, in bytes.
+    /// Bounds the in-flight inline download volume.
     isize download_ring_bytes = isize(16) * 1024 * 1024;
 
-    /// Size of one async-upload staging window, in bytes. The staging buffer is triple-buffered (three
-    /// of these), so CPU memcpy and GPU copy overlap; an upload larger than a window packs across
-    /// successive windows. Bigger windows amortize submits; smaller ones cut latency and memory.
+    /// Size of one async-upload staging window, in bytes.
+    /// The staging buffer is triple-buffered — three of these — so CPU memcpy and GPU copy overlap.
+    /// An upload larger than a window packs across successive windows.
+    /// Bigger windows amortize submits; smaller ones cut latency and memory.
     isize async_upload_window_bytes = isize(16) * 1024 * 1024;
 
-    /// Size of one async-download (readback) staging window, in bytes. Triple-buffered like the upload
-    /// window; a read larger than a window packs across successive windows. Bigger windows amortize
-    /// submits; smaller ones cut latency and memory.
+    /// Size of one async-download (readback) staging window, in bytes.
+    /// Triple-buffered like the upload window; a read larger than a window packs across successive windows.
+    /// Bigger windows amortize submits; smaller ones cut latency and memory.
     isize async_download_window_bytes = isize(16) * 1024 * 1024;
 
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
     int descriptor_heap_capacity = 1 << 16;
 
-    /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the
-    /// rest is the persistent bump region.
+    /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the rest is the persistent bump region.
     float descriptor_transient_fraction = 0.25f;
 
-    /// Total descriptors in the shader-visible SAMPLER heap dynamic samplers are written into. D3D12 caps
-    /// a shader-visible sampler heap at 2048; split into transient/persistent by descriptor_transient_fraction.
+    /// Total descriptors in the shader-visible SAMPLER heap dynamic samplers are written into.
+    /// D3D12 caps a shader-visible sampler heap at 2048.
+    /// Split into transient/persistent by descriptor_transient_fraction.
     int sampler_heap_capacity = 512;
 
-    /// Descriptors in the (non-shader-visible) RTV / DSV heaps render-target / depth-stencil views are
-    /// created into.
+    /// Descriptors in the non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into.
     int rtv_heap_capacity = 256;
     int dsv_heap_capacity = 256;
 };
 
-/// DirectX 12 implementation of sg::context. The sg::context virtuals are thin forwarders to the
-/// backend-typed create_dx12_* methods — prefer those when you hold a dx12_context. Bodies in dx12.cc.
+/// DirectX 12 implementation of sg::context.
+/// The sg::context virtuals are thin forwarders to the backend-typed create_dx12_* methods — prefer those when you hold a dx12_context.
 class dx12_context final : public sg::context
 {
     // dx12 consumes DXIL only.
     static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::dxil};
 
 public:
-    // Default-constructs an empty context; create_dx12_context populates the device objects and
-    // initializes the inline transfer systems. The COM pointers and fences start null.
+    // Default-constructs an empty context; create_dx12_context populates the device objects and initializes the inline transfer systems.
+    // The COM pointers and fences start null.
     dx12_context()
       : sg::context(sg::backend_kind::dx12, sg::thread_model::multi_threaded, k_accepted_shader_formats),
         _cmd_pool(*this),
@@ -93,9 +98,9 @@ public:
 
     ~dx12_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
 
-    /// Whether this device supports ray tracing (DXR tier >= 1.0). Cached from CheckFeatureSupport at
-    /// creation; a build_blas / build_tlas on an unsupported device asserts. Surfaced through
-    /// cmd.raytracing.is_supported().
+    /// Whether this device supports ray tracing (DXR tier >= 1.0), cached from CheckFeatureSupport at creation.
+    /// A build_blas / build_tlas requires a supported device.
+    /// Surfaced through cmd.raytracing.is_supported().
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
     // backend-typed API — prefer these when you already hold a dx12_context
@@ -111,13 +116,13 @@ public:
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
 
-    // The drop cleanup on an unsubmitted list (reclaim its allocator/list/slot, discard its recorded
-    // downloads, drop the open-list count). Shared by drop_dx12_command_list and the list's destructor
-    // auto-drop — do not call directly; go through drop_dx12_command_list.
+    // The drop cleanup on an unsubmitted list: reclaim its allocator/list/slot, discard its recorded downloads, drop the open-list count.
+    // Shared by drop_dx12_command_list and the list's destructor auto-drop.
+    // Do not call it directly — go through drop_dx12_command_list.
     void reclaim_unsubmitted_command_list(dx12_command_list& cmd);
 
-    // Bind path — backend-typed creates (no downcasts when you hold a dx12_context). Bodies in dx12_bind.cc.
-    // `scope` is persistent-only for now (transient bind-path resources not implemented yet).
+    // Bind path — backend-typed creates, so no downcasts when you hold a dx12_context; bodies in dx12_bind.cc.
+    // `scope` must be persistent: transient bind-path resources are not implemented yet.
     [[nodiscard]] cc::result<dx12_binding_group_layout_handle> create_dx12_binding_group_layout(
         cc::span<sg::binding const> bindings,
         cc::span<sg::named_sampler const> static_samplers,
@@ -146,22 +151,22 @@ public:
                                                                                   cc::span<sg::named_sampler const> samplers,
                                                                                   sg::lifetime_scope scope);
 
-    // Render-target / depth-stencil descriptors — RTV/DSV are CPU-only (bound via the output-merger, not a descriptor table),
-    // so they get their own non-shader-visible heaps rather than going through a binding group. Each create
-    // allocates a heap slot and writes the descriptor; free the returned slot when the view is done with.
-    // Bodies in dx12_bind.cc. Returns an error when the RTV/DSV heap is exhausted.
+    // Render-target / depth-stencil descriptors.
+    // RTV/DSV are CPU-only — bound via the output-merger, not a descriptor table — so they get their own non-shader-visible heaps rather than a binding group.
+    // Each create allocates a heap slot and writes the descriptor; free the returned slot when the view is done with.
+    // Returns an error when the RTV/DSV heap is exhausted; bodies in dx12_bind.cc.
     [[nodiscard]] cc::result<dx12_descriptor_ref> create_dx12_render_target_view(sg::render_target_view const& view);
     [[nodiscard]] cc::result<dx12_descriptor_ref> create_dx12_depth_stencil_view(sg::depth_stencil_view const& view);
     void free_dx12_render_target_view(cpu_descriptor_slot slot) { _rtv_heap->free(slot); }
     void free_dx12_depth_stencil_view(cpu_descriptor_slot slot) { _dsv_heap->free(slot); }
 
-    /// Stages a refcount-zero GPU resource for deferred deletion, attributed to the epoch it dies in
-    /// (freed once that epoch retires). Called from ~dx12_buffer; safe to call from any thread.
+    /// Stages a refcount-zero GPU resource for deferred deletion, attributed to the epoch it dies in and freed once that epoch retires.
+    /// Called from ~dx12_buffer; safe to call from any thread.
     void schedule_deferred_deletion(dx12_expiring_resource expiring);
 
-    // sg::context overrides — forward to the backend-typed methods above. A command list is only
-    // ever a dx12 one here (backends never mix), so the downcast is sound; a CC_ASSERT'd dynamic_cast
-    // guards against a foreign command list slipping in (compiled out in release).
+    // sg::context overrides — forward to the backend-typed methods above.
+    // A command list is only ever a dx12 one here, since backends never mix, so the downcast is sound.
+    // A CC_ASSERT'd dynamic_cast guards against a foreign command list slipping in, compiled out in release.
 
     [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> try_create_command_list() override
     {
@@ -196,8 +201,8 @@ public:
                                                                                                         "swapchain");
     }
 
-    // Bind-path sg::context overrides — thin forwarders (unpack the description / downcast the sg layout
-    // handle) to the backend-typed creates above. Bodies in dx12_bind.cc.
+    // Bind-path sg::context overrides — thin forwarders to the backend-typed creates above.
+    // They unpack the description and downcast the sg layout handle; bodies in dx12_bind.cc.
     [[nodiscard]] cc::result<sg::binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<sg::binding const> bindings,
         cc::span<sg::named_sampler const> static_samplers,
@@ -225,9 +230,10 @@ public:
     // The swapchain uses note_device_removed_if_lost (below) to mark the context lost on a failed Present.
     friend class dx12_swapchain;
 
-    // Device-loss detection (see is_device_lost). Records the sticky loss reason and returns true if the
-    // device is removed — either `hr` is a removed/reset code, or the device reports a non-S_OK removed
-    // reason. `what` labels the failing op. Call after any HRESULT failure on the device timeline.
+    // Device-loss detection; see is_device_lost.
+    // Records the sticky loss reason and returns true when the device is removed — either `hr` is a removed/reset code, or the device reports a non-S_OK removed reason.
+    // `what` labels the failing op.
+    // Call after any HRESULT failure on the device timeline.
 private:
     bool note_device_removed_if_lost(HRESULT hr, char const* what)
     {
@@ -240,8 +246,8 @@ private:
         return true;
     }
 
-    // Consults GetDeviceRemovedReason when a create returned an error, so a device-loss-during-create is
-    // marked before the throwing façade classifies the failure. Passes the result through unchanged.
+    // Consults GetDeviceRemovedReason when a create returned an error, so a device-loss-during-create is marked before the throwing façade classifies the failure.
+    // Passes the result through unchanged.
     template <class T>
     cc::result<T> note_device_loss_on_error(cc::result<T> r, char const* what)
     {
@@ -264,8 +270,8 @@ public:
         drop_dx12_command_list(std::unique_ptr<dx12_command_list>(static_cast<dx12_command_list*>(cmd.release())));
     }
 
-    // Reached through ctx.upload — async CPU→GPU buffer streaming on the copy queue. Forwards to the
-    // async upload system; later direct-queue lists reading the buffer auto-wait on the copy.
+    // Reached through ctx.upload — async CPU→GPU streaming on its own copy queue.
+    // Forwards to the async upload system; later direct-queue lists reading the buffer auto-wait on the copy.
     void async_upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
                                       cc::pinned_data<byte const> data,
                                       isize offset_in_bytes) override
@@ -281,8 +287,8 @@ public:
         _upload_async.upload_texture(cc::move(texture), cc::move(data), subresource, region);
     }
 
-    // Reached through ctx.download — async GPU→CPU buffer readback on the copy queue. Forwards to the async
-    // download system; a later direct-queue list writing the buffer auto-waits on the read.
+    // Reached through ctx.download — async GPU→CPU readback on its own copy queue.
+    // Forwards to the async download system; a later direct-queue list writing the buffer auto-waits on the read.
     [[nodiscard]] sg::bytes_future async_download_bytes_from_buffer(sg::raw_buffer_handle buffer,
                                                                     isize offset_in_bytes,
                                                                     isize size_in_bytes) override
@@ -297,16 +303,16 @@ public:
         return _download_async.download_texture(cc::move(texture), subresource, region);
     }
 
-    // Runtime transfer-resource resizing (reached via ctx.upload / ctx.download). Each records a pending
-    // change on the owning system, applied at a later safe point (see the systems + advance_epoch).
+    // Runtime transfer-resource resizing, reached via ctx.upload / ctx.download.
+    // Each records a pending change on the owning system, applied at a later safe point — see the systems and advance_epoch.
     void set_async_upload_window_bytes(isize bytes) override { _upload_async.set_window_bytes(bytes); }
     void set_async_download_window_bytes(isize bytes) override { _download_async.set_window_bytes(bytes); }
     void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
 
-    /// Drives all three copy actors one cycle each. Only does anything when they have no thread of their
-    /// own; see sg::context::pump_transfers. Every actor is pumped (no short-circuit): they are
-    /// independent, and an upload's copy-queue fence can be what a download is waiting behind.
+    /// Drives all three copy actors one cycle each.
+    /// Only does anything when they have no thread of their own — see sg::context::pump_transfers.
+    /// Every actor is pumped, with no short-circuit: they are independent, and an upload's copy-queue fence can be what a download waits behind.
     bool pump_transfers() override
     {
         bool more = _upload_async.pump_unthreaded();
@@ -315,10 +321,10 @@ public:
         return more;
     }
 
-    /// Drains every copy actor until none reports more work. Costs one false test wherever the actors
-    /// have their own threads. Without them it is a precondition of any GPU wait: a submitted list can be
-    /// parked on the async-upload completion fence, which only the copy actor signals, so the GPU would
-    /// never reach the epoch fence — leaving the wait blocked on work only this thread can produce.
+    /// Drains every copy actor until none reports more work.
+    /// Costs one false test wherever the actors have their own threads.
+    /// Without them it is a precondition of any GPU wait: a submitted list can be parked on the async-upload completion fence, which only the copy actor signals.
+    /// The GPU would never reach the epoch fence, leaving the wait blocked on work only this thread can produce.
     void drain_transfers()
     {
         while (pump_transfers())
@@ -326,8 +332,8 @@ public:
         }
     }
 
-    // Epoch contract — bodies in dx12_epoch.cc. These return sg vocabulary types (no backend-typed
-    // variant needed), so the whole body lives in the override.
+    // Epoch contract — bodies in dx12_epoch.cc.
+    // These return sg vocabulary types, so there is no backend-typed twin to forward to; the override is the implementation.
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
@@ -344,79 +350,77 @@ public:
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
 
-    // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5). NOT_SUPPORTED until set.
+    // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
+    // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
 
-    // Epoch machinery. The epoch fence is signaled with the epoch value at the end of each epoch;
-    // the submission fence is a per-command-list timeline on the same queue.
+    // Epoch machinery.
+    // The epoch fence is signaled with the epoch value at the end of each epoch; the submission fence is a per-command-list timeline on the same queue.
+    // Waits on the epoch fence create a per-call event, so wait_for_epoch stays safe to invoke from any thread.
     ComPtr<ID3D12Fence> _epoch_fence;
     ComPtr<ID3D12Fence> _submission_fence;
-    // Epoch-fence waits (wait_for_epoch) create a per-call event so they stay safe to invoke from any
-    // thread — no shared wait event to serialize on.
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;
 
     // create / submit / drop are thread-safe, so the shared bookkeeping they touch is synchronized:
     //  - _open_command_lists: bumped per create, dropped per submit/drop — a lock-free counter.
-    //  - _next_submission: the next completion token; guarded together with the ExecuteCommandLists +
-    //    Signal in submit so token order == queue/signal order (out-of-order signals could move the
-    //    fence value backwards).
+    //  - _next_submission: the next completion token, guarded together with the ExecuteCommandLists + Signal in submit,
+    //    so token order equals queue/signal order; out-of-order signals could move the fence value backwards.
     std::atomic<int> _open_command_lists = 0; // must reach 0 before advance — lists cannot span epochs
     // cc::mutex's value ctor is explicit, so the type is named rather than left to `= {…}`.
     cc::mutex<sg::submission_token> _next_submission = cc::mutex<sg::submission_token>(sg::submission_token::first);
 
-    // Hands each open command list a dense access-tracking slot (a backend helper for concurrent
-    // recording); acquired at create, released at submit/drop. Each resource separately tracks how many
-    // open lists are using it and promotes when its last active slot finalizes. Internally synchronized.
+    // Hands each open command list a dense access-tracking slot, a backend helper for concurrent recording.
+    // Acquired at create, released at submit/drop.
+    // Each resource separately tracks how many open lists are using it, and promotes when its last active slot finalizes.
+    // Internally synchronized.
     sg::command_list_slot_allocator _command_list_slots;
 
     cc::mutex<dx12_epoch_state> _epoch_state;
 
-    // Extra systems — owned by value, constructed with *this. The command-allocator pool recycles
-    // command allocators (epoch-gated) and command lists per queue.
-    //
-    // TODO: more backend systems will grow here as the API expands — a group-fence pool, a descriptor
-    // system, and RTV/DSV allocators. (Inline upload/download, async upload/download, and the query
-    // system already exist below.)
+    // Extra systems — owned by value, constructed with *this.
+    // The command-allocator pool recycles command allocators (epoch-gated) and command lists per queue.
     dx12_command_allocator_pool _cmd_pool;
 
-    // Inline host↔device buffer transfer over UPLOAD / READBACK ring buffers on the direct queue.
-    // Initialized (ring buffers mapped, download actor started) in create_dx12_context.
+    // Inline host↔device transfer over UPLOAD / READBACK ring buffers on the direct queue.
+    // Initialized in create_dx12_context: ring buffers mapped, download actor started.
     dx12_upload_inline_system _upload_inline;
     dx12_download_inline_system _download_inline;
 
-    // Async CPU→GPU buffer streaming on the copy queue (reached via ctx.upload). Owns its staging ring +
-    // copy actor; initialized in create_dx12_context after the copy queue/fence exist.
+    // Async CPU→GPU streaming on its own copy queue, reached via ctx.upload.
+    // Owns its staging ring and copy actor; initialized in create_dx12_context.
     dx12_upload_async_system _upload_async;
 
-    // Async GPU→CPU buffer readback on the copy queue (reached via ctx.download). Owns its readback staging
-    // ring + copy actor; initialized in create_dx12_context after the copy queue + download fence exist.
+    // Async GPU→CPU readback on its own copy queue, reached via ctx.download.
+    // Owns its readback staging ring and copy actor; initialized in create_dx12_context.
     dx12_download_async_system _download_async;
 
-    // GPU-query heap pool (reached via cmd.query). Leases timestamp query heaps to recording lists and
-    // caches the direct queue's timestamp frequency. Initialized in create_dx12_context after the queue exists.
+    // GPU-query heap pool, reached via cmd.query.
+    // Leases timestamp query heaps to recording lists and caches the direct queue's timestamp frequency.
+    // Initialized in create_dx12_context, after the queue exists.
     dx12_query_system _query_system;
 
-    // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them
-    // (their placed storage in ctx.transient's heap is reused by the next epoch). Weak: never keeps a
-    // buffer alive. Guarded because create runs on any thread while advance runs on the driver thread.
+    // Transient buffers created in the open epoch, registered here so advance_epoch can auto-expire them.
+    // Their placed storage in ctx.transient's heap is reused by the next epoch.
+    // Weak, so this never keeps a buffer alive.
+    // Guarded because create runs on any thread while advance runs on the driver thread.
     cc::mutex<cc::vector<std::weak_ptr<sg::raw_buffer const>>> _transient_expiring;
 
     // Transient textures created in the open epoch, auto-expired at advance_epoch just like buffers.
-    // Dedicated for now (no bump storage to reuse), but expiry still honours the transient contract.
+    // Dedicated for now, with no bump storage to reuse, but expiry still honours the transient contract.
     cc::mutex<cc::vector<std::weak_ptr<sg::raw_texture const>>> _transient_expiring_textures;
 
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.
     dx12_descriptor_heap _descriptor_heap;
 
-    // Shader-visible SAMPLER heap dynamic samplers are written into (a separate heap — D3D12 binds one of
-    // each type). Same transient/persistent split as _descriptor_heap. Initialized in create_dx12_context.
+    // Shader-visible SAMPLER heap dynamic samplers are written into — a separate heap, since D3D12 binds one of each type.
+    // Same transient/persistent split as _descriptor_heap; initialized in create_dx12_context.
     dx12_descriptor_heap _sampler_heap;
 
-    // Non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into (CPU-only,
-    // bound via the output-merger). Built by dx12_cpu_descriptor_heap::create in create_dx12_context.
+    // Non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into; CPU-only, bound via the output-merger.
+    // Built by dx12_cpu_descriptor_heap::create in create_dx12_context.
     std::unique_ptr<dx12_cpu_descriptor_heap> _rtv_heap;
     std::unique_ptr<dx12_cpu_descriptor_heap> _dsv_heap;
 };
@@ -424,7 +428,8 @@ public:
 
 namespace sg
 {
-/// Creates a dx12-backed sg::context. Returns an error (never asserts) on environment failure —
-/// no adapter, device creation refused, etc. Only callers that link the dx12 backend see it.
+/// Creates a dx12-backed sg::context.
+/// Returns an error, never asserts, on environment failure — no adapter, device creation refused, and the like.
+/// Only callers that link the dx12 backend see it.
 [[nodiscard]] cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config = {});
 } // namespace sg

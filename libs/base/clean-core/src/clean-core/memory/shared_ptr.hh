@@ -7,15 +7,11 @@
 
 #include <type_traits> // std::is_convertible_v
 
-// cc::shared_ptr<T, Traits> / cc::weak_ptr<T, Traits> — an 8 B, single-pointer, INTRUSIVE-refcount smart
-// pointer pair. Unlike std::shared_ptr there is no separate control block reached through a second pointer:
-// the handle stores exactly the payload pointer (get() is a no-op), and the reference counts live in the SAME
-// node, located by a Traits type. Two layouts fall out of one protocol:
-//   * default (cc::default_shared_traits): the node is [ T payload | trailing control ]; the counts sit at a
-//     fixed offset after T, so nothing intrudes on T itself. e.g. shared_ptr<int> is a 16 B node (16 B class).
-//   * intrusive (e.g. cc::async's own traits): the counts are members of T, so the node IS the object and the
-//     handle needs no extra storage. Requires that destroy_object tears down only the payload and leaves the
-//     counts alive (weak must outlive the object) — see the lifetime note below.
+// cc::shared_ptr<T, Traits> / cc::weak_ptr<T, Traits> — an 8 B, single-pointer, INTRUSIVE-refcount handle pair.
+// The handle stores exactly the payload pointer, so get() is a no-op, and the counts live in the SAME node, located by a Traits type.
+//
+// The model, the two layouts that exist today, and how provisional this design is are in libs/base/clean-core/docs/systems/shared-ptr.md.
+// Read that before writing a third Traits: the protocol below is shaped by cc::async's needs and is expected to be simplified.
 //
 // Traits protocol — all static, operating on T* (so a base-class Traits also serves a derived T through the
 // implicit upcast, which is how async uses one Traits keyed on async_node_base for every async<U>):
@@ -35,33 +31,24 @@
 // release_strong reports what the caller must do, IN ORDER:
 //   {false, false} -> nothing.
 //   {true,  false} -> destroy_object(p), THEN release_weak(p) to drop the strong owners' collective weak count;
-//                     free_storage(p) iff that returns true. The order is load-bearing: releasing the collective
-//                     weak before destroy_object would let a racing weak_ptr drop free the storage under it.
+//                     free_storage(p) iff that returns true.
 //   {true,  true}  -> destroy_object(p), then free_storage(p). Do NOT call release_weak: no other reference
 //                     exists (a strong-only Traits, or the sole-owner fast path — see cc::fused_refcount).
+//
+// The order is load-bearing: releasing the collective weak before destroy_object would let a racing weak_ptr drop free the storage under it.
 // It is one call rather than a dec_strong(T*) -> bool so a Traits CAN answer both questions from a single load.
 // The protocol says nothing about representation: two u32s, one fused u64, or a lone strong count all fit.
 //
-// Lifetime — standard shared/weak counting: the strong owners collectively hold ONE weak count. With weak
-// support destroy_object fires when strong hits 0 and free_storage fires when weak then hits 0; without weak
-// support free_storage immediately follows destroy_object. The counts must stay readable between those two
-// points, so destroy_object must NOT destroy them: with trailing control this is automatic (separate storage);
-// intrusive control must run a payload-only teardown and leave the count members intact until free_storage.
+// destroy_object must NOT destroy the counts — they have to stay readable until free_storage runs.
+// With trailing control that is automatic, since the control is separate storage; an intrusive Traits must run a payload-only teardown instead.
 //
-// Create only via cc::make_shared<T, Traits>(...): a node is born owned, strong = 1. Upcasts to a base with the
-// SAME Traits are allowed; aliasing/projection to a subobject is not (deferred).
-//
-// Two intrusive escape hatches, and the difference between them is the whole point:
-//   from_alive(p)       MINTS a new count. Requires storage known to still be alive (strong or weak > 0).
-//   release() / adopt() MOVE an existing count and mint nothing — count-neutral by construction. They exist so a
-//                       count can live in hand-rolled storage (a tagged word, a lock-free array of raw pointers)
-//                       without a redundant inc/dec round trip. Whoever holds the raw pointer owes the release.
-// Neither adopts an *arbitrary* raw pointer: from_alive needs live storage, adopt needs a count you already own.
+// Create only via cc::make_shared<T, Traits>(...): a node is born owned, strong = 1.
+// Upcasts to a base with the SAME Traits are allowed; aliasing/projection to a subobject is not (deferred).
 
 namespace cc
 {
-/// What dropping a strong reference leaves for the caller to do, in this order. `free` without `destroy` never
-/// happens. See the protocol block above for the full contract.
+/// What dropping a strong reference leaves for the caller to do, in this order.
+/// `free` without `destroy` never happens; the protocol block above carries the full contract.
 struct shared_release
 {
     bool destroy; ///< this was the last strong reference: run destroy_object
@@ -69,12 +56,11 @@ struct shared_release
 };
 
 /// The fused strong/weak counter both stock Traits build on: strong in the high 32 bits, weak in the low 32.
-/// The weak half counts every weak_ptr PLUS one collective count shared by all strong owners, so the two halves
-/// move independently — never as a unit. Fusing buys exactly one thing: release_strong can test both counts
-/// with a single load, and the sole-owner case then needs no locked RMW at all.
+/// The weak half counts every weak_ptr PLUS one collective count shared by all strong owners, so the two halves move independently, never as a unit.
+/// Fusing buys exactly one thing: release_strong can test both counts with a single load, and the sole-owner case then needs no locked RMW at all.
 ///
-/// Weak is the LOW half, so a weak overflow carries straight into the strong count. 2^32 live weak refs is
-/// unreachable in practice (each costs a pointer somewhere) — an invariant, not a check.
+/// Weak is the LOW half, so a weak overflow carries straight into the strong count.
+/// 2^32 live weak refs is unreachable in practice, since each costs a pointer somewhere — an invariant, not a check.
 struct fused_refcount
 {
     static constexpr u64 strong_unit = u64(1) << 32;
@@ -87,11 +73,10 @@ struct fused_refcount
 
     static shared_release release_strong(cc::atomic<u64>& c)
     {
-        // Reading exactly (1,1) proves we hold the only reference of any kind: no other thread can mint one,
-        // because minting requires already holding one. So there is nobody to race and no RMW is needed — this
-        // is the whole point of fusing. The ACQUIRE is load-bearing: it pairs with the release of whoever
-        // dropped the second-to-last reference, ordering their writes before our teardown. Note this leaves the
-        // counts reading (1,1) through destroy_object / free_storage; nothing may read them there.
+        // Reading exactly (1,1) proves we hold the only reference of any kind: no other thread can mint one, because minting requires already holding one.
+        // So there is nobody to race and no RMW is needed, which is the whole point of fusing.
+        // The ACQUIRE is load-bearing: it pairs with the release of whoever dropped the second-to-last reference, ordering their writes before our teardown.
+        // Note this leaves the counts reading (1,1) through destroy_object / free_storage; nothing may read them there.
         if (c.load(cc::memory_order_acquire) == sole_owner)
             return {true, true};
 
@@ -255,8 +240,8 @@ public:
 
     // low-level
 public:
-    /// Mint a strong handle from a raw pointer whose storage is known to still be alive (strong or weak > 0):
-    /// intrusive self-recovery. Undefined if the storage has already been freed.
+    /// Mint a strong handle from a raw pointer whose storage is known to still be alive (strong or weak > 0): intrusive self-recovery.
+    /// Undefined if the storage has already been freed.
     [[nodiscard]] static shared_ptr from_alive(T* p)
     {
         shared_ptr r;
@@ -266,9 +251,9 @@ public:
         return r;
     }
 
-    /// Take over one strong count the caller already holds — no inc_strong. The twin of release(): together they
-    /// move a strong reference into and out of hand-rolled storage (e.g. a lock-free deque of raw node pointers)
-    /// without a redundant inc/dec pair. The caller must not also release its own count.
+    /// Take over one strong count the caller already holds — no inc_strong.
+    /// The twin of release(): together they move a strong reference into and out of hand-rolled storage, e.g. a lock-free deque of raw node pointers, without a redundant inc/dec pair.
+    /// The caller must not also release its own count.
     /// Also make_shared's birth ref and weak_ptr::lock's upgrade, which likewise own a count already.
     [[nodiscard]] static shared_ptr adopt(T* p)
     {
@@ -383,9 +368,9 @@ public:
         return r;
     }
 
-    /// Take over one weak count the caller already holds — no inc_weak. The twin of release(): together they
-    /// move a weak reference into and out of hand-rolled storage (e.g. a tagged word) without a redundant
-    /// inc/dec pair. The caller must not also release its own count.
+    /// Take over one weak count the caller already holds — no inc_weak.
+    /// The twin of release(): together they move a weak reference into and out of hand-rolled storage, e.g. a tagged word, without a redundant inc/dec pair.
+    /// The caller must not also release its own count.
     [[nodiscard]] static weak_ptr adopt(T* p)
     {
         weak_ptr r;

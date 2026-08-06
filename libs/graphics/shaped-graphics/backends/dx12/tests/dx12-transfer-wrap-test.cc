@@ -3,22 +3,20 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 
 using namespace cc::primitive_defines;
 
-// Backend-internal test: an inline transfer that would straddle the ring seam is split into two
-// contiguous copies rather than wasting the tail and restarting at 0. We peel the abstraction (the
-// legitimate escape hatch — see libs/graphics/shaped-graphics/docs/testing.md): create a tiny ring, drain
-// it, park the logical cursor
-// a few bytes before the physical seam via the system's debug_set_cursor hook, run a transfer bigger
-// than that gap, and assert the cursor advanced by *exactly* the transfer size — a wasted tail would add
-// the skipped gap on top. A byte-exact round-trip proves the seam-straddling copy is correct.
+// Backend-internal test: an inline transfer that would straddle the ring seam is split into two contiguous copies, rather than wasting the tail and restarting at 0.
+// It peels the abstraction, the legitimate escape hatch — see libs/graphics/shaped-graphics/docs/testing.md.
+// Create a tiny ring, drain it, park the logical cursor a few bytes before the physical seam via debug_set_cursor, then run a transfer bigger than that gap.
+// The cursor must have advanced by *exactly* the transfer size; a wasted tail would add the skipped gap on top.
+// A byte-exact round-trip proves the seam-straddling copy is correct.
 //
-// Covers the seam-split in dx12_upload_inline / dx12_download_inline (concept docs
+// Covers the seam-split in dx12_upload_inline / dx12_download_inline — concept docs
 // libs/graphics/shaped-graphics/docs/concepts/upload.inline.md /
-// libs/graphics/shaped-graphics/docs/concepts/download.inline.md).
+// libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 
 namespace
 {
@@ -101,7 +99,8 @@ TEST("sg dx12 - inline download splits across the ring seam")
     REQUIRE(before.capacity == ring_bytes);
     REQUIRE(isize(before.next_pos % u64(ring_bytes)) + xfer_bytes > ring_bytes); // setup forces a wrap
 
-    // Record a wrapping readback. Reservation happens at record time, so the cursor is observable now.
+    // Record a wrapping readback.
+    // Reservation happens at record time, so the cursor is observable immediately.
     auto down = ctx->create_command_list();
     auto fut = down->download.bytes_from_buffer(buf, 0, xfer_bytes);
 

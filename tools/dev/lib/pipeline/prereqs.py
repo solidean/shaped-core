@@ -1,23 +1,12 @@
 """External prerequisites that must exist before CMake configures.
 
-Three deps are fetched rather than committed, so we hydrate them on demand.
-Each configure runs the fetch script: a few seconds on a cold install, a cheap pin-file check after.
-None is fatal — a failure leaves the dependent target unbuilt and configure proceeds.
+Four deps are fetched rather than committed — DXC, Zydis, SDL3 and SQLite — so every configure runs their fetch script.
+That is seconds on a cold install and a cheap pin-file check after, and `SC_SKIP_<NAME>=1` opts out of one.
+A cross-target preset skips all four, since these are host-side dependencies.
+None of them is fatal: a failure leaves the dependent target unbuilt and configure proceeds.
 
-- DXC: the (Windows-only) shaped-shader-compiler-dxc library links its prebuilt release
-  binaries from extern/dxc/.install/. Set SC_SKIP_DXC=1 to skip.
-- Zydis: the (Windows-only) instruction-tracer tool links the amalgamated decoder generated
-  into extern/zydis/.install/ — ~12 MB of generated tables we keep out of the history. Set
-  SC_SKIP_ZYDIS=1 to skip.
-- SDL3: shaped-rendering's sr::window is built on the source release fetched into
-  extern/sdl3/.install/. Set SC_SKIP_SDL3=1 to skip.
-- SQLite: babel-serializer's babel::sqlite format links the amalgamation fetched into
-  extern/sqlite/.install/ — ~9.5 MB of generated C we keep out of the history. Set
-  SC_SKIP_SQLITE=1 to skip.
-
-SDL3 and SQLite run on every platform, so they are what make a cold Linux or macOS configure do
-real work: ~15 MB (SDL3) plus ~3 MB (SQLite) downloaded, then SDL compiled once (~35 s per preset
-on Windows). All are cached afterwards, by pin.txt and by the build tree respectively.
+DXC and Zydis are Windows-only, while SDL3 and SQLite run everywhere — which is what makes a cold Linux or macOS configure do real work.
+Each dep's own docs own its pin, its size and what is missing without it — for Zydis that is tools/instruction-tracer/readme.md, not a libs/ doc.
 """
 
 from __future__ import annotations
@@ -92,9 +81,10 @@ def _ensure(
 
 
 def ensure_dxc(root: Path, preset_name: str = "") -> None:
-    """Download DXC into extern/dxc/.install when it is missing or at the wrong pin. No-op off
-    Windows, for cross-target presets, when SC_SKIP_DXC is set, or when the install is already
-    current. A failure is reported but not fatal — configure proceeds and simply skips the library."""
+    """Download DXC into extern/dxc/.install when it is missing or at the wrong pin.
+
+    A failure leaves shaped-shader-compiler-dxc unbuilt.
+    """
     _ensure(
         root,
         preset_name,
@@ -109,10 +99,10 @@ def ensure_dxc(root: Path, preset_name: str = "") -> None:
 
 
 def ensure_zydis(root: Path, preset_name: str = "") -> None:
-    """Generate the amalgamated Zydis into extern/zydis/.install when it is missing or at the
-    wrong pin. No-op off Windows, for cross-target presets, when SC_SKIP_ZYDIS is set, or when
-    the install is already current. A failure is reported but not fatal — configure proceeds and
-    simply skips the instruction-tracer tool."""
+    """Generate the amalgamated Zydis into extern/zydis/.install when it is missing or at the wrong pin.
+
+    A failure leaves the instruction-tracer tool unbuilt.
+    """
     _ensure(
         root,
         preset_name,
@@ -128,9 +118,9 @@ def ensure_zydis(root: Path, preset_name: str = "") -> None:
 
 def ensure_sdl3(root: Path, preset_name: str = "") -> None:
     """Download the SDL3 source into extern/sdl3/.install when it is missing or at the wrong pin.
-    Runs on every platform, unlike DXC and Zydis. No-op for cross-target presets, when SC_SKIP_SDL3
-    is set, or when the install is already current. A failure is reported but not fatal — configure
-    proceeds and shaped-rendering simply builds without its window API."""
+
+    A failure leaves shaped-rendering building without its window API.
+    """
     _ensure(
         root,
         preset_name,
@@ -145,10 +135,10 @@ def ensure_sdl3(root: Path, preset_name: str = "") -> None:
 
 
 def ensure_sqlite(root: Path, preset_name: str = "") -> None:
-    """Download the SQLite amalgamation into extern/sqlite/.install when it is missing or at the
-    wrong pin. Runs on every platform, like SDL3. No-op for cross-target presets, when SC_SKIP_SQLITE
-    is set, or when the install is already current. A failure is reported but not fatal — configure
-    proceeds and babel-serializer builds with its SQLite format reporting the backend unavailable."""
+    """Download the SQLite amalgamation into extern/sqlite/.install when it is missing or at the wrong pin.
+
+    A failure leaves babel-serializer's SQLite format reporting the backend unavailable.
+    """
     _ensure(
         root,
         preset_name,

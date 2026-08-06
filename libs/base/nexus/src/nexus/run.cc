@@ -64,9 +64,8 @@ cc::result<cc::unit> write_report_file(cc::string_view path, cc::string_view con
     return cc::unit{};
 }
 
-// Prints failing tests to stderr, recursing into invoked (nested) executions. `prefix` is the accumulated
-// addressable path of the parent (invocation group + name segments), so a failing instance shows its
-// full "driver / group / test" location.
+// Prints failing tests to stderr, recursing into invoked (nested) executions.
+// `prefix` is the parent's accumulated addressable path — invocation group plus name segments — so a failing instance shows its full "driver / group / test" location.
 void print_failing(nx::test_execution const& exec, cc::string const& prefix)
 {
     auto const* const decl = exec.instance.declaration;
@@ -92,8 +91,8 @@ void print_failing(nx::test_execution const& exec, cc::string const& prefix)
         print_failing(child, label);
 }
 
-// Collects the declarations of all invoked (nested) executions — i.e. which invocable tests actually ran
-// this session. Used to detect orphans (declared but never invoked).
+// Collects the declarations of every invoked (nested) execution, which is the set of invocable tests that actually ran this session.
+// Used to detect orphans: declared but never invoked.
 void collect_invoked(nx::test_execution const& exec, std::unordered_set<void const*>& out)
 {
     for (auto const& child : exec.nested)
@@ -135,9 +134,9 @@ int nx::run(int argc, char** argv)
         return 0;
     }
 
-    // JSON test listing: a query used by `dev.py test` to pre-select which binaries actually contain a matching
-    // test. It reports every registered test plus eligibility under the parsed args; it never runs anything and
-    // always succeeds, even when nothing is eligible (the caller decides what an empty match means).
+    // JSON test listing: the query `dev.py test` uses to pre-select which binaries actually contain a matching test.
+    // It reports every registered test plus its eligibility under the parsed args, and never runs anything.
+    // It always succeeds, even when nothing is eligible — the caller decides what an empty match means.
     if (!config.list_tests_json_file.empty())
     {
         auto const json = write_test_listing_json(program_name(argv[0]), config, registry);
@@ -181,8 +180,8 @@ int nx::run(int argc, char** argv)
     // Execute the scheduled tests
     auto execution = execute_tests(schedule, config);
 
-    // Write a JUnit XML report if requested. This is additive: the normal
-    // console output below still runs regardless of the reporting mode.
+    // Write a JUnit XML report if requested.
+    // This is additive: the console output below still runs, whatever the reporting mode.
     if (!config.junit_xml_file.empty())
     {
         auto const written = write_report_file(config.junit_xml_file, write_junit_xml(program_name(argv[0]), execution));

@@ -1,15 +1,10 @@
-// dx12_download_inline_system: the inline READBACK ring buffer plus the actor that performs deferred
-// CPU copies. Downloads record a GPU readback copy at record time; at submit the deferred copies are
-// stamped with the list's submission token and enqueued on a cc::threaded_actor. The actor blocks on
-// the submission fence, memcpys the readback bytes into the destination (skipping it if the future was
-// dropped), marks the waiter ready, and releases the epoch's outstanding-copy count.
-//
-// Ring space is reclaimed at EPOCH granularity, not per submission. Reservations happen concurrently
-// in allocation order; multiple lists record in parallel, so submission order (the actor's copy order)
-// need not match allocation order. Freeing a window per submission could release space an interleaved,
-// not-yet-submitted list still holds. So each epoch carries an outstanding-copy counter, and a closed
-// epoch's whole ring span frees only once that counter hits zero — i.e. every one of its downloads has
-// drained (or its list was dropped). See libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
+// dx12_download_inline_system: the inline READBACK ring buffer plus the actor that performs deferred CPU copies.
+// A download records the GPU readback copy at record time.
+// At submit the deferred copies are stamped with the list's submission token and enqueued on a cc::threaded_actor.
+// The actor blocks on the submission fence, memcpys the readback bytes into the destination, marks the waiter ready, and releases the epoch's outstanding-copy count.
+// It skips the memcpy when the future was already dropped.
+// Ring space is reclaimed at EPOCH granularity, never per submission: each epoch carries an outstanding-copy counter, and its whole span frees only once that counter hits zero.
+// Why that coarsening is load-bearing under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/optional.hh>
@@ -52,8 +47,7 @@ cc::result<cc::unit> dx12_download_inline_system::initialize(isize capacity)
 {
     CC_ASSERT(capacity > 0, "download ring capacity must be positive");
 
-    // READBACK heap, COPY_DEST: the GPU writes readback bytes here via CopyBufferRegion, the actor
-    // reads them back out on the CPU.
+    // READBACK heap, COPY_DEST: the GPU writes readback bytes here via CopyBufferRegion, the actor reads them back out on the CPU.
     auto ring = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST,
                                           capacity);
     CC_RETURN_IF_ERROR(ring);
@@ -76,8 +70,8 @@ void dx12_download_inline_system::ring_state::reclaim(dx12_download_inline_syste
     u64 const prev = sys._freed_pos.load(std::memory_order_acquire);
     u64 new_freed = prev;
 
-    // Free every leading epoch whose copies have all drained. The FIFO is ordered by allocation, so a
-    // still-busy epoch blocks reclaim of everything reserved after it.
+    // Free every leading epoch whose copies have all drained.
+    // The FIFO is ordered by allocation, so a still-busy epoch blocks reclaim of everything reserved after it.
     isize retired = 0;
     for (auto const& cp : checkpoints)
     {
@@ -98,9 +92,9 @@ void dx12_download_inline_system::ring_state::reclaim(dx12_download_inline_syste
 
 void dx12_download_inline_system::account_pending_copy(std::shared_ptr<std::atomic<isize>> const& epoch_copies)
 {
-    // One more outstanding copy, counted only for a window that actually produces a copy job (a seam-skip
-    // window makes no progress and is not counted). Bumped here rather than in reserve_span so the counts
-    // pair 1:1 with pushed jobs — each is released in on_copy_done / discard_unsubmitted.
+    // One more outstanding copy, counted only for a window that actually produces a copy job.
+    // A seam-skip window makes no progress and is not counted.
+    // Bumped here rather than in reserve_span so the counts pair 1:1 with pushed jobs, each released in on_copy_done / discard_unsubmitted.
     epoch_copies->fetch_add(1, std::memory_order_relaxed); // this epoch's tally (gates ring reclaim)
     _outstanding.fetch_add(1, std::memory_order_relaxed);  // and the global drain gate
 }
@@ -132,9 +126,9 @@ dx12_download_inline_system::span_reservation dx12_download_inline_system::reser
         if (r.has_value())
             return cc::move(r.value());
 
-        // The ring is full; only the actor draining copies frees space. Where it has no thread of its own,
-        // run it here — the wait below would otherwise be on progress nobody can make. A no-op with
-        // threads, where the actor is already draining and _freed_pos is what we should sleep on.
+        // The ring is full, and only the actor draining copies frees space.
+        // Where it has no thread of its own, run it here: the wait below would otherwise be on progress nobody can make.
+        // A no-op with threads, where the actor is already draining and _freed_pos is what to sleep on.
         if (pump_unthreaded())
             continue;
 
@@ -159,11 +153,10 @@ sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list
 
     dx12_texture_download download(src, fp, dst_span);
 
-    // The job self-aligns each byte window and returns bytes-consumed-including-alignment; the ring stays a
-    // plain byte allocator. Reserve the whole region once, plus slack for the self-alignment (512) and the one
-    // partial row a seam wrap pushes past the boundary (padded), then walk it with to-seam windows (mirroring
-    // the inline upload). Each chunk is its own deferred un-pad copy; a window too small for an aligned row
-    // yields an empty copy we skip; only the last real chunk carries the waiter.
+    // Reserve the whole region once, plus slack for the self-alignment (512) and the one padded row a seam wrap pushes past the boundary.
+    // Then walk the reserved span in to-seam windows; dx12_texture_upload owns the self-align contract dx12_texture_download mirrors.
+    // Each chunk is its own deferred un-pad copy, and a window too small for an aligned row yields an empty copy we skip.
+    // Only the last real chunk carries the waiter.
     isize const total = download.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
     CC_ASSERT(total <= _capacity, "an inline texture readback (with staging slack) exceeds the readback ring capacity");
 
@@ -213,10 +206,9 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     dx12_buffer_download download(src, offset, dst_span);
     download.prepare(cmd);
 
-    // Reserve the whole read once (the span may wrap the seam), then walk it with to-seam windows — the same
-    // reserve_span the texture path uses. Each chunk gets its own deferred memcpy and its own epoch-copy
-    // count; only the last chunk carries the waiter, so the future becomes ready once every chunk has drained
-    // (the actor copies in enqueue order).
+    // Reserve the whole read once (the span may wrap the seam), then walk it with to-seam windows.
+    // Each chunk gets its own deferred memcpy and its own epoch-copy count.
+    // Only the last chunk carries the waiter, so the future becomes ready once every chunk has drained — the actor copies in enqueue order.
     span_reservation const span = reserve_span(size);
     u64 cursor = span.start;
     while (!download.is_finished())
@@ -254,10 +246,9 @@ void dx12_download_inline_system::enqueue_submitted(sg::submission_token token, 
 
 void dx12_download_inline_system::discard_unsubmitted(cc::vector<dx12_download_copy_job>& jobs)
 {
-    // Never submitted: the deferred copies won't run and their futures can't complete. Cancel each
-    // future and release the epoch-copy count it held, so the epoch still reaches zero and reclaims its
-    // ring span once its *submitted* downloads drain. The reserved bytes are not freed individually —
-    // they sit inside the open epoch's span and are reclaimed with it.
+    // Never submitted: the deferred copies won't run, so their futures can't complete.
+    // Cancel each future and release the epoch-copy count it held, so the epoch still reaches zero once its *submitted* downloads drain.
+    // The reserved bytes are not freed individually — they sit inside the open epoch's span and are reclaimed with it.
     bool released = false;
     for (auto& job : jobs)
     {
@@ -282,8 +273,8 @@ void dx12_download_inline_system::on_epoch_advance(sg::epoch closed)
     _ring.lock(
         [&](ring_state& s)
         {
-            // Snapshot the cursor as `closed`'s boundary and hand off its counter; the fresh counter
-            // tallies the next epoch. reclaim in case `closed` already fully drained (counter at zero).
+            // Snapshot the cursor as `closed`'s boundary and hand off its counter; the fresh one tallies the next epoch.
+            // Reclaim in case `closed` already fully drained, with its counter at zero.
             s.checkpoints.push_back(epoch_checkpoint{closed, s.next_pos, cc::move(s.current_epoch_copies)});
             s.current_epoch_copies = std::make_shared<std::atomic<isize>>(0);
             s.reclaim(*this);
@@ -313,8 +304,7 @@ void dx12_download_inline_system::on_copy_done(std::shared_ptr<std::atomic<isize
 
 void dx12_download_inline_system::wait_until_idle()
 {
-    // Wait-for-zero on the global counter: std::atomic::wait rechecks the value, so a decrement to zero
-    // between load and wait is not lost (unlike polling per-epoch checkpoints, which races the actor).
+    // Wait-for-zero on the global counter: std::atomic::wait rechecks the value, so a decrement to zero between load and wait is not lost.
     // Only the actor decrements it, so where it has no thread we must run it rather than wait on it.
     isize cur = _outstanding.load(std::memory_order_acquire);
     while (cur != 0)
@@ -338,9 +328,9 @@ void dx12_download_inline_system::apply_pending_budget()
     if (pending <= 0)
         return;
 
-    // Drain every in-flight epoch (bounds the GPU wait), then wait for the actor to finish every
-    // outstanding readback copy — each memcpys out of the *current* ring, so the ring cannot be freed
-    // until they are all done. The freshly-opened epoch has no downloads yet, so this reaches zero.
+    // Drain every in-flight epoch (bounds the GPU wait), then wait for the actor to finish every outstanding readback copy.
+    // Each memcpys out of the *current* ring, so the ring cannot be freed until they are all done.
+    // The freshly-opened epoch has no downloads yet, so this reaches zero.
     while (u64(_ctx.completed_epoch()) + 1 < u64(_ctx.current_epoch()))
         _ctx.wait_for_next_inflight_epoch();
     _ctx.process_completed_epochs();

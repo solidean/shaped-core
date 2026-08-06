@@ -1,5 +1,5 @@
-// dx12_buffer: GPU buffer creation (committed + placed) and deferred-deletion destructor. The buffer
-// type is otherwise header-only (ctor + fields).
+// dx12_buffer: GPU buffer creation, committed and placed, plus the deferred-deletion destructor.
+// The buffer type is otherwise header-only (ctor + fields).
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
@@ -19,10 +19,9 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usage u
     desc.Format = DXGI_FORMAT_UNKNOWN;
     desc.SampleDesc.Count = 1;
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // required for buffers
-    // Only a UAV (read-write storage) needs a creation flag; SRV / CBV / VBV / IBV / copy / indirect
-    // are all allowed by default on a D3D12 buffer. Acceleration-structure *storage* is a UAV-flavored
-    // buffer too (D3D12 requires ALLOW_UNORDERED_ACCESS for it) — plus it must be *created* in the
-    // RAYTRACING_ACCELERATION_STRUCTURE state (see accel_structure_initial_state / dx12_context create).
+    // Only a UAV (read-write storage) needs a creation flag; SRV / CBV / VBV / IBV / copy / indirect are all allowed by default on a D3D12 buffer.
+    // Acceleration-structure *storage* is a UAV-flavored buffer too, since D3D12 requires ALLOW_UNORDERED_ACCESS for it.
+    // It must also be *created* in the RAYTRACING_ACCELERATION_STRUCTURE state — see accel_structure_initial_state and the dx12_context create path.
     bool const needs_uav = sg::has_flag(usage, sg::buffer_usage::readwrite_buffer)
                         || sg::has_flag(usage, sg::buffer_usage::accel_structure_storage);
     desc.Flags = needs_uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
@@ -95,9 +94,8 @@ void dx12_buffer::finalize_slot(sg::command_list_slot slot) const
     _access.lock(
         [&](access_tracking& t)
         {
-            // Only ever called for a buffer this list touched (declare_access set the slot active), so it
-            // exists and is active — see the command list's submit path. A buffer has no layout and no
-            // between-lists state, so finalize just frees the slot (its state is discarded, not carried).
+            // Only ever called for a buffer this list touched, since declare_access set the slot active — see the command list's submit path.
+            // A buffer has no layout and no between-lists state, so finalize just frees the slot; its state is discarded, not carried.
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "finalize of a buffer this list never touched");
             CC_ASSERT(!t.slots[i].state.has_pending_declares(), "a declared access was never flushed by a GPU op");
@@ -119,16 +117,15 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
 
 void dx12_buffer::release_storage() const
 {
-    // Stage the GPU handle + finalizers for deletion once the current epoch retires. Empty buffers
-    // (null resource) with no finalizers own nothing GPU-side; already-released ones no-op here.
+    // Stage the GPU handle + finalizers for deletion once the current epoch retires.
+    // An empty buffer (null resource) with no finalizers owns nothing GPU-side, and an already-released one no-ops here.
     if (_resource || !_finalizers.empty())
     {
         dx12_expiring_resource expiring;
         expiring.resource = cc::move(_resource);
         expiring.finalizers = cc::move(_finalizers);
-        // Gate release on the async copy queue too: an in-flight upload to this buffer may still reference
-        // the resource after its epoch (direct queue) has retired. This is the buffer's highest pending
-        // async value; deferred deletion holds the resource until the copy fence reaches it.
+        // Gate release on the async copy queue too: an in-flight upload to this buffer may still reference the resource after its epoch has retired on the direct queue.
+        // This is the buffer's highest pending async value, and deferred deletion holds the resource until the copy fence reaches it.
         expiring.copy_wait = dx12_copy_fence_value(_pending_async_upload_value.load(std::memory_order_acquire));
         _ctx.schedule_deferred_deletion(cc::move(expiring));
     }

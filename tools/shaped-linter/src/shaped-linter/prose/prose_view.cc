@@ -1,7 +1,9 @@
 #include "prose_view.hh"
 
 #include <clean-core/common/utility.hh>
+#include <shaped-linter/lex/lexer.hh>
 #include <shaped-linter/lex/markdown_scanner.hh>
+#include <shaped-linter/lex/python_lexer.hh>
 #include <shaped-linter/lex/source_buffer.hh>
 
 namespace scl
@@ -110,6 +112,16 @@ bool opens_logical_line(cc::span<token const> tokens, isize index)
     return true; // the first token of the file
 }
 
+} // namespace
+
+bool is_python_docstring(cc::span<token const> tokens, isize index)
+{
+    auto const& t = tokens[index];
+    return t.is(token_kind::string_literal) && is_triple_quoted(t.text) && opens_logical_line(tokens, index);
+}
+
+namespace
+{
 /// C++ and Python alike: comments come out of the token stream, and adjacent line comments group.
 /// A `/* … */` is one block of its own lines, with the decorative leading `*` of each continuation cut.
 prose_view extract_from_tokens(source_buffer const& buffer, source_language language, token_stream const& tokens)
@@ -130,8 +142,7 @@ prose_view extract_from_tokens(source_buffer const& buffer, source_language lang
             continue;
         }
 
-        auto const docstring = language == source_language::python && t.is(token_kind::string_literal)
-                            && is_triple_quoted(t.text) && opens_logical_line(all, index);
+        auto const docstring = language == source_language::python && is_python_docstring(all, index);
         if (!t.is(token_kind::block_comment) && !docstring)
             continue;
 
@@ -192,7 +203,7 @@ prose_view extract_from_tokens(source_buffer const& buffer, source_language lang
 }
 
 /// Markdown: every line the scanner called text.
-/// A blank line, a fence or a table row ends the block.
+/// A blank line, a fence, a table row or a frontmatter line ends the block.
 prose_view extract_from_markdown(source_buffer const& buffer)
 {
     prose_view view;
@@ -218,5 +229,48 @@ prose_view extract_prose(source_buffer const& buffer, source_language language, 
     if (language == source_language::markdown)
         return extract_from_markdown(buffer);
     return extract_from_tokens(buffer, language, tokens);
+}
+
+prose_stats measure_prose(prose_view const& view)
+{
+    prose_stats out;
+    for (auto const& block : view.blocks)
+        for (auto const& line : block.lines)
+        {
+            ++out.lines;
+
+            // Both ends are already trimmed, so a word starts wherever a space run ends.
+            auto in_word = false;
+            for (auto const c : line.text)
+            {
+                if (is_space(c))
+                {
+                    in_word = false;
+                    continue;
+                }
+                if (!in_word)
+                    ++out.words;
+                in_word = true;
+            }
+        }
+
+    return out;
+}
+
+prose_stats measure_file_prose(cc::string_view text, cc::string_view path)
+{
+    auto const language = language_from_path(path);
+    auto const buffer = source_buffer::from_text(cc::string(text), path, 0);
+
+    token_stream tokens; // markdown has no lexer and needs none
+    if (language != source_language::markdown)
+    {
+        auto lexed = language == source_language::python ? lex_python(buffer) : lex(buffer);
+        if (lexed.has_error())
+            return {};
+        tokens = cc::move(lexed.value());
+    }
+
+    return measure_prose(extract_prose(buffer, language, tokens));
 }
 } // namespace scl

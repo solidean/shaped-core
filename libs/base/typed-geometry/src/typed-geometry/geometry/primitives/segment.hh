@@ -11,7 +11,7 @@ namespace tg
 ///
 /// Represents the set of points {(1 - t)*pos0 + t*pos1 : t in [0, 1]} — the straight connection between pos0 and pos1, endpoints included.
 /// It is a 1D object (intrinsic_dim == 1) in D-dimensional space and is finite.
-/// A segment with pos0 == pos1 is a degenerate point; this is not enforced.
+/// A segment with pos0 == pos1 is a degenerate point, which is not enforced against.
 ///
 ///     tg::segment3f s(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0));
 template <int D, class T>

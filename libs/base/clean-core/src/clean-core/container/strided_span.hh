@@ -9,25 +9,14 @@
 #include <initializer_list>
 #include <type_traits>
 
-/// Forward iterator for non-contiguous data with a constant stride.
+/// Forward iterator over elements of T laid out at a constant byte stride — the iterator behind cc::strided_span.
 ///
-/// This iterator allows iteration over elements of type T that are stored with a
-/// fixed byte offset (stride) between consecutive elements.
+/// The stride is the byte offset between consecutive elements.
+/// It may be positive (forward through memory), negative (backward), or zero, in which case every element aliases the same location.
+/// See cc::strided_span below for the alignment the stride must preserve.
 ///
-/// The stride represents the byte offset between consecutive elements and can be:
-/// - positive: forward iteration through memory
-/// - negative: backward iteration through memory
-/// - zero: all elements alias the same memory location (repeated element access)
-///
-/// IMPORTANT: The stride must ensure that all accessed elements are properly aligned
-/// for type T. Misaligned accesses lead to undefined behavior.
-///
-/// DESIGN: This iterator uses a counting approach (ptr, stride, remaining_count).
-/// It compares against cc::sentinel for end-of-range detection, properly supporting
-/// zero-stride where the pointer never advances.
-///
-/// NOTE: This is a forward iterator only - supports range-based for, but not random access.
-/// Use operator[] on strided_span for indexed access.
+/// Forward iteration only: range-based for works, random access does not — use strided_span::operator[] for indexed access.
+/// The counting representation (ptr, stride, remaining_count) compared against cc::sentinel is what makes a zero stride terminate.
 template <class T>
 struct cc::strided_iterator
 {
@@ -77,24 +66,22 @@ private:
     isize _remaining_count = 0;
 };
 
-/// Non-owning view over elements of type T with a constant stride between elements
-/// Useful for accessing interleaved data or subsets with regular spacing
+/// Non-owning view over elements of type T with a constant stride between them.
+/// Useful for interleaved data, or for a subset with regular spacing.
 ///
 /// The stride represents the byte offset between consecutive elements and can be:
 /// - positive: forward iteration through memory
 /// - negative: backward iteration through memory
 /// - zero: all elements alias the same memory location (repeated element view)
 ///
-/// Unlike span, strided_span is not necessarily contiguous, so it provides
-/// start_ptr() instead of data() and has an is_contiguous() query.
+/// Unlike span, strided_span is not necessarily contiguous, so it offers start_ptr() instead of data(), plus an is_contiguous() query.
 ///
-/// IMPORTANT: Normal C++ alignment rules apply. The stride must ensure that all accessed
-/// elements are properly aligned for type T. Using a stride less than alignof(T) or
-/// strides that result in misaligned accesses can lead to undefined behavior.
+/// The stride must keep every accessed element aligned for T.
+/// A stride below alignof(T), or any stride that produces a misaligned access, is undefined behavior.
 ///
-/// DESIGN: Uses counting iterators with sentinel-based end detection. The begin() iterator
-/// contains the full size and counts down, while end() returns cc::sentinel. This design
-/// properly supports zero-stride iteration and eliminates any possibility of infinite loops.
+/// Iteration counts rather than compares pointers: begin() carries the remaining count, and end() is cc::sentinel.
+/// That is what makes a zero stride iterate a finite number of times instead of looping forever.
+/// See [containers](../../../docs/containers.md) for the bounds-checking and lifetime contracts shared with the other views.
 template <class T>
 struct cc::strided_span
 {

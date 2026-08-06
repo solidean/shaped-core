@@ -5,11 +5,10 @@
 
 using namespace cc::primitive_defines;
 
-// Placed resources: buffers sub-allocated into a shared memory_heap at explicit offsets, on WARP so they
-// run headless on CI. Verifies that two placements at distinct offsets in one heap are independent GPU
-// storage, and that a UAV-usage buffer places correctly. All through the public sg API — placement is a
-// backend-neutral feature (ctx.persistent.create_memory_heap + memory_heap placement queries). See
-// libs/graphics/shaped-graphics/docs/concepts/memory.md.
+// Placed resources: buffers sub-allocated into a shared memory_heap at explicit offsets, on WARP so they run headless on CI.
+// Verifies that two placements at distinct offsets in one heap are independent GPU storage, and that a UAV-usage buffer places correctly.
+// All through the public sg API, since placement is a backend-neutral feature: ctx.persistent.create_memory_heap plus memory_heap placement queries.
+// See libs/graphics/shaped-graphics/docs/concepts/memory.md.
 
 namespace
 {

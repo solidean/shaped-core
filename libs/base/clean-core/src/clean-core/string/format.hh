@@ -13,21 +13,19 @@
 #include <utility>
 
 // =========================================================================================================
-// cc::format — a std::format / fmtlib-style formatter with Pythonic placeholders and compile-time-validated
-// format strings.
+// cc::format — a std::format / fmtlib-style formatter with Pythonic placeholders.
 //
 //   cc::string s = cc::format("{} + {} = {}", 1, 2, 3);   // "1 + 2 = 3"
 //   cc::format("{:#06x}", 255);                            // "0x00ff"
 //   cc::format("{:>8.2f}", 3.14159);                       // "    3.14"
 //   cc::format("{:'}", 1232453254);                        // "1'232'453'254"  (digit grouping)
 //
-// The format string is checked at compile time: brace matching, argument indices, and spec-vs-argument-type
-// compatibility are all verified by the consteval format_string constructor. A malformed call does not
-// compile. Numeric formatting currently goes through std::to_chars behind the seam in format.cc.
+// Brace matching, argument indices and spec-vs-argument-type compatibility are all checked by the consteval
+// format_string constructor, so a malformed call does not compile.
+// No ADL is performed on the arguments.
 //
-// Customization: specialize cc::custom::formatter<T> (it gets the raw spec string and owns its own runtime
-// formatting + consteval validation) or provide a member T::to_string() (the plain "{}" spec). See
-// formatter.hh. No ADL is performed on arguments.
+// The grammar, the cc::custom::formatter<T> protocol and the limits of the compile-time check are owned by
+// libs/base/clean-core/docs/formatting.md.
 // =========================================================================================================
 
 namespace cc
@@ -38,9 +36,9 @@ namespace cc
 
 /// A format string whose syntax and argument types are validated at compile time.
 ///
-/// Implicitly constructed from a string literal (or any compile-time string_view-convertible constant);
-/// the consteval constructor parses it against Args... and turns any error into a compile error. You never
-/// name this type directly — it is the first parameter of cc::format / format_append / format_to.
+/// Implicitly constructed from a string literal, or from any compile-time string_view-convertible constant.
+/// The consteval constructor parses it against Args... and turns any error into a compile error.
+/// You never name this type directly — it is the first parameter of cc::format / format_append / format_to.
 template <class... Args>
 struct format_string
 {
@@ -64,8 +62,9 @@ void format_append(string& out, format_string<std::type_identity_t<Args>...> fmt
 
 /// Formats into a caller-provided buffer without allocating (snprintf semantics).
 ///
-/// Writes at most out.size() bytes and returns the number of bytes that WOULD have been written; a return
-/// value greater than out.size() means the output was truncated. The buffer is never null-terminated.
+/// Writes at most out.size() bytes and returns the number of bytes that WOULD have been written.
+/// A return value greater than out.size() therefore means the output was truncated.
+/// The buffer is never null-terminated.
 template <class... Args>
 [[nodiscard]] isize format_to(span<char> out, format_string<std::type_identity_t<Args>...> fmt, Args&&... args);
 
@@ -75,8 +74,9 @@ template <class... Args>
 
 namespace impl
 {
-/// Validates one field's spec text against argument type T at compile time: a cc::custom::formatter<T> owns
-/// its validation (via an optional validate hook); otherwise the standard grammar + type rules apply.
+/// Validates one field's spec text against argument type T at compile time.
+/// A cc::custom::formatter<T> owns its own validation through an optional validate hook; without one, the
+/// standard grammar and type rules apply.
 template <class T>
 consteval void format_validate_spec_for(string_view spec)
 {
@@ -95,8 +95,9 @@ consteval void format_validate_spec_for(string_view spec)
     }
 }
 
-/// Walks the format string, replaying argument indexing, and validates the spec of every field that resolves
-/// to argument `target` against type T. Structural errors are reported separately by format_validate_structure.
+/// Walks the format string, replaying argument indexing, and validates the spec of every field that
+/// resolves to argument `target` against type T.
+/// Structural errors are reported separately by format_validate_structure.
 template <class T>
 consteval void format_validate_arg_fields(string_view fmt, isize target)
 {
@@ -136,9 +137,11 @@ consteval void format_validate_arg_fields(string_view fmt, isize target)
 }
 
 /// Validates every field against the type of the argument it references, assigning each argument its index
-/// in turn. A plain consteval fold rather than an immediately-invoked generic lambda: MSVC fails to evaluate
-/// immediate functions called from within such a lambda (C7595), so the validation must live in its own
-/// consteval function.
+/// in turn.
+///
+/// A plain consteval fold rather than an immediately-invoked generic lambda.
+/// MSVC fails to evaluate immediate functions called from within such a lambda (C7595), so the validation
+/// needs a consteval function of its own.
 template <class... Args>
 consteval void format_validate_args(string_view fmt)
 {

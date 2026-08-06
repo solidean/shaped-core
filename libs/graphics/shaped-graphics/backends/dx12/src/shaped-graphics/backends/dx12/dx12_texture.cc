@@ -1,5 +1,5 @@
-// dx12_texture: GPU texture creation (committed / dedicated) and deferred-deletion destructor. The
-// type is otherwise header-only (ctor + fields).
+// dx12_texture: GPU texture creation, committed and dedicated, plus the deferred-deletion destructor.
+// The type is otherwise header-only (ctor + fields).
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
@@ -45,9 +45,9 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     desc.SampleDesc.Count = UINT(d.sample_count);
     desc.SampleDesc.Quality = 0;
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN; // driver-chosen optimal tiling
-
-    // Usage → creation flags. readonly_texture + copy need no flag (allowed by default); the
-    // writable/attachment usages each add one. DENY_SHADER_RESOURCE is left off so a depth/RT texture
+    // Usage → creation flags.
+    // readonly_texture and copy need no flag, being allowed by default; the writable/attachment usages each add one.
+    // DENY_SHADER_RESOURCE is left off, so a depth/RT texture can also be sampled.
     // can also be sampled.
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
     if (sg::has_flag(d.usage, sg::texture_usage::readwrite_texture))
@@ -74,8 +74,8 @@ void dx12_texture::release_storage() const
         return;
     }
 
-    // Stage the GPU handle + finalizers for deletion once the current epoch retires. Already-released
-    // textures own nothing here and no-op.
+    // Stage the GPU handle + finalizers for deletion once the current epoch retires.
+    // An already-released texture owns nothing here and no-ops.
     if (_resource || !_finalizers.empty())
     {
         dx12_expiring_resource expiring;
@@ -111,8 +111,8 @@ cc::result<dx12_texture_handle> dx12_context::create_dx12_texture(sg::texture_de
 
     D3D12_RESOURCE_DESC const rdesc = texture_resource_desc(desc);
 
-    // Created in COMMON. Textures are not usable in command lists yet (no layout tracking), so no initial
-    // transition is recorded; the layout/barrier system arrives with texture command-list support.
+    // Created in COMMON, the layout dx12_texture_access seeds its canonical state with.
+    // A recording list transitions out of it only when its first access needs another layout, so no initial transition is recorded here.
     ComPtr<ID3D12Resource> resource;
     D3D12_HEAP_PROPERTIES heap = {};
     heap.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-resident; sg exposes no host-visible textures

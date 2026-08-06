@@ -5,14 +5,13 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
-// Headless flat-PBR raytrace on WARP (or a hardware device): build a random triangle cloud through the
-// managers and dispatch one direct-lit ray per pixel via pbr_raytrace_routine, driven to completion. The
-// view_renderer drives the path tracer now, so this keeps the simpler flat routine exercised directly — the
-// slib-acquired ray-tracing shaders compile, the DXR pipeline + shader table build, the TLAS is built, and
-// dispatch_rays runs.
+// Headless flat-PBR raytrace on WARP (or a hardware device).
+// It builds a random triangle cloud through the managers and dispatches one direct-lit ray per pixel via pbr_raytrace_routine, driven to completion.
+// The view_renderer drives the path tracer now, so this keeps the simpler flat routine exercised directly.
+// The slib-acquired ray-tracing shaders compile, the DXR pipeline + shader table build, the TLAS is built, and dispatch_rays runs.
 //
-// No pixel readback: texture download is not wired in sg yet, so this asserts the pipeline runs rather than
-// inspecting the image. Reaching the end without an assert/exception means every GPU stage succeeded.
+// No pixel readback: this asserts the pipeline runs rather than inspecting the image.
+// Reaching the end without an assert/exception means every GPU stage succeeded.
 TEST("sv - flat-PBR raytraced view (headless)")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});

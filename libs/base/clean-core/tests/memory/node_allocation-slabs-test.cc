@@ -6,10 +6,10 @@
 
 #include <thread>
 
-// Slab-lifecycle tests for the frontend split. These use a *private* node_allocator bound to the real
-// default resource (a fresh slab_info, isolated from the process-wide default_node_allocator() that other
-// tests share) so they observe the real, shipped refill/ring/drain code from a clean slate. Slab lifecycle
-// is asserted via distinct slab base addresses (node_slab_base_for_ptr): a new base == a new slab.
+// Slab-lifecycle tests for the frontend split.
+// These use a *private* node_allocator bound to the real default resource — a fresh slab_info, isolated from the process-wide default_node_allocator() other tests share.
+// So they observe the real, shipped refill/ring/drain code from a clean slate.
+// Slab lifecycle is asserted via distinct slab base addresses (node_slab_base_for_ptr): a new base means a new slab.
 
 using namespace cc::primitive_defines;
 
@@ -145,8 +145,8 @@ TEST("node_allocation - slab trim returns surplus fully-free slabs to backing")
     int const peak_ring = ring_len(alloc, idx);
     REQUIRE(peak_ring >= 6);
 
-    // churn with small bursts that each spill just past one slab. this drives the cold path enough for the
-    // gated trim sweep to run and hand the surplus fully-free slabs back to the backing resource.
+    // churn with small bursts that each spill just past one slab.
+    // this drives the cold path enough for the gated trim sweep to run and hand the surplus fully-free slabs back to the backing resource.
     for (int round = 0; round < 1000; ++round)
     {
         cc::vector<cc::node_allocation<T8B>> burst;
@@ -224,8 +224,8 @@ TEST("node_allocation - thread-exit reclaims fully-free slabs to backing")
 {
     auto const before = cc::impl::node_orphan_slab_count();
 
-    // a thread allocates a multi-slab batch, frees it ALL on itself, then exits. every slab is fully free
-    // at the allocator's teardown -> returned to the backing resource, and NOTHING is orphaned.
+    // a thread allocates a multi-slab batch, frees it ALL on itself, then exits.
+    // every slab is fully free at the allocator's teardown, so all of them go back to the backing resource and NOTHING is orphaned.
     std::thread(
         []
         {

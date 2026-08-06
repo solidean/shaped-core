@@ -299,6 +299,25 @@ Because the linalg types no longer name the transform classes, they no longer in
 A projective transform has no answer for a `vec` or a `bivec`, and says so: those overloads `static_assert` rather than quietly applying something.
 `composed_transform` applies its two parts directly in `transform` rather than routing back through `obj.transformed`, since a base type delegating into it would otherwise not terminate.
 
+### What each primitive registers
+
+Which registrations exist is a statement about geometry, not about effort:
+
+| primitive | registered at | result |
+|---|---|---|
+| `sphere` | similarity / affine (unless embedded) | `sphere` / **`ellipsoid`** |
+| `ellipsoid` | affine | `ellipsoid` |
+| `aabb` | scaling + translation **only** | `aabb` |
+| `triangle`, `segment` | affine, projective | unchanged |
+| `plane` | affine, projective | `plane` |
+| `ray`, `line` | affine **only** | unchanged |
+
+The affine image of an *embedded* `sphere` is the one gap left in that table.
+It is an ellipse in the ambient space, but naming it needs an orthonormal basis of the circle's plane, which `linalg` has no routine for yet.
+
+A finite convex primitive given by its vertices does survive a projection: `w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
+An unbounded primitive generally does not.
+
 ### An unsupported pair is a compile error on purpose
 
 A rotated `aabb` is not an `aabb`. Returning the enclosing box instead would be a silent, lossy answer to a question the caller did not ask, so the chain falls through to its `static_assert` and says so.

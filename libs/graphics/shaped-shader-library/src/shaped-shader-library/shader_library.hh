@@ -5,7 +5,7 @@
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
-#include <shaped-graphics/compiled_shader.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/filesystem/mount_table.hh>
@@ -17,38 +17,41 @@
 
 namespace slib
 {
-/// How the reload watcher runs. See shader_library::start_hot_reload.
+/// How the reload watcher runs.
+/// See shader_library::start_hot_reload.
 struct reload_config
 {
-    /// How long between rescans while polling. Ignored where the filesystem can notify: there is no
-    /// interval then, the change itself is the trigger.
+    /// How long between rescans while polling.
+    /// Ignored where the filesystem can notify: there is no interval then, the change itself is the trigger.
     double interval_ms = 200;
 
-    /// Run no thread; nothing is scanned until you call poll_hot_reload(). Forced on where the platform
-    /// has no threads. Tests use it to make a reload deterministic — write a file, pump, acquire, done.
+    /// Run no thread; nothing is scanned until you call poll_hot_reload().
+    /// Forced on where the platform has no threads.
+    /// It is what makes a reload deterministic — write a file, pump, acquire, done — which is how most of the reload tests run.
     bool unthreaded = false;
 
-    /// Rescan on interval_ms even where the filesystem could notify. For exercising the fallback path
-    /// deliberately; a real app has no reason to ask for it.
+    /// Rescan on interval_ms even where the filesystem could notify.
+    /// For exercising the fallback path deliberately; a real app has no reason to ask for it.
     bool force_polling = false;
 };
 
-/// Owns the shader packages a program uses: their filesystems, the compilers that build them, and the
-/// assets the generated symbols point at.
+/// Owns the shader packages a program uses: their filesystems, the compilers that build them, and the assets the generated symbols point at.
 ///
-/// Not a singleton and not something call sites touch — build one at startup, register what you need,
-/// and forget it. Everything after that goes through the generated package symbols:
+/// Not a singleton and not something call sites touch — build one at startup, register what you need, and forget it.
+/// Everything after that goes through the generated package symbols:
 ///
 ///   slib::shader_library lib;
 ///   lib.add_compiler(slib::create_dxc_compiler().value());
-///   lib.add_package(sg::test::shaders::package());
+///   lib.add_package(my::shaders::package());
 ///   ...
-///   auto cs = sg::test::shaders::invert.compute.main->acquire(ctx);
+///   auto cs = my::shaders::vignette.compute.main->acquire(ctx);
 ///
-/// The generated symbols are process-wide globals, so at most one library may exist at a time and a
-/// package may only be added once — both assert. Those globals can outlive any library, so an asset
-/// only weakly references the one that made it: acquiring through a stale global reports an error
-/// rather than reaching a dead library.
+/// The generated symbols are process-wide globals, so at most one library may exist at a time and a package may only be added once — both assert.
+/// Those globals can also outlive the library, which is why an asset only weakly references it (see shader_asset's members).
+///
+/// Threading: the asset list is fixed once start_hot_reload has run — add_package asserts that.
+/// acquire() is then safe from any thread.
+/// The library must still outlive every acquire in flight: the weak reference reports a library that is already gone, not one being torn down under a live call.
 class shader_library
 {
 public:
@@ -58,42 +61,38 @@ public:
     shader_library(shader_library const&) = delete;
     shader_library& operator=(shader_library const&) = delete;
 
-    /// Registers a compilation edge (language -> format). Adding a second compiler for the same edge
-    /// replaces the first.
+    /// Registers a compilation edge (language -> format).
+    /// Adding a second compiler for the same edge replaces the first.
     void add_compiler(std::unique_ptr<shader_compiler> compiler);
 
     /// Mounts `package` at its own name and writes its generated asset handles back.
     ///
-    /// Mounts the embedded files, then the package's source_dir over them when that directory exists.
-    /// That single line is the whole dev-vs-ship split: a dev build reads and watches the source tree,
-    /// a shipped build reads what the generator baked in, and neither needs a mode flag.
+    /// Mounts the embedded files, then a real_filesystem on the package's source_dir over them whenever that path is non-empty.
+    /// A directory that is not there finds nothing, which is what lets a shipped build land on the embedded copy with no mode flag.
     void add_package(shader_package const& package);
 
-    /// Mounts `fs` for the package instead of the default embedded+source pair. Tests pass a
-    /// memory_filesystem, which is what makes a reload a write() rather than a sleep.
+    /// Mounts `fs` for the package instead of the default embedded+source pair.
+    /// Tests pass a memory_filesystem, which is what makes a reload a write() rather than a sleep.
     void add_package(shader_package const& package, filesystem_handle fs);
 
-    /// Mounts a filesystem at a virtual path — for shader sources that belong to no single package,
-    /// like a shared include library.
+    /// Mounts a filesystem at a virtual path — for shader sources that belong to no single package, like a shared include library.
     void mount(cc::string_view virtual_dir, filesystem_handle fs);
 
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
     ///
-    /// The filesystem notifies where it can, and the watcher is otherwise asleep — no interval, no periodic
-    /// wakeup. Where it cannot (a platform with no watch backend, SC_THREADS=OFF, force_polling), it falls
-    /// back to rescanning every `interval_ms`.
+    /// The filesystem notifies where it can, and the watcher is otherwise asleep; where it cannot, it rescans on `interval_ms`.
     ///
-    /// Recompiles run on the watcher, not on whoever acquires — so a reload costs a consumer nothing but
-    /// the lock around a pointer swap, and it keeps the last good shader until the new one is ready.
+    /// A reload is staged, never applied in place: the recompile runs on the watcher and the next acquire promotes it, so a reload costs a consumer only the pointer swap.
+    /// The first acquire of a format is the exception — it reads, preprocesses and dispatches the compile while holding the asset's lock.
     void start_hot_reload(reload_config config = {});
 
-    /// Drives the watcher on the calling thread. A no-op unless hot reload was started unthreaded, so it is
-    /// safe to call unconditionally every frame.
+    /// Drives the watcher on the calling thread.
+    /// A no-op unless hot reload was started unthreaded, so it is safe to call unconditionally every frame.
     ///
     /// Unthreaded, this *is* the recompile: it blocks for as long as the changed shaders take to build.
-    /// That is the trade for having no thread, and it is what makes a reload deterministic. Where the
-    /// filesystem notifies, a poll with nothing pending does no work at all.
+    /// That is the trade for having no thread.
+    /// Where the filesystem notifies, a poll with nothing pending does no work at all.
     void poll_hot_reload();
 
     /// Whether the watcher is running.
@@ -105,17 +104,17 @@ public:
     /// Every format some registered compiler can produce from `language`.
     [[nodiscard]] cc::vector<sg::shader_format> supported_formats(shader_language language) const;
 
-    /// The assets registered so far, in package-declaration order. Fixed once hot reload has started —
-    /// add_package asserts after that, so the watcher may hold on to this.
+    /// The assets registered so far, in package-declaration order.
+    /// Fixed once hot reload has started — add_package asserts after that, so the watcher may hold on to this.
     [[nodiscard]] cc::span<shader_asset_handle const> assets() const { return _assets; }
 
-    /// Everything mounted: the packages' sources plus any shared mounts. What shader paths resolve against.
+    /// Everything mounted: the packages' sources plus any shared mounts.
+    /// What shader paths resolve against.
     [[nodiscard]] mount_table const& filesystem() const { return _mounts; }
 
-    /// The process-global reload counter (see slib::current_reload_generation) — a reader for consumers
-    /// that hold a library. Bumped whenever any asset's shader is replaced by a reload; the coarse
-    /// "something changed" check. Prefer an asset's own generation() when you can: this moves for shaders
-    /// you never use.
+    /// The process-global reload counter (see slib::current_reload_generation) — a reader for consumers that hold a library.
+    /// Bumped whenever any asset's shader is replaced by a reload; the coarse "something changed" check.
+    /// Prefer an asset's own generation() when you can: this moves for shaders you never use.
     [[nodiscard]] u64 generation() const;
 
     // internal — the compile path an asset drives
@@ -127,8 +126,8 @@ public:
         cc::vector<cc::string> dependencies; ///< the source itself, then each resolved include
     };
 
-    /// Reads, preprocesses and compiles one shader for `format`. A missing file, a missing compiler, or
-    /// a compile error all come back as an async error on `shader` — never a throw.
+    /// Reads, preprocesses and compiles one shader for `format`.
+    /// A missing file, a missing compiler, or a compile error all come back as an async error on `shader` — never a throw.
     [[nodiscard]] compile_outcome compile_shader(cc::string_view virtual_path,
                                                  sg::shader_stage stage,
                                                  cc::string_view entry_point,
@@ -139,9 +138,9 @@ public:
 
     void note_reload();
 
-    /// Tells the watcher an asset's dependency set moved, so it can seed the new paths and re-arm its
-    /// watches. A first acquire records what a shader is built from on a *consumer* thread — which the
-    /// watcher, parked on its mailbox, would otherwise never hear about. Cheap and safe to over-call.
+    /// Tells the watcher an asset's dependency set moved, so it can seed the new paths and re-arm its watches.
+    /// A first acquire records what a shader is built from on a consumer thread, which the watcher would otherwise never hear about.
+    /// Cheap and safe to over-call.
     void note_dependencies_changed();
 
 private:
@@ -157,9 +156,7 @@ private:
     /// The package that owns `virtual_path`. Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
 
-    /// Alive-token handed to every asset as a weak reference, cleared first thing on destruction. The
-    /// generated globals are statics, so an asset can easily outlive its library; this is what turns
-    /// "acquire through a stale global" into a reported error instead of a dangling back-reference.
+    /// Alive-token handed to every asset as a weak reference, cleared first thing on destruction.
     /// Aliasing with a no-op deleter — it owns nothing, it only tracks whether we are still here.
     std::shared_ptr<shader_library> _alive;
 
@@ -169,18 +166,16 @@ private:
 
     cc::vector<package_entry> _packages;
 
-    /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a
-    /// filesystem notification comes in through. Both are shared because the actor owns the impl and only
-    /// hands it back once it has stopped.
+    /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a filesystem notification comes in through.
+    /// Both are shared because the actor owns the impl and only hands it back once it has stopped.
     cc::unique_ptr<cc::threaded_actor<impl::check_now>> _watcher;
     std::shared_ptr<cc::atomic<bool>> _watcher_stopping;
     std::shared_ptr<impl::reload_wake> _wake;
 };
 
-/// The process-global shader-reload counter: it moves whenever any shader is reloaded, anywhere. There
-/// is only ever one live shader_library, so a single global counter is enough. The counter itself now
-/// lives in shaped-graphics (this forwards to sg::reload_generation(), and note_reload() bumps it via
-/// sg::signal_reload()) — a consumer like a render routine reads sg directly, without any slib
-/// dependency. Monotonic; only the fact that it changed is meaningful.
+/// The process-global shader-reload counter: it moves whenever any shader is reloaded, anywhere.
+/// There is only ever one live shader_library, so a single global counter is enough.
+/// It is `sg::reload_generation()`, so a consumer that already depends on shaped-graphics — a render routine, say — reads it without depending on slib.
+/// Monotonic; only the fact that it changed is meaningful.
 [[nodiscard]] u64 current_reload_generation();
 } // namespace slib

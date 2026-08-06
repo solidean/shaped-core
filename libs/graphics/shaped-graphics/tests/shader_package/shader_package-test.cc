@@ -1,7 +1,7 @@
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/compiled_shader.hh>
-#include <shaped-graphics/context.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -10,9 +10,9 @@
 // CMakeLists). Generated into the build dir and private to this binary.
 #include <sg_test_shaders.hh>
 
-// A *consumer* of shaped-graphics declaring its own shaders. That is the whole point: sg does not depend
-// on the shader library — only this test binary does — yet a shader declared here builds and resolves
-// against the very context sg handed us.
+// A *consumer* of shaped-graphics declaring its own shaders.
+// That is the whole point: sg does not depend on the shader library, only this test binary does.
+// Yet a shader declared here builds and resolves against the very context sg handed us.
 //
 // Only built where a shader compiler exists (SC_HAS_DXC_COMPILER); the shader library's own tests cover
 // the mechanism everywhere with a fake compiler.
@@ -56,9 +56,8 @@ INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired
     }
     else
     {
-        // A vulkan context wants SPIR-V, and only an HLSL->DXIL compiler is registered. It reports that
-        // rather than handing back DXIL the context cannot use — the reason acquire takes a context at
-        // all instead of assuming a format.
+        // A vulkan context wants SPIR-V, and only an HLSL->DXIL compiler is registered.
+        // It reports that rather than handing back DXIL the context cannot use — the reason acquire takes a context at all, instead of assuming a format.
         CHECK(shader->has_error());
     }
 }

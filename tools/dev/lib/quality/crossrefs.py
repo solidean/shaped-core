@@ -1,25 +1,20 @@
 """Cross-reference validator: verify links between docs and code still resolve.
 
-This backs `dev.py check crossrefs`. It scans tracked (and untracked-but-not-
-ignored) markdown and `.cc`/`.hh` sources under `libs/`, `docs/`, `.claude/`,
-plus the repo-root meta docs (CLAUDE.md, README.md), and verifies that:
+This backs `dev.py check crossrefs`.
+It scans tracked, and untracked-but-not-ignored, markdown and `.cc`/`.hh` sources under `libs/`, `docs/` and `.claude/`, plus the repo-root meta docs, and verifies that:
 
-  - Markdown links in `.md` files: `[text](relative/path.cc#L42-L51)`. The path
-    resolves relative to the `.md` file, except a target that starts with a
-    repo-root segment (`docs/`, `libs/`, `.claude/`, ...) resolves
-    repo-root-relative — that is how the meta docs link. Line anchors
-    (`#L42` / `#L42-L51`) are checked against the target's line count; section
-    anchors (`#some-heading`) against the target `.md`'s headings. In-page
-    anchors (`#foo` with no path) resolve against the same file.
-  - Doc references in `//` and `///` comments inside `.cc`/`.hh` files:
-    repo-root paths like `docs/guides/building-and-testing.md`.
+  - Markdown links in `.md` files resolve — `[text](relative/path.cc#L42-L51)`.
+    The path resolves relative to the `.md` file, except for a target starting with a repo-root segment (`docs/`, `libs/`, `.claude/`, ...).
+    Those are tried repo-root-relative first and fall back to file-relative, which is how the meta docs link and how a per-library sheet still reaches its own docs/.
+    Line anchors (`#L42` / `#L42-L51`) are checked against the target's line count, and section anchors (`#some-heading`) against the target `.md`'s headings.
+    An in-page anchor (`#foo` with no path) resolves against the same file.
+  - Doc references in `//` and `///` comments inside `.cc`/`.hh` files resolve — repo-root paths like `docs/guides/building-and-testing.md`.
 
-These rot easily: rename or move a file and links in *other*, untouched files
-silently break. The scan is full-repo so the breakage is caught wherever it
-lands. `/* ... */` block comments are not scanned (discouraged here).
+These rot easily: rename or move a file and links in *other*, untouched files silently break.
+The scan is therefore full-repo, so the breakage is caught wherever it lands.
+`/* ... */` block comments are not scanned, since they are discouraged here.
 
-`check_crossrefs(root)` returns a CrossRefResult; orchestration/printing lives
-in `dev.py`.
+`check_crossrefs(root)` returns a CrossRefResult, and the printing is report.py's.
 """
 
 from __future__ import annotations
@@ -31,10 +26,9 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-# Top-level repo dirs a repo-root-relative link/comment token may start with. A
-# token starting with one of these is resolved repo-root-relative; anything else
-# is treated as relative to the referencing file (then the repo root) as a
-# fallback — which is how bare root files (CLAUDE.md, dev.py) resolve.
+# Top-level repo dirs a repo-root-relative link or comment token may start with.
+# A token starting with one of these is resolved repo-root-relative.
+# Anything else is treated as relative to the referencing file, then to the repo root as a fallback — which is how a bare root file (CLAUDE.md, dev.py) resolves.
 REPO_ROOT_SEGMENTS = (
     "docs/",
     "libs/",
@@ -42,13 +36,12 @@ REPO_ROOT_SEGMENTS = (
     ".claude/",
 )
 
-# Dirs scanned as link *sources* (their markdown / sources are walked). A link
-# *target* anywhere in the repo is still validated regardless of this list.
+# Dirs scanned as link *sources*, so their markdown and sources are walked.
+# A link *target* anywhere in the repo is still validated regardless of this list.
 _SCAN_DIRS = ("libs", "docs", ".claude")
 
-# Markdown inline link / image: [text](target) or ![text](target). We capture
-# the target and recover its line via offset; nested brackets in the text are
-# rare enough in our docs that the non-greedy text match is fine.
+# Markdown inline link or image: [text](target) or ![text](target).
+# The target is captured and its line recovered via offset; nested brackets in the text are rare enough in our docs that the non-greedy text match is fine.
 MD_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]*)\)")
 
 # A path-like token ending in .md, used to find doc references inside comments.
@@ -63,9 +56,10 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 
 @dataclass
 class CrossRefResult:
-    """Outcome of a cross-reference scan: offending references plus the counts
-    that went into the verdict. `offenders` are preformatted `file:line: msg`
-    lines, ready to print one per line."""
+    """Outcome of a cross-reference scan: the offending references, plus the counts that went into the verdict.
+
+    `offenders` are preformatted `file:line: msg` lines, ready to print one per line.
+    """
 
     offenders: list[str]
     md_links: int
@@ -79,12 +73,9 @@ class CrossRefResult:
 
 
 def list_files(root: Path) -> list[Path]:
-    # Tracked + untracked-but-not-ignored, so a freshly added doc is seen before
-    # it is committed. Scoped to the dirs we own cross-references for (libs/,
-    # docs/, .claude/) plus the repo-root meta docs (CLAUDE.md, README.md). The
-    # "*.md" pathspec also matches markdown deeper in the tree (tools/, ...), so
-    # we keep only the root-level ones — those subtrees are not scanned as
-    # sources, only as link targets.
+    # Tracked plus untracked-but-not-ignored, so a freshly added doc is seen before it is committed.
+    # Scoped to the dirs we own cross-references for, plus the repo-root meta docs.
+    # The "*.md" pathspec also matches markdown deeper in the tree (tools/, ...), so only the root-level ones are kept — those subtrees are link targets, not sources.
     result = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard",
          "--", *_SCAN_DIRS, "*.md"],
@@ -106,9 +97,8 @@ def list_files(root: Path) -> list[Path]:
 
 
 def slugify_heading(text: str) -> str:
-    # Approximate GitHub's anchor slugs: strip inline markdown emphasis/code
-    # markers, lowercase, drop punctuation other than word chars / space / hyphen,
-    # then spaces -> hyphens. Good enough for our prose headings.
+    # Approximate GitHub's anchor slugs: strip inline markdown emphasis and code markers, lowercase, drop punctuation other than word chars, space and hyphen, then spaces -> hyphens.
+    # Good enough for our prose headings.
     text = text.replace("`", "")
     text = re.sub(r"[*_]+", "", text)
     text = text.lower()
@@ -118,8 +108,8 @@ def slugify_heading(text: str) -> str:
 
 
 def heading_slugs(path: Path) -> set[str]:
-    # All heading anchors for a .md file, with GitHub-style -1/-2 disambiguation
-    # for duplicate slugs. Headings inside fenced code blocks are ignored.
+    # All heading anchors for a .md file, with GitHub-style -1/-2 disambiguation for duplicate slugs.
+    # Headings inside fenced code blocks are ignored.
     slugs: set[str] = set()
     counts: dict[str, int] = {}
     in_fence = False
@@ -215,12 +205,10 @@ def check_md_links(md_path: Path, root: Path, offenders: list[str]) -> int:
                         offenders.append(f"{loc}: {err}: {raw}")
                 continue
 
-            # A repo-root-segment target (docs/..., libs/..., .claude/..., ...)
-            # may be repo-root-relative — the style CLAUDE.md / README.md / skills
-            # use — or relative to the linking file, which is how a per-library
-            # cheat sheet references its own docs/ subdir. Try repo-root first,
-            # then fall back to file-relative; a non-segment target is always
-            # file-relative. A trailing slash means a directory is expected.
+            # A repo-root-segment target (docs/..., libs/..., .claude/..., ...) may be repo-root-relative — the style CLAUDE.md, README.md and the skills use.
+            # It may equally be relative to the linking file, which is how a per-library cheat sheet references its own docs/ subdir.
+            # So try repo-root first, then fall back to file-relative; a non-segment target is always file-relative.
+            # A trailing slash means a directory is expected.
             wants_dir = path_part.endswith("/")
             candidates: list[Path] = []
             if path_part.startswith(REPO_ROOT_SEGMENTS):
@@ -241,10 +229,9 @@ def check_md_links(md_path: Path, root: Path, offenders: list[str]) -> int:
 
 
 def resolve_doc_token(token: str, src_path: Path, root: Path) -> Path | None:
-    # Returns the resolved existing path, or None if it does not resolve. A
-    # docs/... token may be repo-root-relative or, in a per-library source file,
-    # relative to that file's own docs/ subdir — so try repo-root for segment
-    # tokens, then next to the referencing file, then the repo root.
+    # Returns the resolved existing path, or None if it does not resolve.
+    # A docs/... token may be repo-root-relative or, in a per-library source file, relative to that file's own docs/ subdir.
+    # So try repo-root for a segment token, then next to the referencing file, then the repo root.
     bases = [root] if token.startswith(REPO_ROOT_SEGMENTS) else []
     bases += [src_path.parent, root]
     for base in bases:
@@ -273,10 +260,9 @@ def check_source_refs(src_path: Path, root: Path, offenders: list[str]) -> int:
 def check_crossrefs(root: Path) -> CrossRefResult:
     """Scan the repo's docs and sources and validate every cross-reference.
 
-    Markdown links (and their line/heading anchors) and `//`-comment doc tokens
-    are resolved against the on-disk tree; a link *target* anywhere in the repo
-    counts, even in subtrees not scanned as sources. The lines cache is cleared
-    on entry so repeated calls in one process see current file contents.
+    Markdown links, their line and heading anchors, and `//`-comment doc tokens are all resolved against the on-disk tree.
+    A link *target* anywhere in the repo counts, even in a subtree not scanned as a source.
+    The lines cache is cleared on entry, so repeated calls in one process see current file contents.
     """
     _lines_cache.clear()
 

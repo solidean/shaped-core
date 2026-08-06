@@ -1,14 +1,11 @@
 # Fuzz testing (`nx::fuzz`)
 
-`nx::fuzz` is an **API-sequence fuzzer** built into nexus. Instead of feeding
-random *bytes* into one function, you declare a small vocabulary of typed
-**operations**, seed **values**, and **invariants**, and the engine composes them
-into random but type-correct *programs* (sequences of calls). When a program
-fails, the engine automatically **shrinks** it to a minimal reproducer and prints
-**copy-pasteable C++ regression code**.
+`nx::fuzz` is an **API-sequence fuzzer** built into nexus.
+Instead of feeding random *bytes* into one function, you declare a small vocabulary of typed **operations**, seed **values** and **invariants**.
+The engine composes them into random but type-correct *programs* — sequences of calls.
+When a program fails, the engine **shrinks** it to a minimal reproducer and prints **copy-pasteable C++ regression code**.
 
-This is the right tool for stateful APIs — containers, parsers, state machines,
-allocators — where bugs hide in *sequences* of operations, not in a single call.
+This is the right tool for stateful APIs — containers, parsers, state machines, allocators — where bugs hide in *sequences* of operations rather than in a single call.
 
 ```cpp
 #include <nexus/fuzz/fuzz.hh>
@@ -27,41 +24,32 @@ TEST("add1 never reaches 7")
 }
 ```
 
-You build the setup once in an ordinary `TEST`, then drive it from `SECTION`s
-(see *the regression workflow* below). The example above fails
-(3 → 4 → 5 → 6 → 7) and prints a 6-step reproducer.
+You build the setup once in an ordinary `TEST`, then drive it from `SECTION`s; *the regression workflow* below is why.
+The example above fails (3 → 4 → 5 → 6 → 7) and prints a 6-step reproducer.
 
 ## Model
 
-- **Value** — a seed datum, registered with `add_value(name, v)`. Modeled as a
-  nullary operation returning a copy, so `v`'s type must be copyable.
-- **Operation** — any callable, registered with `add_op(name, fn)`. Its argument
-  types are deduced; each argument is drawn from the values produced so far.
-  Non-const reference parameters (`T&`) are **mutating** — the engine writes the
-  mutation back. A `cc::random&` parameter is special (see *Randomized operations*).
-- **Invariant** — a univariate, non-mutating check registered with
-  `add_invariant(name, fn)`. It runs automatically after **any** operation that
-  produces or mutates a value of its argument type. It may either return `bool`
-  (which must be true) or return `void` and use `CHECK(...)` internally.
-- **Precondition** — `op->when(pred)` guards when an operation may run. `pred`
-  may be nullary (an external gate), single-argument (must hold for every input
-  of that type), or exact-arity (the full argument tuple).
-- **Builder** — `execute_at_least(n)` / `execute_at_most(n)` / `execute_once()`
-  shape how often an operation is scheduled (operations default to at least 50;
-  values to at least 1).
+- **Value** — a seed datum, registered with `add_value(name, v)`.
+  Modeled as a nullary operation returning a copy, so `v`'s type must be copyable.
+- **Operation** — any callable, registered with `add_op(name, fn)`; its argument types are deduced, and each argument is drawn from the values produced so far.
+  Non-const reference parameters (`T&`) are **mutating**: the engine writes the mutation back.
+  A `cc::random&` parameter is special — see *Randomized operations*.
+- **Invariant** — a univariate, non-mutating check registered with `add_invariant(name, fn)`.
+  It runs automatically after **any** operation that produces or mutates a value of its argument type.
+  It may return `bool`, which must be true, or return `void` and use `CHECK(...)` internally.
+- **Precondition** — `op->when(pred)` guards when an operation may run.
+  `pred` may be nullary (an external gate), single-argument (must hold for every input of that type), or exact-arity (the full argument tuple).
+- **Builder** — `execute_at_least(n)` / `execute_at_most(n)` / `execute_once()` shape how often an operation is scheduled.
+  Operations default to at least 50 runs, values to at least 1.
 
-State is **SSA-like**: every value lives in a slot, operations communicate only
-through slots, and the reachable set grows as operations produce new values.
+State is **SSA-like**: every value lives in a slot, operations communicate only through slots, and the reachable set grows as operations produce new values.
 
 ## Determinism and replay
 
-The engine draws all randomness from `cc::random` (a PCG32 generator in
-clean-core), seeded per run. The same seed, the same setup, and the same build
-reproduce a run exactly — and because PCG32 uses fixed constants, runs reproduce
-across platforms and compilers too. Each step also records a full `cc::random`
-state; an operation taking a `cc::random&` is handed a generator rebuilt from it
-via `cc::random::from_state(...)`, which is what makes randomized operations
-replayable (state/`from_state` is the blessed roundtrip).
+The engine draws all randomness from `cc::random`, clean-core's PCG32 generator, seeded per run.
+The same seed, setup and build reproduce a run exactly, and because PCG32 uses fixed constants, runs reproduce across platforms and compilers too.
+Each step also records a full `cc::random` state, and an operation taking a `cc::random&` is handed a generator rebuilt from it via `cc::random::from_state`.
+That roundtrip — `state` out, `from_state` in — is what makes a randomized operation replayable.
 
 ## Randomized operations
 
@@ -72,9 +60,8 @@ test.add_op("gen", [](cc::random& r) { return r.uniform(0, 10); });
 test.add_op("use", [](int a, int b) { /* ... */ });
 ```
 
-The `cc::random&` argument is not drawn from a slot; it is synthesized from the
-step's recorded state. Emitted regression code reproduces it via
-`cc::random::from_state`:
+The `cc::random&` argument is not drawn from a slot; it is synthesized from the step's recorded state.
+Emitted regression code reproduces it via `cc::random::from_state`:
 
 ```cpp
 auto i0 = test->eval_op("gen", cc::random::from_state(3737ull));
@@ -91,22 +78,17 @@ Inside an operation, all four of these are detected and stop the run:
 - a failed `CC_ASSERT` (rerouted into the engine instead of aborting),
 - an invariant returning `false`.
 
-Crucially, the thousands of failing executions the engine probes during
-generation and minimization do **not** pollute the host test: they are captured
-(via nexus's `scoped_check_capture`) and never recorded against it. The only
-result the host test sees is the single `CHECK(test->execute_fuzz_test())`.
+The thousands of failing executions the engine probes during generation and minimization do **not** pollute the host test.
+They are captured via nexus' `scoped_check_capture` and never recorded against it, so the only result the host test sees is the single `CHECK(test->execute_fuzz_test())`.
 
-> Note: like `CHECK_ASSERTS`, `CC_ASSERT`-based detection only works on
-> assert-enabled presets (debug / relwithdebinfo). On `release-*` presets
-> assertions are compiled out.
+> Like `CHECK_ASSERTS`, `CC_ASSERT`-based detection only works on assert-enabled presets (debug / relwithdebinfo).
+> On a `release-*` preset assertions are compiled out.
 
 ## Minimization and the regression workflow
 
-On a finding, the engine shrinks the failing program to a local minimum that
-still fails: it tree-shakes operations that cannot influence the failing step,
-then tries single-step removals in randomized order, re-validating every
-candidate by replay. It then prints the reproducer as a ready-made `SECTION`
-referring to the handle name you pass (`"test"` by default):
+On a finding, the engine shrinks the failing program to a local minimum that still fails.
+It tree-shakes operations that cannot influence the failing step, then tries single-step removals in randomized order, re-validating every candidate by replay.
+It then prints the reproducer as a ready-made `SECTION`, referring to the handle name you pass (`"test"` by default):
 
 ```text
 [fuzz] found a failing run (seed 1, 12 operations): invariant violated
@@ -123,10 +105,8 @@ SECTION("regression")
 }
 ```
 
-Because nexus re-runs the test body once per `SECTION` path, the setup written
-in the outer `TEST` is rebuilt fresh for each section. So the workflow is: build
-the setup once, fuzz in one `SECTION`, and paste each finding as a sibling
-`SECTION` to pin it as a regression — no shared helper needed.
+Because nexus re-runs the test body once per `SECTION` path, the setup written in the outer `TEST` is rebuilt fresh for each section.
+So the workflow is: build the setup once, fuzz in one `SECTION`, and paste each finding as a sibling `SECTION` to pin it as a regression — no shared helper needed.
 
 ```cpp
 TEST("add1 never reaches 7")
@@ -153,46 +133,37 @@ TEST("add1 never reaches 7")
 }
 ```
 
-You can also pin specific behaviors directly with `eval_op_to<T>` /
-`eval_op_bool` in their own `SECTION`s, independent of any finding.
+You can also pin specific behaviors directly with `eval_op_to<T>` / `eval_op_bool` in their own `SECTION`s, independent of any finding.
 
 ## Fuzzing over external, shared state
 
-The engine drives your operations against whatever state they close over. When that state is an
-external, **shared** resource — a GPU context, a database handle, a global allocator — two properties
-of the engine become load-bearing:
+The engine drives your operations against whatever state they close over.
+When that state is an external, **shared** resource — a GPU context, a database handle, a global allocator — two properties of the engine become load-bearing:
 
-- **It runs thousands of programs against the same shared object.** Generation tries many random
-  sequences; minimization *replays* candidate after candidate. They all hit the one resource your ops
-  captured.
-- **It discards partial states constantly.** Each replay builds a fresh SSA state, runs some ops, then
-  destroys it — including any values your ops produced that are still "open".
+- **It runs thousands of programs against the same shared object.** Generation tries many random sequences, and minimization *replays* candidate after candidate.
+  They all hit the one resource your operations captured.
+- **It discards partial states constantly.** Each replay builds a fresh SSA state, runs some operations, then destroys it.
+  That includes any values your operations produced that are still "open".
 
-So every value threaded through the fuzz state must **clean up after itself on destruction** (RAII). A
-value that leaks a resource when its state is discarded — a GPU command list recorded but never
-submitted or dropped, a transaction left open, a lock not released — corrupts the *shared* object, and
-the corruption surfaces **later, on an unrelated operation**, often as a minimal reproducer that does
-**not** reproduce in isolation.
+So every value threaded through the fuzz state must **clean up after itself on destruction** (RAII).
+A value that leaks a resource when its state is discarded corrupts the *shared* object — a command list never submitted, a transaction left open, a lock not released.
+The corruption then surfaces **later, on an unrelated operation**, often as a minimal reproducer that does **not** reproduce in isolation.
 
-> Worked example. A fuzz over an `sg::context` shrank to the reproducer `mk_trace; advance_epoch`. Run
-> alone it passes — `mk_trace` submits its list, so the advance sees no open lists. It only "failed"
-> because *earlier* discarded replays had left command lists open on the shared context, and the leaked
-> open-list count made a later `advance_epoch` assert. The bug was a missing RAII drop, not anything
-> about `mk_trace` + `advance`. Two lessons: (1) make fuzz-state values self-cleaning — that `trace`
-> struct now drops its open command list in its destructor *and* its move-assignment, so a discarded
-> replay never leaks onto the shared context; (2) when a minimal reproducer doesn't reproduce
-> standalone, suspect shared-state pollution from the churn around it, not the printed steps.
+> Worked example: a fuzz over an `sg::context` shrank to the reproducer `mk_trace; advance_epoch`, which passes when run alone.
+> `mk_trace` submits its list, so the advance sees no open lists.
+> It only "failed" because *earlier* discarded replays had left command lists open on the shared context, and the leaked open-list count made a later `advance_epoch` assert.
+> Two lessons.
+> Make fuzz-state values self-cleaning, dropping an open resource in the destructor *and* in move-assignment, so a discarded replay never leaks onto the shared object.
+> And when a minimal reproducer does not reproduce standalone, suspect shared-state pollution from the churn around it rather than the printed steps.
 
 ## Setup errors
 
-If some argument type can never be constructed (no value or operation produces
-it), `execute_fuzz_test` reports a setup error rather than a finding — add a
-value or a producing operation for that type.
+If some argument type can never be constructed — no value or operation produces it — `execute_fuzz_test` reports a setup error rather than a finding.
+Add a value or a producing operation for that type.
 
 ## Out of scope (for now)
 
-Corpus persistence, parallel fuzzing, coverage-guided generation, and
-multi-operation removal during minimization are not implemented.
+Corpus persistence, parallel fuzzing, coverage-guided generation, and multi-operation removal during minimization are not implemented.
 
 ## See also
 

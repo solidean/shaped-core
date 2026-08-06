@@ -6,9 +6,9 @@
 #include <thread>
 #endif
 
-// Thread naming is best-effort with no readback API, so we just exercise the call paths and confirm
-// nothing crashes. The main-thread call is valid everywhere (a no-op where naming is unavailable);
-// the spawned-thread part only compiles/runs where real threads exist.
+// Thread naming is best-effort with no readback API, so we just exercise the call paths and confirm nothing crashes.
+// The main-thread call is valid everywhere, a no-op where naming is unavailable.
+// The spawned-thread part only compiles and runs where real threads exist.
 TEST("thread - set_current_thread_name is callable")
 {
     cc::set_current_thread_name("nexus-main");

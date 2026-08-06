@@ -9,8 +9,8 @@
 #include <type_traits>
 #include <utility> // std::index_sequence
 
-// Generic invocation glue: call any callable with its arguments sourced (by decayed type) from a
-// span of typed_value slots. Shared by nx::invoke_tests (INVOCABLE_TEST) and the fuzz engine.
+// Generic invocation glue: call any callable with its arguments sourced, by decayed type, from a span of typed_value slots.
+// Shared by nx::invoke_tests (INVOCABLE_TEST) and the fuzz engine.
 
 namespace nx::impl
 {
@@ -29,7 +29,8 @@ typed_value call_with_values(F const& f, cc::span<typed_value*> inputs, cc::sign
     }
 }
 
-// Builds the index sequence from the signature itself. Returns an (invalid) typed_value for void callables.
+// Builds the index sequence from the signature itself.
+// Returns an invalid typed_value for a void callable.
 template <class F, class R, class... A>
 typed_value invoke_with_values(F const& f, cc::span<typed_value*> inputs, cc::signature<R(A...)> s)
 {

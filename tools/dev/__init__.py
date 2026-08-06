@@ -1,10 +1,8 @@
-"""Reusable developer tooling for CMake-based projects.
+"""Reusable developer tooling for CMake-based projects: the flat facade over lib/.
 
-Plain functions over plain data — orchestration (argument parsing, command
-dispatch, project-specific policy) lives in the project's dev.py; this package
-only provides helpers.
-Everything is collection-oriented: configure/build/test
-operate on lists of presets and targets.
+Callers reach the whole machinery as `dev.X`, without knowing which lib/ group a helper sits in.
+Deliberately does not import `cmd`, which would be a cycle.
+docs/dev-py-driver.md is the design behind both.
 """
 
 from __future__ import annotations
@@ -35,10 +33,13 @@ from .lib.quality.crossrefs import CrossRefResult, check_crossrefs
 from .lib.quality.format import (
     FormatResult,
     FormatSetupError,
+    changed_line_ranges,
     clang_format_version,
     discover_files,
     discover_lint_files,
+    expand_lint_paths,
     find_clang_format,
+    format_changed_line_spec,
     format_sources,
     required_major,
     run_format,
@@ -98,10 +99,13 @@ __all__ = [
     "doctor",
     "FormatResult",
     "FormatSetupError",
+    "changed_line_ranges",
     "clang_format_version",
     "discover_files",
     "discover_lint_files",
+    "expand_lint_paths",
     "find_clang_format",
+    "format_changed_line_spec",
     "format_sources",
     "required_major",
     "run_format",

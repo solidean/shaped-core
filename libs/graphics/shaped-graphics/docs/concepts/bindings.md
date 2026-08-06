@@ -1,75 +1,56 @@
 # Concept: bindings & compiled shaders
 
-> Concept docs answer **"what is this and why is it shaped this way?"** — the load-bearing design
-> decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)). See also
-> [views](views.md).
-
-A [`compiled_shader`](../../src/shaped-graphics/compiled_shader.hh) is a bytecode blob plus the
-metadata and **reflection** needed to build a pipeline and bind resources to it. Its reflection is a
-flat list of [`binding`](../../src/shaped-graphics/binding.hh)s — the named resource slots the shader
-declares. This is the schema half of the descriptor system; the bound half is [views](views.md).
-(Compilation itself is not part of sg yet — a `compiled_shader` is produced by a future compiler or
-loader, or hand-authored in a test.)
+A [`compiled_shader`](../../src/shaped-graphics/binding/compiled_shader.hh) is a bytecode blob plus the metadata and **reflection** needed to build a pipeline and bind resources to it.
+Its reflection is a flat list of [`binding`](../../src/shaped-graphics/binding/binding.hh)s — the named resource slots the shader declares.
+This is the schema half of the descriptor system; the bound half is [views](views.md).
+Producing a `compiled_shader` is not sg's job — it comes from shaped-shader-library (see [shaders](../shaders.md)), or is hand-authored in a test.
 
 ## The binding vocabulary is backend-agnostic
 
-A backend-specific binding vocabulary would be HLSL/D3D12 verbatim — a bind-type enum that *is*
-`D3D_SHADER_INPUT_TYPE`, an address model that is HLSL's `(space, register, count)`. Since sg's baseline
-shading language is undecided, the binding vocabulary is instead drawn from concepts common to
-HLSL / GLSL / Slang / MSL / WGSL:
+A backend-specific binding vocabulary would be HLSL/D3D12 verbatim: a bind-type enum that *is* `D3D_SHADER_INPUT_TYPE`, an address model that is HLSL's `(space, register, count)`.
+sg's baseline shading language is undecided, so the vocabulary is drawn instead from concepts common to HLSL / GLSL / Slang / MSL / WGSL:
 
-- **`binding_type`** — the kind of resource a slot expects (`uniform_buffer`,
-  `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`,
-  `readwrite_raw_buffer`, `readonly_texture`, `readwrite_texture`, `sampler`; acceleration-structure
-  follows). The backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
-- **`(set, index)` + `count`** — the address, following SPIR-V (set/binding), WGSL (`@group`/`@binding`),
-  and Metal argument buffers. A D3D12 backend derives its `(register-type, register, space)` at layout
-  build (register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`, space = `set`).
+- **`binding_type`** — the kind of resource a slot expects, and the backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
+  `uniform_buffer`, `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`, `readwrite_raw_buffer`.
+  Then `readonly_texture`, `readwrite_texture`, `sampler`, `acceleration_structure`.
+- **`(set, index)` + `count`** — the address, following SPIR-V (set/binding), WGSL (`@group`/`@binding`) and Metal argument buffers.
+  A D3D12 backend derives its `(register-type, register, space)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`, space = `set`.
   `count == 0` is an unbounded array.
 - **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
 
 ## Bindings and views speak the same vocabulary
 
-A `binding` describes what the shader *expects*; a [`raw_view`](../../src/shaped-graphics/views.hh)
-describes what is *bound*. For buffer and texture kinds they line up exactly: `access_of(binding_type)` and
-`shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have, and
-`accepts(binding_type, raw_view)` is the check. That equivalence is what lets a binding validate a
-bound view without a backend — and it is why `binding_type`'s view kinds mirror the view
-`(access, shape)` combinations one-to-one.
+A `binding` describes what the shader *expects*, and a [`raw_view`](../../src/shaped-graphics/resource/views.hh) describes what is *bound*.
+For buffer and texture kinds they line up exactly: `access_of(binding_type)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
+`accepts(binding_type, raw_view)` is the check.
+That equivalence is what lets a binding validate a bound view with no backend involved, and it is why `binding_type`'s view kinds mirror the view `(access, shape)` combinations one-to-one.
 
 ## Samplers: not views
 
-A `sampler` binding (`is_sampler(binding_type)`) has no view — a sampler carries no memory and no
-`(access, shape)`, so `accepts` rejects any view for it. It is matched instead to a
-[`sampler`](../../src/shaped-graphics/sampler.hh) — an immutable filtering/addressing/LOD
-state — via a `named_sampler`. There are two ways in, and *which one* is a layout-time decision:
+A `sampler` binding (`is_sampler(binding_type)`) has no view: a sampler carries no memory and no `(access, shape)`, so `accepts` rejects any view for it.
+It is matched instead to a [`sampler`](../../src/shaped-graphics/binding/sampler.hh) — an immutable filtering/addressing/LOD state — via a `named_sampler`.
+There are two ways in, and *which one* is a layout-time decision:
 
-- **static** — fixed for every group and costs no per-group descriptor. Two ways to declare one, and you
-  can use either or both: a **name-matched** `named_sampler` passed to `create_binding_group_layout`
-  (matched to a sampler binding by name, then excluded from the dynamic group), or a **register-bound**
-  `bound_sampler` attached to the `pipeline_layout` directly (its `binding` carries the register/space, so
-  it needs no matching group binding — e.g. a shared sampler a pipeline needs on top of its groups). A
-  sampler binding declared static this way must not be supplied per group. (dx12: both become
-  `D3D12_STATIC_SAMPLER_DESC`s that the pipeline layout bakes into the root signature.)
-- **dynamic** — a sampler binding *not* named static is supplied per group: each `binding_group` provides
-  its `named_sampler`, so the sampler state can vary group to group. (dx12: samplers occupy their own
-  descriptor heap and root descriptor table, so a group with dynamic samplers binds a second heap and
-  table at dispatch — see the dx12 section below.)
+- **static** — fixed for every group, and costing no per-group descriptor.
+  Two ways to declare one, usable either or both.
+  A **name-matched** `named_sampler` passed to `create_binding_group_layout`, matched to a sampler binding by name and then excluded from the dynamic group.
+  Or a **register-bound** `bound_sampler` attached to the `pipeline_layout` directly — its `binding` carries the register and space, so it needs no matching group binding.
+  A sampler binding declared static this way must not also be supplied per group.
+  In dx12 both become `D3D12_STATIC_SAMPLER_DESC`s the pipeline layout bakes into the root signature.
+- **dynamic** — a sampler binding *not* named static is supplied per group, so each `binding_group` provides its `named_sampler` and the state can vary group to group.
+  In dx12 samplers occupy their own descriptor heap and root descriptor table, so a group with dynamic samplers binds a second heap and table at dispatch.
 
-Going register-bound means the sampler binding must leave the group layout's bindings, or the group claims
-that register a second time as a dynamic sampler — `split_off_sampler_bindings` is the reflection-side split.
+Going register-bound means the sampler binding must leave the group layout's bindings, or the group claims that register a second time as a dynamic sampler.
+`split_off_sampler_bindings` is the reflection-side split.
 
 ## Working with reflected bindings
 
-Reflection hands you one `cc::vector<binding>` per shader stage, but a pipeline has a single binding
-interface, so [`binding.hh`](../../src/shaped-graphics/binding.hh) carries the two operations every
-multi-stage caller needs:
+Reflection hands you one `cc::vector<binding>` per shader stage, but a pipeline has a single binding interface.
+So [`binding.hh`](../../src/shaped-graphics/binding/binding.hh) carries the two operations every multi-stage caller needs:
 
-- `merge_bindings({stage0.bindings, stage1.bindings, …})` — the union by name, first-seen order. A
-  raytracing pipeline's global root signature must cover every stage's bindings; a raster pipeline's group
-  covers vertex + fragment.
-- `split_off_sampler_bindings(bindings)` — removes the sampler bindings and returns them, for the samplers
-  that are bound outside the group (see above).
+- `merge_bindings({stage0.bindings, stage1.bindings, …})` — the union by name, in first-seen order.
+  A raytracing pipeline's global root signature must cover every stage's bindings, and a raster pipeline's group covers vertex plus fragment.
+- `split_off_sampler_bindings(bindings)` — removes the sampler bindings and returns them, for the samplers bound outside the group.
 
 ## Where this is headed
 
@@ -82,52 +63,45 @@ compiled_shader.bindings ─▶ binding_group_layout ─▶ binding_group (name 
                                      └─▶ pipeline_layout (ordered group layouts) ─▶ compute_pipeline
 ```
 
-A `pipeline_layout` composes an ordered list of `binding_group_layout`s (index = bind slot), so an entire
-group can be rebound at one slot without disturbing the others. It may also carry an optional
-**inline-constants** block — a single uniform-buffer binding, excluded from the group layouts, written
-directly on the command list via `cmd.compute.set_inline_constants(...)` for fast per-dispatch parameters
-without descriptor allocation (dx12 root constants / vulkan push constants). `binding_group_layout`, `pipeline_layout`,
-and `compute_pipeline` are schemas / PSOs, not lifetime-scoped resources — they are built through the raw
-[`ctx.uncached.create_*`](../../src/shaped-graphics/context.uncached.hh) scope, or (almost always preferred)
-deduplicated and built asynchronously through
-[`ctx.cached.acquire_*`](../../src/shaped-graphics/context.cached.hh). See [caches](caches.md).
-A `binding_group`, being a per-instance set of bound resources, is genuinely lifetime-scoped:
-`ctx.persistent.create_binding_group` for one that lives until released, `ctx.transient.create_binding_group`
-for per-frame scratch recycled when its epoch retires. The `command_list` recording that binds and
-dispatches them (`cmd.compute.bind_pipeline` / `bind_group` / `dispatch`) is lifetime-agnostic.
+A `pipeline_layout` composes an ordered list of `binding_group_layout`s, index = bind slot, so an entire group can be rebound at one slot without disturbing the others.
+It may also carry an optional **inline-constants** block — a single uniform-buffer binding, excluded from the group layouts.
+That one is written directly on the command list via `cmd.compute.set_inline_constants(...)`.
+Those are fast per-dispatch parameters needing no descriptor allocation — dx12 root constants, vulkan push constants.
 
-The **dx12** backend implements the full chain — a `pipeline_layout` becomes the root signature (composed
-from its group layouts' descriptor tables + baked static samplers, plus a trailing 32-bit-constants root
-parameter when the layout declares inline constants), a `binding_group` allocates a range in
-the single shader-visible descriptor heap and translates each `raw_view` into a native CBV/SRV/UAV, and a
-dispatch binds each slot's table and runs. That heap is **split by lifetime**, and the two halves use
-different allocators because their hazard models differ:
+`binding_group_layout`, `pipeline_layout` and `compute_pipeline` are schemas and PSOs, not lifetime-scoped resources.
+They are built through the raw [`ctx.uncached.create_*`](../../src/shaped-graphics/context/uncached.hh) scope.
+Almost always preferred is [`ctx.cached.acquire_*`](../../src/shaped-graphics/context/cached.hh), which deduplicates and builds asynchronously.
+See [caches](caches.md).
 
-- a leading **transient ring** reclaimed per epoch. Descriptors are **written by the CPU** when a group
-  is created and read by the GPU during that epoch, so a slot can't be reused until the epoch that wrote
-  it retires — a CPU/GPU in-flight hazard the ring's per-epoch watermark enforces. (This is unlike the
-  transient *buffer* heap, whose contents are only GPU-touched, so it can bump-reset and alias across
-  epochs — see [memory](memory.md).) A transient group bound past its epoch is refused (its slots may
-  already be reused).
-- a **persistent free-ranges allocator** for the rest: a group's range is returned to the free list when
-  the group is released, deferred (via an epoch finalizer, like buffer deletion) until its last-using
-  epoch retires — so long-lived groups don't leak the heap.
+A `binding_group`, being a per-instance set of bound resources, is genuinely lifetime-scoped.
+`ctx.persistent.create_binding_group` for one that lives until released; `ctx.transient.create_binding_group` for per-frame scratch recycled when its epoch retires.
+The recording that binds and dispatches them — `cmd.compute.bind_pipeline` / `bind_group` / `dispatch` — is lifetime-agnostic.
 
-The **vulkan** backend stubs the chain (each create returns a `cc::error`) until its own compute milestone.
-Compilation is still external: a `compiled_shader`'s bytecode + reflection are supplied (the dx12 test
-embeds a precompiled DXIL blob).
+The **dx12** backend implements the full chain.
+A `pipeline_layout` becomes the root signature, composed from its group layouts' descriptor tables and baked static samplers.
+A trailing 32-bit-constants root parameter is appended where the layout declares inline constants.
+A `binding_group` allocates a range in the single shader-visible descriptor heap and translates each `raw_view` into a native CBV/SRV/UAV; a dispatch binds each slot's table and runs.
+That heap is **split by lifetime**, and the two halves use different allocators because their hazard models differ:
+
+- a leading **transient ring**, reclaimed per epoch.
+  Descriptors are **written by the CPU** when a group is created and read by the GPU during that epoch, so a slot cannot be reused until the epoch that wrote it retires.
+  That CPU/GPU in-flight hazard is what the ring's per-epoch watermark enforces, and it is why a transient group bound past its epoch is refused — its slots may already be reused.
+  The transient *buffer* heap is unlike this: its contents are only GPU-touched, so it can bump-reset and alias across epochs — see [memory](memory.md).
+- a **persistent free-ranges allocator** for the rest.
+  A group's range returns to the free list when the group is released, deferred via an epoch finalizer (like buffer deletion) until its last-using epoch retires.
+  So long-lived groups do not leak the heap.
+
+The **vulkan** backend stubs the chain — each create returns a `cc::error` — until its own compute milestone.
 
 ## Deferred
 
-Constant-buffer member layouts, a content hash for caching, and input/output (vertex / render-target)
-signatures are all future additions to `compiled_shader`; the binding vocabulary still gains an
-acceleration-structure kind. Inline (root/push) constants exist on the `pipeline_layout` for compute;
-per-member payload validation (a reflected constant-buffer layout) and the graphics / raytracing scopes
-are deferred. (The DXC shader compiler reflects buffer / texture / sampler
-bindings; texel/typed buffers and acceleration structures are the remaining unsupported kinds.)
+Still to come on `compiled_shader`: constant-buffer member layouts, a content hash for caching, and the input/output (vertex / render-target) signatures.
+Inline (root/push) constants exist on the `pipeline_layout`, but per-member payload validation against a reflected constant-buffer layout does not.
+The DXC compiler reflects buffer, texture, sampler and acceleration-structure bindings.
+Texel/typed buffers (`Buffer<T>` / `RWBuffer<T>`) and append/consume/counter buffers are the kinds it does not reflect.
 
 ## See also
 
-- [binding.hh](../../src/shaped-graphics/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
-- [compiled_shader.hh](../../src/shaped-graphics/compiled_shader.hh) — the shader data model.
+- [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
+- [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.
 - [views](views.md) — the bound half: `raw_view` and the typed views that convert to it.

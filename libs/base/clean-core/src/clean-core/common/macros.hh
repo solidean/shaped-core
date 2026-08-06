@@ -3,11 +3,11 @@
 // =========================================================================================================
 // Platform detection — the ONLY place raw toolchain predefines may be read
 // =========================================================================================================
-// This header translates the compiler's raw predefined macros (_MSC_VER, __clang__, _WIN32, __APPLE__,
-// _M_X64, __aarch64__, __ANDROID__, …) into a small, orthogonal set of CC_* macros. Downstream code MUST
-// branch on these CC_* macros and MUST NOT read the raw predefines directly — that keeps the messy,
-// overlapping vendor macros (e.g. clang-cl defines _MSC_VER; Android also defines __linux__; TARGET_OS_MAC
-// is set on iOS too) confined to one audited place. The five axes are independent: query each separately.
+// This header translates the compiler's raw predefined macros into a small, orthogonal set of CC_* macros.
+// The raw ones are _MSC_VER, __clang__, _WIN32, __APPLE__, _M_X64, __aarch64__, __ANDROID__ and friends.
+// Downstream code MUST branch on these CC_* macros and MUST NOT read the raw predefines directly.
+// That keeps the messy, overlapping vendor macros confined to one audited place — clang-cl defines _MSC_VER, Android also defines __linux__, TARGET_OS_MAC is set on iOS too.
+// The five axes are independent: query each separately.
 //
 //   Compiler: CC_COMPILER_{CLANG, MSVC, GCC}            — who is compiling (clang-cl counts as CLANG)
 //   Arch:     CC_ARCH_{X64, X86, ARM64, ARM32, WASM32}  — target CPU / instruction set
@@ -16,12 +16,12 @@
 //   Platform: CC_PLATFORM_{DESKTOP, MOBILE, WEB, CONSOLE} — coarse device class (orthogonal to OS: an Xbox
 //             is OS=WINDOWS, Platform=CONSOLE)
 //
-// Exactly one macro is defined per axis. CC_HAS_64BIT_POINTERS (0 or 1) is derived from Arch — pointer
-// width is not an axis of its own, but it is the thing byte-count code actually means.
+// Exactly one macro is defined per axis.
+// CC_HAS_64BIT_POINTERS (0 or 1) is derived from Arch: pointer width is not an axis of its own, but it is the thing byte-count code actually means.
 
 // --- Compiler ---
-// clang is checked first: clang-cl also defines _MSC_VER but is clang, and bucketing it as CLANG (not MSVC)
-// lets it take the GNU-attribute paths it supports. MinGW (defines __GNUC__) folds into GCC.
+// clang is checked first: clang-cl also defines _MSC_VER but is clang, and bucketing it as CLANG rather than MSVC lets it take the GNU-attribute paths it supports.
+// MinGW, which defines __GNUC__, folds into GCC.
 #if defined(__clang__)
 #define CC_COMPILER_CLANG
 #elif defined(_MSC_VER)
@@ -50,11 +50,11 @@
 // --- Pointer width (derived from Arch; always defined, 0 or 1) ---
 // Register width and pointer width are separate questions here, and only one of them is settled:
 //
-//   * 64-bit REGISTERS are required. Everything we ship assumes 64-bit arithmetic is a single operation
-//     (cc::atomic<u64>, the fused refcount, the tagged control words).
-//   * Pointer width is NOT 64 everywhere. wasm32 is the case that matters: 64-bit registers, 32-bit
-//     pointers. So a pointer is 4 B there, and every struct footprint derived from one shrinks with it —
-//     cc::small_vector's 48 B is a 64-bit-pointer statement, not a universal one.
+//   * 64-bit REGISTERS are required.
+//     Everything we ship assumes 64-bit arithmetic is a single operation — cc::atomic<u64>, the fused refcount, the tagged control words.
+//   * Pointer width is NOT 64 everywhere.
+//     wasm32 is the case that matters: 64-bit registers, 32-bit pointers.
+//     So a pointer is 4 B there, and every struct footprint derived from one shrinks with it — cc::small_vector's 48 B is a 64-bit-pointer statement, not a universal one.
 //
 // Branch on this — never on the arch, and never on a hand-rolled sizeof(void*) == 8 at the use site.
 #if defined(CC_ARCH_WASM32) || defined(CC_ARCH_X86) || defined(CC_ARCH_ARM32)
@@ -70,9 +70,9 @@
 // Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS
 // From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED
 //
-// CMake only ever defines inputs; this header owns every derivation and defines the outputs
-// unconditionally. So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, and CC_SINGLE_THREADED feeds
-// CC_HAS_THREADS — none of the derived macros is itself overridable.
+// CMake only ever defines inputs; this header owns every derivation and defines the outputs unconditionally.
+// So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, and CC_SINGLE_THREADED feeds CC_HAS_THREADS.
+// None of the derived macros is itself overridable.
 
 #ifdef CC_COMPILER_MSVC
 #ifdef _CPPRTTI
@@ -97,9 +97,8 @@
 #endif
 #endif
 
-// CC_ASSERT_ENABLED - Assertions are active (0 or 1)
-// Assertions are enabled in debug and release-with-debug-info builds by default
-// Can be explicitly enabled in release builds with CC_ENABLE_ASSERT_IN_RELEASE
+// CC_ASSERT_ENABLED - Assertions are active (0 or 1).
+// On by default in debug and release-with-debug-info builds, and in release only when CC_ENABLE_ASSERT_IN_RELEASE is defined.
 #if defined(CC_DEBUG) || defined(CC_RELWITHDEBINFO) || defined(CC_ENABLE_ASSERT_IN_RELEASE)
 #define CC_ASSERT_ENABLED 1
 #else
@@ -107,9 +106,8 @@
 #endif
 
 // --- Operating system ---
-// Order matters: Emscripten/WASI leak unix-ish predefines, and Android also defines __linux__, so the more
-// specific OSes are matched before the generic ones. The Apple split keys off <TargetConditionals.h> and
-// checks iOS/tvOS before macOS because TARGET_OS_MAC is set on all Apple platforms.
+// Order matters: Emscripten/WASI leak unix-ish predefines, and Android also defines __linux__, so the more specific OSes are matched before the generic ones.
+// The Apple split keys off <TargetConditionals.h> and checks iOS/tvOS before macOS, because TARGET_OS_MAC is set on all Apple platforms.
 #if defined(__EMSCRIPTEN__)
 #define CC_OS_EMSCRIPTEN
 #elif defined(__wasi__)
@@ -163,16 +161,14 @@
 // Threading availability
 // =========================================================================================================
 // CC_HAS_THREADS - whether real OS threads are available (0 or 1).
-// Native platforms always have them. On WebAssembly threads are opt-in: Emscripten only enables pthreads
-// (and SharedArrayBuffer-backed std::thread) when built with -pthread, which predefines
-// __EMSCRIPTEN_PTHREADS__. Single-threaded wasm still compiles <mutex>/<thread>/thread_local fine — they
-// degrade to no-ops — so this flag gates behavior, not compilation.
+// Native platforms always have them.
+// On WebAssembly threads are opt-in: Emscripten enables pthreads only when built with -pthread, which predefines __EMSCRIPTEN_PTHREADS__.
+// Single-threaded wasm still compiles <mutex>/<thread>/thread_local fine, since they degrade to no-ops — so this flag gates behavior, not compilation.
 //
-// CC_SINGLE_THREADED (from CMake: SC_THREADS=OFF) forces 0 on a platform that HAS threads, which is what
-// makes the single-threaded mode developable natively instead of only under wasm. It forces threads OFF
-// only: wasm without -pthread genuinely has none, so there is deliberately no way to force them ON.
-// Absent the define the autodetect below stands, which is also the path when clean-core is consumed via
-// add_subdirectory without our root CMakeLists.
+// CC_SINGLE_THREADED (from CMake: SC_THREADS=OFF) forces 0 on a platform that HAS threads.
+// That is what makes the single-threaded mode developable natively instead of only under wasm.
+// It forces threads OFF only: wasm without -pthread genuinely has none, so there is deliberately no way to force them ON.
+// Absent the define the autodetect below stands, which is also the path when clean-core is consumed via add_subdirectory without our root CMakeLists.
 
 #if defined(CC_SINGLE_THREADED)
 #define CC_HAS_THREADS 0
@@ -210,11 +206,11 @@
 // Usage: CC_HOT_FUNC void process_frame() { ... }
 #define CC_HOT_FUNC CC_IMPL_HOT_FUNC
 
-// CC_PURE - Function has no side effects and its result depends only on its arguments and the memory it
-// reads. Lets the compiler elide redundant calls (only across code that cannot have changed the read memory)
-// and pipeline calls across a loop, so an out-of-line wrapper over a pure callee is not pessimized relative
-// to the callee. Use ONLY for genuinely pure functions: no writes, no hidden/global state, deterministic —
-// e.g. a hash of its byte input. Misuse (marking a function with side effects pure) causes miscompiles.
+// CC_PURE - Function has no side effects, and its result depends only on its arguments and the memory it reads.
+// Lets the compiler elide redundant calls — though only across code that cannot have changed the read memory — and pipeline calls across a loop.
+// An out-of-line wrapper over a pure callee is then not pessimized relative to the callee.
+// Use ONLY for genuinely pure functions: no writes, no hidden or global state, deterministic — a hash of its byte input, for instance.
+// Marking a function that has side effects as pure causes miscompiles.
 // Usage: [[nodiscard]] CC_PURE u64 hash_of(span<byte const> data);
 #define CC_PURE CC_IMPL_PURE
 
@@ -284,8 +280,8 @@
 #define CC_IMPL_FORCE_INLINE __attribute__((always_inline)) inline
 #define CC_IMPL_DONT_INLINE __attribute__((noinline))
 
-// C++ spelling ([[gnu::cold]], not __attribute__((cold))): a leading __attribute__ followed by a C++
-// attribute-seq (e.g. CC_COLD_FUNC [[nodiscard]]) is rejected by some clangs (older Apple clang).
+// C++ spelling ([[gnu::cold]], not __attribute__((cold))): a leading __attribute__ followed by a C++ attribute-seq is rejected by some clangs, including older Apple clang.
+// `CC_COLD_FUNC [[nodiscard]]` is the case that breaks.
 #define CC_IMPL_COLD_FUNC [[gnu::cold]]
 #define CC_IMPL_HOT_FUNC [[gnu::hot]]
 

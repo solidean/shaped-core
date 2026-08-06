@@ -2,10 +2,10 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
-#include <shaped-graphics/buffer.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/buffer.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
@@ -98,10 +98,9 @@ INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle con
     CHECK(data.value()[3] == 8);
 }
 
-// The buffer<T> overloads of upload/download: `T` comes from the buffer alone, so nothing is spelled out
-// twice and the span / pod / offset all agree on it. Pins that a cc::vector, a C array and a braced list
-// all convert to the span parameter — the deduction there is non-obvious (T is deduced only from the
-// buffer, via type_identity_t) and would silently regress into "no matching overload".
+// The buffer<T> overloads of upload/download: `T` comes from the buffer alone, so nothing is spelled out twice and the span / pod / offset all agree on it.
+// Pins that a cc::vector, a C array and a braced list all convert to the span parameter.
+// That deduction is non-obvious — `T` is deduced only from the buffer, via type_identity_t — and would silently regress into "no matching overload".
 INVOCABLE_TEST("sg - typed buffer<T> upload/download need no raw()", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -216,10 +215,10 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
     ctx->submit_command_list(cc::move(cmd));
 }
 
-// A submitted readback is deliverable without advancing the epoch: ctx.wait_for blocks until the
-// download actor has copied the bytes back — no advance_epoch / wait_for_idle needed. (This replaces an
-// earlier is_ready()-after-wait_for_idle assumption that flaked under transfer-fuzz seed 1: idle drains
-// the GPU but not the actor, so is_ready() can lag it; wait_for is the actual completion guarantee.)
+// A submitted readback is deliverable without advancing the epoch.
+// ctx.wait_for blocks until the download actor has copied the bytes back, with no advance_epoch / wait_for_idle needed.
+// This replaces an earlier is_ready()-after-wait_for_idle assumption that flaked under transfer-fuzz seed 1.
+// Idle drains the GPU but not the actor, so is_ready() can lag it; wait_for is the actual completion guarantee.
 INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

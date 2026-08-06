@@ -3,9 +3,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 #include <atomic>
@@ -13,10 +13,9 @@
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic async buffer upload (ctx.upload): CPU→GPU streaming on a dedicated copy queue, run
-// against every available backend. These pin the public contract — automatic per-resource sync in BOTH
-// directions so the CPU timeline (submit → async upload → submit) mirrors GPU ordering — while the copy
-// pipelining / staging internals live with the backend (backends/dx12/tests/dx12-upload-async-test.cc).
+// Backend-agnostic async buffer upload (ctx.upload): CPU→GPU streaming on a dedicated copy queue, run against every available backend.
+// These pin the public contract — automatic per-resource sync in BOTH directions, so the CPU timeline (submit → async upload → submit) mirrors GPU ordering.
+// The copy pipelining and staging internals live with the backend, in backends/dx12/tests/dx12-upload-async-test.cc.
 // See libs/graphics/shaped-graphics/docs/concepts/upload.async.md and libs/graphics/shaped-graphics/docs/testing.md.
 
 namespace
@@ -46,7 +45,8 @@ INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handl
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
 
-    // Fire-and-forget: no wait, no advance. The later download must auto-wait on the copy.
+    // Fire-and-forget: no wait, no advance.
+    // The later download must auto-wait on the copy.
     ctx->upload.bytes_to_buffer(buf, pinned_bytes(256, [](isize i) { return int(i); }));
 
     auto down = ctx->create_command_list();
@@ -155,14 +155,12 @@ INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_h
     CHECK(second_won);
 }
 
-// Regression: the copy actor once deadlocked when one staging window batched two async uploads across an
-// inline list that read the buffer between them — the window issues its reverse-sync wait once, hoisted
-// ahead of its copies, so it ended up waiting on a submission token whose direct list waited on a copy the
-// same window had not yet run. Hammer that exact shape: async upload; inline write of the same region +
-// submit; ×256 (fast enough that the actor batches several async jobs per window), then advance and wait.
-// Pre-fix this blocks forever; it must now return. See
-// libs/graphics/shaped-graphics/docs/concepts/upload.async.md (the window-level acyclicity rule) and the
-// re-enabled "async upload" op in transfer-fuzz-test.cc.
+// Regression: the copy actor once deadlocked when one staging window batched two async uploads across an inline list that read the buffer between them.
+// The window issues its reverse-sync wait once, hoisted ahead of its copies.
+// So it ended up waiting on a submission token whose direct list waited on a copy the same window had not yet run.
+// Hammer that exact shape: async upload; inline write of the same region + submit; ×256, fast enough that the actor batches several async jobs per window, then advance and wait.
+// Pre-fix this blocks forever; it must now return.
+// See libs/graphics/shaped-graphics/docs/concepts/upload.async.md for the window-level acyclicity rule, and the re-enabled "async upload" op in transfer-fuzz-test.cc.
 INVOCABLE_TEST("sg - async upload interleaved with inline writes does not deadlock", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -174,9 +172,9 @@ INVOCABLE_TEST("sg - async upload interleaved with inline writes does not deadlo
         // Async upload the whole region on the copy queue (ordered after already-submitted work).
         ctx->upload.bytes_to_buffer(buf, pinned_bytes(n, [it](isize i) { return int(i) ^ it; }));
 
-        // Inline write of the SAME region on the direct queue, submitted at once: it reads-after the async
-        // upload (forward sync) and its submission becomes the next iteration's async reverse token — the
-        // interlock that closed the cycle. Inline bytes are consumed during record, so a stack span is fine.
+        // Inline write of the SAME region on the direct queue, submitted at once.
+        // It reads-after the async upload (forward sync), and its submission becomes the next iteration's async reverse token — the interlock that closed the cycle.
+        // Inline bytes are consumed during record, so a stack span is fine.
         auto cmd = ctx->create_command_list();
         REQUIRE(cmd != nullptr);
         byte inline_bytes[n];
@@ -231,12 +229,11 @@ INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_han
     CHECK(matches);
 }
 
-// An async upload whose target's last handle is dropped before the actor stages it must still release the
-// buffer's storage. The copy is skipped, but its completion value V is still signaled — otherwise the
-// deferred-deletion gate (which holds the storage until the copy fence reaches V) would never release it.
-// We can't deterministically force the drop-before-stage race from the public API, but the release
-// invariant must hold whichever way it resolves. A second, kept buffer's download drives the copy fence
-// past V (the actor processes jobs in order), after which the retired epoch must free the dropped buffer.
+// An async upload whose target's last handle is dropped before the actor stages it must still release the buffer's storage.
+// The copy is skipped, but its completion value V is still signaled.
+// Otherwise the deferred-deletion gate, which holds the storage until the copy fence reaches V, would never release it.
+// The drop-before-stage race cannot be forced deterministically from the public API, but the release invariant must hold whichever way it resolves.
+// A second, kept buffer's download drives the copy fence past V, since the actor processes jobs in order, after which the retired epoch must free the dropped buffer.
 INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -251,8 +248,8 @@ INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::c
         ctx->upload.bytes_to_buffer(dropped, pinned_bytes(isize(64) * 1024, [](isize i) { return int(i); }));
     } // `dropped`'s last handle released here → its storage is scheduled for deferred deletion, gated on V
 
-    // A later async upload + download on the kept buffer. The download auto-waits on this upload's value
-    // (> V), and the actor signals the copy fence in order, so completing it proves V was signaled too.
+    // A later async upload + download on the kept buffer.
+    // The download auto-waits on this upload's value (> V), and the actor signals the copy fence in order, so completing it proves V was signaled too.
     ctx->upload.bytes_to_buffer(keep, pinned_bytes(256, [](isize i) { return int(i); }));
     auto down = ctx->create_command_list();
     REQUIRE(down != nullptr);
@@ -260,8 +257,8 @@ INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::c
     ctx->submit_command_list(cc::move(down));
     REQUIRE(ctx->wait_for(future).has_value());
 
-    // Retire the epoch the dropped buffer died in; with V signaled the deferred-deletion gate now releases
-    // its storage and runs the finalizer. Two advances so the death epoch is fully retired and swept.
+    // Retire the epoch the dropped buffer died in; with V signaled the deferred-deletion gate now releases its storage and runs the finalizer.
+    // Two advances, so the death epoch is fully retired and swept.
     ctx->advance_epoch_and_wait_for_idle();
     ctx->advance_epoch_and_wait_for_idle();
     ctx->process_completed_epochs();

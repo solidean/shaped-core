@@ -6,9 +6,9 @@
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic tests for the sg download-result vocabulary (no GPU needed). Only the non-blocking
-// polls live on the future; the blocking wait is ctx.wait_for(future), covered in the context-driven
-// suites (tests/transfer, backends/dx12/tests). Backend readback / actor completion is exercised there.
+// Backend-agnostic tests for the sg download-result vocabulary, with no GPU needed.
+// Only the non-blocking polls live on the future; the blocking wait is ctx.wait_for(future), covered in the context-driven suites (tests/transfer, backends/dx12/tests).
+// Backend readback and actor completion are exercised there.
 
 TEST("sg bytes_future - default is invalid")
 {

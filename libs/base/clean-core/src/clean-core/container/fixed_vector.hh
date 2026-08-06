@@ -10,29 +10,26 @@
 #include <initializer_list>
 #include <type_traits>
 
-/// Fixed-capacity vector: up to `N` elements of `T` stored inline, with runtime-variable size and **no
-/// dynamic allocation ever**. The size grows and shrinks like a vector, but the capacity is a hard
-/// compile-time cap — pushing past `N` asserts (it does not spill to the heap like `small_vector`).
+/// Fixed-capacity vector: up to `N` elements of `T` stored inline, with a runtime-variable size and **no dynamic allocation ever**.
+/// The size grows and shrinks like a vector, but the capacity is a hard compile-time cap — pushing past `N` asserts instead of spilling to the heap.
 ///
-/// Use it where `N` is a genuine invariant — a hardware / protocol limit — rather than a size hint: the
-/// type then *encodes* the cap (an overflow is a bug that trips, not a silent allocation). For "usually a
-/// handful but an occasional overflow must still work", use `cc::small_vector` instead.
+/// Reach for it where `N` is a genuine invariant, such as a hardware or protocol limit, rather than a size hint.
+/// The type then *encodes* the cap, so an overflow is a bug that trips instead of a silent allocation.
+/// Where an occasional overflow must still work, use `cc::small_vector` instead.
 ///
-/// The public surface mirrors `cc::vector` where it is meaningful for a fixed capacity (create_*
-/// factories, push/emplace, pop/remove, remove_at[_unordered] / _range / _where, resize_* /
-/// clear_resize_* family, fill), so it is a drop-in where the capacity fits. Members that only exist to
-/// manage a growable allocation — `reserve*`, `shrink_to_fit`, `create_with_capacity` /
-/// `create_from_allocation` / `extract_allocation` — are meaningless here (capacity is always `N`) and are
-/// intentionally absent.
+/// The public surface mirrors `cc::vector` wherever that is meaningful for a fixed capacity, so it is a drop-in where the capacity fits.
+/// Members that exist only to manage a growable allocation are intentionally absent — `reserve*`, `shrink_to_fit`, `create_with_capacity`,
+/// `create_from_allocation` and `extract_allocation` have nothing left to do when the capacity is always `N`.
 ///
-/// Value semantics (deep copy); a moved-from fixed_vector is left empty. Elements are constructed /
-/// destroyed in place, so `T` need not be default-constructible. `N == 0` is a valid (permanently empty)
-/// vector.
+/// Value semantics (deep copy); a moved-from fixed_vector is left empty.
+/// Elements are constructed and destroyed in place, so `T` need not be default-constructible.
+/// `N == 0` is a valid, permanently empty vector.
 ///
-/// **Not subobject-safe:** copy/move assignment destroys the current elements before reading the source,
-/// so assigning from an element of the *same* vector (e.g. `v = v[0].other`) is undefined behavior — the
-/// self-assignment guard only catches whole-object aliasing. Same constraint as `cc::optional`; fine for
-/// a non-allocating container.
+/// **Not subobject-safe:** copy/move assignment destroys the current elements before reading the source.
+/// Assigning from an element of the *same* vector (`v = v[0].other`) is therefore undefined behavior — the self-assignment guard only catches whole-object aliasing.
+/// Same constraint as `cc::optional`, and unproblematic for a non-allocating container.
+///
+/// See [containers](../../../docs/containers.md) for the contracts every container shares, including what removal does to references.
 ///
 /// Usage:
 ///   cc::fixed_vector<int, 4> v; // holds at most 4 ints, never allocates
@@ -47,7 +44,8 @@ struct cc::fixed_vector
 
     // factories (mirroring cc::vector)
 public:
-    /// A deep copy of `source`. Precondition: source.size() <= N.
+    /// A deep copy of `source`.
+    /// Precondition: source.size() <= N.
     [[nodiscard]] static fixed_vector create_copy_of(cc::span<T const> source)
     {
         CC_ASSERT(source.size() <= N, "create_copy_of exceeds fixed_vector capacity");
@@ -57,7 +55,8 @@ public:
         return v;
     }
 
-    /// `size` default-constructed (value-initialized) elements. Precondition: 0 <= size <= N.
+    /// `size` default-constructed (value-initialized) elements.
+    /// Precondition: 0 <= size <= N.
     [[nodiscard]] static fixed_vector create_defaulted(isize size)
     {
         fixed_vector v;
@@ -65,7 +64,8 @@ public:
         return v;
     }
 
-    /// `size` elements, each a copy of `value`. Precondition: 0 <= size <= N.
+    /// `size` elements, each a copy of `value`.
+    /// Precondition: 0 <= size <= N.
     [[nodiscard]] static fixed_vector create_filled(isize size, T const& value)
     {
         fixed_vector v;
@@ -83,9 +83,9 @@ public:
 
     // ctors / dtor / assignment
 public:
-    // User-provided (not =default) so a const fixed_vector — and any aggregate holding one without a
-    // default member initializer — is const-default-constructible, matching cc::small_vector. Leaves the
-    // storage uninitialized; `_size` starts at 0 via its default member initializer.
+    // User-provided rather than `= default`, so a const fixed_vector is const-default-constructible.
+    // The same holds for any aggregate that stores one without a default member initializer.
+    // Leaves the storage uninitialized; `_size` starts at 0 through its own default member initializer.
     fixed_vector() {}
 
     fixed_vector(std::initializer_list<T> init)
@@ -190,8 +190,8 @@ public:
     [[nodiscard]] isize capacity_back() const { return N - size(); }
     [[nodiscard]] bool has_capacity_back_for(isize count) const { return capacity_back() >= count; }
 
-    // appending — no `_stable` variants: a fixed_vector never reallocates, so every append is already
-    // pointer-stable and the stable/unstable distinction cc::vector draws is meaningless here.
+    // appending — no `_stable` variants: a fixed_vector never reallocates, so every append is already pointer-stable.
+    // The stable/unstable distinction cc::vector draws is meaningless here.
 public:
     void push_back(T const& value) { emplace_back(value); }
     void push_back(T&& value) { emplace_back(cc::move(value)); }
@@ -208,7 +208,8 @@ public:
 
     // single element removal
 public:
-    /// Removes and returns the last element. Precondition: !empty().
+    /// Removes and returns the last element.
+    /// Precondition: !empty().
     [[nodiscard]] T pop_back()
     {
         CC_ASSERT(!empty(), "pop_back() on empty fixed_vector");
@@ -217,7 +218,8 @@ public:
         return value;
     }
 
-    /// Removes the last element without returning it. Precondition: !empty().
+    /// Removes the last element without returning it.
+    /// Precondition: !empty().
     void remove_back()
     {
         CC_ASSERT(!empty(), "remove_back() on empty fixed_vector");
@@ -226,14 +228,16 @@ public:
         _size = size_type(last);
     }
 
-    /// Removes and returns the element at `idx`, preserving order. Precondition: 0 <= idx < size().
+    /// Removes and returns the element at `idx`, preserving order.
+    /// Precondition: 0 <= idx < size().
     [[nodiscard]] T pop_at(isize idx)
     {
         T value = cc::move((*this)[idx]);
         remove_at(idx);
         return value;
     }
-    /// Removes the element at `idx`, preserving order (O(n) compaction). Precondition: 0 <= idx < size().
+    /// Removes the element at `idx`, preserving order (O(n) compaction).
+    /// Precondition: 0 <= idx < size().
     void remove_at(isize idx)
     {
         CC_ASSERT(idx >= 0 && idx < size(), "remove_at index out of bounds");
@@ -260,7 +264,8 @@ public:
 
     // range removal
 public:
-    /// Removes `count` elements starting at `start`, preserving order. Precondition: start + count <= size().
+    /// Removes `count` elements starting at `start`, preserving order.
+    /// Precondition: start + count <= size().
     void remove_at_range(isize start, isize count)
     {
         CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range out of bounds");
@@ -281,7 +286,8 @@ public:
             d[start + i] = cc::move(d[size() - k + i]);
         _shrink_to(size() - count);
     }
-    /// Removes the range [start, end), preserving order. Precondition: start <= end <= size().
+    /// Removes the range [start, end), preserving order.
+    /// Precondition: start <= end <= size().
     void remove_from_to(isize start, isize end)
     {
         CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to out of bounds");
@@ -363,13 +369,15 @@ public:
 
     // resizing
 public:
-    /// Shrinks to `new_size` by destroying trailing elements. Precondition: 0 <= new_size <= size().
+    /// Shrinks to `new_size` by destroying trailing elements.
+    /// Precondition: 0 <= new_size <= size().
     void resize_down_to(isize new_size)
     {
         CC_ASSERT(new_size >= 0 && new_size <= size(), "resize_down_to must not grow");
         _shrink_to(new_size);
     }
-    /// Resizes to `new_size`; new elements are `T(args...)`. Precondition: 0 <= new_size <= N.
+    /// Resizes to `new_size`; new elements are `T(args...)`.
+    /// Precondition: 0 <= new_size <= N.
     template <class... Args>
     void resize_to_constructed(isize new_size, Args const&... args)
     {
@@ -380,7 +388,8 @@ public:
             while (size() < new_size)
                 emplace_back(args...);
     }
-    /// Resizes to `new_size`, default-constructing any new elements. Precondition: 0 <= new_size <= N.
+    /// Resizes to `new_size`, default-constructing any new elements.
+    /// Precondition: 0 <= new_size <= N.
     void resize_to_defaulted(isize new_size)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_defaulted exceeds fixed_vector capacity");
@@ -390,7 +399,8 @@ public:
             while (size() < new_size)
                 emplace_back();
     }
-    /// Resizes to `new_size`, filling any new elements with `value`. Precondition: 0 <= new_size <= N.
+    /// Resizes to `new_size`, filling any new elements with `value`.
+    /// Precondition: 0 <= new_size <= N.
     void resize_to_filled(isize new_size, T const& value)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_filled exceeds fixed_vector capacity");
@@ -400,7 +410,9 @@ public:
             while (size() < new_size)
                 push_back(value);
     }
-    /// Resizes to `new_size`, leaving any new elements uninitialized (trivial types only); keeps existing.
+    /// Resizes to `new_size`, leaving any new elements uninitialized (trivial types only).
+    /// Existing elements are kept.
+    /// Precondition: 0 <= new_size <= N.
     void resize_to_uninitialized(isize new_size)
     {
         CC_ASSERT(new_size >= 0 && new_size <= N, "resize_to_uninitialized exceeds fixed_vector capacity");
@@ -458,7 +470,8 @@ public:
 
     // implementation
 private:
-    /// Destroys elements [new_size, size()) and sets the size. Precondition: 0 <= new_size <= size().
+    /// Destroys elements [new_size, size()) and sets the size.
+    /// Precondition: 0 <= new_size <= size().
     void _shrink_to(isize new_size)
     {
         T* const d = data();
@@ -472,9 +485,9 @@ private:
     // Purely a storage detail — every read goes through size(), which converts to the signed isize API.
     using size_type = cc::impl::small_size_t<u64(N), alignof(T)>;
 
-    // Uninitialized aligned storage for N elements; only [0, _size) are alive. reinterpret_cast in data()
-    // is well-defined for the objects placement-new'd into it. Sized to at least 1 byte so N == 0 does not
-    // form a (UB) zero-length array.
+    // Uninitialized aligned storage for N elements; only [0, _size) are alive.
+    // The reinterpret_cast in data() is well-defined for objects placement-new'd into this buffer.
+    // Sized to at least 1 byte so N == 0 does not form a zero-length array, which would be UB.
     alignas(T) unsigned char _storage[N == 0 ? 1 : sizeof(T) * N];
     size_type _size = 0;
 };

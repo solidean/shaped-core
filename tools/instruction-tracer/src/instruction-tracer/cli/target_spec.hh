@@ -27,11 +27,12 @@ struct target_spec
     cc::string to_string() const;
 };
 
-/// Parse a --target value; the form is inferred from the separators. `0x`-prefixed => address,
-/// `mod!sym` => module_symbol, `mod+0xN` => module_offset, anything else => a bare symbol.
+/// Parse a --target value; the form is inferred from the separators.
+/// `0x`-prefixed => address, `mod!sym` => module_symbol, `mod+0xN` => module_offset, anything else => a bare symbol.
 /// Fails on an empty spec or a malformed hex offset.
 cc::result<target_spec> parse_target_spec(cc::string_view spec);
 
-/// Parse an absolute address, with or without a `0x` prefix. Fails on empty/garbage/overflow.
+/// Parse an absolute address, with or without a `0x` prefix.
+/// Fails on empty/garbage/overflow.
 cc::result<u64> parse_address(cc::string_view text);
 } // namespace itrace

@@ -1,13 +1,13 @@
 # typed-geometry cheat sheet
 
-Strongly-typed C++23 math & geometry.
-Namespace `tg`. Depends on clean-core.
+Strongly-typed C++23 math & geometry, namespace `tg`, depending on clean-core.
 Headers are included by full path from `src/`: `#include <typed-geometry/<module>/<name>.hh>`.
 
-> **Scope note:** this single sheet covers the surface that exists today (`scalar`, `linalg`, `transform`, and the `geometry` primitives). As the library grows we will likely split it into per-module cheat sheets — the eventual API surface is far too large for one file.
-> For the *why*, read the header `///` docs and [docs/structure.md](docs/structure.md).
+> **Scope note:** one sheet still covers the whole surface that exists today — `scalar`, `linalg`, `transform` and the `geometry` primitives.
+> As the library grows this will likely split into per-module sheets, since the eventual API is far too large for one file.
+> For the *why* behind a decision, read the header `///` docs and [docs/_index.md](docs/_index.md).
 
-How to read this: each block leads with the include; one symbol per line with a trailing comment giving the return type / intuition.
+How to read this: each block leads with the include, then one symbol per line with a trailing comment giving the return type or intuition.
 Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ---
@@ -41,7 +41,7 @@ v.data;                                   // T[D] — the raw storage (public). 
 v[i];                                      // T& / T const& — CC_ASSERTs 0 <= i < D
 v.length_sqr();                            // T   — sum of squares (any scalar)
 v.length();                                // T   — requires has_sqrt<T>
-v.normalized();                            // vec — requires has_sqrt<T>; returns zero if length is ~0
+v.normalized();                            // vec — requires has_sqrt<T>; returns zero when traits::is_zero(length())
 v.transformed(t);                          // vec — the LINEAR part only; no projective transform
 
 a + b   a - b   -a   a * s   s * a   a / s     // vec arithmetic (s is a scalar T)
@@ -332,11 +332,12 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 
 ## Gotchas
 
-- **No `.x/.y/.z`** — by design.
-  Use `data[i]` or `operator[]`.
+- **No `.x/.y/.z`** — by design; use `data[i]` or `operator[]`.
 - **Constructors are `explicit`.** `tg::vec3f v = {1,2,3};` does not compile; use `tg::vec3f(1,2,3)` or `tg::vec3f({1,2,3})`.
-- **`length()`/`normalized()`/`distance()`/`tg::sqrt` need `has_sqrt<T>`** — they don't exist for `vec3i` etc. Use `length_sqr()` / `distance_sqr()` for integers.
-- **`normalized()` does NOT assert on zero** — it returns the zero vector/quaternion (a hard assert here caused too many spurious failures in practice). Check `tg::traits::is_zero(v.length())` yourself if you need to distinguish.
+- **`length()`/`normalized()`/`distance()`/`tg::sqrt` need `has_sqrt<T>`** — they don't exist for `vec3i` etc.
+  Use `length_sqr()` / `distance_sqr()` for integers.
+- **`normalized()` does NOT assert on zero** — it returns the zero vector or quaternion.
+  Check `tg::traits::is_zero(v.length())` yourself if you need to tell the cases apart.
 - **Out-of-range `operator[]` and wrong-size initializer lists `CC_ASSERT`** (active in debug/relwithdebinfo, stripped in release).
 - Types are **trivially copyable**; default construction **zero-initializes** the components.
 - **Factories are `make_*`** (`make_from_values`, `make_unit`, `make_rotation_z`, …). Distinguished values are static constants (`vec::zero`, `mat::identity`, …) — runtime consts, not `constexpr`.

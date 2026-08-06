@@ -63,8 +63,6 @@ cc::vector<finding> run_rules_on_text(cc::string_view source, cc::string_view pa
     return run_rules(buffer, all_rules());
 }
 
-namespace
-{
 cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content)
 {
     auto adapter = cc::file_write_stream_adapter::create(path);
@@ -74,7 +72,6 @@ cc::result<cc::unit> write_file(cc::string_view path, cc::string_view content)
     CC_RETURN_IF_ERROR(stream.flush()); // no auto-flush: buffered bytes are lost otherwise
     return cc::unit{};
 }
-} // namespace
 
 cc::string apply_edits(cc::string_view original, cc::span<text_edit const> edits)
 {

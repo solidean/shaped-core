@@ -2,7 +2,7 @@
 #include <shaped-graphics/backends/dx12/dx12_binding_group_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
-#include <shaped-graphics/binding.hh> // sg::is_sampler
+#include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 
 namespace sg::backend::dx12
 {
@@ -59,8 +59,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
                                                                         bs.binding.set, D3D12_SHADER_VISIBILITY_ALL));
     }
 
-    // Inline constants become a 32-bit-constants root parameter, appended last so the group slots' root-
-    // parameter indices above stay put. The command list addresses it via inline_constants_root_param.
+    // Inline constants become a 32-bit-constants root parameter, appended last so the group slots' root-parameter indices above stay put.
+    // The command list addresses it via inline_constants_root_param.
     if (inline_constants.has_value())
     {
         auto const& ic = inline_constants.value();

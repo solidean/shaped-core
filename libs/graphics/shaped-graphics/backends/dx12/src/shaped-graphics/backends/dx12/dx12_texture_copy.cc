@@ -2,8 +2,8 @@
 #include <clean-core/common/utility.hh> // cc::min
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::backend::dx12
 {
@@ -30,8 +30,8 @@ dx12_texture_footprint compute_texture_footprint(sg::texture_description const& 
     int const sub_w = mip_extent(desc.width, sub.mip_level);
     int const sub_h = desc.dimension == sg::texture_dimension::d1 ? 1 : mip_extent(desc.height, sub.mip_level);
 
-    // The region is already resolved + bounds-checked by the sg API layer, so it is a concrete, in-bounds,
-    // non-empty box here. tg::pos / tg::vec are subscript-accessed ([0..2]=x/y/z).
+    // The region is already resolved + bounds-checked by the sg API layer: a concrete, in-bounds, non-empty box.
+    // tg::pos / tg::vec are subscript-accessed ([0..2] = x/y/z).
     int const ox = region.offset[0];
     int const oy = region.offset[1];
     int const oz = region.offset[2];

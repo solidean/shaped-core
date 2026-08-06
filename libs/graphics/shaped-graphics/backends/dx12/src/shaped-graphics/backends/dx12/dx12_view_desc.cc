@@ -4,7 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
-#include <shaped-graphics/views.hh>
+#include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
 {
@@ -19,11 +19,10 @@ namespace
     return buf->_resource.Get();
 }
 
-// The D3D12 SRV desc for a texture view: dimension + mip/array/plane come straight from the view (a
-// reinterpretation the view chose), not from the texture's shape. Non-array dimensions (Texture2D, cube,
-// …) have no base-slice field in D3D12, so a non-zero first slice promotes to the size-1 array form —
-// same texels, still declared as the requested dimension in the shader. depth-as-SRV (a typeless
-// resource) is not supported yet.
+// The D3D12 SRV desc for a texture view: dimension + mip/array/plane come straight from the view, a reinterpretation the view chose, not from the texture's shape.
+// Non-array dimensions (Texture2D, cube, …) have no base-slice field in D3D12, so a non-zero first slice promotes to the size-1 array form.
+// Same texels, still declared as the requested dimension in the shader.
+// depth-as-SRV, on a typeless resource, is not supported yet.
 [[nodiscard]] D3D12_SHADER_RESOURCE_VIEW_DESC texture_srv_desc(sg::raw_texture_view const& v, DXGI_FORMAT format)
 {
     D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
@@ -112,9 +111,9 @@ namespace
     return desc;
 }
 
-// The D3D12 UAV desc for a texture view (a single mip level; no MSAA, no cube — a cube is a 2D array). A
-// non-zero first slice on a non-array dimension promotes to the size-1 array form. 3D uses the view's
-// W-slice window.
+// The D3D12 UAV desc for a texture view: a single mip level, no MSAA, no cube — a cube is a 2D array.
+// A non-zero first slice on a non-array dimension promotes to the size-1 array form.
+// 3D uses the view's W-slice window.
 [[nodiscard]] D3D12_UNORDERED_ACCESS_VIEW_DESC texture_uav_desc(sg::raw_texture_view const& v, DXGI_FORMAT format)
 {
     D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
@@ -178,8 +177,8 @@ namespace
     return desc;
 }
 
-// The D3D12 RTV desc for a color (render-target) view: a single mip level, 2D-shaped (a cube renders as a 2D
-// array), MSAA allowed. A non-zero first slice on a non-array dimension promotes to the size-1 array form.
+// The D3D12 RTV desc for a color (render-target) view: a single mip level, 2D-shaped since a cube renders as a 2D array, MSAA allowed.
+// A non-zero first slice on a non-array dimension promotes to the size-1 array form.
 [[nodiscard]] D3D12_RENDER_TARGET_VIEW_DESC texture_rtv_desc(sg::render_target_view const& v, DXGI_FORMAT format)
 {
     D3D12_RENDER_TARGET_VIEW_DESC desc = {};

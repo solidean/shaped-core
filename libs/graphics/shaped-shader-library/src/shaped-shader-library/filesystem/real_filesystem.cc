@@ -4,14 +4,10 @@
 #include <shaped-shader-library/filesystem/impl/watch_backend.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
 
-// This file and its watch backends are the only part of slib allowed to reach the real disk. <filesystem>
-// is not a blessed clean-core header (see libs/base/clean-core/docs/blessed-stdlib-headers.md), and it stays
-// contained here: every other part of slib addresses shader sources through a mounted slib::filesystem.
-// Keeping the dependency to one adaptor is also what makes the eventual move to a cc:: virtual filesystem a
-// local change.
+// Why <filesystem> is included here and nowhere else: it is not a blessed clean-core header (see libs/base/clean-core/docs/blessed-stdlib-headers.md).
 //
-// Reading is already off <filesystem> — it goes through cc's file stream adapters. What is left needs
-// filesystem *metadata* (is_regular_file, last_write_time, file_size), which clean-core does not model.
+// Reading is already off it — that goes through cc's file stream adapters.
+// What is left needs filesystem *metadata* (is_regular_file, last_write_time, file_size), which clean-core does not model.
 #include <filesystem>
 
 slib::real_filesystem::real_filesystem(cc::string root_dir) : _root_dir(cc::move(root_dir))
@@ -23,8 +19,7 @@ slib::real_filesystem::~real_filesystem() = default;
 
 cc::optional<cc::string> slib::real_filesystem::to_native_path(cc::string_view path) const
 {
-    // normalize_path is the traversal guard: it rejects anything climbing past the root, so what we
-    // append below can only ever land inside _root_dir.
+    // normalize_path is the traversal guard: it rejects anything climbing past the root, so what we append below can only ever land inside _root_dir.
     auto const normalized = impl::normalize_path(path);
     if (!normalized.has_value())
         return cc::nullopt;
@@ -89,10 +84,8 @@ cc::optional<slib::watch_subscription> slib::real_filesystem::watch(cc::string_v
     if (!native.has_value())
         return watch_subscription(); // nothing is reachable under a prefix that escapes the root
 
-    // A prefix naming an existing file is watched as the directory holding it: that is what the OS offers,
-    // and the relaxed contract is what lets us take it — a sibling's change then fires the sink, and the
-    // rescan it asks for finds nothing to do. A path that does not exist is left exactly as it is, so the
-    // backend can fail on it and send the caller back to polling.
+    // A prefix naming an existing file is watched as the directory holding it: that is what the OS offers, and the relaxed contract is what lets us take it.
+    // A path that does not exist is left as it is, so the backend can fail on it and send the caller back to polling.
     if (std::error_code ec;
         std::filesystem::is_regular_file(std::filesystem::path(native.value().c_str_materialize()), ec) && !ec)
         native = cc::string::create_copy_of(impl::parent_path(native.value()));
@@ -100,8 +93,7 @@ cc::optional<slib::watch_subscription> slib::real_filesystem::watch(cc::string_v
     auto* const backend = _watch_state.lock(
         [](watch_state& s)
         {
-            // Once: a platform with no backend has none the second time either, and building one costs a
-            // thread and a completion port.
+            // Once: a platform with no backend has none the second time either, and building one costs a thread and a completion port.
             if (!s.created)
             {
                 s.backend = impl::create_watch_backend();

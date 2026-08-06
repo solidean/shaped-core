@@ -3,11 +3,28 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
 
+// Raw object-lifetime primitives behind the allocating containers.
+// Every function here shares one contract, so the functions themselves document only what differs.
+//
+// A `_to` function takes its destination as a cursor by reference and advances it past each object it touches, which is how the caller ends up holding the live range:
+//
+//   auto obj_start = (T*)uninitialized_memory;
+//   auto obj_end = obj_start;
+//   copy_create_objects_to(obj_end, src, src + count);
+//   // [obj_start, obj_end) is now the constructed live range
+//
+// A `*_create_*` function requires the destination to be UNINITIALIZED and begins the objects' lifetimes there.
+// An `*_assign_*` function requires the destination objects to be ALIVE already.
+// Empty ranges, a null pointer and count == 0 are all valid and do nothing.
+// Where a function copies or moves a RANGE, a trivially copyable T takes a memcpy — memmove where the ranges may overlap — instead of a per-element loop.
+// The default_ and fill_ functions always loop, since there is no source range to copy from.
+// On a throw the cursor delimits the objects handled so far, so the caller can still destroy exactly them.
+// The two move_ functions promise nothing beyond that, since a throwing move constructor has already lost the source.
+//
 namespace cc::impl
 {
 /// Calls destructors on [start, end) in reverse order.
-/// Empty ranges (start == end) and nullptr are valid and result in a no-op.
-/// Trivially destructible types are optimized out at compile time.
+/// A trivially destructible T compiles out entirely.
 template <class T>
 constexpr void destroy_objects_in_reverse(T* start, T* end)
 {
@@ -23,19 +40,8 @@ constexpr void destroy_objects_in_reverse(T* start, T* end)
     }
 }
 
-/// Default-constructs a count of objects using placement new.
-/// dest_end is incremented for each successfully constructed object.
-/// IMPORTANT: Assumes the objects at [*dest_end, *dest_end + count) are NOT yet constructed
-/// (uninitialized memory). This function initializes the lifetime of objects starting at *dest_end. If default
-/// construction throws, dest_end points to the element that threw (not yet constructed). If no exception occurs,
-/// dest_end is updated to one past the last constructed object. count == 0 is valid and results in a no-op.
-/// All objects are properly initialized via T(), which ensures zero-initialization for trivial types (e.g., int).
-///
-/// Usage pattern:
-///   auto obj_start = (T*)uninitialized_memory;
-///   auto obj_end = obj_start;
-///   default_create_objects_to(obj_end, count);
-///   // [obj_start, obj_end) is now the constructed live range
+/// Default-constructs `count` objects at the cursor.
+/// Each is built with T(), so a trivial type such as int is zero-initialized rather than left indeterminate.
 template <class T>
 constexpr void default_create_objects_to(T*& dest_end, isize count)
 {
@@ -51,18 +57,7 @@ constexpr void default_create_objects_to(T*& dest_end, isize count)
     }
 }
 
-/// Fill-constructs a count of objects by copy-constructing from a single value using placement new.
-/// dest_end is incremented for each successfully constructed object.
-/// IMPORTANT: Assumes the objects at [*dest_end, *dest_end + count) are NOT yet constructed
-/// (uninitialized memory). This function initializes the lifetime of objects starting at *dest_end. If copy
-/// construction throws, dest_end points to the element that threw (not yet constructed). If no exception occurs,
-/// dest_end is updated to one past the last constructed object. count == 0 is valid and results in a no-op.
-///
-/// Usage pattern:
-///   auto obj_start = (T*)uninitialized_memory;
-///   auto obj_end = obj_start;
-///   fill_create_objects_to(obj_end, count, value);
-///   // [obj_start, obj_end) is now the constructed live range, each element a copy of value
+/// Copy-constructs `count` objects at the cursor, each from `value`.
 template <class T>
 constexpr void fill_create_objects_to(T*& dest_end, isize count, T const& value)
 {
@@ -76,19 +71,7 @@ constexpr void fill_create_objects_to(T*& dest_end, isize count, T const& value)
     }
 }
 
-/// Copy-constructs objects from [src_start, src_end) using placement new.
-/// dest_end is incremented for each successfully constructed object.
-/// IMPORTANT: Assumes the objects at [*dest_end, *dest_end + (src_end - src_start)) are NOT yet constructed
-/// (uninitialized memory). This function initializes the lifetime of objects starting at *dest_end. If copy
-/// construction throws, dest_end points to the element that threw (not yet constructed). If no exception occurs,
-/// dest_end is updated to one past the last constructed object. Empty ranges (src_start == src_end) and nullptr are
-/// valid and result in a no-op. Trivially copyable types are optimized to use memcpy at compile time.
-///
-/// Usage pattern:
-///   auto obj_start = (T*)uninitialized_memory;
-///   auto obj_end = obj_start;
-///   copy_create_objects_to(obj_end, src, src + count);
-///   // [obj_start, obj_end) is now the constructed live range
+/// Copy-constructs the objects of [src_start, src_end) at the cursor.
 template <class T>
 constexpr void copy_create_objects_to(T*& dest_end, T const* src_start, T const* src_end)
 {
@@ -115,19 +98,8 @@ constexpr void copy_create_objects_to(T*& dest_end, T const* src_start, T const*
     }
 }
 
-/// Move-constructs objects from [src_start, src_end) using placement new.
-/// dest_end is incremented for each successfully constructed object.
-/// IMPORTANT: Assumes the objects at [*dest_end, *dest_end + (src_end - src_start)) are NOT yet constructed
-/// (uninitialized memory). This function initializes the lifetime of objects starting at *dest_end. We keep the
-/// T*& dest_end design for consistency with copy_create_objects_to, but do not promise exception safety if move
-/// constructors throw. Empty ranges (src_start == src_end) and nullptr are valid and result in a no-op. Trivially
-/// copyable types are optimized to use memcpy at compile time.
-///
-/// Usage pattern:
-///   auto obj_start = (T*)uninitialized_memory;
-///   auto obj_end = obj_start;
-///   move_create_objects_to(obj_end, src, src + count);
-///   // [obj_start, obj_end) is now the constructed live range
+/// Move-constructs the objects of [src_start, src_end) at the cursor.
+/// The cursor is by-reference for consistency with copy_create_objects_to; unlike it, this promises nothing if a move constructor throws.
 template <class T>
 constexpr void move_create_objects_to(T*& dest_end, T* src_start, T* src_end)
 {
@@ -154,19 +126,8 @@ constexpr void move_create_objects_to(T*& dest_end, T* src_start, T* src_end)
     }
 }
 
-/// Move-constructs objects from [src_start, src_end) using placement new in reverse order.
-/// dest_start is decremented for each successfully constructed object.
-/// IMPORTANT: Assumes the objects at [*dest_start - (src_end - src_start), *dest_start) are NOT yet constructed
-/// (uninitialized memory). This function initializes the lifetime of objects ending at *dest_start, moving backwards.
-/// Constructs from src_end-1 down to src_start, placing them at dest_start-1, dest_start-2, etc.
-/// Empty ranges (src_start == src_end) and nullptr are valid and result in a no-op. Trivially copyable types are
-/// optimized to use memcpy at compile time.
-///
-/// Usage pattern:
-///   auto obj_end = (T*)uninitialized_memory_end;
-///   auto obj_start = obj_end;
-///   move_create_objects_to_reverse(obj_start, src, src + count);
-///   // [obj_start, obj_end) is now the constructed live range (constructed in reverse)
+/// Move-constructs the objects of [src_start, src_end) at the cursor, in reverse: from src_end - 1 down to src_start.
+/// The cursor is the destination END and moves backwards, so it finishes at the start of the constructed range.
 template <class T>
 constexpr void move_create_objects_to_reverse(T*& dest_start, T* src_start, T* src_end)
 {
@@ -193,25 +154,18 @@ constexpr void move_create_objects_to_reverse(T*& dest_start, T* src_start, T* s
     }
 }
 
-/// Compacts objects by moving [src_start, src_end) to [dest_start, ...) within the same allocation.
-/// Designed for removal operations where dest_start < src_start (moving elements backward to close a gap).
-/// PRECONDITIONS:
-///   - dest_start < src_start (target is before source, eliminating possibility of forward overlap issues)
-///   - Both ranges are within the same allocation
-///   - All objects in [dest_start, dest_start + (src_end - src_start)) are alive (will be overwritten)
-///   - All objects in [src_start, src_end) are alive (will be moved-from)
-/// POSTCONDITIONS:
-///   - Objects in [dest_start, dest_start + (src_end - src_start)) contain moved values
-///   - Objects in [src_start, src_end) are in moved-from state (still alive, must be destroyed separately)
-/// Uses forward iteration which is safe since dest_start < src_start.
-/// Trivially copyable types are optimized to use memmove (which handles all overlaps correctly).
-/// Empty ranges (src_start == src_end) are valid and result in a no-op.
+/// Compacts objects by moving [src_start, src_end) down to [dest_start, ...) within the same allocation, to close a gap left by a removal.
+/// Forward iteration is what makes this safe, and it is only safe because dest_start does not exceed src_start.
 ///
-/// Usage pattern (closing a gap after removal):
-///   // Remove element at idx from [obj_start, obj_end)
+/// PRECONDITIONS:
+///   - dest_start <= src_start, so the ranges cannot overlap forwards; equal ranges are legal and become a no-op memmove
+///   - both ranges lie in the same allocation
+///   - the objects in [dest_start, dest_start + (src_end - src_start)) are alive, and will be overwritten
+///   - the objects in [src_start, src_end) are alive, and will be moved from
+///
+/// The moved-from tail in [src_start, src_end) stays alive and must be destroyed separately:
+///
 ///   compact_move_objects_backward(obj_start + idx, obj_start + idx + 1, obj_end);
-///   // obj_start[idx] through obj_end[-2] now contain the compacted elements
-///   // obj_end[-1] is in moved-from state, destroy it
 ///   --obj_end;
 ///   obj_end->~T();
 template <class T>
@@ -244,18 +198,8 @@ constexpr void compact_move_objects_backward(T* dest_start, T* src_start, T* src
     }
 }
 
-/// Copy-assigns objects from [src_start, src_end) using copy assignment operator.
-/// dest_end is incremented for each successfully assigned object.
-/// IMPORTANT: Assumes the objects at [*dest_end, *dest_end + (src_end - src_start)) are already constructed (alive).
-/// If copy assignment throws, dest_end points to the element that threw (partially modified state).
-/// If no exception occurs, dest_end is updated to one past the last assigned object.
-/// Empty ranges (src_start == src_end) and nullptr are valid and result in a no-op.
-/// Trivially copyable types are optimized to use memcpy at compile time.
-///
-/// Usage pattern:
-///   auto obj_end = obj_start;
-///   copy_assign_objects_to(obj_end, src, src + count);
-///   // [obj_start, obj_end) is now the validly assigned range
+/// Copy-assigns the objects of [src_start, src_end) over the live objects at the cursor.
+/// A throw leaves the assigned-over elements in a partially modified state, not an invalid one.
 template <class T>
 constexpr void copy_assign_objects_to(T*& dest_end, T const* src_start, T const* src_end)
 {
@@ -282,17 +226,8 @@ constexpr void copy_assign_objects_to(T*& dest_end, T const* src_start, T const*
     }
 }
 
-/// Fill-assigns a count of objects by copy-assigning from a single value using copy assignment operator.
-/// dest_end is incremented for each successfully assigned object.
-/// IMPORTANT: Assumes the objects at [*dest_end, *dest_end + count) are already constructed (alive).
-/// If copy assignment throws, dest_end points to the element that threw (partially modified state).
-/// If no exception occurs, dest_end is updated to one past the last assigned object.
-/// count == 0 is valid and results in a no-op.
-///
-/// Usage pattern:
-///   auto obj_end = obj_start;
-///   fill_assign_objects_to(obj_end, count, value);
-///   // [obj_start, obj_end) is now the validly assigned range, each element a copy of value
+/// Copy-assigns `count` copies of `value` over the live objects at the cursor.
+/// A throw leaves the assigned-over elements in a partially modified state, not an invalid one.
 template <class T>
 constexpr void fill_assign_objects_to(T*& dest_end, isize count, T const& value)
 {

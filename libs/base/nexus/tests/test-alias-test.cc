@@ -15,8 +15,8 @@
 
 namespace
 {
-// Adds an invocable (inert) test to a local registry from a (possibly capturing) callable. Same helper as in
-// test-invocable-test.cc.
+// Adds an invocable (inert) test to a local registry from a possibly-capturing callable.
+// Same helper as in test-invocable-test.cc.
 template <class Fn>
 void add_invocable(nx::test_registry& reg, cc::string name, Fn fn, nx::config::cfg cfg = {})
 {
@@ -148,9 +148,9 @@ TEST("aliases - a multi-fragment alias runs each fragment scoped to its own driv
 
 TEST("aliases - many aliases of one driver collapse into a single scoped run")
 {
-    // The "sg -" case: one backend driver, several invocables, an alias per invocable. A filter matching the
-    // alias names (but NOT the driver name) must schedule the driver ONCE — with every matched path in its
-    // scope set — never once per alias. Aliases are pure filters, not additive schedule entries.
+    // The "sg -" case: one backend driver, several invocables, an alias per invocable.
+    // A filter matching the alias names but NOT the driver name must schedule the driver ONCE, with every matched path in its scope set, never once per alias.
+    // Aliases are pure filters, not additive schedule entries.
     int drv_runs = 0;
     int ran_a = 0;
     int ran_b = 0;
@@ -273,8 +273,8 @@ TEST("aliases - a broad filter over drivers and aliases runs each invocable once
 {
     int ran = 0;
 
-    // Shape of the sg case: two backend drivers + one shared invocable, and an alias per invocable. A filter
-    // ("sg") that hits both the driver names and the alias name must not run the invocable twice on a backend.
+    // Shape of the sg case: two backend drivers plus one shared invocable, and an alias per invocable.
+    // A filter ("sg") hitting both the driver names and the alias name must not run the invocable twice on a backend.
     nx::test_registry reg;
     add_invocable(reg, "sg thing",
                   [&](int)
@@ -353,13 +353,14 @@ TEST("aliases - a substring filter does not reach a manual driver through its al
     }
 }
 
-// --- callback path: NX_TEST_SETUP registers a global callback that run_setup_callbacks drives against a
-// registry. The callback below runs at real startup against the static registry (harmless: it only defines an
-// alias if its driver exists) and, in the test, against a local registry that provides that driver.
+// --- callback path: NX_TEST_SETUP registers a global callback that run_setup_callbacks drives against a registry.
+// The callback below runs at real startup against the static registry, harmlessly, since it only defines an alias if its driver exists.
+// In the test it runs against a local registry that provides that driver.
 
 TEST("aliases - alias-cb-driver")
 {
-    // A plain driver the callback below binds its alias to. Present in both the static and the local registry.
+    // A plain driver the callback below binds its alias to.
+    // Present in both the static and the local registry.
     CHECK(true);
 }
 

@@ -1,18 +1,16 @@
 // Manual throughput benchmark for string hashing.
 //
-// Compares the production byte-range hash (cc::make_hash_of_bytes, XXH3-64 — what cc::string and
-// cc::string_view hash through today) against a couple of hand-rolled "small string" hashers, across a
-// length sweep. The question it answers: does XXH3's fixed setup cost make it a poor default for the short
-// keys that dominate hash-table workloads, and where does the crossover sit?
+// Compares the production byte-range hash (cc::make_hash_of_bytes, XXH3-64 — what cc::string and cc::string_view hash through today)
+// against a couple of hand-rolled "small string" hashers, across a length sweep.
+// The question it answers: does XXH3's fixed setup cost make it a poor default for the short keys that dominate hash-table workloads, and where does the crossover sit?
 //
-// Measurement is GB/s while hashing a large corpus of *distinct* keys back to back — the hash-table insert/
-// lookup scenario, where every key is a cold, never-before-seen string. Both a cc::string_view corpus and a
-// cc::string corpus are measured: cc::string stores <= 39 bytes inline (SSO), so for short keys it also
-// exercises the small-string layout an actual map would hold.
+// Measurement is GB/s while hashing a large corpus of *distinct* keys back to back — the hash-table insert/lookup scenario, where every key is a cold, never-before-seen string.
+// Both a cc::string_view corpus and a cc::string corpus are measured.
+// cc::string stores <= 39 bytes inline (SSO), so for short keys it also exercises the small-string layout an actual map would hold.
 //
-// These are guide benchmarks (GUIDE_BENCHMARK): they print, never CHECK, and additionally record a few
-// representative throughput points via nx::guide for the PGO speedup report. Run them explicitly, e.g.
-// `uv run dev.py test --preset release-clang "bench-string-hash"`, or sweep: `<binary> --guide-benchmarks`.
+// The GUIDE_BENCHMARKs print and record a few representative throughput points via nx::guide for the PGO speedup report; they never CHECK.
+// The full length tables come from the manual sweeps at the bottom of this file.
+// Run them explicitly, e.g. `uv run dev.py test --preset release-clang "bench-string-hash"`, or sweep with `<binary> --guide-benchmarks`.
 
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
@@ -41,7 +39,8 @@ u64 hash_xxh3(char const* p, size_t n)
     return cc::make_hash_of_bytes(cc::span<byte const>(reinterpret_cast<byte const*>(p), isize(n)));
 }
 
-// Classic FNV-1a: one multiply per byte. Trivial setup, but byte-at-a-time hurts on longer keys.
+// Classic FNV-1a: one multiply per byte.
+// Trivial setup, but byte-at-a-time hurts on longer keys.
 u64 hash_fnv1a(char const* p, size_t n)
 {
     u64 h = 0xcbf29ce484222325ull;
@@ -50,10 +49,10 @@ u64 hash_fnv1a(char const* p, size_t n)
     return h;
 }
 
-// Word-at-a-time multiply/xor mixer — the kind of cheap hash a hash table might use for short keys: almost no
-// fixed setup, processes 8 bytes per step. The tail uses overlapping fixed-size reads (wyhash-style) so it
-// never falls back to a variable-length std::memcpy, which compiles to a slow libc call. Not a vetted hash,
-// just a competent speed foil for the small-string regime.
+// Word-at-a-time multiply/xor mixer — the kind of cheap hash a hash table might use for short keys.
+// Almost no fixed setup, and it processes 8 bytes per step.
+// The tail uses overlapping fixed-size reads (wyhash-style) so it never falls back to a variable-length std::memcpy, which compiles to a slow libc call.
+// Not a vetted hash, just a competent speed foil for the small-string regime.
 u64 hash_mul(char const* p, size_t n)
 {
     constexpr u64 k = 0xff51afd7ed558ccdull;
@@ -120,8 +119,8 @@ cc::vector<isize> make_lengths()
 }
 
 // --- corpus -----------------------------------------------------------------------------------------
-// A pile of distinct random keys of a fixed length, laid out back-to-back in one buffer. Both view and owning
-// representations point at the same content.
+// A pile of distinct random keys of a fixed length, laid out back-to-back in one buffer.
+// Both the view and the owning representation point at the same content.
 struct corpus
 {
     cc::vector<char> buffer;
@@ -158,8 +157,8 @@ corpus make_corpus(isize length, cc::random& rng)
 // --- timing -----------------------------------------------------------------------------------------
 u64 volatile g_sink = 0;
 
-// Hashes every key in `keys`, repeating the full pass until at least ~50 ms elapsed, and returns GB/s over the
-// bytes actually processed. `keys` is anything iterable whose elements expose .data()/.size().
+// Hashes every key in `keys`, repeating the full pass until at least ~50 ms elapsed, and returns GB/s over the bytes actually processed.
+// `keys` is anything iterable whose elements expose .data()/.size().
 template <class Keys, class Hasher>
 double measure_gbps(Keys const& keys, Hasher hasher)
 {
@@ -193,10 +192,10 @@ double measure_gbps(Keys const& keys, Hasher hasher)
     return total_bytes / seconds / 1e9;
 }
 
-// Sweeps `lengths`, printing one xxh3/fnv1a/mul row each. When `record`, the points nearest 8 B and 64 KiB
-// are reported as guide metrics — pass the representative-only lengths for a fast guide benchmark, or the full
-// sweep (record=false) for the human analysis table. Each length regenerates a multi-MB corpus, so a full
-// sweep is expensive; the guide path deliberately visits only the two recorded lengths.
+// Sweeps `lengths`, printing one xxh3/fnv1a/mul row each.
+// When `record`, the points nearest 8 B and 64 KiB are reported as guide metrics.
+// Pass the representative-only lengths for a fast guide benchmark, or the full sweep (record=false) for the human analysis table.
+// Each length regenerates a multi-MB corpus, so a full sweep is expensive; the guide path deliberately visits only the two recorded lengths.
 void run_sweep(char const* corpus_kind, bool use_strings, cc::span<isize const> lengths, bool record)
 {
     cc::random rng(0xC0FFEEu);
@@ -267,7 +266,8 @@ GUIDE_BENCHMARK("bench-string-hash (string)")
     run_sweep("string", true, guide_lengths, /*record*/ true);
 }
 
-// Full human-facing sweeps (manual): the complete length tables the docs analyze. Run by exact name.
+// Full human-facing sweeps (manual): the complete length tables the docs analyze.
+// Run by exact name.
 TEST("bench-string-hash (string_view, full sweep)", nx::config::manual)
 {
     run_sweep("string_view", false, make_lengths(), /*record*/ false);

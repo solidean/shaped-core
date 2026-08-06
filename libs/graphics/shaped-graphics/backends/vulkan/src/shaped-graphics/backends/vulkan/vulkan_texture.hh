@@ -2,13 +2,13 @@
 
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::backend::vulkan
 {
-/// Vulkan implementation of sg::raw_texture. Holds the VkImage and its backing device-local
-/// VkDeviceMemory (dedicated allocation). Minimal: no per-command-list layout tracking yet — a texture
-/// is creatable but not usable in command lists until layout transitions land.
+/// Vulkan implementation of sg::raw_texture.
+/// Holds the VkImage and its backing device-local VkDeviceMemory, always a dedicated allocation.
+/// There is no layout tracking yet, so a texture is creatable but unusable in a command list until layout transitions land.
 class vulkan_texture final : public sg::raw_texture
 {
 public:
@@ -21,8 +21,9 @@ public:
     {
     }
 
-    // Deferred deletion: hands the GPU handles + finalizers to the context, freed once the owning epoch
-    // retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
+    // Deferred deletion: hands the GPU handles and finalizers to the context, freed once the owning epoch retires.
+    // Freeing them here could pull memory out from under a GPU still reading them.
+    // Body in vulkan_texture.cc.
     ~vulkan_texture() override;
 
     vulkan_context& _ctx;      // creating context — outlives this texture

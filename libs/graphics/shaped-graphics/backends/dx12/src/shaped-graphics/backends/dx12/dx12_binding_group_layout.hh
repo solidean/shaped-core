@@ -5,16 +5,15 @@
 #include <clean-core/error/result.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
-#include <shaped-graphics/binding.hh>
-#include <shaped-graphics/binding_group_layout.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
 
 namespace sg::backend::dx12
 {
-/// dx12 binding_group_layout: one group's descriptor-table schema — a CBV/SRV/UAV table (one range per
-/// resource-view binding) and a SAMPLER table (one range per *dynamic* sampler binding) — plus any
-/// *static* sampler descs baked from this group's bindings. It is NOT a root signature; a dx12_pipeline_layout
-/// composes one or more of these into the root signature and assigns each a root-parameter slot. Keeps the
-/// reflected view/sampler bindings and their table offsets so a binding_group can place and validate descriptors.
+/// dx12 binding_group_layout: one group's descriptor-table schema.
+/// That is a CBV/SRV/UAV table (one range per resource-view binding) and a SAMPLER table (one range per *dynamic* sampler binding), plus any *static* sampler descs baked from this group's bindings.
+/// It is NOT a root signature: a dx12_pipeline_layout composes one or more of these into the root signature and assigns each a root-parameter slot.
+/// Keeps the reflected view/sampler bindings and their table offsets, so a binding_group can place and validate descriptors.
 class dx12_binding_group_layout final : public sg::binding_group_layout
 {
 public:
@@ -37,9 +36,8 @@ public:
     cc::vector<slot> sampler_slots;   // dynamic sampler bindings, in declaration order
     int sampler_descriptor_count = 0; // descriptors the SAMPLER table holds
 
-    // Descriptor ranges (in this group's table space) + static sampler descs — assembled into the root
-    // signature by dx12_pipeline_layout. The range vectors must outlive its serialization (the pipeline
-    // layout holds this group layout alive, so they do).
+    // Descriptor ranges, in this group's table space, plus static sampler descs — assembled into the root signature by dx12_pipeline_layout.
+    // The range vectors must outlive its serialization, which the pipeline layout holding this group layout alive guarantees.
     cc::vector<D3D12_DESCRIPTOR_RANGE> view_ranges;
     cc::vector<D3D12_DESCRIPTOR_RANGE> sampler_ranges;
     cc::vector<D3D12_STATIC_SAMPLER_DESC> static_sampler_descs;

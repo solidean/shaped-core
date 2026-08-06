@@ -1,10 +1,7 @@
 """Target discovery via the CMake File API (codemodel-v2).
 
-We ask CMake to emit a codemodel by writing an empty query file before
-configure; after configure the reply describes every target, its type, and the
-real paths of its built artifacts. This is generator-agnostic and needs no
-project-specific knowledge (no `bin/` assumption, no name globbing) — it is the
-authoritative source for "what got built and where".
+An empty query file written before configure makes CMake emit a codemodel; after configure the reply describes every target, its type, and the real paths of its built artifacts.
+That is generator-agnostic and needs no project-specific knowledge — no `bin/` assumption, no name globbing — which makes it the authoritative source for what got built and where.
 """
 
 from __future__ import annotations
@@ -88,10 +85,9 @@ def _primary_artifact(target_data: dict, build_dir: Path) -> Path | None:
 def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
     """Map each target name to its raw File API target JSON for the build.
 
-    This is the authoritative per-target description (compile groups, link
-    fragments, sources, artifacts). `discover_targets` is the summarized view on
-    top of it; callers that need the full detail (e.g. flag inspection) take the
-    raw dict. First definition wins on duplicate names, matching discovery.
+    The authoritative per-target description: compile groups, link fragments, sources, artifacts.
+    `discover_targets` is the summarized view on top of it, and a caller needing the full detail — flag inspection, say — takes the raw dict.
+    First definition wins on a duplicate name, matching discovery.
     """
     index = _load_index(build_dir)
     codemodel_path = _codemodel_file(build_dir, index)
@@ -140,16 +136,15 @@ def select_test_binaries(
 ) -> tuple[list[str], str | None, str | None]:
     """Pick which test binaries to run and the optional test-name filter.
 
-    Three modes, in order: `wanted_names` (from --target) selects matching
-    test binaries, keeping `name_arg` as a test-name filter across them; a
-    `name_arg` that names a test binary runs just that one; otherwise `name_arg`
-    is a name filter applied across every `is_test` binary. Returns
-    `(binary_names, test_name, error)` — `error` is a message string when nothing
-    matched (the caller decides how to surface it), else None.
+    Three modes, in order.
+    `wanted_names` (from --target) selects matching test binaries, keeping `name_arg` as a test-name filter across them.
+    A `name_arg` that names a test binary runs just that one.
+    Otherwise `name_arg` is a name filter applied across every `is_test` binary.
 
-    Both name lookups are restricted to `is_test` binaries: the repo also builds
-    non-test executables (tools/), and running one as a test would just feed it
-    `--junit-xml` and report the resulting usage error as a test failure.
+    Returns `(binary_names, test_name, error)`, where `error` is a message string when nothing matched and None otherwise; the caller decides how to surface it.
+
+    Both name lookups are restricted to `is_test` binaries.
+    The repo also builds non-test executables under tools/, and running one as a test would just feed it `--junit-xml` and report the resulting usage error as a test failure.
     """
     test_targets = [t for t in all_targets if is_test(t)]
 

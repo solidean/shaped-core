@@ -4,25 +4,23 @@
 
 /// Object trait seam for typed-geometry's geometric primitives.
 ///
-/// Every geometric object in tg denotes a **set of points** in some surrounding space. The query
-/// layer (containment, distance, intersection, …) is phrased uniformly against that set, so each
-/// object only has to declare which set it represents — the representation is just the encoding.
-/// That declaration lives in tg::object_traits<ObjT>, a primary template each object type
-/// specializes in its own header (colocated with the type).
+/// Every geometric object in tg denotes a **set of points** in some surrounding space.
+/// The query layer — containment, distance, intersection — is phrased uniformly against that set, so an object only has to declare which set it represents.
+/// The representation is just the encoding of that set.
+/// The declaration lives in tg::object_traits<ObjT>, a primary template each object type specializes in its own header, colocated with the type.
 ///
 /// Three facts describe the set:
 ///
-///   - ambient_dim   — the dimension of the space the points live in (a triangle with 3D coords
-///                     has ambient_dim = 3).
-///   - intrinsic_dim — the dimension of the set itself as a manifold (a triangle is a 2D surface
-///                     patch regardless of the ambient space, so intrinsic_dim = 2). Always
-///                     <= ambient_dim; a hyperplane has intrinsic_dim = ambient_dim - 1.
-///   - is_finite     — whether the set is bounded. A triangle/segment/aabb is finite; a
-///                     ray/line/plane extends to infinity.
+///   - ambient_dim   — the dimension of the space the points live in.
+///                     A triangle with 3D coordinates has ambient_dim = 3.
+///   - intrinsic_dim — the dimension of the set itself as a manifold.
+///                     A triangle is a 2D surface patch regardless of the ambient space, so intrinsic_dim = 2.
+///                     Always <= ambient_dim, and a hyperplane has intrinsic_dim = ambient_dim - 1.
+///   - is_finite     — whether the set is bounded.
+///                     A triangle/segment/aabb is finite; a ray/line/plane extends to infinity.
 ///
-/// Representation is not interpretation: two objects may share an encoding yet denote different
-/// sets. A plane stores {normal, dist} and denotes the points *on* the hyperplane; a future
-/// halfspace will reuse the very same {normal, dist} but denote the points on one *side* of it.
+/// Representation is not interpretation: two objects may share an encoding yet denote different sets.
+/// A plane stores {normal, dist} and denotes the points *on* the hyperplane, while a future halfspace will reuse the very same {normal, dist} for the points on one *side* of it.
 ///
 /// To teach tg about a new object type, specialize tg::object_traits for it next to the type:
 ///

@@ -1,15 +1,15 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
-#include <shaped-graphics/command_list.hh>
-#include <shaped-graphics/context.hh>
-#include <shaped-graphics/raw_buffer.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic device→device buffer copy (cmd.copy) over the public sg API, run against every available
-// backend (see tests/context/context-test.cc for the invocable/alias mechanism).
+// Backend-agnostic device→device buffer copy (cmd.copy) over the public sg API.
+// Run against every available backend — see tests/context/context-test.cc for the invocable/alias mechanism.
 
 namespace
 {

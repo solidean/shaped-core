@@ -9,42 +9,15 @@
 
 // The lint corpus: a rule's breadth coverage written as an ordinary, readable markdown file.
 //
-// A corpus file is normal prose with C++ code blocks; the checks ride on each fence's info string:
+// A corpus file is normal prose with C++ code blocks, and the expectations ride on each fence's info string:
 //
 //   ```cpp [default-init-assignment] fix=" = {}"
 //   struct S { int value{}; };
 //   ```
 //
-//   ```cpp ~[default-init-assignment]
-//   void f() { g({1, 2}); }
-//   ```
-//
-//   [rule-id]   the rule must produce one finding here (repeat the annotation for N findings)
-//   ~[rule-id]  the rule must produce NO finding here
-//   fix="…"     one replacement text the PRECEDING rule produces; chain it for more
-//   hint="…"    the same, for a rewrite `--fix` does not apply (see `struct hint`)
-//   path="…"    the file name this block is linted as, for a rule that reads it (default `<memory>`)
-//
-// Inside a quoted value `\n` / `\t` / `\r` are the real characters, so a replacement that splices in a
-// whole line is still spellable on the single line a fence info string gets; any other `\x` is just `x`,
-// which is how `\"` and `\\` work.
-//
-// `path=` describes the BLOCK, not a rule, so it stands on its own and may appear anywhere in the info
-// string — at most once. Give it a name a real file could have (`x.cc`, `x.hh`): a rule that distinguishes
-// a header from a translation unit sees only the extension, never the contents.
-//
-// `fix=` binds to the annotation in front of it, and all fixes written for one rule form a SET: the
-// replacements that rule actually produced — over all its findings, all their edits, duplicates merged —
-// must equal that set exactly. Naming no fix for a rule leaves its fixes unchecked; naming one means
-// naming them all. Because it is a set, `[r] fix="a" [r] fix="b"` and `[r] [r] fix="a" fix="b"` are the
-// same pin, and order does not matter. Finding COUNTS come from the `[rule-id]` annotations alone.
-//
-// `hint=` is the same pin over the same rule's hint edits, tracked separately: a block may name only its
-// fixes, only its hints, or both. A hint that carries prose and no edit contributes nothing to that set,
-// so its wording is pinned by the rule's smoke test rather than here.
-//
-// A `cpp` block with no annotation, and any non-`cpp` block, is illustration and is not checked.
-// See ../../docs/coding-guidelines.md for which cases belong here rather than in a rule's smoke tests.
+// The annotation spellings, the escape rules, the set semantics of `fix=` / `hint=` and the `path=` language dispatch are all specified in
+// ../../docs/coding-guidelines.md, section "The corpus format" — which also says which cases belong in a corpus rather than in a rule's smoke tests.
+// The types below are the parse of exactly that format.
 
 namespace scl
 {
@@ -68,17 +41,17 @@ struct lint_corpus_case
     cc::vector<lint_corpus_expectation> expect; // in annotation order
 };
 
-/// Every case in one corpus file. This is the invocable key type — a struct, never a bare primitive,
-/// so `nx::invoke_tests` matches it unambiguously.
+/// Every case in one corpus file.
+/// This is the invocable key type — a struct, never a bare primitive, so `nx::invoke_tests` matches it unambiguously.
 struct lint_corpus_group
 {
     cc::string path; // relative to the corpus root, e.g. "default_init_assignment.md"
     cc::vector<lint_corpus_case> cases;
-    isize skipped = 0; // unannotated code blocks, reported so silent skipping stays visible
+    isize skipped = 0; // unannotated lintable blocks; counted here, but nothing reads it yet
 };
 
-/// Parse an already-loaded corpus file. Fails on a malformed annotation — a typo must not read as
-/// "no expectations".
+/// Parse an already-loaded corpus file.
+/// Fails on a malformed annotation, because a typo must not read as "no expectations".
 cc::result<lint_corpus_group> parse_lint_corpus(cc::string_view text, cc::string_view relative_path);
 
 /// Read and parse a corpus file from disk.

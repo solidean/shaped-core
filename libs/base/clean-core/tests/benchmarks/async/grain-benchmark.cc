@@ -5,32 +5,28 @@
 
 // cc::async_thread_pool grain sweep — at what leaf size does fork-join overhead stop dominating?
 //
-// pool-benchmark.cc pins one grain per case (8192) and sweeps worker count: it answers "does it scale" but by
-// construction never shows the region that grain was chosen to avoid. At 8192 elements per leaf, per-node
-// scheduling cost is ~1/8192 of the leaf and simply invisible. This file sweeps the other axis — grain and n,
-// both 1..8192 / 1..2^20 by powers of two, at a single P-worker pool — so that cost IS the measurement.
+// pool-benchmark.cc pins one grain per case -- 8192 for parallel-for and reduction, 1024, 4096 and 65536 for the others -- and sweeps worker count.
+// So it answers "does it scale", but by construction never shows the region those grains were chosen to avoid.
+// At 8192 elements per leaf, per-node scheduling cost is ~1/8192 of the leaf and simply invisible.
+// This file sweeps the other axis -- grain and n, both by powers of two, on one default-sized pool -- so that cost IS the measurement.
 //
-// Read the output as ns per INPUT element. For leaf work costing X ns/elem and per-node scheduling cost C, a
-// grain-g bisection lands near X + C/g. So each grain line is flat where n is large (overhead amortized) and
-// rises toward small n (the blocking_get round-trip spread over too few elements), and the vertical spread
-// between lines at a fixed n is C/g — the thing this file exists to show.
+// How to read the output, and the fork floor its small-n end runs into, are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
 // Three constraints that are not obvious and will quietly corrupt the numbers if broken:
 //
-// * `mix` must not be affine. pool-benchmark.cc used eight rounds of `x = x*a + b` and clang composed all
-//   eight into a single imul+add, quietly turning its leaves into a memory-bandwidth streamer instead of the
-//   compute-bound work they were meant to be (it has since been fixed the same way). The xor-shift/multiply
-//   finalizer below is not affine over Z_2^32 and cannot collapse that way.
-// * The grain is a namespace-scope global, NOT a capture. A two-child frame already captures exactly
-//   span(16) + two shared_async(8+8) = the node's whole 32 B inline slot; one more member spills it into a
-//   heap-boxed cc::unique_function, which puts an allocation in every task and makes this a benchmark of
-//   malloc. It is written on the driving thread before the root is submitted and only read afterwards, so the
-//   pool's own submit/steal synchronization publishes it.
-// * One pool for the entire sweep. Constructing one is ~100 us of thread spawning; per-point construction
-//   would land inside measure_units_per_sec's adaptive loop and dominate every short pass.
+// * `mix` must not be affine.
+//   A chain of `x = x*a + b` rounds collapses into a single multiply-add, which turns the leaves into a
+//   memory-bandwidth streamer instead of the compute-bound work they are meant to be.
+//   The xor-shift/multiply finalizer below is not affine over Z_2^32 and cannot collapse that way.
+// * The grain is a namespace-scope global, NOT a capture.
+//   A two-child frame already captures exactly span(16) + two shared_async(8+8), which is the node's whole 32 B inline slot.
+//   One more member spills it into a heap-boxed cc::unique_function, putting an allocation in every task and making this a benchmark of malloc.
+//   It is written on the driving thread before the root is submitted and only read afterwards, so the pool's own submit/steal synchronization publishes it.
+// * One pool for the entire sweep.
+//   Constructing one is ~100 us of thread spawning, and per-point construction would land inside measure_units_per_sec's adaptive loop and dominate every short pass.
 //
-// Only grain <= n is measured: a grain above n never splits, so those points would all duplicate the
-// single-leaf curve. Each grain line therefore starts at x == grain.
+// Only grain <= n is measured: a grain above n never splits, so those points would all duplicate the single-leaf curve.
+// Each grain line therefore starts at x == grain.
 
 #include "../bench_util.hh"
 
@@ -53,9 +49,9 @@ using cc::u64;
 
 namespace
 {
-// make_async_lazy<i64>, but pinning the frame to the node's inline slot first. Mirrors
-// async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here — if that
-// budget ever changes, this assert is what will (loudly) notice.
+// make_async_lazy<i64>, but pinning the frame to the node's inline slot first.
+// Mirrors async_node_base::frame_fits_inline (async_node.hh), which is protected and so cannot be named here.
+// If that budget ever changes, this assert is what will loudly notice.
 template <class F>
 [[nodiscard]] cc::shared_async<i64> spawn(F&& f)
 {
@@ -72,8 +68,8 @@ template <class F>
 constexpr isize max_n = 1 << 20;
 constexpr isize max_grain = 1 << 13;
 
-// The fork-floor sweep (run_fork_floor) reuses everything above on a much smaller n, at grain 1. Capped at 8
-// workers: the floor's structure is all at the low end, and the full P sweep is minutes of 50 ms passes.
+// The fork-floor sweep (run_fork_floor) reuses everything above on a much smaller n, at grain 1.
+// Capped at 8 workers: the floor's structure is all at the low end, and the full P sweep is minutes of 50 ms passes.
 constexpr isize floor_max_n = 32;
 constexpr int floor_max_workers = 8;
 
@@ -82,9 +78,8 @@ isize g_grain = 1;
 
 // --- leaf work -------------------------------------------------------------------------------------------
 
-// lowbias32 (Chris Wellons' hash-prospector search): xor-shift/multiply, so it is not an affine map over
-// Z_2^32 and cannot be folded into one multiply-add the way a chain of LCG steps can. Cheap on purpose —
-// heavy leaf work would bury the per-node cost this file is trying to expose.
+// lowbias32 (Chris Wellons' hash-prospector search): xor-shift/multiply, so it is not an affine map over Z_2^32 and cannot be folded into one multiply-add the way a chain of LCG steps can.
+// Cheap on purpose — heavy leaf work would bury the per-node cost this file is trying to expose.
 CC_FORCE_INLINE i32 mix(i32 x)
 {
     u32 h = u32(x);
@@ -111,10 +106,9 @@ CC_FORCE_INLINE i64 sum_range(cc::span<i32 const> d)
 }
 
 // --- async fork-join graphs ------------------------------------------------------------------------------
-// Raw two-phase frames, same shape as pool-benchmark.cc: on the first poll either do the leaf work inline or
-// spawn both children and park; on the re-poll, join. `l == nullptr` is the "have I spawned yet" test — using
-// it instead of a step counter is what keeps these frames inside the 32 B inline slot. The children are
-// captured, which is what keeps them alive: the pending-dependency list does not own anything.
+// Raw two-phase frames, same shape as pool-benchmark.cc: on the first poll either do the leaf work inline or spawn both children and park; on the re-poll, join.
+// `l == nullptr` is the "have I spawned yet" test, and using it instead of a step counter is what keeps these frames inside the 32 B inline slot.
+// The children are captured, which is what keeps them alive -- the pending-dependency list does not own anything.
 
 cc::shared_async<i64> async_pfor(cc::span<i32> d)
 {
@@ -175,8 +169,8 @@ cc::vector<i32> make_random(isize n)
     return v;
 }
 
-// One CSV row per (case, n, grain), prefixed so it survives whatever else lands on stdout — grain-plot.py
-// greps for the marker rather than trying to bound a table. Flushed per row so a long sweep shows progress.
+// One CSV row per (case, n, grain), prefixed so it survives whatever else lands on stdout -- grain-plot.py greps for the marker rather than trying to bound a table.
+// Flushed per row so a long sweep shows progress.
 void emit(char const* name, isize n, isize grain, double ns_per_elem)
 {
     std::printf("GRAINCSV %s,%lld,%lld,%.6f\n", name, (long long)n, (long long)grain, ns_per_elem);
@@ -237,16 +231,15 @@ void run_all()
 
 // The fork floor: what does the SECOND thread cost?
 //
-// The grain sweep's total-time view says an un-split single node costs ~0.3 us, but a graph that forks even
-// once jumps to ~11 us and stays on that plateau out to ~2^12 elements. That plateau, not per-node cost, is
-// what makes small graphs expensive. It should be the pool waking a worker to take a published sibling.
+// The grain sweep's total-time view shows a graph that forks even once jumping to a plateau far above an un-split single node, and holding it out to a few thousand elements.
+// That plateau, not per-node cost, is what makes small graphs expensive, and it should be the pool waking a worker to take a published sibling.
 //
 // This sweeps the two axes that tell those apart, at grain 1 so every element is its own node:
-//   pool size 1..8 — a FIXED handoff cost stays flat here; a contention effect grows.
+//   pool size 1..8 — a FIXED handoff cost stays flat here, whereas a contention effect grows.
 //   n 1..32        — how the floor amortizes as the graph gets real work to do.
 //
-// Read the w=1 line first: one worker plus the participating caller is the minimum fork, so it is the floor's
-// floor. Anything above it that grows with w is the pool getting in its own way.
+// Read the w=1 line first: one worker plus the participating caller is the minimum fork, so it is the floor's floor.
+// Anything above it that grows with w is the pool getting in its own way.
 void run_fork_floor()
 {
     int const p = cc::num_hardware_threads();
@@ -283,11 +276,10 @@ void run_fork_floor()
     std::fflush(stdout);
 }
 
-// Why every grain line in the sweep converges to the same ~21 us at n == 1: that is not per-node cost (a node
-// is ~50-100 ns inline), it is the foreign-thread round trip — submit, wake a worker, run, wake the caller.
-// Sweeping the worker count separates the two candidate explanations, which is the whole point of the probe:
-// two context switches would be a constant, whereas contention on the shared injection mutex grows with the
-// number of idle workers scanning it.
+// Why every grain line in the sweep converges on the same cost at small n: that is not per-node cost, since a node is ~50-100 ns inline.
+// It is the foreign-thread round trip -- submit, wake a worker, run, wake the caller.
+// Sweeping the worker count separates the two candidate explanations, which is the whole point of the probe.
+// Two context switches would be a constant, whereas contention on the shared injection mutex grows with the number of idle workers scanning it.
 void run_latency()
 {
     std::printf("\n=== blocking_get round-trip, one trivial node (median of 5) ===\n");
@@ -315,8 +307,9 @@ void run_latency()
 }
 } // namespace
 
-// Grain x size sweep for parallel-for and reduction. ~5 minutes, so --timeout 0 is not optional: dev.py kills
-// a test binary at 60 s by default and would cut the table off mid-sweep. Run by exact name:
+// Grain x size sweep for parallel-for and reduction.
+// ~5 minutes, so --timeout 0 is not optional: dev.py kills a test binary at 60 s by default and would cut the table off mid-sweep.
+// Run by exact name:
 //   uv run dev.py --mirror-test-output test "bench-async-grain (sweep)" --preset release-clang --timeout 0
 // or let grain-plot.py drive it and chart the result.
 TEST("bench-async-grain (sweep)", nx::config::manual)
@@ -324,16 +317,16 @@ TEST("bench-async-grain (sweep)", nx::config::manual)
     run_all();
 }
 
-// The floor every grain line in the sweep hits at small n, isolated. Run by exact name:
-//   uv run dev.py --mirror-test-output test "bench-async-latency (round-trip)" --preset release-clang
+// The floor every grain line in the sweep hits at small n, isolated.
+// Run by exact name:
 TEST("bench-async-latency (round-trip)", nx::config::manual)
 {
     run_latency();
 }
 
-// Does the fork floor scale with pool size? ~4 min, so --timeout 0 again. Run by exact name:
-//   uv run dev.py --mirror-test-output test "bench-async-fork-floor (thread sweep)" --preset release-clang --timeout 0
-// or let fork-floor-plot.py drive it and chart the result.
+// Does the fork floor scale with pool size?
+// ~4 min, so --timeout 0 again.
+// Run by exact name:
 TEST("bench-async-fork-floor (thread sweep)", nx::config::manual)
 {
     run_fork_floor();

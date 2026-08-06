@@ -9,10 +9,9 @@
 
 namespace sg::backend::dx12
 {
-/// A command allocator tagged with the queue type it was created for. The type is fixed at creation
-/// (D3D12 requires the allocator's type to match the lists recorded onto it), so it must be routed
-/// back to that queue's free pool. Allocators can only be reset once every list sourced from them
-/// has finished on the GPU — hence they are epoch-gated.
+/// A command allocator tagged with the queue type it was created for.
+/// The type is fixed at creation — D3D12 requires it to match the lists recorded onto it — so the allocator must be routed back to that queue's free pool.
+/// An allocator can only be reset once every list sourced from it has finished on the GPU, which is why it is epoch-gated.
 struct dx12_pooled_allocator
 {
     ComPtr<ID3D12CommandAllocator> allocator;
@@ -28,56 +27,54 @@ struct dx12_acquired_command_list
 
 /// Pools command allocators and command lists for reuse, partitioned per queue type.
 ///
-/// Allocators and lists have different lifetimes: an allocator's memory backs GPU execution, so it is
-/// epoch-gated — held in-flight until the epoch that submitted it retires, then reset and reused. A
-/// command list can be reset (onto a fresh, GPU-safe allocator) while its own previous submission is
-/// still executing, so lists return to the pool immediately and are never epoch-gated. Reusing a list
-/// avoids the per-list CreateCommandList cost, which dominates command-list creation.
+/// Allocators and lists have different lifetimes.
+/// An allocator's memory backs GPU execution, so it is epoch-gated: held in-flight until the epoch that submitted it retires, then reset and reused.
+/// A command list can be reset onto a fresh, GPU-safe allocator while its own previous submission is still executing.
+/// So lists return to the pool immediately and are never epoch-gated.
 ///
-/// Thread-safe: create / submit / drop run concurrently. Each queue has its own mutex so recording on
-/// different queues never contends.
+/// Thread-safe: create / submit / drop run concurrently.
+/// Each queue has its own mutex, so recording on different queues never contends.
 class dx12_command_allocator_pool
 {
 public:
     explicit dx12_command_allocator_pool(dx12_context& ctx) : _ctx(ctx) {}
 
-    /// Acquires an allocator plus an open, recording command list for `queue`. Both are reused from
-    /// the pool when available (allocator reset, list reset onto it), else freshly created.
+    /// Acquires an allocator plus an open, recording command list for `queue`.
+    /// Both are reused from the pool when available — allocator reset, list reset onto it — else freshly created.
     [[nodiscard]] cc::result<dx12_acquired_command_list> acquire_command_list(D3D12_COMMAND_LIST_TYPE queue);
 
-    /// Returns a submitted list's allocator: held in-flight until the current epoch retires, then
-    /// reset and reused. Not reset here — it may still back GPU work.
+    /// Returns a submitted list's allocator: held in-flight until the current epoch retires, then reset and reused.
+    /// Not reset here, since it may still back GPU work.
     void return_submitted_allocator(dx12_pooled_allocator allocator);
 
-    /// Returns a never-submitted allocator straight to the free pool (the GPU never touched it; the
-    /// reset happens at the next acquire).
+    /// Returns a never-submitted allocator straight to the free pool; the GPU never touched it, and the reset happens at the next acquire.
     void return_free_allocator(dx12_pooled_allocator allocator);
 
-    /// Returns a CLOSED command list for reuse. The list is reset onto its next allocator at acquire,
-    /// so returning it while its previous submission is still in flight is legal.
+    /// Returns a CLOSED command list for reuse.
+    /// The list is reset onto its next allocator at acquire, so returning it while its previous submission is still in flight is legal.
     void return_command_list(D3D12_COMMAND_LIST_TYPE queue, ComPtr<ID3D12GraphicsCommandList> list);
 
-    /// Drains every allocator captured by this epoch's submissions across all queues, tagged with its
-    /// queue. Called at epoch advance; the caller stores the batch in the epoch payload and hands it
-    /// back to reclaim_allocators once the epoch's GPU work is done.
+    /// Drains every allocator captured by this epoch's submissions across all queues, each tagged with its queue.
+    /// Called at epoch advance.
+    /// The caller stores the batch in the epoch payload and hands it back to reclaim_allocators once the epoch's GPU work is done.
     [[nodiscard]] cc::vector<dx12_pooled_allocator> drain_in_epoch_allocators();
 
-    /// Resets finished allocators and returns them to their queue's free pool. Every list sourced from
-    /// them must have finished on the GPU (guaranteed by the epoch that owned them having retired).
+    /// Resets finished allocators and returns them to their queue's free pool.
+    /// Every list sourced from them must have finished on the GPU, which the owning epoch's retirement guarantees.
     void reclaim_allocators(cc::vector<dx12_pooled_allocator> allocators);
 
-    /// Drops all pooled allocators and lists. Call once the GPU is idle and no more work will arrive.
+    /// Drops all pooled allocators and lists.
+    /// Call once the GPU is idle and no more work will arrive.
     void shutdown();
 
-    // Introspection for tests and future stats.
+    // Introspection for tests.
     [[nodiscard]] isize free_allocator_count(D3D12_COMMAND_LIST_TYPE queue);
     [[nodiscard]] isize free_command_list_count(D3D12_COMMAND_LIST_TYPE queue);
 
 private:
     dx12_context& _ctx; // creating context — outlives this pool
 
-    // Indexes D3D12_COMMAND_LIST_TYPE directly: DIRECT=0, BUNDLE=1, COMPUTE=2, COPY=3, VIDEO_DECODE=4,
-    // VIDEO_PROCESS=5, VIDEO_ENCODE=6.
+    // Indexes D3D12_COMMAND_LIST_TYPE directly: DIRECT=0, BUNDLE=1, COMPUTE=2, COPY=3, VIDEO_DECODE=4, VIDEO_PROCESS=5, VIDEO_ENCODE=6.
     static constexpr int queue_count = 7;
     static_assert(D3D12_COMMAND_LIST_TYPE_DIRECT < queue_count, "not enough queue slots");
     static_assert(D3D12_COMMAND_LIST_TYPE_COMPUTE < queue_count, "not enough queue slots");

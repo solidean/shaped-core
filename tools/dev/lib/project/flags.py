@@ -1,10 +1,8 @@
 """Shape raw CMake File API target JSON into resolved compile/link flags.
 
-The File API target object (see targets.load_target_models) already separates a
-target's compile settings into `compileGroups` — one per distinct flag-set — and
-its link line into role-tagged fragments. This module turns that into the plain
-CompileGroup / TargetFlags data the `info` command prints. No I/O: callers pass
-the dict that targets.py loaded.
+The File API target object (see targets.load_target_models) already separates a target's compile settings into `compileGroups`, one per distinct flag-set, and its link line into role-tagged fragments.
+This module turns that into the plain CompileGroup / TargetFlags data the `info` command prints.
+No I/O: the caller passes the dict that targets.py loaded.
 """
 
 from __future__ import annotations

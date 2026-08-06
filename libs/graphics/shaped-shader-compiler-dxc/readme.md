@@ -1,11 +1,15 @@
 # shaped-shader-compiler-dxc
 
-A lean wrapper over the [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler)
-(DXC, `IDxcCompiler3`) that turns HLSL into an
-[`sg::compiled_shader`](../shaped-graphics/src/shaped-graphics/compiled_shader.hh) — bytecode plus the
-reflected bindings and compute workgroup size sg needs to build pipelines. Namespace `ssc::dxc`. Depends on
-**shaped-graphics** (and transitively typed-geometry + clean-core). Part of the
-[graphics family](../../../docs/graphics.md).
+A lean wrapper over the [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) (DXC, `IDxcCompiler3`).
+It turns HLSL into an [`sg::compiled_shader`](../shaped-graphics/src/shaped-graphics/binding/compiled_shader.hh): bytecode plus the reflected bindings sg builds pipelines from.
+Namespace `ssc::dxc`.
+Depends on **shaped-graphics** (and transitively typed-geometry + clean-core).
+Part of the [graphics family](../../../docs/graphics.md).
+
+Every `sg::shader_stage` compiles.
+Compute and the raster stages each target their own DXC profile — `cs_6_8`, `vs_6_8`, `ps_6_8`, and so on.
+The six ray-tracing stages target a single-entry DXIL library (`lib_6_x`), which needs shader model 6.3 or higher.
+Only compute carries a reflected workgroup size.
 
 **Windows-only** for now: it links DXC and uses the Windows SDK's `d3d12shader.h` reflection.
 
@@ -13,11 +17,11 @@ reflected bindings and compute workgroup size sg needs to build pipelines. Names
 
 Compilation is split so callers control include resolution and can cache the flattened source:
 
-1. **`preprocess`** — expand macros and inline `#include`s via a caller-supplied resolver
-   (`cc::function_ref<cc::optional<cc::string>(cc::string_view)>` — a virtual file system, no file I/O
-   baked in). Returns the flattened HLSL.
-2. **`compile`** — turn *already-preprocessed* source into an `sg::compiled_shader`. A stray `#include`
-   is rejected (the source is supposed to be flat by now).
+1. **`preprocess`** — expand macros and inline `#include`s via a caller-supplied resolver.
+   The resolver is a `cc::function_ref<cc::optional<cc::string>(cc::string_view)>`, so include resolution is a virtual file system with no file I/O baked in.
+   Returns the flattened HLSL.
+2. **`compile`** — turn *already-preprocessed* source into an `sg::compiled_shader`.
+   A stray `#include` is rejected: the source is supposed to be flat by now.
 
 ```cpp
 #include <shaped-shader-compiler-dxc/all.hh>
@@ -34,20 +38,18 @@ auto shader = comp.value().compile(desc);            // cc::result<sg::compiled_
 
 ## DXC is downloaded on demand
 
-DXC is neither vendored nor built from source (its from-source build is LLVM-scale, far too slow for
-CI). Instead [`extern/dxc/download-dxc.py`](../../../extern/dxc/download-dxc.py) fetches the pinned
-official release (`v1.9.2602.24`) for the host architecture, verifies its SHA-256, and extracts the
-`dxcompiler.dll` + import lib + headers (plus the `dxil.dll` signer) into a gitignored
-`extern/dxc/.install/`. The first Windows configure runs it (a few-second download); every configure
-after is a cheap pin-file check. Set `SC_SKIP_DXC=1` to skip it (the library is then left unbuilt).
+DXC is neither vendored nor built from source — its from-source build is LLVM-scale, far too slow for CI.
+Instead [`extern/dxc/download-dxc.py`](../../../extern/dxc/download-dxc.py) fetches the pinned official release (`v1.9.2602.24`) for the host architecture and verifies its SHA-256.
+It extracts the `dxcompiler.dll` + import lib + headers, plus the `dxil.dll` signer, into a gitignored `extern/dxc/.install/`.
+The first Windows configure runs it (a few-second download); every configure after is a cheap pin-file check.
+Set `SC_SKIP_DXC=1` to skip it — the library is then left unbuilt.
 
 The release ships `dxil.dll`, so emitted DXIL is **signed** and runs on dx12 without developer mode.
 `arm64` binaries are in the same release, so Windows ARM works too.
 
 ## Building & testing
 
-Build and test through the repo driver — never run the `shaped-shader-compiler-dxc-test` binary
-directly:
+Build and test through the repo driver — never run the `shaped-shader-compiler-dxc-test` binary directly:
 
 ```bash
 uv run dev.py test -t shaped-shader-compiler-dxc-test   # while iterating

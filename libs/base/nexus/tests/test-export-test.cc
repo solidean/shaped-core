@@ -10,8 +10,8 @@
 
 namespace
 {
-// A registry with one test per interesting axis: a plain normal test, a disabled test, and a manual-bucket
-// test. Used to exercise the eligibility predicates and the JSON listing.
+// A registry with one test per interesting axis: a plain normal test, a disabled test, and a manual-bucket test.
+// Used to exercise the eligibility predicates and the JSON listing.
 nx::test_registry make_axis_registry()
 {
     nx::test_registry reg;
@@ -89,8 +89,8 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
         CHECK(!cfg.would_run(alpha));
     }
 
-    // A SUBSTRING filter that happens to match a disabled test's name must NOT resurrect it — only an exact
-    // name (or the bulk run_disabled_tests flag) does. "et" is a substring of "beta" but not its whole name.
+    // A SUBSTRING filter that happens to match a disabled test's name must NOT resurrect it; only an exact name, or the bulk run_disabled_tests flag, does.
+    // "et" is a substring of "beta" but not its whole name.
     {
         char const* const args[] = {"prog", "et"};
         auto const cfg = config_from(args);
@@ -115,8 +115,8 @@ TEST("schedule - would_run honors buckets and disabled, name_matches ignores the
         CHECK(!cfg.would_run(alpha));
     }
 
-    // Explicit bucket mode: a name in another bucket matches by name but is excluded by the bucket gate — the
-    // "matched but wrong bucket" case the dev.py diagnostics explain. An exact name does not override a flag.
+    // Explicit bucket mode: a name in another bucket matches by name but is excluded by the bucket gate.
+    // That is the "matched but wrong bucket" case, and an exact name does not override a flag.
     {
         char const* const args[] = {"prog", "--guide-benchmarks", "alpha"};
         auto const cfg = config_from(args);

@@ -3,25 +3,26 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/string/print.hh>
-#include <shaped-graphics/backend/command_list_slot.hh>
-#include <shaped-graphics/backend/resource_access.hh>
-#include <shaped-graphics/backend/resource_access_state.hh>
-#include <shaped-graphics/backend/subresource.hh>
-#include <shaped-graphics/pixel_format.hh>
-#include <shaped-graphics/raw_texture.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
+#include <shaped-graphics/barrier/resource_access.hh>
+#include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/barrier/subresource_state.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/subresource.hh>
 
 namespace sg::backend::dx12
 {
-/// A barrier the tracker asks the command list to emit, scoped to a subresource range. dx12-internal —
-/// SG core never produces barriers; each backend owns its own tracking + emission.
+/// A barrier the tracker asks the command list to emit, scoped to a subresource range.
+/// dx12-internal: SG core never produces barriers, and each backend owns its own tracking and emission.
 struct dx12_subresource_barrier
 {
     sg::subresource_range range;
     sg::access_barrier barrier;
 };
 
-/// The subresource grid a texture's access state partitions: mip × array-slice × aspect-plane. A cube is
-/// 6 array slices per cube; a depth+stencil format has two aspect planes.
+/// The subresource grid a texture's access state partitions: mip × array-slice × aspect-plane.
+/// A cube is 6 array slices per cube; a depth+stencil format has two aspect planes.
 [[nodiscard]] inline sg::subresource_extent subresource_extent_of(sg::texture_description const& d)
 {
     int const layers = d.array_layers.value_or(1) * (d.is_cube ? 6 : 1);
@@ -32,8 +33,7 @@ struct dx12_subresource_barrier
     };
 }
 
-/// How two required layouts for one subresource-in-one-op combined: cleanly, into a slower fallback, or not
-/// at all (a hazard).
+/// How two required layouts for one subresource-in-one-op combined: cleanly, into a slower fallback, or not at all — a hazard.
 enum class layout_combine
 {
     ok,       ///< a single layout serves both (or they were equal) — no cost
@@ -47,13 +47,12 @@ struct combined_layout
     layout_combine result;
 };
 
-/// Combine the two layouts a subresource is required to be in within a single operation (a texture bound as
-/// more than one view). D3D12-specific policy: the only mismatch a compute binding group can legitimately
-/// produce is a texture bound as both a sampled (`shader_readonly`/SRV) and a storage
-/// (`shader_readwrite`/UAV) view — no specialized layout serves both an SRV and a UAV, so it falls back to
-/// COMMON (`general`) and reports `degraded` (sampling in COMMON is slower). `general` already serves any
-/// access, so combining with it is free. Anything else (a copy/render-target/depth layout mixed with a
-/// different one) is a real hazard and reports `conflict`.
+/// Combine the two layouts a subresource is required to be in within a single operation, i.e. a texture bound as more than one view.
+/// The policy is D3D12-specific.
+/// The only mismatch a compute binding group can legitimately produce is a texture bound as both a sampled (`shader_readonly`/SRV) and a storage (`shader_readwrite`/UAV) view.
+/// No specialized layout serves both an SRV and a UAV, so it falls back to COMMON (`general`) and reports `degraded`; sampling in COMMON is slower.
+/// `general` already serves any access, so combining with it is free.
+/// Anything else — a copy/render-target/depth layout mixed with a different one — is a real hazard and reports `conflict`.
 [[nodiscard]] inline combined_layout combine_layouts(sg::texture_layout a, sg::texture_layout b)
 {
     if (a == b)
@@ -70,28 +69,25 @@ struct combined_layout
     return {sg::texture_layout::general, layout_combine::conflict};
 }
 
-/// Per-texture, per-command-list access tracking — the dx12 realization of the covering-partition + slot
-/// model. Pure logic (no D3D12 objects) so it is unit-testable without a device; dx12_texture holds one
-/// under a mutex, the command list drives declare/finalize/discard and emits the returned barriers.
+/// Per-texture, per-command-list access tracking — the dx12 realization of the covering-partition + slot model.
+/// Pure logic, with no D3D12 objects, so it is unit-testable without a device.
+/// dx12_texture holds one under a mutex; the command list drives declare/finalize/discard and emits the returned barriers.
 ///
-/// Each open command list keys its private covering partition by its command_list_slot, seeded on first
-/// touch from `canonical` (the between-lists state). A per-texture `active_slot_count` tracks how many open
-/// lists are using it; the finalize that drops it to zero — the *last* such list — promotes that list's
-/// partition into `canonical` (the one case that may leave the texture in a new layout), and every earlier
-/// finalize restores the texture to the canonical layout for the lists still using it.
+/// Each open command list keys its private covering partition by its command_list_slot, seeded on first touch from `canonical`, the between-lists state.
+/// A per-texture `active_slot_count` tracks how many open lists are using it.
+/// The finalize that drops it to zero — the *last* such list — promotes that list's partition into `canonical`, the one case that may leave the texture in a new layout.
+/// Every earlier finalize restores the texture to the canonical layout for the lists still using it.
 class dx12_texture_access
 {
 public:
     explicit dx12_texture_access(sg::subresource_extent extent) : _canonical(extent) {}
 
-    /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` (seeding from canonical on
-    /// first touch) into the next-op state, without emitting anything. Call once per binding — a texture
-    /// bound several times to one op declares several times; `flush` then merges them per box. Thread-safe
-    /// via the owning dx12_texture's mutex.
+    /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state, seeding from canonical on first touch, without emitting anything.
+    /// Call once per binding — a texture bound several times to one op declares several times, and `flush` then merges them per box.
+    /// Thread-safe via the owning dx12_texture's mutex.
     ///
-    /// If a box is already declared for this op with a *different* layout (the texture is bound as more than
-    /// one view), the two are combined via `combine_layouts`: they may fall back to COMMON (`general`) with a
-    /// one-time perf warning, and a genuine conflict (e.g. copy-dest + sampled) asserts.
+    /// If a box is already declared for this op with a *different* layout — the texture bound as more than one view — the two are combined via `combine_layouts`.
+    /// They may fall back to COMMON (`general`) with a one-time perf warning, and a genuine conflict such as copy-dest plus sampled asserts.
     void declare(sg::command_list_slot slot,
                  sg::subresource_range range,
                  sg::pipeline_stage_flags stages,
@@ -125,9 +121,9 @@ public:
             });
     }
 
-    /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last
-    /// flush, false after. The command list uses it to enqueue the texture for the pre-op barrier flush
-    /// exactly once, no matter how many times it is bound. `flush` clears it.
+    /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last flush, false after.
+    /// Only valid on a slot that was declared (active), which is why it is only ever called right after declare.
+    /// `flush` clears it.
     [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot)
     {
         // Only ever called right after declare, so the slot exists and is active.
@@ -140,10 +136,10 @@ public:
         return true;
     }
 
-    /// Flush the accesses declared for `slot` since the last flush: for every subresource box with pending
-    /// work, roll it forward and collect the per-box barrier (empty = all freebies). Merges multiple declares
-    /// of the same box (a texture bound several times to one op) into one barrier. Call once per op, before
-    /// it, after all its bindings are declared. Only valid on a slot that was declared (active).
+    /// Flush the accesses declared for `slot` since the last flush: for every subresource box with pending work, roll it forward and collect the per-box barrier; empty means all freebies.
+    /// Merges multiple declares of the same box — a texture bound several times to one op — into one barrier.
+    /// Call once per op, before it, after all its bindings are declared.
+    /// Only valid on a slot that was declared (active).
     [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> flush(sg::command_list_slot slot)
     {
         int const i = int(slot);
@@ -164,17 +160,15 @@ public:
         return out;
     }
 
-    /// Finalize `slot` when its command list is submitted. Decrements this texture's `active_slot_count`; if
-    /// this was the **last** command list using the texture, its slot partition becomes the new canonical
-    /// (between-lists) state — the only case that may leave the texture in a new layout. Otherwise each
-    /// subresource whose layout diverged is transitioned back to the canonical layout (returning those
-    /// barriers), so the texture is handed back unchanged for the lists still using it. Clears the slot.
-    /// No-op if the list never touched this texture. Submit runs finalize + execute under one lock so
-    /// finalize order = execute order; the decision itself is per-texture, under this object's mutex.
+    /// Finalize `slot` when its command list is submitted, decrementing this texture's `active_slot_count`.
+    /// If this was the **last** command list using the texture, its slot partition becomes the new canonical (between-lists) state — the only case that may leave the texture in a new layout.
+    /// Otherwise each subresource whose layout diverged is transitioned back to the canonical layout, returning those barriers, so the texture is handed back unchanged for the lists still using it.
+    /// Clears the slot; only valid on a slot this list declared, so it is active.
+    /// Submit runs finalize + execute under one lock, so finalize order equals execute order; the decision itself is per-texture, under this object's mutex.
     [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize(sg::command_list_slot slot)
     {
-        // Only ever called for a texture this list actually touched (declare seeded the slot active and
-        // grew _slots), so the slot exists and is active — see the command list's submit/reclaim paths.
+        // Only ever called for a texture this list actually touched: declare seeded the slot active and grew _slots.
+        // So the slot exists and is active — see the command list's submit/reclaim paths.
         int const i = int(slot);
         CC_ASSERT(i < _slots.size() && _slots[i].active, "finalize of a texture this list never touched");
         auto& s = _slots[i];
@@ -190,8 +184,8 @@ public:
         return out;
     }
 
-    /// Discard `slot` when its command list is dropped: the recorded work never runs, so just drop this
-    /// texture's `active_slot_count` and clear the slot. No layout change — `canonical` is unchanged.
+    /// Discard `slot` when its command list is dropped: the recorded work never runs, so just drop this texture's `active_slot_count` and clear the slot.
+    /// No layout change — `canonical` is unchanged.
     void discard(sg::command_list_slot slot)
     {
         // Like finalize, only ever called for a texture this list touched (its slot is active).
@@ -202,9 +196,8 @@ public:
         _slots[i] = slot_state{};
     }
 
-    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false
-    /// after (until the slot is cleared by finalize/discard). The command list uses it to add the texture to
-    /// its touched set exactly once, in O(1) — replacing a linear scan.
+    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false after, until the slot is cleared by finalize/discard.
+    /// The command list uses it to add the texture to its touched set exactly once, in O(1), replacing a linear scan.
     [[nodiscard]] bool mark_recorded(sg::command_list_slot slot)
     {
         int const i = int(slot);
@@ -221,8 +214,8 @@ public:
 private:
     struct slot_state
     {
-        // subresource_partition's default ctor is explicit, so the initializer names the type: `= {}` is
-        // copy-list-init and would not pick it. Extent is set when the slot is seeded.
+        // subresource_partition's default ctor is explicit, so the initializer names the type; `= {}` is copy-list-init and would not pick it.
+        // Extent is set when the slot is seeded.
         sg::subresource_partition partition = sg::subresource_partition();
         bool active = false;
         bool recorded = false;        // this slot's command list has added the texture to its finalize set (dedup)
@@ -245,10 +238,9 @@ private:
         return s;
     }
 
-    // Restore each subresource box to the canonical layout: for every box in the canonical
-    // partition, transition the (possibly diverged) current layout back to it. While a list uses the
-    // texture its active_slot_count is >= 1, so no other list can promote it — canonical is stable across
-    // that list's lifetime, hence "the layout it entered with" and "the canonical layout" are the same.
+    // Restore each subresource box to the canonical layout: for every box in the canonical partition, transition the possibly diverged current layout back to it.
+    // While a list uses the texture its active_slot_count is >= 1, so no other list can promote it.
+    // Canonical is therefore stable across that list's lifetime, which makes "the layout it entered with" and "the canonical layout" the same.
     cc::small_vector<dx12_subresource_barrier, 4> revert_to_canonical(slot_state& s)
     {
         cc::small_vector<dx12_subresource_barrier, 4> out;

@@ -10,14 +10,12 @@ namespace tg
 {
 /// Displacement / direction vector in D dimensions.
 ///
-/// A vec is a free vector: it represents a difference between positions, a direction, or any quantity that adds component-wise.
-/// vec + vec -> vec and scaling are well-defined;
-/// see pos for the position type and its mixed pos/vec arithmetic.
+/// A vec is a free vector: a difference between positions, a direction, or any quantity that adds component-wise.
+/// vec + vec -> vec and scaling are well-defined; pos carries the position type and its mixed pos/vec arithmetic.
 ///
-/// The raw storage is the public C array member `data`.
-/// Components are accessed through `data` or operator[] — there are no .x/.y/.z members.
-/// Default construction zero-initializes all components.
-/// length()/normalized() are only available for scalar types whose scalar_traits declares has_sqrt (see scalar/traits.hh).
+/// Components live in the public array member `data`, reached through `data` or operator[] — there are no .x/.y/.z members.
+/// Default construction zero-initializes every component.
+/// length() and normalized() exist only for scalar types whose scalar_traits declares has_sqrt (scalar/traits.hh).
 ///
 ///     tg::vec3f a;                          // {0, 0, 0}
 ///     auto const b = tg::vec3f(1, 2, 2);    // {1, 2, 2}
@@ -122,8 +120,7 @@ public:
     }
 
     /// unit vector in the same direction; only for scalar types that support sqrt.
-    /// returns the zero vector if this vector has (near-)zero length, rather than asserting —
-    /// experience shows a hard assert here causes too many spurious failures.
+    /// returns the zero vector rather than asserting when traits::is_zero(length()) holds.
     [[nodiscard]] vec normalized() const
         requires(tg::traits::has_sqrt<T>)
     {

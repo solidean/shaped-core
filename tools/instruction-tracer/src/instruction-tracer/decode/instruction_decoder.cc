@@ -27,9 +27,9 @@ insn_category category_of(ZydisInstructionCategory category)
     }
 }
 
-/// A locked RMW. The `lock` prefix is the usual form, but `xchg` with a memory operand is locked
-/// implicitly — no prefix, no ZYDIS_ATTRIB_HAS_LOCK — and that is how an atomic store/exchange
-/// compiles, so matching only the prefix silently undercounts.
+/// A locked RMW.
+/// The `lock` prefix is the usual form, but `xchg` with a memory operand is locked implicitly — no prefix, no ZYDIS_ATTRIB_HAS_LOCK.
+/// That is how an atomic store/exchange compiles, so matching only the prefix silently undercounts.
 bool is_atomic_insn(ZydisDisassembledInstruction const& d)
 {
     if ((d.info.attributes & ZYDIS_ATTRIB_HAS_LOCK) != 0)
@@ -45,7 +45,8 @@ bool is_atomic_insn(ZydisDisassembledInstruction const& d)
     return false;
 }
 
-/// Through a register or memory rather than a rel32 immediate. Only meaningful for a call/jmp.
+/// Through a register or memory rather than a rel32 immediate.
+/// Only meaningful for a call/jmp.
 bool is_indirect_transfer(ZydisDisassembledInstruction const& d)
 {
     for (u8 i = 0; i < d.info.operand_count; ++i)
@@ -60,17 +61,10 @@ bool is_indirect_transfer(ZydisDisassembledInstruction const& d)
     return false;
 }
 
-/// Instructions that are categorically not single-cycle — tens to hundreds of cycles each, where
-/// everything around them is ~1. Returns Zydis's static mnemonic string, or nullptr.
+/// Instructions that are categorically not single-cycle — tens to hundreds of cycles each, where everything around them is ~1.
+/// Returns Zydis's static mnemonic string, or nullptr.
 ///
-/// **Not a cost model, on purpose.** Exact latencies are microarchitecture-specific (idiv r64 is ~18
-/// cycles on one part and different on the next), so nothing here estimates or weighs. Membership is
-/// the claim: "the instruction count will mislead you here, go look". The moment this returns
-/// something that reads like a cycle count, someone will trust it as one.
-///
-/// The cost this CANNOT see is the one that usually matters: a `mov` that misses to DRAM is 200+
-/// cycles and is indistinguishable from an L1 hit. This finds landmines in the opcode stream, not
-/// where the time went.
+/// What the column claims, and the cost it cannot see, is the readme's `slow` section.
 char const* slow_mnemonic_of(ZydisDisassembledInstruction const& d)
 {
     switch (d.info.mnemonic)
@@ -111,7 +105,7 @@ char const* slow_mnemonic_of(ZydisDisassembledInstruction const& d)
     case ZYDIS_MNEMONIC_PAUSE:
     case ZYDIS_MNEMONIC_CLFLUSH:
     case ZYDIS_MNEMONIC_CLFLUSHOPT:
-    // x87 transcendentals: microcoded, and nobody means to emit them.
+    // x87 transcendentals: microcoded.
     case ZYDIS_MNEMONIC_FDIV:
     case ZYDIS_MNEMONIC_FSQRT:
     case ZYDIS_MNEMONIC_FSIN:
@@ -123,13 +117,14 @@ char const* slow_mnemonic_of(ZydisDisassembledInstruction const& d)
         break;
     }
 
-    // A rep-prefixed string op costs whatever rcx says. Matched by prefix rather than by mnemonic
-    // because Zydis spells the string and SSE forms of `movsd` with the same one.
+    // A rep-prefixed string op costs whatever rcx says.
+    // Matched by prefix rather than by mnemonic, because Zydis spells the string and SSE forms of `movsd` with the same one.
     constexpr auto rep_prefixes = ZYDIS_ATTRIB_HAS_REP | ZYDIS_ATTRIB_HAS_REPE | ZYDIS_ATTRIB_HAS_REPNE;
     if ((d.info.attributes & rep_prefixes) != 0)
         return ZydisMnemonicGetString(d.info.mnemonic);
 
-    // Gather/scatter: one memory access per lane. A family far too large to list, but named uniformly.
+    // Gather/scatter: one memory access per lane.
+    // A family far too large to list, but named uniformly.
     auto const* const name = ZydisMnemonicGetString(d.info.mnemonic);
     if (name != nullptr)
     {
@@ -142,8 +137,8 @@ char const* slow_mnemonic_of(ZydisDisassembledInstruction const& d)
     return nullptr;
 }
 
-/// Whether any explicit memory operand is read / written. Explicit only: the implicit stack traffic
-/// of a push/pop/call would otherwise mark nearly everything, drowning out the pointer chases.
+/// Whether any explicit memory operand is read / written.
+/// Explicit only: the implicit stack traffic of a push/pop/call would otherwise mark nearly everything, drowning out the pointer chases.
 void fill_memory_access(ZydisDisassembledInstruction const& d, recorded_instruction& insn)
 {
     for (u8 i = 0; i < d.info.operand_count; ++i)

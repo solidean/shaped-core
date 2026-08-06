@@ -2,7 +2,7 @@
 
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/all.hh> // brings ctx.cached (context.cached.hh) + pipeline_cache
+#include <shaped-graphics/all.hh> // brings ctx.cached (context/cached.hh) + pipeline_cache
 
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See dx12-compute-test.cc.
 #include "double_compute.dxil.h"

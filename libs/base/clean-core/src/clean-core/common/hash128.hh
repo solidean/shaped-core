@@ -20,8 +20,8 @@ struct hash128
     /// Empty data is valid (hashes the empty input); a seed of 0 selects XXH3's unseeded variant.
     [[nodiscard]] CC_PURE static hash128 create(cc::span<byte const> data, u64 seed);
 
-    /// ADL customization point (see common/hash.hh): a hash128 is already a hash,
-    /// so we surface its low limb as the 64-bit hash.
+    /// ADL customization point (see common/hash.hh).
+    /// A hash128 is already a hash, so its low limb is surfaced as the 64-bit hash.
     [[nodiscard]] friend constexpr u64 hash(hash128 const& v) { return v.low; }
 };
 } // namespace cc

@@ -6,8 +6,8 @@ using namespace cc::primitive_defines;
 // must assume any call may change the slab base, defeating base-hoisting on the fast path.
 byte* bench_design::cold_refill(byte* base)
 {
-    // identity refill: reset the local bitmap to all-free and hand the same slab back. The behavior is
-    // irrelevant (this never runs in the timed loop) -- opacity to the caller's TU is the entire point.
+    // identity refill: reset the local bitmap to all-free and hand the same slab back.
+    // the behavior is irrelevant, since this never runs in the timed loop — opacity to the caller's TU is the entire point.
     *reinterpret_cast<u64*>(base) = ~u64(0);
     return base;
 }

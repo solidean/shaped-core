@@ -20,14 +20,15 @@
 //   W / S — forward / back      A / D — strafe      E / Q — up / down      Shift — move faster
 //   Esc — quit
 //
-// nx::config::manual keeps it out of the default sweep. Run it explicitly:
+// nx::config::manual keeps it out of the default sweep.
+// Run it explicitly:
 //   uv run dev.py test "sv - viewer window (manual)" --manual --timeout 0
 // Prefers a hardware GPU, falls back to WARP; SKIPs if the device has no ray tracing or there is no window.
 
 namespace
 {
-/// A minimal free-fly camera controller — the kind of thing an app would grow into a real class, kept here
-/// in the test for now. Holds its own position + yaw/pitch, consumes sr input events, and writes an sv::camera.
+/// A minimal free-fly camera controller — the kind of thing an app would grow into a real class, kept here in the test for now.
+/// Holds its own position + yaw/pitch, consumes sr input events, and writes an sv::camera.
 struct fly_camera
 {
     tg::pos3f position = tg::pos3f(0, 1.4f, -5.0f);

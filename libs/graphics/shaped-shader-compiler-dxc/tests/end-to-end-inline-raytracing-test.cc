@@ -1,15 +1,16 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/acceleration_structure.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#include <shaped-graphics/raytracing/acceleration_structure.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
-// Inline ray tracing (DXR tier 1.1 RayQuery / TraceRayInline) end to end on WARP, with NO ray-tracing
-// pipeline or shader table: an ordinary compute dispatch traces against a bound TLAS. This proves the
-// tlas-binding path — binding_type::acceleration_structure, the AS SRV descriptor, and the accel_read
-// hazard — is complete on its own.
+using namespace cc::primitive_defines;
+
+// Inline ray tracing (DXR tier 1.1 RayQuery / TraceRayInline) end to end on WARP, with NO ray-tracing pipeline or shader table.
+// An ordinary compute dispatch traces against a bound TLAS.
+// This proves the tlas-binding path — binding_type::acceleration_structure, the AS SRV descriptor, and the accel_read hazard — is complete on its own.
 //
 // The scene is one z=0 triangle (0,0,0)-(1,0,0)-(0,1,0). Two threads each shoot a +z ray: thread 0 aims
 // at (0.25,0.25) inside the triangle (expects a hit), thread 1 aims at (-1,-1) outside it (expects a
@@ -63,8 +64,8 @@ TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispa
             SKIP("device reports no ray tracing support");
     }
 
-    // Build the scene: one triangle BLAS, one identity-transform TLAS instance. Wait for the GPU so the AS
-    // is fully built before the trace reads it.
+    // Build the scene: one triangle BLAS, one identity-transform TLAS instance.
+    // Wait for the GPU so the AS is fully built before the trace reads it.
     float const verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     auto const vbuf = ctx.persistent.create_raw_buffer(
         sizeof(verts), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
@@ -114,13 +115,13 @@ TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispa
     auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
-    auto out_buf = ctx.persistent.create_raw_buffer(cc::isize(2 * sizeof(sg::u32)),
+    auto out_buf = ctx.persistent.create_raw_buffer(isize(2 * sizeof(u32)),
                                                     sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(out_buf != nullptr);
 
     sg::named_view const views[] = {
         {.name = "scene", .view = tlas->as_view()},
-        {.name = "Out", .view = sg::buffer<sg::u32>::from_raw(out_buf).as_readwrite_buffer()},
+        {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()},
     };
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
     REQUIRE(group != nullptr);
@@ -132,11 +133,11 @@ TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispa
     ctx.submit_command_list(cc::move(disp));
 
     auto down = ctx.create_command_list();
-    auto future = down->download.data_from_buffer<sg::u32>(out_buf, 0, 2);
+    auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
     auto const data = ctx.wait_for(future);
     REQUIRE(data.has_value());
-    cc::vector<sg::u32> result;
+    cc::vector<u32> result;
     for (auto const v : data.value())
         result.push_back(v);
     REQUIRE(result.size() == 2);

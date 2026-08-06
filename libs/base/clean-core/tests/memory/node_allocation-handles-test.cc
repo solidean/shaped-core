@@ -129,9 +129,9 @@ TEST("any_node_allocation - class index round-trips through free across classes"
 {
     auto& alloc = cc::default_node_allocator();
 
-    // Slots alternate between two very different size classes. Because free derives the slab from the
-    // stored class index, a wrong index would compute the wrong slab base and trip the double-free assert
-    // or corrupt the bitmap. Even-idx slots hold T64B, odd-idx slots hold T1B; each is read back per iter.
+    // Slots alternate between two very different size classes.
+    // Free derives the slab from the stored class index, so a wrong index would compute the wrong slab base and either trip the double-free assert or corrupt the bitmap.
+    // Even-idx slots hold T64B and odd-idx slots hold T1B; each is read back per iter.
     std::array<cc::any_node_allocation, 32> slots;
 
     for (int iter = 0; iter < 4000; ++iter)
@@ -201,8 +201,8 @@ struct PolyLarge : PolyBase
 // the leaves must occupy distinct size classes for the "correct class on free" checks to have teeth
 static_assert(cc::node_class_index_for<PolySmall>() != cc::node_class_index_for<PolyLarge>());
 
-// User traits: recover the class index of the *actual* object, then destroy it. Order matters — the
-// class index is read through the vtable, which is gone once the destructor has run.
+// User traits: recover the class index of the *actual* object, then destroy it.
+// Order matters: the class index is read through the vtable, which is gone once the destructor has run.
 struct PolyTraits
 {
     static cc::node_class_index destroy_and_get_class_index(PolyBase& b)
@@ -330,8 +330,8 @@ TEST("poly_node_allocation - mixed-leaf churn frees each in its own class")
 {
     auto& alloc = cc::default_node_allocator();
 
-    // Alternate leaf types per slot and churn. Freeing with the wrong class (e.g. treating a PolyLarge
-    // as a PolySmall) would compute the wrong slab and corrupt the bitmap / trip the double-free assert.
+    // Alternate leaf types per slot and churn.
+    // Freeing with the wrong class — treating a PolyLarge as a PolySmall — would compute the wrong slab and either corrupt the bitmap or trip the double-free assert.
     reset_poly_counters();
     std::array<cc::poly_node_allocation<PolyBase, PolyTraits>, 24> slots;
 

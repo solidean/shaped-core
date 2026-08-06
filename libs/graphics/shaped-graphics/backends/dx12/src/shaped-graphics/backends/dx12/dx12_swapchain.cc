@@ -26,8 +26,8 @@ tg::vec2i client_size_of(HWND hwnd)
     return tg::vec2i(w > 0 ? w : 1, h > 0 ? h : 1);
 }
 
-// Best-effort HDR: pick an HDR color space matching the (wide) back-buffer format and set it if the
-// swapchain supports presenting in it. A no-op when unsupported — the surface stays SDR.
+// Best-effort HDR: pick an HDR color space matching the wide back-buffer format and set it when the swapchain supports presenting in it.
+// A no-op when unsupported, leaving the surface SDR.
 void apply_hdr_colorspace(IDXGISwapChain3* swapchain, sg::pixel_format format)
 {
     // rgba16_float -> scRGB (linear, Rec.709 primaries); otherwise HDR10 (ST.2084, Rec.2020).
@@ -142,9 +142,7 @@ void dx12_swapchain::release_backbuffers()
 
 cc::result<cc::unit> dx12_swapchain::resize(tg::vec2i size)
 {
-    // ResizeBuffers requires zero outstanding back-buffer references. Since acquire calls this at most once
-    // per epoch, waiting for the GPU to finish every submitted present (the present fence) is enough to make
-    // the back buffers safe to release — no epoch advance needed. Borrowed wrappers then release synchronously.
+    // ResizeBuffers requires zero outstanding back-buffer references — hence the present-fence wait plus release below.
     wait_for_gpu();
     release_backbuffers();
 
@@ -162,8 +160,8 @@ sg::render_target_view dx12_swapchain::acquire_backbuffer()
 {
     CC_ASSERT(!_acquired, "acquire_backbuffer() called twice without an intervening present()");
 
-    // Auto-resize to the window — but only the first acquire of each epoch checks. That bounds resize (which
-    // drains the GPU) to once per epoch, so it never advances an epoch under the caller.
+    // Auto-resize to the window, but only the first acquire of each epoch checks.
+    // That bounds resize, which drains the GPU, to once per epoch, so it never advances an epoch under the caller.
     if (sg::epoch const epoch = _ctx.current_epoch(); epoch != _last_resize_epoch)
     {
         _last_resize_epoch = epoch;
@@ -193,9 +191,9 @@ void dx12_swapchain::record_present_transition(sg::command_list& cmd)
     auto* const dx = dynamic_cast<dx12_command_list*>(&cmd);
     CC_ASSERT(dx != nullptr, "command list is not a dx12 command list");
 
-    // Transition the acquired back buffer to the PRESENT layout on the caller's still-open list. Going
-    // through the barrier tracker computes it from whatever layout the frame left the buffer in (a no-op if
-    // already present) and leaves its canonical layout as `present` for next frame.
+    // Transition the acquired back buffer to the PRESENT layout on the caller's still-open list.
+    // Going through the barrier tracker computes it from whatever layout the frame left the buffer in, a no-op when already present.
+    // It also leaves the canonical layout as `present` for next frame.
     dx->transition_texture_to(_backbuffers[_acquired_index].texture, sg::texture_layout::present);
 }
 
@@ -226,7 +224,6 @@ void dx12_swapchain::fail(HRESULT hr, char const* what)
 
 dx12_swapchain::~dx12_swapchain()
 {
-    // Wait for the GPU to finish with the back buffers, then release them synchronously (borrowed storage).
     wait_for_gpu();
     release_backbuffers();
     if (_fence_event != nullptr)

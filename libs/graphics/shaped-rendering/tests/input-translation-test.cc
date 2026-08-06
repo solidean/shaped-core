@@ -25,7 +25,8 @@ TEST("sr - scancodes map to physical positions")
     CHECK(impl::scancode_from_sdl(SDL_SCANCODE_KP_0) == scancode::kp_0);
     CHECK(impl::scancode_from_sdl(SDL_SCANCODE_KP_ENTER) == scancode::kp_enter);
 
-    // SDL spells this one RETURN; sr spells it enter. An easy one to map to the keypad's by mistake.
+    // SDL spells this one RETURN; sr spells it enter.
+    // An easy one to map to the keypad's by mistake.
     CHECK(impl::scancode_from_sdl(SDL_SCANCODE_RETURN) == scancode::enter);
     CHECK(impl::scancode_from_sdl(SDL_SCANCODE_RETURN) != scancode::kp_enter);
 
@@ -82,8 +83,8 @@ TEST("sr - printable keycodes become their codepoint")
     CHECK(impl::character_from_keycode(SDLK_LSHIFT) == 0);
     CHECK(impl::character_from_keycode(SDLK_UNKNOWN) == 0);
 
-    // SDL defines these as the C0 controls they stand for, and they are inside the Unicode range, so they
-    // come through as characters. A non-zero character is therefore not the same as a printable one.
+    // SDL defines these as the C0 controls they stand for, and they are inside the Unicode range, so they come through as characters.
+    // A non-zero character is therefore not the same as a printable one.
     CHECK(impl::character_from_keycode(SDLK_RETURN) == U'\r');
     CHECK(impl::character_from_keycode(SDLK_TAB) == U'\t');
     CHECK(impl::character_from_keycode(SDLK_BACKSPACE) == U'\b');

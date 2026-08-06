@@ -2,9 +2,10 @@
 
 namespace nx::config
 {
-// Which selection bucket a test belongs to. A test lives in exactly one bucket; an automatic sweep selects a
-// single bucket (normal by default, manual via --manual, guide_benchmark via --guide-benchmarks). Naming a
-// test by an exact (non-wildcard) filter runs it regardless of its bucket. The set is intentionally extensible.
+// Which selection bucket a test belongs to; a test lives in exactly one.
+// An automatic sweep selects a single bucket — normal by default, manual via --manual, guide_benchmark via --guide-benchmarks.
+// An exact (non-substring) filter naming a test can also pull it in from another bucket, but only when no bucket flag was given.
+// The set is intentionally extensible.
 enum class test_bucket
 {
     normal,
@@ -19,24 +20,24 @@ struct cfg
     int seed = 0;
 };
 
-// Orthogonal to buckets: a disabled test is skipped by a sweep of any bucket and only runs when explicitly
-// named (or via a bulk "run disabled too" request).
+// Orthogonal to buckets: a disabled test is skipped by a sweep of any bucket.
+// It runs only when named exactly, or under a bulk "run disabled too" request.
 constexpr struct
 {
     void apply(cfg& result) const { result.enabled = false; }
 } disabled;
 
-// A manual test never runs as part of an automatic sweep — not by default, and not via a "run disabled too"
-// bulk request either. It runs only when explicitly targeted (a non-wildcard filter that names it) or when
-// the runner is put in manual mode via --manual. Intended for tests that open windows or are otherwise
-// incompatible with unattended execution.
+// A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
+// It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.
+// Intended for tests that open windows, or are otherwise incompatible with unattended execution.
 constexpr struct
 {
     void apply(cfg& result) const { result.bucket = test_bucket::manual; }
 } manual;
 
-// A guide benchmark records performance metrics via nx::guide and is swept only via --guide-benchmarks (or
-// named explicitly). Like manual tests it stays out of automatic runs. See GUIDE_BENCHMARK in test.hh.
+// A guide benchmark records performance metrics via nx::guide, and is swept only via --guide-benchmarks.
+// Naming it exactly also runs it, as long as no bucket flag was given; like a manual test it otherwise stays out of automatic runs.
+// GUIDE_BENCHMARK in test.hh is the macro.
 constexpr struct
 {
     void apply(cfg& result) const { result.bucket = test_bucket::guide_benchmark; }
@@ -57,18 +58,18 @@ constexpr auto seed(int value)
 namespace nx::impl
 {
 
-// merge logic
-// NOTE: defaults in cfg must not override values in result
+// Folds one config item into the accumulated cfg.
+// A default in `rhs` must not override a value already set in `result`.
 void apply_config_item(config::cfg& result, config::cfg const& rhs);
 
-// for the struct -> void apply(cfg&) pattern
+// The `struct { void apply(cfg&) }` config-item form, e.g. nx::config::disabled.
 void apply_config_item(config::cfg& result, auto const& config)
     requires requires { config.apply(result); }
 {
     config.apply(result);
 }
 
-// given a list of configs or configure objects, create a single test config from that
+// Merges a list of config items into one test config, in the order TEST received them.
 config::cfg merge_config(auto&&... items)
 {
     config::cfg result;

@@ -28,9 +28,9 @@ inline bool bytes_equal(cc::span<byte const> a, cc::span<byte const> b)
     return a.empty() || std::memcmp(a.data(), b.data(), size_t(a.size())) == 0;
 }
 
-/// A non-seekable in-memory READ source (models a pipe): it serves bytes from a fixed source in fixed-size
-/// chunks and returns -1 for every seek / dry-seek, so try_as_seekable must fail on it. A plain flush
-/// (relative, 0) still works and also returns -1 (no meaningful position).
+/// A non-seekable in-memory READ source, modelling a pipe.
+/// It serves bytes from a fixed source in fixed-size chunks, and returns -1 for every seek and dry-seek, so try_as_seekable must fail on it.
+/// A plain flush (relative, 0) still works, and also returns -1, since there is no meaningful position.
 class mock_pipe_read_stream_adapter
 {
 public:
@@ -122,10 +122,9 @@ private:
     byte _buffer[k_cap];
 };
 
-/// A read_write adapter whose read boundary and write capacity are deliberately DIFFERENT: a flush hands out
-/// `readable` bytes to read but the whole buffer to write into. On a span adapter the two always coincide, so
-/// this is the only shape that can tell `end` (read) and `write_end` (write) apart — which is exactly what a
-/// read_write -> write narrowing has to get right.
+/// A read_write adapter whose read boundary and write capacity are deliberately DIFFERENT: a flush hands out `readable` bytes to read, but the whole buffer to write into.
+/// On a span adapter the two always coincide, so this is the only shape that can tell `end` (read) and `write_end` (write) apart.
+/// Which is exactly what a read_write -> write narrowing has to get right.
 class mock_split_bounds_read_write_adapter
 {
 public:

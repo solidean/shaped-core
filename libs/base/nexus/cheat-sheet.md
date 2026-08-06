@@ -1,12 +1,12 @@
 # nexus cheat sheet
 
-Lightweight C++23 test framework, Catch2 v3 CLI–compatible (so IDE test
-integration works out of the box). Namespace `nx`. Depends on clean-core.
+Lightweight C++23 test framework, Catch2 v3 CLI–compatible so IDE test integration works out of the box.
+Namespace `nx`, depends on clean-core.
 
-You almost never call `nx::` directly — you write `TEST` / `CHECK` / `SECTION`
-macros and run them through `dev.py`. Headers are included by full path:
-`#include <nexus/...>`. Format conventions for this sheet live in
-[docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+You almost never call `nx::` directly — you write `TEST` / `CHECK` / `SECTION` macros and run them through `dev.py`.
+Headers are included by full path: `#include <nexus/...>`.
+[readme.md](readme.md) is the library overview and [docs/_index.md](docs/_index.md) the documentation hub.
+Format conventions for this sheet live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ---
 
@@ -46,6 +46,26 @@ GUIDE_BENCHMARK("hash - throughput")     // a test in the guide_benchmark bucket
 }
 // Recorded metrics print as a table and, with `--perf-json <file>`, write a sidecar consumed by `dev.py pgo`.
 ```
+
+## Hardware counters (`nx::bench`)
+
+```cpp
+#include <nexus/bench/bench.hh>
+
+auto const m = nx::bench::measure_hw_counters([&] { work(); });   // ONE invocation; loop inside the body yourself
+if (auto const ins = m.value_of(nx::bench::hw_counter::instructions_retired); ins.has_value())
+    cc::println("retired {} instructions", ins.value());          // nullopt = not requested, or unreadable this run
+
+nx::bench::available_hw_counters();      // what THIS machine can measure right now (the runtime source of truth)
+nx::bench::print_hw_counters();          // the same, printed;  `uv run dev.py profiling counters` is the CLI
+```
+
+- **Best-effort, never fails as a whole** — elapsed time always comes back, and reference cycles wherever a cheap counter exists (x86).
+- An unreadable counter is `nullopt`, so gate on `has_value()` rather than on a machine assumption.
+- **Only a few PMU counters fit at once.** `hw_measure_config::measure_all` re-runs the body over subsets so nothing is left unmeasured.
+  The body must be deterministic for that.
+- [docs/guides/profiling.md](../../../docs/guides/profiling.md) owns this surface: the counter list, the per-platform rules, and the Windows non-admin setup.
+  It also has a worked cache-traversal example.
 
 ## Checks
 
@@ -112,21 +132,20 @@ TEST("sg backend - vulkan")
 }
 ```
 
-- **Addressable iteration, not sections**: the driver body runs once; each match is driven to completion
-  internally. Don't mix a top-level `invoke_tests` with sibling `SECTION`s (they'd replay the driver).
-- **Matching is coarse** (decayed signature; `T` == `T const&`): every `INVOCABLE_TEST(int)` matches any
-  `invoke_tests` of an `int`. Use a unique key type (`sg::context_handle`, a `case` struct, a tag).
-- **Params must be by value or `const&`** — a mutable lvalue ref is a compile error (args are shared inputs).
-- **Address one instance**: `dev.py test "<driver>" -c <invoke-name> -c <test-name> [-c <section>...]` (one
-  `-c` per path segment; `dev.py test` forwards everything after the name to the binary).
-- **Run an instance by name**: an `NX_TEST_SETUP(nx::setup& s)` block defines *aliases* — `s.define_alias(name,
-  {alias_fragment{driver, section_path}, ...})` binds a name to driver+scope, so `dev.py test "<test-name>"`
-  runs it (one scoped run per fragment, e.g. per backend). `s.invocables_with<Args...>()` / `find_test(name)`
-  help build them. Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already
-  name-selected is dropped.
-- **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` no driver invoked fails.
-- Args are boxed by (decayed) value — prefer cheap-to-copy / handle types. See
-  [docs/invocable-tests.md](docs/invocable-tests.md). (Type-parametrized/templated tests: not yet.)
+- **Addressable iteration, not sections**: the driver body runs once, and each match is driven to completion internally.
+  Don't mix a top-level `invoke_tests` with sibling `SECTION`s — they would replay the driver.
+- **Matching is coarse** — decayed signature, `T` == `T const&` — so every `INVOCABLE_TEST(int)` matches any `invoke_tests` of an `int`.
+  Use a unique key type: `sg::context_handle`, a `case` struct, a tag.
+- **Params must be by value or `const&`** — a mutable lvalue ref is a compile error, since args are shared inputs.
+- **Address one instance**: `dev.py test "<driver>" -c <invoke-name> -c <test-name> [-c <section>...]`, one `-c` per path segment.
+  `dev.py test` forwards everything after the name to the binary.
+- **Run an instance by name**: an `NX_TEST_SETUP(nx::setup& s)` block defines *aliases*.
+  `s.define_alias(name, {alias_fragment{driver, section_path}, ...})` binds a name to driver+scope, so `dev.py test "<test-name>"` runs it, one scoped run per fragment.
+  `s.invocables_with<Args...>()` / `find_test(name)` help build them.
+  Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already name-selected is dropped.
+- **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
+- Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.
+- Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
 
 ## Running tests
 
@@ -151,9 +170,9 @@ uv run dev.py test                       # build + run the whole suite
 
 ## Fuzz testing (`nx::fuzz`)
 
-API-sequence fuzzing: declare typed *operations*, seed *values*, and *invariants*;
-the engine composes random type-correct programs, finds a failure, shrinks it, and
-prints copy-pasteable regression code. See [docs/fuzz-testing.md](docs/fuzz-testing.md).
+API-sequence fuzzing: declare typed *operations*, seed *values* and *invariants*, and the engine composes random type-correct programs.
+It finds a failure, shrinks it, and prints copy-pasteable regression code.
+[docs/fuzz-testing.md](docs/fuzz-testing.md) is the full mechanism, including the shared-state trap.
 
 ```cpp
 #include <nexus/fuzz/fuzz.hh>
@@ -182,20 +201,15 @@ auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regressi
 
 ## Gotchas
 
-- **Never run the `*-test` binary directly** — `uv run dev.py test` configures,
-  builds, discovers, and records results. Test binaries are named `<lib>-test`.
-- **`CHECK`/`REQUIRE` capture lhs/rhs only on failure**, so put the interesting
-  expression *inside* the macro (`CHECK(a == b)`, not `bool ok = a == b; CHECK(ok)`).
-- **`CHECK_ASSERTS` / `REQUIRE_ASSERTS` report success — and skip executing the
-  expression — when assertions are compiled out** (`CC_ASSERT_ENABLED == 0`, i.e.
-  release presets). Run an assert-enabled preset (debug / relwithdebinfo) to
-  actually exercise them.
-- **The `_AS` exception checks match subclasses too** (a `std::runtime_error`
-  satisfies `..._THROWS_AS(expr, std::exception)`).
+- **Never run the `*-test` binary directly** — `uv run dev.py test` configures, builds, discovers and records results.
+- **`CHECK`/`REQUIRE` capture lhs/rhs only on failure**, so put the interesting expression *inside* the macro: `CHECK(a == b)`, not `bool ok = a == b; CHECK(ok)`.
+- **`CHECK_ASSERTS` / `REQUIRE_ASSERTS` report success — and skip executing the expression — when assertions are compiled out** (`CC_ASSERT_ENABLED == 0`, the release presets).
+  Run an assert-enabled preset (debug / relwithdebinfo) to actually exercise them.
+- **The `_AS` exception checks match subclasses too**: a `std::runtime_error` satisfies `..._THROWS_AS(expr, std::exception)`.
 - **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
-- **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` (above), not Catch2 generators.
-- **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, type-parametrized (templated) tests. (Benchmarks:
-  use `GUIDE_BENCHMARK` + `nx::guide`.) Use `.context()` / `.note()` / `.dump()` for messages.
+- **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
+- **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
+  Use `.context()` / `.note()` / `.dump()` for messages, and `GUIDE_BENCHMARK` + `nx::guide` for benchmarks.
 
-See [docs/catch2-runner-compat.md](docs/catch2-runner-compat.md) for the exact
-CLI subset and how IDE discovery works.
+[docs/catch2-runner-compat.md](docs/catch2-runner-compat.md) has the exact CLI subset and how IDE discovery works.
+[docs/_index.md](docs/_index.md) indexes the rest, including the hardware counters and the perf-metric workflow.

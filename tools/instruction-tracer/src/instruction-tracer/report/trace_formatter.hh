@@ -8,6 +8,7 @@
 
 namespace itrace
 {
+/// Which optional blocks the trace section prints, straight off `--stack` / `--source` / `--register-diffs`.
 struct format_options
 {
     bool stack = true;
@@ -23,7 +24,7 @@ cc::string format_trace(trace const& t, u32 total_traces, format_options const& 
 /// The "symbol X is ambiguous" report, listing every candidate.
 cc::string format_symbol_error(symbol_error const& error);
 
-/// One line per instruction, without source grouping. Used by --no-source and by the tests.
+/// One line per instruction, without the source heading format_trace groups them under.
 cc::string format_instruction(recorded_instruction const& insn);
 
 /// "00007ff6`11203410" — the grouped form debuggers print.
