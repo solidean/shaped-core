@@ -223,6 +223,9 @@ TEST("format - floats")
     CHECK(cc::format("{:+.2f}", 3.14) == "+3.14");
     CHECK(cc::format("{:.2e}", 12345.0) == "1.23e+04");
     CHECK(cc::format("{:.2E}", 12345.0) == "1.23E+04");
+
+    // without an explicit f/e/g the rendering is shortest-round-trip, which ignores precision entirely
+    CHECK(cc::format("{:.2}", 3.14159) == "3.14159");
 }
 
 TEST("format - pointer and byte")
@@ -280,10 +283,11 @@ TEST("format - custom types")
 }
 
 // =========================================================================================================
-// Compile-fail cases — these MUST NOT compile. They are disabled by default and cannot be expressed as
-// static_assert (a static_assert cannot assert that another expression fails to compile). To verify
-// manually, define CC_FORMAT_COMPILE_FAIL_TESTS and confirm each line below fails to compile with a
-// readable diagnostic. Not run in CI.
+// Compile-fail cases — these MUST NOT compile.
+// They cannot be written as a static_assert, since a static_assert cannot assert that another expression
+// fails to compile.
+// So they are disabled by default and NOT run in CI: define CC_FORMAT_COMPILE_FAIL_TESTS and confirm by
+// hand that each line below fails with a readable diagnostic.
 // =========================================================================================================
 
 #if defined(CC_FORMAT_COMPILE_FAIL_TESTS)

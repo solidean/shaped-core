@@ -27,7 +27,7 @@ Source lives in `src/clean-core/`, grouped by topic:
 | `memory/`    | allocation handles (`allocation`, `node_allocation`) over memory resources |
 | `container/` | owning containers (`array`/`vector` + `fixed_`/`unique_`/`small_` variants, `map`, `set`, `pair`) and views (`span`, `strided_span`, `pinned_data`) |
 | `sequence/`  | the lazy ranges API (`sequence`) |
-| `string/`    | `string`, `string_view`, `char_predicates`, `to_string`, `to_debug_string` |
+| `string/`    | `string`, `string_view`, `char_predicates`, the compile-time-checked `format` / `print`, `to_string` / `to_debug_string`, and UTF-16 `conversion` |
 | `function/`  | type-erased callables (`function_ref`, `unique_function`) |
 | `error/`     | fallible value types (`optional`, `result`) and the crash handler |
 | `thread/`    | `async` and its work-stealing pool, `threaded_actor`, and the primitives under them (`atomic`, `mutex`, `spin`, `thread`) |
@@ -53,6 +53,8 @@ full workflow.
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance (symbols, signatures, gotchas).
 - [docs/containers.md](docs/containers.md) — choosing a container, and the contracts they all share.
+- [docs/strings.md](docs/strings.md) — `cc::string` / `cc::string_view`: null-termination, invalidation, SSO, and hashing.
+- [docs/formatting.md](docs/formatting.md) — `cc::format`, the placeholder grammar, and making a type formattable.
 - [docs/_index.md](docs/_index.md) — clean-core's documentation hub.
 - [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.
   `.clang-format` is authoritative for formatting.

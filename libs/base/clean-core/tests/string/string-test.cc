@@ -7,6 +7,19 @@
 
 using namespace cc::primitive_defines;
 
+// string_view's relational operators are hidden friends, so ADL never finds them for two cc::strings.
+// cc::string itself declares only operator==, which is why compare() is the way to order two strings.
+namespace
+{
+template <class A, class B>
+concept has_equal = requires(A const& a, B const& b) { a == b; };
+template <class A, class B>
+concept has_less = requires(A const& a, B const& b) { a < b; };
+} // namespace
+static_assert(has_equal<cc::string, cc::string>);
+static_assert(!has_less<cc::string, cc::string>);
+static_assert(has_less<cc::string, cc::string_view>);
+
 TEST("string - SSO behavior")
 {
     SECTION("small strings stay in SSO mode")
@@ -1065,7 +1078,9 @@ TEST("string - resize and capacity")
         return true;
     };
 
-    // The inline SSO capacity, derived the same way as cc::string::small_capacity: the allocation header's four pointers and one isize fill the space before custom_resource, minus one byte for the size tag.
+    // The inline SSO capacity, derived the same way as cc::string::small_capacity.
+    // The allocation header's four pointers and one isize fill the space before custom_resource, minus one
+    // byte for the size tag.
     // 39 on 64-bit, fewer where pointers are smaller (23 on wasm32).
     isize const small_capacity = isize(4 * sizeof(void*) + sizeof(isize) - 1);
 
@@ -1229,7 +1244,7 @@ TEST("string - resize and capacity")
         s.resize_down_to(5);
         CHECK(!s.is_small()); // still heap after the shrink
         s.shrink_to_fit();
-        CHECK(s.is_small()); // reallocation was due anyway, so it returned to SSO
+        CHECK(s.is_small()); // content that fits inline always returns to SSO
         CHECK(s == cc::string_view{"aaaaa"});
     }
 

@@ -1,37 +1,13 @@
 #pragma once
 
 // =========================================================================================================
-// Locale independent character predicates on 'char's
+// Locale-independent character predicates on 'char'.
+//
+// constexpr and ASCII-only, which is what makes them locale-independent by construction — and why
+// clean-core does not reach for <cctype>.
+// Classification, case conversion, the is_equal_fun factory and the equality / comparison functors are
+// each documented on their declaration below.
 // =========================================================================================================
-//
-// see https://en.cppreference.com/w/cpp/string/byte
-//
-// Character classification:
-//   is_space(c)         - whitespace character (space, \f, \t, \n, \r, \v)
-//   is_blank(c)         - blank character (space, \t)
-//   is_digit(c)         - decimal digit ('0' to '9')
-//   is_hex_digit(c)     - hexadecimal digit ('0'-'9', 'a'-'f', 'A'-'F')
-//   is_alphanumeric(c)  - letter or digit ('0'-'9', 'a'-'z', 'A'-'Z')
-//   is_lower(c)         - lowercase letter ('a' to 'z')
-//   is_upper(c)         - uppercase letter ('A' to 'Z')
-//   is_punctuation(c)   - punctuation character
-//   is_graphical(c)     - alphanumeric or punctuation character
-//   is_printable(c)     - printable character (space, alphanumeric, or punctuation)
-//   is_control(c)       - control character
-//
-// Character conversion:
-//   to_lower(c)         - convert uppercase to lowercase (identity if not uppercase)
-//   to_upper(c)         - convert lowercase to uppercase (identity if not lowercase)
-//
-// Predicate factories:
-//   is_equal_fun(c)     - returns lambda that checks equality with c
-//
-// Predicate functors:
-//   equal_case_sensitive           - functor for case-sensitive character equality
-//   equal_case_insensitive         - functor for case-insensitive character equality
-//   compare_ascii_case_sensitive   - functor for case-sensitive three-way comparison
-//   compare_ascii_case_insensitive - functor for case-insensitive three-way comparison
-//
 
 namespace cc
 {

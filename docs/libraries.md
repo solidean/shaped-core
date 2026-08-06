@@ -22,8 +22,8 @@ Highlights:
 
 - **Containers & views** — `vector`, `array` (and the `fixed_` / `unique_` variants), `map`, `set`, `ringbuffer`, `bitset`, `disjoint_set`,
   `pair` / `tuple` / `variant`, plus non-owning `span` / `strided_span`.
-- **Strings** — owning `string` (with SSO), `string_view`, `char_predicates`, and
-  `to_string` / `to_debug_string`.
+- **Strings** — owning `string` (with SSO), `string_view`, `char_predicates`, and `to_string` / `to_debug_string`.
+  Plus `cc::format`, a `std::format`-style formatter whose format strings are validated at compile time.
 - **Fallible values** — `optional` and `result<T, E>` for expected-error handling.
 - **Callables** — non-owning `function_ref`, move-only `unique_function`.
 - **Memory** — `allocation` / `node_allocation` handles over `memory_resource`s, plus `shared_ptr`, an 8 B intrusive handle whose Traits protocol is still provisional.

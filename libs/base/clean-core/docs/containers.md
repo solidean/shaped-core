@@ -6,6 +6,7 @@ Per-type documentation lives in the headers; the [cheat-sheet](../cheat-sheet.md
 This page owns the four things that would otherwise be restated in each of a dozen headers: how to choose, what `T` must be, what indexing checks, and when references die.
 
 Storage itself is a level below — [systems/allocation](systems/allocation.md) owns `cc::allocation<T>`, the handle every heap container holds.
+`cc::string` and `cc::string_view` live in `string/` rather than here, and [strings](strings.md) owns their contracts.
 
 ## Choosing one
 
@@ -37,6 +38,9 @@ Non-owning views — the viewed storage must outlive them, except where noted:
 | `fixed_span<T, N>` | a contiguous run, compile-time length | the length is part of the signature |
 | `strided_span<T>` | elements at a constant byte stride | reading one field out of an array of structs |
 | `pinned_data<T>` | a contiguous run, plus a shared owner | a view that must keep its own backing memory alive |
+
+`cc::string_view` belongs to the same family — a borrowed range over storage it does not own — but lives in `string/` rather than here.
+[strings](strings.md) owns its invalidation and hashing rules, which differ from the ones below only in who holds the bytes.
 
 Associative — separate chaining over power-of-two buckets:
 

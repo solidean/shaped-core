@@ -4,8 +4,9 @@
 
 using namespace cc::primitive_defines;
 
-// Numbers go straight through std::to_chars into a small stack buffer; the result is copied into a cc::string
-// (whose SSO means none of these allocate in practice). No cc::format / std::format overhead on this path.
+// Numbers go straight through std::to_chars into a small stack buffer, then into a cc::string.
+// On 64-bit every result they can produce fits inline, so none of these allocate.
+// The path carries none of cc::format's dispatch or spec parsing.
 
 namespace
 {

@@ -4,8 +4,9 @@
 
 using namespace cc::primitive_defines;
 
-// This is the ONLY translation unit that includes <charconv>: it is the seam where value→text happens.
-// A vendored number-formatting backend would replace just the chars_* definitions here.
+// The chars_* definitions below are the seam where value→text happens, via std::to_chars.
+// A vendored number-formatting backend would replace just those definitions.
+// cc::to_string reaches std::to_chars on its own path, in to_string.cc.
 
 namespace
 {
@@ -59,7 +60,8 @@ isize float_precision_of(char mode, isize precision)
 }
 
 // inserts `sep` every `group` digits (counting from the right) into `digits`, writing the result to `out`.
-// returns the grouped length. e.g. group_digits(out, "1232453", '\'', 3) -> "1'232'453" (length 9)
+// returns the grouped length.
+// e.g. group_digits(out, "1232453", '\'', 3) -> "1'232'453" (length 9)
 isize group_digits(cc::span<char> out, cc::string_view digits, char sep, int group)
 {
     isize const dn = digits.size();
@@ -235,8 +237,8 @@ void format_write_decorated_number(format_sink const& sink,
 
     isize const core = sign_sv.size() + prefix.size() + digits.size();
 
-    // zero-padding only applies when no explicit alignment was requested; the zeros go between the
-    // prefix and the digits (e.g. "0x00ff", "-0003.14")
+    // zero-padding only applies when no explicit alignment was requested.
+    // the zeros go between the prefix and the digits, e.g. "0x00ff" or "-0003.14"
     if (spec.zero_pad && spec.align == format_align_t::none)
     {
         isize const zeros = spec.width > core ? spec.width - core : 0;

@@ -25,6 +25,7 @@ A type should provide **exactly one** implementation.
 > An operation may use a differently-named template and a different subset of tiers when that suits it better.
 > Formatting is the example: its point is **`cc::custom::formatter<T>`**, a specialization with a static `format` plus a consteval `validate`.
 > It intentionally **omits the ADL tier** — `cc::custom::formatter<T>` then member `to_string()` only — so that `cc::format` does not trigger ADL over every argument on every call.
+> [formatting](formatting.md) owns that protocol, with the required signatures and a worked example.
 
 ### Why this order
 

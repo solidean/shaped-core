@@ -17,7 +17,7 @@ clean-core/
   memory/       # allocation, node_allocation, shared_ptr (+ impl/)
   container/    # array/vector families, map, set, span, strided_span, … (+ impl/)
   sequence/     # the lazy ranges API
-  string/       # string, string_view, char_predicates, to_string, to_debug_string
+  string/       # string, string_view, char_predicates, format, formatter, print, to_string, to_debug_string, conversion
   function/     # function_ref, unique_function
   error/        # optional, result, crash_handler
   thread/       # async + its work-stealing pool, threaded_actor, atomic, mutex, spin, thread
@@ -30,6 +30,10 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
 
 - [containers](containers.md) — the contracts every container type shares: how to choose one, what `T` must be,
   what indexing checks, and when references and iterators die.
+- [strings](strings.md) — `cc::string` and `cc::string_view`: null-termination and C interop, when a pointer dies,
+  how storage moves between inline and heap, and what hashes equal to what.
+- [formatting](formatting.md) — `cc::format` and the `to_string` / `to_debug_string` alternatives.
+  The placeholder grammar, the `cc::custom::formatter<T>` protocol, and what the compile-time check does and does not cover.
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers clean-core is allowed to depend on directly, and why.
 - [customization-points](customization-points.md) — the `cc::custom::` trait + hidden-friend protocol that operations like hashing use to let types opt in.
 - [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter.

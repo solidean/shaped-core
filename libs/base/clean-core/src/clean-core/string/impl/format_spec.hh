@@ -10,18 +10,14 @@
 // =========================================================================================================
 // Compile-time format-string grammar: spec struct, scanner, and parser.
 //
-// This header is allocation-free and constexpr throughout. It is shared by two callers:
+// This header is allocation-free and constexpr throughout.
+// It is shared by two callers:
 //   - the consteval cc::format_string constructor, which validates the string at compile time, and
 //   - the runtime render loop in format.cc, which re-uses the very same parser so the two never disagree.
 //
-// The placeholder syntax follows Python / std::format / fmtlib:
-//   replacement_field ::= '{' [arg_index] [':' format_spec] '}'
-//   format_spec       ::= [[fill] align] [sign] ['#'] ['0'] [width] [grouping] ['.' precision] [type]
-//   align ::= '<' | '>' | '^'      sign ::= '+' | '-' | ' '
-//   grouping ::= one digit-group separator (any non-alphanumeric char except '.'); decimal groups by 3,
-//                binary/hex/octal by 4. Numbers only. e.g. {:'} -> 1'234'567, {:,} -> 1,234,567
-//   type  ::= d|x|X|o|b|B|c (ints) | f|F|e|E|g|G (floats) | s (string/bool) | p (ptr)
-//   escapes: '{{' and '}}' produce a single literal brace.
+// The placeholder syntax follows Python / std::format / fmtlib.
+// The grammar is written out in libs/base/clean-core/docs/formatting.md; format_spec_error_for_type below
+// is the per-type table behind it.
 // =========================================================================================================
 
 // cc::impl is shared across clean-core, so the symbols here carry a format_ prefix to avoid collisions with
@@ -30,15 +26,17 @@ namespace cc::impl
 {
 /// Reports an invalid format string.
 ///
-/// Intentionally NOT constexpr: reaching it during constant evaluation (inside the consteval
-/// cc::format_string ctor) is itself the compile error — a constant expression may not call a
-/// non-constexpr function — and the bad call site is named in the diagnostic. The surrounding parser
-/// stays constexpr; a valid format string never reaches here, so it still constant-evaluates. At runtime
-/// this path is only reachable defensively (the string was already validated), so it routes through the
-/// clean-core assertion handler.
+/// Intentionally NOT constexpr: reaching it during constant evaluation, inside the consteval
+/// cc::format_string ctor, is itself the compile error — a constant expression may not call a
+/// non-constexpr function — and the bad call site is named in the diagnostic.
+/// The surrounding parser stays constexpr, and a valid format string never reaches here, so it still
+/// constant-evaluates.
+/// At runtime this path is only reachable defensively, the string having been validated already, so it
+/// routes through the clean-core assertion handler.
 ///
 /// A constexpr function that could only ever throw or call non-constexpr code has no constant-expression
-/// path at all; MSVC rejects such a definition (C3615), so the non-constexpr form is also the portable one.
+/// path at all, and MSVC rejects such a definition (C3615), so the non-constexpr form is also the portable
+/// one.
 [[noreturn]] inline void format_error(char const* msg)
 {
     cc::impl::handle_assert_failure("cc::format", msg, cc::source_location::current());
@@ -91,8 +89,9 @@ struct format_spec
 
 /// A parsed replacement field.
 ///
-/// The spec is kept as the raw text between ':' and '}' (not parsed): built-in types parse it with the
-/// standard grammar (format_parse_spec), while a cc::custom::formatter<T> may interpret it however it likes.
+/// The spec is kept as the raw text between ':' and '}' rather than parsed here.
+/// Built-in types parse it with the standard grammar (format_parse_spec), while a cc::custom::formatter<T>
+/// may interpret it however it likes.
 struct format_field
 {
     isize arg_index = -1;  // resolved (auto or explicit) argument index
@@ -108,7 +107,8 @@ struct format_index_state
     bool saw_explicit = false;
 };
 
-/// Maps a (decayed) argument type to its format_type_tag. Used by the validator only.
+/// Maps a (decayed) argument type to its format_type_tag.
+/// Used by the validator only.
 template <class T>
 consteval format_type_tag format_type_tag_of()
 {
@@ -132,8 +132,8 @@ consteval format_type_tag format_type_tag_of()
 }
 
 /// Parses a format spec (the text between ':' and '}') into a format_spec.
-/// Reports syntax errors via format_error. Does not validate against the argument type
-/// (that is format_spec_error_for_type's job).
+/// Reports syntax errors via format_error.
+/// Checking the spec against the argument type is format_spec_error_for_type's job.
 constexpr format_spec format_parse_spec(string_view body)
 {
     format_spec spec;
@@ -303,7 +303,7 @@ constexpr char const* format_spec_error_for_type(format_spec const& s, format_ty
                              && !s.alternate && !s.zero_pad && s.width == -1 && s.group == '\0' && s.precision == -1
                              && s.presentation == '\0';
         if (!is_default)
-            return "user-defined types accept only '{}' (specialize cc::formatter<T> for custom specs)";
+            return "user-defined types accept only '{}' (specialize cc::custom::formatter<T> for custom specs)";
         return nullptr;
     }
 

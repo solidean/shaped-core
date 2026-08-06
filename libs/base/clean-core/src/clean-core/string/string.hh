@@ -9,50 +9,44 @@
 #include <type_traits>
 
 /// Owning UTF-8 byte string with small-string optimization (SSO).
-/// Stores up to small_capacity bytes inline without allocation (39 on 64-bit platforms; fewer where pointers are smaller, e.g. wasm32).
-/// Longer strings use heap storage via cc::allocation<char>.
-/// size() counts bytes, not codepoints; embedded '\0' bytes are allowed.
-/// data() returns contiguous bytes but is NOT null-terminated.
+/// Content up to small_capacity bytes lives inline with no allocation; longer content uses heap storage via
+/// cc::allocation<char>.
+/// size() counts bytes rather than codepoints, and embedded '\0' bytes are allowed.
+/// data() is contiguous but NOT null-terminated — c_str_materialize() is the explicit C-interop path.
 ///
-/// C interop requires explicit materialization:
-/// Use c_str_materialize() to obtain a temporary '\0'-terminated pointer valid only until the next mutation.
-/// This design avoids the overhead of maintaining a persistent terminator for all operations.
+/// A pointer, reference or string_view into a string is valid until the next non-const operation on it.
+/// c_str_materialize() is itself non-const and may reallocate, so it invalidates like any mutation.
 ///
-/// Memory resource choice ("custom_resource is sticky") is preserved across all operations, including transitions between SSO and heap.
-/// Mutating operations may invalidate pointers and references, as with std::string.
+/// The memory resource is sticky across every operation on one string, including transitions between
+/// inline and heap storage.
+/// Copying is the exception — see the copy constructor and copy assignment.
 ///
-/// Performance characteristics:
-/// SSO fast paths (small strings, up to small_capacity bytes) avoid allocation and branch on size checks.
-/// For data-intensive or SIMD-heavy workloads, prefer string_view/span over repeated string operations.
+/// Full Unicode semantics — grapheme clusters, codepoint iteration, normalization — are a non-goal.
 ///
-/// Non-goal: Full Unicode semantics (grapheme clusters, codepoint iteration).
-/// For heavyweight UTF-8 processing, use cc::text/text_view (planned).
+/// libs/base/clean-core/docs/strings.md owns the storage, lifetime, hashing and conversion contracts.
 struct cc::string
 {
     // constants
 private:
     /// Maximum number of bytes that can be stored inline without heap allocation.
     /// Derived from the heap layout rather than hardcoded.
-    /// The inline buffer fills the space before the custom_resource pointer (which data_small must alias for the SSO tag bit), minus one byte for the size tag.
-    /// This tracks the pointer size automatically — 39 bytes on 64-bit, fewer where pointers are smaller (e.g. wasm32, which has 32-bit pointers).
+    /// The inline buffer fills the space before the custom_resource pointer, which data_small must alias for
+    /// the SSO tag bit, minus one byte for the size tag.
+    /// That is 39 bytes on 64-bit and fewer where pointers are smaller, so read this constant rather than
+    /// assuming a number.
     static constexpr isize small_capacity = isize(offsetof(allocation<char>, custom_resource)) - 1;
 
     // factories
 public:
     /// Creates a string by copying the contents of a string_view.
-    /// If the content fits in 39 bytes, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
-    /// Equivalent to the string_view constructor, but provides a consistent factory interface.
-    /// Complexity: O(source.size()).
+    /// Equivalent to the string_view constructor, and exists so the factories cover the same ground.
     [[nodiscard]] static string create_copy_of(string_view source, memory_resource const* resource = nullptr)
     {
         return string(source.data(), source.size(), resource);
     }
 
     /// Creates a string filled with size copies of the given character.
-    /// If size <= 39, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
-    /// Complexity: O(size).
+    /// Precondition: size >= 0.
     [[nodiscard]] static string create_filled(isize size, char value, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(size >= 0, "string size must be non-negative");
@@ -64,11 +58,9 @@ public:
     }
 
     /// Creates a string with uninitialized storage for size bytes.
-    /// The caller is responsible for initializing the bytes before reading them.
-    /// If size <= 39, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
-    /// Use this only when you will immediately overwrite all bytes.
-    /// Complexity: O(1) for SSO, O(size) for heap (allocation only, no initialization).
+    /// The caller must write every byte before reading any of them, so use this only when you will overwrite
+    /// all of them immediately.
+    /// Precondition: size >= 0.
     [[nodiscard]] static string create_uninitialized(isize size, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(size >= 0, "string size must be non-negative");
@@ -79,11 +71,10 @@ public:
         return result;
     }
 
-    /// Creates a string from an existing allocation<char>.
-    /// The allocation must already contain valid UTF-8 byte data in its live range.
-    /// Always uses heap mode, even if the content would fit in SSO.
-    /// This preserves the allocation for efficient memory sharing and zero-copy interop.
-    /// Complexity: O(1).
+    /// Creates a string from an existing allocation<char>, which must already hold valid bytes in its live
+    /// range.
+    /// Always uses heap mode, even for content that would fit inline, so that the allocation survives for
+    /// sharing and zero-copy interop.
     [[nodiscard]] static string create_from_allocation(allocation<char> data)
     {
         string result;
@@ -93,11 +84,10 @@ public:
         return result;
     }
 
-    /// Creates an empty string with pre-allocated capacity.
-    /// If capacity <= 39, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage with the specified capacity from the memory resource.
-    /// The string is initially empty (size() == 0), but can grow up to capacity without reallocation.
-    /// Complexity: O(1) (allocation only, no initialization).
+    /// Creates an empty string with room to grow to capacity bytes without reallocating.
+    /// capacity is a lower bound: a heap allocation is rounded up to the allocator's alignment, so
+    /// capacity_back() may exceed what was asked for.
+    /// Precondition: capacity >= 0.
     [[nodiscard]] static string create_with_capacity(isize capacity, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(capacity >= 0, "capacity must be non-negative");
@@ -109,13 +99,11 @@ public:
     }
 
     /// Creates a null-terminated copy of a string_view.
-    /// Allocates capacity for size + 1, copies the source, and writes a terminating '\0'.
-    /// The '\0' is written to storage but NOT included in size().
-    /// This is semantically equivalent to calling create_copy_of followed by c_str_materialize,
-    /// but more efficient as it pre-allocates the terminator space.
-    /// Use this when you know you'll need a null-terminated string for C interop.
-    /// Guarantees that c_str_if_terminated() will return a valid pointer (not nullptr).
-    /// Complexity: O(source.size()).
+    /// Allocates room for size + 1, copies the source, and writes a terminating '\0' that is NOT counted in
+    /// size().
+    /// c_str_if_terminated() is guaranteed to succeed on the result.
+    /// Equivalent to create_copy_of followed by c_str_materialize, but sizes one allocation for the
+    /// terminator up front rather than possibly reallocating for it later.
     [[nodiscard]] static string create_copy_c_str_materialized(string_view source,
                                                                memory_resource const* resource = nullptr)
     {
@@ -135,18 +123,14 @@ public:
 
     // constructors
 public:
-    /// Constructs an empty string with no allocation.
-    /// Uses small string optimization (SSO) mode.
-    /// The string is ready to use and can grow up to 39 bytes without allocating.
+    /// Constructs an empty string, inline and with no allocation.
     string() { initialize_small_empty(nullptr); }
 
-    /// Prevent construction from nullptr to avoid ambiguity (compile-time error instead of runtime check).
-    /// Use the default constructor string() for an empty string instead.
+    /// Constructing from nullptr is a compile error rather than a runtime check.
+    /// Use the default constructor for an empty string.
     string(nullptr_t) = delete;
 
-    /// Constructs a string from a single character.
-    /// Always uses SSO mode (no allocation).
-    /// Complexity: O(1).
+    /// Constructs a string from a single character, always inline.
     explicit string(char c, memory_resource const* resource = nullptr)
     {
         initialize_small_empty(resource);
@@ -155,10 +139,7 @@ public:
     }
 
     /// Constructs a string from [ptr, ptr+size).
-    /// If the content fits in 39 bytes, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
     /// Precondition: size >= 0, and ptr must not be null unless size == 0.
-    /// Complexity: O(size).
     explicit string(char const* ptr, isize size, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(size >= 0, "string size must be non-negative");
@@ -178,10 +159,7 @@ public:
     }
 
     /// Constructs a string from [begin, end).
-    /// If the content fits in 39 bytes, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
     /// Precondition: begin <= end, and begin must not be null unless begin == end.
-    /// Complexity: O(end - begin).
     explicit string(char const* begin, char const* end, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(begin <= end, "invalid pointer range");
@@ -201,11 +179,8 @@ public:
         }
     }
 
-    /// Constructs a string from a null-terminated C string.
-    /// If the string fits in 39 bytes, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
-    /// Precondition: cstr must not be nullptr (use default constructor for empty string).
-    /// Complexity: O(n) where n is the length of the string.
+    /// Constructs a string from a null-terminated C string, whose length is computed by scanning for '\0'.
+    /// Precondition: cstr must not be nullptr.
     string(char const* cstr, memory_resource const* resource = nullptr)
     {
         CC_ASSERT(cstr != nullptr, "use default constructor for empty string instead of nullptr");
@@ -225,9 +200,7 @@ public:
     }
 
     /// Constructs a string from any container providing .data() and .size().
-    /// If the content fits in 39 bytes, uses SSO mode (no allocation).
-    /// Otherwise, allocates heap storage from the specified memory resource.
-    /// Complexity: O(n) where n is the size of the container.
+    /// This conversion is implicit, so passing a string_view where a string is expected silently copies.
     template <class Container>
         requires requires(Container&& c) {
             { c.data() } -> std::convertible_to<char const*>;
@@ -251,9 +224,7 @@ public:
         }
     }
 
-    /// Destroys the string, freeing heap allocation if present.
-    /// Small strings (SSO mode) require no cleanup.
-    /// Complexity: O(1).
+    /// Destroys the string, freeing the heap allocation if there is one.
     ~string()
     {
         if (!is_small())
@@ -262,10 +233,7 @@ public:
 
     // copy
     /// Deep-copies a string.
-    /// If the source is small (SSO), performs a fast block copy.
-    /// If the source is heap-allocated, allocates new storage and copies the bytes.
-    /// Preserves the source's memory resource.
-    /// Complexity: O(n) for heap strings, O(1) for small strings.
+    /// Always adopts the source's memory resource.
     string(string const& rhs)
     {
         if (rhs.is_small()) [[likely]]
@@ -278,11 +246,9 @@ public:
         }
     }
 
-    /// Deep-copy assignment.
-    /// Destroys the current content (if heap-allocated), then copies from rhs.
-    /// Preserves this string's memory resource (does not copy allocator).
-    /// Self-assignment safe.
-    /// Complexity: O(n) for heap strings, O(1) for small strings.
+    /// Deep-copy assignment, self-assignment safe.
+    /// Which memory resource survives depends on rhs's storage: an inline rhs is block-copied, resource word
+    /// included, while a heap rhs allocates from this string's resource.
     string& operator=(string const& rhs)
     {
         if (this != &rhs)
@@ -303,22 +269,14 @@ public:
     }
 
     // move
-    /// Move constructor.
-    /// Transfers ownership of rhs's content via block copy.
-    /// Leaves rhs in a valid empty state (small mode).
-    /// Works for both small and heap strings.
-    /// Complexity: O(1).
+    /// Move constructor, leaving rhs empty and inline.
     string(string&& rhs) noexcept
     {
         _data.blocks = rhs._data.blocks;
         rhs.initialize_small_empty(rhs._data.small.custom_resource);
     }
 
-    /// Move assignment.
-    /// Destroys current content (if heap), then transfers ownership from rhs.
-    /// Leaves rhs in a valid empty state (small mode).
-    /// Self-assignment safe.
-    /// Complexity: O(1).
+    /// Move assignment, self-assignment safe, leaving rhs empty and inline.
     string& operator=(string&& rhs) noexcept
     {
         if (this != &rhs)
@@ -335,9 +293,7 @@ public:
     // queries
 public:
     /// Returns the number of bytes in the string.
-    /// Note: This counts bytes, not Unicode codepoints or grapheme clusters.
-    /// Embedded '\0' bytes are allowed and counted.
-    /// Complexity: O(1).
+    /// Bytes, not codepoints or grapheme clusters; embedded '\0' bytes are counted.
     [[nodiscard]] isize size() const
     {
         if (is_small()) [[likely]]
@@ -346,15 +302,11 @@ public:
             return _data.heap.size();
     }
 
-    /// Returns true if the string contains no bytes (size() == 0).
-    /// Complexity: O(1).
+    /// Returns true if the string contains no bytes.
     [[nodiscard]] bool empty() const { return size() == 0; }
 
-    /// Returns a pointer to the first byte of the string.
-    /// The data is contiguous but NOT null-terminated.
-    /// Use c_str_materialize() if you need a null-terminated string for C APIs.
-    /// May return a pointer to internal SSO buffer or heap allocation.
-    /// Complexity: O(1).
+    /// Returns a pointer to the first byte, inline or heap depending on the storage mode.
+    /// The bytes are contiguous but NOT null-terminated — use c_str_materialize() for a C API.
     [[nodiscard]] char const* data() const
     {
         if (is_small()) [[likely]]
@@ -363,11 +315,8 @@ public:
             return _data.heap.data();
     }
 
-    /// Returns a mutable pointer to the first byte of the string.
-    /// The data is contiguous but NOT null-terminated.
-    /// Allows in-place modification of individual bytes.
-    /// May return a pointer to internal SSO buffer or heap allocation.
-    /// Complexity: O(1).
+    /// Returns a mutable pointer to the first byte, for in-place modification.
+    /// The bytes are contiguous but NOT null-terminated.
     [[nodiscard]] char* data()
     {
         if (is_small()) [[likely]]
@@ -376,9 +325,8 @@ public:
             return _data.heap.data();
     }
 
-    /// Returns a const reference to the byte at index i.
+    /// Returns the byte at index i.
     /// Precondition: 0 <= i < size().
-    /// Complexity: O(1).
     [[nodiscard]] char const& operator[](isize i) const
     {
         CC_ASSERT(0 <= i && i < size(), "index out of bounds");
@@ -387,7 +335,6 @@ public:
 
     /// Returns a mutable reference to the byte at index i.
     /// Precondition: 0 <= i < size().
-    /// Complexity: O(1).
     [[nodiscard]] char& operator[](isize i)
     {
         CC_ASSERT(0 <= i && i < size(), "index out of bounds");
@@ -415,11 +362,12 @@ public:
 
     // string_view read forwarding
 public:
-    /// Lexicographically compares with another view.
-    /// Returns <0, 0, or >0.
+    /// Lexicographically compares with another view, returning <0, 0 or >0.
+    /// Two cc::strings have no relational operators, so this is how you order them.
     [[nodiscard]] int compare(string_view other) const { return string_view(*this).compare(other); }
 
     /// Finds the first occurrence of substring at or after pos, or -1.
+    /// Naive search: O(size() * substring.size()).
     /// Precondition: 0 <= pos <= size().
     [[nodiscard]] isize find(string_view substring, isize pos = 0) const
     {
@@ -430,7 +378,8 @@ public:
     /// Precondition: 0 <= pos <= size().
     [[nodiscard]] isize find(char c, isize pos = 0) const { return string_view(*this).find(c, pos); }
 
-    /// Finds the last occurrence of substring at or before pos (-1 = from the end), or -1.
+    /// Finds the last occurrence of substring at or before pos, or -1.
+    /// A pos of -1 searches from the end.
     [[nodiscard]] isize rfind(string_view substring, isize pos = -1) const
     {
         return string_view(*this).rfind(substring, pos);
@@ -441,17 +390,15 @@ public:
 
     // substring operations
 public:
-    /// Returns a non-owning view [offset, size()) into this string.
-    /// The view is invalidated by any mutation of this string.
+    /// Returns a non-owning view [offset, size()) into this string, invalidated like any other pointer into
+    /// it.
     /// Precondition: 0 <= offset <= size().
     [[nodiscard]] string_view subview(isize offset) const { return string_view(*this).subview(offset); }
 
     /// Returns a non-owning view [r.offset, r.offset + r.size) into this string.
-    /// The view is invalidated by any mutation of this string.
     [[nodiscard]] string_view subview(offset_size r) const { return string_view(*this).subview(r); }
 
     /// Returns a non-owning view [r.start, r.end) into this string.
-    /// The view is invalidated by any mutation of this string.
     [[nodiscard]] string_view subview(start_end r) const { return string_view(*this).subview(r); }
 
     /// Returns an owning copy of [offset, size()).
@@ -466,17 +413,13 @@ public:
 
     // C interop
 public:
-    /// Materializes a null-terminated C string on demand.
-    /// Writes a '\0' byte immediately after the string content (does NOT change size()).
-    /// May allocate or transition from SSO to heap if needed.
+    /// Materializes a null-terminated C string on demand and returns it.
+    /// Writes a '\0' immediately after the content, which does NOT change size().
+    /// May allocate, and may move an inline string to the heap.
     ///
-    /// IMPORTANT: The returned pointer is only valid until the next non-const operation.
-    /// This is an explicit FFI boundary operation, not a persistent invariant.
-    ///
-    /// Usage pattern: Call immediately before passing to C API, do not store the pointer.
-    /// Example: some_c_function(str.c_str_materialize());
-    ///
-    /// Complexity: O(1) if capacity exists, O(n) if reallocation needed.
+    /// The returned pointer is valid only until the next non-const operation, so call this immediately
+    /// before the C call and never store the result:
+    ///   some_c_function(str.c_str_materialize());
     [[nodiscard]] char const* c_str_materialize()
     {
         if (is_small()) [[likely]]
@@ -501,23 +444,18 @@ public:
         }
     }
 
-    /// Returns a C string pointer if already null-terminated, nullptr otherwise.
-    /// This is a const inspection that does NOT modify the string.
-    /// Checks if capacity > size and if the byte at position size() is already '\0'.
+    /// Returns a C string pointer when the content already happens to be null-terminated, nullptr otherwise.
+    /// A const inspection: it checks that capacity reaches past size() and that the byte at size() is '\0'.
+    /// Strings from create_copy_c_str_materialized() always succeed here.
     ///
-    /// Strings created with create_copy_c_str_materialized() are guaranteed to succeed.
+    /// The returned pointer is valid only until the next non-const operation.
     ///
-    /// IMPORTANT: The returned pointer is only valid until the next non-const operation.
-    ///
-    /// Usage pattern: Optimistically check before materializing to avoid allocation.
-    /// Most effective with const strings, where materialization requires a copy.
-    /// Example:
+    /// Try this before materializing, which matters most for a string you only hold by const reference,
+    /// where materializing means copying:
     ///   if (auto* cstr = str.c_str_if_terminated())
     ///       some_c_function(cstr);
     ///   else
     ///       some_c_function(string::create_copy_c_str_materialized(str).c_str_if_terminated());
-    ///
-    /// Complexity: O(1).
     [[nodiscard]] char const* c_str_if_terminated() const
     {
         if (is_small()) [[likely]]
@@ -538,10 +476,9 @@ public:
 
     // mutating operations
 public:
-    /// Appends a single byte to the end of the string.
-    /// If small and at capacity (39 bytes), transitions to heap mode.
-    /// May reallocate if heap capacity is exhausted.
-    /// Amortized O(1) complexity.
+    /// Appends a single byte.
+    /// Moves to the heap when the inline buffer is full, and may reallocate when heap capacity runs out.
+    /// Amortized O(1).
     void push_back(char c)
     {
         if (is_small()) [[likely]]
@@ -559,11 +496,8 @@ public:
         _data.heap.push_back(c);
     }
 
-    /// Appends the contents of a string_view to the end of this string.
-    /// If small and the result fits in SSO capacity, stays small.
-    /// Otherwise, transitions to heap or grows existing heap allocation.
-    /// May reallocate if capacity is insufficient.
-    /// Complexity: O(sv.size()).
+    /// Appends the contents of a string_view.
+    /// Stays inline while the result fits, and otherwise moves to or grows the heap allocation.
     void append(string_view sv)
     {
         if (sv.empty())
@@ -587,65 +521,47 @@ public:
         std::memcpy(_data.heap.data() + old_size, sv.data(), sv.size());
     }
 
-    /// Appends a single character to the end of this string.
-    /// Delegates to push_back for consistent behavior.
-    /// Amortized O(1) complexity.
+    /// Appends a single character.
     void append(char c) { push_back(c); }
 
-    /// Appends the contents of a string_view to this string.
-    /// Returns a reference to this string for chaining.
-    /// Complexity: O(sv.size()).
+    /// Appends the contents of a string_view and returns *this for chaining.
     string& operator+=(string_view sv)
     {
         append(sv);
         return *this;
     }
 
-    /// Appends a single character to this string.
-    /// Returns a reference to this string for chaining.
-    /// Amortized O(1) complexity.
+    /// Appends a single character and returns *this for chaining.
     string& operator+=(char c)
     {
         append(c);
         return *this;
     }
 
-    /// Appends formatted output to this string, equivalent to cc::format_append(*this, fmt, args...).
+    /// Appends formatted output, equivalent to cc::format_append(*this, fmt, args...).
     /// The format string is validated against the argument types at compile time.
     ///
-    /// IMPORTANT: only declared here; the definition lives in <clean-core/string/format.hh>. You must
-    /// include that header to call this (string.hh deliberately does not pull in the format machinery).
-    ///
-    /// Usage:
-    ///   #include <clean-core/string/format.hh>
-    ///   str.appendf("{} = {}", key, value);
+    /// Only declared here: the definition lives in <clean-core/string/format.hh>, which you must include to
+    /// call this, since string.hh deliberately does not pull in the format machinery.
     template <class... Args>
     void appendf(format_string<std::type_identity_t<Args>...> fmt, Args&&... args);
 
-    /// Concatenates a string and a string_view.
-    /// Takes the left-hand string by value and appends the right-hand view.
-    /// Returns a new string containing the concatenated result.
-    /// Complexity: O(rhs.size()).
+    /// Concatenates a string and a string_view, taking the left side by value.
     [[nodiscard]] friend string operator+(string lhs, string_view rhs)
     {
         lhs.append(rhs);
         return lhs;
     }
 
-    /// Concatenates a string and a character.
-    /// Takes the left-hand string by value and appends the right-hand character.
-    /// Returns a new string containing the concatenated result.
-    /// Amortized O(1) complexity.
+    /// Concatenates a string and a character, taking the left side by value.
     [[nodiscard]] friend string operator+(string lhs, char rhs)
     {
         lhs.append(rhs);
         return lhs;
     }
 
-    /// Clears the string to empty (size() becomes 0).
-    /// Does not deallocate heap storage; capacity is preserved.
-    /// After clear(), the string remains in its current mode (small or heap).
-    /// Complexity: O(1).
+    /// Clears the string to empty without deallocating.
+    /// Capacity and storage mode are both preserved.
     void clear()
     {
         if (is_small()) [[likely]]
@@ -682,11 +598,10 @@ public:
 
     // resize and capacity
 public:
-    /// Resizes to new_size bytes, leaving any newly added bytes uninitialized.
+    /// Resizes to new_size bytes, leaving newly added bytes uninitialized and preserving existing ones.
     /// Growing extends at the back; shrinking drops trailing bytes.
-    /// Existing bytes are preserved.
-    /// Stays in SSO mode while new_size fits inline; otherwise materializes to heap.
-    /// The storage mode is never demoted here — only shrink_to_fit() may return to SSO.
+    /// Stays inline while new_size fits, and otherwise moves to the heap.
+    /// Only shrink_to_fit() ever moves back, so this never demotes.
     /// Precondition: new_size >= 0.
     void resize_to_uninitialized(isize new_size)
     {
@@ -705,10 +620,8 @@ public:
         _data.heap.resize_to_uninitialized(new_size);
     }
 
-    /// Resizes to new_size bytes, filling any newly added bytes with value.
+    /// Resizes to new_size bytes, filling newly added bytes with value and preserving existing ones.
     /// Growing extends at the back; shrinking drops trailing bytes.
-    /// Existing bytes are preserved.
-    /// Stays in SSO mode while new_size fits inline; otherwise materializes to heap.
     /// Precondition: new_size >= 0.
     void resize_to_filled(isize new_size, char value)
     {
@@ -750,7 +663,6 @@ public:
 
     /// Discards all current content, then resizes to new_size bytes left uninitialized.
     /// Unlike resize_*, existing bytes are NOT preserved when growing.
-    /// Stays in SSO mode while new_size fits inline; otherwise materializes to heap.
     /// Precondition: new_size >= 0.
     void clear_resize_to_uninitialized(isize new_size)
     {
@@ -796,10 +708,11 @@ public:
     /// Precondition: new_size >= 0.
     void clear_resize_to_defaulted(isize new_size) { clear_resize_to_filled(new_size, char()); }
 
-    /// Ensures at least count MORE bytes can be appended at the back without reallocation.
+    /// Ensures at least count MORE bytes can be appended at the back without reallocating.
     /// count is a delta on top of the current size, not an absolute capacity.
-    /// A no-op while the string stays inline (SSO already reserves small_capacity bytes); otherwise materializes to heap with room for count more bytes.
-    /// Uses exponential growth to amortize future reservations.
+    /// A no-op while the string stays inline, since SSO already reserves small_capacity bytes.
+    /// Growth is exponential only once the string is on the heap; the move from inline to heap allocates
+    /// just what count asks for.
     /// Precondition: count >= 0.
     void reserve_back(isize count)
     {
@@ -815,8 +728,8 @@ public:
         _data.heap.reserve_back(count);
     }
 
-    /// Ensures at least count MORE bytes can be appended at the back without reallocation.
-    /// Like reserve_back but allocates exactly the needed space (no exponential slack).
+    /// Ensures at least count MORE bytes can be appended at the back without reallocating.
+    /// Like reserve_back, but allocates exactly the needed space with no exponential slack.
     /// Precondition: count >= 0.
     void reserve_back_exact(isize count)
     {
@@ -835,8 +748,9 @@ public:
     /// Ensures at least count MORE bytes of unused capacity BEFORE the content (front slack).
     /// No string operation consumes front slack today; it survives back-growth until shrink_to_fit().
     ///
-    /// A small string always materializes to heap here — SSO cannot represent a front offset.
-    /// The new allocation holds small_capacity + count bytes, content placed so capacity_front() == count and the back capacity matches what SSO had (small_capacity - size).
+    /// An inline string always moves to the heap here, since SSO cannot represent a front offset.
+    /// The new allocation holds small_capacity + count bytes, placed so that capacity_front() == count and
+    /// the back capacity matches what SSO had.
     /// Precondition: count >= 0.
     void reserve_front(isize count)
     {
@@ -873,18 +787,19 @@ public:
     }
 
     /// Releases excess capacity so the allocation fits the current content.
-    /// A no-op in SSO mode (already minimal) and for an already-tight heap allocation.
-    /// When a heap string would reallocate and its content fits inline, it drops back to SSO, freeing the heap allocation entirely.
-    /// Otherwise the heap block is tightened in place.
-    /// This is the only operation that returns a heap string to SSO.
+    /// A no-op in inline mode, which is already minimal, and for an already-tight heap allocation.
+    /// A heap string whose content fits inline always drops back to SSO, freeing the heap allocation
+    /// entirely; otherwise the heap block is tightened in place.
+    /// This is the only operation that returns a heap string to inline storage.
     /// May invalidate pointers.
     void shrink_to_fit()
     {
         if (is_small()) [[likely]]
             return;
 
-        // Content that fits inline always returns to SSO, freeing the heap allocation outright — the only path back to SSO, and a strict win over any heap block.
-        // This must come before any heap-tightness test: with a 128-byte alloc_alignment (some targets' cache line) a block can read as already-tight for the current size yet still be demotable to SSO.
+        // Fitting inline always wins over any heap block, so this must come before any heap-tightness test.
+        // With a 128-byte alloc_alignment, some targets' cache line, a block can read as already tight for
+        // the current size and still be demotable.
         if (size() <= small_capacity)
         {
             demote_to_small();
@@ -897,7 +812,6 @@ public:
 
     /// Replaces every occurrence of from with to, in place.
     /// Returns the number of replacements.
-    /// Complexity: O(size()).
     isize replace_all(char from, char to);
 
     /// Replaces every non-overlapping occurrence of from with to (scanning left to right).
@@ -937,9 +851,7 @@ public:
 
     // comparisons
 public:
-    /// Compares this string with any type convertible to string_view for equality.
-    /// Returns true if both have the same size and content.
-    /// Complexity: O(size()).
+    /// Compares against anything convertible to string_view for equality of size and content.
     template <class S>
     [[nodiscard]] bool operator==(S&& rhs) const
         requires std::convertible_to<S, string_view>
@@ -947,90 +859,76 @@ public:
         return string_view(*this) == string_view(cc::forward<S>(rhs));
     }
 
-    /// Compares this string with another string for equality.
-    /// Returns true if both have the same size and content.
-    /// Complexity: O(size()).
+    /// Compares against another string for equality of size and content.
     [[nodiscard]] bool operator==(string const& rhs) const { return string_view(*this) == string_view(rhs); }
 
     /// Structural hash over the bytes; delegates to string_view so equal content hashes equally regardless of SSO vs heap storage (and matches a string_view of the same content).
     [[nodiscard]] friend u64 hash(string const& s) { return hash(string_view(s)); }
 
-    /// Checks if this string starts with the given prefix.
-    /// Returns true if the string begins with the prefix.
-    /// Complexity: O(prefix.size()).
+    /// Returns true if the string begins with prefix.
     [[nodiscard]] bool starts_with(string_view prefix) const { return string_view(*this).starts_with(prefix); }
 
-    /// Checks if this string ends with the given suffix.
-    /// Returns true if the string ends with the suffix.
-    /// Complexity: O(suffix.size()).
+    /// Returns true if the string ends with suffix.
     [[nodiscard]] bool ends_with(string_view suffix) const { return string_view(*this).ends_with(suffix); }
 
-    /// Checks if this string contains the given substring.
-    /// Returns true if the substring is found anywhere in the string.
-    /// Complexity: O(size() * sv.size()).
+    /// Returns true if sv occurs anywhere in the string.
+    /// Naive search: O(size() * sv.size()).
     [[nodiscard]] bool contains(string_view sv) const { return string_view(*this).contains(sv); }
 
-    /// Checks if this string contains the given character.
-    /// Returns true if the character is found anywhere in the string.
-    /// Complexity: O(size()).
+    /// Returns true if c occurs anywhere in the string.
     [[nodiscard]] bool contains(char c) const { return string_view(*this).contains(c); }
 
     // storage mode
 public:
-    /// True while the string is in small (SSO) mode: content is stored inline, no heap allocation exists.
-    /// Bit set (1) means small mode; bit clear (0) means heap mode.
-    /// Only shrink_to_fit() may turn a heap string back into a small one.
+    /// True while the content is stored inline and no heap allocation exists.
+    /// The flag is the low bit of the custom_resource word: set means inline, clear means heap.
+    /// Only shrink_to_fit() turns a heap string back into an inline one.
     [[nodiscard]] bool is_small() const { return (reinterpret_cast<uintptr_t>(_data.small.custom_resource) & 1) != 0; }
 
     // helpers
 private:
-    /// Returns the memory resource associated with this string.
-    /// Removes the small-mode tag bit if present.
-    /// nullptr means use the default global memory resource.
+    /// Returns the memory resource, with the inline-mode tag bit removed.
+    /// nullptr means the default global memory resource.
     [[nodiscard]] memory_resource const* resource() const { return remove_small_tag(_data.small.custom_resource); }
 
-    /// Tags a memory resource pointer to indicate small mode.
-    /// Sets the low bit to 1; the tagged pointer is stored in data_small.custom_resource.
-    /// The low bit is safe to use because memory_resource pointers are always aligned.
+    /// Tags a memory resource pointer to mark inline mode by setting its low bit.
+    /// Safe because memory_resource pointers are always aligned.
     [[nodiscard]] static memory_resource const* add_small_tag(memory_resource const* r)
     {
         return reinterpret_cast<memory_resource const*>(reinterpret_cast<uintptr_t>(r) | 1);
     }
 
-    /// Removes the small-mode tag from a tagged resource pointer.
-    /// Clears the low bit to recover the original resource pointer (or nullptr).
+    /// Recovers the original resource pointer, or nullptr, by clearing the tag bit.
     [[nodiscard]] static memory_resource const* remove_small_tag(memory_resource const* r)
     {
         return reinterpret_cast<memory_resource const*>(reinterpret_cast<uintptr_t>(r) & ~uintptr_t(1));
     }
 
-    /// Initializes the union in small mode with size 0 and a tagged resource pointer.
-    /// After this call, is_small() returns true and size() returns 0.
+    /// Initializes the union in inline mode, with size 0 and a tagged resource pointer.
     void initialize_small_empty(memory_resource const* resource)
     {
         _data.small.size = 0;
         _data.small.custom_resource = add_small_tag(resource);
     }
 
-    /// Initializes the union in heap mode by constructing data_heap and copying data.
-    /// Allocates storage for len bytes, copies from str, and sets up the live range.
-    /// Precondition: The union must be uninitialized or previously destroyed.
+    /// Initializes the union in heap mode, allocating for len bytes and copying them from str.
+    /// Precondition: the union must be uninitialized or previously destroyed.
     void initialize_heap_from_data(char const* str, isize len, memory_resource const* resource);
 
-    /// Transitions from small mode to heap mode.
-    /// Copies the small buffer content to a new heap allocation with additional back capacity.
-    /// Precondition: is_small() must be true.
-    /// After this call, is_small() returns false and the old small data is lost.
+    /// Moves from inline to heap mode, copying the inline content into a new allocation with at least
+    /// min_back_capacity bytes of room after it.
+    /// Precondition: is_small().
     void materialize_heap(isize min_back_capacity);
 
-    /// Transitions from small mode to heap mode, placing the content with front_capacity unused bytes before it and back_capacity unused bytes after it (capacity_front() == front_capacity afterwards).
+    /// Moves from inline to heap mode, placing the content with front_capacity unused bytes before it and
+    /// back_capacity unused bytes after it, so that capacity_front() == front_capacity afterwards.
     /// Precondition: is_small() and front_capacity >= 0 and back_capacity >= 0.
     void materialize_heap_front(isize front_capacity, isize back_capacity);
 
-    /// Transitions from heap mode back to small mode, freeing the heap allocation.
-    /// Copies the live bytes into the inline buffer and preserves the memory resource.
+    /// Moves from heap back to inline mode, copying the live bytes into the inline buffer and freeing the
+    /// allocation.
+    /// The memory resource is preserved.
     /// Precondition: !is_small() and size() <= small_capacity.
-    /// After this call, is_small() returns true.
     void demote_to_small();
 
     // data member

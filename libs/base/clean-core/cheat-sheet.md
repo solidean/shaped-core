@@ -191,6 +191,9 @@ cc::make_pinned_data(container_or_shared_ptr);    // pinned_data/shared_ptr -> w
 
 ## Strings (UTF-8)
 
+The contracts behind these — null-termination, invalidation, SSO transitions, hashing — live in [strings](docs/strings.md).
+Formatting has [its own page](docs/formatting.md).
+
 ```cpp
 #include <clean-core/string/string.hh>    // cc::string — owning, SSO (<= 39 bytes inline on 64-bit), deep-copyable
 cc::string str = "shaped";                // ctors: char, (ptr,size), (begin,end), c-string, container
@@ -202,10 +205,10 @@ str.clear_resize_to_uninitialized(n);        // + _defaulted(n) / _filled(n,'x')
 str.reserve_back(n);                         // n MORE bytes; + reserve_back_exact(n); no-op while SSO already fits
 str.reserve_front(n);  str.reserve_front_exact(n);  // front slack; a small string always allocates (SSO has no front offset)
 str.capacity_back();  str.capacity_front();  // -> isize free bytes at back / front (front is 0 while SSO)
-str.shrink_to_fit();                         // release excess capacity; may demote heap->SSO (only when reallocating)
+str.shrink_to_fit();                         // release excess capacity; content that fits inline ALWAYS returns to SSO
 str.size();  str.empty();  str[i];  str.data();   // data() is NOT null-terminated
 str.front();  str.back();  str.compare(o);  str.find(x,pos=0);  str.rfind(x,pos=-1);   // string_view reads forwarded
-str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (invalidated by mutation)
+str.subview(off / {.offset,.size} / {.start,.end});   // -> string_view (dies on the next non-const operation)
 str.substring(off / {.offset,.size} / {.start,.end}); // -> owning cc::string copy
 str.replace_all(from, to);                        // -> isize count; char/char or sv/sv (empty from = no-op)
 str.replace_first(from, to);  str.replace_last(from, to);   // -> bool; char/char or sv/sv
@@ -213,22 +216,24 @@ str.replace({.offset,.size} / {.start,.end}, with);         // replace a range w
 str.is_small();                                   // -> bool (currently in SSO mode)
 str.as_span();  str.as_mutable_span();            // -> span<char const> / span<char> (content only, no terminator)
 str.as_bytes();  str.as_mutable_bytes();          // -> span<byte const> / span<byte>
-str.c_str_materialize();                          // -> char const* '\0'-terminated (valid until next mutation)
+str.c_str_materialize();                          // -> char const* '\0'-terminated (valid until the next non-const op)
 str.c_str_if_terminated();                        // -> char const* or nullptr if not terminated
 
-#include <clean-core/string/string_view.hh>   // cc::string_view — non-owning; implicitly from cc::string
+#include <clean-core/string/string_view.hh>   // cc::string_view — non-owning, trivially copyable
+// string -> string_view is free; string_view -> string is ALSO implicit, and copies (allocating past SSO)
 cc::string_view sv = "abc";               // ctors: (ptr,size), (begin,end), c-string, literal, container
 sv.subview(off);  sv.subview({.offset=o,.size=n});  sv.subview({.start=a,.end=b});   // named-range (cc::offset_size/start_end)
 sv.subview_clamped(off, len);
 sv.remove_prefix(n);  sv.remove_suffix(n);
 sv.starts_with(x);  sv.ends_with(x);  sv.contains(x);   // x = string_view or char
 sv.find(x, pos = 0);  sv.rfind(x, pos = -1);            // -> isize, or -1 if not found
-sv.compare(o);  sv == o;  sv < o;                       // lexicographic
+sv.compare(o);  sv == o;  sv < o;                       // lexicographic; two cc::strings have no <, so use compare
 sv.as_span();  sv.as_bytes();                          // -> span<char const> / span<byte const> (no terminator)
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 #include <clean-core/string/to_debug_string.hh>  // cc::to_debug_string(v, cfg = {}) -> diagnostics string
-// to_debug_string: quotes strings/chars, recurses into ranges [..] and tuples (..); best-effort, non-semantic.
+// to_debug_string: quotes strings/chars, prints pointers as ptr(0xHEX), recurses into ranges [..] and tuples (..).
+// Best-effort and non-semantic — the output is unstable across builds, so never parse it.
 
 #include <clean-core/string/format.hh>           // cc::format — std::format/fmtlib-style, COMPILE-TIME-checked
 cc::format("{} + {} = {}", 1, 2, 3);             // -> cc::string "1 + 2 = 3"   (bad fmt/args = compile error)
@@ -237,8 +242,9 @@ cc::format("{:'}", 1232453254);                  // "1'232'453'254"  — digit g
 cc::format_append(str, "x={}", 7);               // append into an existing cc::string (no temporary)
 str.appendf("x={}", 7);                          // same, as a cc::string member (needs <clean-core/string/format.hh>)
 cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; return > n means truncated
-// Placeholders: {} auto-index, {N} positional (don't mix), {{ }} escape braces. Types: d/x/X/o/b/c ints,
-// f/F/e/E/g/G floats, s string/bool, p pointer. Numbers go via std::to_chars (one seam). No ADL on args.
+// Placeholders: {} auto-index, {N} positional (don't mix), {{ }} escape braces. No ADL on args.
+// Types: d/x/X/o/b/B/c ints, f/F/e/E/g/G floats, s string/bool (bool also takes d/b/B/o/x/X), p pointer.
+// The full grammar and the per-type table: docs/formatting.md.
 // Customize: specialize cc::custom::formatter<T> — gets the raw spec string_view; provide
 //   static void format(cc::format_sink, cc::string_view spec, T const&) + static consteval void validate(spec).
 //   Delegate to the standard grammar via cc::format_value(sink, spec, v) / cc::validate_format_spec(spec).
@@ -249,6 +255,7 @@ cc::print(sv);  cc::println("done");             // raw string_view (braces NOT 
 cc::println("{} + {} = {}", 1, 2, 3);            // cc::format string + args (>=1 arg picks the format overload)
 cc::eprint("oops: {}", err);  cc::eprintln();    // stderr variants
 // println/eprintln ALWAYS flush; print/eprint stay buffered (append your own '\n', or call cc::flush()).
+// println(sv) writes text and newline separately, so concurrent printers can interleave; the format overloads are one write.
 ```
 
 ## Optional & result (fallibility)
@@ -620,8 +627,8 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   `CC_ASSERT`'s message argument is mandatory.
 - **`isize` is signed `i64`, not `size_t`** — intentional, to avoid unsigned underflow.
   `find`/`rfind` return **`-1`** (not a huge unsigned) on no-match.
-- **`string` / `string_view` are NOT null-terminated.** `data()` is not a C
-  string — use `str.c_str_materialize()` (valid only until the next mutation).
+- **`string` / `string_view` are NOT null-terminated.**
+  `data()` is not a C string — use `str.c_str_materialize()`, whose result is valid only until the next non-const operation.
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
 - **`optional` has no `operator*` / `operator->`.** Use `value()`, which
   *asserts* when empty rather than throwing.

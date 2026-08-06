@@ -17,15 +17,20 @@
 //   - a compile-time-checked cc::format string plus arguments:
 //       cc::print("{} + {} = {}", 1, 2, 3);   cc::println("{:.2f}", x);
 //
-// println / eprintln append a trailing '\n' (and the no-argument cc::println() writes just a newline).
-// Output goes through std::fwrite to stdout / stderr (in print.cc, the only TU that includes <cstdio> — this
-// header deliberately does not); no <iostream>, no locale handling.
+// println / eprintln append a trailing '\n', and the no-argument cc::println() writes just a newline.
+// Output goes through std::fwrite in print.cc; this header deliberately stays free of <cstdio>.
+// There is no <iostream> and no locale handling.
 //
 // Flushing: println / eprintln ALWAYS flush after writing, so line-oriented output appears promptly even
-// when the stream is redirected or piped. print / eprint do NOT flush — stdout stays buffered (line-buffered
-// to a terminal, fully buffered when redirected, flushed at normal program exit). For buffered, non-flushing
-// line output, use print and append your own '\n'. stderr is unbuffered regardless. cc::flush() / cc::eflush()
-// flush a stream explicitly.
+// when the stream is redirected or piped.
+// print / eprint do NOT flush, leaving stdout buffered — line-buffered to a terminal, fully buffered when
+// redirected, and flushed at normal program exit.
+// For buffered, non-flushing line output, use print and append your own '\n'.
+// cc::flush() / cc::eflush() flush a stream explicitly.
+//
+// cc::println(string_view) is not atomic: it writes the text and the newline as separate calls, so
+// concurrent printers can interleave mid-line.
+// The cc::format overloads append the newline to the formatted string first, so each of those is one write.
 // =========================================================================================================
 
 namespace cc
@@ -38,15 +43,18 @@ namespace cc
 void print(string_view s);
 /// Writes s followed by '\n' to stdout and flushes; cc::println() writes just a newline.
 void println(string_view s = {});
-/// Flushes any buffered stdout output. Rarely needed (stdout is line-buffered to a terminal and flushed at
-/// exit), but useful for prompt progress output when stdout is redirected/piped.
+/// Flushes any buffered stdout output.
+/// Rarely needed, since stdout is line-buffered to a terminal and flushed at exit, but useful for prompt
+/// progress output when stdout is redirected or piped.
 void flush();
 
 /// Writes s to stderr verbatim (no format interpretation).
 void eprint(string_view s);
 /// Writes s followed by '\n' to stderr and flushes; cc::eprintln() writes just a newline.
 void eprintln(string_view s = {});
-/// Flushes stderr. Provided for symmetry; stderr is already unbuffered, so this is normally a no-op.
+/// Flushes stderr.
+/// Provided for symmetry with cc::flush.
+/// stderr is never fully buffered, so this is normally a no-op.
 void eflush();
 
 // -----------------------------------------------------------------------------------------------------

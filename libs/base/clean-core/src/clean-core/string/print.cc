@@ -2,8 +2,7 @@
 
 #include <cstdio>
 
-// This is the ONLY translation unit that includes <cstdio>: the raw byte writers behind cc::print / eprint
-// (the public header stays free of <cstdio>).
+// The raw byte writers behind cc::print / eprint live here so that print.hh stays free of <cstdio>.
 
 void cc::print(string_view s)
 {
