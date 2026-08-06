@@ -82,9 +82,9 @@ private:
     template <int, int, class, tg::impl::transform_flags>
     friend struct homogeneous_transform;
 
+    /// the return type stays deduced on both sides — see transform_representation_access.hh.
     template <int DS, int DT, class U, tg::impl::transform_flags F>
-    friend constexpr tg::impl::transform_representation<DS, U, tg::impl::linear_part(F), tg::impl::layout_of(F)> const&
-    tg::impl::transform_representation_of(homogeneous_transform<DS, DT, U, F> const&);
+    friend constexpr auto const& tg::impl::transform_representation_of(homogeneous_transform<DS, DT, U, F> const&);
 
     // construction
 public:
