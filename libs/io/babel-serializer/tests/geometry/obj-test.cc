@@ -181,7 +181,7 @@ TEST("obj - reads through the read_stream overload")
 {
     auto const src = cc::string_view("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 
-    cc::span_read_stream_adapter adapter{as_bytes(src)};
+    auto adapter = cc::span_read_stream_adapter(as_bytes(src));
     cc::read_stream stream = adapter;
 
     auto const m = babel::obj::read(stream).value();
