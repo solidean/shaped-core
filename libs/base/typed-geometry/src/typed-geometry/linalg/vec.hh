@@ -4,20 +4,25 @@
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
+// transformed() names the transform classes to branch on them.
+// This is forward declarations only — transform/fwd.hh pulls in nothing from linalg, so the
+// dependency stays one-way; the complete type is needed at the call site, not here.
+#include <typed-geometry/transform/fwd.hh>
+
 #include <initializer_list>
 
 namespace tg
 {
 /// Displacement / direction vector in D dimensions.
 ///
-/// A vec is a free vector: it represents a difference between positions, a direction, or any
-/// quantity that adds component-wise. vec + vec -> vec and scaling are well-defined; see pos
-/// for the position type and its mixed pos/vec arithmetic.
+/// A vec is a free vector: it represents a difference between positions, a direction, or any quantity that adds component-wise.
+/// vec + vec -> vec and scaling are well-defined;
+/// see pos for the position type and its mixed pos/vec arithmetic.
 ///
-/// The raw storage is the public C array member `data`. Components are accessed through `data`
-/// or operator[] — there are no .x/.y/.z members. Default construction zero-initializes all
-/// components. length()/normalized() are only available for scalar types whose scalar_traits
-/// declares has_sqrt (see scalar/traits.hh).
+/// The raw storage is the public C array member `data`.
+/// Components are accessed through `data` or operator[] — there are no .x/.y/.z members.
+/// Default construction zero-initializes all components.
+/// length()/normalized() are only available for scalar types whose scalar_traits declares has_sqrt (see scalar/traits.hh).
 ///
 ///     tg::vec3f a;                          // {0, 0, 0}
 ///     auto const b = tg::vec3f(1, 2, 2);    // {1, 2, 2}
@@ -131,6 +136,32 @@ public:
         if (tg::traits::is_zero(l))
             return zero;
         return *this / l;
+    }
+
+    // transformation
+public:
+    /// the image of this displacement under `t` — the translation does not apply to it.
+    ///
+    /// A projective transform is rejected: a free vector has no base point, so it has no projective image.
+    /// Transform the two endpoints and subtract instead.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+
+        // a displacement is blind to the translation, so the identity and a pure translation both leave it alone
+        else if constexpr (requires { tg::translation_transform<D, T>(t); })
+            return *this;
+
+        // the transform applies its own linear part: it is the only thing that knows whether that is
+        // a quaternion, a scalar or a matrix
+        else if constexpr (requires { tg::affine_transform<D, T>(t); })
+            return t.apply_linear(*this);
+        else
+            static_assert(false,
+                          "tg: this transform cannot be applied to a displacement. A projective transform has no "
+                          "linear part in this sense — transform the endpoints and subtract instead.");
     }
 
     // comparison

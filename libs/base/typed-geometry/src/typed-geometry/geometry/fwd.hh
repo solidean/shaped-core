@@ -34,6 +34,15 @@ struct line;
 template <int D, class T>
 struct plane;
 
+/// sphere surface {x : distance(x, center) == radius}. Finite, intrinsic_dim D-1.
+template <int D, class T>
+struct sphere;
+
+/// ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}. 3D only, finite, intrinsic_dim 2.
+/// The 2D counterpart would be an ellipse, which does not exist yet.
+template <class T>
+struct ellipsoid;
+
 //
 // Dimensional aliases
 //
@@ -67,6 +76,15 @@ template <class T>
 using plane2 = plane<2, T>;
 template <class T>
 using plane3 = plane<3, T>;
+
+template <class T>
+using sphere2 = sphere<2, T>;
+template <class T>
+using sphere3 = sphere<3, T>;
+
+// ellipsoid is 3D only, so its "dimensional" alias just names that dimension.
+template <class T>
+using ellipsoid3 = ellipsoid<T>;
 
 //
 // Concrete typedefs (2D and 3D; suffix f = f32, d = f64, i = i32)
@@ -108,5 +126,14 @@ using plane2f = plane<2, f32>;
 using plane3f = plane<3, f32>;
 using plane2d = plane<2, f64>;
 using plane3d = plane<3, f64>;
+
+// sphere/ellipsoid carry a radius or a semi-axis map, so only the real-scalar suffixes f/d.
+using sphere2f = sphere<2, f32>;
+using sphere3f = sphere<3, f32>;
+using sphere2d = sphere<2, f64>;
+using sphere3d = sphere<3, f64>;
+
+using ellipsoid3f = ellipsoid<f32>;
+using ellipsoid3d = ellipsoid<f64>;
 
 } // namespace tg

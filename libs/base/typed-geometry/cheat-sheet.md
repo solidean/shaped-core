@@ -1,16 +1,14 @@
 # typed-geometry cheat sheet
 
-Strongly-typed C++23 math & geometry. Namespace `tg`. Depends on clean-core. Headers are included
-by full path from `src/`: `#include <typed-geometry/<module>/<name>.hh>`.
+Strongly-typed C++23 math & geometry.
+Namespace `tg`. Depends on clean-core.
+Headers are included by full path from `src/`: `#include <typed-geometry/<module>/<name>.hh>`.
 
-> **Scope note:** this single sheet covers the small surface that exists today (`scalar` + the
-> `linalg` core). As the library grows we will likely split it into per-module cheat sheets
-> (one per larger module) — the eventual API surface is far too large for one file. For the
-> *why*, read the header `///` docs and [docs/structure.md](docs/structure.md).
+> **Scope note:** this single sheet covers the surface that exists today (`scalar`, `linalg`, `transform`, and the `geometry` primitives). As the library grows we will likely split it into per-module cheat sheets — the eventual API surface is far too large for one file.
+> For the *why*, read the header `///` docs and [docs/structure.md](docs/structure.md).
 
-How to read this: each block leads with the include; one symbol per line with a trailing comment
-giving the return type / intuition. Format conventions live in
-[docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+How to read this: each block leads with the include; one symbol per line with a trailing comment giving the return type / intuition.
+Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ---
 
@@ -20,6 +18,7 @@ giving the return type / intuition. Format conventions live in
 #include <typed-geometry/fwd.hh>          // forward decls + all aliases
 tg::vec<D, T>  tg::pos<D, T>  tg::comp<D, T>  tg::bivec<D, T>   // generic over dimension D
 tg::mat<C, R, T>   tg::quat<T>   tg::angle<T>                   // matrix / quaternion / angle
+tg::homogeneous_transform<DSource, DTarget, T, Flags>           // the one transform type (dims are 2 or 3)
 // dimensional alias templates: vec2/3/4, pos2/3/4, comp2/3/4, bivec2/3/4, mat2/3/4   e.g. tg::vec3<T>
 // concrete typedefs — suffix attaches to a trailing digit, else separated by '_':
 tg::vec3f tg::pos3f tg::comp3f tg::bivec3f tg::mat3f   // f=f32, d=f64, i=i32  (e.g. vec2d, mat4i)
@@ -43,6 +42,7 @@ v[i];                                      // T& / T const& — CC_ASSERTs 0 <= 
 v.length_sqr();                            // T   — sum of squares (any scalar)
 v.length();                                // T   — requires has_sqrt<T>
 v.normalized();                            // vec — requires has_sqrt<T>; returns zero if length is ~0
+v.transformed(t);                          // vec — the LINEAR part only; no projective transform
 
 a + b   a - b   -a   a * s   s * a   a / s     // vec arithmetic (s is a scalar T)
 a += b  a -= b  a *= s  a /= s
@@ -66,6 +66,7 @@ q - p;                                     // vec  — displacement between poin
 p + v;    v + p;    p - v;                 // pos  — translate a point
 p + q;                                     // pos  — translation of singleton {p} (adds coords)
 p += v;   p -= v;                          // pos  — in place
+p.transformed(t);                          // pos  — incl. the projective divide (asserts w != 0)
 p == q;                                    // component-wise
 ```
 
@@ -101,12 +102,13 @@ tg::min(a, s);  tg::max(a, s);            // comp — against a broadcast scalar
 tg::bivec3f b;                                  // C(D,2) components: 1 in 2D, 3 in 3D, 6 in 4D
 tg::bivec3f::num_components;                     // static constexpr int
 b.data;  b[i];  b == b2;  b + b2;  -b;  s * b;  b / s;   tg::bivec3f::zero
+b.transformed(t);   // bivec — by the 2nd exterior power (cofactor in 3D), NOT the linear part
 // ctors: default, splat(T), {init,list}, make_from_values(... == num_components)
 ```
 
 ```cpp
 #include <typed-geometry/linalg/cross.hh>
-tg::cross(a, b);                          // bivec3 — wedge of two vec3 (components {xy, yz, zx})
+tg::cross(a, b);                          // bivec3 — wedge of two vec3 (components {yz, zx, xy})
 tg::dual(biv);                            // vec3   — Hodge dual; dual(cross(a,b)) == classic a x b
 tg::undual(v);                            // bivec3 — inverse of dual
 ```
@@ -157,6 +159,106 @@ q.angle();                                        // angle — requires has_sqrt
 q.conjugate();                                    // inverse rotation for a unit quat
 ```
 
+## mat_ops — square-matrix operations
+
+```cpp
+#include <typed-geometry/linalg/mat_ops.hh>
+tg::transpose(m);                          // mat<R,C> — works for rectangular m too
+tg::determinant(m);                        // T        — square only, N <= 4
+tg::inverse(m);                            // mat      — zero matrix if m is singular
+tg::adjugate(m);                           // mat      — adjugate(m) * m == determinant(m) * identity
+tg::cofactor(m);                           // mat      — det(m) * transpose(inverse(m)), division-free
+// N <= 4 because tg is 2D/3D: the linear part tops out at mat3, the homogeneous matrix at mat4.
+// cofactor is what a NORMAL transforms by; adjugate stays defined for singular matrices.
+```
+
+## transform — one type over a capability lattice
+
+```cpp
+#include <typed-geometry/transform/transform_flags.hh>
+tg::transform_flags;                       // enum class: translation, uniform_scaling,
+                                           //   non_uniform_scaling, negative_scaling, rotation,
+                                           //   general_linear, projection
+tg::transform_class::identity;             // ... translation, uniform_scaling, scaling, rotation,
+                                           //     rigid, scaled_rotation, similarity, linear, affine,
+                                           //     scaling_translation, uniform_scaling_translation, projective
+                                           // + signed_ variants that allow a NEGATIVE factor:
+                                           //     signed_uniform_scaling, signed_scaling, signed_scaled_rotation,
+                                           //     signed_scaling_translation, signed_uniform_scaling_translation,
+                                           //     signed_similarity   (linear/affine/projective include it already)
+tg::canonical(f);                          // transform_flags — the class representative (19 classes)
+tg::is_canonical(f);                       // bool
+tg::is_subclass(sub, super);               // bool — USE THIS, not has_all. See the Gotchas.
+tg::has_any(f);  tg::has_all(f, part);  tg::without(f, x);  f | g;  f & g;  ~f
+```
+
+```cpp
+#include <typed-geometry/transform/homogeneous_transform.hh>
+tg::rigid_transform3f t;                   // default = IDENTITY (not zero); also 2f/2d/3d
+tg::homogeneous_transform<DSource, DTarget, T, Flags>;  // the one type: a map DSource -> DTarget space
+                                           // SQUARE ONLY today — it static_asserts DSource == DTarget.
+                                           // The pair is what will make lifting/projecting typed.
+t.source_dimension;  t.target_dimension;   // int
+// aliases: identity_/translation_/rotation_/scaling_/scaling_translation_/linear_/
+//          rigid_/similarity_/affine_/projective_transform<D,T>   (+ 2f/3f/2d/3d typedefs)
+//          signed_scaling_/signed_scaling_translation_/signed_similarity_transform<D,T> too
+//          — ALL square, so the second dimension almost never shows up at a call site
+tg::rigid_transform3f::identity;           // static constant
+tg::rigid_transform3f::make_translation(v);          // requires the class to contain translation
+tg::similarity_transform3f::make_uniform_scaling(s);  // s must be POSITIVE; the factory asserts it
+tg::scaling_transform3f::make_scaling(vec);
+tg::rigid_transform3f::make_rotation(quat);           // D==3; make_rotation(angle) for D==2
+tg::affine_transform3f::make_from_linear_mat(mat3);
+tg::projective_transform3f::make_from_mat(mat4);      // projective only
+
+t.translation();  t.rotation();  t.uniform_scale();  t.scale();   // gated on the class
+                                           // translation() is in TARGET space; scale() indexes SOURCE axes
+t.linear_mat();                            // mat<DSource,DTarget> — not for a projective transform
+t.to_mat();                                // mat<DSource+1,DTarget+1> — translation in the last column
+t.apply_linear(v);                         // vec<DSource> -> vec<DTarget> — the linear part only
+t.apply_bivec(b);                          // bivec — the 2nd exterior power of the linear part
+t.apply_pos(p);                            // pos<DSource> -> pos<DTarget> — linear part, translation, any divide
+t.homogeneous_w(p);                        // T   — projective only; positive means "in front"
+auto a = tg::affine_transform3f(rigid);    // widening: lossless but EXPLICIT, and only compiles if
+                                           //   the source class really IS a member of the target one.
+                                           //   That is also the dispatch mechanism — see obj.transformed
+```
+
+```cpp
+p.transformed(t);                          // pos   — incl. the projective divide (asserts w != 0)
+v.transformed(t);                          // vec   — NOT available for a projective transform
+b.transformed(t);                          // bivec — by the 2nd exterior power, i.e. cofactor in 3D
+```
+
+```cpp
+a.composed(b);                             // applies b FIRST, then a — NO operator*
+                                           // result class = canonical(FA | FB), so it can widen
+                                           // opt-in per type; probe with requires { a.composed(b); }
+#include <typed-geometry/transform/compose.hh>
+tg::compose(a, b);                         // a.composed(b) if that exists, else tg::composed_transform<A,B>
+                                           // — a compile-time choice, so the return type says which
+tg::composed_transform<A, B>(outer, inner);  // stores both; applies `inner` first, then `outer`
+                                           // composes ANY two transforms, at the cost of not fusing
+#include <typed-geometry/transform/inverse.hh>
+tg::inverse(t);                            // same class — every canonical class is closed under it
+                                           // dimensions swap: <DSource,DTarget> inverts to <DTarget,DSource>
+```
+
+```cpp
+obj.transformed(t);   // the return type depends on the object AND the transform class
+t.transform(obj);     // the mirror spelling; routes straight back to obj.transformed(t)
+t(obj);               // the call spelling of t.transform(obj) — application, NOT composition
+// These three are the same value, by construction:
+//   a(b(obj))  ==  a.composed(b).transform(obj)  ==  obj.transformed(b).transformed(a)
+// Each object writes its own `if constexpr` chain, in its own header, asking which class it can
+// widen the transform to; an unsupported pair is a static_assert. To probe, ask the same question:
+//   requires { tg::scaling_translation_transform<D, T>(t); }   // == "an aabb accepts this transform"
+// To special-case an object, a transform declares a PRIVATE custom_transform(ObjT const&) and
+// befriends that object — the first branch every object checks. Access is part of the requires,
+// so an object that was not befriended never sees it.
+// `composed` is opt-in per transform type and IS probeable: requires { a.composed(b); }
+```
+
 ## geometry primitives (each denotes a set of points)
 
 ```cpp
@@ -167,10 +269,23 @@ tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
 tg::line<D,T>     {pos origin; vec dir}       // {origin + t*dir : t in R}, 1D                 — infinite
 tg::plane<D,T>    {vec normal; T dist}        // hyperplane {x : dot(normal,x) == dist}        — infinite
+tg::sphere<D,T>   {pos center; T radius}      // SURFACE {x : distance(x,center) == radius}    — finite
+tg::ellipsoid<T>  {pos center; vec semi_axes[3]} // SURFACE {center + sum_i u_i*semi_axes[i] : |u| == 1} — finite
+//   3D ONLY (no D parameter): the 2D counterpart is an ellipse, which does not exist yet.
+//   ctor takes the three axis vectors: tg::ellipsoid3f(center, axis0, axis1, axis2). Axes need not be orthogonal.
 // members are public + named (pos0/min/normal/…), not data[]; default-ctor zero-inits; explicit ctors;
 //   defaulted operator==. No queries/measures/factories yet (representations still settling).
 // dimensional aliases: aabb2/3, triangle2/3, …   concrete: aabb3f triangle3f segment2i ray3f plane3d
-//   (aabb/triangle/segment get f/d/i; ray/line/plane get f/d — directions/normals are real)
+//   (aabb/triangle/segment get f/d/i; ray/line/plane/sphere/ellipsoid get f/d — they carry real values)
+//   ellipsoid keeps the 3 in ellipsoid3/ellipsoid3f/ellipsoid3d, though it has no D to vary
+
+obj.transformed(t);   // every primitive; which transforms it accepts is a geometric statement:
+//   sphere              similarity -> sphere      |  affine (3D only) -> ELLIPSOID
+//   ellipsoid           affine     -> ellipsoid
+//   aabb                scaling + translation ONLY (a rotated aabb needs obb, which does not exist)
+//   triangle, segment   affine, projective
+//   plane               affine, projective        (normal picks up the cofactor, not the linear part)
+//   ray, line           affine ONLY               (a projected ray is a bounded segment)
 ```
 
 ## object_traits (point-set classification seam)
@@ -207,28 +322,39 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 ## Umbrellas
 
 ```cpp
-#include <typed-geometry/linalg/linalg.hh>     // curated: vec/pos/comp/bivec/mat/quat + ops
-#include <typed-geometry/linalg/all.hh>        // everything in linalg
-#include <typed-geometry/geometry/geometry.hh> // curated: object_traits + primitives
-#include <typed-geometry/geometry/all.hh>      // everything in geometry
-#include <typed-geometry/all.hh>               // everything (scalar + linalg + geometry); expensive
+#include <typed-geometry/linalg/linalg.hh>       // curated: vec/pos/comp/bivec/mat/quat + ops
+#include <typed-geometry/linalg/all.hh>          // everything in linalg
+#include <typed-geometry/transform/transform.hh> // curated: the transform type + its operations
+#include <typed-geometry/geometry/geometry.hh>   // curated: object_traits + primitives
+#include <typed-geometry/geometry/all.hh>        // everything in geometry
+#include <typed-geometry/all.hh>                 // everything; expensive
 ```
 
 ## Gotchas
 
-- **No `.x/.y/.z`** — by design. Use `data[i]` or `operator[]`.
-- **Constructors are `explicit`.** `tg::vec3f v = {1,2,3};` does not compile; use
-  `tg::vec3f(1,2,3)` or `tg::vec3f({1,2,3})`.
-- **`length()`/`normalized()`/`distance()`/`tg::sqrt` need `has_sqrt<T>`** — they don't exist for
-  `vec3i` etc. Use `length_sqr()` / `distance_sqr()` for integers.
-- **`normalized()` does NOT assert on zero** — it returns the zero vector/quaternion (a hard assert
-  here caused too many spurious failures in practice). Check `tg::traits::is_zero(v.length())`
-  yourself if you need to distinguish.
-- **Out-of-range `operator[]` and wrong-size initializer lists `CC_ASSERT`** (active in
-  debug/relwithdebinfo, stripped in release).
+- **No `.x/.y/.z`** — by design.
+  Use `data[i]` or `operator[]`.
+- **Constructors are `explicit`.** `tg::vec3f v = {1,2,3};` does not compile; use `tg::vec3f(1,2,3)` or `tg::vec3f({1,2,3})`.
+- **`length()`/`normalized()`/`distance()`/`tg::sqrt` need `has_sqrt<T>`** — they don't exist for `vec3i` etc. Use `length_sqr()` / `distance_sqr()` for integers.
+- **`normalized()` does NOT assert on zero** — it returns the zero vector/quaternion (a hard assert here caused too many spurious failures in practice). Check `tg::traits::is_zero(v.length())` yourself if you need to distinguish.
+- **Out-of-range `operator[]` and wrong-size initializer lists `CC_ASSERT`** (active in debug/relwithdebinfo, stripped in release).
 - Types are **trivially copyable**; default construction **zero-initializes** the components.
-- **Factories are `make_*`** (`make_from_values`, `make_unit`, `make_rotation_z`, …). Distinguished
-  values are static constants (`vec::zero`, `mat::identity`, …) — runtime consts, not `constexpr`.
-- **`mat`'s multi-arg `m[c, r]` needs parentheses inside macros**: `CHECK((m[0,0]) == 1)`, else the
-  comma is read as a macro-argument separator.
-- **`mat` default is the ZERO matrix, not identity** — use `tg::matNf::identity`.
+- **Factories are `make_*`** (`make_from_values`, `make_unit`, `make_rotation_z`, …). Distinguished values are static constants (`vec::zero`, `mat::identity`, …) — runtime consts, not `constexpr`.
+- **`mat`'s multi-arg `m[c, r]` needs parentheses inside macros**: `CHECK((m[0,0]) == 1)`, else the comma is read as a macro-argument separator.
+- **`mat` default is the ZERO matrix, not identity** — use `tg::matNf::identity`. A **transform**, by contrast, defaults to the **identity**: a zero-filled transform would be singular.
+- **Transform containment is `tg::is_subclass`, NEVER `tg::has_all`.** `canonical()` clears bits — `affine` drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is `false` even though every similarity is affine.
+- **Widening a transform is explicit**: `tg::affine_transform3f(rigid)`, not an implicit conversion.
+  An implicit one would make two registrations at different classes an ambiguous overload set.
+  Narrowing is not a constructor at all.
+- **A normal is a `bivec`, not a `vec`.** It transforms by the cofactor matrix, not the linear part — the difference only shows up under a non-uniform scaling, which is what makes it a silent bug.
+- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a rotated `aabb` is not an `aabb`). It is not probeable — the return type is `auto`, so asking trips the `static_assert`; test the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
+- **Transform scale factors are POSITIVE** unless the class carries `negative_scaling` (`tg::signed_scaling_transform3f`, `signed_similarity_transform3f`, …); the factories assert it.
+  `linear`/`affine`/`projective` include it by nature.
+- **A transform has TWO dimension parameters** (`homogeneous_transform<DSource, DTarget, T, Flags>`), so lifting and projecting can be typed.
+  Only the square case is implemented — it `static_assert`s `DSource == DTarget` — and every alias is square, so you rarely see it.
+- **`composed` can widen the class**: a rotation composed with a per-axis scaling is a general linear map, not "a rotation and a scaling".
+- **`tg::compose` is total, `composed` is not.** `composed` exists only where two transforms can fuse; `compose` falls back to a `composed_transform` that just holds both.
+  Prefer `compose` unless you specifically want the fused transform or nothing.
+- **There is no `operator*` on transforms** — composition is `a.composed(b)` (or `tg::compose(a, b)`).
+  A transform is applied, not multiplied, and `*` would invite a `t * p` that deliberately does not exist.
+- **`t(obj)` applies, it does not compose.** `t(u)` for a transform `u` is a compile error on purpose; write `t.composed(u)`.

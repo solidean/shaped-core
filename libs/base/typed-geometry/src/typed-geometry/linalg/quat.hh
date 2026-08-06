@@ -11,9 +11,8 @@ namespace tg
 {
 /// Unit quaternion for representing 3D rotations.
 ///
-/// Storage is the public C array member `data` in the order {x, y, z, w}, where (x, y, z) is the
-/// vector part and w is the scalar part. Default construction yields the zero quaternion; use
-/// quat::identity for the rotation-neutral (0, 0, 0, 1).
+/// Storage is the public C array member `data` in the order {x, y, z, w}, where (x, y, z) is the vector part and w is the scalar part.
+/// Default construction yields the zero quaternion; use quat::identity for the rotation-neutral (0, 0, 0, 1).
 ///
 ///     auto q = tg::quat_f::make_rotation_z(tg::angle_f::make_from_degree(90));
 ///     tg::vec3f const v = q * tg::vec3f(1, 0, 0);   // ~ (0, 1, 0)
@@ -30,10 +29,16 @@ public:
 
     // special values
 public:
-    /// the zero quaternion. Runtime constant, not usable in constant expressions.
+    /// the zero quaternion.
+    /// Runtime constant, not usable in constant expressions.
     static quat const zero;
     /// the identity rotation (0, 0, 0, 1). Runtime constant.
     static quat const identity;
+
+    /// the identity rotation, as a constant expression.
+    /// Needed where quat::identity cannot be used: a static data member of incomplete type cannot be constexpr,
+    /// so it is not a constant expression.
+    [[nodiscard]] static constexpr quat make_identity() { return quat(T{}, T{}, T{}, tg::one<T>()); }
 
     // rotations
 public:
@@ -144,7 +149,8 @@ public:
         return v / l;
     }
 
-    /// the rotation angle; zero when there is no rotation. Pairs with make_rotation_axis_angle.
+    /// the rotation angle; zero when there is no rotation.
+    /// Pairs with make_rotation_axis_angle.
     [[nodiscard]] tg::angle<T> angle() const
         requires(tg::traits::has_sqrt<T> && tg::traits::has_trigonometry<T>)
     {
@@ -191,6 +197,6 @@ public:
 template <class T>
 inline quat<T> const quat<T>::zero = quat<T>{};
 template <class T>
-inline quat<T> const quat<T>::identity = quat<T>(T{}, T{}, T{}, tg::one<T>());
+inline quat<T> const quat<T>::identity = quat<T>::make_identity();
 
 } // namespace tg

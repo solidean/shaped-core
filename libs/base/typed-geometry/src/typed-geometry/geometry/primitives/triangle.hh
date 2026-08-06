@@ -1,17 +1,19 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/transform/homogeneous_transform.hh>
 
 namespace tg
 {
 /// Triangle (filled) with D-dimensional vertices.
 ///
-/// Represents the solid triangle — the convex hull of its three vertices, i.e. the set of points
-/// {a*pos0 + b*pos1 + c*pos2 : a,b,c >= 0, a+b+c == 1}. It is a 2D surface patch (intrinsic_dim ==
-/// 2) living in D-dimensional space (ambient_dim == D), and it is finite. A triangle whose three
-/// vertices are collinear is degenerate; this is not enforced at construction.
+/// Represents the solid triangle — the convex hull of its three vertices,
+/// i.e. the set of points {a*pos0 + b*pos1 + c*pos2 : a,b,c >= 0, a+b+c == 1}.
+/// It is a 2D surface patch (intrinsic_dim == 2) living in D-dimensional space (ambient_dim == D), and it is finite.
+/// A triangle whose three vertices are collinear is degenerate; this is not enforced at construction.
 ///
 ///     tg::triangle3f t(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0));
 template <int D, class T>
@@ -30,6 +32,34 @@ public:
     explicit constexpr triangle(pos<D, T> const& pos0, pos<D, T> const& pos1, pos<D, T> const& pos2)
       : pos0(pos0), pos1(pos1), pos2(pos2)
     {
+    }
+
+    // transformation
+public:
+    /// An affine map sends the convex hull of the vertices to the convex hull of their images.
+    ///
+    /// A projective map does too, as long as every vertex has a positive homogeneous weight:
+    /// w is affine over the triangle and the positive-w halfspace is convex, so checking the three vertices settles the whole hull.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+
+        else if constexpr (requires { tg::affine_transform<D, T>(t); })
+        {
+            auto const a = tg::affine_transform<D, T>(t);
+            return triangle(pos0.transformed(a), pos1.transformed(a), pos2.transformed(a));
+        }
+        else if constexpr (requires { tg::projective_transform<D, T>(t); })
+        {
+            auto const p = tg::projective_transform<D, T>(t);
+            CC_ASSERT(p.homogeneous_w(pos0) > T(0) && p.homogeneous_w(pos1) > T(0) && p.homogeneous_w(pos2) > T(0),
+                      "a triangle only stays a triangle when every vertex is in front of the projection");
+            return triangle(pos0.transformed(p), pos1.transformed(p), pos2.transformed(p));
+        }
+        else
+            static_assert(false, "tg: a triangle can be transformed by an affine or a projective map");
     }
 
     // comparison
