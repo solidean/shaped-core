@@ -5,12 +5,11 @@
 #include <clean-core/thread/atomic.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 
-/// A compiler that pretends. It resolves `#include "x"` lines itself, then turns the flattened text into
-/// an sg::compiled_shader whose "bytecode" is that text.
+/// A compiler that pretends.
+/// It resolves `#include "x"` lines itself, then turns the flattened text into an sg::compiled_shader whose "bytecode" is that text.
 ///
-/// This is what lets slib's own tests cover the mechanism — packages, lazy per-format compiles, reload,
-/// dependency tracking — on every platform, rather than only where DXC exists. The real ssc::dxc adapter
-/// is exercised separately.
+/// This is what lets slib's own tests cover the mechanism — packages, lazy per-format compiles, reload, dependency tracking — on every platform, rather than only where DXC exists.
+/// The real ssc::dxc adapter is exercised separately.
 namespace slib_test
 {
 // Vocabulary types (i32/u32/u64/isize/byte/...) available bare inside slib_test, not leaked globally.
@@ -27,8 +26,8 @@ public:
     [[nodiscard]] slib::shader_language source_language() const override { return _language; }
     [[nodiscard]] sg::shader_format target_format() const override { return _format; }
 
-    /// Inlines every `#include "path"` line through `resolve`, one level deep per pass, until none are
-    /// left. Enough to exercise dependency tracking without pulling in a real preprocessor.
+    /// Inlines every `#include "path"` line through `resolve`, one level deep per pass, until none are left.
+    /// Enough to exercise dependency tracking without pulling in a real preprocessor.
     [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const& desc,
                                                     slib::include_resolver resolve) const override
     {

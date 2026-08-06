@@ -33,11 +33,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                            help="Do not write any JUnit XML result files (per-binary XML is on by default)")
     p.add_argument("test_name", nargs="?",
                    help="Specific test name or binary to run (auto-discovers the binary)")
-    # Args dev.py doesn't recognize are forwarded verbatim to the test binary (collected by the
-    # top-level parse_known_args into args.runner_args), e.g. `-c <section>` to scope into a
-    # section/instance (repeat -c to descend a path). An optional leading `--` is dropped. Unlike
-    # a REMAINDER positional this does NOT swallow dev.py's own options, so `--preset` et al. still
-    # bind here regardless of where they sit relative to the test name.
+    # Args dev.py does not recognize are forwarded verbatim to the test binary, collected by the top-level parse_known_args into args.runner_args.
+    # `-c <section>` scopes into a section or instance, repeated to descend a path.
+    # An optional leading `--` is dropped, and dev.py's own options still bind wherever they sit relative to the test name.
     return p
 
 
@@ -45,9 +43,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     primary = presets[0]
 
-    # Unrecognized args are passed straight to the test binary (e.g. `-c <section>` for nexus
-    # section/instance scoping). parse_known_args already drops the first `--`; strip a stray
-    # leading one defensively so an explicit `test <name> -- -c foo` never leaks the separator.
+    # parse_known_args already drops the first `--`.
+    # Strip a stray leading one as well, so an explicit `test <name> -- -c foo` never leaks the separator through.
     runner_args = list(args.runner_args or [])
     if runner_args and runner_args[0] == "--":
         runner_args = runner_args[1:]
@@ -77,10 +74,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if err:
         ctx.die(err)
 
-    # With a name/pattern filter, only run binaries that actually contain a matching test (queried via nexus'
-    # --list-tests-json on the primary preset). An unfiltered sweep is unchanged — every binary runs and an
-    # empty one fails loudly. A filter that matches nothing anywhere fails with a diagnostic instead of a
-    # spurious "All 0 passed". Binaries that can't answer the query are kept and run as before.
+    # With a filter, only the binaries that actually contain a matching test run, queried via nexus' --list-tests-json on the primary preset.
+    # A binary that cannot answer the query is kept and run as before.
     if test_name:
         binary_names, diag = dev.select_eligible_binaries(
             primary, all_targets, binary_names,

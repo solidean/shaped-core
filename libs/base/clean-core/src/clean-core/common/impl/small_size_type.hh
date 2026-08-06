@@ -2,13 +2,11 @@
 
 #include <clean-core/fwd.hh>
 
-/// cc::impl::small_size_t<MaxCount, MinAlign> — the smallest **unsigned** integer type suitable for
-/// storing a size/count in [0, MaxCount] inline next to `MinAlign`-aligned data. An internal helper for
-/// inline containers (fixed_vector, small string buffers, …) that keep a size field beside aligned
-/// storage: it picks the smallest of {u8, u16, u32, u64} that both represents MaxCount and is at least
-/// MinAlign bytes wide, so the size field occupies what would otherwise be tail padding rather than adding
-/// bytes. It is only ever a storage type — containers convert to isize at their public boundary (so the
-/// unsigned storage never mixes with the signed API).
+/// cc::impl::small_size_t<MaxCount, MinAlign> — the smallest **unsigned** type that stores a count in [0, MaxCount] next to `MinAlign`-aligned data.
+/// It picks the smallest of {u8, u16, u32, u64} that both represents MaxCount and is at least MinAlign bytes wide.
+/// The size field then occupies what would otherwise be tail padding, instead of adding bytes.
+///
+/// A storage type only: inline containers convert to isize at their public boundary, so the unsigned storage never mixes with the signed API.
 ///
 /// Examples: fixed_vector<u8, 10> -> u8; fixed_vector<u8, 300> -> u16 (u8 can't hold 300);
 /// fixed_vector<u64, 2> -> u64 (alignof(u64) == 8, so a smaller field would just be padding).
@@ -55,8 +53,8 @@ struct small_size_type_of<8>
     using type = u64;
 };
 
-/// Smallest unsigned integer type holding a count in [0, MaxCount], at least MinAlign bytes wide (default
-/// 1, i.e. the pure smallest-uint-for-value). See the header comment for the rationale.
+/// Smallest unsigned integer type holding a count in [0, MaxCount], at least MinAlign bytes wide.
+/// MinAlign defaults to 1, which is the pure smallest-uint-for-value case; the header comment has the rationale.
 template <u64 MaxCount, u64 MinAlign = 1>
 using small_size_t = typename small_size_type_of<small_size_bytes(MaxCount, MinAlign)>::type;
 } // namespace cc::impl

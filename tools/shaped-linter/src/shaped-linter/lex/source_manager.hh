@@ -19,7 +19,8 @@ struct source_manager
     /// Register in-memory text (tests, snippets). No file IO.
     source_buffer const& add_from_text(cc::string text, cc::string_view path);
 
-    /// Read a file from disk and register it. Fails if the file cannot be opened/read.
+    /// Read a file from disk and register it.
+    /// Fails if the file cannot be opened or read.
     cc::result<source_buffer const*> add_from_file(cc::string_view path);
 
     /// The buffer for a file_id (which is its registration index).

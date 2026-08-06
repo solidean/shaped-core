@@ -1,9 +1,8 @@
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
-// Ray-tracing shaders compile to a single-entry DXIL library (`lib_6_x`) and reflect through
-// ID3D12LibraryReflection rather than ID3D12ShaderReflection. This is device-free: it exercises the
-// compile + library-reflection path only (no ID3D12Device), so it runs everywhere the compiler does.
+// Ray-tracing shaders compile to a single-entry DXIL library (`lib_6_x`) and reflect through ID3D12LibraryReflection rather than ID3D12ShaderReflection.
+// This is device-free: it exercises the compile + library-reflection path only (no ID3D12Device), so it runs everywhere the compiler does.
 
 namespace
 {

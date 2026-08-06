@@ -6,15 +6,14 @@
 
 using namespace cc::primitive_defines;
 
-// dx12 async-download internals that the backend-agnostic tier-1 suite (tests/transfer/download-async-test.cc)
-// can't reach: the readback staging pipeline's window packing and recycling, forced with a deliberately tiny
-// window size (a dx12_config knob). The public download/sync contract is pinned in tier 1. See
-// libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/download.async.md.
+// dx12 async-download internals the backend-agnostic tier-1 suite (tests/transfer/download-async-test.cc) can't reach.
+// That is the readback staging pipeline's window packing and recycling, forced with a deliberately tiny window size (a dx12_config knob).
+// The public download/sync contract is pinned in tier 1.
+// See libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/download.async.md.
 
 namespace
 {
-// Seeds `buf` with fn(i) via an inline command-list upload (direct queue) and submits it, so the async
-// download reads committed bytes by auto-waiting on the seed list.
+// Seeds `buf` with fn(i) via an inline command-list upload on the direct queue and submits it, so the async download reads committed bytes by auto-waiting on the seed list.
 void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 {
     cc::vector<byte> data;
@@ -29,8 +28,8 @@ void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 }
 } // namespace
 
-// A single download larger than one readback window must pack across several windows, pipelining and
-// recycling as it goes. A fresh context with deliberately tiny windows forces it.
+// A single download larger than one readback window must pack across several windows, pipelining and recycling as it goes.
+// A fresh context with deliberately tiny windows forces it.
 TEST("sg dx12 - async download larger than a staging window packs across windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 4096});
@@ -53,8 +52,8 @@ TEST("sg dx12 - async download larger than a staging window packs across windows
     CHECK(matches);
 }
 
-// Many downloads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on
-// the window fence and recycle windows repeatedly. Each targets its own buffer; all must read back intact.
+// Many downloads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on the window fence and recycle windows repeatedly.
+// Each targets its own buffer; all must read back intact.
 TEST("sg dx12 - many async downloads recycle the staging windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 1024});
@@ -85,9 +84,9 @@ TEST("sg dx12 - many async downloads recycle the staging windows")
     CHECK(all_ok);
 }
 
-// Uneven download sizes (none a window multiple) force the actor to both pack several reads into one window
-// and split a single read across windows, all while recycling — a shape the exact-fill and single-large
-// tests miss. Distinct buffers; each must read back intact.
+// Uneven download sizes (none a window multiple) force the actor to both pack several reads into one window and split a single read across windows, all while recycling.
+// That is a shape the exact-fill and single-large tests miss.
+// Distinct buffers; each must read back intact.
 TEST("sg dx12 - uneven async downloads pack and straddle staging windows")
 {
     auto ctx = sg::create_dx12_context({.use_warp = true, .async_download_window_bytes = 1024});

@@ -57,8 +57,8 @@ TEST("hash128 - value semantics")
 
 TEST("hash128 - known answer (XXH3 128-bit, v0.8.3)")
 {
-    // Reference values produced by XXH3_128bits_withSeed; the empty/seed-0 pair
-    // is the canonical XXH3-128 constant. These pin the binding to the algorithm.
+    // Reference values produced by XXH3_128bits_withSeed.
+    // The empty/seed-0 pair is the canonical XXH3-128 constant, so these pin the binding to the algorithm.
     SECTION("empty, seed 0")
     {
         cc::span<byte const> const empty;

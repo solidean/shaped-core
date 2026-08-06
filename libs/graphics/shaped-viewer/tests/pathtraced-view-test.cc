@@ -5,11 +5,10 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
-// Headless end-to-end path-tracing trace on WARP (or a hardware device): build a simple Cornell box through
-// the managers, integrate one small view with global illumination, and drive it to completion. Beyond the
-// flat direct-lit raytraced-view test, this exercises the whole GI path — the path-tracing shaders compile
-// through slib, the DXR pipeline + shader table build, the TLAS is built, and the raygen bounces rays with
-// next-event estimation toward the ceiling light.
+// Headless end-to-end path trace on WARP (or a hardware device).
+// It builds a simple Cornell box through the managers, integrates one small view with global illumination, and drives it to completion.
+// Beyond the flat direct-lit raytraced-view test, this exercises the whole GI path.
+// The path-tracing shaders compile through slib, the DXR pipeline + shader table build, the TLAS is built, and the raygen bounces rays with NEE toward the ceiling light.
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
 // raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.

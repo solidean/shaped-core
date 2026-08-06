@@ -29,13 +29,12 @@ struct dx12_texture_hazard_view
     sg::view_class access;
 };
 
-/// dx12 binding_group: a contiguous range of descriptors in the context's shader-visible heap, one
-/// per layout binding, created from the bound views. `table_start` is the GPU handle the command list
-/// binds as a root descriptor table.
+/// dx12 binding_group: a contiguous range of descriptors in the context's shader-visible heap, one per layout binding, created from the bound views.
+/// `table_start` is the GPU handle the command list binds as a root descriptor table.
 ///
-/// The descriptor range comes from the heap region matching `scope`: a persistent group's table is
-/// allocated from the free list and returned to it (epoch-deferred) when the group is released; a
-/// transient group's is ring-allocated and reclaimed collectively when its epoch retires.
+/// The descriptor range comes from the heap region matching `scope`.
+/// A persistent group's table is allocated from the free list and returned to it, epoch-deferred, when the group is released.
+/// A transient group's is ring-allocated and reclaimed collectively when its epoch retires.
 class dx12_binding_group final : public sg::binding_group
 {
 public:

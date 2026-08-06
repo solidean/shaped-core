@@ -5,13 +5,12 @@
 #include <typed-geometry/scalar/constants.hh>
 #include <typed-geometry/scalar/traits.hh>
 
-/// Curated scalar include: scalar traits/constants plus the free scalar operations that dispatch
-/// through them. Prefer these free functions over std:: math so exotic scalar types keep working.
+/// Curated scalar include: the traits and constants, plus the free scalar operations that dispatch through them.
+/// Prefer these free functions over std:: math so exotic scalar types keep working.
 ///
-/// Note the angle typing: trigonometry is expressed in terms of tg::angle, not bare radians, so the
-/// unit is checked at the type level. sin/cos take an angle and return a scalar; atan2 takes two
-/// scalars and returns an angle. The underlying scalar_traits kernels still work in raw radian T
-/// (that is the low-level numeric seam) — the angle typing lives only at this public layer.
+/// Trigonometry is expressed in terms of tg::angle rather than bare radians, so the unit is checked at the type level.
+/// sin/cos take an angle and return a scalar; atan2 takes two scalars and returns an angle.
+/// The underlying scalar_traits kernels still work in raw radian T, so the angle typing lives only at this public layer.
 
 namespace tg
 {
@@ -31,8 +30,9 @@ template <class T>
     return scalar_traits<T>::sqrt(x);
 }
 
-// Trigonometry — free-function forms of the angle members (a.sin() etc.). Both forms exist; these
-// delegate so there is a single implementation. All require a scalar with has_trigonometry.
+// Trigonometry — the free-function forms of the angle members (a.sin() and friends).
+// Both forms exist, and these delegate, so there is a single implementation.
+// All require a scalar with has_trigonometry.
 
 /// sine of an angle.
 template <class T>
@@ -92,8 +92,8 @@ template <class T>
     return a.cot();
 }
 
-// Inverse trigonometry — these take a scalar and *return* an angle (like atan2). All require a
-// scalar with has_trigonometry.
+// Inverse trigonometry — these take a scalar and *return* an angle, like atan2.
+// All require a scalar with has_trigonometry.
 
 /// arcsine: the angle whose sine is x (x in [-1, 1]).
 template <class T>
@@ -119,8 +119,8 @@ template <class T>
     return angle<T>::make_from_radians(scalar_traits<T>::atan(x));
 }
 
-/// two-argument arctangent; returns the angle of the vector (x, y). Only for scalars with
-/// has_trigonometry.
+/// two-argument arctangent; returns the angle of the vector (x, y).
+/// Only for scalars with has_trigonometry.
 template <class T>
 [[nodiscard]] angle<T> atan2(T y, T x)
     requires(tg::traits::has_trigonometry<T>)

@@ -39,8 +39,8 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     bool has_xml_reporter = false;
     bool has_durations = false;
 
-    // Set by --manual / --guide-benchmarks. When a bucket is chosen explicitly, a non-wildcard filter narrows
-    // within that bucket rather than crossing into other buckets.
+    // Set by --manual / --guide-benchmarks.
+    // With a bucket chosen explicitly, an exact filter narrows within that bucket rather than crossing into another.
     bool explicit_bucket = false;
 
     // Parse command line arguments
@@ -161,11 +161,7 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         }
     }
 
-    // Without an explicit bucket flag, a filter may name a test in another bucket (a manual/benchmark test
-    // given by name). Whether it actually does is decided per-test in is_eligible, on an *exact* name — the
-    // same way a disabled test is enabled. A substring filter like "async" must not drag in a manual test
-    // merely because its name contains it. The bulk escape hatches stay explicit: a bucket flag to sweep a
-    // whole bucket, run_disabled_tests for disabled ones.
+    // Without an explicit bucket flag, a filter may reach a test in another bucket; is_eligible decides that per test, on an exact name.
     config.allow_cross_bucket_naming = !explicit_bucket;
 
     return config;
@@ -201,12 +197,11 @@ bool nx::test_schedule_config::is_eligible(test_declaration const& decl, bool na
 {
     auto const& tc = decl.test_config;
 
-    // Bucket and disabled are two independent gates, both keyed on the *exact* name — a substring filter
-    // opens neither. `named_exactly` is that key: the test's own name for a direct match, the alias name for
-    // an alias fragment (filters themselves are applied by the caller).
-    //  - a sweep selects exactly one bucket (selected_bucket); a test in another bucket runs only when named
-    //    exactly, and only if no bucket flag was given (allow_cross_bucket_naming) — under --manual the
-    //    sweep is the manual bucket, period.
+    // Bucket and disabled are two independent gates, both keyed on the *exact* name; a substring filter opens neither.
+    // `named_exactly` is that key: the test's own name for a direct match, the alias name for an alias fragment.
+    // Filters themselves are applied by the caller.
+    //  - a sweep selects exactly one bucket, and a test in another bucket runs only when named exactly AND no bucket flag was given.
+    //    Under --manual the sweep is the manual bucket, period.
     //  - disabled is orthogonal: a disabled test runs when named exactly, or under bulk run_disabled_tests.
     if (tc.bucket != selected_bucket && !(allow_cross_bucket_naming && named_exactly))
         return false;
@@ -269,12 +264,9 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         });
     }
 
-    // Aliases act purely as filters: a matched alias name selects (driver, section-path) leaves to run. Every
-    // matched fragment that shares a driver is grouped into that driver's ONE instance, whose scope set is the
-    // union of their paths — so a driver's body runs exactly once regardless of how many of its aliases match
-    // (aliases never add schedule entries in an additive sense). The bucket/disabled gates still apply, keyed
-    // on the alias name: reaching a manual driver through one of its aliases takes that alias's exact name,
-    // exactly as reaching the driver directly takes the driver's.
+    // Aliases act purely as filters: a matched alias name selects (driver, section-path) leaves to run.
+    // Every matched fragment sharing a driver is grouped into that driver's ONE instance, whose scope set is the union of their paths.
+    // The bucket and disabled gates still apply, keyed on the *alias* name, so reaching a manual driver through one of its aliases takes that alias's exact name.
     //
     // A fragment is dropped when its target run is already covered, so nothing executes twice:
     //  - the driver is already scheduled *unscoped* (matched directly by name) — that run drives every

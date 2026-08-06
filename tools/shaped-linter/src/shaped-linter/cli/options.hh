@@ -14,7 +14,8 @@ namespace scl
 /// See usage_text() for the flags and readme.md for what they mean.
 struct options
 {
-    /// Source files to lint. At least one is required (unless --help).
+    /// Source files to lint.
+    /// At least one is required, unless --help.
     cc::vector<cc::string> files;
 
     /// --fix: apply each finding's suggested edit back to its file in place.

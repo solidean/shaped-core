@@ -1,7 +1,7 @@
 #pragma once
 
-// Single include gate for the DXC / COM headers (behind clean-core's sanitized win32) plus the
-// shared helpers. Internal to the library — never include this from a public header.
+// Single include gate for the DXC / COM headers (behind clean-core's sanitized win32) plus the shared helpers.
+// Internal to the library — never include this from a public header.
 
 #include <clean-core/error/result.hh>
 #include <clean-core/platform/win32_sanitized.hh>
@@ -12,8 +12,8 @@
 
 #include <string>
 
-// The DXC / COM headers reach <rpcndr.h> through <unknwn.h>, which WIN32_LEAN_AND_MEAN does not stop — so
-// the `byte` rename is repeated over them here. See win32_sanitized.hh for why it is needed.
+// The DXC / COM headers reach <rpcndr.h> through <unknwn.h>, which WIN32_LEAN_AND_MEAN does not stop, so the `byte` rename is repeated over them here.
+// See win32_sanitized.hh for why it is needed.
 // <string> stays above the bracket: a C++ header parsed under the macro would lose `std::byte`.
 #define byte win_byte_override
 #include <d3d12shader.h>    // ID3D12ShaderReflection (from the Windows SDK)
@@ -57,8 +57,8 @@ using Microsoft::WRL::ComPtr;
     return cc::string(tmp.data(), isize(n));
 }
 
-/// A source blob kept alive alongside the DxcBuffer that points into it. The buffer is only valid
-/// while the returned value lives.
+/// A source blob kept alive alongside the DxcBuffer that points into it.
+/// The buffer is only valid while the returned value lives.
 struct source_blob
 {
     ComPtr<IDxcBlobEncoding> blob;

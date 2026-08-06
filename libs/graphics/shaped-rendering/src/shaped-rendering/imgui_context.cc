@@ -114,7 +114,8 @@ void sync_viewport_requests()
         if (viewport->PlatformHandle == nullptr)
             continue;
 
-        // A viewport window's close request is imgui's to act on — it closes the imgui window that owns the viewport — so it is consumed here rather than left latched for a caller that will never look.
+        // A viewport window's close request is imgui's to act on — it closes the imgui window that owns the viewport.
+        // So it is consumed here rather than left latched for a caller that will never look.
         auto& win = window_of(viewport);
         if (win.is_close_requested())
         {
@@ -324,7 +325,8 @@ void imgui_context::install_viewports(window_system& wsys, window& main_window)
 
     auto& io = ImGui::GetIO();
 
-    // Idempotent for the same system, like install_clipboard — but the main viewport's handles are restated every frame regardless, because the caller may drive a different window than it did last frame.
+    // Idempotent for the same system, like install_clipboard.
+    // The main viewport's handles are restated every frame regardless, because the caller may drive a different window than it did last frame.
     if (io.BackendPlatformUserData != &wsys)
     {
         io.BackendPlatformUserData = &wsys;

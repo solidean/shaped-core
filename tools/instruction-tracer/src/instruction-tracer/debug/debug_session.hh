@@ -14,6 +14,8 @@
 
 namespace itrace
 {
+/// What one debug_session run needs: the process to launch, where to break, and how much to record.
+/// Its fields mirror the like-named ones on `options`, which is where they are documented.
 struct debug_config
 {
     cc::string exe;
@@ -58,18 +60,20 @@ private:
         finished,
     };
 
-    // Event handlers. Each returns the DBG_* continue status for the event.
+    // Event handlers.
+    // Each returns the DBG_* continue status for the event.
     u32 on_create_process(void const* info, u32 thread_id);
     u32 on_load_dll(void const* info);
     u32 on_exception(void const* info, u32 thread_id);
     u32 on_breakpoint_hit(u32 thread_id, void* thread);
     u32 on_single_step(u32 thread_id, void* thread);
 
-    /// Try to resolve the target and arm the breakpoint. Idempotent; a symbol may only appear once
-    /// its DLL loads, so this is retried on every module load until it succeeds.
+    /// Try to resolve the target and arm the breakpoint.
+    /// Idempotent, and retried on every module load: a symbol may only appear once its DLL loads.
     void try_resolve_and_arm();
 
-    /// Track a newly loaded image and hand it to dbghelp. Takes ownership of `file_handle`.
+    /// Track a newly loaded image and hand it to dbghelp.
+    /// Takes ownership of `file_handle`.
     void register_module(void* file_handle, u64 base);
     void unregister_module(u64 base);
 
@@ -83,9 +87,8 @@ private:
     void* _main_thread = nullptr;
     cc::map<u32, void*> _threads;
 
-    /// Each loaded module's image handle, kept open until the module unloads. SYMOPT_DEFERRED_LOADS
-    /// means dbghelp reads the PDB on the first query rather than at SymLoadModuleEx, and it reads
-    /// it through this handle — closing it early makes every later lookup silently miss.
+    /// Each loaded module's image handle, kept open until the module unloads.
+    /// Under SYMOPT_DEFERRED_LOADS dbghelp reads the PDB through this handle on its first query, so it must stay open that long.
     cc::map<u64, void*> _module_files;
 
     module_registry _modules;
@@ -101,8 +104,8 @@ private:
     cc::vector<trace> _traces;
     cc::optional<symbol_error> _resolve_error;
 
-    /// Bound by run() to its caller's callback, which outlives the call. Non-owning — never give it
-    /// a temporary. Valid only for the duration of run().
+    /// Bound by run() to its caller's callback, which outlives the call.
+    /// Non-owning and valid only for the duration of run() — never give it a temporary.
     cc::function_ref<void(trace&, symbol_session const&)> _on_trace;
 };
 } // namespace itrace

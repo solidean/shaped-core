@@ -10,28 +10,30 @@
 
 namespace sg::backend::dx12
 {
-/// Inline UPLOAD path: stages latency-critical CPU→GPU buffer writes through a persistently-mapped
-/// UPLOAD-heap ring buffer on the direct queue. An upload memcpys into the ring and records a
-/// CopyBufferRegion immediately, so the destination is usable by later commands in the same list.
-/// Ring space for an epoch's uploads is reclaimed once that epoch's GPU work retires.
+/// Inline UPLOAD path: stages CPU→GPU writes through a persistently-mapped UPLOAD-heap ring on the direct queue.
+/// The copy is recorded immediately, so the destination is usable by later commands in the same list.
+/// An epoch's ring space is reclaimed once that epoch's GPU work retires.
+/// See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md.
 class dx12_upload_inline_system
 {
 public:
     explicit dx12_upload_inline_system(dx12_context& ctx) : _ctx(ctx) {}
 
-    /// Creates + persistently maps the UPLOAD ring buffer (capacity bytes, > 0). Called once during
-    /// context bring-up. Returns a dx12 error if the resource or mapping could not be created.
+    /// Creates + persistently maps the UPLOAD ring buffer; `capacity` must be > 0.
+    /// Called once during context bring-up.
+    /// Returns a dx12 error when the resource or the mapping could not be created.
     [[nodiscard]] cc::result<cc::unit> initialize(isize capacity);
 
-    /// Stages `data` into `dst` at `dst_offset`, recording the copy into `cmd`. Synchronous: the
-    /// source bytes are consumed before returning. Empty `data` is a no-op.
+    /// Stages `data` into `dst` at `dst_offset`, recording the copy into `cmd`.
+    /// Synchronous: the source bytes are consumed before returning.
+    /// Empty `data` is a no-op.
     void upload_buffer(dx12_command_list& cmd, dx12_buffer const& dst, cc::span<byte const> data, isize dst_offset);
 
-    /// Stages one texture region's tightly-packed `data` into `dst` per `fp`, recording CopyTextureRegion(s)
-    /// into `cmd`. The region is packed into 512-aligned ring windows row/slice-wise, so a region larger than
-    /// the free ring space — or one straddling the ring seam — is split across several copies (only a single
-    /// padded row wider than the whole ring is unsupported). The caller emits the copy_dst layout barrier
-    /// first (it holds the sg texture). Synchronous: `data` is consumed before returning.
+    /// Stages one texture region's tightly-packed `data` into `dst` per `fp`, recording CopyTextureRegion(s) into `cmd`.
+    /// A region larger than the free ring space, or one straddling the seam, splits into several copies.
+    /// Unsupported: a single padded row wider than the whole ring.
+    /// The caller emits the copy_dst layout barrier first — it is the one holding the sg texture.
+    /// Synchronous: `data` is consumed before returning.
     void upload_texture(dx12_command_list& cmd,
                         ID3D12Resource* dst,
                         dx12_texture_footprint const& fp,
@@ -46,8 +48,8 @@ public:
     /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
     void set_budget(isize capacity);
 
-    /// Applies a pending set_budget at an epoch boundary: drains every in-flight epoch (so no GPU work
-    /// still reads the ring), then reallocates it at the new capacity. No-op if nothing is pending.
+    /// Applies a pending set_budget at an epoch boundary, and is a no-op when nothing is pending.
+    /// Drains every in-flight epoch so no GPU work still reads the ring, then reallocates it at the new capacity.
     /// Called from advance_epoch once the new epoch is open.
     void apply_pending_budget();
 
@@ -55,8 +57,8 @@ public:
     void shutdown();
 
     // --- test-only escape hatches --------------------------------------------------------------------
-    // Backend tests peel the abstraction to assert ring-cursor behavior (e.g. seam-splitting). See
-    // libs/graphics/shaped-graphics/docs/testing.md. Not part of the production surface.
+    // Backend tests peel the abstraction to assert ring-cursor behavior, e.g. seam-splitting.
+    // Not part of the production surface — see libs/graphics/shaped-graphics/docs/testing.md.
 
     /// A snapshot of the ring's logical cursors and physical capacity.
     struct debug_cursor_snapshot
@@ -67,16 +69,16 @@ public:
     };
     [[nodiscard]] debug_cursor_snapshot debug_cursor();
 
-    /// Repositions the logical cursor at `pos` (so the next reserve starts at physical `pos % capacity`)
-    /// on an already-drained ring: sets next_pos == freed_pos == pos and clears checkpoints, so the ring
-    /// reads as empty at that seam-relative position. Call only after a full drain.
+    /// Repositions the logical cursor at `pos`, so the next reserve starts at physical `pos % capacity`.
+    /// Sets next_pos == freed_pos == pos and clears checkpoints, so the ring reads as empty at that seam-relative position.
+    /// Call only on an already-drained ring.
     void debug_set_cursor(u64 pos);
 
 private:
-    /// Reserves `total` contiguous logical bytes in one shot (the span may wrap the physical seam) and
-    /// returns its start cursor; the caller walks it, handing a resumable job to-seam windows (offset
-    /// `cursor % capacity`, size to the seam). `total` must fit the capacity. Blocks (retiring in-flight
-    /// epochs) when the space is still held by earlier epochs.
+    /// Reserves `total` contiguous logical bytes in one shot and returns its start cursor.
+    /// The span may wrap the physical seam; the caller walks it, handing a resumable job to-seam windows (offset `cursor % capacity`, size to the seam).
+    /// `total` must fit the capacity.
+    /// Blocks, retiring in-flight epochs, while the space is still held by earlier ones.
     u64 reserve_span(isize total);
 
     dx12_context& _ctx;

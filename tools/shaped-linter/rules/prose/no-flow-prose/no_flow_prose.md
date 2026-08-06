@@ -10,9 +10,8 @@ The rule deliberately carries no fix, because obeying it means modelling the pro
 Acting on more than a couple of findings is `prose apply`'s job: it takes a plan of rewrites across many files and lands them in one pass, and the `reworking-prose` skill is the workflow around it.
 Repairing a hit in isolation is the failure mode both exist to prevent.
 
-Blocks below are annotated with `[no-flow-prose]` for "fires once here" and `~[no-flow-prose]` for "must stay quiet".
-`path="…"` is what picks the language: the fence word says what the block *is*, the path says what it is linted *as*.
-A block with no path is linted as C++.
+The block annotations are specified in [docs/coding-guidelines.md](../../../docs/coding-guidelines.md#the-corpus-format).
+The one that matters most while reading this file: `path="…"` picks the language, and a block with no path is linted as C++.
 
 ## The shape it fires on
 

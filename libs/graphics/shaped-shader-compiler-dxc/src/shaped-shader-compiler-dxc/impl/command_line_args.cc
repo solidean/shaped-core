@@ -5,9 +5,8 @@ namespace ssc::dxc::impl
 {
 namespace
 {
-/// Profile prefix for a stage, or nullptr if we don't emit that stage yet. Compute is wired
-/// end-to-end; vertex/fragment map too (their pipelines aren't in sg yet, but the profile is valid).
-/// The six ray-tracing stages all target the `lib` profile (a single-entry DXIL library).
+/// Profile prefix for a stage, or nullptr if we do not emit that stage yet.
+/// Compute and the raster stages map to their own profile; the six ray-tracing stages all target the `lib` profile, a single-entry DXIL library.
 [[nodiscard]] char const* stage_prefix(sg::shader_stage s)
 {
     switch (s)
@@ -33,8 +32,8 @@ namespace
     case sg::shader_stage::callable:
         return "lib";
     }
-    // No default: -Wswitch forces a new stage (geometry, mesh, ...) to be handled here rather than
-    // silently falling through. A stage we don't emit a profile for yet lands here.
+    // No default: -Wswitch forces a new stage (mesh, amplification, ...) to be handled here rather than silently falling through.
+    // A stage we do not emit a profile for yet lands here.
     return nullptr;
 }
 

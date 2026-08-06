@@ -7,6 +7,7 @@
 #include <shaped-linter/lex/source_buffer.hh>
 #include <shaped-linter/lex/source_language.hh>
 #include <shaped-linter/lex/source_manager.hh>
+#include <shaped-linter/prose/prose_view.hh>
 #include <shaped-linter/rules/engine.hh>
 #include <shaped-linter/rules/registry.hh>
 #include <shaped-linter/rules/rule.hh>
@@ -48,12 +49,22 @@ cc::string_view comparable_text(token const& t)
     return t.text.subview({.start = 0, .end = end});
 }
 
-cc::vector<token> significant_tokens(token_stream const& ts)
+/// The tokens an edit must leave untouched.
+///
+/// A Python docstring is dropped: it lexes as a string literal, but every prose rule reads it as prose, so
+/// rewriting one is a prose edit and this check must not call it a code change.
+cc::vector<token> significant_tokens(token_stream const& ts, source_language language)
 {
     cc::vector<token> out;
-    for (auto const& t : ts.all())
-        if (!t.is_trivia())
-            out.push_back(t);
+    auto const all = ts.all();
+    for (isize i = 0; i < all.size(); ++i)
+    {
+        if (all[i].is_trivia())
+            continue;
+        if (language == source_language::python && is_python_docstring(all, i))
+            continue;
+        out.push_back(all[i]);
+    }
     return out;
 }
 
@@ -81,8 +92,8 @@ void check_code_unchanged(planned_rewrite const& rewritten,
         return;
     }
 
-    auto const old_tokens = significant_tokens(before.value());
-    auto const new_tokens = significant_tokens(after.value());
+    auto const old_tokens = significant_tokens(before.value(), language);
+    auto const new_tokens = significant_tokens(after.value(), language);
 
     auto const shared = old_tokens.size() < new_tokens.size() ? old_tokens.size() : new_tokens.size();
     for (isize i = 0; i < shared; ++i)

@@ -12,12 +12,11 @@
 // =========================================================================================================
 //
 // cc::random is a small, fast, header-only PRNG based on PCG32 (O'Neill, Apache-2.0 reference).
-// A given seed produces the same sequence on every platform and compiler, which makes it suitable
-// for reproducible tests, fuzzing, and any algorithm that must replay exactly from a recorded seed.
+// A given seed produces the same sequence on every platform and compiler.
+// That makes it suitable for reproducible tests, fuzzing, and any algorithm that must replay exactly from a recorded seed.
 //
-// It is move-only with an explicit clone(): a generator is a position in a stream, and silently
-// copying it (two callers drawing the "same" numbers) is almost always a bug. Duplicate the stream
-// on purpose with clone() when you really want two independent-but-identical sequences.
+// It is move-only with an explicit clone(): a generator is a position in a stream, and silently copying it — two callers drawing the "same" numbers — is almost always a bug.
+// Duplicate the stream on purpose with clone() when you really want two independent-but-identical sequences.
 //
 //   cc::random rng(seed);                    - seeded generator
 //   rng.next_u32() / next_u64()              - raw uniform bits
@@ -29,7 +28,8 @@
 
 namespace cc
 {
-/// Deterministic PCG32 generator. Reproducible across platforms for a fixed seed.
+/// Deterministic PCG32 generator.
+/// Reproducible across platforms for a fixed seed.
 /// Move-only by design; use clone() to intentionally duplicate the stream position.
 struct random
 {
@@ -44,7 +44,8 @@ struct random
     random(random&&) = default;
     random& operator=(random&&) = default;
 
-    /// Returns an independent generator at the same stream position. Both produce identical sequences.
+    /// Returns an independent generator at the same stream position.
+    /// Both produce identical sequences.
     [[nodiscard]] random clone() const
     {
         random r;
@@ -65,7 +66,7 @@ struct random
 
     /// Reconstructs a generator directly from a raw state, bypassing the seeding scramble.
     /// The blessed roundtrip: from_state(r.state()) reproduces r's subsequent draws exactly.
-    /// Any u64 is a valid state (the fixed odd increment makes the LCG full-period).
+    /// Any u64 is a valid state — the fixed odd increment makes the LCG full-period.
     [[nodiscard]] static random from_state(u64 state)
     {
         random r;
@@ -74,7 +75,8 @@ struct random
         return r;
     }
 
-    /// Raw LCG state. The replay partner of from_state(); also useful for inspection/debugging.
+    /// Raw LCG state.
+    /// The replay partner of from_state(); also useful for inspection and debugging.
     [[nodiscard]] u64 state() const { return _state; }
 
     /// One PCG32 step: 32 uniform bits.
@@ -87,7 +89,8 @@ struct random
         return (xorshifted >> rot) | (xorshifted << ((0u - rot) & 31u));
     }
 
-    /// 64 uniform bits from two steps. The draw order is fixed and part of the reproducibility contract.
+    /// 64 uniform bits from two steps.
+    /// The draw order is fixed and part of the reproducibility contract.
     [[nodiscard]] u64 next_u64()
     {
         u64 const hi = next_u32();
@@ -95,7 +98,8 @@ struct random
         return (hi << 32) | lo;
     }
 
-    /// Unbiased uniform integer in [a, b] inclusive. Rejection-samples to avoid modulo bias.
+    /// Unbiased uniform integer in [a, b] inclusive.
+    /// Rejection-samples to avoid modulo bias.
     template <class T>
     [[nodiscard]] T uniform(T a, T b_inclusive)
     {
@@ -119,21 +123,24 @@ struct random
     /// Fair coin flip.
     [[nodiscard]] bool uniform_bool() { return (next_u32() & 1u) != 0; }
 
-    /// Uniform float in [a, b). Uses 24 mantissa bits.
+    /// Uniform float in [a, b).
+    /// Uses 24 mantissa bits.
     [[nodiscard]] f32 uniform(f32 a, f32 b)
     {
         f32 const unit = f32(next_u32() >> 8) * (1.0f / 16777216.0f); // [0, 1)
         return a + (b - a) * unit;
     }
 
-    /// Uniform double in [a, b). Uses 53 mantissa bits.
+    /// Uniform double in [a, b).
+    /// Uses 53 mantissa bits.
     [[nodiscard]] f64 uniform(f64 a, f64 b)
     {
         f64 const unit = f64(next_u64() >> 11) * (1.0 / 9007199254740992.0); // [0, 1)
         return a + (b - a) * unit;
     }
 
-    /// Uniformly picks one element of an indexable, non-empty range; returns a reference into it.
+    /// Uniformly picks one element of an indexable, non-empty range.
+    /// Returns a reference into it.
     template <class Range>
     [[nodiscard]] decltype(auto) uniform_in(Range&& r)
     {
@@ -142,7 +149,8 @@ struct random
         return r[uniform(isize(0), n - 1)];
     }
 
-    /// In-place uniform shuffle (forward Fisher-Yates). The loop order is part of the reproducibility contract.
+    /// In-place uniform shuffle (forward Fisher-Yates).
+    /// The loop order is part of the reproducibility contract.
     template <class Range>
     void shuffle(Range& r)
     {

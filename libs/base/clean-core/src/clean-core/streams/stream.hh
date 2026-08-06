@@ -8,60 +8,43 @@
 // Generic byte streams
 // =========================================================================================================
 //
-// A stream is a NON-OWNING, MOVE-ONLY view over a byte buffer, driven by a single type-erased flush callback
-// into an owning *adapter* (see span_stream.hh / file_stream.hh). The stream itself holds only the current
-// window plus the callback + context:
+// A stream is a NON-OWNING, MOVE-ONLY view over a byte buffer, driven by a single type-erased flush callback into an owning *adapter* (see span_stream.hh / file_stream.hh).
+// The stream itself holds only the current window plus the callback and context:
 //
 //     byte* curr; byte* end; flush_fn flush; void* context;
 //     (+ byte* first_write on write-capable streams; + byte* write_end on read_write streams)
 //
-// [curr, end) is the readable window (read streams) or the free-to-write window (write streams). The adapter
-// behind `context` refills / drains / seeks on demand.
+// [curr, end) is the readable window (read streams) or the free-to-write window (write streams).
+// The adapter behind `context` refills, drains and seeks on demand.
 //
-// A read_write stream needs BOTH boundaries at once, so it carries a second end: `end` is the read boundary
-// (end of valid data) and `write_end` is the write capacity. On every other stream the write bound is just
-// `end`, so `write_end` is zero-sized and, at the flush boundary, aliases `end`. Because these are separate,
-// a read_write stream at EOF still has free write space (`end == curr` but `write_end > curr`), so appending
-// there just works — no ambiguity between "refill for read" and "make room to write".
+// A read_write stream needs BOTH boundaries at once, so it carries a second end: `end` is the read boundary (end of valid data) and `write_end` is the write capacity.
+// On every other stream the write bound is just `end`, so `write_end` is zero-sized and, at the flush boundary, aliases `end`.
+// Because these are separate, a buffered read_write adapter can still have free write space at EOF (`end == curr` but `write_end > curr`), so appending there just works.
+// A span adapter sets both bounds to the same address, so its sink really is full once `curr == end`.
 //
-// PERFORMANCE. The stream is type-erased, but the hot path is NOT. Reads and writes act directly on the
-// exposed [curr, end) buffer pointers: ready_bytes()/consume() and writable_bytes()/produce() are plain pointer
-// moves, and read()/write()/read_pod()/write_pod() are immediate memcpy against that window. None of this
-// goes through the function pointer or any other non-inlinable call, so even a long run of small consecutive
-// operations stays fully inlined — a byte read is a load, not a virtual dispatch. The ONLY guaranteed
-// (non-inlinable) call is `flush`, taken exactly when a window is exhausted or must be drained; its cost is
-// amortized across every byte moved between flushes.
+// PERFORMANCE.
+// The stream is type-erased, but the hot path is NOT.
+// Reads and writes act directly on the exposed [curr, end) buffer pointers.
+// ready_bytes()/consume() and writable_bytes()/produce() are plain pointer moves, and read()/write()/read_pod()/write_pod() are immediate memcpy against that window.
+// None of this goes through the function pointer or any other non-inlinable call.
+// So even a long run of small consecutive operations stays fully inlined — a byte read is a load, not a virtual dispatch.
+// The ONLY guaranteed non-inlinable call is `flush`, taken exactly when a window is exhausted or must be drained, and its cost is amortized across every byte moved between flushes.
 //
-// WHY A SINGLE FLUSH POINTER. Refill, drain, and all six seek_dir operations funnel through one function
-// pointer (dir + offset select the operation). A stream is therefore exactly {window + one pointer + context}
-// no matter its access or seekability — so a single adapter, over one flush, can hand out any of the six
-// stream types, with no per-operation vtable to translate.
+// WHY A SINGLE FLUSH POINTER.
+// Refill, drain, and all six seek_dir operations funnel through one function pointer, with dir + offset selecting the operation.
+// A stream is therefore exactly {window + one pointer + context} no matter its access or seekability.
+// So a single adapter, over one flush, can hand out any of the six stream types, with no per-operation vtable to translate.
 //
-// Flush contract (dir + offset select the operation; see cc::seek_dir in stream_flush.hh):
-//   * (relative, 0) is a PLAIN FLUSH: refill the read window / write through pending bytes, no logical move.
-//   * A stream is at its end iff `curr == end` AFTER a flush — for reads that means "no more data", for a
-//     bounded write sink (e.g. a fixed span) it means "no more space". Unbounded sinks (files) keep
-//     curr < end after a successful write-flush. Initially curr == end, so a read consumer must flush once
-//     to obtain the first data (span adapters are unbuffered and hand out a full window up front).
-//   * dry_* variants compute the resulting global position WITHOUT touching curr/end or the buffer; used by
-//     position()/size()/remaining_bytes() and to probe seekability cheaply.
-//   * flush returns the global position of `curr`, or -1 when the source has no meaningful position / is not
-//     seekable, or a cc::result error on I/O failure.
-//   * first_write is passed by value and reset by the stream wrapper (not by flush) after a successful,
-//     non-dry flush; on error it is left intact so the write can be retried.
-//   * CALLER CONTRACT: a stream must never invoke flush with parameters outside its own capability. A
-//     non-seekable stream must not issue any seek — even if the underlying adapter could seek — and a read
-//     stream must not request a write-through. The public API enforces this by construction (seek_* exist
-//     only on seekable streams, write-through only happens on write streams), so the flush callback trusts
-//     its inputs and asserts on a violation rather than defensively checking every call.
+// The flush contract itself — every parameter, the dry_* rules, the caller contract — is in stream_flush.hh, over libs/base/clean-core/docs/writing-a-stream.md.
+// The one rule a stream USER needs from it: a stream is at its end iff `curr == end` AFTER a flush.
+// A buffered adapter starts with an empty window, so a read consumer must flush once to get the first data; a span adapter hands out its whole window at construction.
 //
-// CONVERSIONS only ever NARROW — drop seekable, and read_write -> read or write; read and write are leaf
-// capabilities that never cross. An adapter converts straight to its natural (most-capable) stream or to any
-// legal narrowing of it. A stream narrows to another stream too, but only FROM AN RVALUE: converting consumes
-// the source and leaves it invalid, so a backend never ends up with two live views. That matters because the
-// stream holds the curr/end window while flush is stateful in the adapter — a second overlay onto the same
-// backend would desynchronize both. Temporarily downgrading a stream and getting the original back is a
-// separate story, and not one this offers.
+// CONVERSIONS only ever NARROW — drop seekable, and read_write -> read or write; read and write are leaf capabilities that never cross.
+// An adapter converts straight to its natural (most-capable) stream, or to any legal narrowing of it.
+// A stream narrows to another stream too, but only FROM AN RVALUE: converting consumes the source and leaves it invalid, so a backend never ends up with two live views.
+// That matters because the stream holds the curr/end window while flush is stateful in the adapter — a second overlay onto the same backend would desynchronize both.
+// Temporarily downgrading a stream and getting the original back is a separate story, and not one this offers.
+// Narrowing away write capability ASSERTS while writes are still pending: they can only drain through the source's own write bound, so flush before narrowing.
 
 namespace cc
 {
@@ -88,14 +71,14 @@ template <> struct public_stream<stream_access::read_write,  true>  { using type
 
 namespace cc
 {
-// The six stream types. Each is a real, distinct type that PRIVATELY inherits the shared engine
-// (cc::impl::stream<Access, Seekable>) and explicitly pulls in only the methods its capability supports — so
-// the type's own definition IS its API, the way cc::vector lists its methods over allocating_container.
-// Private inheritance keeps the engine hidden; adapters construct these directly (see span_stream.hh), and
-// each type also takes an RVALUE of any wider stream, consuming it. The engine is befriended so
-// try_as_seekable can build the seekable variant and so a narrowing constructor can take the source's state.
+// The six stream types.
+// Each is a real, distinct type that PRIVATELY inherits the shared engine (cc::impl::stream<Access, Seekable>) and explicitly pulls in only the methods its capability supports.
+// So the type's own definition IS its API, the way cc::vector lists its methods over allocating_container.
+// Private inheritance keeps the engine hidden; adapters construct these directly (see span_stream.hh), and each type also takes an RVALUE of any wider stream, consuming it.
+// The engine is befriended so try_as_seekable can build the seekable variant, and so a narrowing constructor can take the source's state.
 
-/// Non-owning, move-only read view over a byte source. Refills on demand via its adapter.
+/// Non-owning, move-only read view over a byte source.
+/// Refills on demand via its adapter.
 struct read_stream : private impl::stream<impl::stream_access::read, false>
 {
     using engine = impl::stream<impl::stream_access::read, false>;
@@ -125,7 +108,8 @@ struct read_stream : private impl::stream<impl::stream_access::read, false>
     using engine::try_as_seekable; // -> optional<seekable_read_stream>
 };
 
-/// Non-owning, move-only write view over a byte sink. Drains on demand via its adapter.
+/// Non-owning, move-only write view over a byte sink.
+/// Drains on demand via its adapter.
 struct write_stream : private impl::stream<impl::stream_access::write, false>
 {
     using engine = impl::stream<impl::stream_access::write, false>;

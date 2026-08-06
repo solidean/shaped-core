@@ -2,13 +2,13 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// The primitive kind a raster pipeline assembles vertices into. Baked into the pipeline (dynamic
-/// per-draw topology is a future addition), so a pipeline is built for one topology.
+/// The primitive kind a raster pipeline assembles vertices into.
+/// Baked into the pipeline, so a pipeline is built for one topology; dynamic per-draw topology is a future addition.
 
 namespace sg
 {
-/// How vertices are assembled into primitives. The concrete topology, not the coarse family: a backend
-/// derives the PSO's topology *type* (point / line / triangle) from it via `topology_type`.
+/// How vertices are assembled into primitives.
+/// The concrete topology, not the coarse family: a backend derives the PSO's topology *type* (point / line / triangle) from it via `topology_type`.
 enum class primitive_topology
 {
     point_list,     // DX12 POINTLIST     / Vk POINT_LIST
@@ -17,14 +17,14 @@ enum class primitive_topology
     triangle_list,  // DX12 TRIANGLELIST  / Vk TRIANGLE_LIST
     triangle_strip, // DX12 TRIANGLESTRIP / Vk TRIANGLE_STRIP
 
-    /// A list of control-point patches — the input a tessellation (hull/domain) pipeline consumes. The
-    /// control-point count per patch is not part of the topology; it comes from
-    /// `raster_pipeline_description::patch_control_points`. DX12 N_CONTROL_POINT_PATCHLIST / Vk PATCH_LIST.
+    /// A list of control-point patches — the input a tessellation (hull/domain) pipeline consumes.
+    /// The control-point count per patch is not part of the topology; it comes from `raster_pipeline_description::patch_control_points`.
+    /// DX12 N_CONTROL_POINT_PATCHLIST / Vk PATCH_LIST.
     patch_list,
 };
 
-/// The coarse family a topology belongs to — the granularity a dx12 PSO records
-/// (D3D12_PRIMITIVE_TOPOLOGY_TYPE), distinct from the concrete `primitive_topology` set on the IA.
+/// The coarse family a topology belongs to — the granularity a dx12 PSO records (D3D12_PRIMITIVE_TOPOLOGY_TYPE).
+/// Distinct from the concrete `primitive_topology` set on the IA.
 enum class primitive_topology_type
 {
     point,

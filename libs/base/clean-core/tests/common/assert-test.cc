@@ -9,7 +9,7 @@
 TEST("assertions - failing assertion calls handler with correct payload")
 {
     cc::optional<cc::impl::assertion_info> captured;
-    // CAREFUL: this is a bit brittle wrt. formatting but it should be fine
+    // CAREFUL: brittle with respect to formatting, but it should be fine.
     int const test_line = __LINE__ + 11; // line where CC_ASSERT_ALWAYS is called
 
     {

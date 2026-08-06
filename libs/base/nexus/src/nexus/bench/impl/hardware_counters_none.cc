@@ -1,9 +1,9 @@
 #include <nexus/bench/impl/baseline.hh>
 #include <nexus/bench/impl/hardware_counters_backend.hh>
 
-// Fallback backend: no PMU. Used on platforms without a hardware-counter implementation (currently macOS,
-// and any OS that is neither Windows nor Linux). Produces only the baseline — elapsed time and, on x86, a
-// reference-cycle count — and reports every PMU counter as unavailable.
+// Fallback backend: no PMU.
+// Used on any platform without a hardware-counter implementation — currently macOS, and any OS that is neither Windows nor Linux.
+// Produces only the baseline (elapsed time, and on x86 a reference-cycle count) and reports every PMU counter as unavailable.
 
 namespace nx::bench::impl
 {

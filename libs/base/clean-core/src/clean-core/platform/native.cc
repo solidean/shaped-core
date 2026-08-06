@@ -6,11 +6,10 @@
 #include <mutex>
 
 
-// Platform-specific includes for symbol demangling
 #ifdef CC_OS_WINDOWS
 #include <clean-core/platform/win32_sanitized.hh>
 
-// NOTE: must be _after_ windows.h
+// Must come after windows.h.
 #include <DbgHelp.h>
 
 // TODO: Future - decide if dbghelp.lib linking should be exposed in CMake target_link_libraries
@@ -27,20 +26,16 @@
 
 cc::string cc::demangle_symbol(cc::string_view symbol)
 {
-    // Static mutex to protect thread-unsafe demangling functions
-    // UnDecorateSymbolName (Windows) is documented as single-threaded
-    // __cxa_demangle (POSIX) thread-safety is not guaranteed
+    // UnDecorateSymbolName is documented as single-threaded, and __cxa_demangle makes no thread-safety guarantee either.
     static std::mutex demangle_mutex;
     std::lock_guard<std::mutex> lock(demangle_mutex);
 
 #ifdef CC_OS_WINDOWS
-    // Windows implementation using UnDecorateSymbolName
-    // Allocate buffer for demangled name (MSVC symbols are typically < 4KB)
+    // MSVC symbols are typically well under 4 KB.
     constexpr DWORD buffer_size = 4096;
     char buffer[buffer_size];
 
-    // UnDecorateSymbolName expects a null-terminated string
-    // Create a temporary null-terminated copy of the symbol
+    // UnDecorateSymbolName needs a null-terminated string.
     cc::string symbol_nt = cc::string::create_copy_c_str_materialized(symbol);
     char const* nt_ptr = symbol_nt.c_str_if_terminated();
     CC_ASSERT(nt_ptr != nullptr, "should always succeed");
@@ -53,18 +48,15 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
 
     if (result > 0)
     {
-        // Successfully demangled
         return cc::string(buffer, result);
     }
     else
     {
-        // Failed to demangle, return original symbol
         return cc::string::create_copy_of(symbol);
     }
 
 #else
-    // GCC/Clang implementation using __cxa_demangle
-    // __cxa_demangle expects a null-terminated string
+    // __cxa_demangle needs a null-terminated string.
     cc::string symbol_nt = cc::string::create_copy_c_str_materialized(symbol);
     char const* nt_ptr = symbol_nt.c_str_if_terminated();
     CC_ASSERT(nt_ptr != nullptr, "should always succeed");
@@ -74,14 +66,12 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
 
     if (status == 0 && demangled != nullptr)
     {
-        // Successfully demangled
         cc::string result = cc::string(demangled);
         std::free(demangled);
         return result;
     }
     else
     {
-        // Failed to demangle, return original symbol
         if (demangled != nullptr)
         {
             std::free(demangled);

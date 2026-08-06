@@ -8,9 +8,8 @@ namespace itrace
 {
 class source_cache;
 
-/// One rendered source line: its 1-based number, the untrimmed text (indentation preserved), and
-/// whether any traced instruction mapped to it. (Not `source_line` — that name is a PDB file+line
-/// pair in debug/symbol_session.hh.)
+/// One rendered source line: its 1-based number, the untrimmed text with indentation preserved, and whether any traced instruction mapped to it.
+/// Not `source_line` — that name is a PDB file+line pair in debug/symbol_session.hh.
 struct source_view_line
 {
     u32 number = 0;
@@ -18,9 +17,8 @@ struct source_view_line
     bool executed = false;
 };
 
-/// A contiguous span of source lines to show together — a touched line plus its context, merged
-/// with any neighbouring touched line whose context window overlaps or abuts. `start`/`end` are
-/// 1-based inclusive; `lines` covers exactly [start, end].
+/// A contiguous span of source lines to show together — a touched line plus its context, merged with any neighbouring touched line whose context window overlaps or abuts.
+/// `start`/`end` are 1-based inclusive, and `lines` covers exactly [start, end].
 struct source_range
 {
     u32 start = 0;
@@ -41,9 +39,9 @@ struct source_view_model
     cc::vector<source_file_view> files;
 };
 
-/// Collect the source a trace touched: for every instruction with a source line, grow that line by
-/// `context` lines each way, merge overlapping/adjacent windows into contiguous ranges per file, and
-/// read the (untrimmed) text. Files whose source cannot be read are dropped. Ranges clamp to the
-/// file's bounds. `context` is the ± half-window (5 → up to 11 lines around a lone touched line).
+/// Collect the source a trace touched.
+/// For every instruction with a source line, grow that line by `context` lines each way, merge overlapping or adjacent windows into contiguous ranges per file, and read the untrimmed text.
+/// Files whose source cannot be read are dropped, and ranges clamp to the file's bounds.
+/// `context` is the ± half-window, so 5 gives up to 11 lines around a lone touched line.
 source_view_model collect_source_view(trace const& t, source_cache& sources, u32 context = 5);
 } // namespace itrace

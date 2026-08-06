@@ -9,9 +9,9 @@
 
 namespace sg
 {
-/// Base of every shaped-graphics exception. Carries a formatted message; catch a concrete derived type
-/// for structured context, or `sg::exception` for "any sg failure". These are thrown only by the
-/// throwing create façades and the submit/advance path — the `try_*` surface never throws.
+/// Base of every shaped-graphics exception, carrying a formatted message.
+/// Catch a concrete derived type for structured context, or `sg::exception` for "any sg failure".
+/// Thrown only by the throwing create façades and the submit/advance path — the `try_*` surface never throws.
 ///
 /// Example:
 ///   try { auto buf = ctx->persistent.create_raw_buffer(size, usage); ... }
@@ -30,9 +30,9 @@ protected:
     cc::string _message;
 };
 
-/// The GPU device was lost (driver reset / TDR / removed adapter). Sticky: the owning context stays
-/// lost once this fires — tear it down and recreate. Surfaced at submit / advance / fence waits and
-/// from the throwing create façades; never through the `try_*` channel.
+/// The GPU device was lost (driver reset / TDR / removed adapter).
+/// Sticky: the owning context stays lost once this fires, so tear it down and recreate.
+/// Surfaced at submit / advance / fence waits and from the throwing create façades, never through the `try_*` channel.
 class device_lost_exception final : public exception
 {
 public:
@@ -48,9 +48,9 @@ private:
     cc::string _reason;
 };
 
-/// A GPU resource allocation failed (out of device memory, or a fixed heap / descriptor region is
-/// exhausted). Recoverable in principle by a coarse handler that frees or resizes — the classic
-/// bubble-up-to-a-budget failure. Carries the requested size and the underlying backend error.
+/// A GPU resource allocation failed — out of device memory, or a fixed heap / descriptor region is exhausted.
+/// Recoverable in principle by a coarse handler that frees or resizes: the classic bubble-up-to-a-budget failure.
+/// Carries the requested size and the underlying backend error.
 class allocation_exception final : public exception
 {
 public:
@@ -67,8 +67,9 @@ private:
     isize _size_in_bytes = 0;
 };
 
-/// Building a binding_group_layout, pipeline_layout, or compute / raster / raytracing pipeline failed — a
-/// shader/root-signature/PSO compile or create error the driver reported. Carries the pipeline's entry point for context.
+/// Building a binding_group_layout, pipeline_layout, or compute / raster / raytracing pipeline failed.
+/// A shader / root-signature / PSO compile or create error the driver reported.
+/// Carries the pipeline's entry point for context.
 class pipeline_creation_exception final : public exception
 {
 public:
@@ -85,9 +86,9 @@ private:
     cc::string _entry_point;
 };
 
-/// Creating a swapchain failed — a bad window handle, an unsupported surface format, or a DXGI/driver
-/// error creating the flip chain. Recoverable in principle (fix the window / format and retry). Carries
-/// the underlying backend error.
+/// Creating a swapchain failed — a bad window handle, an unsupported surface format, or a DXGI/driver error creating the flip chain.
+/// Recoverable in principle: fix the window or format and retry.
+/// Carries the underlying backend error.
 class swapchain_creation_exception final : public exception
 {
 public:
@@ -97,10 +98,10 @@ public:
     }
 };
 
-/// Instantiating a binding_group against its layout failed: a bound view names no binding, a view's
-/// access/shape doesn't match its binding, or a declared binding was left unprovided. A caller-side
-/// mistake in wiring views to a layout (as opposed to running out of GPU memory). Carries the message
-/// the backend produced (which names the offending binding).
+/// Instantiating a binding_group against its layout failed.
+/// A bound view names no binding, a view's access or shape does not match its binding, or a declared binding was left unprovided.
+/// So it is a caller-side mistake in wiring views to a layout, as opposed to running out of GPU memory.
+/// Carries the message the backend produced, which names the offending binding.
 class binding_group_exception final : public exception
 {
 public:

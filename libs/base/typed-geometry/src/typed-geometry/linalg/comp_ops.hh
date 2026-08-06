@@ -2,8 +2,8 @@
 
 #include <typed-geometry/linalg/comp.hh>
 
-/// Additional component-wise operations on comp that read better as free functions. Like the
-/// operators in comp.hh these are fully element-wise, with scalar operands broadcasting.
+/// Additional component-wise operations on comp that read better as free functions.
+/// Like the operators in comp.hh these are fully element-wise, with scalar operands broadcasting.
 
 namespace tg
 {

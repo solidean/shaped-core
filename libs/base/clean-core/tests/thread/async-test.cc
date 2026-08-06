@@ -8,16 +8,17 @@
 
 using namespace cc::primitive_defines;
 
-// These tests drive the graph inline on the calling thread (cc::async_blocking_get_singlethreaded or an explicit
-// singlethreaded_scheduler + async_worker_scope) — deterministic and thread-free, matching the threaded_actor test
-// philosophy. The concurrent work-stealing scheduler and its tests live in async-pool-test.cc (threads only).
+// These tests drive the graph inline on the calling thread — cc::async_blocking_get_singlethreaded, or an explicit singlethreaded_scheduler + async_worker_scope.
+// That is deterministic and thread-free, matching the threaded_actor test philosophy.
+// The concurrent work-stealing scheduler and its tests live in async-pool-test.cc (threads only).
 
 using cc::async_context;
 
-// Node size guards. The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the
-// payload slot: max(scratch, sizeof(T), sizeof(E)), aligned so the whole node is a 64 B line for a value up to
-// ~48 B. The value/error shares the payload with the unresolved scratch (frame + deps + continuations) and
-// grows the node naturally for a larger T/E (no inline cap — it is built straight into the payload at resolution).
+// Node size guards.
+// The node is a 16 B header (intrusive refcount + tagged state/ops word) followed by the payload slot: max(scratch, sizeof(T), sizeof(E)).
+// It is aligned so the whole node is a 64 B line for a value up to ~48 B.
+// The value/error shares the payload with the unresolved scratch (frame + deps + continuations), and grows the node naturally for a larger T/E.
+// There is no inline cap — the value is built straight into the payload at resolution.
 static_assert(sizeof(cc::async<int>) == 64, "async<int> should be exactly one cache line");
 static_assert(sizeof(cc::async<cc::vector<int>>) == 64, "async<vector> should stay one cache line");
 static_assert(sizeof(cc::async<cc::string>) == 64, "async<string> should stay one cache line");
@@ -167,8 +168,8 @@ TEST("async - dependency frame may still take a leading async_context")
 
 TEST("async - dynamic dependency added during compute, removed once ready")
 {
-    // step 0 creates a dependency mid-compute, requires it, and waits; step 1 reads its value. The dependency
-    // must be gone from the pending list by the time the parent completes.
+    // step 0 creates a dependency mid-compute, requires it, and waits; step 1 reads its value.
+    // The dependency must be gone from the pending list by the time the parent completes.
     auto p = cc::make_async_lazy<int>(
         [step = 0, child = cc::shared_async<int>()](async_context<int>& actx) mutable -> cc::async_step_status
         {
@@ -207,9 +208,8 @@ TEST("async - already-ready dependency completes without parking")
 
 TEST("async - required cold dependency is driven to completion")
 {
-    // The dependency is a separate cold async captured by the parent. require() neither schedules nor
-    // subscribes: the parent's poll loop drives the cold dep inline on its own stack, all within one
-    // async_blocking_get_singlethreaded.
+    // The dependency is a separate cold async captured by the parent.
+    // require() neither schedules nor subscribes: the parent's poll loop drives the cold dep inline on its own stack, all within one async_blocking_get_singlethreaded.
     auto dep = cc::make_async_lazy([] { return 100; });
     auto p = cc::make_async_lazy<int>(
         [dep](async_context<int>& actx) -> cc::async_step_status
@@ -224,13 +224,13 @@ TEST("async - required cold dependency is driven to completion")
 
 TEST("async - a reused singlethreaded_scheduler settles empty after each graph")
 {
-    // A singlethreaded_scheduler has no steal-capable peers, so the poll loop never publishes a dependency it
-    // is about to drive inline. Nothing is left queued once the root is ready.
+    // A singlethreaded_scheduler has no steal-capable peers, so the poll loop never publishes a dependency it is about to drive inline.
+    // Nothing is left queued once the root is ready.
     //
-    // This pins a real lifetime invariant, not just churn: a queued entry is a STRONG node handle, so anything
-    // abandoned here would pin its whole graph alive for as long as the scheduler lives. When require() still
-    // scheduled eagerly, every drive leaked its deps this way — unbounded across a long-lived scheduler, and
-    // worth 13-82x on the drive benchmark once the slab stopped recycling hot nodes.
+    // This pins a real lifetime invariant rather than churn: a queued entry is a STRONG node handle.
+    // So anything abandoned here would pin its whole graph alive for as long as the scheduler lives.
+    // When require() still scheduled eagerly, every drive leaked its deps this way, unbounded across a long-lived scheduler.
+    // That was worth 13-82x on the drive benchmark once the slab stopped recycling hot nodes.
     cc::singlethreaded_scheduler sched;
     cc::async_worker_scope scope(sched);
 
@@ -280,8 +280,8 @@ TEST("async - a frame is never invoked again after it produces a value")
 
 TEST("async - a two-phase frame runs exactly twice (register deps, then compute)")
 {
-    // First poll registers a dependency and waits; the second (and last) poll computes. The frame must be
-    // entered exactly twice — never again after it returns success.
+    // First poll registers a dependency and waits; the second (and last) poll computes.
+    // The frame must be entered exactly twice — never again after it returns success.
     auto calls = std::make_shared<int>(0);
     auto p = cc::make_async_lazy<int>(
         [calls, step = 0, child = cc::shared_async<int>()](async_context<int>& actx) mutable -> cc::async_step_status
@@ -308,9 +308,8 @@ TEST("async - a two-phase frame runs exactly twice (register deps, then compute)
 
 namespace
 {
-// Tracks LIVE instances, not destructor calls: building a lambda copies the capture around, so counting
-// destructions alone cannot tell a frame's own capture from the temporaries. A frame holding one of these
-// keeps the count at 1; a leaked frame leaves it at 1, a double-destroyed one drives it negative.
+// Tracks LIVE instances, not destructor calls: building a lambda copies the capture around, so counting destructions alone cannot tell a frame's own capture from the temporaries.
+// A frame holding one of these keeps the count at 1; a leaked frame leaves it at 1, a double-destroyed one drives it negative.
 struct live_counter
 {
     int* live;
@@ -351,8 +350,8 @@ TEST("async - a resolving frame destroys its captures exactly once")
 
 TEST("async - a frame dropped before it resolves still destroys its captures")
 {
-    // teardown_payload's not-ready branch: the in-place frame was never invoked (cold) or is parked. Both are
-    // a plain ~F over the inline slot — no resolve, so no re-entrancy contract applies.
+    // teardown_payload's not-ready branch: the in-place frame was never invoked (cold) or is parked.
+    // Both are a plain ~F over the inline slot — no resolve, so no re-entrancy contract applies.
     int cold_live = 0;
     {
         auto a = cc::make_async_lazy<int>([c = live_counter(&cold_live)] { return 1; });
@@ -381,8 +380,8 @@ TEST("async - a frame dropped before it resolves still destroys its captures")
 
 TEST("async - a parked frame keeps its state in place across polls")
 {
-    // The frame is never moved, so a mutable closure just picks up where it left off. (The two-phase test
-    // above pins the call count; this pins that per-poll mutations to the captures actually survive.)
+    // The frame is never moved, so a mutable closure just picks up where it left off.
+    // The two-phase test above pins the call count; this pins that per-poll mutations to the captures actually survive.
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy<int>(
         [ext, polls = 0](async_context<int>& actx) mutable -> cc::async_step_status
@@ -478,9 +477,9 @@ TEST("async - blocking on external dep subscribes late, completion wakes it")
 TEST("async - try_blocking_get reports no-progress instead of asserting")
 {
     // A drained queue does NOT mean the graph is stuck — it means THIS scheduler can make no further progress.
-    // Here that is an unpushed manual node; the multi-scheduler case is a graph that migrated onto a pool (see
-    // async-pool-test.cc). Either way `try_` must report it, not abort the process. Re-driving after the push
-    // succeeds, so nullopt is "not yet", not "never".
+    // Here that is an unpushed manual node; the multi-scheduler case is a graph that migrated onto a pool (see async-pool-test.cc).
+    // Either way `try_` must report it, not abort the process.
+    // Re-driving after the push succeeds, so nullopt is "not yet", not "never".
     cc::singlethreaded_scheduler sched;
     cc::async_worker_scope const scope(sched); // so the push below can route the woken dependent somewhere
 
@@ -559,9 +558,9 @@ TEST("async - a dependent that expires is pruned from a subscribed-to node")
 
 TEST("async - continuation head: inline slot promotes into the spill list and back to empty")
 {
-    // White-box over async_cont_head's tagged word: the inline slot holds its weak count by hand, so every
-    // transition (fill, promote, prune, drop) has to hand that count over exactly once. A leak or a double
-    // dec_weak here is invisible to the graph tests; the node's weak count is what actually pins its storage.
+    // White-box over async_cont_head's tagged word: the inline slot holds its weak count by hand.
+    // Every transition (fill, promote, prune, drop) therefore has to hand that count over exactly once.
+    // A leak or a double dec_weak here is invisible to the graph tests; the node's weak count is what actually pins its storage.
     auto a = cc::make_async_manual<int>();
     auto b = cc::make_async_manual<int>();
 
@@ -661,9 +660,9 @@ TEST("async - cancellation propagates as a value")
 
 TEST("async - a large value grows the node but round-trips through value + dependency paths")
 {
-    // big_value (96 B) exceeds one line's payload, so the node spans multiple lines. The value is built
-    // straight into the payload at resolution (over the moved-out frame's slot) — verify it survives the value
-    // read, a manual push, and being unwrapped as a dependency.
+    // big_value (96 B) exceeds one line's payload, so the node spans multiple lines.
+    // The value is built straight into the payload at resolution, over the moved-out frame's slot.
+    // Verify it survives the value read, a manual push, and being unwrapped as a dependency.
     auto a = cc::make_async_lazy(
         []
         {
@@ -697,10 +696,10 @@ TEST("async - a large value grows the node but round-trips through value + depen
 
 namespace
 {
-// Build a balanced binary sum-tree of the given depth. Leaves count 1; internal nodes require both children
-// and sum them. leaf_exec counts leaf-frame runs, so we can assert no completed node is recomputed and that
-// undemanded work stays cold. (Internal frames legitimately run twice — once to register deps and return
-// wait, once to compute after they are ready — which is inherent to the re-entrant poll model.)
+// Build a balanced binary sum-tree of the given depth.
+// Leaves count 1; internal nodes require both children and sum them.
+// leaf_exec counts leaf-frame runs, so we can assert no completed node is recomputed and that undemanded work stays cold.
+// Internal frames legitimately run twice — once to register deps and return wait, once to compute after they are ready — which is inherent to the re-entrant poll model.
 cc::shared_async<i64> build_sum_tree(int depth, std::shared_ptr<i64> const& leaf_exec)
 {
     if (depth == 0)
@@ -744,10 +743,9 @@ TEST("async - large dependency tree drives correctly without computing undemande
 
 TEST("async - deep cold chain completes across the inline depth cap")
 {
-    // A lazy chain far longer than the eager-drive recursion cap: the first ~cap levels are driven inline
-    // depth-first on one stack, then the poll loop falls back to subscribe+park (driven via the scheduler
-    // queue) for the rest. The result must be identical either way — this pins that the cap fallback is
-    // correct and that the native stack stays bounded regardless of graph depth.
+    // A lazy chain far longer than the eager-drive recursion cap: the first ~cap levels are driven inline depth-first on one stack.
+    // The poll loop then falls back to subscribe+park, driven via the scheduler queue, for the rest.
+    // The result must be identical either way — this pins that the cap fallback is correct, and that the native stack stays bounded regardless of graph depth.
     int const n = 400; // > the internal inline depth cap
     auto node = cc::make_async_lazy<i64>([] { return i64(0); });
     for (int i = 1; i < n; ++i)

@@ -3,24 +3,21 @@
 
 using namespace cc::primitive_defines;
 
-// vulkan backend bring-up test. This is its own binary (shaped-graphics-vulkan-test), built only
-// where the vulkan backend builds (the SDK is present), so it never needs an #ifdef guard. Backend-
-// specific tests live here rather than in the backend-agnostic shaped-graphics-test.
+// vulkan backend bring-up test, in its own binary (shaped-graphics-vulkan-test) built only where the vulkan backend builds, so it needs no #ifdef guard.
+// What belongs in a backend suite rather than in the backend-agnostic shaped-graphics-test is libs/graphics/shaped-graphics/docs/concepts/backends.md's call.
 //
-// Unlike dx12's WARP adapter, Vulkan has no guaranteed software device, so a context can't be created
-// on a driver-less headless host. Each test therefore skips (returns) when creation fails — the same
-// shape as dx12's "hardware context" test. The debug/validation layer is requested but best-effort:
-// create_vulkan_context proceeds without it when the layer isn't installed.
+// Vulkan has no guaranteed software device — unlike dx12's WARP adapter — so no context can be created on a driver-less headless host.
+// Every test therefore returns early when creation fails, rather than failing.
+// Validation is requested throughout but best-effort: create_vulkan_context proceeds without the layer when it is not installed.
 
 namespace
 {
 namespace vulkan = sg::backend::vulkan;
 
-// Drives the real vulkan paths against a live context via the backend-typed API (create_vulkan_*), so
-// there are no downcasts and we can inspect the concrete resources.
+// Drives the real vulkan paths against a live context through the backend-typed API, so the concrete resources are inspectable without a downcast.
 void exercise_context(vulkan::vulkan_context& ctx)
 {
-    // Command list: handed out already recording. Submitting consumes it (moved in).
+    // Command list: handed out already recording, and submitting consumes it.
     auto cmd = ctx.create_vulkan_command_list();
     REQUIRE(cmd.has_value());
     REQUIRE(cmd.value() != nullptr);
@@ -51,8 +48,7 @@ void exercise_context(vulkan::vulkan_context& ctx)
     REQUIRE(to_drop.has_value());
     ctx.drop_vulkan_command_list(cc::move(to_drop.value()));
 
-    // The abstract sg::context API forwards to the same places: create a buffer, and create + drop a
-    // command list, all through the base type.
+    // The abstract sg::context API forwards to the same places, exercised here through the base type.
     auto& base = static_cast<sg::context&>(ctx);
 
     auto via_base = base.persistent.create_raw_buffer(64, sg::buffer_usage::vertex_buffer);
@@ -77,8 +73,8 @@ TEST("sg vulkan - context")
 
 TEST("sg vulkan - software-preferred context")
 {
-    // prefer_software picks a CPU device (e.g. lavapipe) when one is present; otherwise it falls back
-    // to hardware. Either way the same paths are exercised.
+    // prefer_software picks a CPU device (e.g. lavapipe) when one is present, and falls back to hardware otherwise.
+    // Either way the same paths are exercised.
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .prefer_software_device = true});
     if (ctx.has_error())
         return; // no Vulkan-capable device available.

@@ -31,14 +31,13 @@ bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_inde
 } // namespace impl
 
 /// Runs every INVOCABLE_TEST whose *decayed* argument signature matches `Args...`, passing `args...`.
-/// Call from inside an ordinary (driver) test body. Each matched test runs as an addressable child under
-/// the section segment `name` (its own name and sections nest below), and the expensive setup around the
-/// call happens once — the driver body itself is not re-run per child.
+/// Call from inside an ordinary (driver) test body.
+/// Each matched test runs as an addressable child under the section segment `name`, with its own name and sections nested below.
+/// The driver body itself is not re-run per child, so expensive setup around the call happens once.
 ///
-/// Usually the template argument is left to deduce (`nx::invoke_tests("case", load(f))`); the key is the
-/// decayed type list. `name` is authored, never derived from a value, so output/addresses stay stable.
-/// Arguments are boxed by (decayed) value; prefer cheap-to-copy / handle types, or pass large data behind
-/// a handle/pointer.
+/// The template argument is usually left to deduce (`nx::invoke_tests("case", load(f))`), and the key is the decayed type list.
+/// `name` is authored, never derived from a value, so output and addresses stay stable.
+/// Arguments are boxed by (decayed) value, so prefer cheap-to-copy / handle types, or pass large data behind a handle or pointer.
 template <class... Args>
 invocation_result invoke_tests(cc::string_view name, Args... args)
 {

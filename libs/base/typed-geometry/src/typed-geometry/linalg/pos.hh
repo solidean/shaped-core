@@ -10,8 +10,8 @@ namespace tg
 {
 /// Position / point in D dimensions.
 ///
-/// A pos is a point in space — conceptually a singleton point set, not a free vector. Its
-/// arithmetic with vec mirrors affine geometry:
+/// A pos is a point in space — conceptually a singleton point set, not a free vector.
+/// Its arithmetic with vec mirrors affine geometry:
 ///
 ///     pos - pos -> vec    (the displacement between two points)
 ///     pos + vec -> pos    (translate a point)
@@ -19,9 +19,8 @@ namespace tg
 ///     pos + pos -> pos    (translation of the singleton point set — a deliberate rule;
 ///                          adding a point translates by that point's coordinates)
 ///
-/// The raw storage is the public C array member `data`. Components are accessed through `data`
-/// or operator[] — there are no .x/.y/.z members. Default construction zero-initializes all
-/// components (the origin).
+/// Components live in the public array member `data`, reached through `data` or operator[] — there are no .x/.y/.z members.
+/// Default construction zero-initializes every component, giving the origin.
 ///
 ///     tg::pos3f o;                          // origin {0, 0, 0}
 ///     auto const p = tg::pos3f(1, 2, 3);

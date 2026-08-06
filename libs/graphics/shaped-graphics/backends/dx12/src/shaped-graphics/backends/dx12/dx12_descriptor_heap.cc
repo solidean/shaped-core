@@ -1,7 +1,6 @@
-// dx12_descriptor_heap: the shader-visible CBV/SRV/UAV heap, split into a per-epoch-reclaimed transient
-// ring (front) and a persistent free-ranges region (rest). The transient ring reuses the u64-cursor +
-// per-epoch-checkpoint scheme of the inline rings; the persistent region is a first-fit free list with
-// coalescing frees. See dx12_descriptor_heap.hh and libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+// dx12_descriptor_heap: the shader-visible CBV/SRV/UAV heap, split into a per-epoch-reclaimed transient ring (front) and a persistent free-ranges region (rest).
+// The transient ring reuses the u64-cursor + per-epoch-checkpoint scheme of the inline rings; the persistent region is a first-fit free list with coalescing frees.
+// See dx12_descriptor_heap.hh and libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/error/optional.hh>
@@ -56,9 +55,9 @@ dx12_descriptor_alloc dx12_descriptor_heap::allocate_persistent(int count)
                     f.remove_at(i);
                 return {offset, count};
             }
-            // No span fits: the fixed persistent region is exhausted. This is a recoverable, runtime
-            // failure (esp. for bindless / large binding sets), not a contract violation — return the
-            // empty reservation so create_binding_group turns it into a cc::error / throw.
+            // No span fits: the fixed persistent region is exhausted.
+            // A recoverable runtime failure, especially for bindless / large binding sets, not a contract violation.
+            // Return the empty reservation so create_binding_group turns it into a cc::error / throw.
             return dx12_descriptor_alloc{};
         });
 }
@@ -98,12 +97,11 @@ void dx12_descriptor_heap::free_persistent(dx12_descriptor_alloc alloc)
 
 dx12_descriptor_alloc dx12_descriptor_heap::allocate_transient(int count)
 {
-    // Why a ring here and not a per-epoch bump-reset like transient *buffers*: these descriptors are
-    // written by the CPU (create_binding_group) and read by the GPU during the epoch, so a slot cannot be
-    // reused until the epoch that wrote it retires — resetting to 0 each epoch would let a new epoch's CPU
-    // write stomp a descriptor a still-in-flight older epoch reads. Transient buffers dodge this because
-    // their contents are written on the GPU timeline (FIFO-safe on the single queue), so they can bump-reset
-    // and alias across epochs; descriptors cannot. The ring's checkpoints + freed_pos enforce exactly this.
+    // Why a ring here and not a per-epoch bump-reset like transient *buffers*.
+    // These descriptors are written by the CPU (create_binding_group) and read by the GPU during the epoch, so a slot cannot be reused until the epoch that wrote it retires.
+    // Resetting to 0 each epoch would let a new epoch's CPU write stomp a descriptor a still-in-flight older epoch reads.
+    // Transient buffers dodge this because their contents are written on the GPU timeline, FIFO-safe on the single queue, so they can bump-reset and alias across epochs.
+    // The ring's checkpoints and freed_pos enforce exactly this.
     CC_ASSERT(count > 0, "transient descriptor allocation must be positive");
     CC_ASSERT(count <= transient_capacity, "a single binding group exceeds the transient descriptor region");
 
@@ -129,8 +127,8 @@ dx12_descriptor_alloc dx12_descriptor_heap::allocate_transient(int count)
         if (slot.has_value())
             return {slot.value(), count};
 
-        // Ring full: retire the oldest in-flight epoch to advance the watermark. If nothing is in
-        // flight, this epoch's transient groups exceed the region — a hard budget error.
+        // Ring full: retire the oldest in-flight epoch to advance the watermark.
+        // If nothing is in flight, this epoch's transient groups exceed the region — a hard budget error.
         bool const any_in_flight = _ctx->_epoch_state.lock([](dx12_epoch_state& s) { return !s.in_flight.empty(); });
         CC_ASSERT(any_in_flight, "transient binding groups in one epoch exceed the transient descriptor region");
         _ctx->wait_for_next_inflight_epoch(); // retires → on_epochs_completed advances freed_pos

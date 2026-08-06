@@ -10,21 +10,15 @@
 // Hardware performance counters, miniperf-style.
 //
 // measure_hw_counters(body) invokes `body` once with the requested counters running, and returns the deltas.
-// The exception is hw_measure_config::measure_all, which re-runs `body` once per counter subset (see below).
+// hw_measure_config::measure_all is the exception: it re-runs `body` once per counter subset.
 // For repetition within a single measurement, loop inside `body` yourself — nexus does not loop for you.
-// Best-effort and never fails as a whole: it always yields at least elapsed time (and, on x86, a cycle count).
-// A counter the machine cannot read this run comes back with `valid == false` rather than erroring.
 //
-// Full PMU counters (instructions/branches/caches) need hardware and OS support that is not always present:
-//   - Linux: gated by /proc/sys/kernel/perf_event_paranoid; blocked inside many sandboxes/containers.
-//   - Windows: read via a real-time ETW context-switch session, which needs a one-time non-admin grant (below).
-//   - macOS/ARM64: unsupported for now (baseline only).
-// The Windows grant: run tools/setup-pmu-access.ps1 once (elevated) for Performance Log Users + SeSystemProfilePrivilege + the ETW session-GUID ACLs, then sign out and back in.
-// Without any access only the baseline is produced, and nexus prints a single warning once.
-// Query available_hw_counters() to see what THIS machine reports as measurable right now.
+// Best-effort and never fails as a whole: the result always carries elapsed time, and on x86 a reference-cycle count.
+// A counter the machine cannot read this run comes back with `valid == false` rather than erroring, so gate on validity and never on a machine assumption.
+// available_hw_counters() is the runtime source of truth for what THIS machine can measure right now.
+// NX_BENCH_HAS_HW_COUNTERS (1/0) only says a real PMU backend was compiled in, which is the weaker claim.
 //
-// NX_BENCH_HAS_HW_COUNTERS (1/0) says whether a real PMU backend was compiled in — a coarse compile-time hint, not a runtime capability.
-// Always trust available_hw_counters() for the latter.
+// docs/guides/profiling.md has the per-platform availability rules and the one-time non-admin grant Windows needs.
 
 namespace nx::bench
 {
@@ -71,7 +65,10 @@ void print_hw_counters();
 /// Options for measure_hw_counters().
 struct hw_measure_config
 {
-    /// Which counters to measure. Absent (nullopt) means the default set (default_hw_counter_set()).
+    /// Which counters to measure; absent (nullopt) means default_hw_counter_set().
+    /// Order matters when the requested set exceeds the hardware's simultaneous-counter budget, but how is per-backend.
+    /// Windows keeps the earliest-requested counters and drops the rest; Linux multiplexes the group and time-scales the values.
+    /// Set measure_all rather than relying on either.
     cc::optional<cc::vector<hw_counter>> counters;
 
     /// Measure EVERY requested counter, even when they exceed the hardware's simultaneous-counter budget.

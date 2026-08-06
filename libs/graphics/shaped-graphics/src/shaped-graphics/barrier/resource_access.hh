@@ -2,23 +2,24 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// Backend-neutral vocabulary for resource access tracking: how a GPU operation touches a resource
-/// (`access_flags`), in which pipeline stages (`pipeline_stage_flags`), and — for textures — the memory
-/// layout it needs (`texture_layout`). Deliberately not any single backend's spelling; each value's
-/// trailing comment gives its D3D12 and Vulkan mapping.
+/// Backend-neutral vocabulary for resource access tracking.
+/// How a GPU operation touches a resource (`access_flags`), in which pipeline stages (`pipeline_stage_flags`), and — for textures — the memory layout it needs (`texture_layout`).
+/// Deliberately not any single backend's spelling: each value's trailing comment gives its D3D12 and Vulkan mapping.
 ///
-/// These are shared, opt-in building blocks: a backend that emits explicit barriers tracks state in
-/// terms of them (see resource_access_state.hh); a backend that relies on driver-managed barriers may
-/// ignore them entirely. Buffers only ever use the `general` layout — layouts matter for textures.
+/// These are shared, opt-in building blocks.
+/// A backend that emits explicit barriers tracks state in terms of them (see resource_access_state.hh); one that relies on driver-managed barriers may ignore them entirely.
+/// Buffers only ever use the `general` layout — layouts matter for textures.
+/// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
 namespace sg
 {
-/// What a GPU operation does to a resource. Bit flags — combine with `|`, test with `has_all` / `has_any`.
+/// What a GPU operation does to a resource.
+/// Bit flags — combine with `|`, test with `has_all` / `has_any`.
 /// Migrates to `cc::flags` once that clean-core type lands (same status as `buffer_usage`).
 ///
-/// Read vs write is explicit in the suffix. `is_unordered_write` marks the accesses that create a hazard
-/// needing a barrier (shader/transfer/accel writes); color/depth *target* writes are ROP-ordered by the
-/// hardware and are not unordered.
+/// Read vs write is explicit in the suffix.
+/// `is_unordered_write` marks the accesses that create a hazard needing a barrier — shader, transfer and accel writes.
+/// Color/depth *target* writes are ROP-ordered by the hardware, and are not unordered.
 enum class access_flags : u32
 {
     none = 0,
@@ -31,7 +32,8 @@ enum class access_flags : u32
     copy_write = 1u << 6,    // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
     indirect_read = 1u << 7, // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
 
-    // Designed-in for later resource families (textures / render targets / raytracing); unused for buffers.
+    // Texture / render-target / raytracing families.
+    // A buffer only ever uses the accel_* pair, through cmd.raytracing.
     color_write = 1u << 8,  // render-target write:     DX12 RENDER_TARGET   / Vk COLOR_ATTACHMENT_WRITE
     depth_read = 1u << 9,   // depth/stencil test:      DX12 DEPTH_STENCIL_READ  / Vk DEPTH_STENCIL_ATTACHMENT_READ
     depth_write = 1u << 10, // depth/stencil write:    DX12 DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_WRITE
@@ -39,9 +41,9 @@ enum class access_flags : u32
     accel_write = 1u << 12, // AS build:               DX12 / Vk ACCELERATION_STRUCTURE_WRITE
 };
 
-/// Pipeline stages that may perform an access. Bit flags. Coarse on purpose (tessellation/geometry fold
-/// into `vertex`, early/late depth into `depth_stencil_target`), mirroring how DX12 `BARRIER_SYNC` and
-/// Vulkan `PIPELINE_STAGE_2` are typically consumed.
+/// Pipeline stages that may perform an access — bit flags, combined with `|`.
+/// Coarse on purpose — tessellation/geometry fold into `vertex`, early/late depth into `depth_stencil_target`.
+/// That mirrors how DX12 `BARRIER_SYNC` and Vulkan `PIPELINE_STAGE_2` are typically consumed.
 enum class pipeline_stage_flags : u32
 {
     none = 0,
@@ -56,9 +58,9 @@ enum class pipeline_stage_flags : u32
     accel_build = 1u << 8,          // DX12 BUILD_RAYTRACING_ACCELERATION_STRUCTURE / Vk ACCELERATION_STRUCTURE_BUILD
 };
 
-/// Memory layout a texture subresource is in. Buffers are always `general`. Maps to DX12
-/// `BARRIER_LAYOUT` / Vulkan `ImageLayout`. Used only once textures land; carried now so the state model
-/// is complete.
+/// Memory layout a texture subresource is in; buffers are always `general`.
+/// Maps to DX12 `BARRIER_LAYOUT` / Vulkan `ImageLayout`.
+/// Live for textures today — dx12 transitions render targets, shader reads and copy destinations through it.
 enum class texture_layout : u32
 {
     undefined,        // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
@@ -138,9 +140,8 @@ constexpr pipeline_stage_flags& operator|=(pipeline_stage_flags& a, pipeline_sta
     return a & ~remove;
 }
 
-/// The accesses that constitute an *unordered write* — a write the hardware does not auto-serialize, so
-/// a following access (read or write) needs an explicit barrier. Color/depth target writes are excluded:
-/// they are ROP-ordered (globally serialized) and act as ordered "freebies".
+/// The accesses that constitute an *unordered write* — one the hardware does not auto-serialize, so a following access, read or write, needs an explicit barrier.
+/// Color/depth target writes are excluded: they are ROP-ordered (globally serialized) and act as ordered freebies.
 [[nodiscard]] constexpr bool is_unordered_write(access_flags a)
 {
     return has_any(a & (access_flags::shader_write | access_flags::copy_write | access_flags::accel_write));

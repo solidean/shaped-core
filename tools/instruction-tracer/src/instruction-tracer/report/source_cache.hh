@@ -10,21 +10,21 @@ namespace itrace
 {
 /// Reads source files off disk to annotate traces, caching each file's lines.
 ///
-/// A file that cannot be read is cached as empty and never retried — a build whose sources have
-/// moved would otherwise re-stat once per instruction.
+/// A file that cannot be read is cached as empty and never retried — a build whose sources have moved would otherwise re-stat once per instruction.
 class source_cache
 {
 public:
-    /// One 1-based line, trimmed of leading indentation and trailing whitespace. Empty when the
-    /// file is unreadable or the line is out of range.
+    /// One 1-based line, trimmed of leading indentation and trailing whitespace.
+    /// Empty when the file is unreadable or the line is out of range.
     cc::string_view line(cc::string_view path, u32 line_number);
 
-    /// One 1-based line with indentation preserved. Empty when the file is unreadable or out of
-    /// range. For a source view that must show real nesting.
+    /// One 1-based line with indentation preserved, for a source view that must show real nesting.
+    /// Empty when the file is unreadable or out of range.
     /// Line endings are already normalized on read, so a CRLF file yields no trailing CR.
     cc::string_view raw_line(cc::string_view path, u32 line_number);
 
-    /// Number of lines in the file, 0 when unreadable. For clamping a context window to file bounds.
+    /// Number of lines in the file, 0 when unreadable.
+    /// For clamping a context window to file bounds.
     u32 line_count(cc::string_view path);
 
 private:

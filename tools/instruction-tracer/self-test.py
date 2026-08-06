@@ -6,17 +6,14 @@
 """End-to-end test for instruction-tracer: trace the fixture and check what came back.
 
 The nexus suite (instruction-tracer-test) covers the pure parts — parsing, decoding, formatting.
-None of it touches the part that can actually break in the field: launching a process under the
-debug API, landing an int3 on a symbol, single-stepping it, and reading the PDB back. That needs a
-real debuggee, so it lives here rather than in the suite.
+None of it touches the part that can actually break in the field: launching a process under the debug API, landing an int3 on a symbol, single-stepping it, and reading the PDB back.
+That needs a real debuggee, so it lives here rather than in the suite.
 
-Kept separate from `dev.py test` on purpose: this is Windows-x64-only and needs PDBs, so it is not
-something the cross-platform suite can sweep.
+Kept separate from `dev.py test` on purpose: this is Windows-x64-only and needs PDBs, which the cross-platform suite cannot sweep.
 
-The assertions are built to be optimizer-independent. They never pin a particular codegen shape —
-only things the language and the fixture's noinline/volatile guarantee (the call happens, the frame
-exists, the function returns), plus one relation *between* runs that no optimizer can break: three
-traces of the same function must retire the same addresses.
+The assertions are built to be optimizer-independent.
+They never pin a particular codegen shape — only what the language and the fixture's noinline/volatile guarantee: the call happens, the frame exists, the function returns.
+On top of that sits one relation *between* runs that no optimizer can break: three traces of the same function must retire the same addresses.
 
     uv run tools/instruction-tracer/self-test.py [--preset <name>] [-v]
 """
@@ -142,7 +139,7 @@ class Tracer:
         return result.returncode, result.stdout, result.stderr
 
     def traces(self, *args: str) -> list[Trace]:
-        """Trace, requiring success. Returns the parsed trace blocks."""
+        """Trace, requiring success; returns the parsed trace blocks."""
         code, out, err = self(*args)
         if code != 0:
             raise Failure(f"tracer exited {code} for {' '.join(args)}\n{out}\n{err}")
@@ -150,7 +147,8 @@ class Tracer:
 
 
 # --- the invariants ----------------------------------------------------------------------------
-# Each takes the tracer and raises Failure. Keep them independent of any particular codegen.
+# Each takes the tracer and raises Failure.
+# Keep them independent of any particular codegen.
 
 def check_traces_one_invocation(t: Tracer) -> None:
     """--skip 100 lands on hit 101 of 1000, and --traces 1 records exactly one."""
@@ -189,9 +187,11 @@ def check_minimum_work(t: Tracer) -> None:
 
 
 def check_traces_are_reproducible(t: Tracer) -> None:
-    """The strongest invariant here: three traces of the same branch-free function must retire the
-    same addresses. It asserts a relation *between* runs, so no codegen choice can invalidate it —
-    only the tracer being wrong (a missed step, a stale breakpoint, a bad rearm) can."""
+    """The strongest invariant here: three traces of the same branch-free function must retire the same addresses.
+
+    It asserts a relation *between* runs, so no codegen choice can invalidate it.
+    Only the tracer being wrong can — a missed step, a stale breakpoint, a bad rearm.
+    """
     traces = t.traces("--symbol", SYMBOL, "--skip", "100", "--traces", "3")
     if len(traces) != 3:
         raise Failure(f"expected 3 traces, got {len(traces)}")
@@ -332,8 +332,11 @@ def check_memory_frame_region_is_opt_in(t: Tracer) -> None:
 
 
 def check_html_export_writes_a_self_contained_file(t: Tracer) -> None:
-    """--html writes one self-contained page. It forces a full capture, so the memory data (the
-    touched global) must be embedded, and without --sections it replaces stdout with a summary."""
+    """--html writes one self-contained page.
+
+    It forces a full capture, so the memory data (the touched global) must be embedded.
+    Without --sections it replaces stdout with a summary.
+    """
     tmp = Path(tempfile.gettempdir()) / "itrace_self_test_export.html"
     tmp.unlink(missing_ok=True)
     try:
@@ -395,7 +398,7 @@ def check_html_embeds_the_mca_object(t: Tracer) -> None:
 
 
 def check_sections_combine_in_one_run(t: Tracer) -> None:
-    """The point of --sections: several views, one capture. All must appear together."""
+    """The point of --sections: several views from one capture, all appearing together."""
     code, out, err = t("--symbol", MEMORY_SYMBOL, "--skip", "100",
                        "--sections", "trace,memory,cachelines,memory-stats")
     if code != 0:

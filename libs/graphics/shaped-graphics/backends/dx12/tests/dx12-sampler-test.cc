@@ -9,9 +9,9 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/sampler.hh>
 
-// dx12 samplers: the sampler -> D3D12 translation (pure) and, on WARP, that a root signature
-// with a static + a dynamic sampler and a binding group with a dynamic sampler are accepted by the debug
-// layer. No sampling shader is dispatched — this covers the descriptor/root-signature wiring only.
+// dx12 samplers: the sampler -> D3D12 translation, which is pure.
+// Plus, on WARP, that a root signature with a static + a dynamic sampler, and a binding group with a dynamic sampler, are accepted by the debug layer.
+// No sampling shader is dispatched, so this covers the descriptor / root-signature wiring only.
 
 namespace
 {

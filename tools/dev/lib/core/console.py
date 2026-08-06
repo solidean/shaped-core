@@ -1,12 +1,8 @@
-"""Terminal color support: a single global enable flag plus style helpers.
+"""Terminal color support: one global enable flag plus style helpers.
 
-dev.py and the helper modules print plain text by default; wrapping a message in
-one of the style helpers here colors it only when color is enabled, and returns
-it unchanged otherwise — so call sites read the same in either mode.
-
-`configure` resolves the mode once at startup (from --plain/--colored or, in auto
-mode, from the terminal and the NO_COLOR/FORCE_COLOR conventions); every later
-helper reads that one decision. Zero dependencies: just ANSI SGR escapes.
+A message wrapped in a style helper is colored only when color is enabled, and comes back unchanged otherwise, so call sites read the same in either mode.
+`configure` resolves the mode once at startup and every later helper reads that one decision.
+Zero dependencies: just ANSI SGR escapes.
 """
 
 from __future__ import annotations
@@ -25,15 +21,11 @@ _enabled = False
 
 
 def configure(mode: str = "auto") -> None:
-    """Set whether style helpers emit ANSI codes. `mode` is one of:
+    """Set whether style helpers emit ANSI codes.
 
-    - "colored": always on; "plain": always off — the explicit --colored/--plain
-      flags, which override everything.
-    - "auto": NO_COLOR (any value) forces off and wins over FORCE_COLOR (the
-      no-color.org convention); FORCE_COLOR forces on even when piped; otherwise
-      on only when both stdout and stderr are TTYs. Requiring both means piping
-      either stream (the agent / `| cat` case) yields plain output and keeps ANSI
-      out of redirected stdout data.
+    "colored" and "plain" are the explicit --colored / --plain flags and override everything.
+    In "auto", NO_COLOR (any value) forces off and wins over FORCE_COLOR, per the no-color.org convention; FORCE_COLOR then forces on even when piped.
+    Otherwise color is on only when stdout and stderr are *both* TTYs, so piping either one — the agent or `| cat` case — keeps ANSI out of redirected data.
     """
     global _enabled
     if mode == "colored":

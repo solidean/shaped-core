@@ -6,18 +6,13 @@ A local godbolt over the object code the current preset produced:
     assembly show <symbol>      disassemble one function (Intel syntax, labeled branches)
     assembly trace <symbol>     record what a function ACTUALLY executed at run time
 
-search/show answer the static question — what the code might do. Objects, not the linked
-binary, are the source of truth there: a release .exe is stripped of its symbol table, while
-every .obj keeps a full one and holds the real inlined codegen of a function. See
-tools/dev/lib/toolchain/disasm.py for the rationale and docs/guides/disassembly.md.
+search/show answer the static question, and read objects rather than the linked binary — tools/dev/lib/toolchain/disasm.py says why.
+trace answers the dynamic one, driving tools/instruction-tracer (Windows x64 only), whose readme.md is the flag reference.
+docs/guides/disassembly.md is the workflow around all three.
 
-trace answers the dynamic one — which branch was taken, where an indirect call landed, how many
-instructions an invocation really retired. It drives tools/instruction-tracer (Windows x64 only);
-see that tool's readme.md.
-
-None of it is tied to this repo. A preset is only the convenient default: --build-dir/--objects
-scan any build tree (search/show) and --exe traces any executable, both bypassing preset
-resolution and CMake discovery entirely. Paths the user types are relative to their CWD.
+Only `search` and `show` are untied from this repo: --build-dir/--objects scan any build tree and skip preset resolution entirely.
+`trace` always resolves a preset and builds the tracer from it, and --exe only changes which binary gets traced.
+Paths the user types are relative to their CWD.
 """
 
 from __future__ import annotations
@@ -45,8 +40,8 @@ TRACER_TARGET = "instruction-tracer"
 def _external_scope(p: argparse.ArgumentParser) -> None:
     """The flags that point search/show at a build tree outside this repo.
 
-    Either one switches off preset resolution entirely — no CMakePresets.json, no CMake
-    discovery, no configure — so the command works on any project's object files.
+    Either one switches off the preset *build tree* — nothing is configured, built, or scanned outside the named roots.
+    A preset is still resolved best-effort, purely to locate the LLVM tools (see `_scan`).
     """
     p.add_argument("--build-dir", metavar="PATH",
                    help="Scan this build tree instead of a preset's (any project; skips preset resolution)")
@@ -85,7 +80,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
         help="Record the instructions a function actually retired at run time (Windows x64)",
         description="Run --target under the debugger, break on a symbol, and print what one "
                     "invocation actually executed. Everything after `--` is passed to the traced "
-                    "binary (e.g. a nexus test-name filter).",
+                    "binary (e.g. a nexus test-name filter). A flag left unset takes the tracer's "
+                    "own default; tools/instruction-tracer/readme.md lists them, and how these "
+                    "flags differ from its own.",
     )
     a.preset(t)
     # Exactly one: a target of this repo (built for you), or any executable on disk.
@@ -98,43 +95,41 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Working directory for the traced binary (default: its own directory for "
                         "--exe, the repo root for --target)")
 
-    # Exactly one, mirroring the tracer. `--spec` rather than `--target` because --target already
-    # means a build target across this command.
+    # Exactly one, mirroring the tracer.
+    # Spelled `--spec` rather than `--target`, because --target already means a build target across this command.
     where = t.add_mutually_exclusive_group(required=True)
     where.add_argument("--symbol", help="Break on a symbol; a unique substring is enough")
     where.add_argument("--address", help="Break on an absolute runtime address, e.g. 0x7ff611203410")
     where.add_argument("--spec", help="Target spec: foo::bar | 0x7ff6... | mod.exe!foo::bar | mod.exe+0x3410")
 
-    t.add_argument("--skip", type=int, metavar="N", help="Ignore the first N entry hits (default: 0)")
-    t.add_argument("--traces", type=int, metavar="N", help="Record N invocations (default: 1)")
-    t.add_argument("--instructions", type=int, metavar="N",
-                   help="Max retired instructions per trace (default: 100)")
+    t.add_argument("--skip", type=int, metavar="N", help="Ignore the first N entry hits")
+    t.add_argument("--traces", type=int, metavar="N", help="Record N invocations")
+    t.add_argument("--instructions", type=int, metavar="N", help="Max retired instructions per trace")
 
     t.add_argument("--sections", metavar="LIST",
                    help="Comma-separated output sections, all from one capture: trace, stats, memory, "
-                        "cachelines, memory-stats, timing (default: trace). Any non-trace section raises "
-                        "the --instructions default to 100000. timing needs llvm-mca (resolved automatically)")
+                        "cachelines, memory-stats, timing")
     t.add_argument("--memory-regions", metavar="LIST",
                    help="Comma-separated address regions the memory sections show: heap, frame, stack, "
-                        "instructions (default: heap,stack)")
+                        "instructions")
     t.add_argument("--html", metavar="PATH",
-                   help="Write a self-contained HTML report to PATH (forces a full capture). Without "
-                        "--sections it replaces stdout with a one-line summary")
+                   help="Write a self-contained HTML report to PATH; without --sections this replaces "
+                        "stdout with a one-line summary")
     t.add_argument("--mca-cpu", metavar="NAME",
-                   help="micro-arch llvm-mca models for the timing views (default: host via -mcpu=native)")
+                   help="The micro-arch that llvm-mca models for the timing views")
 
-    # BooleanOptionalAction gives each its --no- form; default None means "don't pass it, let the
-    # tracer's own default stand" — so the defaults live in one place, not two.
+    # BooleanOptionalAction gives each its --no- form.
+    # default=None means the flag is not passed at all, so the tracer's own default stands and this file never restates it.
     for flag, help_text in (
-        ("until-return", "Stop once the entry frame returns (default: on)"),
-        ("stop-at-syscall", "Stop before executing a syscall (default: on)"),
-        ("stack", "Print the stack at entry (default: on)"),
-        ("source", "Annotate with source file/line and text (default: on)"),
-        ("register-diffs", "Show the registers each instruction changed (default: off)"),
-        ("terminate-after-traces", "Kill the debuggee once done (default: on)"),
-        ("stats", "Shortcut for --sections stats (default: off)"),
+        ("until-return", "Stop once the entry frame returns"),
+        ("stop-at-syscall", "Stop before executing a syscall"),
+        ("stack", "Print the stack at entry"),
+        ("source", "Annotate with source file/line and text"),
+        ("register-diffs", "Show the registers each instruction changed"),
+        ("terminate-after-traces", "Kill the debuggee once done"),
+        ("stats", "Shortcut for --sections stats"),
         ("memory-instruction-addresses",
-         "Annotate the memory and cacheline views with the accessing instruction (default: off)"),
+         "Annotate the memory and cacheline views with the accessing instruction"),
     ):
         t.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None, help=help_text)
 
@@ -196,9 +191,8 @@ def _display(ctx: Context, p: Path) -> str:
 def _scan(args: argparse.Namespace, ctx: Context):
     """Resolve the scan scope, enumerate symbols across its objects, and return the pieces.
 
-    Two modes. A preset names one of this repo's build trees; --build-dir / --objects name any
-    tree at all, and then no preset is resolved (`preset` comes back None) — that is what keeps
-    the command usable on a project that has no CMakePresets.json, or no CMake.
+    Two modes: a preset names one of this repo's build trees, while --build-dir / --objects name any tree at all.
+    In the second no preset is resolved and `preset` comes back None, which is what keeps the command usable on a project with no CMakePresets.json, or no CMake.
     """
     roots = _external_roots(args)
     preset = None
@@ -210,9 +204,9 @@ def _scan(args: argparse.Namespace, ctx: Context):
         for root in roots:
             if not root.exists():
                 ctx.die(f"no such path: {root}")
-        # The foreign tree first (a CMake build there pins the matching LLVM), then ours as a
-        # fallback: an MSVC or non-CMake tree names no compiler, and LLVM is rarely on PATH.
-        # Best-effort, so a project without our presets still works — env and PATH come first anyway.
+        # The foreign tree first, since a CMake build there pins the matching LLVM.
+        # Ours is the fallback: an MSVC or non-CMake tree names no compiler, and LLVM is rarely on PATH.
+        # Best-effort, so a project without our presets still works.
         tool_dirs = [r for r in roots if r.is_dir()]
         try:
             tool_dirs.append(ctx.resolve_presets(None)[0].build_dir)
@@ -366,8 +360,7 @@ def _show(args: argparse.Namespace, ctx: Context) -> None:
     else:
         print(raw.rstrip("\n"))
     if not args.source:
-        print(console.dim("(cross-object calls are unresolved placeholders in object code; "
-                          "pass --source on a relwithdebinfo preset to interleave source)"))
+        print(console.dim("(pass --source on a relwithdebinfo preset to interleave source lines)"))
 
 
 # --- Intel disassembly prettifier (labels + light color) ----------------------
@@ -485,8 +478,10 @@ def _artifact_of(ctx: Context, preset, name: str) -> Path | None:
 
 
 def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path, mca_tool: str | None) -> list[str]:
-    """Translate our flags into the tracer's CLI. Flags left at None are simply not passed, so the
-    tracer's own defaults apply and we never restate them."""
+    """Translate our flags into the tracer's CLI.
+
+    A flag left at None is not passed at all, so the tracer's own default applies and this file never restates it.
+    """
     argv = [str(tracer), "--exe", str(exe)]
 
     if args.symbol:
@@ -502,13 +497,13 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path, mca_tool: st
         if value is not None:
             argv += [flag, str(value)]
 
-    # The tracer runs with a cwd of our choosing (the repo root, or the traced exe's directory), so
-    # resolve a relative --html against the user's CWD — where they typed it — and pass it absolute.
+    # The tracer runs with a cwd of our choosing — the repo root, or the traced exe's directory.
+    # So a relative --html is resolved against the user's CWD, where they typed it, and passed on absolute.
     if args.html is not None:
         argv += ["--html", str(_user_path(args.html))]
 
-    # Pass llvm-mca whenever it resolved; the tracer only invokes it for a timing section or --html,
-    # so this gives HTML exports timing out of the box without changing a plain trace.
+    # Pass llvm-mca whenever it resolved.
+    # The tracer only invokes it for a timing section or --html, so this gives HTML exports timing out of the box without changing a plain trace.
     if mca_tool is not None:
         argv += ["--mca", str(mca_tool)]
     if args.mca_cpu is not None:
@@ -527,8 +522,7 @@ def _tracer_argv(args: argparse.Namespace, tracer: Path, exe: Path, mca_tool: st
         if value is not None:
             argv.append(f"--{flag}" if value else f"--no-{flag}")
 
-    # dev.py already resolved the color question (--colored/--plain/auto); make its answer
-    # authoritative rather than letting the child re-detect against an inherited terminal.
+    # dev.py already resolved the color question, so pass its answer down rather than letting the child re-detect against an inherited terminal.
     argv.append("--colored" if console.enabled() else "--plain")
 
     if args.debuggee_args:
@@ -543,8 +537,8 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
 
     preset = ctx.resolve_presets(args.preset)[0]
 
-    # The tracer itself always comes from this repo — it is our tool, and the preset only ever
-    # decides which build of *it* runs. The traced binary is a separate question below.
+    # The tracer itself always comes from this repo, and the preset only decides which build of *it* runs.
+    # Which binary gets traced is a separate question, below.
     external = args.exe is not None
     if external:  # validate before spending a build on the tracer
         exe = _user_path(args.exe)
@@ -565,8 +559,8 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
                 f"(uv run extern/zydis/fetch-zydis.py)")
 
     if external:
-        # Symbols and source come from the PDB beside the exe; without one the trace degrades to
-        # raw addresses. We can check that directly here, where guessing from a preset name can't.
+        # Symbols and source come from the PDB beside the exe, and without one the trace degrades to raw addresses.
+        # Checkable directly for an external exe, where guessing from a preset name is not.
         if not exe.with_suffix(".pdb").is_file():
             print(console.yellow(f"note: no {exe.stem}.pdb beside {exe.name}; the trace will show raw "
                                  f"addresses without symbols or source"), file=sys.stderr)
@@ -579,11 +573,12 @@ def _trace(args: argparse.Namespace, ctx: Context) -> None:
             print(console.yellow(f"note: {preset.name} has no PDB; the trace will show raw addresses "
                                  f"without symbols or source. Use a relwithdebinfo preset."), file=sys.stderr)
 
-    # An external app resolves its DLLs and data relative to itself, so its own directory is the
-    # only default that reliably starts it; our own targets keep running from the repo root.
+    # An external app resolves its DLLs and data relative to itself, so its own directory is the only default that reliably starts it.
+    # Our own targets keep running from the repo root.
     cwd = _user_path(args.cwd) if args.cwd else (exe.parent if external else ctx.root)
 
-    # llvm-mca powers the timing views. Resolve it best-effort; the tracer soft-degrades without it.
+    # llvm-mca powers the timing views.
+    # Resolved best-effort, since the tracer soft-degrades without it.
     wants_timing = args.html is not None or (args.sections is not None and "timing" in args.sections)
     try:
         mca_tool: str | None = disasm.find_tool("llvm-mca", preset.build_dir)

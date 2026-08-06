@@ -10,12 +10,12 @@
 
 namespace ssc::dxc::impl
 {
-/// DXC argv is a list of wide strings. We hand the pointers to Compile() at the call site (after the
-/// storage is stationary) to avoid dangling on move.
+/// DXC argv is a list of wide strings.
+/// We hand the pointers to Compile() at the call site, after the storage is stationary, to avoid dangling on move.
 using arg_storage = std::vector<std::wstring>;
 
-/// Full compile argv: `-E <entry> -T <prefix>_<model>` + options. Fails if the stage has no profile
-/// prefix yet.
+/// Full compile argv: `-E <entry> -T <prefix>_<model>` + options.
+/// Fails if the stage has no profile prefix yet.
 [[nodiscard]] cc::result<arg_storage> build_compile_args(shader_description const& desc, compile_options const& opts);
 
 /// Preprocess argv: `-P -T <prefix>_<model>` + defines/extra (no codegen). Fails as above.

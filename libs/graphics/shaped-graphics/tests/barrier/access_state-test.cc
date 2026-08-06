@@ -2,9 +2,9 @@
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
 
-// Pure, backend-free unit tests for the three-timeline access-state machine. These pin the freebie /
-// hazard logic (what makes barriers minimal) without needing a GPU. Buffers only, so layout stays
-// `general` throughout.
+// Pure, backend-free unit tests for the three-timeline access-state machine.
+// These pin the freebie / hazard logic — what makes barriers minimal — without needing a GPU.
+// Buffers only, so layout stays `general` throughout.
 
 using sg::access_flags;
 using sg::pipeline_stage_flags;

@@ -19,10 +19,9 @@ constexpr cc::string_view k_rationale
 //
 // A reflowed block is not decidable from text — "did this line break because the point ended, or because a
 // column was reached?" is a question about intent.
-// One shape, though, gives it away almost always: a
-// sentence that ENDS in the middle of a line.
-// Two short sentences on one line are fine when the line ends
-// with the second one; a long sentence that had to wrap is fine because it carries no interior full stop.
+// One shape, though, gives it away almost always: a sentence that ends in the middle of a line.
+// Two short sentences on one line are fine when the line ends with the second one.
+// A long sentence that had to wrap is fine too, because it carries no interior full stop.
 // A `.` mid-line with more text behind it means two points were packed onto one line.
 //
 // Hence the whole detector: `<word>. <more text>`. Everything below is the exclusions that keep it usable,
@@ -42,8 +41,7 @@ bool is_alnum(char c)
 }
 
 /// Abbreviations whose trailing dot is not a sentence end.
-/// One- and two-letter words are already excluded
-/// by the length rule, so `e.g.` and `i.e.` are not listed here.
+/// One- and two-letter words are already excluded by the length rule, so `e.g.` and `i.e.` are not listed here.
 bool is_abbreviation(cc::string_view word)
 {
     // Earned one at a time from a real false positive on this tree — `incl.` alone accounted for 13.

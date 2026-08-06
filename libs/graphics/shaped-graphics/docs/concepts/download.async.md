@@ -128,58 +128,50 @@ Not invariants — v1 shortcuts:
 ## dx12 implementation
 
 - [`dx12_download_async.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.hh)
-  / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) — the copy actor,
-  the three-window packing, the in-flight-window drain, and the two fences. The transfer queue is the
-  system's **own** `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`_copy_queue`, separate from the
-  upload system's — see "Why upload and download own separate transfer queues"); the staging buffer is a
-  persistently-mapped `D3D12_HEAP_TYPE_READBACK` committed buffer of `window_bytes * 3`; the read is
-  `ID3D12GraphicsCommandList::CopyBufferRegion`. The **staging fence** is the system's own `_window_fence`;
-  the **completion fence** is the system's own `_completion_fence` (download-only).
-- The **copy queue + download completion fence** are created in the system's `initialize` and torn down
-  (actor drained, copy queue idled) in the system's `shutdown`, called from
-  [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`. The
-  system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per
-  window slot, cycled on the window fence — deliberately **not** the shared epoch-gated pool.
-- The **forward wait vs a pending async upload** is `_copy_queue->Wait(_upload_async._completion_fence, ...)`,
-  hoisted per window in `submit_window` on the max `_pending_async_upload_value` over its reads. The
-  acyclicity guard extends to it: the actor closes the open window before staging a read whose pending-upload
-  value is still unsatisfied once the window has finished a read. This replaces an earlier CPU block (which,
-  on the old shared queue, could deadlock — see the fuzz op in `tests/transfer/transfer-fuzz-test.cc`).
-- **Async texture readbacks assume the texture is already in the COMMON layout** — the copy queue runs no
-  layout barriers, the same as the async upload. A freshly-created texture qualifies; one left in a
-  shader/attachment layout by a direct-queue list must be transitioned back or read inline instead.
-- The per-resource stamps live on `dx12_buffer`: `_pending_async_download_value` (reverse, a
-  `dx12_download_fence_value` distinct from the epoch / submission / async-upload fences) and the shared
-  `_last_used_submission_token` (forward). `track_buffer_access` in
-  [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds
-  the reverse value into `_required_download_wait` **only for write accesses** (`sg::is_unordered_write`).
-  The reverse wait is `_queue->Wait(_download_async._completion_fence, ...)` at command-list submit; the
-  forward wait is
-  `_copy_queue->Wait(_submission_fence, ...)` before a window's reads in
-  [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc),
-  which also enforces the window-level acyclicity rule (close the open window before staging a job whose
-  forward token is still pending once the window has already finished a read).
-- The readback recorder is
-  [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh)'s
-  `dx12_buffer_download` (shared with inline download; made **resumable** so a read larger than a window
-  chunks across calls), and the waiter is `dx12_async_download_waiter` — a `bytes_waiter` that simply blocks
-  on its ready flag (no "submitted" gate, unlike the inline path — an async download is always handed to the
-  actor).
+  / [`.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc)
+  — the copy actor, the three-window packing, the in-flight-window drain, and the two fences.
+  The transfer queue is the system's **own** `D3D12_COMMAND_LIST_TYPE_COPY` `ID3D12CommandQueue` (`_copy_queue`).
+  It is separate from the upload system's — see "Why upload and download own separate transfer queues".
+  The staging buffer is a persistently-mapped `D3D12_HEAP_TYPE_READBACK` committed buffer of `window_bytes * 3`, and the read is `ID3D12GraphicsCommandList::CopyBufferRegion`.
+  The **staging fence** is the system's own `_window_fence`; the **completion fence** is its own `_completion_fence`, download-only.
+- The **copy queue + download completion fence** are created in the system's `initialize`.
+  They are torn down — actor drained, copy queue idled — in the system's `shutdown`.
+  That is called from [`dx12_context.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.cc) `shutdown`.
+  The system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per window slot, cycled on the window fence.
+  Deliberately **not** the shared epoch-gated pool.
+- The **forward wait vs a pending async upload** is `_copy_queue->Wait(_upload_async._completion_fence, ...)`.
+  It is hoisted per window in `submit_window`, on the max `_pending_async_upload_value` over that window's reads.
+  The acyclicity guard extends to it: once the open window has finished a read, the actor closes it before staging a read whose pending-upload value is still unsatisfied.
+  The fuzz op in `tests/transfer/transfer-fuzz-test.cc` covers the interleaving this protects.
+- **Async texture readbacks assume the texture is already in the COMMON layout** — the copy queue runs no layout barriers, the same as the async upload.
+  A freshly-created texture qualifies.
+  One left in a shader/attachment layout by a direct-queue list must be transitioned back, or read inline instead.
+- The per-resource stamps live on `dx12_buffer`: `_pending_async_download_value` (reverse) and the shared `_last_used_submission_token` (forward).
+  The reverse one is a `dx12_download_fence_value`, distinct from the epoch / submission / async-upload fences.
+  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds the reverse value into `_required_download_wait`.
+  It does so **only for write accesses** (`sg::is_unordered_write`), since two reads never conflict.
+  The reverse wait is `_queue->Wait(_download_async._completion_fence, ...)` at command-list submit.
+  The forward wait is `_copy_queue->Wait(_submission_fence, ...)`, issued before a window's reads.
+  That path in [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) also enforces the window-level acyclicity rule.
+- The readback recorder is `dx12_buffer_download` in [`dx12_resource_download.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_resource_download.hh).
+  It is shared with inline download, and made **resumable** so a read larger than a window chunks across calls.
+  The waiter is `dx12_async_download_waiter`, a `bytes_waiter` that simply blocks on its ready flag.
+  It has no "submitted" gate, unlike the inline path, because an async download is always handed to the actor.
 - The public facade is [`download.hh`](../../src/shaped-graphics/context/download.hh), reached as `ctx.download` — see [context](context.md).
   It also carries the inline readback ring's `set_budget`.
 
 ## Backend note: vulkan needs a second-transfer-queue fallback
 
-The separate-queue design assumes async upload and async download can each hold their **own** transfer
-queue. dx12 grants this freely — `CreateCommandQueue` makes as many `COPY` queues as wanted (WARP included).
-Vulkan does **not**: queues come from **queue families fixed at device creation**, and a dedicated
-transfer family often exposes `queueCount == 1`, so two independent transfer queues are not guaranteed. A
-vulkan backend must select capability-driven with a fallback — a second queue from a transfer-capable family
-(graphics/compute queues implicitly support transfer) when available, else route one stream onto another
-queue, or fall back to a single shared queue. **A single shared transfer queue reintroduces the FIFO
-deadlock above**, so the shared-queue fallback must serialize upload/download differently (e.g. the old CPU
-block, or one actor for both) rather than run two independent actors on it. This is unimplemented — the
-vulkan backend is still a stub — but the constraint is load-bearing for its design.
+The separate-queue design assumes async upload and async download can each hold their **own** transfer queue.
+dx12 grants this freely — `CreateCommandQueue` makes as many `COPY` queues as wanted, WARP included.
+Vulkan does **not**: queues come from **queue families fixed at device creation**.
+A dedicated transfer family often exposes `queueCount == 1`, so two independent transfer queues are not guaranteed.
+A vulkan backend must therefore pick its queues capability-driven, with a fallback.
+First choice is a second queue from a transfer-capable family, since graphics and compute queues implicitly support transfer.
+Failing that, route one stream onto another queue, or fall back to a single shared queue.
+**A single shared transfer queue reintroduces the FIFO deadlock above.**
+That fallback must therefore serialize upload against download — one actor for both, say — rather than run two independent actors on it.
+The vulkan backend is still a stub, but the constraint is load-bearing for its design.
 
 ## See also
 

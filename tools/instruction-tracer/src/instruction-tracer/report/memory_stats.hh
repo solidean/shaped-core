@@ -8,21 +8,26 @@
 
 namespace itrace
 {
-/// What one symbol's code touched in memory, summed over every trace. Grouped by the function
-/// *making* the accesses (the instruction's owner), like the instruction table — so it answers
-/// "which function moves how much memory", not "which data was hit".
+/// What one symbol's code touched in memory, summed over every trace.
+/// Grouped by the function *making* the accesses (the instruction's owner), like the instruction table.
+/// So it answers "which function moves how much memory", not "which data was hit".
 struct memory_symbol_stats
 {
     cc::string symbol;
     u32 accesses = 0;
     u32 reads = 0;
     u32 writes = 0;
-    /// Distinct cachelines touched — a working-set proxy. An access spanning two lines counts both.
+    /// Distinct cachelines touched — a working-set proxy.
+    /// An access spanning two lines counts both.
     u32 cachelines = 0;
     /// Bytes moved (traffic): the sum of access sizes, so a location hit twice counts twice.
     u64 bytes = 0;
 };
 
+/// Per-symbol rows plus a totals row.
+///
+/// `total.cachelines` is the distinct-line union across every symbol, not the sum of the rows' `cachelines` — two functions touching one line count it once here and once each above.
+/// The other totals are plain column sums.
 struct memory_stats_summary
 {
     cc::vector<memory_symbol_stats> rows; // sorted by accesses descending, then symbol

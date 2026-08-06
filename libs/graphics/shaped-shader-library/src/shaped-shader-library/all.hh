@@ -1,7 +1,7 @@
 #pragma once
 
-/// Everything shaped-shader-library exposes. Convenient for a consumer that wants the whole surface;
-/// prefer the individual headers where the dependency matters.
+/// Everything shaped-shader-library exposes.
+/// Convenient for a consumer that wants the whole surface; prefer the individual headers where the dependency matters.
 
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>

@@ -15,21 +15,21 @@
 // Buffered, seekable adapters backed by an OS file (via cc::impl::native_file). Each owns a 4 KiB inline
 // buffer; the flush callback reads/writes through it and maps seeks onto the OS file pointer.
 //
-// LIFETIME: the stream's window points into the adapter's inline buffer, so the adapter must outlive any
-// stream taken from it. An adapter may be moved BEFORE a stream is taken; once `.stream()` (or an implicit
-// conversion) has produced a live stream, the adapter is effectively pinned and must not be moved.
+// LIFETIME: the stream's window points into the adapter's inline buffer, so the adapter must outlive any stream taken from it.
+// An adapter may be moved BEFORE a stream is taken; once `.stream()` or an implicit conversion has produced a live stream, the adapter is effectively pinned and must not be moved.
 //
 // Construct via the static open()/create()/append() factories; the adapter then converts implicitly to the
 // matching stream, or hand out one explicitly with `.stream()`.
 //
-// GROWTH. Writing grows the file whenever the window maps to (or past) the end. For the write adapter the
-// differentiation is at the factory: create (truncate), open (overwrite in place), append (start at EOF).
-// The read_write adapter grows too — a write past the current end extends the file, including a fresh
-// seek-to-end + write (it keeps the read boundary and the write capacity as separate ends).
+// GROWTH.
+// Writing grows the file whenever the window maps to, or past, the end.
+// For the write adapter the differentiation is at the factory: create truncates, open overwrites in place, append starts at EOF.
+// The read_write adapter grows too — a write past the current end extends the file, including a fresh seek-to-end plus write, since it keeps the read boundary and the write capacity as separate ends.
 
 namespace cc
 {
-/// Buffered read adapter over a file. Hands out a seekable_read_stream.
+/// Buffered read adapter over a file.
+/// Hands out a seekable_read_stream.
 class file_read_stream_adapter
 {
 public:
@@ -44,8 +44,8 @@ public:
     file_read_stream_adapter& operator=(file_read_stream_adapter const&) = delete;
     ~file_read_stream_adapter() = default;
 
-    /// Hand out the read stream. Starts empty (curr == end), so the first read triggers a flush that fills
-    /// the buffer.
+    /// Hand out the read stream.
+    /// Starts empty (curr == end), so the first read triggers a flush that fills the buffer.
     [[nodiscard]] cc::seekable_read_stream stream()
     {
         return cc::seekable_read_stream(_buffer, _buffer, &impl_flush, this);
@@ -70,8 +70,8 @@ private:
     byte _buffer[k_buffer_size];
 };
 
-/// Buffered write adapter over a file. Hands out a seekable_write_stream. Unbounded: a write-flush always
-/// frees the whole buffer (curr < end) unless the disk errors.
+/// Buffered write adapter over a file, handing out a seekable_write_stream.
+/// Unbounded: a write-flush always frees the whole buffer (curr < end) unless the disk errors.
 class file_write_stream_adapter
 {
 public:
@@ -92,7 +92,8 @@ public:
     file_write_stream_adapter& operator=(file_write_stream_adapter const&) = delete;
     ~file_write_stream_adapter() = default;
 
-    /// Hand out the write stream. Starts with the whole buffer free (curr = buffer, end = buffer + size).
+    /// Hand out the write stream.
+    /// Starts with the whole buffer free (curr = buffer, end = buffer + size).
     [[nodiscard]] cc::seekable_write_stream stream()
     {
         return cc::seekable_write_stream(_buffer, _buffer + k_buffer_size, &impl_flush, this);
@@ -118,10 +119,9 @@ private:
     byte _buffer[k_buffer_size];
 };
 
-/// Buffered read+write adapter over a file. Hands out a seekable_read_write_stream: seekable reads, in-place
-/// overwrite, and growth — writing past the current end extends the file, including a fresh seek-to-end + write
-/// with nothing buffered. This works because the stream tracks the read boundary and the write capacity as two
-/// separate ends (so at EOF there is still free write space), rather than overloading a single window.
+/// Buffered read+write adapter over a file, handing out a seekable_read_write_stream: seekable reads, in-place overwrite, and growth.
+/// Writing past the current end extends the file, including a fresh seek-to-end plus write with nothing buffered.
+/// That works because the stream tracks the read boundary and the write capacity as two separate ends, so at EOF there is still free write space, rather than overloading a single window.
 class file_read_write_stream_adapter
 {
 public:
@@ -136,7 +136,8 @@ public:
     file_read_write_stream_adapter& operator=(file_read_write_stream_adapter const&) = delete;
     ~file_read_write_stream_adapter() = default;
 
-    /// Hand out the read+write stream. Starts empty (curr == end), so the first op triggers a flush.
+    /// Hand out the read+write stream.
+    /// Starts empty (curr == end), so the first op triggers a flush.
     [[nodiscard]] cc::seekable_read_write_stream stream()
     {
         return cc::seekable_read_write_stream(_buffer, _buffer, &impl_flush, this);

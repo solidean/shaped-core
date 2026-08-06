@@ -1,7 +1,7 @@
 #include <shaped-rendering/impl/input_translation.hh>
 
-// Definitions for impl/input_translation.hh. Kept in their own translation unit so the mapping can be linked into
-// a test without dragging in the window and event-pump machinery.
+// Definitions for impl/input_translation.hh.
+// Kept in their own translation unit so the mapping can be linked into a test without dragging in the window and event-pump machinery.
 
 namespace sr::impl
 {

@@ -9,9 +9,9 @@ using namespace scl;
 
 namespace
 {
-/// Owns the buffer AND its tokens: tokens borrow the buffer's text, so the buffer must outlive them.
-/// The buffer is heap-boxed (stable address) — small strings are SSO, so a plain move would relocate
-/// the bytes out from under the token views. Keep a `lexed` as a named local for the test's lifetime.
+/// Owns the buffer and its tokens: tokens borrow the buffer's text, so the buffer must outlive them.
+/// The buffer is heap-boxed for a stable address — small strings are SSO, so a plain move would relocate the bytes out from under the token views.
+/// Keep a `lexed` as a named local for the test's lifetime.
 struct lexed
 {
     cc::unique_ptr<source_buffer> buf;
@@ -105,13 +105,36 @@ TEST("shaped-linter - lexer - strings and chars")
         CHECK(t[0].kind == token_kind::string_literal);
         CHECK(t[0].text == R"("he\"llo")");
     }
+    // Each raw-string case carries trailing code on purpose.
+    // A lexer that mis-reads the delimiter swallows the rest of the file into one literal, which a case
+    // holding nothing but the literal cannot tell apart from a correct lex.
+    // Escaped strings rather than raw ones here: clang-format reflows a raw literal and would rewrite the input.
     SECTION("raw string with delimiter")
     {
-        auto const lx = lex_text(R"(R"xx(a)b)xx")");
+        auto const lx = lex_text("R\"xx(a)b)xx\"; int y;");
         auto const t = lx.sig();
-        REQUIRE(t.size() == 1);
+        REQUIRE(t.size() == 5);
         CHECK(t[0].kind == token_kind::string_literal);
-        CHECK(t[0].text == R"(R"xx(a)b)xx")");
+        CHECK(t[0].text == "R\"xx(a)b)xx\"");
+        CHECK(t[2].kind == token_kind::keyword);
+    }
+    SECTION("raw string with an empty delimiter")
+    {
+        auto const lx = lex_text("R\"(a)\"; int y;");
+        auto const t = lx.sig();
+        REQUIRE(t.size() == 5);
+        CHECK(t[0].kind == token_kind::string_literal);
+        CHECK(t[0].text == "R\"(a)\"");
+        CHECK(t[2].kind == token_kind::keyword);
+    }
+    SECTION("raw string behind a multi-char encoding prefix")
+    {
+        auto const lx = lex_text("u8R\"(a)\"; int y;");
+        auto const t = lx.sig();
+        REQUIRE(t.size() == 5);
+        CHECK(t[0].kind == token_kind::string_literal);
+        CHECK(t[0].text == "u8R\"(a)\"");
+        CHECK(t[2].kind == token_kind::keyword);
     }
     SECTION("string with suffix")
     {

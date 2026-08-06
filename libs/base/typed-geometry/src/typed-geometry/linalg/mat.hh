@@ -10,13 +10,12 @@ namespace tg
 {
 /// Column-major matrix with C columns and R rows.
 ///
-/// mat is a linear-algebra object, not a transform type (there is no mat * pos). It is stored as
-/// C column vectors (`vec<R, T> cols[C]`), so col(i) is a real reference and matrix/vector products
-/// fall out as column combinations. Element access uses the C++23 multi-argument subscript
-/// `m[col, row]`.
+/// mat is a linear-algebra object, not a transform type — there is no mat * pos.
+/// It is stored as C column vectors (`vec<R, T> cols[C]`), so col(i) is a real reference and matrix/vector products fall out as column combinations.
+/// Element access uses the C++23 multi-argument subscript `m[col, row]`, which needs parentheses inside a function-like macro.
 ///
-/// The only constructor is the default one (all entries zero); everything else is a make_ factory.
-/// In particular there is no "default is identity" — use mat::identity for that.
+/// The only constructor is the default one, giving all entries zero; everything else is a make_ factory.
+/// There is deliberately no "default is identity" — use mat::identity for that.
 ///
 ///     auto m = tg::mat3f::identity;
 ///     auto r = tg::mat3f::make_rotation_z(tg::angle_f::make_from_degree(90));
@@ -45,9 +44,11 @@ public:
 
     // special values
 public:
-    /// the zero matrix. Runtime constant, not usable in constant expressions.
+    /// the zero matrix.
+    /// Runtime constant, not usable in constant expressions.
     static mat const zero;
-    /// the identity matrix (rectangular identity if C != R). Runtime constant.
+    /// the identity matrix, rectangular identity when C != R.
+    /// Runtime constant, not usable in constant expressions.
     static mat const identity;
 
     // rotations (3x3 only; require a scalar with trigonometry)

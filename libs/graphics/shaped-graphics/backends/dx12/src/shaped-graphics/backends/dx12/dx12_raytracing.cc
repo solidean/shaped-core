@@ -1,6 +1,6 @@
-// dx12_raytracing: ray-tracing acceleration-structure builds (cmd.raytracing). Translates the backend-neutral
-// geometry / instance inputs to DXR descs, sizes the result from a prebuild query, and records the build via
-// ID3D12GraphicsCommandList4. See libs/graphics/shaped-graphics/docs/concepts/acceleration-structures.md.
+// dx12_raytracing: ray-tracing acceleration-structure builds (cmd.raytracing).
+// Translates the backend-neutral geometry / instance inputs to DXR descs, sizes the result from a prebuild query, and records the build via ID3D12GraphicsCommandList4.
+// See libs/graphics/shaped-graphics/docs/concepts/acceleration-structures.md.
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -57,8 +57,8 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
                                           "cmd.raytracing.is_supported())");
     CC_ASSERT(!geometry_descs.empty(), "build_blas needs at least one geometry");
 
-    // Query the DXR interfaces off the base device / list. Do the QueryInterface OUTSIDE the assert — its
-    // out-param is a real side effect that would be compiled out with CC_ASSERT in asserts-off builds.
+    // Query the DXR interfaces off the base device / list.
+    // Do the QueryInterface OUTSIDE the assert — its out-param is a real side effect that would be compiled out with CC_ASSERT in asserts-off builds.
     ComPtr<ID3D12Device5> device5;
     [[maybe_unused]] HRESULT const device5_hr = _ctx._device.As(&device5);
     CC_ASSERT(SUCCEEDED(device5_hr) && device5, "ID3D12Device5 unavailable (SDK/driver too old for DXR)");
@@ -86,10 +86,11 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
     auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(scratch_raw);
     CC_ASSERT(result != nullptr && scratch != nullptr, "acceleration-structure buffers are not dx12 buffers");
 
-    // Order the build, all on the accel_build stage. Only the AS *result* is an acceleration structure
-    // (accel_write); scratch is a plain UAV (shader_write / UNORDERED_ACCESS) and the geometry inputs are
-    // ordinary buffer reads (shader_read / SHADER_RESOURCE) — the AS access bits are illegal on non-AS
-    // buffers. The tracker turns a prior upload of the inputs (copy_write) into the copy->read barrier.
+    // Order the build, all on the accel_build stage.
+    // Only the AS *result* is an acceleration structure (accel_write).
+    // Scratch is a plain UAV (shader_write / UNORDERED_ACCESS), and the geometry inputs are ordinary buffer reads (shader_read / SHADER_RESOURCE).
+    // The AS access bits are illegal on non-AS buffers.
+    // The tracker turns a prior upload of the inputs (copy_write) into the copy->read barrier.
     track_buffer_access(result, sg::pipeline_stage_flags::accel_build, sg::access_flags::accel_write);
     track_buffer_access(scratch, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_write);
     for (auto const& in : input_buffers)
@@ -277,9 +278,9 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(scratch_raw);
     CC_ASSERT(result != nullptr && scratch != nullptr, "acceleration-structure buffers are not dx12 buffers");
 
-    // The top-level build writes the result (accel_write), reads the instance descs as an ordinary buffer
-    // (shader_read — it is not an acceleration structure), uses scratch as a UAV (shader_write), and reads
-    // each referenced BLAS *as an acceleration structure* (accel_read).
+    // The top-level build writes the result (accel_write) and uses scratch as a UAV (shader_write).
+    // The instance descs are an ordinary buffer read (shader_read) — they are not an acceleration structure.
+    // Each referenced BLAS is read *as* an acceleration structure (accel_read).
     track_buffer_access(result, sg::pipeline_stage_flags::accel_build, sg::access_flags::accel_write);
     track_buffer_access(scratch, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_write);
     track_buffer_access(instance_buf, sg::pipeline_stage_flags::accel_build, sg::access_flags::shader_read);

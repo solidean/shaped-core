@@ -1,13 +1,8 @@
-"""`lint` — the entry point for shaped-core's linting framework.
+"""`lint` — the front door for every linter, each of which lives under its own tool directory.
 
-Thin wiring: each linter lives under its own tool directory and this command shells out to it.
-`clang-tidy` runs the whitelist gates (tools/lint/clang-tidy.py), `shaped` runs our own parser-based rules
-(tools/shaped-linter), and `prose-apply` hands that same binary a plan of prose rewrites to apply at once.
-The clang-tidy gates are a strict whitelist that must be
-zero before a commit — distinct from the root .clang-tidy, which is the broader IDE incubator.
+`clang-tidy` runs the whitelist gates in tools/lint/, `shaped` runs our own parser-based rules in tools/shaped-linter/, and the two prose subcommands hand that same binary a plan or a path list.
 
-`check` reuses `run_clang_tidy` and `run_shaped_linter` (dirty-only) as pre-commit gates — see
-tools/dev/cmd/check.py.
+docs/guides/prose.md is the prose loop, and docs/guides/building-and-testing.md the gates.
 """
 
 from __future__ import annotations
@@ -25,7 +20,7 @@ NAME = "lint"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    p = sub.add_parser(NAME, help="Run the linters (clang-tidy gates; shaped-linter; more to come)")
+    p = sub.add_parser(NAME, help="Run the linters, apply a prose plan, or measure prose")
     lint_sub = p.add_subparsers(dest="lint_cmd", required=True)
 
     ct = lint_sub.add_parser("clang-tidy", help="Run the clang-tidy whitelist gates (must be zero to commit)")
@@ -34,12 +29,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                     help="Only lint git-dirty/untracked .cc sources (the next commit's files)")
     ct.add_argument("--fix", action="store_true", help="Let clang-tidy apply its fixes in place")
     ct.add_argument("--limit", type=int, default=None, metavar="N",
-                    help="Max diagnostic lines before switching to a grouped-by-check digest (default: 200)")
+                    help="Max diagnostic lines before switching to a grouped-by-check digest")
 
-    sl = lint_sub.add_parser("shaped", help="Run shaped-linter — our own C++ parser-based rules (tools/shaped-linter)")
+    sl = lint_sub.add_parser("shaped", help="Run shaped-linter — our own rules over code and prose (tools/shaped-linter)")
     a.preset(sl)
     sl.add_argument("--dirty-only", action="store_true",
-                    help="Only lint git-dirty/untracked .cc/.hh sources (the next commit's files)")
+                    help="Only lint the next commit's files, and for prose rules only its changed lines")
     sl.add_argument("--fix", action="store_true", help="Let shaped-linter apply its suggested fixes in place")
 
     pa = lint_sub.add_parser("prose-apply", help="Apply a prose plan — many comment/doc rewrites in one pass")
@@ -67,8 +62,7 @@ def run_clang_tidy(
 ) -> bool:
     """Run tools/lint/clang-tidy.py against a preset's compilation database; return True if clean.
 
-    Resolves the preset and ensures it is configured (so compile_commands.json exists), then shells out
-    to the standalone runner.
+    Ensures the preset is configured first, since the runner needs compile_commands.json.
     Shared by `lint clang-tidy` and the `check` lint gate.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
@@ -100,13 +94,9 @@ def run_shaped_linter(
     mirror: bool = False,
     verbose: bool = False,
 ) -> bool:
-    """Build shaped-linter and run it over first-party C++ sources; return True if clean.
+    """Build shaped-linter and run it over first-party sources; return True if clean.
 
-    shaped-linter is our own parser-based linter (tools/shaped-linter) — the custom-rules sibling of the
-    clang-tidy gates.
-    It parses each file itself, so it lints headers directly (no compilation database).
-    Dirty-only in `check` so a not-yet-clean tree adopts it incrementally, exactly like the clang-tidy
-    gates.
+    It parses each file itself, so no compilation database is needed and headers are linted directly.
     Shared by `lint shaped` and the `check` shaped-lint gate.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
@@ -124,13 +114,13 @@ def run_shaped_linter(
         print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
         return False
 
-    # Its own scope, wider than clang-format's: it lints prose too, so .md and .py are in and so is docs/.
+    # A wider scope than clang-format's, prose included, so .md and .py are in — tools/dev/lib/quality/format.py owns it.
     files = dev.discover_lint_files(ctx.root, dirty_only=dirty_only)
     if not files:
         print(dev.console.green("shaped-linter: nothing to lint (no sources in scope)"), file=sys.stderr)
         return True
 
-    # Dirty-only is line-exact for prose: editing one section of a long file must not drag that file's older, unrelated prose into the gate.
+    # Dirty-only is line-exact for prose, and docs/guides/prose.md says why that matters.
     # A spec file rather than argv, since the run already batches to stay under the command-line limit.
     changed_lines_spec: Path | None = None
     if dirty_only:
@@ -172,11 +162,8 @@ def run_prose_apply(
 ) -> bool:
     """Build shaped-linter and hand it a prose plan; return True if the whole plan applied (or validated).
 
-    The plan names line spans across many files and the prose to put there, so a surface-wide rework of
-    comments and docs lands in ONE invocation instead of hundreds of edits.
-    Applying is all-or-nothing, and the linter rejects any span whose edit changed code rather than prose.
-    `stats` adds the prose delta — lines and words, before and after, per file and total — which is how a
-    rework's line budget is measured rather than guessed.
+    Applying is all-or-nothing across every file in the plan.
+    tools/shaped-linter/readme.md has the plan grammar and the two validations; docs/guides/prose.md says when to reach for this at all.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
     ctx.discover(preset)  # (re)configure if stale
@@ -225,10 +212,8 @@ def run_prose_stats(
 ) -> bool:
     """Build shaped-linter and report how much prose the given files carry; return True if it ran.
 
-    The measure is the linter's own — extracted prose only, so a `///` marker and the code around it never
-    register — and it is the same one `prose-apply --stats` reports a delta in.
-    That is what lets a rework be scoped and budgeted BEFORE its plan is written, rather than discovering
-    the size of the job from the delta afterwards.
+    Extracted prose only, so a `///` marker and the code around it never register.
+    The same measure `prose-apply --stats` reports a delta in, which is what makes a rework's budget checkable against the number it was set from.
     """
     preset = ctx.resolve_presets(preset_specs)[0]
     ctx.discover(preset)  # (re)configure if stale

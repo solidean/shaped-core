@@ -6,15 +6,17 @@
 
 #include <cstddef> // offsetof
 
-// Geometry- and tessellation-stage raster pipelines, end to end on WARP. Each compiles the extra stage,
-// builds an sg::raster_pipeline that includes it, renders over a cleared target, and reads the target back
-// to prove the stage actually ran and its output reached the rasterizer. Same rhythm as
-// end-to-end-raster-test.cc's plain vertex+pixel triangle, one stage further down the pipeline.
+using namespace cc::primitive_defines;
+
+// Geometry- and tessellation-stage raster pipelines, end to end on WARP.
+// Each compiles the extra stage, builds an sg::raster_pipeline that includes it, renders over a cleared target, and reads the target back.
+// That proves the stage actually ran and its output reached the rasterizer.
+// Same rhythm as end-to-end-raster-test.cc's plain vertex+pixel triangle, one stage further down the pipeline.
 
 namespace
 {
-// A bare position-only vertex — the geometry test feeds it a single point, the tessellation test three
-// control points of a patch. Both stages synthesize their own color, so no color attribute is needed.
+// A bare position-only vertex — the geometry test feeds it a single point, the tessellation test three control points of a patch.
+// Both stages synthesize their own color, so no color attribute is needed.
 struct pos_vertex
 {
     float position[3];
@@ -180,7 +182,7 @@ TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle")
 
     // A single point at the target center — the geometry shader expands it into the triangle.
     pos_vertex const verts[1] = {{{0.0f, 0.0f, 0.0f}}};
-    auto vbuf = ctx.persistent.create_raw_buffer(cc::isize(sizeof(verts)),
+    auto vbuf = ctx.persistent.create_raw_buffer(isize(sizeof(verts)),
                                                  sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
     REQUIRE(vbuf != nullptr);
 
@@ -201,9 +203,9 @@ TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle")
 
     auto const bytes = ctx.wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(W) * cc::isize(H) * 4);
-    auto const* px = reinterpret_cast<cc::u8 const*>(bytes.value().data());
-    auto texel = [&](int x, int y) { return px + (cc::isize(y) * W + x) * 4; };
+    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     auto const* center = texel(W / 2, H / 2);
     CHECK(center[0] == 0);
@@ -278,7 +280,7 @@ TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle")
         {{-0.8f, -0.8f, 0.0f}},
         {{0.8f, -0.8f, 0.0f}},
     };
-    auto vbuf = ctx.persistent.create_raw_buffer(cc::isize(sizeof(verts)),
+    auto vbuf = ctx.persistent.create_raw_buffer(isize(sizeof(verts)),
                                                  sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
     REQUIRE(vbuf != nullptr);
 
@@ -299,9 +301,9 @@ TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle")
 
     auto const bytes = ctx.wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(W) * cc::isize(H) * 4);
-    auto const* px = reinterpret_cast<cc::u8 const*>(bytes.value().data());
-    auto texel = [&](int x, int y) { return px + (cc::isize(y) * W + x) * 4; };
+    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     auto const* center = texel(W / 2, H / 2);
     CHECK(center[0] == 0);

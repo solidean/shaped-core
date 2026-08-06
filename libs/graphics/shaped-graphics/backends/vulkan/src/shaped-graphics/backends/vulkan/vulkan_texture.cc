@@ -1,5 +1,5 @@
-// vulkan_texture: GPU texture (VkImage) creation and teardown. The texture type is header-only (ctor +
-// fields); the allocating create path, the format/usage maps, and the destructor live here.
+// vulkan_texture: GPU texture (VkImage) creation and teardown.
+// The texture type itself is header-only, so the create path, the format/usage maps and the destructor live here.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
@@ -160,8 +160,8 @@ VkImageUsageFlags to_vk_image_usage(sg::texture_usage u)
     if (sg::has_flag(u, sg::texture_usage::depth_stencil))
         flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
-    // Vulkan rejects a zero-usage image; a usage-less texture keeps a benign SAMPLED bit so the handle
-    // stays valid (mirrors the buffer path's transfer-dst fallback).
+    // Vulkan rejects a zero-usage image, so a usage-less texture keeps a benign SAMPLED bit and stays valid.
+    // Same shape as the buffer path's transfer-dst fallback.
     if (flags == 0)
         flags = VK_IMAGE_USAGE_SAMPLED_BIT;
     return flags;
@@ -170,7 +170,7 @@ VkImageUsageFlags to_vk_image_usage(sg::texture_usage u)
 
 vulkan_texture::~vulkan_texture()
 {
-    // Stage the GPU handles + finalizers for deletion once the current epoch retires.
+    // Stage the GPU handles and finalizers for deletion once the current epoch retires.
     if (_image != VK_NULL_HANDLE || _memory != VK_NULL_HANDLE || !_finalizers.empty())
     {
         vulkan_expiring_resource expiring;
@@ -184,12 +184,11 @@ vulkan_texture::~vulkan_texture()
 cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::texture_description const& desc,
                                                                         sg::allocation_info const& alloc)
 {
-    // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point
-    // rather than surfacing as a driver error (mirrors the dx12 path).
+    // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point rather than surfacing as a driver error.
     desc.assert_valid();
 
-    // TEMPORARY: dedicated allocations only. Placement into a memory_heap (vkBindImageMemory at an offset
-    // into a shared VkDeviceMemory) is not wired up yet — same status as vulkan_buffer.
+    // TEMPORARY: dedicated allocations only.
+    // Placement into a memory_heap needs vkBindImageMemory at an offset into a shared VkDeviceMemory, same status as vulkan_buffer.
     CC_ASSERT(alloc.is_dedicated(), "placed textures (non-null memory_heap) not implemented yet");
 
     // Extent + layer count derived from the shape: depth only for 3D; a cube is 6 layers per cube.
@@ -221,7 +220,6 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     VkMemoryRequirements req = {};
     vkGetImageMemoryRequirements(_device, image, &req);
 
-    // GPU-resident: sg exposes no host-visible textures.
     u32 const type = find_memory_type(u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (type == UINT32_MAX)
     {

@@ -6,10 +6,9 @@ using namespace cc::primitive_defines;
 
 // Verifies the nexus/bench hardware-counter API end to end.
 //
-// It must pass on the virtualized GitHub-hosted CI runners (where the PMU is hidden — only the baseline is
-// produced) AND genuinely check real values on hardware. So: the baseline (elapsed time, and reference
-// cycles on x86) is always asserted; the full PMU counters are asserted only when the machine reports them
-// available, and otherwise noted as skipped.
+// It must pass on the virtualized GitHub-hosted CI runners, where the PMU is hidden and only the baseline is produced, AND genuinely check real values on hardware.
+// So the baseline — elapsed time, and reference cycles on x86 — is always asserted.
+// The full PMU counters are asserted only when the machine reports them available, and otherwise noted as skipped.
 
 namespace
 {
@@ -66,10 +65,9 @@ TEST("nexus bench - hardware counters query and measure")
     CHECK(cycles.value() > 0);
 #endif
 
-    // Full PMU counters: assert plausibility when the counter actually flowed, else note the skip. Gating on
-    // the measured value (not on enumeration availability) keeps this honest everywhere: a real value is
-    // checked on Linux/Windows machines that can read the PMU, and machines where it cannot flow — virtualized
-    // CI, or a box without the one-time PMU setup — take the skip instead of failing.
+    // Full PMU counters: assert plausibility when the counter actually flowed, and otherwise note the skip.
+    // Gating on the measured value rather than on enumeration availability keeps this honest everywhere.
+    // A real value is checked on a Linux or Windows machine that can read the PMU, and a machine where it cannot flow takes the skip instead of failing.
     auto const instructions = m.value_of(hw_counter::instructions_retired);
     if (instructions.has_value())
     {
@@ -120,8 +118,8 @@ TEST("nexus bench - measure_all gathers every available counter across passes")
 {
     using nx::bench::hw_counter;
 
-    // The default set has more PMU counters than fit the hardware budget at once. With measure_all the body
-    // is re-run over subsets so every counter the machine can read comes back valid — none left behind.
+    // The default set has more PMU counters than fit the hardware budget at once.
+    // With measure_all the body is re-run over subsets, so every counter the machine can read comes back valid, with none left behind.
     auto call_count = 0;
     auto const m = nx::bench::measure_hw_counters(
         [&]

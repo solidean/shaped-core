@@ -1,9 +1,8 @@
 # byte hash benchmark (xxHash)
 
-Throughput of the raw xxHash entry points behind clean-core's hashing — `XXH3_64bits_withSeed` /
-`XXH3_128bits_withSeed` — and the thin wrappers over them (`cc::make_hash_of_bytes` /
-[`cc::hash128::create`](../../src/clean-core/common/hash128.hh)), over a key-length sweep. Unlike the
-[string-hash benchmark](string-hash-benchmark.md), this hashes raw byte ranges, with no string/SSO layer.
+Throughput of the raw xxHash entry points behind clean-core's hashing — `XXH3_64bits_withSeed` and `XXH3_128bits_withSeed` — and of the thin wrappers over them,
+`cc::make_hash_of_bytes` and [`cc::hash128::create`](../../src/clean-core/common/hash128.hh), over a key-length sweep.
+Unlike the [string-hash benchmark](string-hash-benchmark.md), this hashes raw byte ranges, with no string or SSO layer.
 
 Source: [tests/benchmarks/hash-benchmark.cc](../../tests/benchmarks/hash-benchmark.cc).
 
@@ -11,18 +10,18 @@ Source: [tests/benchmarks/hash-benchmark.cc](../../tests/benchmarks/hash-benchma
 
 ### 1. The RelWithDebInfo `/Ob1` trap (fixed project-wide)
 
-The string-hash benchmark showed XXH3 running *catastrophically* slowly for short/mid keys in the **default
-RelWithDebInfo** dev build — under ~1 GB/s up to ~216 bytes — while Release was fine. `CC_ASSERT` is ours, not
-xxHash's, so that pointed at the build, not the library.
+The string-hash benchmark showed XXH3 running *catastrophically* slowly for short and mid keys in the **default RelWithDebInfo** dev build — under ~1 GB/s up to ~216 bytes.
+Release was fine at the same lengths.
+`CC_ASSERT` is ours, not xxHash's, so that pointed at the build rather than the library.
 
-Cause: the compiler is `clang-cl`, and the *only* flag difference between the presets was the inlining level —
+Cause: the compiler is `clang-cl`, and the *only* flag difference between the presets was the inlining level.
 RelWithDebInfo defaulted to `/Ob1` (inline only functions explicitly marked `inline`), Release to `/Ob2`.
-xxHash's short/mid-key path (keys ≤ `XXH3_MIDSIZE_MAX` = 240 bytes) is a chain of plain `static` helpers that
-only collapse into the caller under `/Ob2`; under `/Ob1` each stays a real call.
+xxHash's short/mid-key path (keys ≤ `XXH3_MIDSIZE_MAX` = 240 bytes) is a chain of plain `static` helpers that only collapse into the caller under `/Ob2`.
+Under `/Ob1` each one stays a real call.
 
-Fix: the root [CMakeLists.txt](../../../../../CMakeLists.txt) now promotes RelWithDebInfo to `/Ob2`
-project-wide (`add_compile_options($<$<CONFIG:RelWithDebInfo>:/Ob2>)`) — the mental model is *RelWithDebInfo =
-Release codegen + assertions + debug info*, and `/Ob1` was a misleading default. Impact on raw `xxh64`:
+Fix: the root [CMakeLists.txt](../../../../../CMakeLists.txt) now promotes RelWithDebInfo to `/Ob2` project-wide, via `add_compile_options($<$<CONFIG:RelWithDebInfo>:/Ob2>)`.
+The mental model is *RelWithDebInfo = Release codegen + assertions + debug info*, and `/Ob1` was a misleading default.
+Impact on raw `xxh64`:
 
 | length | before /Ob1 | after /Ob2 | speedup× |
 |------:|------:|------:|------:|
@@ -35,26 +34,23 @@ Release codegen + assertions + debug info*, and `/Ob1` was a misleading default.
 | 216 | 1.08 | 13.85 | 12.82 |
 | 324 | 7.00 | 18.07 | 2.58 |
 
-(The 240→324 jump in the *before* column is XXH3's documented switch from the scalar short/mid path to its
-vectorized long-hash accumulator — `XXH3_MIDSIZE_MAX` in `xxhash.h`. That cliff is by design; `/Ob1` just made
-everything below it pathologically slow.)
+(The 240→324 jump in the *before* column is XXH3's documented switch from the scalar short/mid path to its vectorized long-hash accumulator, `XXH3_MIDSIZE_MAX` in `xxhash.h`.
+That cliff is by design; `/Ob1` just made everything below it pathologically slow.)
 
 ### 2. The wrappers needed a purity attribute
 
-Even after the inlining fix, the wrapper columns (`hob64`/`hash128`) trailed the raw columns by more than a
-single extra call should cost. The reason: the raw xxHash entry points are tagged `XXH_PUREF`
-(`__attribute__((pure))`), which lets the compiler pipeline calls across the loop; the wrappers carried no
-such promise, so the compiler treated every wrapper call as an opaque memory barrier and serialized the loop.
+Even after the inlining fix, the wrapper columns (`hob64`/`hash128`) trailed the raw columns by more than a single extra call should cost.
+The raw xxHash entry points are tagged `XXH_PUREF` (`__attribute__((pure))`), which lets the compiler pipeline calls across the loop.
+The wrappers carried no such promise, so the compiler treated every wrapper call as an opaque memory barrier and serialized the loop.
 
-`cc::make_hash_of_bytes` and `cc::hash128::create` are now tagged `CC_PURE` (a new portable macro —
-`[[gnu::pure]]` on GCC/Clang/clang-cl, empty on MSVC). For the 64-bit wrapper this recovered most of the gap
-(RelWithDebInfo, 16-byte keys: `hob64` 6.9 → 7.8 GB/s, vs raw 8.7). A residual ~10% remains for tiny keys —
-the genuinely irreducible cost of one non-inlined call (`make_hash_of_bytes` lives in its own TU and, without
-LTO, cannot be inlined) — and it vanishes past a few dozen bytes.
+`cc::make_hash_of_bytes` and `cc::hash128::create` are now tagged `CC_PURE`, a portable macro that is `[[gnu::pure]]` on GCC/Clang/clang-cl and empty on MSVC.
+For the 64-bit wrapper this recovered most of the gap (RelWithDebInfo, 16-byte keys: `hob64` 6.9 → 7.8 GB/s, against raw 8.7).
+A residual ~10% remains for tiny keys — the irreducible cost of one non-inlined call, since `make_hash_of_bytes` lives in its own TU and cannot be inlined without LTO.
+It vanishes past a few dozen bytes.
 
-The **128-bit** wrapper does *not* close up: it returns a 16-byte struct via a hidden pointer (sret), an extra
-memory round-trip the `pure` tag cannot remove, so `hash128` stays meaningfully below raw `xxh128` for short
-keys. Prefer the 64-bit hash for hash-table keys unless you actually need 128 bits.
+The **128-bit** wrapper does *not* close up: it returns a 16-byte struct through a hidden pointer (sret), an extra memory round-trip the `pure` tag cannot remove.
+So `hash128` stays meaningfully below raw `xxh128` for short keys.
+Prefer the 64-bit hash for hash-table keys unless you actually need 128 bits.
 
 ## System under test
 
@@ -65,14 +61,14 @@ keys. Prefer the 64-bit hash for hash-table keys unless you actually need 128 bi
 | OS | Windows 11 |
 | Compiler | Clang/`clang-cl` (`relwithdebinfo-clang` / `release-clang` presets) |
 
-Single-run numbers; short-key/small-block rows are sub-millisecond and noisy (~10%). Read trends, not third
-decimals.
+Single-run numbers; short-key and small-block rows are sub-millisecond and noisy (~10%).
+Read trends, not third decimals.
 
 ## Reproducing
 
-This full table is the manual `bench-hash (… full sweep)` benchmark. A lean `GUIDE_BENCHMARK` of the same
-base name records just the representative points (≈8 B and ≈64 KiB) via `nx::guide` for `dev.py pgo`. Both are
-excluded from normal sweeps; the `"bench-hash"` filter matches both — name them explicitly:
+This full table is the manual `bench-hash (… full sweep)` benchmark.
+A lean `GUIDE_BENCHMARK` of the same base name records just the representative points (≈8 B and ≈64 KiB) via `nx::guide`, for `dev.py pgo`.
+Both are excluded from normal sweeps, and the `"bench-hash"` filter matches both — so name them explicitly:
 
 ```bash
 uv run dev.py test "bench-hash" --target clean-core-test --preset release-clang --timeout 0
@@ -83,8 +79,8 @@ See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 
 ## Results
 
-GB/s; higher is better. `hob64` = `cc::make_hash_of_bytes` (XXH3-64 wrapper), `hash128` = `cc::hash128::create`
-(XXH3-128 wrapper), `xxh64`/`xxh128` = the raw xxHash calls.
+GB/s; higher is better.
+`hob64` = `cc::make_hash_of_bytes` (XXH3-64 wrapper), `hash128` = `cc::hash128::create` (XXH3-128 wrapper), `xxh64`/`xxh128` = the raw xxHash calls.
 
 ### RelWithDebInfo (after global `/Ob2` + `CC_PURE`)
 
@@ -206,12 +202,9 @@ GB/s; higher is better. `hob64` = `cc::make_hash_of_bytes` (XXH3-64 wrapper), `h
 
 ## Takeaways
 
-- **Promoting RelWithDebInfo to `/Ob2` was the big fix** — short-key xxHash went from ~0.7 to ~8 GB/s at
-  16 bytes (~11×) and now matches Release.
-- **`CC_PURE` on the wrappers** recovers most of the remaining wrapper overhead by letting the compiler
-  pipeline wrapper calls; a fixed ~10% per-call cost survives for tiny keys (no LTO across the clean-core TU
-  boundary) and amortizes away past a few dozen bytes.
-- **64-bit beats 128-bit for short keys** (roughly 2× the GB/s up to ~32 bytes); the 128-bit wrapper also
-  pays an sret struct-return cost the purity tag can't remove. Use the 64-bit hash for hash-table keys.
-- **The 240-byte cliff is xxHash by design** (`XXH3_MIDSIZE_MAX`): scalar mixing below, the SIMD long-hash
-  path above, plateauing ~30–36 GB/s.
+- **Promoting RelWithDebInfo to `/Ob2` was the big fix** — short-key xxHash went from ~0.7 to ~8 GB/s at 16 bytes (~11×), and now matches Release.
+- **`CC_PURE` on the wrappers** recovers most of the remaining wrapper overhead, by letting the compiler pipeline wrapper calls.
+  A fixed ~10% per-call cost survives for tiny keys (no LTO across the clean-core TU boundary) and amortizes away past a few dozen bytes.
+- **64-bit beats 128-bit for short keys**, roughly 2× the GB/s up to ~32 bytes.
+  The 128-bit wrapper also pays an sret struct-return cost the purity tag cannot remove, so use the 64-bit hash for hash-table keys.
+- **The 240-byte cliff is xxHash by design** (`XXH3_MIDSIZE_MAX`): scalar mixing below, the SIMD long-hash path above, plateauing ~30–36 GB/s.

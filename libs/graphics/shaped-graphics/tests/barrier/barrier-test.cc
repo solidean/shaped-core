@@ -39,8 +39,9 @@ INVOCABLE_TEST("sg - two concurrent command lists record and submit independentl
         vb[i] = 1000 + i;
     }
 
-    // Both lists open at once — each holds a distinct access-tracking slot. c1 submits while c2 is still
-    // open (not the last list); c2 submits last. Both must round-trip their own buffer correctly.
+    // Both lists open at once, each holding a distinct access-tracking slot.
+    // c1 submits while c2 is still open, so it is not the last list; c2 submits last.
+    // Both must round-trip their own buffer correctly.
     auto c1 = ctx->create_command_list();
     auto c2 = ctx->create_command_list();
     REQUIRE(c1 != nullptr);
@@ -73,8 +74,8 @@ INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list",
     for (int i = 0; i < 128; ++i)
         first[i] = pattern(i);
 
-    // upload → first half; self-copy first half → second half (read+write the same buffer); download the
-    // second half. The tracker must order the copy after the upload and the download after the copy.
+    // upload → first half; self-copy first half → second half, reading and writing the same buffer; download the second half.
+    // The tracker must order the copy after the upload, and the download after the copy.
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
     cmd->upload.bytes_to_buffer(buf, cc::span<byte const>(first, 128), 0);

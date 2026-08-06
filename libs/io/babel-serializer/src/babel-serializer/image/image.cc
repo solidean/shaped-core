@@ -8,8 +8,8 @@ namespace babel::image
 {
 namespace
 {
-/// Map a low-level decode's channel count + (future) sample type onto the aggregator's component enum.
-/// Both codecs produce 8-bit samples today, so this is u8 for now — the switch is where u16 / f32 slot in.
+/// The aggregator's sample type for a low-level decode.
+/// Both codecs produce 8-bit samples today, so this is where u16 / f32 will branch.
 component component_of_decode()
 {
     return component::u8;

@@ -9,16 +9,15 @@
 
 namespace sg
 {
-/// A strongly-typed view onto a raw_buffer whose element type is fixed at compile time by `T` — think a
-/// GPU-side `span<T>`. Privately holds a raw_buffer_handle; the view factories (`as_readonly_buffer()`,
-/// `as_uniform_buffer()`, …) drop the element-type argument the raw API needs and infer it from `T`, and
-/// are `requires`-gated so a nonsensical one (a uniform block of `byte`, a storage view of a non-DWORD
-/// type) is a compile error. Reach the raw resource for the general (raw / byte-addressed) API via `raw()`.
-/// Value type: copy is a cheap handle copy. Prefer creating one with `ctx.{persistent,transient}.create_buffer<T>(count, usage)`.
+/// A strongly-typed view onto a raw_buffer whose element type is fixed at compile time by `T` — think a GPU-side `span<T>`.
+/// The view factories (`as_readonly_buffer()`, `as_uniform_buffer()`, …) drop the element-type argument the raw API needs and infer it from `T`.
+/// Each is `requires`-gated, so a nonsensical one — a uniform block of `byte`, a storage view of a non-DWORD type — is a compile error.
+/// `raw()` reaches the underlying resource for the general, byte-addressed API.
+/// A value type: copying is a cheap handle copy.
+/// Prefer `ctx.{persistent,transient}.create_buffer<T>(count, usage)` over building one directly.
 ///
-/// `T` must be trivially copyable (a buffer is raw GPU bytes) but is otherwise open — a vertex struct, an
-/// index type, a uniform block, `byte`, …; each view factory imposes its own further constraint. Element
-/// counts / ranges are in units of `T`.
+/// `T` must be trivially copyable, since a buffer is raw GPU bytes, but is otherwise open — a vertex struct, an index type, a uniform block, `byte`, ….
+/// Each view factory imposes its own further constraint, and every element count or range is in units of `T`.
 template <class T>
 class buffer
 {
@@ -31,10 +30,10 @@ public:
 
     buffer() = default;
 
-    // -- Wrapping a raw_buffer over the (byte size vs sizeof(T)) relationship: `from_raw` requires the byte
-    //    size to be a whole number of `T` (asserts; `try_from_raw` is the checked twin), while
-    //    `from_raw_clamped` tolerates a trailing partial element (element_count() floors). All require a
-    //    non-null handle (null is a contract bug, not a runtime failure).
+    // -- Wrapping a raw_buffer, over the relationship between its byte size and `sizeof(T)`.
+    //    `from_raw` requires the byte size to be a whole number of `T` and asserts it; `try_from_raw` is the checked twin.
+    //    `from_raw_clamped` tolerates a trailing partial element, which `element_count()` floors away.
+    //    All three require a non-null handle, since null is a contract bug rather than a runtime failure.
 
     /// Wrap a raw_buffer whose byte size is an exact multiple of `sizeof(T)` (a whole number of elements).
     [[nodiscard]] static buffer from_raw(raw_buffer_handle raw)
@@ -54,16 +53,16 @@ public:
         return buffer(cc::move(raw));
     }
 
-    /// Wrap a raw_buffer, flooring to whole elements: a trailing partial element (byte size not a multiple
-    /// of `sizeof(T)`) is simply ignored by element_count().
+    /// Wrap a raw_buffer, flooring to whole elements.
+    /// A trailing partial element — a byte size that is not a multiple of `sizeof(T)` — is simply ignored by `element_count()`.
     [[nodiscard]] static buffer from_raw_clamped(raw_buffer_handle raw)
     {
         CC_ASSERT(raw != nullptr, "buffer<T> wraps a non-null raw_buffer");
         return buffer(cc::move(raw));
     }
 
-    /// The underlying raw resource (never null unless default-constructed). Use this to reach the raw
-    /// (general / byte-addressed) API; there is no implicit conversion to raw_buffer_handle.
+    /// The underlying raw resource, never null unless default-constructed.
+    /// Use it to reach the raw, byte-addressed API; there is no implicit conversion to `raw_buffer_handle`.
     [[nodiscard]] raw_buffer_handle const& raw() const { return _raw; }
 
     [[nodiscard]] isize size_in_bytes() const { return _raw->size_in_bytes(); }
@@ -72,14 +71,14 @@ public:
     /// Number of whole `T` elements the buffer holds (byte size / sizeof(T), truncating).
     [[nodiscard]] isize element_count() const { return _raw->size_in_bytes() / isize(sizeof(T)); }
 
-    // -- Reinterpretation — view the same raw_buffer's storage as `buffer<U>`. Mirrors cc::span: the
-    //    compile-time-checked `reinterpret_as` needs `sizeof(T)` divisible by `sizeof(U)` (U tiles T — e.g.
-    //    buffer<vec3f> -> buffer<float>), so on an exact-fit buffer it is always clean; `try_reinterpret_as`
-    //    handles the general case (U larger / unrelated) with a runtime size check.
+    // -- Reinterpretation — view the same raw_buffer's storage as `buffer<U>`, mirroring `cc::span`.
+    //    `reinterpret_as` is compile-time-checked and needs `sizeof(T)` divisible by `sizeof(U)`, so `U` tiles `T` — `buffer<vec3f>` -> `buffer<float>`.
+    //    On an exact-fit buffer that is always clean.
+    //    `try_reinterpret_as` handles the general case, a larger or unrelated `U`, with a runtime size check.
 
-    /// Reinterpret the storage as `buffer<U>`. `sizeof(T)` must be divisible by `sizeof(U)` (U tiles T), so
-    /// on an exact-fit buffer the result is always exact; for the general case use try_reinterpret_as. (`U`
-    /// is trivially copyable — enforced by `buffer<U>`.)
+    /// Reinterpret the storage as `buffer<U>`, where `sizeof(T)` must be divisible by `sizeof(U)` so that `U` tiles `T`.
+    /// On an exact-fit buffer the result is always exact; use try_reinterpret_as for the general case.
+    /// `U` is trivially copyable, which `buffer<U>` enforces.
     template <class U>
     [[nodiscard]] buffer<U> reinterpret_as() const
     {
@@ -99,22 +98,21 @@ public:
         return buffer<U>::from_raw(_raw);
     }
 
-    // Shader-facing views, always in the buffer's own element type `T` (no reinterpretation). Each builds the
-    // typed view directly and asserts the matching buffer_usage; ranges are in elements of `T`. (raw_buffer
-    // itself carries only the byte-level as_raw_* factories — the typed path lives here, on buffer<T>.)
+    // Shader-facing views, always in the buffer's own element type `T` — no reinterpretation.
+    // Each builds the typed view directly and asserts the matching `buffer_usage`; ranges are in elements of `T`.
+    // raw_buffer itself carries only the byte-level `as_raw_*` factories, so the typed path lives here.
     //
-    // The `template <class U = T> requires std::is_same_v<U, T>` shape is a deferral trick, not a
-    // reinterpretation hook: the constrained view return type (readonly_buffer_view<T> requires view_element<T>,
-    // uniform_buffer_view<T> requires uniform_element<T>) must not be *formed* until the view is actually used —
-    // otherwise a buffer<u16> (a valid index buffer) would be ill-formed just for naming readonly_buffer_view<u16>,
-    // whose element constraint u16 fails. Making the member a template defers that; pinning U == T keeps it
-    // T-only. Use reinterpret_as for an explicit element-type change.
+    // The `template <class U = T> requires std::is_same_v<U, T>` shape is a deferral trick, not a reinterpretation hook.
+    // A constrained return type must not be *formed* until the view is actually used.
+    // `readonly_buffer_view<T>` requires `view_element<T>`, and `uniform_buffer_view<T>` requires `uniform_element<T>`.
+    // Otherwise a `buffer<u16>`, a perfectly valid index buffer, would be ill-formed just for naming `readonly_buffer_view<u16>`.
+    // Making the member a template defers that, and pinning `U == T` keeps it T-only; `reinterpret_as` is the explicit element-type change.
 
-    /// Binds one element of the buffer as a uniform block (constant buffer / UBO) — `element_index` picks
-    /// which (default: the first). A uniform_buffer_view is a single block, not a range. The element's byte offset
-    /// (element_index * sizeof(T)) must be 256-byte aligned, so addressing past the first element needs `T`
-    /// sized to a multiple of 256; drop to `raw()` for an arbitrary byte offset. Only where `T` obeys the
-    /// uniform block rules. Requires uniform_buffer usage.
+    /// Binds one element of the buffer as a uniform block (constant buffer / UBO), `element_index` picking which — by default the first.
+    /// A uniform_buffer_view is a single block, not a range.
+    /// The element's byte offset (`element_index * sizeof(T)`) must be 256-byte aligned, so addressing past the first element needs `T` sized to a multiple of 256.
+    /// Drop to `raw()` for an arbitrary byte offset.
+    /// Only where `T` obeys the uniform block rules.
     template <class U = T>
     [[nodiscard]] uniform_buffer_view<U> as_uniform_buffer(isize element_index = 0) const
         requires(std::is_same_v<U, T> && uniform_element<U>)
@@ -127,12 +125,10 @@ public:
         return uniform_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .size_in_bytes = isize(sizeof(U))};
     }
 
-    // A storage view is a *subrange* of the buffer, so unlike buffer<T> itself it carries the portable
-    // binding rules: a 256-byte-aligned byte offset and a 4-byte-multiple byte size (see
-    // storage_buffer_offset_alignment). A whole-buffer view starts at 0, so only the ranged overloads can
-    // trip the offset rule — bind the whole buffer and index in the shader if you hit it.
+    // A storage view is a subrange, so unlike `buffer<T>` itself it carries the portable binding rules — see `storage_buffer_offset_alignment`.
+    // A whole-buffer view starts at 0, so only the ranged overloads can trip the offset rule; bind the whole buffer and index in the shader if you hit it.
 
-    /// A read-only storage view of the whole buffer as an array of `T` (SRV). Requires readonly_buffer usage.
+    /// A read-only storage view of the whole buffer as an array of `T` (SRV).
     template <class U = T>
     [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
@@ -142,7 +138,7 @@ public:
         return readonly_buffer_view<U>{.buffer = _raw, .offset_in_bytes = 0, .element_count = element_count()};
     }
 
-    /// A read-only storage view of `range` elements of `T` (SRV). Requires readonly_buffer usage.
+    /// A read-only storage view of `range` elements of `T` (SRV).
     template <class U = T>
     [[nodiscard]] readonly_buffer_view<U> as_readonly_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
@@ -153,7 +149,7 @@ public:
         return readonly_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
     }
 
-    /// A read-write storage view of the whole buffer as an array of `T` (UAV). Requires readwrite_buffer usage.
+    /// A read-write storage view of the whole buffer as an array of `T` (UAV).
     template <class U = T>
     [[nodiscard]] readwrite_buffer_view<U> as_readwrite_buffer() const
         requires(std::is_same_v<U, T> && view_element<U>)
@@ -163,7 +159,7 @@ public:
         return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = 0, .element_count = element_count()};
     }
 
-    /// A read-write storage view of `range` elements of `T` (UAV). Requires readwrite_buffer usage.
+    /// A read-write storage view of `range` elements of `T` (UAV).
     template <class U = T>
     [[nodiscard]] readwrite_buffer_view<U> as_readwrite_buffer(cc::offset_size range) const
         requires(std::is_same_v<U, T> && view_element<U>)
@@ -174,9 +170,10 @@ public:
         return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
     }
 
-    // Checked twins of the storage / uniform view factories: nullopt when the range breaks the placement rules
-    // (bounds, 256-byte offset, 4-byte size, uniform block rules) — the conditions a caller computing an offset
-    // at runtime can genuinely hit. A missing buffer_usage flag still asserts: you chose the usage at creation.
+    // Checked twins of the storage / uniform view factories: nullopt when the range breaks the placement rules.
+    // That is bounds, the 256-byte offset, the 4-byte size, and the uniform block rules.
+    // Those are the conditions a caller computing an offset at runtime can genuinely hit.
+    // A missing buffer_usage flag still asserts, since you chose the usage at creation.
 
     /// Checked as_readonly_buffer (whole buffer) — nullopt when the size breaks the storage rules.
     template <class U = T>
@@ -238,17 +235,14 @@ public:
         return as_uniform_buffer(element_index);
     }
 
-    // Draw-input views (bound at draw time, not shader-visible). Ranges are in elements of `T`.
-    // NOTE: as_vertex_buffer only conveys the per-vertex stride (sizeof(T)) today — it does not yet tie `T`
-    // to the pipeline's vertex_input_layout (attribute offsets / formats). A `vertex_layout<T>` trait that
-    // lets binding cross-check the layout (and build it from `T`) is a deferred extension, landing with the
-    // raster-pipeline vertex-input work.
-    // TODO: validate a bound vertex buffer's element type against the vertex_input_layout the pipeline
-    // expects. Carrying a std::type_info / std::type_index of `T` on the view (recorded via typeid(T)) and
-    // the expected type on the layout would let binding cross-check them at runtime, even before the
-    // compile-time vertex_layout<T> trait lands.
+    // Draw-input views, bound at draw time and not shader-visible.
+    // Ranges are in elements of `T`, and each asserts the matching `buffer_usage` — vertex_buffer or index_buffer.
+    // `as_vertex_buffer` conveys only the per-vertex stride (`sizeof(T)`) today, and does not tie `T` to the pipeline's `vertex_input_layout` — its attribute offsets and formats.
+    // A `vertex_layout<T>` trait that lets binding cross-check the layout, and build it from `T`, lands with the raster-pipeline vertex-input work.
+    // TODO: validate a bound vertex buffer's element type against the `vertex_input_layout` the pipeline expects.
+    // Carrying a `std::type_index` of `T` on the view and the expected type on the layout would let binding cross-check them at runtime, ahead of the compile-time trait.
 
-    /// The whole buffer as a vertex buffer with per-vertex stride `sizeof(T)`. Requires vertex_buffer usage.
+    /// The whole buffer as a vertex buffer with per-vertex stride `sizeof(T)`.
     [[nodiscard]] vertex_buffer_view as_vertex_buffer() const
     {
         CC_ASSERT(has_flag(_raw->usage(), buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
@@ -258,7 +252,7 @@ public:
                                   .stride_in_bytes = isize(sizeof(T))};
     }
 
-    /// A vertex buffer over `range` vertices of `T` (stride `sizeof(T)`). Requires vertex_buffer usage.
+    /// A vertex buffer over `range` vertices of `T`, stride `sizeof(T)`.
     [[nodiscard]] vertex_buffer_view as_vertex_buffer(cc::offset_size range) const
     {
         CC_ASSERT(has_flag(_raw->usage(), buffer_usage::vertex_buffer), "buffer lacks vertex_buffer usage");
@@ -268,8 +262,8 @@ public:
                                   .stride_in_bytes = isize(sizeof(T))};
     }
 
-    /// The whole buffer as an index buffer; the index width follows `T` (u16 → uint16, u32 → uint32).
-    /// Only on 16-/32-bit unsigned element types. Requires index_buffer usage.
+    /// The whole buffer as an index buffer; the index width follows `T` (u16 -> uint16, u32 -> uint32).
+    /// Only on 16- and 32-bit unsigned element types.
     [[nodiscard]] index_buffer_view as_index_buffer() const
         requires(std::is_same_v<T, u16> || std::is_same_v<T, u32>)
     {
@@ -280,7 +274,8 @@ public:
                                  .size_in_bytes = _raw->size_in_bytes()};
     }
 
-    /// An index buffer over `range` indices of `T`. Only on 16-/32-bit unsigned element types. Requires index_buffer usage.
+    /// An index buffer over `range` indices of `T`.
+    /// Only on 16- and 32-bit unsigned element types.
     [[nodiscard]] index_buffer_view as_index_buffer(cc::offset_size range) const
         requires(std::is_same_v<T, u16> || std::is_same_v<T, u32>)
     {
@@ -295,24 +290,25 @@ private:
     // Non-null / fit are checked by the `from_raw` / `from_raw_clamped` factories before this runs.
     explicit buffer(raw_buffer_handle raw) : _raw(cc::move(raw)) {}
 
-    // Whether an element range fits the buffer. Non-asserting twin of the bounds check in _element_offset.
+    // Whether an element range fits the buffer.
+    // Non-asserting twin of the bounds check in _element_offset.
     [[nodiscard]] bool _is_valid_element_range(cc::offset_size range) const
     {
         return range.offset >= 0 && range.size >= 0
             && (range.offset + range.size) * isize(sizeof(T)) <= _raw->size_in_bytes();
     }
 
-    // Whether a byte range obeys the storage placement rules. Non-asserting twin of _assert_storage_placement.
+    // Whether a byte range obeys the storage placement rules.
+    // Non-asserting twin of _assert_storage_placement.
     [[nodiscard]] static bool _is_valid_storage_placement(isize offset_in_bytes, isize size_in_bytes)
     {
         return offset_in_bytes % storage_buffer_offset_alignment == 0
             && size_in_bytes % storage_buffer_size_alignment == 0;
     }
 
-    // The portable placement rules for a shader-facing storage view's byte range (see
-    // storage_buffer_offset_alignment). Only the views carry these — buffer<T> itself is a whole buffer and
-    // recasts like a span, so from_raw / reinterpret_as / the draw-input (vertex, index) views are exempt;
-    // that keeps e.g. a buffer<u16> index buffer perfectly legal.
+    // The portable placement rules for a shader-facing storage view's byte range — see `storage_buffer_offset_alignment`.
+    // Only the views carry these: `buffer<T>` is a whole buffer and recasts like a span, so from_raw, reinterpret_as and the draw-input views are exempt.
+    // That is what keeps a `buffer<u16>` index buffer legal.
     void _assert_storage_placement(isize offset_in_bytes, isize size_in_bytes) const
     {
         CC_ASSERT(offset_in_bytes % storage_buffer_offset_alignment == 0, "storage view offset must be 256-byte "
@@ -340,8 +336,8 @@ private:
     raw_buffer_handle _raw = nullptr;
 };
 
-// raw_buffer -> buffer<T> (declared on raw_buffer, defined here where buffer<T> is complete). Thin wrappers
-// over from_raw / try_from_raw, so a handle re-types with `raw->as_buffer<T>()` instead of naming buffer<T>.
+// raw_buffer -> buffer<T>, declared on raw_buffer and defined here where `buffer<T>` is complete.
+// Thin wrappers over from_raw / try_from_raw, so a handle re-types with `raw->as_buffer<T>()` instead of naming `buffer<T>`.
 template <class T>
 auto raw_buffer::as_buffer() const
 {

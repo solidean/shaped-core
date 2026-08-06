@@ -9,10 +9,10 @@ namespace tg
 {
 /// Ray: a half-line from an origin along a direction.
 ///
-/// Represents the set of points {origin + t*dir : t >= 0} — the origin and everything in front of
-/// it along dir. It is a 1D object (intrinsic_dim == 1) in D-dimensional space and is unbounded
-/// (is_finite == false). dir is expected to be non-zero and is conventionally unit-length so the
-/// parameter t reads as a distance; neither is enforced at construction.
+/// Represents the set of points {origin + t*dir : t >= 0} — the origin and everything in front of it along dir.
+/// It is a 1D object (intrinsic_dim == 1) in D-dimensional space and is unbounded (is_finite == false).
+/// dir is expected to be non-zero and is conventionally unit-length, so the parameter t reads as a distance.
+/// Neither is enforced at construction.
 ///
 ///     tg::ray3f r(tg::pos3f(0, 0, 0), tg::vec3f(0, 0, 1));   // ray up the +z axis
 template <int D, class T>

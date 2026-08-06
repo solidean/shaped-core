@@ -54,13 +54,14 @@ target_include_directories(babel-serializer
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# clean-core provides streams / containers / result; typed-geometry provides vec / pos for the geometry formats.
+# clean-core provides streams / containers / result.
+# typed-geometry provides vec / pos / mat / quat for the geometry formats.
 target_link_libraries(babel-serializer PUBLIC clean-core typed-geometry)
 
 # The SQLite backend is fetched on demand (extern/sqlite), so the target exists only once it has been fetched.
-# The babel::sqlite API is always compiled (sqlite.cc above); only the backend link is conditional.
-# BABEL_HAS_SQLITE is PRIVATE — it selects the real vs. stub implementation inside sqlite.cc and never reaches
-# a public header or user code (see docs/coding-guidelines.md). sqlite3.h stays PRIVATE too: sqlite.hh is opaque.
+# BABEL_HAS_SQLITE stays PRIVATE and never leaves sqlite.cc, and sqlite3.h never reaches a public header.
+# docs/coding-guidelines.md has both rules.
+# BABEL_HAS_SQLITE and sqlite3.h both stay PRIVATE, per the header non-leak rule in docs/coding-guidelines.md.
 if(TARGET sqlite)
     target_compile_definitions(babel-serializer PRIVATE BABEL_HAS_SQLITE=1)
     target_link_libraries(babel-serializer PRIVATE sqlite)
@@ -68,8 +69,9 @@ else()
     target_compile_definitions(babel-serializer PRIVATE BABEL_HAS_SQLITE=0)
 endif()
 
-# The stb image backend is committed in-source (extern/stb), so the target always exists and the link is unconditional — no if(TARGET stb) and no availability gate (contrast sqlite above).
-# stb is linked PRIVATE: the stb_image.h / stb_image_write.h headers live only inside image/impl/stb_backend.cc and never reach a babel public header (see docs/coding-guidelines.md).
+# The stb image backend is committed in-source (extern/stb), so the target always exists and the link is unconditional.
+# No if(TARGET stb) and no availability gate, unlike sqlite above.
+# stb is linked PRIVATE: the stb headers live only inside image/impl/stb_backend.cc.
 target_link_libraries(babel-serializer PRIVATE stb)
 
 # Enable conforming preprocessor for MSVC

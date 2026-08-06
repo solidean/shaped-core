@@ -11,26 +11,26 @@
 #include <new>
 #include <type_traits>
 
-/// Growable vector with small-vector optimization: the first elements live inline (no allocation),
-/// spilling to the heap only once the size exceeds the inline capacity. Ideal where the common case holds
-/// a handful of elements but an occasional overflow must still be handled correctly.
+/// Growable vector with small-vector optimization: the first elements live inline, and the buffer spills to the heap only once the size exceeds the inline capacity.
+/// Reach for it where the common case holds a handful of elements but an occasional overflow must still work.
 ///
-/// `N` is a *minimum* inline capacity: the buffer auto-grows to fill the storage footprint, so
-/// `inline_capacity()` is >= N (e.g. `small_vector<int, 4>` holds 9 inline). Storage is a single raw
-/// buffer: elements always sit at the front, followed by a `u32` size, and the tagged memory-resource
-/// pointer is the trailing 8 bytes (its low bit marks inline mode — the 8-aligned pointer leaves it
-/// free). In heap mode a `data_heap` (a `cc::allocating_container<T>`) is placement-constructed so its
-/// resource word overlaps that trailing tag word, making the mode readable either way (mirrors
-/// `cc::string`'s SSO). The struct is **48 B** for `alignof(T) <= 8` and a small inline buffer, and
-/// grows only to fit a larger inline buffer — no wasted leading bytes. Over-aligned `T` is handled with no
-/// special dependency: the struct picks up `alignof(T)` (elements at offset 0 are correctly aligned) and the
-/// footprint rounds up to it — e.g. `small_vector<float4, 2>` (16 B/16-aligned) is still 48 B, while
-/// `small_vector<float8, 1>` (32 B/32-aligned) rounds to 64 B. The heap side reuses
-/// `cc::allocation`'s growth strategy, cache-line alignment, memory-resource support, and exception
-/// guarantees. The public surface mirrors
-/// `cc::vector` (create_* factories, resize_* family, pop_back/remove_back, extract_allocation) so it
-/// feels the same. `is_inline()` reports whether storage is still the inline buffer. Value semantics
-/// (deep copy); a moved-from small_vector is left empty and inline.
+/// `N` is a *minimum* inline capacity, not the exact one.
+/// The buffer auto-grows to fill the storage footprint, so `inline_capacity()` is >= N — `small_vector<int, 4>` holds 9 inline.
+///
+/// Storage is a single raw buffer: elements at the front, then a `u32` size, and the tagged memory-resource pointer as the trailing 8 bytes.
+/// The pointer's low bit marks inline mode, which an 8-aligned pointer leaves free.
+/// In heap mode a `data_heap` is placement-constructed so its resource word overlaps that trailing tag word, making the mode readable either way.
+///
+/// The struct is **48 B** where pointers are 64-bit and `alignof(T) <= 8`, and grows only to fit a larger inline buffer.
+/// Over-aligned `T` needs no special handling: the struct picks up `alignof(T)`, and the footprint rounds up to it.
+/// So `small_vector<float4, 2>` (16 B, 16-aligned) is still 48 B, while `small_vector<float8, 1>` (32 B, 32-aligned) rounds to 64 B.
+///
+/// The heap side is a `cc::allocating_container<T>`, so growth strategy, cache-line alignment, memory resources and exception guarantees are `cc::vector`'s.
+/// The public surface mirrors `cc::vector` too — create_* factories, the resize_* family, pop_back/remove_back, extract_allocation.
+/// `is_inline()` reports whether storage is still the inline buffer; a reference taken while it is true does not survive the spill to the heap.
+/// Value semantics (deep copy); a moved-from small_vector is left empty and inline.
+///
+/// See [containers](../../../docs/containers.md) for the contracts every container shares.
 ///
 /// Usage:
 ///   cc::small_vector<int, 4> v; // holds >= 4 ints without allocating (9 in practice)
@@ -231,7 +231,8 @@ public:
         return heap_ptr()->emplace_back(cc::forward<Args>(args)...);
     }
 
-    /// Removes and returns the last element. Precondition: !empty().
+    /// Removes and returns the last element.
+    /// Precondition: !empty().
     [[nodiscard]] T pop_back()
     {
         CC_ASSERT(!empty(), "pop_back() on empty small_vector");
@@ -240,7 +241,8 @@ public:
         return value;
     }
 
-    /// Removes the last element without returning it. Precondition: !empty().
+    /// Removes the last element without returning it.
+    /// Precondition: !empty().
     void remove_back()
     {
         CC_ASSERT(!empty(), "remove_back() on empty small_vector");
@@ -270,14 +272,16 @@ public:
     T& push_back_stable(T const& value) { return emplace_back_stable(value); }
     T& push_back_stable(T&& value) { return emplace_back_stable(cc::move(value)); }
 
-    /// Removes and returns the element at `idx`, preserving order. Precondition: 0 <= idx < size().
+    /// Removes and returns the element at `idx`, preserving order.
+    /// Precondition: 0 <= idx < size().
     [[nodiscard]] T pop_at(isize idx)
     {
         T value = cc::move((*this)[idx]);
         remove_at(idx);
         return value;
     }
-    /// Removes the element at `idx`, preserving order (O(n) compaction). Precondition: 0 <= idx < size().
+    /// Removes the element at `idx`, preserving order (O(n) compaction).
+    /// Precondition: 0 <= idx < size().
     void remove_at(isize idx)
     {
         CC_ASSERT(idx >= 0 && idx < size(), "remove_at index out of bounds");
@@ -302,7 +306,8 @@ public:
         _shrink_to(last);
     }
 
-    /// Removes `count` elements starting at `start`, preserving order. Precondition: start + count <= size().
+    /// Removes `count` elements starting at `start`, preserving order.
+    /// Precondition: start + count <= size().
     void remove_at_range(isize start, isize count)
     {
         CC_ASSERT(start >= 0 && count >= 0 && start + count <= size(), "remove_at_range out of bounds");
@@ -322,7 +327,8 @@ public:
         cc::impl::compact_move_objects_backward(d + start, d + size() - count, d + size());
         _shrink_to(size() - count);
     }
-    /// Removes the range [start, end), preserving order. Precondition: start <= end <= size().
+    /// Removes the range [start, end), preserving order.
+    /// Precondition: start <= end <= size().
     void remove_from_to(isize start, isize end)
     {
         CC_ASSERT(start >= 0 && start <= end && end <= size(), "remove_from_to out of bounds");
@@ -441,7 +447,8 @@ public:
             heap_ptr()->reserve_back_exact(count - heap_ptr()->size());
     }
 
-    /// Shrinks to `new_size` by destroying trailing elements. Precondition: new_size <= size().
+    /// Shrinks to `new_size` by destroying trailing elements.
+    /// Precondition: new_size <= size().
     void resize_down_to(isize new_size)
     {
         CC_ASSERT(new_size >= 0 && new_size <= size(), "resize_down_to: new_size must be in [0, size()]");
@@ -539,8 +546,8 @@ public:
     /// Ensures capacity for `count` more elements beyond the current size (exact allocation).
     void reserve_back_exact(isize count) { reserve_exact(size() + count); }
 
-    /// Reduces capacity toward the current size. If the elements fit inline, returns to inline storage
-    /// (freeing the heap allocation); otherwise shrinks the heap allocation.
+    /// Reduces capacity toward the current size.
+    /// If the elements fit inline this returns to inline storage and frees the heap allocation; otherwise it shrinks the heap allocation.
     void shrink_to_fit()
     {
         if (is_small())
@@ -562,8 +569,8 @@ public:
 
     // allocation extraction
 public:
-    /// Extracts the underlying allocation, leaving this empty. If currently inline, the elements are first
-    /// materialized into a fresh heap allocation. Mirrors cc::vector::extract_allocation.
+    /// Extracts the underlying allocation, leaving this empty.
+    /// If currently inline, the elements are first materialized into a fresh heap allocation.
     [[nodiscard]] cc::allocation<T> extract_allocation()
     {
         if (is_small())
@@ -648,8 +655,8 @@ private:
         return *reinterpret_cast<cc::memory_resource const* const*>(_storage + k_res_word_off);
     }
 
-    // SSO tag: the low bit of the resource pointer marks inline mode. Resource pointers are 8-aligned, so
-    // the bit is free. Read mode-agnostically via the tag word (which aliases the heap allocation's resource).
+    // SSO tag: the low bit of the resource pointer marks inline mode, and an 8-aligned resource pointer leaves that bit free.
+    // Read it mode-agnostically through the tag word, which aliases the heap allocation's resource.
     [[nodiscard]] bool is_small() const { return (reinterpret_cast<uintptr_t>(tag_word()) & 1) != 0; }
     [[nodiscard]] cc::memory_resource const* resource() const { return remove_small_tag(tag_word()); }
 
@@ -662,7 +669,8 @@ private:
         return reinterpret_cast<cc::memory_resource const*>(reinterpret_cast<uintptr_t>(r) & ~uintptr_t(1));
     }
 
-    // Establish an empty inline vector with the given (sticky) resource. Precondition: storage is uninitialized.
+    // Establish an empty inline vector with the given (sticky) resource.
+    // Precondition: storage is uninitialized.
     void initialize_small_empty(cc::memory_resource const* resource)
     {
         sso_size() = 0;
@@ -670,7 +678,8 @@ private:
     }
 
     // Move the inline elements into a fresh heap allocation of at least `min_capacity`, then switch modes.
-    // Precondition: currently small. `exact` uses exact (non-exponential) allocation.
+    // Precondition: currently small.
+    // `exact` requests an exact rather than exponential allocation.
     void _spill_to_heap(isize min_capacity, bool exact = false)
     {
         isize const cur = isize(sso_size());
@@ -709,7 +718,8 @@ private:
             heap_ptr()->~data_heap();
     }
 
-    // Deep-copy rhs into a fresh (uninitialized) *this. Picks inline storage when the content fits.
+    // Deep-copy rhs into a fresh (uninitialized) *this.
+    // Picks inline storage when the content fits.
     void _init_copy(small_vector const& rhs)
     {
         if (rhs.size() <= k_inline_cap)

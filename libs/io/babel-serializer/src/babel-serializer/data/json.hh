@@ -43,7 +43,8 @@ enum class node_kind : u8
     object,
 };
 
-/// One parsed value in the document's flat node array. Not used directly — traverse via `ref`.
+/// One parsed value in the document's flat node array.
+/// Not used directly — traverse via `ref`.
 /// The payload fields are read according to `kind`; the unrelated ones are left at 0.
 struct node
 {
@@ -189,7 +190,9 @@ inline ref document::root() const
 // reading
 // -------------------------------------------------------------------------------------------------
 
-/// Parse a complete JSON document from a stream. Trailing whitespace is allowed; trailing junk is an error.
+/// Parse a complete JSON document from a stream.
+/// Trailing whitespace is allowed; trailing junk is an error.
+/// `\uXXXX` escapes and surrogate pairs decode to UTF-8 into the arena, and an unpaired surrogate is an error.
 /// Parses against the stream's buffered window; the resulting document owns everything it needs.
 [[nodiscard]] cc::result<document> read(cc::read_stream& in);
 

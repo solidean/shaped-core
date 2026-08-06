@@ -7,13 +7,8 @@
 
 using namespace cc::primitive_defines;
 
-// mimalloc-backed implementation of cc::default_memory_resource. mimalloc is a fast
-// general-purpose allocator; routing the default resource through it speeds up every
-// non-node allocation (cc::vector, cc::string, ...). The <mimalloc.h> dependency is
-// confined to this translation unit so clean-core's headers stay free of it.
-//
-// The node allocator (node_allocation.*) is a separate fast path and is unaffected,
-// though it now draws its slabs from mimalloc via this default resource.
+// mimalloc-backed implementation of cc::default_memory_resource.
+// The <mimalloc.h> dependency is confined to this translation unit, so clean-core's headers stay free of it.
 
 namespace
 {
@@ -72,14 +67,9 @@ isize mi_try_resize_bytes_in_place(byte* p, isize old_bytes, isize min_bytes, is
     CC_ASSERT(old_bytes > 0, "old_bytes must be positive");
     CC_ASSERT(1 <= min_bytes && min_bytes <= max_bytes, "must have 1 <= min_bytes <= max_bytes");
 
-    // An in-place resize succeeds iff min_bytes still fits the block's usable
-    // size; the block never moves, so pointers into the allocation stay valid.
-    // We query mi_usable_size directly rather than via mi_expand: mi_expand is a
-    // documented no-op (always fails) under mimalloc's padding/guard debug modes
-    // (MI_DEBUG/MI_SECURE), which would make every resize fail there. mi_usable_size
-    // excludes the padding region, so reporting capacity up to it keeps writes
-    // inside the user block and leaves mimalloc's overflow canary intact. This
-    // matches mi_expand's release semantics exactly while also working in debug.
+    // An in-place resize succeeds iff min_bytes still fits the block's usable size, and the block never moves, so pointers into the allocation stay valid.
+    // mi_usable_size rather than mi_expand: mi_expand is a documented no-op under mimalloc's padding/guard debug modes (MI_DEBUG / MI_SECURE), which would make every resize fail there.
+    // mi_usable_size excludes the padding region, so reporting capacity up to it keeps writes inside the user block and leaves mimalloc's overflow canary intact.
     isize const usable = static_cast<isize>(mi_usable_size(p));
     if (min_bytes > usable)
     {

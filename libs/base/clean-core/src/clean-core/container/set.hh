@@ -11,7 +11,8 @@
 ///   - Heterogeneous membership tests and inserts: contains/erase/insert take any probe type the hasher and
 ///     comparator accept.
 ///
-/// Not thread-safe for mutation; concurrent readers are fine. See cc::map for the hashing requirements.
+/// Not thread-safe for mutation; concurrent readers are fine.
+/// See cc::map for the hashing requirements.
 template <class T, class Hash, class KeyEqual>
 struct cc::set
 {

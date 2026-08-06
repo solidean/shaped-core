@@ -9,11 +9,11 @@
 
 namespace sg
 {
-/// A strongly-typed view onto a raw_texture whose shape is fixed at compile time by `Traits` (a
-/// `texture_traits`). Privately holds a raw_texture_handle; adds shape-specific accessors gated by
-/// `requires` so, e.g., `depth()` exists only on 3D textures — misuse is a compile error, not a runtime
-/// check. Reach the raw resource for the general (raw) API via `raw()`. Value type: copy is a cheap
-/// handle copy. Prefer the typedefs (`texture_2d`, `texture_cube_array`, …) over spelling Traits.
+/// A strongly-typed view onto a raw_texture whose shape is fixed at compile time by `Traits`, a `texture_traits`.
+/// Shape-specific accessors are gated by `requires`, so `depth()` exists only on 3D textures and misuse is a compile error.
+/// `raw()` reaches the underlying resource for the general API.
+/// A value type, so copying is a cheap handle copy.
+/// Prefer the typedefs — `texture_2d`, `texture_cube_array`, … — over spelling `Traits` out.
 template <class Traits>
 class texture
 {
@@ -40,9 +40,9 @@ public:
 
     texture() = default;
 
-    // -- Wrapping a raw_texture over the shape relationship: `from_raw` requires the runtime shape to match
-    //    `Traits` (asserts; `try_from_raw` is the checked twin). Both require a non-null handle (null is a
-    //    contract bug, not a runtime failure).
+    // -- Wrapping a raw_texture, over the shape relationship.
+    //    `from_raw` requires the runtime shape to match `Traits` and asserts it; `try_from_raw` is the checked twin.
+    //    Both require a non-null handle, since null is a contract bug rather than a runtime failure.
 
     /// Wrap a raw_texture whose runtime shape matches `Traits` (see texture_traits::matches).
     [[nodiscard]] static texture from_raw(raw_texture_handle raw)
@@ -61,8 +61,8 @@ public:
         return texture(cc::move(raw));
     }
 
-    /// The underlying raw resource (never null unless default-constructed). Use this to reach the raw
-    /// (general) API; there is no implicit conversion to raw_texture_handle.
+    /// The underlying raw resource, never null unless default-constructed.
+    /// Use it to reach the general API; there is no implicit conversion to `raw_texture_handle`.
     [[nodiscard]] raw_texture_handle const& raw() const { return _raw; }
 
     // Always-available runtime queries.
@@ -92,11 +92,10 @@ public:
         return _raw->sample_count();
     }
 
-    // Shader-facing views. `as_readonly_view` / `as_readwrite_view` are the natural views (the texture's
-    // own dimension); the `_2d` / `_1d` / `cube` variants reinterpret one slice / face / cube as a lower
-    // dimension, so binding one slice is a *different binding* than a size-1 array window. Each takes a
-    // shape-specific parameter bag (the `*_params` typedefs above) naming only the axes that shape has,
-    // and asserts the matching texture_usage.
+    // Shader-facing views — libs/graphics/shaped-graphics/docs/concepts/views.md has the factory surface in full.
+    // `as_readonly_view` / `as_readwrite_view` are the natural views, in the texture's own dimension.
+    // The `_2d` / `_1d` / `cube` variants reinterpret one slice, face or cube as a lower dimension.
+    // Each takes the shape-specific parameter bag its `*_params` typedef above names, and asserts the matching texture_usage.
 
     /// Sampled (SRV) view over the whole texture in its natural dimension.
     [[nodiscard]] auto as_readonly_view(read_only_params const& params = {}) const
@@ -104,7 +103,8 @@ public:
         return _make_readonly<_srv_whole_dim()>(_natural_array_range(params), _mips(params));
     }
 
-    /// Sampled view of one array slice, bound as a Texture2D (or Texture2DMS). Only on 2D array shapes.
+    /// Sampled view of one array slice, bound as a Texture2D (or Texture2DMS).
+    /// Only on 2D array or cube shapes.
     [[nodiscard]] auto as_readonly_2d_view(read_only_2d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
@@ -112,14 +112,16 @@ public:
         return _make_readonly<dim>(_single(_pick_slice(params)), _mips(params));
     }
 
-    /// Sampled view of one array slice, bound as a Texture1D. Only on 1D array textures.
+    /// Sampled view of one array slice, bound as a Texture1D.
+    /// Only on 1D array textures.
     [[nodiscard]] auto as_readonly_1d_view(read_only_1d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
         return _make_readonly<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), _mips(params));
     }
 
-    /// Sampled view of one cube (all 6 faces) of a cube array, bound as a TextureCube. Only on cube arrays.
+    /// Sampled view of one cube (all 6 faces) of a cube array, bound as a TextureCube.
+    /// Only on cube arrays.
     [[nodiscard]] auto as_readonly_cube_view(read_only_cube_params const& params = {}) const
         requires(Traits::is_cube && Traits::is_array && !Traits::is_multisampled)
     {
@@ -128,22 +130,24 @@ public:
             {.start = isize(params.cube) * 6, .end = isize(params.cube) * 6 + 6}, _mips(params));
     }
 
-    /// Sampled view of a cube's faces as a plain Texture2DArray (all faces, or a slice sub-range). Only on
-    /// cubes — the alternative to the natural TextureCube view.
+    /// Sampled view of a cube's faces as a plain Texture2DArray — all faces, or a slice sub-range.
+    /// Only on cubes, as the alternative to the natural TextureCube view.
     [[nodiscard]] auto as_readonly_2d_array_view(read_only_2d_array_params const& params = {}) const
         requires(Traits::is_cube && !Traits::is_multisampled)
     {
         return _make_readonly<texture_view_dimension::tex_2d_array>(_natural_array_range(params), _mips(params));
     }
 
-    /// Storage (UAV) view over the whole texture at one mip level. Not on multisampled textures.
+    /// Storage (UAV) view over the whole texture at one mip level.
+    /// Not on multisampled textures.
     [[nodiscard]] auto as_readwrite_view(read_write_params const& params = {}) const
         requires(!Traits::is_multisampled)
     {
         return _make_readwrite<_uav_whole_dim()>(_natural_array_range(params), params.mip, _depth_slices(params));
     }
 
-    /// Storage view of one array slice / cube face, bound as a Texture2D. Only on non-MS 2D array shapes.
+    /// Storage view of one array slice / cube face, bound as a Texture2D.
+    /// Only on non-MS 2D array shapes.
     [[nodiscard]] auto as_readwrite_2d_view(read_write_2d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
                  && (Traits::is_array || Traits::is_cube))
@@ -152,7 +156,8 @@ public:
                                                                _whole_depth_slice_range());
     }
 
-    /// Storage view of one array slice, bound as a Texture1D. Only on non-MS 1D array textures.
+    /// Storage view of one array slice, bound as a Texture1D.
+    /// Only on non-MS 1D array textures.
     [[nodiscard]] auto as_readwrite_1d_view(read_write_1d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
@@ -160,18 +165,21 @@ public:
                                                                _whole_depth_slice_range());
     }
 
-    // Render-target / depth-stencil views — bind the texture as a graphics-pipeline color / depth-stencil
-    // target. These are *not* shader-facing (they don't erase to raw_view); they target a single mip level
-    // and slice range. 2D-shaped only; MSAA is allowed. The format must be renderable (RTV) / a depth format (DSV).
+    // Render-target / depth-stencil views — bind the texture as a graphics-pipeline color or depth-stencil target.
+    // Not shader-facing, so they do not erase to raw_view.
+    // 2D-shaped only, over one mip level plus a slice range, and MSAA is allowed.
+    // The format must be renderable (RTV) or a depth format (DSV), which the factories assert.
 
-    /// Render-target view over the whole texture at one mip. Only on 2D-shaped textures.
+    /// Render-target view over the whole texture at one mip.
+    /// Only on 2D-shaped textures.
     [[nodiscard]] render_target_view as_render_target_view(render_target_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2)
     {
         return _make_render_target(_target_view_whole_dim(), _natural_array_range(params), params.mip);
     }
 
-    /// Render-target view of one array slice / cube face, bound as a Texture2D. Only on 2D array/cube shapes.
+    /// Render-target view of one array slice / cube face, bound as a Texture2D.
+    /// Only on 2D array / cube shapes.
     [[nodiscard]] render_target_view as_render_target_2d_view(render_target_2d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
@@ -179,14 +187,16 @@ public:
         return _make_render_target(dim, _single(_pick_slice(params)), params.mip);
     }
 
-    /// Depth-stencil view over the whole texture at one mip. Only on 2D-shaped textures.
+    /// Depth-stencil view over the whole texture at one mip.
+    /// Only on 2D-shaped textures.
     [[nodiscard]] depth_stencil_view as_depth_stencil_view(depth_stencil_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2)
     {
         return _make_depth_stencil(_target_view_whole_dim(), _natural_array_range(params), params.mip);
     }
 
-    /// Depth-stencil view of one array slice / cube face, bound as a Texture2D. Only on 2D array/cube shapes.
+    /// Depth-stencil view of one array slice / cube face, bound as a Texture2D.
+    /// Only on 2D array / cube shapes.
     [[nodiscard]] depth_stencil_view as_depth_stencil_2d_view(depth_stencil_2d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
@@ -225,8 +235,9 @@ private:
             return (Traits::is_array || Traits::is_cube) ? d::tex_2d_array : d::tex_2d;
     }
 
-    // The dimension a whole-texture render-target / depth-stencil view binds as: 2D only, a cube renders as a 2D array;
-    // MSAA is allowed (unlike UAV). Only instantiated on d2 shapes (the factories are d2-gated).
+    // The dimension a whole-texture render-target / depth-stencil view binds as: 2D only, with a cube rendering as a 2D array.
+    // MSAA is allowed, unlike a UAV.
+    // Only instantiated on d2 shapes, since the factories are d2-gated.
     [[nodiscard]] static constexpr texture_view_dimension _target_view_whole_dim()
     {
         using d = texture_view_dimension;
@@ -264,7 +275,8 @@ private:
         return {.start = slice, .end = slice + 1};
     }
 
-    // The mip range a params bag selects: `p.mips` if present, else the whole range. MSAA has one mip.
+    // The mip range a params bag selects: `p.mips` if present, else the whole range.
+    // MSAA has one mip.
     template <class P>
     [[nodiscard]] cc::start_end _mips(P const& p) const
     {
@@ -317,8 +329,7 @@ private:
 
     // -- View assembly (assert usage, fill the subresource range). --
 
-    // The shader-facing view dimension is compile-time (constexpr from Traits), so it becomes the view's
-    // `Traits` type parameter here rather than a runtime field.
+    // The shader-facing view dimension is compile-time, constexpr from Traits, so it becomes the view's `Traits` type parameter here rather than a runtime field.
     template <texture_view_dimension Dim>
     [[nodiscard]] readonly_texture_view<texture_view_traits<Dim>> _make_readonly(cc::start_end array_range,
                                                                                  cc::start_end mip_range) const
@@ -378,8 +389,8 @@ private:
     raw_texture_handle _raw = nullptr;
 };
 
-// Shape typedefs — the ergonomic names. Anything not spelled is defaulted (non-array, non-cube,
-// single-sampled).
+// Shape typedefs — the ergonomic names.
+// Anything not spelled out is defaulted: non-array, non-cube, single-sampled.
 using texture_1d = texture<texture_traits<texture_dimension::d1>>;
 using texture_2d = texture<texture_traits<texture_dimension::d2>>;
 using texture_3d = texture<texture_traits<texture_dimension::d3>>;
@@ -394,8 +405,8 @@ using texture_2d_array_ms = texture<texture_traits<texture_dimension::d2, true, 
 using texture_cube_ms = texture<texture_traits<texture_dimension::d2, false, true, true>>;
 using texture_cube_array_ms = texture<texture_traits<texture_dimension::d2, true, true, true>>;
 
-// raw_texture -> texture<Traits> (declared on raw_texture, defined here where the wrapper + typedefs are
-// complete). Thin wrappers over from_raw / try_from_raw so a handle re-types with `raw->as_texture_2d()`.
+// raw_texture -> texture<Traits>, declared on raw_texture and defined here where the wrapper and typedefs are complete.
+// Thin wrappers over from_raw / try_from_raw, so a handle re-types with `raw->as_texture_2d()`.
 inline auto raw_texture::as_texture_1d() const
 {
     return texture_1d::from_raw(shared_from_this());

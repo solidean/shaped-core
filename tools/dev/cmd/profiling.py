@@ -1,8 +1,7 @@
-"""`profiling` — profiling helpers for shaped-core.
+"""`profiling` — profiling helpers, one subcommand per capability.
 
-Today it exposes a single subcommand, `counters`, which lists the hardware performance counters the current
-machine can actually measure (via nexus/bench). It is a home for more profiling tooling over time — each
-capability is its own subcommand under `dev.py profiling`.
+`counters` lists the hardware performance counters the current machine can actually measure, via nexus/bench.
+docs/guides/profiling.md is the workflow.
 """
 
 from __future__ import annotations
@@ -18,8 +17,8 @@ from .context import Context
 
 NAME = "profiling"
 
-# The nexus manual test whose body calls nx::bench::print_hw_counters(). Run by exact name so it fires
-# regardless of bucket. Keep in sync with libs/base/nexus/tests/bench-hardware-counters-test.cc.
+# The nexus manual test whose body calls nx::bench::print_hw_counters(), named exactly so it fires regardless of bucket.
+# Must stay in sync with libs/base/nexus/tests/bench-hardware-counters-test.cc.
 _COUNTERS_TEST = "nexus bench - list hardware counters"
 
 

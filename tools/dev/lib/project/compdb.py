@@ -1,10 +1,8 @@
 """Read and query a preset's compilation database (compile_commands.json).
 
-This is the ground truth of what the compiler is actually invoked with, per
-translation unit — the same database clangd reads. `info compile-command` uses it
-to print the exact command for one source file. CMake writes absolute,
-forward-slash `file` paths; matching here is separator- and case-insensitive so a
-repo-relative path or a bare filename resolves on Windows too.
+The ground truth of what the compiler is actually invoked with, per translation unit — the same database clangd reads.
+`info compile-command` uses it to print the exact command for one source file.
+CMake writes absolute, forward-slash `file` paths, and matching here is separator- and case-insensitive so a repo-relative path or a bare filename resolves on Windows too.
 """
 
 from __future__ import annotations
@@ -33,9 +31,10 @@ def _norm(p: str | Path) -> str:
 
 
 def find_entry(entries: list[dict], file: Path, root: Path) -> dict | None:
-    """Locate the entry for `file`: by absolute/repo-relative path, else a unique
-    filename-or-suffix tail. Returns None when nothing matches or the tail is
-    ambiguous (the caller surfaces suggestions)."""
+    """Locate the entry for `file`: by absolute or repo-relative path, else a unique filename-or-suffix tail.
+
+    None when nothing matches, or when the tail is ambiguous — the caller surfaces suggestions.
+    """
     raw = str(file)
     target = file if file.is_absolute() else root / file
     want = _norm(target)
@@ -53,8 +52,7 @@ def find_entry(entries: list[dict], file: Path, root: Path) -> dict | None:
 
 
 def suggest_files(entries: list[dict], file: Path, limit: int = 10) -> list[str]:
-    """Files in the database that look related to `file` (same name, then same
-    stem) — for a 'did you mean' hint when find_entry comes up empty."""
+    """Files in the database that look related to `file`, by same name then same stem, for a 'did you mean' hint when find_entry comes up empty."""
     name = _norm(Path(str(file)).name)
     same_name = [e["file"] for e in entries if _norm(Path(e["file"]).name) == name]
     if same_name:

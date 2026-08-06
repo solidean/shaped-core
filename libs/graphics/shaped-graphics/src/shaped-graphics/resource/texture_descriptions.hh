@@ -2,12 +2,11 @@
 
 #include <shaped-graphics/resource/texture.hh> // texture<Traits> + the shape typedefs
 
-/// Shape-specific texture descriptions — the input to the typed `create_texture_*` factories on the
-/// context scopes (context/persistent.hh, context/transient.hh). Each exposes only the parameters that
-/// are *free* for its shape (a plain 2D texture has no depth / layers / samples), so a nonsensical field
-/// is a compile error rather than an ignored value. `to_texture_description()` expands one into the full
-/// `texture_description` by filling in the shape-fixed fields; the factory then creates the raw_texture
-/// and wraps it in the matching `texture<Traits>` (named by the `texture_type` alias).
+/// Shape-specific texture descriptions — the input to the typed `create_texture_*` factories on the context scopes (context/persistent.hh, context/transient.hh).
+/// Each exposes only the parameters that are *free* for its shape, so a plain 2D texture has no depth / layers / samples.
+/// A nonsensical field is therefore a compile error rather than an ignored value.
+/// `to_texture_description()` expands one into the full `texture_description` by filling in the shape-fixed fields.
+/// The factory then creates the raw_texture and wraps it in the matching `texture<Traits>`, named by the `texture_type` alias.
 
 namespace sg
 {

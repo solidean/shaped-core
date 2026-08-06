@@ -6,9 +6,9 @@
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh>
 
-// Texture subresource barrier tracking + dx12 emission. The tracker (dx12_texture_access) is pure logic,
-// so most of this is GPU-free; a final WARP smoke test drives real D3D12_TEXTURE_BARRIERs through the
-// debug layer. No public op records against a texture yet — these drive the wired substrate directly.
+// Texture subresource barrier tracking plus dx12 emission.
+// The tracker (dx12_texture_access) is pure logic, so most of this is GPU-free; a final WARP smoke test drives real D3D12_TEXTURE_BARRIERs through the debug layer.
+// These drive the tracker directly, rather than through a public op recording against the texture.
 
 namespace
 {
@@ -31,9 +31,8 @@ sg::subresource_range whole_of(sg::texture_description const& d)
     return sg::subresource_range::whole(dx12::subresource_extent_of(d));
 }
 
-// Declare one access and immediately flush it — models a single op declaring a single binding, returning the
-// barriers that op would emit. (The real path declares every binding first, then flushes once; these tests
-// each declare a single access per op.)
+// Declare one access and immediately flush it — models a single op declaring a single binding, returning the barriers that op would emit.
+// The real path declares every binding first, then flushes once; these tests each declare a single access per op.
 cc::small_vector<dx12::dx12_subresource_barrier, 4> declare_flush(dx12::dx12_texture_access& acc,
                                                                   sg::command_list_slot slot,
                                                                   sg::subresource_range range,
@@ -132,8 +131,8 @@ TEST("sg dx12 - combine_layouts folds sampled+storage to COMMON and flags real c
 
 TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to COMMON")
 {
-    // Two views of one texture in the same op — shader_readonly (SRV) and shader_readwrite (UAV) — combine to
-    // the COMMON (general) layout, in a single barrier carrying both accesses. (Emits a one-time perf warning.)
+    // Two views of one texture in the same op — shader_readonly (SRV) and shader_readwrite (UAV) — combine to the COMMON (general) layout.
+    // They arrive as a single barrier carrying both accesses, plus a one-time perf warning.
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
     auto const slot = sg::command_list_slot(0);
@@ -158,8 +157,8 @@ TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to CO
 
 TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly once per op")
 {
-    // The command list enqueues a texture for the pre-op barrier flush only when mark_pending_barrier returns
-    // true — the first binding of the op. flush clears the flag, so the next op enqueues it again.
+    // The command list enqueues a texture for the pre-op barrier flush only when mark_pending_barrier returns true, on the first binding of the op.
+    // flush clears the flag, so the next op enqueues it again.
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
     auto const slot = sg::command_list_slot(0);
@@ -174,9 +173,9 @@ TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly on
 
 TEST("sg dx12 - mark_recorded reports the slot's first record")
 {
-    // The command list uses mark_recorded to add a texture to its finalize set exactly once (O(1), no scan):
-    // true the first time per slot, false after, and true again once the slot is cleared. Real flow: a slot
-    // is always declared (seeded active) before it is recorded, and discard requires an active slot.
+    // The command list uses mark_recorded to add a texture to its finalize set exactly once, in O(1) with no scan.
+    // True the first time per slot, false after, and true again once the slot is cleared.
+    // In the real flow a slot is always declared (seeded active) before it is recorded, and discard requires an active slot.
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
     auto const s0 = sg::command_list_slot(0);
@@ -318,8 +317,8 @@ TEST("sg dx12 - emits well-formed texture barriers on WARP")
     REQUIRE(cmd.has_value());
     auto const range = whole_of(d);
 
-    // Drive the declare → emit path by hand (the future public texture op will do this via
-    // track_texture_access): general → copy_dst, then copy_dst → shader_readonly.
+    // Drive the declare → emit path by hand, the way track_texture_access does for a real op.
+    // general → copy_dst, then copy_dst → shader_readonly.
     auto emit = [&](cc::span<dx12::dx12_subresource_barrier const> barriers)
     {
         cc::vector<D3D12_TEXTURE_BARRIER> batch;

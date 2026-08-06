@@ -1,15 +1,14 @@
 # shaped-viewer
 
-The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API,
-built on [shaped-rendering](../shaped-rendering/readme.md). Namespace `sv`. Depends on
-**shaped-rendering** (and transitively shaped-graphics + typed-geometry + clean-core). Part of
-the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
+The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, built on [shaped-rendering](../shaped-rendering/readme.md).
+Namespace `sv`.
+Depends on **shaped-rendering** (and transitively shaped-graphics + typed-geometry + clean-core).
+Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
-sv will grow into Shaped Code's visualization renderer — the top of the graphics stack, serving
-SOLIDEAN, internal tools, and customer visualization needs.
+sv will grow into Shaped Code's visualization renderer — the top of the graphics stack, serving SOLIDEAN, internal tools, and customer visualization needs.
 
-This library has a **first vertical slice**: a per-frame `viewer_definition` of views, each path-traced
-into a target texture and blitted into a window by the `view_renderer` routine — raytracing-first, dx12 + DXR today.
+The library has a **first vertical slice**: a per-frame `viewer_definition` of views, each path-traced into a target texture.
+The `view_renderer` routine blits them into a window; raytracing-first, dx12 + DXR today.
 See [docs/structure.md](docs/structure.md) for the roadmap and [cheat-sheet.md](cheat-sheet.md) for the API.
 
 ## Building & testing
@@ -24,9 +23,8 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 
 ## More
 
-- [cheat-sheet.md](cheat-sheet.md) — the public API at a glance (empty for now).
+- [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
 - [docs/_index.md](docs/_index.md) — shaped-viewer's documentation hub.
 - [docs/structure.md](docs/structure.md) — the intended module roadmap.
-- [docs/coding-guidelines.md](docs/coding-guidelines.md) — sv-specific conventions (thin for
-  now), on top of the repo-wide ones.
+- [docs/coding-guidelines.md](docs/coding-guidelines.md) — sv-specific conventions (thin for now), on top of the repo-wide ones.
 - [graphics.md](../../../docs/graphics.md) — the whole graphics family overview.

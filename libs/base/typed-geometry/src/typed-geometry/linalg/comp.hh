@@ -9,15 +9,13 @@ namespace tg
 {
 /// Neutral component container: D values of T with no geometric semantics.
 ///
-/// comp is the semantics-free building block. Unlike vec/pos it carries no notion of
-/// direction or position; it is just "D components". Precisely because it has no geometry, it
-/// is the home of the **raw, fully component-wise arithmetic**: every operator acts element by
-/// element, and a scalar operand broadcasts to all components. (vec/pos deliberately do NOT
-/// offer Hadamard `*`/`/` or scalar broadcast — those only make sense on plain components.)
+/// Unlike vec/pos, comp carries no notion of direction or position — it is just "D components".
+/// Precisely because it has no geometry, it is the home of the **raw, fully component-wise arithmetic**.
+/// Every operator acts element by element, and a scalar operand broadcasts to all components.
+/// vec/pos deliberately offer neither Hadamard `*`/`/` nor scalar broadcast, since those only make sense on plain components.
 ///
-/// The raw storage is the public C array member `data`. Components are accessed through
-/// `data` or operator[] — there are no .x/.y/.z members. Default construction
-/// zero-initializes all components.
+/// Components live in the public array member `data`, reached through `data` or operator[] — there are no .x/.y/.z members.
+/// Default construction zero-initializes every component.
 ///
 ///     tg::comp3f c;                       // {0, 0, 0}
 ///     auto const s = tg::comp3f(1.0f);    // splat -> {1, 1, 1}
@@ -79,7 +77,8 @@ public:
 
     // special values
 public:
-    /// all components zero. Runtime constant, not usable in constant expressions.
+    /// all components zero.
+    /// Runtime constant, not usable in constant expressions.
     static comp const zero;
 
     // access

@@ -13,11 +13,13 @@ namespace sg
 ///
 /// Initialization is three phases, kept apart so async pipeline compilation can start long before a command list exists:
 ///
-///   init_once        persistent one-time work, independent of shader content. Never re-runs — not
-///                    even on hot reload (e.g. a CPU-computed noise buffer, uploaded once).
-///   init_declare     acquire shaders, acquire async pipelines (kicking off background compiles), kick
-///                    off uploads. Records no GPU work and opens no command list. Re-runs after a reload.
-///   init_materialize record GPU init work (dispatches, clears, LUT bakes). Re-runs after a reload.
+///   init_once        persistent one-time work, independent of shader content.
+///                    Never re-runs, not even on hot reload — a CPU-computed noise buffer uploaded once, say.
+///   init_declare     acquire shaders, acquire async pipelines (kicking off background compiles), kick off uploads.
+///                    Records no GPU work and opens no command list.
+///                    Re-runs after a reload.
+///   init_materialize record GPU init work: dispatches, clears, LUT bakes.
+///                    Re-runs after a reload.
 ///
 /// Most routines need only init_declare; the other two default to no-ops.
 /// Re-init is driven by sg's process-global reload generation (sg::reload_generation):

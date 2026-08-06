@@ -6,31 +6,23 @@
 
 """clang-tidy gate runner for shaped-core.
 
-The first tenant of the `tools/lint/` linting framework, and where the clang-tidy logic actually lives —
-`dev.py lint clang-tidy` is thin wiring that shells out to this script (and `dev.py check` runs it dirty-only).
+Where the clang-tidy logic actually lives: `dev.py lint clang-tidy` is thin wiring that shells out to this script, and `dev.py check` runs it dirty-only.
 It is also usable standalone: `uv run tools/lint/clang-tidy.py --build-dir build/<preset>`.
 
-It runs clang-tidy against the strict whitelist in tools/lint/clang-tidy-gates.yml — NOT the root .clang-tidy
-(that one is the IDE incubator). That file is our own schema (`gates`, each with a `why`), which this script
-translates into clang-tidy's `-*,<gates>` config (passed via `--config`, so the root .clang-tidy is never
-auto-discovered). Every whitelisted check is a gate: `--warnings-as-errors=*` makes any firing check a
-non-zero exit, so `check` can treat a green run as "safe to commit".
+The gates are the strict whitelist in tools/lint/clang-tidy-gates.yml — our own schema, `gates` each carrying a `why` — which this script translates into clang-tidy's `-*,<gates>` config.
+Passing that via `--config` also stops clang-tidy auto-discovering the root .clang-tidy, which is the broader IDE incubator rather than a gate.
+`--warnings-as-errors=*` makes any firing check a non-zero exit, so `check` can treat a green run as "safe to commit".
 
-Only `.cc` translation units are linted; the compilation database has no entry for a bare header.
-First-party headers still surface diagnostics via `--header-filter` (they are seen through the `.cc` that
-includes them), but a dirty `.hh` with no dirty `.cc` in scope currently lints nothing.
+Only `.cc` translation units are linted, since the compilation database has no entry for a bare header.
+A first-party header still surfaces diagnostics through `--header-filter`, seen via the `.cc` that includes it, but a dirty `.hh` with no dirty `.cc` in scope currently lints nothing.
 Mapping a changed header back to the TUs that include it is future work.
 
-Files are linted in parallel — one clang-tidy invocation per `.cc` across a thread pool (`-j`, default CPU
-count), since the built-in single-process driver is strictly sequential. `--fix` forces one worker so two
-TUs can't rewrite a shared header at once.
+Files are linted in parallel, one clang-tidy invocation per `.cc` across a thread pool (`-j`, default CPU count), because the built-in single-process driver is strictly sequential.
+`--fix` forces one worker, so two TUs cannot rewrite a shared header at once.
 
-Output is bounded: diagnostics print verbatim while under `--limit` lines; past it they collapse into a
-grouped-by-check digest so every failing check stays visible even when there are thousands of hits.
-Progress prints as each file finishes.
+Output is bounded: diagnostics print verbatim while under `--limit` lines, and past it they collapse into a grouped-by-check digest so every failing check stays visible even among thousands of hits.
 
-Reuses tools/dev machinery (git dirty-file discovery, the compilation-database reader, LLVM-tool location)
-by putting the repo root on sys.path.
+tools/dev machinery is reused — git dirty-file discovery, the compilation-database reader, LLVM-tool location — by putting the repo root on sys.path.
 """
 
 from __future__ import annotations
@@ -55,9 +47,9 @@ GATES_CONFIG = ROOT / "tools" / "lint" / "clang-tidy-gates.yml"
 
 # One clang-tidy diagnostic anchor line, e.g.
 #   C:\path\file.cc:11:1: warning: use 'using' instead of 'typedef' [modernize-use-using,-warnings-as-errors]
-# The leading path can itself contain a colon on Windows ("C:\..."), so the non-greedy capture stops at the
-# first ":<line>:<col>:" — the real separator. Notes and the code/caret lines carry no `[check]`, so they
-# don't match and are skipped. The check name is the first token inside the trailing bracket.
+# The leading path can itself contain a colon on Windows ("C:\..."), so the non-greedy capture stops at the first ":<line>:<col>:", which is the real separator.
+# Notes and the code/caret lines carry no `[check]`, so they do not match and are skipped.
+# The check name is the first token inside the trailing bracket.
 _DIAG_RE = re.compile(
     r"^(?P<file>.+?):(?P<line>\d+):(?P<col>\d+):\s+(?:error|warning):\s+"
     r"(?P<msg>.*?)\s*\[(?P<check>[a-zA-Z0-9.\-]+)[^\]]*\]\s*$",
@@ -92,11 +84,9 @@ def _rationales(data: dict, *, include_incubator: bool) -> dict[str, str]:
 def _tidy_config_arg(data: dict, *, include_incubator: bool = False) -> str:
     """Translate our gates schema into clang-tidy's `--config=` argument.
 
-    Only `gates` and `options` reach clang-tidy: the enabled checks become `-*,<check>,...` (a strict
-    whitelist), the options become `CheckOptions`. With `include_incubator` the `incubator` candidates are
-    added too — a preview of what promoting them would flag, not a gate. `excluded` is always documentation
-    and ignored. Passing `--config` (rather than a config file) also stops clang-tidy from auto-discovering
-    the root .clang-tidy.
+    Only `gates` and `options` reach clang-tidy: the enabled checks become `-*,<check>,...`, a strict whitelist, and the options become `CheckOptions`.
+    With `include_incubator` the `incubator` candidates are added too — a preview of what promoting them would flag, not a gate.
+    `excluded` is always documentation and is ignored.
     """
     checks = ["-*"] + [g["check"] for g in _enabled_entries(data, include_incubator=include_incubator)]
     options = []
@@ -115,7 +105,7 @@ def _default_build_dir() -> Path | None:
     """The platform default preset's build dir, so the script runs without an explicit --build-dir.
 
     Reads dev.py's policy table rather than hard-coding a second copy of the preset names.
-    Imported lazily: the common path (invoked by dev.py with an explicit --build-dir) never needs it.
+    Imported lazily, since the common path — invoked by dev.py with an explicit --build-dir — never needs it.
     """
     import dev as dev_cli  # repo-root dev.py, for its default-preset policy table
 
@@ -129,8 +119,8 @@ def _default_build_dir() -> Path | None:
 def _header_filter_regex() -> str:
     """A `--header-filter` regex that matches first-party headers only.
 
-    Built from the same source roots clang-format owns (libs/, tools/instruction-tracer/), so header
-    diagnostics surface while extern/ and system headers stay quiet. Matches either path separator.
+    Built from the same source roots clang-format owns, so header diagnostics surface while extern/ and system headers stay quiet.
+    Matches either path separator.
     """
     segments = []
     for r in dev.source_roots(ROOT):
@@ -142,8 +132,7 @@ def _header_filter_regex() -> str:
 def _parse_diagnostics(text: str) -> dict[str, list[str]]:
     """Group clang-tidy's diagnostics by check name.
 
-    Returns an insertion-ordered {check: ["relpath:line:col  message", ...]}, de-duplicated so a header
-    diagnostic seen through many `.cc` collapses to one entry.
+    Returns an insertion-ordered {check: ["relpath:line:col  message", ...]}, de-duplicated so a header diagnostic seen through many `.cc` collapses to one entry.
     """
     groups: dict[str, list[str]] = {}
     seen: set[tuple[str, str]] = set()
@@ -162,15 +151,14 @@ def _parse_diagnostics(text: str) -> dict[str, list[str]]:
 def _render_grouped(groups: dict[str, list[str]], limit: int, rationales: dict[str, str]) -> list[str]:
     """A bounded, grouped digest of the diagnostics — one section per check, kept within ~`limit` lines.
 
-    Every failing check stays visible (at least one file each, even past the limit); the remaining line
-    budget is spread across checks round-robin, so small checks show in full and the largest are truncated
-    with a `... N more` marker. Checks are ordered by failure count, descending. Each section leads with the
-    check's `why` from the gates config (the rationale, often with a fix hint) so it's clear how to resolve.
+    Every failing check stays visible, at least one file each even past the limit, and the remaining line budget is spread across checks round-robin.
+    So a small check shows in full while the largest are truncated with a `... N more` marker, and checks are ordered by failure count, descending.
+    Each section leads with the check's `why` from the gates config, which is the rationale and often carries a fix hint.
     """
     ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     n_checks = len(ordered)
-    # Headers cost one line each; reserve another line per check for a possible `... more` marker. The floor
-    # keeps the >=1-file-per-check guarantee even when there are more checks than the limit allows.
+    # Headers cost one line each, so reserve another line per check for a possible `... more` marker.
+    # The floor keeps the >=1-file-per-check guarantee even when there are more checks than the limit allows.
     files_budget = max(n_checks, limit - 2 * n_checks)
 
     alloc = {check: 0 for check, _ in ordered}
@@ -202,8 +190,7 @@ def _render_grouped(groups: dict[str, list[str]], limit: int, rationales: dict[s
 def _sources_in_scope(build_dir: Path, *, dirty_only: bool, explicit: list[str]) -> list[Path]:
     """The `.cc` files to lint: either an explicit list or discovery, intersected with the compile DB.
 
-    A file with no compile_commands.json entry (generated, or excluded by the active backend) can't be
-    linted, so it is dropped rather than erroring.
+    A file with no compile_commands.json entry — generated, or excluded by the active backend — cannot be linted, so it is dropped rather than erroring.
     """
     if explicit:
         files = [Path(f).resolve() for f in explicit]
@@ -224,9 +211,8 @@ def _sources_in_scope(build_dir: Path, *, dirty_only: bool, explicit: list[str])
 def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tuple[int, str, str]:
     """Run clang-tidy once per file across a thread pool; return (returncode, combined_stdout, stderr).
 
-    Each file is an independent invocation — clang-tidy is CPU-bound per translation unit, so fanning out
-    over `jobs` workers scales with cores (the built-in single-process driver is strictly sequential). Its
-    diagnostics land on stdout, its per-file chatter on stderr; we collect both and OR the exit codes.
+    Each file is an independent invocation: clang-tidy is CPU-bound per translation unit, so fanning out over `jobs` workers scales with cores, where the built-in driver is strictly sequential.
+    Its diagnostics land on stdout and its per-file chatter on stderr; both are collected and the exit codes OR'd.
     Progress prints as each file finishes.
     """
     import concurrent.futures
@@ -258,9 +244,8 @@ def _run_over_files(base_cmd: list[str], files: list[Path], *, jobs: int) -> tup
 
 
 def main() -> None:
-    # Emit UTF-8 regardless of the Windows console codepage: our prose (and clang-tidy's) carries em dashes,
-    # and dev.py's run_step reads this process's pipes as UTF-8 — a codepage mismatch would mangle them.
-    # Rewrap the raw byte buffers directly; reconfigure() reports success but doesn't take under `uv run`.
+    # Emit UTF-8 regardless of the Windows console codepage: our prose, and clang-tidy's, carries em dashes, and dev.py's run_step reads this process's pipes as UTF-8.
+    # Rewrap the raw byte buffers directly, because reconfigure() reports success but does not take under `uv run`.
     import io
     for name in ("stdout", "stderr"):
         buffer = getattr(getattr(sys, name), "buffer", None)
@@ -322,11 +307,12 @@ def main() -> None:
         file=sys.stderr)
     returncode, out, err = _run_over_files(base_cmd, files, jobs=jobs)
 
-    # Everything the runner emits goes to stderr — the same stream as the per-file progress and the verdict —
-    # so ordering is deterministic even under dev.py's run_step (which pumps stdout/stderr on separate threads).
+    # Everything the runner emits goes to stderr — the same stream as the per-file progress and the verdict.
+    # So ordering stays deterministic even under dev.py's run_step, which pumps stdout and stderr on separate threads.
     diag_lines = out.splitlines()
     if not out.strip():
-        # No lint diagnostics. If a TU still failed (e.g. a genuine compile error), surface its stderr.
+        # No lint diagnostics.
+        # If a TU still failed — a genuine compile error, say — surface its stderr.
         if returncode != 0 and err.strip():
             sys.stderr.write(err if err.endswith("\n") else err + "\n")
     elif len(diag_lines) <= args.limit:

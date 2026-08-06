@@ -1,68 +1,31 @@
 #pragma once
 
-// This is a very lean header with minimal dependencies - easy to include everywhere and low cost.
-// For formatted assertions with cc::format support, use <clean-core/common/assertf.hh> instead.
+// The leanest of the assertion headers, so it is cheap to include everywhere.
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/source_location.hh>
 
 // =========================================================================================================
 // CC_ASSERT - Runtime assertion with string literal message
 //
-// Validates a condition at runtime and triggers a debugger break + abort on failure.
+// Validates a condition at runtime, and triggers a debugger break plus abort on failure.
+// The message is a plain string literal, so this header pulls in no string or format machinery.
+// For a formatted message use CC_ASSERTF from <clean-core/common/assertf.hh>, and for a runtime cc::string_view message CC_ASSERTS from <clean-core/common/asserts.hh>.
+// Source location and the stringified expression are captured automatically.
 //
-// Features:
-//   - Simple string literal error messages (no formatting dependencies)
-//   - Automatic source location capture (file, line, function)
-//   - Debugger integration: breaks into debugger when attached, otherwise aborts
-//   - Expression stringification for clear error reporting
-//   - Active in debug and release-with-debug-info builds by default (we believe in more checks)
-//   - Minimal dependencies - does not include string or format headers
+// Whether assertions are active is CC_ASSERT_ENABLED, derived in <clean-core/common/macros.hh>.
+// It is on in debug and release-with-debug-info builds, and off in release unless CC_ENABLE_ASSERT_IN_RELEASE is defined.
 //
-// When assertions are active:
-//   Assertions are enabled in CC_DEBUG and CC_RELWITHDEBINFO builds.
-//   In CC_RELEASE builds, assertions are disabled unless CC_ENABLE_ASSERT_IN_RELEASE is defined.
+// Assertions protect INVARIANTS, PRECONDITIONS and POSTCONDITIONS — they catch PROGRAMMER ERRORS early.
+// They are NOT for validating user input, for exceptional error handling, or for common and expected error conditions.
+// The rest of the strategy: exceptions for exceptional and nonlocal error handling, result<T, E> for expected errors.
 //
-// What assertions are for:
-//   Assertions protect INVARIANTS, PRECONDITIONS, and POSTCONDITIONS.
-//   They catch PROGRAMMER ERRORS early during development.
-//
-// What assertions are NOT for:
-//   - NOT for user input validation
-//   - NOT for exceptional error handling
-//   - NOT for common/expected error conditions
-//
-// Error handling strategy:
-//   - Assertions      -> programmer errors, violated invariants/preconditions/postconditions
-//   - Exceptions      -> exceptional & nonlocal error handling
-//   - result<T, E>    -> common/expected error handling
-//
-// Important:
-//   Assertions can be semantically equivalent to std::terminate().
-//   NEVER trigger assertions based on user input or external conditions!
-//   Production builds can provide a custom assertion handler to prevent data loss.
+// A failing assertion can be semantically equivalent to std::terminate().
+// So NEVER trigger one from user input or an external condition.
+// A production build can install a custom assertion handler to prevent data loss.
 //
 // Usage:
 //   CC_ASSERT(ptr != nullptr, "pointer must not be null");
-//   CC_ASSERT(size > 0, "size must be positive");
 //   CC_ASSERT(idx < array.size(), "index out of bounds");
-//
-//   void process(int* data, size_t count)
-//   {
-//       CC_ASSERT(data != nullptr, "data pointer must be valid"); // precondition
-//       CC_ASSERT(count > 0, "count must be positive");           // precondition
-//       // ... process data ...
-//       CC_ASSERT(result_valid(), "postcondition violated");      // postcondition
-//   }
-//
-// Note:
-//   For formatted messages with arguments, use CC_ASSERTF from <clean-core/common/assertf.hh>
-//
-// Rationale:
-//   Unlike standard assert(), CC_ASSERT provides:
-//     - Better debugger integration (breaks at assertion site, not in abort())
-//     - Configurable behavior across build configurations
-//     - Source location without macros like __FILE__ and __LINE__
-//     - Minimal dependencies for use in low-level code
 //
 #define CC_ASSERT(cond, msg) CC_IMPL_ASSERT(cond, msg)
 
@@ -103,44 +66,23 @@
 // =========================================================================================================
 // CC_DEBUG_BREAK - Conditional debugger breakpoint
 //
-// Triggers a debugger break if a debugger is attached, otherwise does nothing.
+// Triggers a debugger break if a debugger is attached, and does nothing otherwise — so it never crashes a debugger-less run.
+// It expands inline rather than into a function call, so the debugger stops at the exact location.
 //
 // Usage:
-//   CC_DEBUG_BREAK(); // breaks into debugger if attached
-//
-//   if (some_error_condition)
-//   {
-//       log_error("critical error detected");
-//       CC_DEBUG_BREAK();
-//   }
-//
-// Rationale:
-//   - Safely breaks into the debugger without crashing when no debugger is present
-//   - Executes inline (not in a function) so debugger breaks at the exact location
-//   - Platform-specific implementation ensures correct debugger interaction
-//   - Useful for investigating unexpected conditions without full assertion failure
+//   CC_DEBUG_BREAK(); // breaks into the debugger if one is attached
 //
 #define CC_DEBUG_BREAK() CC_IMPL_DEBUG_BREAK()
 
 // =========================================================================================================
 // CC_BREAK_AND_ABORT - Debug break followed by program termination
 //
-// Triggers a debugger break (if attached) then unconditionally aborts the program.
+// Triggers a debugger break (if one is attached) and then unconditionally aborts, so execution never continues in an invalid state.
+// The break happens first, to allow inspection before termination.
+// This is what CC_ASSERT runs after logging the assertion details.
 //
 // Usage:
-//   CC_BREAK_AND_ABORT(); // break into debugger, then terminate
-//
-//   if (unrecoverable_error())
-//   {
-//       log_fatal("cannot continue");
-//       CC_BREAK_AND_ABORT();
-//   }
-//
-// Rationale:
-//   - Combines debugger investigation opportunity with guaranteed termination
-//   - Used by CC_ASSERT after logging assertion details
-//   - Ensures program doesn't continue in an invalid state
-//   - Debugger break happens first to allow inspection before termination
+//   CC_BREAK_AND_ABORT(); // break into the debugger, then terminate
 //
 #define CC_BREAK_AND_ABORT() (CC_DEBUG_BREAK(), ::cc::impl::perform_abort())
 
@@ -180,9 +122,9 @@ bool is_debugger_connected() noexcept;
 // the _trap is technically not correct because a BREAKpoint is recoverable
 // the use in CC_ASSERT is simply to provide a cleaner debugging experience
 // and is followed by an abort anyways
-// NOTE: we don't want to pull in any posix header here, so we simply declare raise. Its exception
-//       specification must match the platform libc: bionic (Android) does NOT mark raise noexcept,
-//       unlike glibc/musl/Darwin, so a noexcept here would clash with bionic's <signal.h>.
+// NOTE: we don't want to pull in any posix header here, so we simply declare raise.
+//       Its exception specification must match the platform libc: bionic (Android) does NOT mark raise noexcept, unlike glibc/musl/Darwin.
+//       A noexcept here would then clash with bionic's <signal.h>.
 //       SIGTRAP is 5 according to https://man7.org/linux/man-pages/man7/signal.7.html
 #if defined(CC_OS_ANDROID)
 extern "C" int raise(int);

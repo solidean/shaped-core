@@ -28,8 +28,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
-    # Resolve the preset (falling back to the platform default) and attach --toolset WITHOUT
-    # validating it — doctor should *report* a missing/wrong toolset, not hard-fail on it.
+    # Attach --toolset WITHOUT validating it: doctor must *report* a missing or wrong toolset rather than hard-fail on it.
     preset = dataclasses.replace(ctx.resolve_presets(args.preset)[0], toolset=args.toolset)
     checks = dev.doctor(ctx.root, preset=preset, emsdk_path=args.emsdk_path)
     all_ok = True

@@ -8,8 +8,8 @@
 #include <shaped-graphics/raster/rasterization_state.hh>
 #include <shaped-graphics/raster/vertex_input.hh>
 
-/// Maps sg's raster fixed-function state vocabulary to the D3D12 enums a graphics PSO records. Bodies in
-/// dx12_raster_state.cc.
+/// Maps sg's raster fixed-function state vocabulary to the D3D12 enums a graphics PSO records.
+/// Bodies in dx12_raster_state.cc.
 
 namespace sg::backend::dx12
 {

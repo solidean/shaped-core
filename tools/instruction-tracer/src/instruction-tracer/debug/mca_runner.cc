@@ -23,8 +23,8 @@ wchar_t const* as_wide(cc::vector<char16_t> const& v)
     return reinterpret_cast<wchar_t const*>(v.data());
 }
 
-/// An inheritable, delete-on-close temp file. All three llvm-mca streams ride on these: we write the
-/// input, hand the handles to the child as its std streams, then read stdout/stderr back afterwards.
+/// An inheritable, delete-on-close temp file.
+/// All three llvm-mca streams ride on these: write the input, hand the handles to the child as its std streams, then read stdout/stderr back afterwards.
 /// The child inherits duplicate handles sharing the file pointer, so a rewind before launch suffices.
 HANDLE make_temp_file()
 {
@@ -104,7 +104,7 @@ mca_run_result run_once(cc::string_view mca_exe, cc::string_view cpu, cc::string
     }
     rewind(h_in); // the child reads stdin from the start
 
-    // Fixed command line (see the tracer readme's timing section for the rationale of each flag).
+    // Fixed command line.
     cc::string cmd;
     cmd += '"';
     cmd += mca_exe;

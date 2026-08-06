@@ -8,8 +8,8 @@
 
 using namespace cc::primitive_defines;
 
-// Backend-agnostic device→device buffer copy (cmd.copy) over the public sg API, run against every available
-// backend (see tests/context/context-test.cc for the invocable/alias mechanism).
+// Backend-agnostic device→device buffer copy (cmd.copy) over the public sg API.
+// Run against every available backend — see tests/context/context-test.cc for the invocable/alias mechanism.
 
 namespace
 {

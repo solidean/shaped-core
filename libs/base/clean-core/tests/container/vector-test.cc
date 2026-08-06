@@ -10,9 +10,9 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// Recursive type whose own definition contains a cc::vector of itself: this only compiles if
-// cc::vector tolerates an incomplete element type at the point the member is declared. (MSVC in
-// particular eagerly evaluates the container's static members, so alignof(T) must stay out of them.)
+// Recursive type whose own definition contains a cc::vector of itself.
+// It only compiles if cc::vector tolerates an incomplete element type at the point the member is declared.
+// MSVC in particular eagerly evaluates the container's static members, so alignof(T) must stay out of them.
 struct TreeNode
 {
     int value = 0;
@@ -1613,8 +1613,8 @@ TEST("vector - initializer list construction")
 
 TEST("vector - recursive element type")
 {
-    // Builds a small tree where each node owns a cc::vector of nodes. Exercises that the recursive
-    // (incomplete-at-declaration) element type works at runtime, not just that it compiles.
+    // Builds a small tree where each node owns a cc::vector of nodes.
+    // Exercises that the recursive, incomplete-at-declaration element type works at runtime, not just that it compiles.
     TreeNode root;
     root.value = 1;
 

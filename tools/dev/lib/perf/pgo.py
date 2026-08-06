@@ -138,9 +138,8 @@ def pgo_measure(
 ) -> dict:
     """Run the guide benchmarks on baseline + pgo-use and diff the recorded metrics.
 
-    When `build_first`, both presets are (incrementally) built so a standalone
-    `pgo measure` works; the pgo-use build needs the profile to exist. Returns
-    {ok, baseline_preset, pgo_preset, metrics, baseline_count, pgo_count}.
+    With `build_first`, both presets are built incrementally so a standalone `pgo measure` works; the pgo-use build needs the profile to already exist.
+    Returns {ok, baseline_preset, pgo_preset, metrics, baseline_count, pgo_count}.
     """
     if build_first:
         run_build([baseline_preset], None, root=root, mirror=mirror, verbose=verbose)

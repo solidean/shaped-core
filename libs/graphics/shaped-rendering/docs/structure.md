@@ -64,14 +64,16 @@ imgui multi-viewport  [done]  opt-in via create({.enable_viewports = true}) — 
 
 Still open beyond those: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas path.
 
-## Intended scope (routines, all [planned])
+## Routines **[in progress]**
 
 ```text
-mipmap generation      [planned]
-texture compression    [planned]
-tonemapping            [planned]
-render passes / helpers [planned]
-common shader utilities [planned]
+sr::blit_routine          [done]     fullscreen-triangle blit of a texture across an open raster scope
+sr::keyed_pipeline_cache  [done]     one pipeline per caller-chosen key, usually the target's pixel format
+mipmap generation         [planned]
+texture compression       [planned]
+tonemapping               [planned]
+render passes / helpers   [planned]
+common shader utilities   [planned]
 ```
 
 The exact module layout settles as more routines land; keep this roadmap updated as it does.

@@ -8,9 +8,10 @@
 
 namespace sg::backend::dx12
 {
-/// DirectX 12 bottom-level acceleration structure. The built structure lives in the storage buffer the
-/// base holds; this subclass keeps a typed handle to it so a TLAS build can read its GPU virtual address
-/// (the AS location) without re-casting. Thin — the abstract base owns the lifetime + stats.
+/// DirectX 12 bottom-level acceleration structure.
+/// The built structure lives in the storage buffer the base holds.
+/// This subclass keeps a typed handle to it, so a TLAS build can read its GPU virtual address — the AS location — without re-casting.
+/// Thin: the abstract base owns the lifetime and stats.
 class dx12_blas final : public sg::blas
 {
 public:
@@ -34,8 +35,8 @@ public:
     dx12_buffer_handle _dx12_storage;
 };
 
-/// DirectX 12 top-level acceleration structure. Same shape as dx12_blas; the base retains the referenced
-/// BLAS handles (the ownership edge).
+/// DirectX 12 top-level acceleration structure, the same shape as dx12_blas.
+/// The base retains the referenced BLAS handles, which is the ownership edge.
 class dx12_tlas final : public sg::tlas
 {
 public:

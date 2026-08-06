@@ -6,14 +6,14 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// The vertex-input layout of a raster pipeline: how the bytes of each bound vertex buffer decode into
-/// the shader's per-vertex inputs. Two ways to build one: fill the struct explicitly, or derive it from
-/// vertex struct types with `vertex_input_layout::create<Vs...>()` (see vertex_layout_of below).
+/// The vertex-input layout of a raster pipeline: how the bytes of each bound vertex buffer decode into the shader's per-vertex inputs.
+/// Two ways to build one — fill the struct explicitly, or derive it from vertex struct types with `vertex_input_layout::create<Vs...>()` (see vertex_layout_of below).
 
 namespace sg
 {
-/// The component type + count of a single vertex attribute. Deliberately small; grow as needed. Each
-/// enumerator maps 1:1 to a DXGI / Vulkan vertex format.
+/// The component type + count of a single vertex attribute.
+/// Deliberately small; grow it as needed.
+/// Each enumerator maps 1:1 to a DXGI / Vulkan vertex format.
 enum class vertex_attribute_format
 {
     f32,   // DX12 R32_FLOAT          / Vk R32_SFLOAT
@@ -35,14 +35,14 @@ enum class vertex_attribute_format
     rgba8_uint,  // DX12 R8G8B8A8_UINT  / Vk R8G8B8A8_UINT
 };
 
-/// One attribute pulled from a vertex buffer: which shader input it feeds (`semantic` + `semantic_index`,
-/// matched via reflection), its component format, its byte offset within the vertex, and which bound
-/// buffer (`slot`) it comes from.
+/// One attribute pulled from a vertex buffer.
+/// It names which shader input it feeds: `semantic` + `semantic_index`, matched via reflection.
+/// Plus its component format, its byte offset within the vertex, and the bound buffer (`slot`) it comes from.
 ///
-/// TODO: identify inputs by a backend-neutral numeric `location` instead of an HLSL `semantic` string
-/// (the only cross-language identity — SPIR-V/WGSL/Metal all match by location), moving the semantic into
-/// compiled_shader's reflected I/O signature so only the dx12 backend resolves location -> semantic. See
-/// libs/graphics/shaped-graphics/docs/TODO.md.
+/// TODO: identify inputs by a backend-neutral numeric `location` rather than an HLSL `semantic` string.
+/// Location is the only cross-language identity: SPIR-V, WGSL and Metal all match by it.
+/// The semantic then moves into compiled_shader's reflected I/O signature, and only the dx12 backend resolves location -> semantic.
+/// See libs/graphics/shaped-graphics/docs/TODO.md.
 struct vertex_attribute
 {
     cc::string semantic;    ///< HLSL semantic (e.g. "POSITION") the input is matched by
@@ -60,22 +60,22 @@ struct vertex_input_slot
     bool per_instance = false; ///< false: advance per vertex; true: advance per instance
 };
 
-/// The complete vertex-input layout: one `slots` entry per bound vertex buffer, and the flat list of
-/// `attributes` (each naming its slot). Fill it directly, or build it from vertex types via `create`.
+/// The complete vertex-input layout: one `slots` entry per bound vertex buffer, plus the flat list of `attributes`, each naming its slot.
+/// Fill it directly, or build it from vertex types via `create`.
 struct vertex_input_layout
 {
     cc::small_vector<vertex_input_slot, 8> slots;
     cc::vector<vertex_attribute> attributes;
 
-    /// Build a layout from vertex struct types: one slot per `Vs...` (slot index = argument position),
-    /// its stride/attributes taken from `vertex_layout_of<V>`. Specialize `vertex_layout_of` for each
-    /// vertex struct. Attributes' `slot` is filled in here from the pack position.
+    /// Build a layout from vertex struct types: one slot per `Vs...`, with the slot index taken from the argument position.
+    /// Each slot's stride and attributes come from `vertex_layout_of<V>`, which must be specialized for that vertex struct.
+    /// Attributes' `slot` is filled in here from the pack position.
     template <class... Vs>
     [[nodiscard]] static vertex_input_layout create();
 };
 
-/// One vertex type's contribution to a layout: its stride, its attributes (with `slot` unset — `create`
-/// assigns it), and whether it is a per-instance buffer. The value a `vertex_layout_of<V>` returns.
+/// One vertex type's contribution to a layout: its stride, its attributes (with `slot` unset — `create` assigns it), and whether it is a per-instance buffer.
+/// The value a `vertex_layout_of<V>` returns.
 struct vertex_type_layout
 {
     isize stride = 0;

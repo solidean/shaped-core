@@ -21,11 +21,14 @@
 ///     rehash only relinks node pointers, it never touches the nodes.
 ///   - Heterogeneous lookup: get/contains/entry take any probe type the hasher and comparator accept.
 ///
-/// Hashing must be well-mixed because only the low bits index the bucket array. The default hasher
-/// finalizes for you; a custom Hash must avalanche and must agree across K and any probe type.
+/// Hashing must be well-mixed, because only the low bits index the bucket array.
+/// The default hasher finalizes for you.
+/// A custom Hash must avalanche, and must agree across K and any probe type.
 ///
-/// The map is not thread-safe for mutation, but concurrent readers are fine (entries are self-contained
-/// and stash nothing in the map). Any structural mutation invalidates outstanding entries and iterators.
+/// The map is not thread-safe for mutation, but concurrent readers are fine — entries are self-contained and stash nothing in the map.
+/// Any structural mutation invalidates outstanding entries and iterators.
+///
+/// [containers](../../../docs/containers.md) has the contracts shared with the other containers, including what a structural mutation does to element references.
 template <class K, class V, class Hash, class KeyEqual>
 struct cc::map
 {
@@ -129,7 +132,8 @@ public:
             return _found->value;
         }
 
-        /// Insert on the vacant path: K is constructed from the probe key, V from vargs. Must be vacant.
+        /// Insert on the vacant path: K is constructed from the probe key, V from vargs.
+        /// Precondition: the entry is vacant.
         template <class... VArgs>
         V& emplace(VArgs&&... vargs)
         {
@@ -289,7 +293,8 @@ public:
         return true;
     }
 
-    /// The value for k if present, else a copy of fallback. Returns by value (fallback may be a temporary).
+    /// The value for k if present, else a copy of fallback.
+    /// Returns by value, so fallback may be a temporary.
     template <class K2>
     [[nodiscard]] V get_or(K2 const& k, V const& fallback) const
         requires(std::is_copy_constructible_v<V>)

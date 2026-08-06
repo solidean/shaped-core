@@ -9,14 +9,14 @@
 #include <clean-core/string/char_predicates.hh>
 
 /// Non-owning view over a contiguous sequence of char, interpreted as UTF-8.
-/// Stores char const* data and isize size.
-/// Trivially copyable.
-/// Does not own the underlying memory; caller must ensure the referenced data outlives the string_view.
+/// A char const* plus an isize, trivially copyable.
+/// It owns nothing, so the viewed storage must outlive it.
 ///
-/// WARNING: string_view does NOT guarantee a trailing null terminator.
-/// The viewed string may or may not have a '\0' after the last character.
-/// Use data() carefully - it is NOT necessarily null-terminated.
-/// If you need a null-terminated string, you must copy to a null-terminated container.
+/// NOT null-terminated: nothing guarantees a '\0' after the last byte, so data() must never reach a C API
+/// that expects one.
+/// cc::string::c_str_materialize() is how a terminated pointer is obtained.
+///
+/// libs/base/clean-core/docs/strings.md owns the lifetime, hashing and conversion contracts.
 struct cc::string_view
 {
     // construction
@@ -36,7 +36,6 @@ public:
 
     /// Creates a string_view viewing [ptr, ptr+size).
     /// Precondition: size >= 0, and ptr must not be null unless size == 0.
-    /// WARNING: No null terminator is required or guaranteed.
     constexpr explicit string_view(char const* ptr, isize size) : _data(ptr), _size(size)
     {
         CC_ASSERT(size >= 0, "string_view size must be non-negative");
@@ -45,16 +44,14 @@ public:
 
     /// Creates a string_view viewing [begin, end).
     /// Precondition: begin <= end, and begin must not be null unless begin == end.
-    /// WARNING: No null terminator is required or guaranteed.
     constexpr explicit string_view(char const* begin, char const* end) : _data(begin), _size(end - begin)
     {
         CC_ASSERT(begin <= end, "invalid pointer range");
         CC_ASSERT(begin != nullptr || begin == end, "null pointer only allowed for empty range");
     }
 
-    /// Creates a string_view from a null-terminated C string.
-    /// Computes length by searching for '\0'.
-    /// The resulting view does NOT include the null terminator.
+    /// Creates a string_view from a null-terminated C string, whose length is found by scanning for '\0'.
+    /// The view excludes the terminator.
     /// Precondition: cstr must not be null.
     constexpr string_view(char const* cstr)
     {
@@ -63,28 +60,24 @@ public:
         _size = compute_length(cstr);
     }
 
-    /// Creates a string_view from a null-terminated C string literal.
-    /// Deduces size N from array type (includes '\0').
-    /// The resulting view excludes the null terminator: size() == N - 1.
+    /// Creates a string_view from a string literal, deducing the size N from the array type.
+    /// The view excludes the null terminator, so size() == N - 1.
     ///
-    /// CAUTION: This constructor assumes the array has a null terminator at position N-1.
-    /// If you have a local char buffer that may not have a terminator, or contains a shorter
-    /// string than the full buffer size, you MUST use the explicit string_view(ptr, size) constructor instead.
-    ///
-    /// Example:
-    ///   char buf[100] = "hello";  // only 5 chars + '\0', rest is uninitialized
-    ///   auto sv1 = string_view(buf);        // WRONG: creates view of size 99
-    ///   auto sv2 = string_view(buf, 5);     // CORRECT: creates view of size 5
+    /// CAUTION: this assumes a '\0' sits at position N-1.
+    /// For a local char buffer that may be unterminated, or that holds a shorter string than the buffer,
+    /// use the explicit string_view(ptr, size) constructor instead:
+    ///   char buf[100] = "hello";        // 5 chars + '\0', the rest uninitialized
+    ///   auto sv1 = string_view(buf);    // WRONG: a view of size 99
+    ///   auto sv2 = string_view(buf, 5); // CORRECT
     template <isize N>
     constexpr string_view(char const (&arr)[N]) : _data(arr), _size(N - 1)
     {
         static_assert(N > 0, "string literal must have at least a null terminator");
     }
 
-    /// Creates a string_view from any container providing .data() and .size().
-    /// Requires that .data() converts to char const*.
-    /// The string_view does not own the container; the container must outlive the string_view.
-    /// Passing a temporary container is safe when the string_view is used immediately (e.g., function argument).
+    /// Creates a string_view from any container whose .data() converts to char const* and which has .size().
+    /// The container must outlive the view.
+    /// Passing a temporary is safe only where the view is used immediately, such as a function argument.
     template <class Container>
         requires requires(Container&& c) {
             { c.data() } -> std::convertible_to<char const*>;
@@ -120,11 +113,9 @@ public:
         return _data[_size - 1];
     }
 
-    /// Returns a pointer to the underlying contiguous storage.
-    /// May be nullptr if the string_view is default-constructed or empty.
+    /// Returns a pointer to the underlying contiguous storage, which may be nullptr for an empty view.
     ///
-    /// WARNING: The pointed-to data is NOT guaranteed to be null-terminated.
-    /// Do NOT assume you can pass data() to C APIs expecting '\0'-terminated strings.
+    /// NOT guaranteed to be null-terminated, so it must not be passed to a C API expecting '\0'.
     [[nodiscard]] constexpr char const* data() const { return _data; }
 
     // iterators
@@ -137,8 +128,7 @@ public:
 
     // queries
 public:
-    /// Returns the number of bytes in the string_view.
-    /// This is the byte length, not the number of UTF-8 code points.
+    /// Returns the number of bytes in the string_view, rather than the number of UTF-8 code points.
     [[nodiscard]] constexpr isize size() const { return _size; }
     /// Returns true if size() == 0.
     [[nodiscard]] constexpr bool empty() const { return _size == 0; }
@@ -178,9 +168,8 @@ public:
         return string_view(_data + r.start, r.end - r.start);
     }
 
-    /// Returns a subview starting at offset with the specified size, clamped to valid bounds.
-    /// If offset > size(), returns empty view.
-    /// If offset + size > size(), the view is truncated to fit.
+    /// Returns a subview at offset with the given size, clamped to valid bounds instead of asserting.
+    /// An offset past size() gives an empty view, and an over-long size is truncated to fit.
     [[nodiscard]] constexpr string_view subview_clamped(isize offset, isize size) const
     {
         return string_view(_data + offset, offset > _size ? 0 : offset + size > _size ? _size - offset : size);
@@ -204,19 +193,21 @@ public:
     }
 
     // prefix/suffix matching operations
+    //
+    // Every member of this family takes an EqualF comparing two chars, defaulting to cc::equal_case_sensitive
+    // from char_predicates.hh — pass cc::equal_case_insensitive to match without regard to case.
+    // starts_with / ends_with / contains are not part of the family and are always case-sensitive.
+    // The _of statics take both views explicitly; the _with members compare against this view and return
+    // views into this view's data.
+    // A strip_ member mutates in place, while a stripped_ member returns a copy.
 public:
     // Forward declarations of result types (defined at bottom of file)
     struct decomposed_prefix;
     struct decomposed_suffix;
     struct decomposed_affixes;
 
-    /// Decomposes two string views by finding their common prefix
-    ///
-    /// Compares characters from the beginning of both views using the provided equality function.
-    /// Returns a decomposed_prefix containing the matching prefix parts and the remaining parts.
-    ///
-    /// The equality function should have signature: bool(char, char)
-    /// Default is case-sensitive comparison.
+    /// Decomposes two views at their common prefix, comparing forwards from the start of each.
+    /// Returns the matching prefix of each view, plus what remains of each after it.
     ///
     /// Usage:
     ///   auto decomp = string_view::decompose_matching_prefix("hello world", "hello there");
@@ -228,13 +219,8 @@ public:
                                                                                string_view rhs,
                                                                                EqualF&& eq = {});
 
-    /// Decomposes two string views by finding their common suffix
-    ///
-    /// Compares characters from the end of both views backwards using the provided equality function.
-    /// Returns a decomposed_suffix containing the remaining parts and the matching suffix parts.
-    ///
-    /// The equality function should have signature: bool(char, char)
-    /// Default is case-sensitive comparison.
+    /// Decomposes two views at their common suffix, comparing backwards from the end of each.
+    /// Returns what remains of each view before the suffix, plus the matching suffix of each.
     ///
     /// Usage:
     ///   auto decomp = string_view::decompose_matching_suffix("prefix_test", "other_test");
@@ -246,13 +232,8 @@ public:
                                                                                string_view rhs,
                                                                                EqualF&& eq = {});
 
-    /// Decomposes two string views by finding their common prefix AND suffix
-    ///
-    /// First finds the common prefix, then finds the common suffix in the remaining parts.
-    /// Returns a decomposed_affixes containing the prefix, middle, and suffix parts.
-    ///
-    /// The equality function should have signature: bool(char, char)
-    /// Default is case-sensitive comparison.
+    /// Decomposes two views at both their common prefix and their common suffix.
+    /// The prefix is found first, and the suffix is then found in what remains.
     ///
     /// Usage:
     ///   auto decomp = string_view::decompose_matching_affixes("prefix_A_suffix", "prefix_B_suffix");
@@ -533,11 +514,10 @@ public:
 
     // hashing
 public:
-    /// Structural hash over the viewed bytes via cc::make_hash_of_bytes (XXH3-64) — the chosen default string
-    /// hash: benchmarked fastest across the length range, with only a mild penalty for very short keys (a
-    /// hand-rolled word-at-a-time hash wins below ~16 bytes but not enough to special-case). See
-    /// libs/base/clean-core/docs/benchmarks/string-hash-benchmark.md. Equal content hashes equally to
-    /// cc::string, so a string_view can be used for heterogeneous lookup in a string-keyed map.
+    /// Structural hash over the viewed bytes via cc::make_hash_of_bytes (XXH3-64).
+    /// Equal content hashes equally to cc::string, so a string_view can be used for heterogeneous lookup in
+    /// a string-keyed map.
+    /// libs/base/clean-core/docs/benchmarks/string-hash-benchmark.md is why XXH3 is the chosen default.
     [[nodiscard]] friend u64 hash(string_view v) { return cc::make_hash_of_bytes(v.as_bytes()); }
 
     // members

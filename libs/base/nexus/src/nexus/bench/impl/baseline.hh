@@ -31,9 +31,9 @@ CC_FORCE_INLINE bool has_reference_cycles()
 #endif
 }
 
-/// A monotonic reference cycle count. On x86 this is the TSC: constant-rate on modern CPUs, so it tracks
-/// wall-clock time rather than halted core cycles — a baseline, not the PMU cycle event. Returns 0 where no
-/// cheap counter exists; callers then mark the reference_cycles sample invalid.
+/// A monotonic reference cycle count.
+/// On x86 this is the TSC: constant-rate on modern CPUs, so it tracks wall-clock time rather than halted core cycles — a baseline, not the PMU cycle event.
+/// Returns 0 where no cheap counter exists, and callers then mark the reference_cycles sample invalid.
 CC_FORCE_INLINE u64 read_reference_cycles()
 {
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)

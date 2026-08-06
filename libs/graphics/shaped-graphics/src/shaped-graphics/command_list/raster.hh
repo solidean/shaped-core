@@ -15,9 +15,12 @@
 #include <initializer_list>
 #include <type_traits>
 
-/// Raster (graphics-pipeline) recording: bind a set of color / depth-stencil targets as a rendering scope and, per target, clear / preserve / discard its contents.
-/// Reached as `cmd.raster`.
-/// Draw support arrives with the graphics pipeline; for now a scope only applies its begin-ops (clear/discard).
+/// Raster (graphics-pipeline) recording, reached as `cmd.raster`.
+/// A rendering scope binds a set of color / depth-stencil targets, clearing / preserving / discarding each; draws are valid only while one is open.
+///
+/// The draw API appears three times — on the returned `rendering_scope`, on `cmd.raster`, and on `cmd.raster.manual` — and all three forward to the one command list.
+/// It is documented once, on `rendering_scope`.
+/// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 
 namespace sg
 {
@@ -180,28 +183,19 @@ public:
     void end_rendering();
 
     // Draw recording — valid only while a rendering scope is open (begin_rendering / render_to).
-    // The same API is on cmd.raster; both forward to the owning command list.
+    // Identical to `rendering_scope`'s, which documents each call; all forward to the owning command list.
 
-    /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
     void bind_pipeline(raster_pipeline const& pipeline);
-    /// Binds `group` to descriptor set `set` of the active pipeline's layout (must match that slot).
     void bind_group(int set, binding_group const& group);
-    /// Binds vertex buffers to consecutive input slots starting at `first_slot` (slot first_slot+i <- views[i]).
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
-    /// Binds the index buffer read by draw_indexed.
     void bind_index_buffer(index_buffer_view const& view);
-    /// Overrides the rendering scope's viewport / scissor for subsequent draws.
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
-    /// Sets the stencil reference the depth-stencil state's stencil test compares against.
     void set_stencil_reference(u32 reference);
-    /// Sets the constant RGBA factor blend factors that reference it use.
     void set_blend_constants(tg::vec4f constants);
-    /// Writes inline constants into the bound pipeline layout's inline_constants block (see cmd.compute).
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
-    /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
     void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
@@ -209,9 +203,7 @@ public:
         static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
         set_inline_constants(cc::as_bytes(cc::span<T const>(&value, 1)), offset);
     }
-    /// Records a non-indexed draw of the active pipeline.
     void draw(draw_config const& config = {});
-    /// Records an indexed draw of the active pipeline (an index buffer must be bound).
     void draw_indexed(draw_indexed_config const& config = {});
 
     // Pinned to its owning command list: neither copyable nor movable.
@@ -236,32 +228,24 @@ public:
     /// rendering ends when the returned scope is destroyed.
     [[nodiscard]] rendering_scope render_to(rendering_info const& info);
 
-    /// Low-level passthrough: begin / end a rendering scope by hand. Prefer render_to.
+    /// Low-level passthrough: begin / end a rendering scope by hand.
+    /// Prefer render_to, which pairs them via RAII.
     command_list_raster_manual_scope manual;
 
-    // Draw recording — valid only while a rendering scope is open (render_to keeps one alive; or manual.begin_rendering).
-    // The same API is on cmd.raster.manual; both forward to the command list.
+    // Draw recording — valid only while a rendering scope is open (render_to keeps one alive, or manual.begin_rendering).
+    // Identical to `rendering_scope`'s, which documents each call; all forward to the owning command list.
 
-    /// Binds `pipeline` as the active raster pipeline for subsequent bind_group / draw calls.
     void bind_pipeline(raster_pipeline const& pipeline);
-    /// Binds `group` to descriptor set `set` of the active pipeline's layout (must match that slot).
     void bind_group(int set, binding_group const& group);
-    /// Binds vertex buffers to consecutive input slots starting at `first_slot` (slot first_slot+i <- views[i]).
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
-    /// Binds the index buffer read by draw_indexed.
     void bind_index_buffer(index_buffer_view const& view);
-    /// Overrides the rendering scope's viewport / scissor for subsequent draws.
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
-    /// Sets the stencil reference the depth-stencil state's stencil test compares against.
     void set_stencil_reference(u32 reference);
-    /// Sets the constant RGBA factor blend factors that reference it use.
     void set_blend_constants(tg::vec4f constants);
-    /// Writes inline constants into the bound pipeline layout's inline_constants block (see cmd.compute).
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
-    /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
     void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
@@ -269,9 +253,7 @@ public:
         static_assert(sizeof(T) % 4 == 0, "inline-constants payload size must be a multiple of 4 bytes");
         set_inline_constants(cc::as_bytes(cc::span<T const>(&value, 1)), offset);
     }
-    /// Records a non-indexed draw of the active pipeline.
     void draw(draw_config const& config = {});
-    /// Records an indexed draw of the active pipeline (an index buffer must be bound).
     void draw_indexed(draw_indexed_config const& config = {});
 
     // Pinned to its owning command list: neither copyable nor movable.

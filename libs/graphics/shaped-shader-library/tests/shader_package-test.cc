@@ -58,9 +58,8 @@ TEST("slib - the generated package embeds its include closure")
 {
     auto const& pkg = slib_test::shaders::package();
 
-    // Three declared entry points over two files, plus the .hlsli one of them includes. The include is
-    // the point: ssc::dxc has no filesystem fallback, so a shipped build that embedded only the entry
-    // points could not resolve it.
+    // Three declared entry points over two files, plus the .hlsli one of them includes.
+    // The include is the point: ssc::dxc has no filesystem fallback, so a shipped build that embedded only the entry points could not resolve it.
     REQUIRE(pkg.embedded_files.size() == 3);
 
     bool has_invert = false;
@@ -83,9 +82,8 @@ TEST("slib - the generated package embeds its include closure")
 
 TEST("slib - the generated package compiles from its embedded sources alone")
 {
-    // What a shipped binary does: no source tree, only what the generator baked in. Mounting the
-    // package with an explicit empty filesystem would be the other extreme; here we take the real
-    // package and simply prove the embedded copy is complete enough to build from.
+    // What a shipped binary does: no source tree, only what the generator baked in.
+    // Here we take the real package and prove the embedded copy is complete enough to build from.
     auto const& pkg = slib_test::shaders::package();
 
     slib::shader_library lib;

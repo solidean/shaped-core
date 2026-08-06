@@ -3,17 +3,17 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/fwd.hh>
 
-// Portable extended-precision integer primitives: the 64x64 -> 128 multiplies and
-// the carry/borrow-propagating add/sub that wider arithmetic (hash mixers, bignum,
-// fixed-point) is built from. All are constexpr.
+// Portable extended-precision integer primitives: the 64x64 -> 128 multiplies, and the carry/borrow-propagating add/sub that wider arithmetic is built from.
+// Hash mixers, bignum and fixed-point are the callers.
+// All are constexpr.
 //
-// Backend selection (clang/gcc, incl. clang-cl, are CC_COMPILER_CLANG/GCC; only real cl.exe is MSVC):
-//   * clang/gcc, every arch incl. ARM/WASM: __int128 — the whole job is a builtin 128-bit op, best codegen,
-//     constexpr, and the compiler emits the native MUL/UMULH and ADC/SBB itself.
-//   * MSVC cl.exe (no __int128): intrinsics. x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64;
-//     ARM64 has __umulh / __mulh for the multiplies but no carry intrinsic, so add/sub use the plain-u64
-//     fallback. None are usable in a constant expression, so `if !consteval` routes constant evaluation to
-//     the plain-u64 fallback (below).
+// Backend selection — clang/gcc, including clang-cl, are CC_COMPILER_CLANG/GCC; only real cl.exe is MSVC:
+//   * clang/gcc, every arch incl. ARM/WASM: __int128, so the whole job is a builtin 128-bit op.
+//     Best codegen, constexpr, and the compiler emits the native MUL/UMULH and ADC/SBB itself.
+//   * MSVC cl.exe has no __int128, so it uses intrinsics.
+//     x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64.
+//     ARM64 has __umulh / __mulh for the multiplies but no carry intrinsic, so add/sub take the plain-u64 fallback.
+//     None of the intrinsics are usable in a constant expression, so `if !consteval` routes constant evaluation to the plain-u64 fallback below.
 
 #if defined(CC_COMPILER_MSVC)
 #include <intrin.h>
@@ -30,7 +30,8 @@ struct u128
     [[nodiscard]] friend constexpr bool operator==(u128 const&, u128 const&) = default;
 };
 
-/// Low and high halves of a signed 128-bit value: lo is the raw low bit pattern, hi carries the sign.
+/// Low and high halves of a signed 128-bit value.
+/// lo is the raw low bit pattern; hi carries the sign.
 struct i128
 {
     u64 lo = 0;
@@ -57,8 +58,8 @@ struct borrowing_sub_result
     [[nodiscard]] friend constexpr bool operator==(borrowing_sub_result const&, borrowing_sub_result const&) = default;
 };
 
-// Plain-u64 fallbacks. Only instantiated on MSVC (its consteval path, and the ARM64 add/sub path that has
-// no carry intrinsic); the clang/gcc __int128 backend never references them.
+// Plain-u64 fallbacks, only instantiated on MSVC: its consteval path, and the ARM64 add/sub path that has no carry intrinsic.
+// The clang/gcc __int128 backend never references them.
 #if defined(CC_COMPILER_MSVC)
 namespace impl
 {
@@ -81,8 +82,8 @@ namespace impl
 
 [[nodiscard]] constexpr i128 wide_imul128(i64 a, i64 b)
 {
-    // Signed product from the unsigned one: identical low half; correct the high half by
-    // subtracting the other operand's raw bits for each negative operand (two's-complement fixup).
+    // Signed product from the unsigned one: the low half is identical.
+    // Correct the high half by subtracting the other operand's raw bits for each negative operand, which is the two's-complement fixup.
     u128 const u = wide_umul128(u64(a), u64(b));
     u64 hi = u.hi;
     if (a < 0)
@@ -157,7 +158,8 @@ namespace impl
 #endif
 }
 
-/// Computes a + b + carry_in. carry_in must be 0 or 1; the returned carry is likewise 0 or 1.
+/// Computes a + b + carry_in.
+/// carry_in must be 0 or 1; the returned carry is likewise 0 or 1.
 [[nodiscard]] constexpr carrying_add_result add_with_carry(u64 a, u64 b, u64 carry_in = 0)
 {
 #if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
@@ -176,11 +178,13 @@ namespace impl
 #endif
 }
 
-/// Computes a - b - borrow_in. borrow_in must be 0 or 1; the returned borrow is likewise 0 or 1.
+/// Computes a - b - borrow_in.
+/// borrow_in must be 0 or 1; the returned borrow is likewise 0 or 1.
 [[nodiscard]] constexpr borrowing_sub_result sub_with_borrow(u64 a, u64 b, u64 borrow_in = 0)
 {
 #if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
-    // On underflow the 128-bit difference wraps, leaving the high half all-ones; bit 0 of it is the borrow.
+    // On underflow the 128-bit difference wraps, leaving the high half all-ones.
+    // Bit 0 of that half is the borrow.
     __uint128_t const d = static_cast<__uint128_t>(a) - b - borrow_in;
     return {u64(d), static_cast<u64>(d >> 64) & 1u};
 #elif defined(CC_ARCH_ARM64) // MSVC ARM64: no _subborrow_u64 intrinsic

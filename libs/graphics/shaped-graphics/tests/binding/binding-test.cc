@@ -18,8 +18,8 @@ static_assert(std::is_same_v<sg::pipeline_layout_handle, std::shared_ptr<sg::pip
 static_assert(std::is_same_v<sg::compute_pipeline_handle, std::shared_ptr<sg::compute_pipeline const>>);
 static_assert(std::is_same_v<sg::binding_group_handle, std::shared_ptr<sg::binding_group const>>);
 
-// The binding vocabulary + compiled_shader data model are pure CPU value types — no GPU backend. A
-// minimal concrete buffer subclass produces real views to validate bindings against.
+// The binding vocabulary + compiled_shader data model are pure CPU value types — no GPU backend.
+// A minimal concrete buffer subclass produces real views to validate bindings against.
 
 namespace
 {

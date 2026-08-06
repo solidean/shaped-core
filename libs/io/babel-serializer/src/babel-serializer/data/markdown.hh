@@ -12,15 +12,17 @@
 //
 // A parsed document has the same FLAT shape as babel::json — one preorder cc::vector<node> (root at
 // index 0), one cc::vector<i32> of child indices so a block's children are a contiguous range, and one
-// cc::string arena holding every block's text. Traverse through the non-owning `ref` handle.
+// cc::string arena holding every block's text.
+// Traverse through the non-owning `ref` handle.
 //
-// This reader parses the BLOCK structure only: headings, fenced code, paragraphs, lists, block quotes,
-// and thematic breaks. Inline spans (emphasis, links, code spans) are NOT parsed — a paragraph's or
-// heading's text() is the raw source text, so `**bold**` comes back with its asterisks. See
-// ../../../docs/structure.md for what else is deliberately out of v1.
+// This reader parses the BLOCK structure only: ATX headings, fenced code, paragraphs with lazy continuation,
+// nested bullet and ordered lists, block quotes, and thematic breaks.
+// Inline spans (emphasis, links, code spans) are NOT parsed — a paragraph's or heading's text() is the raw
+// source text, so `**bold**` comes back with its asterisks.
+// See ../../../docs/structure.md for what else is deliberately out of v1.
 //
-// Every input is valid markdown — there is no such thing as a parse error here. The cc::result exists
-// for I/O failure on the stream and for API consistency with the other readers.
+// Every input is valid markdown — there is no such thing as a parse error here.
+// The cc::result exists for I/O failure on the stream and for API consistency with the other readers.
 //
 //   auto doc = babel::markdown::read("# title\n\n```cpp x\ncode\n```\n").value();
 //   auto h = doc.node_at(1);         // preorder: the heading
@@ -35,7 +37,8 @@ struct markdown_parser; // defined in markdown.cc; builds a document
 
 namespace babel::markdown
 {
-/// The block kinds this reader produces. Leaves carry text; containers carry children.
+/// The block kinds this reader produces.
+/// Leaves carry text; containers carry children.
 enum class node_kind : u8
 {
     document,       // the root; children are the top-level blocks
@@ -48,7 +51,8 @@ enum class node_kind : u8
     thematic_break, // `---` / `***` / `___`
 };
 
-/// One parsed block. Not used directly — traverse via `ref`.
+/// One parsed block.
+/// Not used directly — traverse via `ref`.
 /// The payload fields are read according to `kind`; the unrelated ones are left at 0.
 struct node
 {
@@ -81,7 +85,8 @@ public:
     /// The root document node (invalid ref on a default-constructed document; read always produces one).
     [[nodiscard]] ref root() const;
 
-    /// The node at a preorder index — 0 is the root. Invalid ref when out of range.
+    /// The node at a preorder index — 0 is the root.
+    /// Invalid ref when out of range.
     /// Iterating 0 .. node_count() visits every block in document order.
     [[nodiscard]] ref node_at(i32 index) const;
 
@@ -145,15 +150,15 @@ public:
     /// The 1-based source line the block starts on; 0 on an invalid ref.
     [[nodiscard]] i32 line() const { return is_valid() ? _node().line : 0; }
 
-    /// Heading / paragraph / code_block text, as a view into the document arena. Empty for containers.
-    /// Inline spans are not parsed: this is the raw source text.
+    /// Heading / paragraph / code_block text, as a view into the document arena.
+    /// Empty for containers, and inline spans are not parsed, so this is the raw source text.
     [[nodiscard]] cc::string_view text() const
     {
         return is_valid() ? _doc->impl_slice(_node().text_offset, _node().text_length) : cc::string_view();
     }
 
-    /// A code block's fence info string (`cpp`, or anything the author wrote after the fence), verbatim
-    /// and trimmed. Empty for a bare fence and for every other kind.
+    /// A code block's fence info string (`cpp`, or anything the author wrote after the fence), verbatim and trimmed.
+    /// Empty for a bare fence and for every other kind.
     [[nodiscard]] cc::string_view info() const
     {
         return is_code_block() ? _doc->impl_slice(_node().info_offset, _node().info_length) : cc::string_view();
@@ -196,7 +201,8 @@ inline ref document::node_at(i32 index) const
 // reading
 // -------------------------------------------------------------------------------------------------
 
-/// Parse markdown from a stream, one line at a time. Never fails on content — only on stream I/O.
+/// Parse markdown from a stream, one line at a time.
+/// Never fails on content — only on stream I/O.
 /// CRLF and LF are both accepted; the resulting document owns everything it needs.
 [[nodiscard]] cc::result<document> read(cc::read_stream& in);
 

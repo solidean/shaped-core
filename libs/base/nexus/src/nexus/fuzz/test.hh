@@ -16,10 +16,11 @@ namespace nx::fuzz
 {
 /// The public façade for an API-sequence fuzz test.
 ///
-/// Declare a bag of operations, seed values, and invariants, then execute_fuzz_test() to generate
-/// random type-correct programs, detect a failure, shrink it, and print copy-pasteable regression
-/// code. The same object also evaluates operations directly (eval_op...), which is what the emitted
-/// regression code calls to replay a failing program.
+/// Declare a bag of operations, seed values and invariants, then call execute_fuzz_test().
+/// It generates random type-correct programs, detects a failure, shrinks it, and prints copy-pasteable regression code.
+/// The same object also evaluates operations directly (eval_op...), which is what the emitted regression code calls to replay a failing program.
+///
+/// libs/base/nexus/docs/fuzz-testing.md is the full mechanism, including the shared-state trap.
 struct test
 {
     struct fuzz_result
@@ -46,7 +47,8 @@ struct test
         return add(fuzz_operation::create(cc::move(name), cc::forward<F>(fn)));
     }
 
-    /// Registers a seed value, modeled as a nullary operation returning a copy. T must be copyable.
+    /// Registers a seed value, modeled as a nullary operation returning a copy.
+    /// T must be copyable.
     template <class T>
     fuzz_operation* add_value(cc::string name, T value)
     {

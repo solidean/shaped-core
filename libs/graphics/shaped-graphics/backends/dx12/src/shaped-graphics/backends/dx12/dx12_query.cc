@@ -21,8 +21,8 @@ namespace
 
 cc::result<cc::unit> dx12_query_system::initialize()
 {
-    // The direct queue's timestamp frequency is in ticks per second, so the tick→seconds factor is its
-    // reciprocal. A failure here just means timestamps are unsupported on this device/queue.
+    // The direct queue's timestamp frequency is in ticks per second, so the tick→seconds factor is its reciprocal.
+    // A failure here just means timestamps are unsupported on this device or queue.
     u64 freq = 0;
     if (HRESULT hr = _ctx._queue->GetTimestampFrequency(&freq); FAILED(hr) || freq == 0)
         return dx12_error(FAILED(hr) ? hr : E_FAIL, "ID3D12CommandQueue::GetTimestampFrequency failed");
@@ -79,8 +79,7 @@ void dx12_query_system::release_heap(cc::unique_ptr<dx12_query_heap_lease> lease
     if (lease == nullptr)
         return;
 
-    // Reset the bump cursor and install a fresh invalid future for the next leaseholder. Handles from the
-    // previous lease keep their own shared_future (already assigned its real readback at submit).
+    // The fresh shared_future is what decouples the next leaseholder from handles still holding the old one.
     lease->next_slot = 0;
     lease->shared_future = std::make_shared<sg::data_future<u64>>();
 

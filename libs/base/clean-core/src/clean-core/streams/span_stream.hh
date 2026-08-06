@@ -16,26 +16,27 @@
 // stream's context — it must outlive any stream taken from it (the stream stores a pointer into it). Take one
 // stream per adapter.
 //
-// Construct explicitly, e.g. `cc::span_read_stream_adapter(bytes)`; the adapter then converts implicitly to the
-// matching stream (or any legal narrowing of it), so it can be passed straight to a function expecting a
-// stream. `.stream()` returns the natural seekable stream explicitly.
+// Construct explicitly, e.g. `cc::span_read_stream_adapter(bytes)`; the adapter then converts implicitly to the matching stream, or to any legal narrowing of it.
+// So it can be passed straight to a function expecting a stream, and `.stream()` returns the natural seekable stream explicitly.
 //
-// The three adapters differ only in span const-ness and which stream they produce; they share all state and
-// logic through impl::span_adapter_base. The single (type-erased) flush lives in span_stream.cc.
+// The three adapters differ only in span const-ness and which stream they produce; they share all state and logic through impl::span_adapter_base.
+// The single type-erased flush lives in span_stream.cc.
 
 namespace cc::impl
 {
-/// The entire state a span adapter needs: the span bounds. Referenced by the flush callback via `void* ctx`.
+/// The entire state a span adapter needs: the span bounds.
+/// Referenced by the flush callback via `void* ctx`.
 struct span_adapter_state
 {
     byte* base;
     isize size;
 };
 
-/// Flush for every span adapter: the span is fully in memory, so a plain flush is a no-op that just restores
-/// end = base + size; seeks reposition curr within [base, base + size]; the span is always seekable. Write-
-/// through is a no-op because bytes are written directly into the destination span (curr == end means the
-/// bounded sink is full). Returns the position of curr, or an error on an out-of-range seek.
+/// Flush for every span adapter.
+/// The span is fully in memory, so a plain flush is a no-op that just restores end = base + size.
+/// Seeks reposition curr within [base, base + size], and the span is always seekable.
+/// Write-through is a no-op, because bytes are written directly into the destination span; curr == end means the bounded sink is full.
+/// Returns the position of curr, or an error on an out-of-range seek.
 cc::result<i64>
 span_adapter_flush(byte*& curr, byte*& end, byte*& write_end, void* ctx, i64 offset, seek_dir dir, byte* first_write);
 
@@ -77,7 +78,8 @@ private:
 
 namespace cc
 {
-/// Read adapter over an immutable byte span. Hands out a seekable_read_stream.
+/// Read adapter over an immutable byte span.
+/// Hands out a seekable_read_stream.
 class span_read_stream_adapter : public impl::span_adapter_base<seekable_read_stream>
 {
 public:
@@ -88,16 +90,16 @@ public:
     }
 };
 
-/// Write adapter over a mutable byte span. Hands out a seekable_write_stream. Bounded: the sink is full once
-/// curr == end, and writing past it errors.
+/// Write adapter over a mutable byte span, handing out a seekable_write_stream.
+/// Bounded: the sink is full once curr == end, and writing past it errors.
 class span_write_stream_adapter : public impl::span_adapter_base<seekable_write_stream>
 {
 public:
     explicit span_write_stream_adapter(cc::span<byte> data) : span_adapter_base(data.data(), data.size()) {}
 };
 
-/// Read+write adapter over a mutable byte span. Hands out a seekable_read_write_stream; reads and writes share
-/// the single cursor within [base, base + size].
+/// Read+write adapter over a mutable byte span, handing out a seekable_read_write_stream.
+/// Reads and writes share the single cursor within [base, base + size].
 class span_read_write_stream_adapter : public impl::span_adapter_base<seekable_read_write_stream>
 {
 public:

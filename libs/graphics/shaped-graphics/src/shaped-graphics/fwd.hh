@@ -4,8 +4,8 @@
 
 #include <memory>
 
-/// Forward declarations and `*_handle` typedefs for shaped-graphics. Include when a forward decl is
-/// all you need.
+/// Forward declarations and `*_handle` typedefs for shaped-graphics.
+/// Include it when a forward decl is all you need.
 
 namespace sg
 {
@@ -66,10 +66,11 @@ class memory_heap;
 struct allocation_info;     // value type (see memory/allocation_info.hh) — no handle typedef
 struct memory_requirements; // value type (see memory/memory_heap.hh)
 
-/// Lifetime mode of a resource — a hard contract, not a hint. `persistent` lives until its handles are
-/// released; `transient` expires when its epoch retires (using it beyond that is a hard error, and the
-/// backend may recycle it immediately). Passed to every `create_*` (buffers carry it inside
-/// allocation_info). Both modes still get in-flight GPU hazard tracking, which is orthogonal.
+/// Lifetime mode of a resource — a hard contract, not a hint.
+/// `persistent` lives until its handles are released; `transient` expires when its epoch retires.
+/// Using a transient resource past that is a hard error, and the backend may recycle it immediately.
+/// Passed to every `create_*`; buffers carry it inside allocation_info.
+/// Both modes still get in-flight GPU hazard tracking, which is orthogonal.
 enum class lifetime_scope
 {
     persistent,
@@ -84,10 +85,10 @@ enum class texture_layout : u32;
 struct access_barrier;
 struct resource_access_state;
 
-// Resource views (see resource/views.hh) — value types, no handle typedefs. The typed view templates
-// (uniform_buffer_view/readonly_buffer_view/readwrite_buffer_view) are constrained, and `raw_view` is a
-// `std::variant` alias (not forward-declarable), so only the enums are declared here; include resource/views.hh for
-// the views themselves.
+// Resource views (see resource/views.hh) — value types, no handle typedefs.
+// Only the enums are declared here: the typed view templates are constrained, and `raw_view` is a
+// `std::variant` alias that cannot be forward-declared.
+// Include resource/views.hh for the views themselves.
 enum class view_class;
 enum class view_shape;
 enum class texture_view_dimension : u8; // shader-facing SRV/UAV dimension (see resource/views.hh)
@@ -196,25 +197,23 @@ enum class callable_index : u32;
 /// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `set`.
 inline constexpr int max_binding_groups = 4;
 
-// The next two caps are small because they are real GPU pipeline limits, not arbitrary array sizes: a
-// GPU's output-merger has a fixed handful of color-output slots and its input assembler a fixed handful
-// of vertex-buffer slots. They bound the (fixed_vector) containers holding those bindings, so an overflow
-// is a hard error rather than a silent heap allocation. Chosen as the portable value across tier-1/2
-// backends (the minimum any of them guarantees), so a layout stays portable.
+// The next two caps are real GPU pipeline limits rather than arbitrary array sizes — an output-merger
+// has a fixed handful of color slots, an input assembler a fixed handful of vertex-buffer slots.
+// Each is set to the portable floor across tier-1/2 backends, so a layout stays portable.
+// Each also bounds a fixed_vector, so an overflow is a hard error rather than a silent heap allocation.
 
-/// Hard cap on simultaneous color render targets in a rendering scope / raster pipeline. 8 is the DX12
-/// (`D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT`) and WebGPU (`maxColorAttachments`) limit; Vulkan guarantees
-/// at least 4 and is 8 on essentially all desktop adapters.
+/// Hard cap on simultaneous color render targets in a rendering scope / raster pipeline.
+/// 8 is the DX12 (`D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT`) and WebGPU (`maxColorAttachments`) limit.
+/// Vulkan guarantees at least 4, and is 8 on essentially all desktop adapters.
 inline constexpr int max_color_targets = 8;
 
-/// Hard cap on vertex-buffer input slots bound for a draw. 8 is WebGPU's `maxVertexBuffers` — the portable
-/// floor; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16, but capping
-/// at the common denominator keeps a vertex layout portable across every backend.
+/// Hard cap on vertex-buffer input slots bound for a draw.
+/// 8 is WebGPU's `maxVertexBuffers`; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16.
 inline constexpr int max_vertex_buffers = 8;
 
-/// Frame-level GPU lifetime token and direct-queue timeline value: a monotonic counter where
-/// reaching value N on the queue's epoch fence means all GPU work of epoch N has finished. See
-/// libs/graphics/shaped-graphics/docs/concepts/epochs.md.
+/// Frame-level GPU lifetime token, and a direct-queue timeline value.
+/// A monotonic counter where reaching value N on the queue's epoch fence means all GPU work of epoch N has finished.
+/// See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 enum class epoch : u64
 {
     invalid = 0,   ///< null sentinel — "not meaningfully set"
@@ -230,9 +229,10 @@ enum class submission_token : u64
     not_submitted = u64(-1), ///< sentinel that always compares "not yet complete"
 };
 
-/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type. context, buffer, and memory_heap get
-/// handles; command_list does not — it's a single-use temporary held by std::unique_ptr, passed by
-/// reference. std::shared_ptr is a placeholder for a future cc::shared_ptr.
+/// A `*_handle` is a std::shared_ptr to a shared-lifetime sg type.
+/// context, buffer and memory_heap get handles; command_list does not, being a single-use temporary held by std::unique_ptr and passed by reference.
+/// cc::shared_ptr exists, but its Traits protocol is still provisional and sg's resources need a base-keyed Traits it does not have, so the switch is deliberately deferred.
+/// See libs/graphics/shaped-graphics/docs/coding-guidelines.md.
 using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
 using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutable: shape is fixed at creation

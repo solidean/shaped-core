@@ -4,8 +4,8 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
 
-// Backend-agnostic GPU-query round-trip: record two timestamps, submit, read them back. Gated on
-// is_supported() so it also asserts the unsupported path (an invalid query, record still callable).
+// Backend-agnostic GPU-query round-trip: record two timestamps, submit, read them back.
+// Gated on is_supported(), so it also asserts the unsupported path — an invalid query, with record still callable.
 // Runs against every available backend (see tests/context/context-test.cc for the mechanism).
 
 INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::context_handle const& ctx))

@@ -5,8 +5,8 @@
 
 using namespace cc::primitive_defines;
 
-// GPU queries: cmd.query.record_gpu_timestamp, resolved + read back at submit, on WARP. Covers the
-// round-trip, heap rollover across leases, and the dropped-list path.
+// GPU queries: cmd.query.record_gpu_timestamp, resolved and read back at submit, on WARP.
+// Covers the round-trip, heap rollover across leases, and the dropped-list path.
 
 namespace
 {

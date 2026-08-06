@@ -1,7 +1,7 @@
-// dx12 epoch system: advance/retire, waits, and deferred-deletion staging. The epoch *concept*
-// (counter + contract) is defined in sg::; this is dx12's concrete realization. See
-// libs/graphics/shaped-graphics/docs/concepts/epochs.md. Device-level teardown (shutdown) lives in
-// dx12_context.cc.
+// dx12 epoch system: advance/retire, waits, and deferred-deletion staging.
+// The epoch *concept* — counter plus contract — is defined in sg::; this is dx12's concrete realization.
+// See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
+// Device-level teardown (shutdown) lives in dx12_context.cc.
 
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -12,8 +12,8 @@ namespace sg::backend::dx12
 {
 sg::epoch dx12_context::completed_epoch() const
 {
-    // The epoch fence's completed value *is* the last fully-finished epoch — we signal the epoch
-    // value at end-of-epoch. Before the first advance it reads 0, so report first-1.
+    // The epoch fence's completed value *is* the last fully-finished epoch, since the epoch value is signaled at end-of-epoch.
+    // Before the first advance it reads 0, so report first-1.
     u64 const first_minus_one = u64(sg::epoch::first) - 1;
     if (!_epoch_fence)
         return sg::epoch(first_minus_one);
@@ -32,17 +32,16 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
 
     // Snapshot the inline upload ring cursor as `last`'s boundary; its space frees once `last` retires.
     _upload_inline.on_epoch_advance(last);
-    // Same for the inline download ring, but its span frees once the actor drains `last`'s readback
-    // copies (tracked per-epoch), not at GPU retire — so the hook is only needed here, not in retire.
+    // Same for the inline download ring, but its span frees once the actor drains `last`'s readback copies, not at GPU retire — so the hook is only needed here.
     _download_inline.on_epoch_advance(last);
     // Same again for the transient descriptor ring: snapshot `last`'s window, freed once `last` retires.
     _descriptor_heap.on_epoch_advance(last);
     _sampler_heap.on_epoch_advance(last); // and the transient sampler ring
 
 
-    // Auto-expire `last`'s transient buffers: their placed storage in ctx.transient's heap is reused by
-    // the new epoch, so mark them expired now, which releases each resource into the deferred-deletion
-    // staging area. Done before the staged drain below so those releases are attributed to `last`.
+    // Auto-expire `last`'s transient buffers: their placed storage in ctx.transient's heap is reused by the new epoch.
+    // Marking them expired now releases each resource into the deferred-deletion staging area.
+    // Done before the staged drain below, so those releases are attributed to `last`.
     // Outside any lock — expire() re-enters schedule_deferred_deletion, which takes _epoch_state.
     cc::vector<std::weak_ptr<sg::raw_buffer const>> const expiring_transient = _transient_expiring.lock(
         [](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v)
@@ -55,8 +54,7 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
         if (auto const b = w.lock())
             b->expire();
 
-    // Same for `last`'s transient textures (dedicated for now, but the transient contract still expires
-    // them here, staging their GPU resources for deferred deletion attributed to `last`).
+    // Same for `last`'s transient textures: dedicated for now, but the transient contract still expires them here, attributing their deferred deletion to `last`.
     cc::vector<std::weak_ptr<sg::raw_texture const>> const expiring_textures = _transient_expiring_textures.lock(
         [](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
         {
@@ -77,8 +75,8 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
         CC_ASSERT(false, "ID3D12CommandQueue::Signal failed");
     }
 
-    // Package everything `last` owns and push it onto the in-flight FIFO. (Externally synchronized, so
-    // no submit races the allocator drain; the lock is for correctness, not contention.)
+    // Package everything `last` owns and push it onto the in-flight FIFO.
+    // Externally synchronized, so no submit races the allocator drain; the lock is for correctness, not contention.
     dx12_epoch_data data;
     data.epoch_id = last;
     data.allocators = _cmd_pool.drain_in_epoch_allocators();
@@ -103,13 +101,13 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
             process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
     }
 
-    // Apply a pending ctx.transient.set_budget() now that the new epoch is open: this drains all in-flight
-    // epochs and resizes the transient heap. Rare (only after a set_budget), so the stall is acceptable.
+    // Apply a pending ctx.transient.set_budget() now that the new epoch is open: it drains all in-flight epochs and resizes the transient heap.
+    // Rare — only after a set_budget — so the stall is acceptable.
     apply_pending_transient_budget();
 
-    // Same for the inline upload/download ring budgets (ctx.upload.set_inline_budget / ctx.download.
-    // set_budget): each drains in-flight epochs — the download ring also waits out its actor — then
-    // reallocates. No-op unless a budget change is pending.
+    // Same for the inline upload/download ring budgets (ctx.upload.set_inline_budget / ctx.download.set_budget).
+    // Each drains in-flight epochs — the download ring also waits out its actor — then reallocates.
+    // A no-op unless a budget change is pending.
     _upload_inline.apply_pending_budget();
     _download_inline.apply_pending_budget();
 }
@@ -119,10 +117,9 @@ void dx12_context::process_completed_epochs()
     if (!_epoch_fence)
         return;
     u64 const completed = _epoch_fence->GetCompletedValue();
-    // Second release gate: how far the async upload copy queue has drained. A resource an in-flight async
-    // upload still references must not be freed even after its epoch retired (the copy queue is decoupled
-    // from epochs). The upload system owns the fence; `~0` when it is not up yet, so the gate is trivially
-    // open before bring-up completes.
+    // Second release gate: how far the async upload copy queue has drained.
+    // A resource an in-flight async upload still references must not be freed even after its epoch retired, since the copy queue is decoupled from epochs.
+    // The upload system owns the fence; `~0` when it is not up yet, so the gate is trivially open before bring-up completes.
     ID3D12Fence* const upload_fence = _upload_async._completion_fence.Get();
     u64 const copy_completed = upload_fence ? upload_fence->GetCompletedValue() : u64(-1);
 
@@ -132,9 +129,9 @@ void dx12_context::process_completed_epochs()
     _descriptor_heap.on_epochs_completed(sg::epoch(completed));
     _sampler_heap.on_epochs_completed(sg::epoch(completed));
 
-    // Under the lock: drain finished epochs, then partition every expiring resource (from those epochs and
-    // from the copy-deferred hold-back) by whether the copy queue has also passed its `copy_wait`. Ready
-    // ones are released outside the lock; the rest stay on `copy_deferred` for the next sweep.
+    // Under the lock: drain finished epochs, then partition every expiring resource by whether the copy queue has also passed its `copy_wait`.
+    // That covers resources from those epochs and from the copy-deferred hold-back.
+    // Ready ones are released outside the lock; the rest stay on `copy_deferred` for the next sweep.
     cc::vector<dx12_epoch_data> done;
     cc::vector<dx12_expiring_resource> ready;
     _epoch_state.lock(
@@ -168,8 +165,7 @@ void dx12_context::process_completed_epochs()
                     gate(r, s.copy_deferred);
         });
 
-    // Allocators are safe to reset now — every command list sourced from them has finished — so hand
-    // them back to the pool, which resets each and returns it to its queue's free list.
+    // Allocators are safe to reset now, since every command list sourced from them has finished — so hand them back to the pool, which resets each and returns it to its queue's free list.
     for (auto& e : done)
         _cmd_pool.reclaim_allocators(cc::move(e.allocators));
 
@@ -184,10 +180,11 @@ void dx12_context::process_completed_epochs()
 
 void dx12_context::wait_for_epoch(sg::epoch e)
 {
-    // Ordering matters: drain the copy actors before blocking. A list submitted this epoch may be waiting
-    // on the async-upload completion fence, which is signalled by the copy actor — so where the actor has
-    // no thread of its own, the GPU never reaches the epoch signal and the wait below never returns. With
-    // threads this is a single false test. Covers advance_epoch's throttle too, which routes through here.
+    // Ordering matters: drain the copy actors before blocking.
+    // A list submitted this epoch may be waiting on the async-upload completion fence, which only the copy actor signals.
+    // Where the actor has no thread of its own, the GPU would never reach the epoch signal and the wait below would never return.
+    // With threads this is a single false test.
+    // Covers advance_epoch's throttle too, which routes through here.
     drain_transfers();
 
     if (_epoch_fence)
@@ -195,9 +192,8 @@ void dx12_context::wait_for_epoch(sg::epoch e)
         u64 const target = u64(e);
         if (_epoch_fence->GetCompletedValue() < target)
         {
-            // A per-call event, not a shared one: the wait/retire family is safe to call from any thread
-            // (e.g. ring back-pressure during concurrent recording), and a single reused event cannot
-            // serve concurrent waiters. A fence accepts many concurrent SetEventOnCompletion registrations.
+            // A per-call event, not a shared one: the wait/retire family is safe to call from any thread, e.g. ring back-pressure during concurrent recording.
+            // A single reused event cannot serve concurrent waiters, and a fence accepts many concurrent SetEventOnCompletion registrations.
             HANDLE const event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             CC_ASSERT(event != nullptr, "CreateEventW failed for the epoch fence wait");
             HRESULT const hr = _epoch_fence->SetEventOnCompletion(target, event);
@@ -205,9 +201,8 @@ void dx12_context::wait_for_epoch(sg::epoch e)
             WaitForSingleObject(event, INFINITE);
             CloseHandle(event);
 
-            // A removed device completes every pending fence wait immediately (the fence jumps to
-            // UINT64_MAX). Detect that here so a blocked frame surfaces device loss instead of racing on
-            // past a bogus fence value.
+            // A removed device completes every pending fence wait immediately, since the fence jumps to UINT64_MAX.
+            // Detect that here so a blocked frame surfaces device loss instead of racing on past a bogus fence value.
             if (note_device_removed_if_lost(S_OK, "epoch fence wait"))
                 throw sg::device_lost_exception(device_loss_reason());
         }

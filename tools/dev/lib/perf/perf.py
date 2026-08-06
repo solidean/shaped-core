@@ -1,11 +1,8 @@
 """Perf: run guide benchmarks and collect their recorded metrics.
 
-A guide benchmark (nexus GUIDE_BENCHMARK) records named metrics via nx::guide and,
-when run with `--perf-json <file>`, writes a sidecar of them. This module runs the
-guide-benchmark bucket across the given test binaries (reusing the standard test
-runner) and parses those sidecars into a flat metric list. `dev.py pgo` uses it to
-train (the run itself drives the instrumented binaries) and to measure (baseline
-vs PGO), diffing the two metric sets.
+A guide benchmark (nexus GUIDE_BENCHMARK) records named metrics via nx::guide, and writes a sidecar of them when run with `--perf-json <file>`.
+This module runs the guide-benchmark bucket across the given test binaries, reusing the standard test runner, and parses those sidecars into a flat metric list.
+`dev.py pgo` uses it both to train, where the run itself drives the instrumented binaries, and to measure baseline against PGO.
 
 Public API:
     run_and_collect(preset, binaries, ...) -> list[dict]   run guide benchmarks, parse metrics
@@ -48,10 +45,9 @@ def run_and_collect(
 ) -> list[dict]:
     """Run the guide-benchmark bucket of each binary, collecting recorded metrics.
 
-    Each binary is run once with `--guide-benchmarks --perf-json <perf_dir>/<binary>.perf.json`
-    (binaries with no guide benchmarks exit 0 and write no sidecar — they just
-    contribute nothing). `extra_env_for` injects per-binary env (the PGO training
-    run uses it for LLVM_PROFILE_FILE). Returns the flat list of parsed metrics.
+    Each binary is run once with `--guide-benchmarks --perf-json <perf_dir>/<binary>.perf.json`.
+    A binary with no guide benchmarks exits 0 and writes no sidecar, so it simply contributes nothing.
+    `extra_env_for` injects per-binary env, which the PGO training run uses for LLVM_PROFILE_FILE.
     """
     perf_dir.mkdir(parents=True, exist_ok=True)
     metrics: list[dict] = []
@@ -76,9 +72,8 @@ def _key(m: dict) -> tuple[str, str, str]:
 def diff(baseline: list[dict], pgo: list[dict]) -> list[dict]:
     """Match metrics by (binary, test, name) and compute the oriented % change.
 
-    `delta_pct` is positive when PGO is better (orientation respects
-    higher_is_better), so a speedup reads positive for throughput and for latency
-    alike. Metrics present in only one set are skipped.
+    `delta_pct` is positive when PGO is better, since the orientation respects higher_is_better — so a speedup reads positive for throughput and for latency alike.
+    A metric present in only one set is skipped.
     """
     pgo_by_key = {_key(m): m for m in pgo}
     out: list[dict] = []

@@ -10,9 +10,9 @@
 // cc::impl::native_file — minimal cross-platform file handle
 // =========================================================================================================
 //
-// A thin, move-only wrapper over an OS file handle (Windows HANDLE / POSIX fd). It confines ALL platform I/O
-// (and <Windows.h>) to native_file.cc, so the file stream adapters stay pure buffer logic. Not a public API
-// — it lives under streams/impl/ and may graduate to clean-core/platform/ if it finds other uses.
+// A thin, move-only wrapper over an OS file handle (Windows HANDLE / POSIX fd).
+// It confines ALL platform I/O, and <Windows.h>, to native_file.cc, so the file stream adapters stay pure buffer logic.
+// Not a public API: it lives under streams/impl/ and may graduate to clean-core/platform/ if it finds other uses.
 
 namespace cc::impl
 {
@@ -42,8 +42,8 @@ public:
     /// reads are normal.
     [[nodiscard]] cc::result<isize> read(cc::span<byte> dst);
 
-    /// Write up to src.size() bytes at the current position; returns the count written. Short writes are
-    /// possible — callers loop.
+    /// Write up to src.size() bytes at the current position; returns the count written.
+    /// Short writes are possible, so callers loop.
     [[nodiscard]] cc::result<isize> write(cc::span<byte const> src);
 
     /// Move the file pointer to an absolute offset from the start; returns the new position.

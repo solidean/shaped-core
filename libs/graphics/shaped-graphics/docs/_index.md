@@ -7,44 +7,22 @@ for repo-wide docs see [docs/_index.md](../../../../docs/_index.md).
 
 ## Source organization
 
-shaped-graphics' headers live in `src/shaped-graphics/`, grouped by topic.
-Only the cross-cutting vocabulary sits at the root; everything else is in the folder that owns it.
-
-```text
-shaped-graphics/
-  fwd.hh           # fwd decls + *_handle typedefs
-  all.hh           # umbrella
-  types.hh         # backend_kind, thread_model, buffer_usage, texture_usage
-  exceptions.hh    # the typed sg exceptions
-  bytes_future.hh  # the shared result type of every download
-  barrier/         # the access-tracking substrate a backend emits barriers from
-  binding/         # compiled shaders, reflected bindings, samplers, group + pipeline layouts
-  command_list/    # the abstract command_list and its seven recording scopes
-  compute/         # the compute pipeline
-  context/         # the abstract context, its six lifetime/transfer scopes, and the pipeline cache
-  memory/          # allocation_info + memory_heap (placed vs dedicated backing memory)
-  present/         # swapchain / presentation
-  query/           # GPU queries (timestamps today)
-  raster/          # the raster pipeline and the fixed-function state it aggregates
-  raytracing/      # acceleration structures, raytracing pipeline, shader table
-  resource/        # buffers, textures, views, pixel formats — the GPU resource surface
-  routine/         # the render-routine framework and its registry
-backends/          # concrete per-backend static libs (dx12/, vulkan/) that subclass the sg types
-```
-
-Headers are included by their full path from `src/`, e.g. `#include <shaped-graphics/resource/texture.hh>`.
-A folder's own umbrella, where it has one, is the same-named header inside it (`command_list/command_list.hh`, `context/context.hh`).
+Headers live in `src/shaped-graphics/`, one folder per topic.
+Only the cross-cutting vocabulary sits at the root — `fwd.hh`, `all.hh`, `types.hh`, `exceptions.hh`, `bytes_future.hh`.
+The [readme](../readme.md#file-organization) has the per-folder table, the include-path rule and the umbrella-header convention.
 
 ## Topics
 
 - [shaders](shaders.md) — how a shader gets from a file you edit to something a context can build a pipeline from: declaring a package, `acquire(ctx)`, hot reload, and dev-vs-shipping.
   Most of that machinery lives *downstream* of sg (shaped-shader-library, shaped-shader-compiler-dxc) — sg owns only `compiled_shader` and what a context accepts — but this is where to start looking.
-- [render-routines](render-routines.md) — the render-routine framework: `sg::render_routine<Derived>` (3-phase, hot-reload-aware init, reached by type via `acquire(cmd)` / `prewarm(ctx)` / `evict(ctx)`),
-  the per-context `ctx.routines` registry (lazy self-registration, `clear()`), and the `sg::reload_generation` counter.
+- [render-routines](render-routines.md) — the render-routine framework.
+  `sg::render_routine<Derived>` is 3-phase and hot-reload-aware, reached by type via `acquire(cmd)` / `prewarm(ctx)` / `evict(ctx)`.
+  The per-context `ctx.routines` registry self-registers lazily and has `clear()`; `sg::reload_generation` is the counter that invalidates.
   Concrete routines live in shaped-rendering.
 - [structure](structure.md) — the module roadmap with `[done]`/`[in progress]`/`[planned]` status.
   This is the living design document; update it as the API lands.
-- [coding-guidelines](coding-guidelines.md) — sg-specific conventions on top of the repo-wide ones: handles, mutable-vs-immutable types, the backend bridge, backend smurf naming, and the duplication-over-abstraction stance.
+- [coding-guidelines](coding-guidelines.md) — the sg-specific conventions on top of the repo-wide ones.
+  Handles, mutable-vs-immutable types, abstract interfaces backends derive from directly, smurf naming, and the duplication-over-abstraction stance.
   Extend it whenever generic advice turns out not to fit sg.
 - [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
 - [TODO](TODO.md) — running list of known follow-ups.
@@ -61,6 +39,8 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [backends](concepts/backends.md) — what a backend is, why we duplicate rather than abstract across them, and how each backend carries its own tests (feature smoke + backend-internal invariants).
 - [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the epoch counter/fence, advance/retire, deferred deletion, and finalizers.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are concurrency-safe and which must be externally synchronized.
+- [command recording](concepts/command-recording.md) — `sg::command_list`: single-use, submit-or-drop-once, bound to its epoch,
+  and the seven recording scopes (`cmd.upload` … `cmd.query`) every GPU operation is reached through.
 - [barriers](concepts/barriers.md) — access tracking + GPU barriers: access inferred from each op, the three-timeline minimal-barrier state machine, and the concurrent-command-list slot model.
 - [views](concepts/views.md) — strongly-typed resource views: typed by element type `T`, the access×layout axes shared across shading languages, and the erased `raw_view` backends consume.
 - [textures](concepts/textures.md) — the `raw_texture` resource vs the typed `texture<Traits>` wrapper, the derived-not-flagged `texture_description` shape, and the restrictive `pixel_format` set.
@@ -74,6 +54,8 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [raster pipeline](concepts/raster-pipeline.md) — the graphics path:
   a `raster_pipeline` (PSO) with its fixed-function state baked in, why the target formats live in the description,
   and how draws record on the `rendering_scope` handle as well as `cmd.raster` / `cmd.raster.manual`.
+- [presentation](concepts/presentation.md) — the swapchain: why the acquired view rather than the swapchain is this frame's size,
+  back buffers as ordinary borrowed textures, the present handshake split around the submit, and the present fence beside the epoch fence.
 - [inline upload](concepts/upload.inline.md) — latency-critical CPU→GPU buffer writes through an epoch-reclaimed UPLOAD ring buffer, usable later in the same command list.
 - [async upload](concepts/upload.async.md) — bulk CPU→GPU streaming on a dedicated copy queue (`ctx.upload`), off the frame path, with automatic per-resource sync so later lists auto-wait.
 - [inline download](concepts/download.inline.md) — asynchronous GPU→CPU readback through a READBACK ring buffer drained by an actor, with epoch-granular space reclaim and drop-to-cancel futures.

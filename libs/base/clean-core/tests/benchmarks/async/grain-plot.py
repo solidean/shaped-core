@@ -52,7 +52,7 @@ CASES = {
 
 
 def run_benchmark(preset: str) -> str:
-    """Run the sweep via dev.py and return its stdout. Raises if dev.py reports failure."""
+    """Run the sweep via dev.py and return its stdout — raises if dev.py reports failure."""
     cmd = [
         "uv",
         "run",
@@ -92,8 +92,9 @@ def parse(text: str) -> dict[str, dict[int, list[tuple[int, float]]]]:
 
 def plot(case: str, grains: dict[int, list[tuple[int, float]]], out_path: pathlib.Path, log_y: bool,
          total: bool) -> None:
-    """total=False: ns per input element. total=True: ns for the whole pass, which turns the fixed
-    submit/drive overhead into a flat left-hand plateau instead of a hyperbola."""
+    """total=False gives ns per input element.
+    total=True gives ns for the whole pass, which turns the fixed submit/drive overhead into a flat left-hand plateau instead of a hyperbola.
+    """
     title, _ = CASES[case]
     keys = sorted(grains)
     # Gradient over the grain EXPONENT, so the powers of two are evenly spaced in color as well as in meaning.

@@ -16,9 +16,8 @@ bool is_ident_char(char c)
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
-/// Length of an `operator` token starting at `i` — "operator", "operator<<", "operator<=>", … — or 0
-/// if there is none. Its angle brackets are punctuation, not template brackets, so the depth count
-/// must step over them rather than through them.
+/// Length of an `operator` token starting at `i` — "operator", "operator<<", "operator<=>", … — or 0 if there is none.
+/// Its angle brackets are punctuation, not template brackets, so the depth count must step over them rather than through them.
 isize operator_token_length(cc::string_view name, isize i)
 {
     constexpr cc::string_view keyword = "operator";
@@ -107,8 +106,8 @@ cc::string pad_left(cc::string_view s, isize width)
     return out;
 }
 
-/// One line, numbers right-aligned and the variable-width symbol last. No color inside a cell, so
-/// plain padding is honest here — unlike the trace formatter, which pads around color codes.
+/// One line, numbers right-aligned and the variable-width symbol last.
+/// No color inside a cell, so plain padding is honest here — unlike the trace formatter, which pads around color codes.
 cc::string row_line(row_cells const& c, column_widths const& w)
 {
     cc::string out;
@@ -122,8 +121,8 @@ cc::string row_line(row_cells const& c, column_widths const& w)
     return out;
 }
 
-/// Named, one per line, because which instruction it is *is* the finding. Empty when there are none,
-/// which is the normal case and needs no ceremony.
+/// Named, one per line, because which instruction it is *is* the finding.
+/// Empty when there are none, which is the normal case.
 cc::string format_slow_ops(cc::span<slow_op const> ops)
 {
     using namespace cc::console;

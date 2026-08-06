@@ -5,39 +5,16 @@
 
 #include <type_traits>
 
-/// Non-owning reference to a callable object with signature T
+/// Non-owning reference to a callable with signature T, in the spirit of std::function_ref (C++26).
 ///
-/// Similar to std::function_ref (C++26), provides a lightweight, trivially copyable view
-/// of any callable object without owning it.
+/// LIFETIME: the referenced callable must outlive the function_ref, which never owns and never copies.
+/// Passing a lambda straight into a parameter is fine — the temporary lives to the end of the full expression.
+/// Invoking a stored function_ref after that temporary dies is UB, as it is for any callable that dies first.
 ///
-/// IMPORTANT LIFETIME RULE:
-///   function_ref never owns. Any referenced callable object must outlive the function_ref.
-///   Binding to temporaries or references with shorter lifetime will result in UB.
+/// Binds function pointers, lambdas, functors, pointer-to-member functions and pointer-to-member objects.
+/// Trivially copyable, no heap allocation, one indirect call, and default-constructible into an invalid state.
 ///
-/// Supports implicit construction from:
-///   - function pointers
-///   - lambdas / functors
-///   - pointer-to-member functions
-///   - pointer-to-member objects
-///
-/// Usage example:
-///   void process(cc::function_ref<int(int)> f) {
-///       auto const result = f(42);
-///   }
-///
-///   auto const add_one = [](int x) { return x + 1; };
-///   process(add_one);
-///   process([](int x) { return x * 2; });
-///   process(+[](int x) { return x - 1; });  // unary + converts to function pointer
-///
-/// Properties:
-///   - Trivially copyable (no destructor, no heap allocations)
-///   - Zero overhead abstraction (single indirect call)
-///   - Default constructible (creates invalid/null state)
-///
-/// Limitations:
-///   - Does not support noexcept qualification in signature
-///   - Does not support ref-qualified signatures (e.g., R() &&)
+/// The signature may not be noexcept-qualified or ref-qualified (`R() &&`).
 template <class R, class... Args>
 struct cc::function_ref<R(Args...)>
 {
@@ -48,13 +25,11 @@ private:
 
     // construction
 public:
-    /// default constructor creates an invalid/null function_ref
-    /// calling operator() on a default-constructed function_ref is UB
+    /// A default-constructed function_ref is invalid; calling operator() on one is UB.
     function_ref() = default;
 
-    /// construct from any callable
-    /// accepts function pointers, lambdas, functors, pointer-to-member-function, pointer-to-member-object
-    /// accepts all kinds of references because it must not outlive its arg anyways
+    /// Construct from any callable — function pointer, lambda, functor, pointer-to-member function, pointer-to-member object.
+    /// Takes every kind of reference, since it must not outlive its argument anyway.
     template <class F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, function_ref>)
     function_ref(F&& f) : _payload(&f)
@@ -78,17 +53,15 @@ public:
 
     // queries
 public:
-    /// returns true if this function_ref references a valid callable
-    /// calling operator() when !is_valid() is UB
+    /// True iff this references a callable; calling operator() when it does not is UB.
     [[nodiscard]] bool is_valid() const { return _thunk != nullptr; }
 
-    /// returns true if this function_ref references a valid callable
     [[nodiscard]] explicit operator bool() const { return is_valid(); }
 
     // invocation
 public:
-    /// invoke the referenced callable with the given arguments
-    /// precondition: is_valid() must be true (checked via CC_ASSERT in debug)
+    /// Invoke the referenced callable.
+    /// is_valid() must hold, which CC_ASSERT checks wherever assertions are enabled.
     R operator()(Args... args) const
     {
         CC_ASSERT(_thunk != nullptr, "calling invalid function_ref is UB");

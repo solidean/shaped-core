@@ -1,12 +1,11 @@
-// The debuggee self-test.py traces. Its functions exist to be single-stepped, so they are built to
-// survive the optimizer: self-test.py asserts on what they actually retire.
+// The debuggee self-test.py traces.
+// Its functions exist to be single-stepped, so they are built to survive the optimizer.
 //
-// __declspec(noinline) keeps the call and the stack frame; the volatile locals force real loads and
-// stores so a body cannot fold to a constant or hoist out of the loop. Neither is an optimization
-// artifact we are hoping for — both are guaranteed by the language and the attribute.
+// __declspec(noinline) keeps the call and the stack frame.
+// The volatile locals force real loads and stores, so a body cannot fold to a constant or hoist out of the loop.
 //
-// extern "C" gives stable, unmangled names for --symbol. The shared `itrace_fixture_` prefix is also
-// what makes the ambiguity test deterministic: any spec matching that prefix hits both functions.
+// extern "C" gives stable, unmangled names for --symbol.
+// The shared `itrace_fixture_` prefix is what makes the ambiguity test deterministic: any spec matching it hits both functions.
 
 #include <clean-core/string/print.hh>
 
@@ -28,8 +27,8 @@ extern "C" __declspec(noinline) int itrace_fixture_mul(int a, int b)
 // volatile so every touch is a real load/store rather than a cached register.
 extern "C" int volatile itrace_global_counter = 0;
 
-// Touches a stack array (frame region) and the global (heap region), so --sections memory has both
-// to classify and name. noinline keeps the frame; volatile keeps the accesses.
+// Touches a stack array (frame region) and the global (heap region), so --sections memory has both to classify and name.
+// noinline keeps the frame; volatile keeps the accesses.
 extern "C" __declspec(noinline) int itrace_fixture_touch(int n)
 {
     int volatile buffer[8];

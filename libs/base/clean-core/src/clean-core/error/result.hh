@@ -132,31 +132,17 @@ private:
 
 namespace cc
 {
-/// Factory function to construct an explicit error wrapper for use with cc::result.
+/// Wraps a value as an explicit error, for returning from a function that returns cc::result.
+/// Marking it unambiguously is what keeps success and error apart in overload resolution and return-type deduction.
+/// It is the single sanctioned escape hatch from the success path — error construction here is deliberately explicit.
 ///
-/// This is the primary way to *return* an error from functions that use cc::result.
-/// It marks the value as an error unambiguously and avoids accidental success/error
-/// confusion in overload resolution and return type deduction.
+/// The wrapper itself does not allocate; it only tags the value, and the error object is constructed inside the receiving cc::result<T, E>.
+/// The optional source location defaults to the call site and is propagated into cc::any_error, or ignored by error types that do not store one.
+/// With the default cc::any_error that is what carries the debugging information: source location, context chains, optional stack traces.
 ///
-/// Typical usage:
+/// Usage:
 ///   return cc::error("failure message");
 ///   return cc::error(my_typed_error{...});
-///
-/// The returned wrapper does not allocate by itself. It merely tags the value as
-/// an error; the actual error object is constructed inside the receiving
-/// cc::result<T, E>.
-///
-/// When used with the default error type (cc::any_error), this enables concise
-/// application-level error handling while preserving rich debugging information
-/// (source location, context chains, optional stack traces).
-///
-/// Error construction is intentionally explicit. This function is the single
-/// sanctioned escape hatch from the success path.
-///
-/// The optional source location defaults to the call site and is propagated into
-/// cc::any_error (or ignored by error types that do not store locations).
-///
-/// Usage: return cc::error("failure message");
 template <class E>
 [[nodiscard]] constexpr as_error_t<std::decay_t<E>> error(E&& e, cc::source_location s = cc::source_location::current())
 {
@@ -428,16 +414,16 @@ public:
             return static_cast<E>(cc::forward<U>(fallback));
     }
 
-    /// Returns the contained value. Asserts that the value is present
-    /// NOTE: This asserts even in release builds.
+    /// Returns the contained value; asserts that it is present.
+    /// The assert fires in release builds too.
     [[nodiscard]] constexpr T value_assert(this auto&& self, cc::string_view msg)
     {
         CC_ASSERTS_ALWAYS(self._has_value, msg);
         return static_cast<decltype(self)&&>(self)._v;
     }
 
-    /// Returns the contained error. Asserts that the error is present
-    /// NOTE: This asserts even in release builds.
+    /// Returns the contained error; asserts that it is present.
+    /// The assert fires in release builds too.
     [[nodiscard]] constexpr E error_assert(this auto&& self, cc::string_view msg)
     {
         CC_ASSERTS_ALWAYS(!self._has_value, msg);

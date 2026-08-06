@@ -15,15 +15,15 @@ struct sqlite3_stmt;
 
 // SQLite reader (data/).
 //
-// Unlike json / obj this is NOT a one-shot stream parser: SQLite is a live database engine, so babel::sqlite is a
-// thin RAII wrapper over an open connection you keep talking to — open a file (or :memory: / a byte image), run SQL,
-// iterate result rows, execute statements. There is deliberately no read(cc::read_stream&): a live engine wants a
-// file or an in-memory image, not a forward-only byte window. open_blob covers "I already have the bytes".
+// Unlike json / obj this is NOT a one-shot stream parser: SQLite is a live database engine.
+// babel::sqlite is a thin RAII wrapper over an open connection you keep talking to — open a file (or :memory: /
+// a byte image), run SQL, iterate result rows, execute statements.
+// There is deliberately no read(cc::read_stream&): a live engine wants a file or an in-memory image, not a
+// forward-only byte window, and open_blob covers "I already have the bytes".
 //
-// The engine backend is fetched on demand (extern/sqlite), so it may be absent from a raw checkout. That is babel's
-// private concern: this API is ALWAYS declared and callable. When the backend was not compiled in, is_available()
-// returns false and every open_* factory returns an error — absence is an ordinary runtime failure on a path that is
-// error-riddled anyway, never a compile-time hole in the API. See docs/coding-guidelines.md.
+// The engine backend is fetched on demand (extern/sqlite), so it may be absent from a raw checkout.
+// Then is_available() is false and every open_* factory returns an error, while the API stays declared and callable.
+// See docs/coding-guidelines.md for that rule.
 //
 //   auto db = babel::sqlite::database::open_memory().value();
 //   db.exec("CREATE TABLE t(id INTEGER, name TEXT)");
@@ -38,7 +38,8 @@ struct sqlite3_stmt;
 namespace babel::sqlite
 {
 /// True when the SQLite backend was compiled in (the extern/sqlite target was fetched and linked).
-/// When false, every database::open_* returns an error. A runtime probe — callers never need a macro.
+/// When false, every database::open_* returns an error.
+/// A runtime probe — callers never need a macro.
 [[nodiscard]] bool is_available();
 
 /// The dynamic type of a result column, as reported by SQLite for the current row.
@@ -51,8 +52,9 @@ enum class column_kind : u8
     blob,
 };
 
-/// A non-owning view of the statement's current result row. Valid only until the next step / the statement dies.
-/// Columns are 0-based. Accessors follow SQLite's type coercion (e.g. as_i64 on a text cell parses it).
+/// A non-owning view of the statement's current result row.
+/// Valid only until the next step, or until the statement dies.
+/// Columns are 0-based, and accessors follow SQLite's type coercion (as_i64 on a text cell parses it).
 struct row
 {
     row() = default;
@@ -94,8 +96,10 @@ public:
     cc::result<cc::unit> bind(i32 index, cc::span<byte const> value);
     cc::result<cc::unit> bind_null(i32 index);
 
-    /// Advance to the next result row. true = a row is now current (read it via the range-for row, or column_*/as_*
-    /// on current()), false = no more rows. Errors surface here and also set the sticky error.
+    /// Advance to the next result row.
+    /// True means a row is now current — read it via the range-for row, or column_* / as_* on current().
+    /// False means no more rows.
+    /// Errors surface here and also set the sticky error.
     [[nodiscard]] cc::result<bool> next();
 
     /// The current row view (valid after next() returned true).
@@ -139,7 +143,8 @@ private:
     cc::string _error;
 };
 
-/// A live SQLite database connection. Move-only (owns the sqlite3 handle; closed in the destructor).
+/// A live SQLite database connection.
+/// Move-only: it owns the sqlite3 handle and closes it in the destructor.
 /// Full read/write: exec arbitrary SQL, prepare/query statements, run DDL and transactions.
 class database
 {
@@ -153,7 +158,8 @@ public:
 
     /// Open (create if missing) an on-disk database for reading and writing.
     [[nodiscard]] static cc::result<database> open(cc::string_view path);
-    /// Open an existing on-disk database read-only. Errors if the file does not exist.
+    /// Open an existing on-disk database read-only.
+    /// Errors if the file does not exist.
     [[nodiscard]] static cc::result<database> open_readonly(cc::string_view path);
     /// A transient in-memory database (":memory:").
     [[nodiscard]] static cc::result<database> open_memory();
@@ -164,7 +170,8 @@ public:
     cc::result<cc::unit> exec(cc::string_view sql);
     /// Prepare a single statement for binding + stepping.
     [[nodiscard]] cc::result<statement> prepare(cc::string_view sql);
-    /// Convenience: prepare a single statement ready to iterate. Same as prepare; reads as intent at the call site.
+    /// Convenience: prepare a single statement ready to iterate.
+    /// Same as prepare; it reads as intent at the call site.
     [[nodiscard]] cc::result<statement> query(cc::string_view sql) { return prepare(sql); }
 
     /// Serialize the main database to a contiguous byte image (round-trips through open_blob). Empty on failure.

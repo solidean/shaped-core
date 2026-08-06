@@ -6,9 +6,9 @@
 
 namespace sg::backend::vulkan
 {
-/// Vulkan implementation of sg::raw_buffer. Holds the VkBuffer and its backing device-local
-/// VkDeviceMemory (sg exposes no host-visible buffers). Both are VK_NULL_HANDLE for an empty
-/// (size 0) buffer.
+/// Vulkan implementation of sg::raw_buffer.
+/// Holds the VkBuffer and its backing device-local VkDeviceMemory — sg exposes no host-visible buffers.
+/// Both are VK_NULL_HANDLE for an empty (size 0) buffer.
 class vulkan_buffer final : public sg::raw_buffer
 {
 public:
@@ -22,8 +22,9 @@ public:
     {
     }
 
-    // Deferred deletion: hands the GPU handles + finalizers to the context, freed once the owning
-    // epoch retires (rather than freeing here, while the GPU may still be reading it). Body in .cc.
+    // Deferred deletion: hands the GPU handles and finalizers to the context, freed once the owning epoch retires.
+    // Freeing them here could pull memory out from under a GPU still reading them.
+    // Body in vulkan_buffer.cc.
     ~vulkan_buffer() override;
 
     vulkan_context& _ctx;      // creating context — outlives this buffer

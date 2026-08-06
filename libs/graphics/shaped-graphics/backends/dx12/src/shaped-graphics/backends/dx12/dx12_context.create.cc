@@ -1,20 +1,17 @@
-// dx12 context bring-up: debug layer, adapter selection, device + queue creation. Split off from the
-// other dx12_context bodies because it is the heavy path and grows with every device feature we opt
-// into (feature-level probing, tearing, GPU-based validation, ...).
+// dx12 context bring-up: debug layer, adapter selection, device + queue creation.
 
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-// ID3D12Debug / ID3D12InfoQueue1 (debug-layer interfaces) live in the SDK-layers header, separate
-// from d3d12.h.
+// ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>
 
 namespace sg::backend::dx12
 {
 namespace
 {
-// Validation messages routed to stderr. Registered on the device's info queue when the debug layer
-// is active; runs on whatever thread the runtime raises the message from.
+// Validation messages routed to stderr.
+// Registered on the device's info queue when the debug layer is active, and runs on whatever thread the runtime raises the message from.
 void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
                                     D3D12_MESSAGE_SEVERITY severity,
                                     D3D12_MESSAGE_ID /*id*/,
@@ -43,8 +40,8 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
     cc::eprintln("[dx12 {}] {}", level, description);
 }
 
-// Routes D3D12 validation messages to dx12_message_callback. Best-effort: needs ID3D12InfoQueue1
-// (recent SDK/runtime); silently skipped when the interface isn't available.
+// Routes D3D12 validation messages to dx12_message_callback.
+// Best-effort: needs ID3D12InfoQueue1, and is silently skipped when the interface isn't available.
 void register_debug_callback(ID3D12Device* device)
 {
     ComPtr<ID3D12InfoQueue1> info_queue;
@@ -120,8 +117,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateCommandQueue failed");
 
-    // Epoch system fences (both timelines on the direct queue) + a reusable wait event. The epoch
-    // fence gates resource reclamation; the submission fence tracks per-command-list completion.
+    // Epoch system fences, both timelines on the direct queue.
+    // The epoch fence gates resource reclamation; the submission fence tracks per-command-list completion.
     ComPtr<ID3D12Fence> epoch_fence;
     if (HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&epoch_fence)); FAILED(hr))
         return dx12_error(hr, "ID3D12Device::CreateFence (epoch) failed");
@@ -158,8 +155,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // The GPU-query heap pool; caches the direct queue's timestamp frequency (→ tick→seconds factor).
     CC_RETURN_IF_ERROR(ctx->_query_system.initialize());
 
-    // The shader-visible descriptor heap binding_groups allocate their tables from. Split into a
-    // per-epoch-reclaimed transient ring (leading fraction) and a persistent bump region (the rest).
+    // The shader-visible descriptor heap binding_groups allocate their tables from.
+    // Split into a per-epoch-reclaimed transient ring (the leading fraction) and a persistent bump region (the rest).
     CC_RETURN_IF_ERROR(ctx->_descriptor_heap.initialize(*ctx, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
                                                         config.descriptor_heap_capacity,
                                                         config.descriptor_transient_fraction));

@@ -1,112 +1,84 @@
 # shaped-graphics TODO
 
-Running list of known follow-ups. Bigger design intent lives in
-[structure.md](structure.md).
+Running list of known follow-ups — what is **open**.
+What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
-- **Transfer — remaining:** host↔device transfer is in for **buffers and textures**, both inline
-  (`cmd.upload` / `cmd.download`, over dx12's UPLOAD / READBACK ring buffers) and async
-  (`ctx.upload` / `ctx.download`, over dedicated copy queues with cross-queue fence waits), with
-  `bytes_future` as the shared result.
-  Still open: the **vulkan** implementation (currently a
-  `CC_UNREACHABLE` stub); **device→device texture copy** (`cmd.copy` only does buffer regions today);
-  and **fallback staging** when a single list's inline transfers exceed the ring capacity — the ring
-  now blocks on in-flight epochs first, but with nothing in flight it still asserts.
-- **Barriers + access tracking — remaining:** the access-tracking system is in for **buffers** (inferred
-  access, the three-timeline `resource_access_state`, the command-list slot model with revert/promote, and
-  dx12 enhanced-barrier emission — see [concepts/barriers.md](concepts/barriers.md)). **Textures** are
-  tracked too: each `dx12_texture` owns a per-command-list covering partition and emits subresource-range
-  `D3D12_TEXTURE_BARRIER` layout transitions (with entry-layout revert on a non-final submit). Real public
-  ops drive it — texture upload/download, a bound texture in a compute dispatch (SRV/UAV views transition
-  via `shader_layout_of`), and the rendering scope's color / depth-stencil targets.
-  Still open: **vulkan**
-  barrier emission (lands with its compute/transfer milestone; it reuses the shared vocabulary + state
-  machine); `declare_array_access` **full wiring** (API + validation are in, but applying it needs an array
-  binding path + a binding-name→resource reflection map); migrating `access_flags` /
-  `pipeline_stage_flags` to `cc::flags` when that lands; a per-draw/dispatch **escape hatch** that disables
-  automatic transitions for callers that know their resources are already in the right layout; and folding
-  the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
-- **Raster pipeline + draws — deferred layers:** the graphics path is in (`sg::raster_pipeline` +
-  `raster_pipeline_description` with its fixed-function state vocabulary, geometry + tessellation stages,
-  `ctx.uncached.create_raster_pipeline`, draw recording on `cmd.raster` / `cmd.raster.manual`, and the
-  rendering scope that binds color / depth-stencil targets; dx12 real on WARP, vulkan stubbed). See
-  [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open: **PSO caching**
-  (`ctx.cached.acquire_raster_pipeline` + `pipeline_cache` description hashing + `async_raster_pipeline` —
-  the compute/RT parity piece); **indirect draws** (`draw_indirect` / count buffers); **dynamic primitive
-  topology** and **dynamic depth bias** (both baked into the PSO for now); **mesh / task** stages; and the
-  **vulkan** implementation (`VkPipeline` + dynamic-rendering formats + the `vkCmdDraw*` seams — currently
-  `CC_UNREACHABLE`).
-- **Acceleration structures — deferred layers:** the single-shot build path is in (`sg::blas`/`sg::tlas`,
-  the `cmd.raytracing` scope with `build_blas` for triangles + procedural AABBs, `build_tlas`, and
-  `is_supported()`; dx12 real on WARP, vulkan stubbed). The abstract types already carry the stats a refit
-  needs (build + update scratch sizes, flags, the storage handle). Still open: the **transient (single-epoch)
-  AS variant** (per-frame rebuilds) — a property of the build call's result, not a new scope; **refit /
-  update** (reuses topology, needs `allow_update` at build and `PERFORM_UPDATE` + the source AS at build
-  time) and **compaction** (BLAS `allow_compaction` → query compacted size → copy into a smaller buffer);
-  the **vulkan** implementation (`to_vk_buffer_usage` must map the `accel_structure_*` usages + add the
-  buffer device address; then the real `VkAccelerationStructureKHR` build path — flip the
-  `nx::config::disabled`/`register_backend` toggle in `tests/backends/vulkan-entry.cc` once it lands). The
-  **trace side** is implemented for dx12 — the `acceleration_structure` binding (inline `RayQuery`) plus the
-  `raytracing_pipeline` / `raytracing_shader_table` / `cmd.raytracing.dispatch_rays` DXR path (see
-  [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md)); still open there are **local root
-  signatures**, a **dedicated shader-table buffer usage** (`types.hh` reserves `shader_binding_table`), a
-  **state-object cached blob**, and the **vulkan** trace implementation.
-- **`cc::shared_ptr`:** the `*_handle` typedefs use `std::shared_ptr` as a placeholder.
-  [`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) has landed (8 B, intrusive,
-  Traits-keyed), so what remains is switching the handles to it (keeps sg off `std::`). Needs a Traits for the
-  sg shapes — `cc::default_shared_traits` gives a trailing control block with no source change. See the
-  [coding-guidelines](coding-guidelines.md) note.
-- **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly (~110 occurrences across the
-  dx12 + vulkan backends, `raw_buffer`, `raw_texture`, `bytes_future`, `acceleration_structure`). clean-core
-  has migrated to [`cc::atomic`](../../../base/clean-core/src/clean-core/thread/atomic.hh), and `<atomic>` is
-  no longer blessed to call into directly — see
-  [blessed-stdlib-headers.md](../../../base/clean-core/docs/blessed-stdlib-headers.md). The migration is
-  mechanical (with threads `cc::atomic` **is** `std::atomic`), and no correctness gap exists today because
-  dx12/vulkan are desktop-only. It becomes real when WebGPU-on-wasm lands: that build has no threads, and
-  every one of those atomics would keep its interlock for a concurrency that cannot happen.
-- **`cc::flags`:** `buffer_usage` and `texture_usage` use a hand-rolled `enum class` + bitwise operators;
-  migrate to `cc::flags` once that clean-core type is implemented (it is still a stub).
-- **Views — deferred layers:** buffer views (`uniform`/`readonly`/`readwrite`, `byte` = raw) + the
-  erased `raw_view` are in, as are texture SRV/UAV views and `render_target` / `depth_stencil` target
-  views (dimension-typed: 1d/2d/2d-array/3d/cube/cube-array), which the rendering scope binds as
-  output-merger targets; see [concepts/views.md](concepts/views.md). Still deferred:
+- **Transfer.** Still open:
+  - the **vulkan** implementation — a `CC_UNREACHABLE` stub today;
+  - **device→device texture copy** — `cmd.copy` does buffer regions only;
+  - **fallback staging** when one list's inline transfers exceed the ring capacity.
+    The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
+  - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
+- **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
+  - **vulkan** barrier emission — it reuses the shared vocabulary and state machine, and lands with vulkan's compute/transfer milestone;
+  - `declare_array_buffer_access` / `declare_array_texture_access` **full wiring** — the API and its validation are in, but neither is applied.
+    Applying either needs an array binding path plus a binding-name→resource reflection map.
+    The texture form additionally asserts on a non-empty declaration today;
+  - migrating `access_flags` / `pipeline_stage_flags` to `cc::flags` once that lands;
+  - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
+  - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
+- **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
+  - **PSO caching** — `ctx.cached.acquire_raster_pipeline` plus `pipeline_cache` description hashing and `async_raster_pipeline`, the compute/RT parity piece;
+  - **indirect draws** — `draw_indirect` and count buffers;
+  - **dynamic primitive topology** and **dynamic depth bias**, both baked into the PSO for now;
+  - **mesh / task** stages;
+  - the **vulkan** implementation — `VkPipeline` plus dynamic-rendering formats and the `vkCmdDraw*` seams, currently `CC_UNREACHABLE`.
+- **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
+  The abstract types already carry the stats a refit needs — build and update scratch sizes, flags, the storage handle.
+  Still open:
+  - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;
+  - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
+  - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
+  - the **vulkan** implementation — `to_vk_buffer_usage` must map the `accel_structure_*` usages and add the buffer device address, then the real `VkAccelerationStructureKHR` build path.
+    Flip the `nx::config::disabled` / `register_backend` toggle in `tests/backends/vulkan-entry.cc` once it lands.
+- **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
+  Still open: **local root signatures**, a **state-object cached blob**, and the **vulkan** trace implementation.
+  Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
+  [types.hh](../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately, so the storage needs a type of its own.
+- **`cc::shared_ptr`:** the `*_handle` typedefs still use `std::shared_ptr`.
+  [`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) exists — 8 B, intrusive, Traits-keyed.
+  But its Traits protocol is provisional, shaped by `cc::async`'s needs and expected to be simplified.
+  So this is gated on that API settling rather than ready to pick up: see [systems/shared-ptr](../../../base/clean-core/docs/systems/shared-ptr.md).
+  It will not be a drop-in even then.
+  sg's resources are polymorphic, so `default_shared_traits`' `sizeof(T)`-derived control offset cannot find the counts through a base-typed handle — the same blocker slib hits.
+  They also derive from `std::enable_shared_from_this`, with 30+ `shared_from_this()` call sites and no `cc::shared_ptr` equivalent.
+  See the [coding-guidelines](coding-guidelines.md) note.
+- **Backend-typed handles are inconsistently const:** `vulkan_buffer_handle` / `vulkan_texture_handle` are `shared_ptr<T>`.
+  sg's `*_handle` typedefs and dx12's backend-typed ones are `shared_ptr<T const>`.
+  Nothing needs the mutability — `add_finalizer` is `const` — so vulkan should follow dx12.
+- **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly.
+  About 110 occurrences, across the dx12 and vulkan backends, `raw_buffer`, `raw_texture`, `bytes_future` and `acceleration_structure`.
+  clean-core has migrated to [`cc::atomic`](../../../base/clean-core/src/clean-core/thread/atomic.hh), and `<atomic>` is no longer blessed to call into directly.
+  See [blessed-stdlib-headers.md](../../../base/clean-core/docs/blessed-stdlib-headers.md).
+  The migration is mechanical, since with threads `cc::atomic` **is** `std::atomic`.
+  It becomes load-bearing when WebGPU-on-wasm lands: that build has no threads, and every one of those atomics would keep its interlock for a concurrency that cannot happen.
+- **`cc::flags`:** `buffer_usage` and `texture_usage` use a hand-rolled `enum class` plus bitwise operators.
+  Migrate to `cc::flags` once that clean-core type is implemented — it is still a stub.
+- **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
-  - **reflection-driven validation** of a view's `T`/access against the shader;
+  - **reflection-driven validation** of a view's `T` and access class against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
-- **Vertex attributes: go location-based, drop the HLSL semantic from the public API.** `vertex_attribute`
-  currently identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that
-  doesn't survive a change of shader language. Every other target matches vertex inputs by a **numeric
-  location**: SPIR-V/Vulkan `layout(location=N)`, WGSL/WebGPU `@location(N)`, Metal `[[attribute(N)]]`;
-  Vulkan's `VkVertexInputAttributeDescription` is literally `{location, binding, format, offset}` with no
-  name. So the backend-neutral identity is a `u32 location`, and `{location, format, offset, slot}` is the
-  union of the Vulkan / WebGPU / Metal models. Plan:
-  - make `location` the attribute identity (replace `semantic` / `semantic_index` in `vertex_attribute`);
-  - move the HLSL **semantic into `compiled_shader`'s reflected vertex-input signature** (already a deferred
-    field there — the `// Deferred: … I/O signatures` note in `compiled_shader.hh`), as per-input
-    `{location, semantic, semantic_index, format}`;
-  - the **dx12 backend** then resolves `location → semantic` from that signature to fill
-    `D3D12_INPUT_ELEMENT_DESC` (DX12 is the only backend that needs the string); SPIR-V / WGSL / Metal use
-    `location` verbatim and ignore the semantic entirely;
-  - optionally keep a semantic **hint** on the layout that is resolved to a location at pipeline-build time
-    against the reflected VS input signature (ergonomic sugar for HLSL authors) — but the string is erased
-    before it reaches any backend, so it never appears in the portable path.
-  This is the direction; the current semantic-string form is an HLSL-only interim.
-- **Blessed escape hatch:** add an sg API that returns raw underlying GPU handles without exposing
-  the concrete backend types, so callers don't reach for `dynamic_cast` to a `sg::backend::*` type.
+- **Vertex attributes: go location-based, drop the HLSL semantic from the public API.**
+  `vertex_attribute` identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that does not survive a change of shader language.
+  Every other target matches vertex inputs by a **numeric location**: SPIR-V/Vulkan `layout(location=N)`, WGSL/WebGPU `@location(N)`, Metal `[[attribute(N)]]`.
+  Vulkan's `VkVertexInputAttributeDescription` is literally `{location, binding, format, offset}`, with no name.
+  So the backend-neutral identity is a `u32 location`, and `{location, format, offset, slot}` is the union of the Vulkan / WebGPU / Metal models.
+  Plan:
+  - make `location` the attribute identity, replacing `semantic` / `semantic_index` in `vertex_attribute`;
+  - move the HLSL **semantic into `compiled_shader`'s reflected vertex-input signature** as per-input `{location, semantic, semantic_index, format}` — already a deferred field there;
+  - the **dx12 backend** then resolves `location → semantic` from that signature to fill `D3D12_INPUT_ELEMENT_DESC`, since DX12 is the only backend that needs the string.
+    SPIR-V / WGSL / Metal use `location` verbatim and ignore the semantic entirely;
+  - optionally keep a semantic **hint** on the layout, resolved to a location at pipeline-build time against the reflected VS input signature — ergonomic sugar for HLSL authors.
+    The string is erased before it reaches any backend, so it never appears in the portable path.
+- **Blessed escape hatch:** an sg API returning the raw underlying GPU handles without exposing the concrete backend types, so a caller never reaches for `dynamic_cast` to an `sg::backend::*` type.
   See the [coding-guidelines](coding-guidelines.md) escape-hatch note.
-- **SDK detection:** dx12 now links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) directly off
-  the default lib path — good enough on the gated Windows path, but there's no explicit SDK
-  presence/version check yet. vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; a
-  version/feature floor beyond the 1.2 baseline is still worth adding.
-- **Epoch system — deferred layers:** the epoch core (counter + direct-queue epoch/submission
-  timelines, in-flight FIFO, advance/retire, throttle, deferred deletion + finalizers, command
-  allocator/pool recycling) is in for dx12 and vulkan, as are dx12's dedicated **async copy queues**
-  behind `ctx.upload` / `ctx.download`; see [concepts/epochs.md](concepts/epochs.md).
-  Still deferred:
+- **SDK detection:** dx12 links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`) straight off the default lib path, with no explicit SDK presence or version check.
+  vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`; a version/feature floor beyond the 1.2 baseline is still worth adding.
+- **Epoch system.** See [concepts/epochs.md](concepts/epochs.md). Still deferred:
   - the **vulkan** async copy queue, which has neither the queue nor the per-resource pending syncs;
-  - **transient textures** — `ctx.transient`'s bump allocator and the transient descriptor ring are in
-    for dx12, but the heap is buffers-only, so a transient texture still asserts.
-- **`cc::ringbuffer`:** the epoch in-flight set uses a `cc::vector` drained from the front, because
-  `cc::ringbuffer` is currently an unimplemented stub. Switch to it once it lands.
+  - a **texture-capable transient heap** — `ctx.transient`'s bump allocator is buffers-only, so a transient texture falls back to a dedicated allocation the backend auto-expires at the next epoch.
+- **`cc::ringbuffer`:** the epoch in-flight set uses a `cc::vector` drained from the front, because `cc::ringbuffer` is an unimplemented stub.
+  Switch to it once it lands.
 - **Render routines want a shared/exclusive lock, not a mutex.**
   The model to reach is: a routine's init phases exclude every `execute`, while `execute` calls that only *read* run in parallel with each other.
   A read-only routine like `sr::blit_routine` — one that can be acquired without exclusivity — has no reason to serialize against another thread's `execute`.
@@ -118,19 +90,15 @@ Running list of known follow-ups. Bigger design intent lives in
 - **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
-- **Swapchain / presentation — deferred layers:** the windowed-presentation path is in
-  (`ctx.create_swapchain` -> `sg::swapchain` with `acquire_backbuffer` / `present` / `get_size` +
-  description getters; auto-resize on acquire; `present_mode` vsync/immediate; an `enable_hdr` flag). dx12
-  is real (an `IDXGISwapChain3` flip-discard chain; back buffers wrapped as `dx12_texture` so they ride the
-  normal render-pass + barrier path; a dedicated present fence gates buffer reuse; `present()` transitions
-  the buffer to `texture_layout::present` via `dx12_command_list::transition_texture_to`). The native
-  window handle is an opaque `void*` (HWND on Windows) in the agnostic description. Still open: the
-  **vulkan** implementation (`VkSurfaceKHR` + `VkSwapchainKHR` + acquire/present semaphores — currently a
-  not-implemented `cc::error` stub); a **proper `native_window_handle` type** to replace the opaque `void*`
-  in `swapchain_description` (a small platform-tagged struct — HWND / xcb+window / wl_surface / NSWindow —
-  once a second windowing backend actually needs one, so it isn't speculative); **deeper HDR** (metadata /
-  tone-mapping beyond the colorspace set); **exclusive fullscreen** and **multi-window**; letting a windowed
-  renderer thread the swapchain's back-buffer count into `advance_epoch`; and a headless/offscreen present
-  target so the present path can be pixel-verified on CI (today the WARP swapchain test needs a real hidden
-  window and SKIPs without one).
+- **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
+  dx12 is real; vulkan is a not-implemented `cc::error` stub.
+  Still open:
+  - the **vulkan** implementation — `VkSurfaceKHR` + `VkSwapchainKHR` + acquire/present semaphores;
+  - a proper **`native_window_handle` type** to replace the opaque `void*` in `swapchain_description`.
+    A small platform-tagged struct (HWND / xcb+window / wl_surface / NSWindow), added once a second windowing backend actually needs one;
+  - **deeper HDR** — metadata and tone-mapping beyond the colorspace set;
+  - **exclusive fullscreen** and **multi-window**;
+  - letting a windowed renderer thread the swapchain's back-buffer count into `advance_epoch`;
+  - a headless/offscreen present target, so the present path can be pixel-verified on CI.
+    Today the WARP swapchain test needs a real hidden window and SKIPs without one.
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

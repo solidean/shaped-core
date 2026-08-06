@@ -5,7 +5,7 @@
 
 namespace sg::backend::dx12
 {
-/// Maps an sg::pixel_format to its DXGI resource format. `undefined` maps to DXGI_FORMAT_UNKNOWN. Depth
-/// formats map to their depth DXGI type (typeless resource + view formats arrive with texture views).
+/// Maps an sg::pixel_format to its DXGI resource format; `undefined` maps to DXGI_FORMAT_UNKNOWN.
+/// Depth formats map to their depth DXGI type, never the typeless pair depth-as-SRV would need — see dx12_view_desc.hh.
 [[nodiscard]] DXGI_FORMAT to_dxgi_format(sg::pixel_format format);
 } // namespace sg::backend::dx12

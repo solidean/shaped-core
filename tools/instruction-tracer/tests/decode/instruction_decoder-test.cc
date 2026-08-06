@@ -85,9 +85,8 @@ TEST("decoder - lock-prefixed RMW is atomic")
 
 TEST("decoder - xchg with memory is atomic without a lock prefix")
 {
-    // 48 87 08 = xchg [rax], rcx. The x86 rule: xchg against memory locks implicitly, so there is no
-    // prefix and no ZYDIS_ATTRIB_HAS_LOCK. This is how an atomic store/exchange compiles, so matching
-    // only the prefix undercounts exactly the traffic the atomics column exists to find.
+    // 48 87 08 = xchg [rax], rcx.
+    // Pins the implicit-lock rule: without it the atomics column misses exactly the traffic it exists to find.
     auto const insn = decoded({0x48, 0x87, 0x08});
     CHECK(insn.is_atomic);
 }
@@ -144,8 +143,8 @@ TEST("decoder - memory read and write are tracked separately")
 
 TEST("decoder - implicit stack traffic is not counted as memory access")
 {
-    // push/pop touch memory only through the implicit rsp operand. Counting those would mark most of
-    // a prologue, drowning out the pointer chases the column is for.
+    // push/pop touch memory only through the implicit rsp operand.
+    // Pins their exclusion, so a prologue cannot drown out the pointer chases.
     CHECK(!decoded({0x50}).writes_memory); // push rax
     CHECK(!decoded({0x58}).reads_memory);  // pop rax
 }
@@ -163,7 +162,8 @@ TEST("decoder - undecodable bytes leave every flag false")
 
 TEST("decoder - integer divide is flagged slow")
 {
-    // 48 F7 F9 = idiv rcx. The one that arrives uninvited via `%` on a non-power-of-two.
+    // 48 F7 F9 = idiv rcx.
+    // The one that arrives uninvited via `%` on a non-power-of-two.
     auto const insn = decoded({0x48, 0xF7, 0xF9});
     REQUIRE(insn.slow_mnemonic != nullptr);
     CHECK(cc::string_view(insn.slow_mnemonic) == "idiv");
@@ -176,14 +176,15 @@ TEST("decoder - integer divide is flagged slow")
 
 TEST("decoder - multiply is not slow, only divide is")
 {
-    // 48 F7 E9 = imul rcx — same F7 group as idiv, ~3 cycles. Flagging it would be noise.
+    // 48 F7 E9 = imul rcx — same F7 group as idiv, ~3 cycles.
+    // Flagging it would be noise.
     CHECK(decoded({0x48, 0xF7, 0xE9}).slow_mnemonic == nullptr);
 }
 
 TEST("decoder - shifts are not slow (a masked bucket index is the fast path)")
 {
-    // 48 D3 E1 = shl rcx, cl — what a power-of-two modulus compiles to. Flagging this would make the
-    // column meaningless for the exact comparison it exists to serve.
+    // 48 D3 E1 = shl rcx, cl — what a power-of-two modulus compiles to.
+    // Flagging this would make the column meaningless for the exact comparison it exists to serve.
     CHECK(decoded({0x48, 0xD3, 0xE1}).slow_mnemonic == nullptr);
     CHECK(decoded({0x48, 0x21, 0xD1}).slow_mnemonic == nullptr); // and rcx, rdx
 }
@@ -205,7 +206,7 @@ TEST("decoder - fences and the spin hint are flagged slow")
     REQUIRE(mfence.slow_mnemonic != nullptr);
     CHECK(cc::string_view(mfence.slow_mnemonic) == "mfence");
 
-    // F3 90 = pause. A contended spinlock is exactly where this shows up.
+    // F3 90 = pause.
     auto const pause = decoded({0xF3, 0x90});
     REQUIRE(pause.slow_mnemonic != nullptr);
     CHECK(cc::string_view(pause.slow_mnemonic) == "pause");
@@ -228,8 +229,8 @@ TEST("decoder - float divide and sqrt are flagged slow")
 
 TEST("decoder - a rep-prefixed string op is slow, the bare one is not")
 {
-    // Matched by the prefix, not the mnemonic: Zydis spells the string and SSE forms of `movsd` the
-    // same way, so a mnemonic match here would catch every scalar double move in the program.
+    // Matched by the prefix, not the mnemonic.
+    // A mnemonic match would catch every scalar double move in the program.
     auto const rep = decoded({0xF3, 0xA4}); // rep movsb
     REQUIRE(rep.slow_mnemonic != nullptr);
     CHECK(cc::string_view(rep.slow_mnemonic) == "movsb");

@@ -1,17 +1,11 @@
 """Toolset pinning and build-directory overrides for --toolset / --build-suffix / --build-dir.
 
-Presets only name a compiler *family* (clang / gcc / msvc); the concrete version is
-otherwise whatever the environment defaults to. `--toolset` pins a specific one so the
-same dev.py can drive, say, clang 19 / 20 / 21 — or two Visual Studio toolsets — on one
-machine, each in its own build directory.
-
 How a pinned toolset is applied depends on the family:
   - clang / gcc: override CMAKE_C/CXX_COMPILER with a versioned binary (see compiler_defines).
-  - msvc: there is no compiler path (Ninja + cl from the injected env), so it is selected by
-    Visual Studio instance + `-vcvars_ver` (see find_msvc_instance and process.msvc_env).
+  - msvc: there is no compiler path, since it is Ninja plus cl from the injected env, so it is selected by Visual Studio instance and `-vcvars_ver` (see find_msvc_instance and process.msvc_env).
 
-A requested toolset that cannot be found is a hard error (ToolsetError) raised eagerly when
-overrides are applied, so the failure is a clean message rather than a confusing mid-build error.
+A requested toolset that cannot be found is a hard error (ToolsetError), raised eagerly when overrides are applied, so the failure is a clean message rather than a confusing mid-build one.
+docs/guides/building-and-testing.md is what --toolset means to a user.
 
 Public API:
     apply_overrides(presets, ...) -> list[Preset]   # rewrite build_dir + attach toolset, validate
@@ -85,11 +79,11 @@ def compiler_major(exe: str) -> int | None:
 def compiler_defines(preset: Preset, root: Path | None = None) -> dict[str, str]:
     """CMAKE_{C,CXX}_COMPILER overrides for a pinned clang/gcc toolset, or {} when none applies.
 
-    For a bare version N, prefer a versioned binary on PATH (`clang++-N` / `g++-N`) and override the
-    compiler to it. When none exists — e.g. `clang-cl` on Windows or Homebrew's unversioned `clang++`
-    on macOS — fall back to *asserting* that the preset's own compiler is major version N (no
-    override): a hard error on mismatch, so a base-image compiler bump is loud. MSVC pins via the
-    vcvars environment, not cache variables, so it returns {} here.
+    A path-valued toolset is used as the C++ driver directly, with the C driver derived beside it.
+    For a bare version N, prefer a versioned binary on PATH (`clang++-N` / `g++-N`) and override the compiler to it.
+    When none exists — `clang-cl` on Windows, or Homebrew's unversioned `clang++` on macOS — fall back to *asserting* that the preset's own compiler is major version N, with no override.
+    That is a hard error on mismatch, so a base-image compiler bump is loud.
+    MSVC pins via the vcvars environment rather than cache variables, so it returns {} here.
     """
     ts = preset.toolset
     if ts is None or preset.family not in ("clang", "gcc"):
@@ -174,9 +168,9 @@ def toolset_hint(folder: str) -> str:
 def list_msvc_toolsets() -> list[dict]:
     """Every installed Visual Studio instance and the MSVC toolsets under each.
 
-    One dict per instance: name, path, prerelease, and `toolsets` (full version folders,
-    newest first). Empty off Windows or when vswhere is unavailable. Includes prerelease
-    instances, so VS preview/insiders show up.
+    One dict per instance: name, path, prerelease, and `toolsets` — the full version folders, newest first.
+    Empty off Windows, or when vswhere is unavailable.
+    Prerelease instances are included, so VS preview and insiders builds show up.
     """
     vswhere = _vswhere()
     if vswhere is None:

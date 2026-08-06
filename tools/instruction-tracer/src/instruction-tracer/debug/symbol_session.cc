@@ -44,8 +44,8 @@ BOOL CALLBACK collect_symbol(SYMBOL_INFO* info, ULONG, void* raw)
     return TRUE;
 }
 
-/// Drop duplicate addresses: dbghelp reports a symbol once per matching record, and the same
-/// function can surface as several records. Ambiguity is about distinct addresses, not names.
+/// Drop duplicate addresses: dbghelp reports a symbol once per matching record, and the same function can surface as several records.
+/// Ambiguity is about distinct addresses, not names.
 void dedupe_by_address(cc::vector<symbol_match>& matches)
 {
     cc::vector<symbol_match> unique;
@@ -73,8 +73,7 @@ symbol_session::symbol_session(void* process, module_registry const& modules) : 
                   | SYMOPT_DEFERRED_LOADS                             // start fast; a PDB loads on its first query
                   | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_NO_PROMPTS); // never block on a symbol-server dialog
 
-    // fInvadeProcess=FALSE: we register modules from the loader's own events instead, which is the
-    // correct live-debugger pattern — invading races the loader at startup.
+    // fInvadeProcess=FALSE: modules are registered from the loader's own events instead, since invading races the loader at startup.
     SymInitializeW(_process, nullptr, FALSE);
 }
 
@@ -168,8 +167,8 @@ cc::result<u64, symbol_error> symbol_session::resolve(target_spec const& spec) c
         scope_base = m->base;
     }
 
-    // Exact match first: an exact name is unambiguous by construction, so a symbol that also happens
-    // to be a substring of others still resolves. (c_str_materialize mutates, hence the local copy.)
+    // Exact match first: an exact name is unambiguous by construction, so a symbol that also happens to be a substring of others still resolves.
+    // (c_str_materialize mutates, hence the local copy.)
     {
         auto symbol_z = spec.symbol;
         symbol_buffer buffer;
@@ -181,9 +180,9 @@ cc::result<u64, symbol_error> symbol_session::resolve(target_spec const& spec) c
         }
     }
 
-    // Otherwise sweep for "*spec*" and demand exactly one distinct address. Enumerate module by
-    // module: SymEnumSymbols with a base of 0 does not reach modules whose symbols are still
-    // deferred (SYMOPT_DEFERRED_LOADS), so an unqualified sweep would silently find nothing.
+    // Otherwise sweep for "*spec*" and demand exactly one distinct address.
+    // Enumerate module by module: SymEnumSymbols with a base of 0 does not reach modules whose symbols are still deferred (SYMOPT_DEFERRED_LOADS).
+    // An unqualified sweep would find nothing.
     cc::vector<symbol_match> matches;
     enum_context ctx = {&matches, &_modules};
     auto mask = cc::format("*{}*", spec.symbol);

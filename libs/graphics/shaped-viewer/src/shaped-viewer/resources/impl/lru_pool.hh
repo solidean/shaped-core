@@ -15,10 +15,10 @@ namespace sv::impl
 /// epoch it was last used, and evicts on two triggers — an idle timeout (unused for more than
 /// `max_idle_epochs` epochs) and a byte budget (over `max_bytes`, drop least-recently-used first).
 ///
-/// Eviction is safe: a record is a bundle of sg handles, so dropping one just defers the GPU free until the
-/// resource is no longer in flight — and anything still referencing it (a TLAS holding a BLAS) keeps it
-/// alive regardless. Evicting an id a live scene still names is a caller error (size the budget for the
-/// working set); the idle timeout and LRU order are chosen so an actively-used record is never the victim.
+/// Eviction is safe: a record is a bundle of sg handles, so dropping one just defers the GPU free until the resource is no longer in flight.
+/// Anything still referencing it — a TLAS holding a BLAS — keeps it alive regardless.
+/// Evicting an id a live scene still names is a caller error, so size the budget for the working set.
+/// The idle timeout and LRU order are chosen so an actively-used record is never the victim.
 ///
 /// This is the generic id-pool the viewer's concrete managers (mesh, material) build on — the reusable core
 /// that a bare `cc::map` per resource type was standing in for.
@@ -38,9 +38,10 @@ public:
         _max_idle_epochs = max_idle_epochs;
     }
 
-    /// Reclaim, then advance to epoch `e`. Evicts everything idle past the timeout and, if still over the
-    /// byte budget, the least-recently-used records — judged against the *just-finished* frame's usage, so
-    /// the frame about to run keeps its working set. Call once at the start of each frame.
+    /// Reclaim, then advance to epoch `e`.
+    /// Evicts everything idle past the timeout and, if still over the byte budget, the least-recently-used records.
+    /// That is judged against the *just-finished* frame's usage, so the frame about to run keeps its working set.
+    /// Call once at the start of each frame.
     void begin_frame(sg::epoch e)
     {
         _evict_idle();
@@ -48,7 +49,8 @@ public:
         _epoch = e;
     }
 
-    /// The record for `id`, or null if absent. Marks it used this epoch (an LRU touch).
+    /// The record for `id`, or null if absent.
+    /// Marks it used this epoch (an LRU touch).
     [[nodiscard]] Record const* get_ptr(Id id)
     {
         auto* const e = _entries.get_ptr(id);
@@ -58,7 +60,8 @@ public:
         return &e->record;
     }
 
-    /// The record for `id` (must exist). Marks it used this epoch.
+    /// The record for `id`, which must exist.
+    /// Marks it used this epoch.
     [[nodiscard]] Record const& get(Id id)
     {
         auto const* const r = get_ptr(id);
@@ -87,9 +90,9 @@ protected:
         return *idp;
     }
 
-    /// Store a freshly-built `record` of `size_in_bytes` under content `hash`, mint its id, stamp it used this
-    /// epoch, then enforce the byte budget. Returns the new id. `hash` must not already be resident — call
-    /// `find_by_hash` first.
+    /// Store a freshly-built `record` of `size_in_bytes` under content `hash`, mint its id, stamp it used this epoch, then enforce the byte budget.
+    /// Returns the new id.
+    /// `hash` must not already be resident — call `find_by_hash` first.
     [[nodiscard]] Id insert(cc::hash128 hash, Record record, isize size_in_bytes)
     {
         CC_ASSERT(!_by_hash.contains(hash), "lru_pool::insert: content hash already resident — find_by_hash first");

@@ -13,9 +13,8 @@ This tree's prose is full of em dashes and ellipses, three UTF-8 bytes each, and
 The exact boundary — 200 passes, 201 fires — is pinned in `no_long_prose_line-test.cc`, where the line can be generated to a precise width.
 This file covers the shapes instead.
 
-Blocks below are annotated with `[no-long-prose-line]` for "fires once here" and `~[no-long-prose-line]` for "must stay quiet".
-`path="…"` is what picks the language: the fence word says what the block *is*, the path says what it is linted *as*.
-A block with no path is linted as C++.
+The block annotations are specified in [docs/coding-guidelines.md](../../../docs/coding-guidelines.md#the-corpus-format).
+The one that matters most while reading this file: `path="…"` picks the language, and a block with no path is linted as C++.
 
 ## The shape it fires on
 

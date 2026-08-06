@@ -10,9 +10,9 @@
 
 // What a caller hands a resource manager: the payload plus the content hash that identifies it.
 //
-// The hash is the manager's whole cache key — equal contents must carry equal hashes, or an acquire hands back
-// the wrong resource. Hashing happens out here, once at authoring time; a manager never hashes, so a per-frame
-// acquire stays O(1) and the hash load is the caller's to schedule.
+// The hash is the manager's whole cache key — equal contents must carry equal hashes, or an acquire hands back the wrong resource.
+// Hashing happens out here, once at authoring time.
+// A manager never hashes, so a per-frame acquire stays O(1) and the hash load is the caller's to schedule.
 //
 // The payload is a cc::pinned_data, so it owns (shares) its memory and stays alive across the acquire that uploads it, whatever the caller does with the source range.
 // `create` takes an existing pin or any contiguous range, and leaves the strategy to cc::make_pinned_data.

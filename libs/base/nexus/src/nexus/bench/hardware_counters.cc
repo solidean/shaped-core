@@ -10,14 +10,15 @@ namespace nx::bench
 {
 namespace
 {
-// The portable default set. The first two are the always-on baseline; the rest need PMU access.
+// The portable default set.
+// The first two are the always-on baseline; the rest need PMU access.
 constexpr hw_counter s_default_set[] = {
     hw_counter::elapsed_nanoseconds,  hw_counter::reference_cycles, hw_counter::instructions_retired,
     hw_counter::branch_instructions,  hw_counter::branch_misses,    hw_counter::cache_l1d_misses,
     hw_counter::cache_llc_references, hw_counter::cache_llc_misses,
 };
 
-// Our best-effort explanation of what each counter measures. Deliberately terse; hardware counters are.
+// Our best-effort explanation of what each counter measures, deliberately terse.
 cc::string_view description_of(hw_counter c)
 {
     switch (c)

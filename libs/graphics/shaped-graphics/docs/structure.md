@@ -1,13 +1,15 @@
 # shaped-graphics structure (sg::)
 
-The living roadmap for shaped-graphics. Section headers carry a status tag:
+The living roadmap for shaped-graphics.
+Section headers carry a status tag:
 
 - **[done]** — implemented and tested
 - **[in progress]** — partially implemented
 - **[planned]** — not started
 - **[stub]** — type/shape exists, body is `CC_UNREACHABLE("not implemented yet")`
 
-Update the tags as the API lands. This document is design intent, not a guarantee of final API.
+Update the tags as the API lands.
+This document is design intent, not a guarantee of final API.
 
 ## Goals
 
@@ -64,7 +66,7 @@ src/shaped-graphics/
   context/
     context.hh/.cc                [in progress] abstract; infallible create_command_list over pure-virtual try_create_*; sticky device-loss status; every create funneled through a scope
     persistent.hh/.cc             [done]        ctx.persistent: the persistent-lifetime resource factory
-    transient.hh/.cc              [in progress] ctx.transient: per-epoch bump allocator over one owned memory_heap (buffers only so far)
+    transient.hh/.cc              [in progress] ctx.transient: per-epoch bump allocator over one owned memory_heap (buffers only; textures fall back to dedicated)
     upload.hh/.cc                 [in progress] ctx.upload: async bulk streaming on the dedicated copy queue (dx12 real; vulkan stub)
     download.hh/.cc               [in progress] ctx.download: async bulk readback on the copy queue -> bytes_future (dx12 real; vulkan stub)
     uncached.hh/.cc               [in progress] ctx.uncached: the raw, non-memoized layout / pipeline factory
@@ -128,71 +130,54 @@ backends/                                       # each subclasses the abstract s
 
 ## Backend tiers
 
-- **Tier 1 (now):** dx12, vulkan. dx12 is real across the surface; vulkan has the device, queues, epochs
-  and resource creation, with the recording paths still stubbed.
+- **Tier 1 (now):** dx12, vulkan.
+  dx12 is real across the surface.
+  vulkan brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
+  Every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
 - **Tier 2 (soon):** metal, webgpu.
 - **Legacy compat (planned):** opengl, webgl.
 
-A backend is built only where it is available for the platform/build. The gates are platform-only
-(dx12 → Windows, vulkan → native desktop). dx12 links the Windows-SDK D3D12 libs
-(`d3d12 dxgi dxguid`), always present on the Windows path; vulkan gates on `find_package(Vulkan)` and
-links `Vulkan::Vulkan` (the loader + headers), so it builds wherever a Vulkan SDK is installed.
+A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).
+dx12 links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`), always present on the Windows path.
+vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`, so it builds wherever a Vulkan SDK is installed.
 
-Error handling follows the repo policy in [docs/error-handling.md](../../../../docs/error-handling.md):
-resource creates offer a throwing default (`create_raw_buffer` → returns the handle, raises a typed
-`sg::exception` — see `exceptions.hh`) plus a fallible `try_create_*` returning `cc::result` (the only
-thing backends implement). `create_command_list()` is infallible (returns the handle; throws only on
-device loss); `create_<backend>_context` still returns `cc::result` (environment failure). Programmer
-misuse (e.g. `size < 0`, missing usage, using a transient resource past its epoch) asserts rather than
-returning an error. Device loss is a sticky, global status (`ctx.is_device_lost()`) surfaced by a throw
-at submit / advance / fence waits — deliberately kept off the `try_*` channel. See the
-[coding-guidelines](coding-guidelines.md).
+Error handling follows the repo policy in [docs/error-handling.md](../../../../docs/error-handling.md).
+A resource create offers a throwing default: `create_raw_buffer` returns the handle and raises a typed `sg::exception` (see `exceptions.hh`).
+Beside it sits a fallible `try_create_*` returning `cc::result` — the only one backends actually implement.
+`create_command_list()` is infallible, throwing only on device loss; `create_<backend>_context` returns `cc::result`, since bringing a device up is an environment failure.
+Programmer misuse asserts rather than returning an error — `size < 0`, a missing usage, a transient resource used past its epoch.
+Device loss is a sticky global status (`ctx.is_device_lost()`) surfaced by a throw at submit / advance / fence waits, deliberately kept off the `try_*` channel.
 
 ## Context creation & backend decoupling
 
-sg never depends on a backend (the arrow is backends → sg). There is no `sg::create_context` in
-the core; each backend library exposes an `sg::create_<backend>_context(config)` factory in the
-`sg` namespace with its own config type. `backend_kind` is a coarse, non-exhaustive tag (for
-interpreting escape-hatch handles), not a backend identity — so a debug/cpu/remote backend drops
-in without the core knowing it. See the [coding-guidelines](coding-guidelines.md).
+sg never depends on a backend — the arrow is backends → sg, so there is no `sg::create_context` in the core.
+Each backend library exposes an `sg::create_<backend>_context(config)` factory in the `sg` namespace, with its own config type.
+Rules and rationale: [coding-guidelines](coding-guidelines.md).
 
 ## Resource & transfer model
 
-Resources (`raw_buffer`, `raw_texture`) are **shared-immutable**: fixed shape, span-like over
-mutable GPU memory, held via `*_handle`. A resource may be **empty** (size 0 — allocates no GPU
-storage). There are **no host-visible resources**; host↔device transfer is a globally shared
-resource sg manages, driven through command lists. See the [coding-guidelines](coding-guidelines.md).
+Resources (`raw_buffer`, `raw_texture`) are **shared-immutable**: a fixed shape, span-like over mutable GPU memory, held via `*_handle`, and legitimately **empty** at size 0.
+There are **no host-visible resources** — host↔device transfer is a globally shared resource sg manages, driven through command lists.
+Rules and rationale: [coding-guidelines](coding-guidelines.md).
 
-Resource creation is reached through a **lifetime scope** on the context rather than the context
-directly: `ctx.persistent.create_raw_buffer(...)`. A scope is a thin facade with a
-back-reference to its context; the actual `create_*` virtual stays on `context` (backends implement it)
-and the scope — a friend — funnels through it, tagging the request with its lifetime. Two lifetime
-scopes exist: `ctx.persistent` and `ctx.transient` (per-epoch, over a bump allocator; buffers only so
-far). Transfer gets its own scopes on the same pattern — `ctx.upload` / `ctx.download` for async bulk
-work on the copy queue — as do the factories, `ctx.uncached` and `ctx.cached`.
+Every create is reached through a **scope** on the context rather than the context itself: `ctx.persistent.create_raw_buffer(...)`.
+A scope is a thin facade holding a back-reference to its context, and the `create_*` virtual stays on `context` for backends to implement.
+The scope — a friend — funnels through that virtual, tagging the request with its lifetime.
+Which scope creates what, and how to choose between them: [concepts/context.md](concepts/context.md).
 
 ## Ownership & lifetime
 
-- **Resources are shared** (`raw_buffer_handle` = `shared_ptr`); **command lists are move-only**
-  (`std::unique_ptr<command_list>`, no handle typedef) — record once, submit once, passed by
-  reference.
-- **Backend-typed create methods** (`create_dx12_buffer` → `dx12_buffer_handle`, …) are the real
-  implementations; the abstract `sg::context` virtuals are thin forwarders. Prefer the backend-typed
-  method when you hold a concrete backend context — no downcasts.
-- A **context must outlive** every object it creates. Objects hold a literal backref to it.
-  `submit`/`drop` **consume** the command list (moved in), so submit-once / drop-once is structural;
-  either that or scope exit destroys the list, and the destructor is the single teardown point. A
-  context is **shut down before destruction** (virtual `shutdown()`, auto-run by the backend dtor).
+- **Resources are shared** (`raw_buffer_handle` = `shared_ptr`); a **command list is move-only** (`std::unique_ptr<command_list>`, no handle typedef) — record once, submit once, passed by reference.
+- **Backend-typed create methods** (`create_dx12_buffer` → `dx12_buffer_handle`, …) are the real implementations, and the abstract `sg::context` virtuals are thin forwarders over them.
+- A **context must outlive** every object it creates, and is **shut down before destruction** (virtual `shutdown()`, auto-run by the backend destructor).
 
-See the [coding-guidelines](coding-guidelines.md) for the rationale on each.
+Rationale for each: [coding-guidelines](coding-guidelines.md).
 
 ## Memory placement
 
-Every resource's backing memory is either **dedicated** (self-allocating) or **placed** into a shared
-`memory_heap`; an `allocation_info` (passed to each create_*) names which. `memory_heap` is an immutable
-factory for `allocation_info` — allocation tracking lives in the caller's own allocator on top. See
-[concepts/memory.md](concepts/memory.md) for the lifetime modes (persistent vs transient) and the
-placed-vs-dedicated system.
+Every resource's backing memory is either **dedicated** (self-allocating) or **placed** into a shared `memory_heap`, and the `allocation_info` passed to each `create_*` names which.
+`memory_heap` is an immutable factory for `allocation_info` — allocation tracking lives in the caller's own allocator on top.
+Lifetime modes and the placed-vs-dedicated system: [concepts/memory.md](concepts/memory.md).
 
 `context` exposes `try_create_memory_heap`, and placement is live for **dx12 buffers** — that is what `ctx.transient`'s bump allocator runs on.
 Still dedicated-only: **dx12 textures** and **all vulkan resources**, both of which assert on a placed `allocation_info`.
@@ -234,8 +219,8 @@ swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acqui
                                   multi-window, exclusive fullscreen
 epochs / submission  [in progress]  epoch counter + direct-queue epoch/submission timelines, advance/retire,
                                   deferred deletion + finalizers, allocator/pool recycling (dx12 + vulkan real),
-                                  plus dx12's dedicated async copy queues for ctx.upload / ctx.download
 transient resources  [in progress]  ctx.transient's per-epoch bump allocator over a memory_heap + the transient
+                                  descriptor ring (dx12 real); transient textures are dedicated, auto-expired next epoch
                                   descriptor ring (dx12 real); transient textures pending
 ```
 

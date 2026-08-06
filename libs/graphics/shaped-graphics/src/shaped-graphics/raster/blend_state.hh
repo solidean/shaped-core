@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 
-/// Color-blend state for one render target of a raster pipeline: how a fragment's output combines with
-/// the value already in the target. Backend-neutral; each enumerator maps to the per-backend factor/op.
+/// Color-blend state for one render target of a raster pipeline: how a fragment's output combines with the value already in the target.
+/// Backend-neutral — each enumerator maps to the per-backend factor / op.
 
 namespace sg
 {
@@ -33,8 +33,9 @@ enum class blend_op
     max,              // DX12 BLEND_OP_MAX          / Vk BLEND_OP_MAX
 };
 
-/// Which color channels a render target write touches. Bit flags — combine with `|`, test with
-/// `has_flag`. Maps to DX12 D3D12_COLOR_WRITE_ENABLE / Vk VkColorComponentFlags.
+/// Which color channels a render target write touches.
+/// Bit flags — combine with `|`, test with `has_flag`.
+/// Maps to DX12 D3D12_COLOR_WRITE_ENABLE / Vk VkColorComponentFlags.
 enum class color_write_mask : u8
 {
     none = 0,
@@ -61,8 +62,8 @@ enum class color_write_mask : u8
     return (u8(mask) & u8(flag)) == u8(flag);
 }
 
-/// One channel group's blend: `src * source + dst * ...` combined by `op`. Used for the color and alpha
-/// groups independently.
+/// One channel group's blend: `src * source + dst * ...` combined by `op`.
+/// Used for the color and alpha groups independently.
 struct blend_component
 {
     blend_factor source = blend_factor::one;
@@ -70,8 +71,8 @@ struct blend_component
     blend_op op = blend_op::add;
 };
 
-/// The color-blend equation for a render target — separate color and alpha components (DX12/Vulkan both
-/// blend RGB and A independently). Present on a color_target_state only when blending is enabled.
+/// The color-blend equation for a render target, with separate color and alpha components — DX12 and Vulkan both blend RGB and A independently.
+/// Present on a color_target_state only when blending is enabled.
 struct blend_state
 {
     blend_component color = {};

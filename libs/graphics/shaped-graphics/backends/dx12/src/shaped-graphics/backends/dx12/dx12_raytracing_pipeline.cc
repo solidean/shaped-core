@@ -81,8 +81,8 @@ struct library_builder
     }
 };
 
-// One hit group: its DXR name plus the exports of the present component shaders. `intersection` present ->
-// procedural, else triangles.
+// One hit group: its DXR name plus the exports of the present component shaders.
+// A present `intersection` export makes it procedural; otherwise triangles.
 struct hit_group_build
 {
     std::wstring name;
@@ -111,8 +111,8 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
     CC_ASSERT(!desc.raygen_shaders.empty(), "raytracing pipeline requires at least one raygen shader");
     CC_ASSERT(desc.max_recursion_depth >= 1, "max_recursion_depth must be >= 1");
 
-    // Dedup the DXIL libraries and rename their exports. Building refs first keeps the wstring names (pointed
-    // at by the D3D12 descs below) alive in `builder` through CreateStateObject.
+    // Dedup the DXIL libraries and rename their exports.
+    // Building refs first keeps the wstring names — pointed at by the D3D12 descs below — alive in `builder` through CreateStateObject.
     library_builder builder;
     cc::vector<export_ref> raygen_refs;
     cc::vector<export_ref> miss_refs;

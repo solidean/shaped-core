@@ -4,22 +4,22 @@
 
 #include <atomic>
 
-// The atomics clean-core code uses. With threads these ARE the std types (aliases, nothing reimplemented);
-// without them (CC_HAS_THREADS == 0 — WASM, or -DSC_THREADS=OFF) they are plain values with the same API,
-// so a refcount bump is an `add` rather than a `lock xadd` and the orderings evaporate.
+// The atomics clean-core code uses.
+// With threads these ARE the std types — aliases, nothing reimplemented.
+// Without them (CC_HAS_THREADS == 0 — WASM, or -DSC_THREADS=OFF) they are plain values with the same API.
+// A refcount bump is then an `add` rather than a `lock xadd`, and the orderings evaporate.
 //
-// That is the whole reason to go through cc:: rather than std:: directly, and why <atomic> is blessed to
-// *appear* in our headers but not to be called into: a std::atomic written by hand stays atomic in a build
-// that provably has no concurrency, and no flag can reach it. See
-// libs/base/clean-core/docs/blessed-stdlib-headers.md.
+// That is the whole reason to go through cc:: rather than std:: directly, and why <atomic> is blessed to *appear* in our headers but not to be called into.
+// A std::atomic written by hand stays atomic in a build that provably has no concurrency, and no flag can reach it.
+// See libs/base/clean-core/docs/blessed-stdlib-headers.md for the blessing, and docs/platforms.md for the SC_THREADS knob behind CC_HAS_THREADS.
 //
-// Dropping the atomicity is sound because there is no second thread to race: every operation on a plain
-// value is already indivisible with respect to the only thread that exists, and the orderings constrain a
-// reordering nobody can observe. This is a whole-build switch, so the two frontends never meet.
+// Dropping the atomicity is sound because there is no second thread to race.
+// Every operation on a plain value is already indivisible with respect to the only thread that exists, and the orderings constrain a reordering nobody can observe.
+// This is a whole-build switch, so the two frontends never meet.
 //
-// Deliberately no wait()/notify(): a wait that is not already satisfied can never be satisfied on the one
-// thread that could satisfy it, so the honest fallback is not a spin but a design change at the caller (see
-// how sg drives its copy actors, or cc::threaded_actor's unthreaded mode). Nothing here needs it today.
+// Deliberately no wait()/notify(): a wait that is not already satisfied can never be satisfied on the one thread that could satisfy it.
+// The honest fallback is not a spin but a design change at the caller — see how sg drives its copy actors, or cc::threaded_actor's unthreaded mode.
+// Nothing here needs it today.
 
 namespace cc
 {
@@ -49,13 +49,13 @@ inline void atomic_thread_fence(memory_order order) noexcept
 
 #else
 
-/// std::atomic's API over a plain T. Single-threaded, every op is already indivisible and the memory_order
-/// arguments constrain nothing observable, so they are accepted and ignored.
+/// std::atomic's API over a plain T.
+/// Single-threaded, every op is already indivisible and the memory_order arguments constrain nothing observable, so they are accepted and ignored.
 template <class T>
 struct atomic
 {
-    /// True: with no concurrency there is nothing to lock. Callers static_assert on it to reject a type
-    /// the hardware would emulate with a mutex.
+    /// True: with no concurrency there is nothing to lock.
+    /// Callers static_assert on it to reject a type the hardware would emulate with a mutex.
     static constexpr bool is_always_lock_free = true;
 
     constexpr atomic() noexcept = default;
@@ -134,8 +134,8 @@ struct atomic
 private:
     bool _compare_exchange(T& expected, T desired) noexcept
     {
-        // Never fails spuriously: the weak/strong distinction exists for LL/SC hardware, and there is no
-        // contention to lose to. A caller's retry loop simply exits on the first pass.
+        // Never fails spuriously: the weak/strong distinction exists for LL/SC hardware, and there is no contention to lose to.
+        // A caller's retry loop simply exits on the first pass.
         if (_value != expected)
         {
             expected = _value;
@@ -156,7 +156,8 @@ private:
     T _value{};
 };
 
-/// std::atomic_ref's API over a plain lvalue. Same reasoning as cc::atomic; the referent stays a plain T.
+/// std::atomic_ref's API over a plain lvalue.
+/// Same reasoning as cc::atomic; the referent stays a plain T.
 template <class T>
 struct atomic_ref
 {
@@ -225,8 +226,8 @@ private:
     T* _value;
 };
 
-/// std::atomic_flag's API over a plain bool. Constinit-able and trivially destructible like the real one —
-/// load-bearing for the static spinlocks that must outlive static destruction (see node_allocation.cc).
+/// std::atomic_flag's API over a plain bool.
+/// Constinit-able and trivially destructible like the real one — load-bearing for the static spinlocks that must outlive static destruction (see node_allocation.cc).
 struct atomic_flag
 {
     constexpr atomic_flag() noexcept = default;
@@ -254,9 +255,8 @@ inline void atomic_thread_fence(memory_order) noexcept
 // =========================================================================================================
 // Read-modify-write on a plain lvalue
 // =========================================================================================================
-// For memory the surrounding code owns as a plain value (a header word, a bitmap) and only occasionally
-// touches atomically. seq_cst: these are for correctness-first call sites, not tuned hot paths — reach for
-// cc::atomic_ref directly when an ordering matters.
+// For memory the surrounding code owns as a plain value (a header word, a bitmap) and only occasionally touches atomically.
+// seq_cst: these are for correctness-first call sites, not tuned hot paths — reach for cc::atomic_ref directly when an ordering matters.
 
 /// Atomically adds and returns the old value.
 /// Usage: int counter = 0; int old = cc::atomic_add(counter, 1); // counter 1, old 0

@@ -10,14 +10,17 @@
 
 // Low-level PNG codec (image/).
 //
-// The faithful, format-shaped view of a PNG: decoded pixels PLUS the PNG's own metadata (color type, bit depth, interlace, gamma, ICC profile, text chunks, physical dimensions, ...).
+// The faithful, format-shaped view of a PNG: decoded pixels PLUS the PNG's own metadata.
+// That is the color type, bit depth, interlace, gamma, ICC profile, text chunks, physical dimensions, and more.
 // This is the format layer — babel::image sits on top and throws the metadata away for the "just give me pixels" case.
 //
 // WHAT IS POPULATED TODAY.
-// Pixels come from the stb backend (8-bit samples, expanded / de-palettized / de-interlaced), and the structural IHDR fields (bit_depth / color / interlace) are parsed natively.
+// Pixels come from the stb backend: 8-bit samples, expanded / de-palettized / de-interlaced.
+// The structural IHDR fields (bit_depth / color / interlace) are parsed natively.
 // Everything below the pixels in `data` is DESIGNED but [todo]: stb exposes no metadata, so filling it needs a native chunk walker.
 // The fields exist now so that walker lands without an API change.
-// `bit_depth` is the file's native depth (1/2/4/8/16), but the decoded `pixels` are always 8-bit for now (`decoded == component::u8`); a 16-bit path is future work.
+// `bit_depth` is the file's native depth (1/2/4/8/16), while the decoded `pixels` are always 8-bit for now
+// (`decoded == component::u8`); a 16-bit path is future work.
 //
 //   auto const img = babel::png::read(bytes).value();
 //   auto const stride = img.width * img.channels; // tightly packed, top-left origin
@@ -66,14 +69,15 @@ struct physical_dimensions
     bool unit_is_meter = false;
 };
 
-/// A faithful native decode of a PNG. Read-once; deliberately not built for mutation.
+/// A faithful native decode of a PNG.
+/// Read-once; deliberately not built for mutation.
 struct data
 {
     // --- populated now ---
     int width = 0;
     int height = 0;
     int channels = 0;                    // samples per pixel in `pixels` (1 grey / 2 GA / 3 rgb / 4 rgba)
-    int bit_depth = 8;                   // native IHDR bit depth: 1/2/4/8/16 (parsed natively)
+    int bit_depth = 8;                   // IHDR bit depth byte, verbatim: 1/2/4/8/16 in a valid file, unvalidated
     color_type color = color_type::rgba; // native IHDR color type (parsed natively)
     interlace_method interlace = interlace_method::none; // native IHDR interlace (parsed natively)
     component decoded = component::u8;                   // sample type of `pixels`
@@ -94,7 +98,8 @@ struct data
 // reading
 // -------------------------------------------------------------------------------------------------
 
-/// Decode a whole PNG buffer. Errors on a bad signature / IHDR or a decode failure.
+/// Decode a whole PNG buffer.
+/// Errors on a bad signature / IHDR or a decode failure.
 [[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
 
 /// Convenience: slurp the stream to end, then decode.
@@ -103,13 +108,15 @@ struct data
 // writing
 // -------------------------------------------------------------------------------------------------
 
-/// PNG encode knobs. PNG is lossless; stb exposes no tuning today.
+/// PNG encode knobs.
+/// PNG is lossless, and babel exposes no encoder tuning today.
 struct write_options
 {
     // [todo] int compression_level once a non-stb encoder lands
 };
 
-/// Encode `img`'s pixels to PNG file bytes. Metadata fields stb cannot emit are ignored (see the header note).
+/// Encode `img`'s pixels to PNG file bytes.
+/// Metadata fields stb cannot emit are ignored (see the header note).
 [[nodiscard]] cc::result<cc::vector<byte>> encode(data const& img, write_options opts = {});
 
 /// Encode and write to a stream.

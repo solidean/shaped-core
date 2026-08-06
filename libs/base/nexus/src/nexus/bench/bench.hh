@@ -14,6 +14,6 @@
 //
 //   nx::bench::print_hw_counters(); // see what this machine can measure
 //
-// See hardware_counters.hh for the availability/degradation rules and the Windows setup note.
+// See hardware_counters.hh for the API contract, and docs/guides/profiling.md for what each platform can measure.
 
 #include <nexus/bench/hardware_counters.hh>

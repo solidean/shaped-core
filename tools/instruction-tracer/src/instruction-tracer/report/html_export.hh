@@ -9,9 +9,8 @@
 
 namespace itrace
 {
-/// Everything main gathers after run() that is not in the trace model itself: capture-time
-/// environment and the settings the run was launched with. All best-effort — an empty string just
-/// renders as a blank cell.
+/// Everything main gathers after run() that is not in the trace model itself: the capture-time environment, and the settings the run was launched with.
+/// All best-effort — an empty string just renders as a blank cell.
 struct html_export_meta
 {
     cc::string generated_at_iso; // wall clock at export time, ISO 8601
@@ -30,12 +29,11 @@ struct html_export_meta
     memory_view_options regions; // the default region set the header shows
 };
 
-/// Build the whole self-contained HTML page: the shell, the inlined CSS/JS assets, and one big
-/// `TRACE_DATA` JSON object serialized from the traces + meta + per-trace source views. Pure over
-/// already-enriched traces; `sources` is used to read the context lines for the source view.
+/// Build the whole self-contained HTML page: the shell, the inlined CSS/JS assets, and one big `TRACE_DATA` JSON object serialized from the traces, meta and per-trace source views.
+/// Pure over already-enriched traces; `sources` is used to read the context lines for the source view.
 ///
-/// `mca[i]` is the optional llvm-mca analysis for `traces[i]` (empty span, or an unavailable entry,
-/// simply omits the timing views for that trace).
+/// `mca[i]` is the optional llvm-mca analysis for `traces[i]`.
+/// An empty span, or an unavailable entry, simply omits the timing views for that trace.
 cc::string export_html(cc::span<trace const> traces,
                        html_export_meta const& meta,
                        source_cache& sources,

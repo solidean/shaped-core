@@ -7,11 +7,9 @@
 
 // The per-thread default node allocator: hydration, set/get, and scoped overrides.
 //
-// default_node_allocator() resolves the default resource's allocator once per thread and caches the
-// result in a TLS slot so the alloc fast path can inline. That slot is authoritative, not a shadow
-// cache: an override must be visible to every later allocation, including on a thread that has
-// already allocated. An earlier attempt at this caching froze the allocator permanently, so these
-// tests pin the "still repointable" half of the contract.
+// default_node_allocator() resolves the default resource's allocator once per thread and caches the result in a TLS slot, so the alloc fast path can inline.
+// That slot is authoritative rather than a shadow cache: an override must be visible to every later allocation, including on a thread that has already allocated.
+// These tests pin the "still repointable" half of that contract.
 //
 // Which allocator served a node is observed via its slab base (node_slab_base_for_ptr): a node from
 // the override lives in a slab the override owns, never in the system allocator's.

@@ -2,9 +2,8 @@
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
-// The shader_cache wraps ssc::dxc::compiler in an async, hash-keyed get-or-create: the same
-// (description, options) returns the same async node without recompiling. No async pool is installed
-// here, so the scheduled node is driven inline by cc::async_blocking_get_singlethreaded.
+// The shader_cache wraps ssc::dxc::compiler in an async, hash-keyed get-or-create: the same (description, options) returns the same async node without recompiling.
+// No async pool is installed here, so the scheduled node is driven inline by cc::async_blocking_get_singlethreaded.
 
 namespace
 {

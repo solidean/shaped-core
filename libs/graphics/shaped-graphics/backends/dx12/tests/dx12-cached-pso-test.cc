@@ -10,10 +10,9 @@
 
 using namespace cc::primitive_defines;
 
-// Exercises the optional cached-PSO path on WARP: a pipeline's serialized blob (cached_pipeline_data)
-// can seed a second pipeline's creation (compute_pipeline_description::cached_pipeline), the seeded
-// pipeline still dispatches correctly, a garbage blob degrades to a fresh build, and the blob is not
-// part of the built-in cache key.
+// Exercises the optional cached-PSO path on WARP.
+// A pipeline's serialized blob (cached_pipeline_data) can seed a second pipeline's creation, via compute_pipeline_description::cached_pipeline.
+// The seeded pipeline still dispatches correctly, a garbage blob degrades to a fresh build, and the blob is not part of the built-in cache key.
 
 namespace
 {
@@ -132,8 +131,8 @@ TEST("sg cached PSO - the blob is not part of the built-in cache key")
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
 
-    // Build once to obtain a real blob, then acquire twice: with and without it. Same shader + layout =>
-    // same async node regardless of the accelerator blob.
+    // Build once to obtain a real blob, then acquire twice: with and without it.
+    // Same shader + layout means the same async node, regardless of the accelerator blob.
     auto first = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(first != nullptr);
     auto const blob = first->cached_pipeline_data();

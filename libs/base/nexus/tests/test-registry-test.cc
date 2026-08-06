@@ -563,7 +563,8 @@ TEST("test registry - manual test without any CHECK is not a failure")
 
 TEST("test schedule config - a bucket flag selects a bucket and pins the sweep to it")
 {
-    // --manual selects the manual bucket. An explicit flag pins the sweep: no cross-bucket naming.
+    // --manual selects the manual bucket.
+    // An explicit flag pins the sweep, so there is no cross-bucket naming.
     {
         char a0[] = "prog";
         char a1[] = "--manual";

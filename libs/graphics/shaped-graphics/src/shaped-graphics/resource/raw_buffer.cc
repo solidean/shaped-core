@@ -7,8 +7,8 @@ raw_buffer::~raw_buffer() = default;
 
 raw_buffer::raw_buffer(isize size_in_bytes, buffer_usage usage) : _size_in_bytes(size_in_bytes), _usage(usage)
 {
-    // Zero is allowed — an empty buffer, like an empty span/vector. A backend allocates no GPU
-    // storage for it. Only a negative size is programmer misuse.
+    // Zero is allowed — an empty buffer, like an empty span or vector, for which a backend allocates no GPU storage.
+    // Only a negative size is programmer misuse.
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
 }
 } // namespace sg

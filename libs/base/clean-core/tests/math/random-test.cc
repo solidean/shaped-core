@@ -59,8 +59,8 @@ TEST("random - from_state round-trips the stream position")
 
 TEST("random - from_state installs raw state without the seeding scramble")
 {
-    // seed() scrambles, so seeding with a value does not leave that value as the state;
-    // from_state() installs it verbatim. The two must therefore differ.
+    // seed() scrambles, so seeding with a value does not leave that value as the state.
+    // from_state() installs it verbatim, so the two must differ.
     cc::random const seeded(4242);
     CHECK(cc::random::from_state(4242).state() != seeded.state());
 }

@@ -8,11 +8,12 @@
 
 namespace sg::backend::dx12
 {
-/// DirectX 12 implementation of sg::swapchain over an IDXGISwapChain3 (flip-discard model). Each back
-/// buffer is wrapped in a dx12_texture (borrowed storage) so it flows through the normal render-pass /
-/// barrier path — the RTV is created on demand by the render pass. A dedicated present fence gates
-/// back-buffer reuse. Auto-resizes to its HWND's client area, checked at most once per epoch so acquire
-/// never advances an epoch under the caller. Created by dx12_context::create_dx12_swapchain.
+/// DirectX 12 implementation of sg::swapchain over an IDXGISwapChain3, flip-discard model.
+/// Each back buffer is wrapped in a dx12_texture with borrowed storage, so it flows through the normal render-pass / barrier path.
+/// The RTV is created on demand by the render pass.
+/// A dedicated present fence gates back-buffer reuse.
+/// Auto-resizes to its HWND's client area, checked at most once per epoch so acquire never advances an epoch under the caller.
+/// Created by dx12_context::create_dx12_swapchain.
 class dx12_swapchain final : public sg::swapchain
 {
 public:
@@ -35,14 +36,14 @@ public:
     {
     }
 
-    // Waits for the GPU to finish with the back buffers, then releases them (borrowed → synchronous) and
-    // closes the fence event. Body in dx12_swapchain.cc.
+    // Waits for the GPU to finish with the back buffers, then releases them — borrowed storage, so synchronously — and closes the fence event.
     ~dx12_swapchain() override;
 
     [[nodiscard]] sg::render_target_view acquire_backbuffer() override;
 
-    // Populates _backbuffers (one dx12_texture wrapper per buffer) from the current IDXGISwapChain3 at the
-    // current _size. Called at creation and after every ResizeBuffers. Returns an error if GetBuffer fails.
+    // Populates _backbuffers, one dx12_texture wrapper per buffer, from the current IDXGISwapChain3 at the current _size.
+    // Called at creation and after every ResizeBuffers.
+    // Returns an error when GetBuffer fails.
     [[nodiscard]] cc::result<cc::unit> build_backbuffers();
 
 protected:
@@ -51,29 +52,27 @@ protected:
     void present() override;
 
 private:
-    // One back buffer: the dx12_texture wrapping the DXGI resource (its RTV is created on demand by the
-    // render pass), plus the present-fence value that must complete before this buffer is reused.
+    // One back buffer: the dx12_texture wrapping the DXGI resource, plus the present-fence value that must complete before this buffer is reused.
     struct backbuffer
     {
         dx12_texture_handle texture;
         u64 frame_fence_value = 0;
     };
 
-    // Blocks until the GPU has finished every present submitted so far (present fence reaches _fence_value),
-    // so the back buffers are safe to release synchronously. No-op if the device is lost.
+    // Blocks until the GPU has finished every present submitted so far, i.e. until the present fence reaches _fence_value.
+    // The back buffers are then safe to release synchronously; a no-op when the device is lost.
     void wait_for_gpu();
 
-    // Releases the back-buffer wrappers. Borrowed storage, so ~dx12_texture drops the DXGI reference
-    // synchronously — callers must wait_for_gpu() first.
+    // Releases the back-buffer wrappers.
+    // Borrowed storage, so ~dx12_texture drops the DXGI reference synchronously — callers must wait_for_gpu() first.
     void release_backbuffers();
 
-    // Waits for the GPU, releases the back buffers, calls ResizeBuffers to `size`, and rebuilds. Does NOT
-    // advance an epoch (acquire calls this at most once per epoch, so the present-fence wait alone leaves
-    // zero outstanding back-buffer references, which ResizeBuffers requires).
+    // Waits for the GPU, releases the back buffers, calls ResizeBuffers to `size`, and rebuilds.
+    // Does NOT advance an epoch: acquire calls this at most once per epoch, so the present-fence wait alone leaves the zero outstanding back-buffer references ResizeBuffers requires.
     [[nodiscard]] cc::result<cc::unit> resize(tg::vec2i size);
 
-    // Marks the context device-lost if `hr` indicates removal, then throws: device_lost_exception when the
-    // device is lost, else a generic sg::exception carrying `hr`. For the throwing frame path.
+    // Marks the context device-lost when `hr` indicates removal, then throws.
+    // device_lost_exception when the device is lost, else a generic sg::exception carrying `hr`.
     [[noreturn]] void fail(HRESULT hr, char const* what);
 
     dx12_context& _ctx; // creating context — must outlive this swapchain (sg lifetime contract)
@@ -83,8 +82,7 @@ private:
 
     cc::vector<backbuffer> _backbuffers;
 
-    // Present timeline on the context's direct queue: signaled after each Present so the next acquire of a
-    // given back-buffer index waits for its prior frame to finish.
+    // Present timeline on the context's direct queue: signaled after each Present, so the next acquire of a given back-buffer index waits for its prior frame to finish.
     ComPtr<ID3D12Fence> _present_fence;
     u64 _fence_value = 0;
     HANDLE _fence_event = nullptr;

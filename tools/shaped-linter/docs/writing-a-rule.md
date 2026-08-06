@@ -1,18 +1,15 @@
 # Writing a shaped-linter rule
 
 This is the step-by-step for adding a rule to shaped-linter.
-It assumes you have skimmed the [readme](../readme.md) and the [clean-core cheat sheet](../../../libs/base/clean-core/cheat-sheet.md).
+It assumes you have skimmed the [readme](../readme.md).
+The [clean-core cheat sheet](../../../libs/base/clean-core/cheat-sheet.md) is the reference for the `cc::` types a rule is written in.
 
 A rule is a small, stateless value: a stable id, a mandatory rationale, the highest pipeline layer it needs, and a `check` function that walks that layer and emits findings.
 The engine only builds the expensive layers a rule actually asks for.
 
 ## The pipeline, and which layer to pick
 
-```
-                           ┌─▶ parser ─▶ syntax_tree ──┐   (C++ only)
-source_buffer ─▶ lexer ─▶ token_stream                 ├─▶ rule engine ─▶ findings ─▶ reporter
-              └──────────▶ prose extraction ─▶ prose_view ┘
-```
+The [readme](../readme.md#how-it-works) draws the pipeline; [architecture](architecture.md#the-layered-pipeline) explains what each layer costs.
 
 Pick the **lowest** layer that can express your rule — it is cheaper and simpler:
 
@@ -23,7 +20,9 @@ Pick the **lowest** layer that can express your rule — it is cheaper and simpl
 * `rule_layer::prose` — the rule walks `ctx.prose`, the file's comments and body text with the markers stripped (a rule about what we *write*, not what we compile).
   This is what [`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) uses, and the one layer that exists for markdown and Python too.
 
-A structural rule must use the tree, not a token scan — the tree is what tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site, and it is what carries `node::scope` (`record_scope` / `namespace_scope` / `function_scope`).
+A structural rule must use the tree, not a token scan.
+The tree is what tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site.
+It is also what carries `node::scope` — `record_scope` / `namespace_scope` / `function_scope`.
 Read the scope off the node; never re-derive it in a rule.
 
 ## Which languages it applies to
@@ -118,7 +117,8 @@ rule const& your_rule()
 ```
 
 A rule whose detector is a **heuristic** says so in its `rationale`, along with what to do about a false positive.
-The rationale prints once per run under the findings, which makes it the one place a reader is guaranteed to see it — [`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) points at its own abbreviation list from there.
+The rationale prints once per run under the findings, which makes it the one place a reader is guaranteed to see it.
+[`no-flow-prose`](../rules/prose/no-flow-prose/no_flow_prose.cc) points at its own abbreviation list from there.
 
 ### 2. Emit findings (and an optional fix or hint)
 
@@ -153,8 +153,8 @@ A hint carries a `message` saying what to weigh, plus optional `edits`; a hint w
 ```
 
 The two are independent — a finding may carry both, and then the fix is what lands while the hint is printed alongside.
-[`default_init_assignment.cc`](../rules/cpp-style/default-init-assignment/default_init_assignment.cc) is the worked example: its fix moves the `=` in and keeps the braces (always safe), while its hint offers the braceless `= value` for a member and the `auto v = T(value)` form for a local.
-Its block comment spells out which hazard rules out which rewrite — worth reading before you decide where your own rewrite belongs.
+[`default_init_assignment.cc`](../rules/cpp-style/default-init-assignment/default_init_assignment.cc) is the worked example, and it carries both channels.
+Its block comment spells out which hazard rules out which rewrite — read it before deciding where your own rewrite belongs.
 
 Nothing in the engine reads a hint's edits; `apply_fixes` looks only at `suggested_fix`, and [`engine-test.cc`](../tests/rules/engine-test.cc) pins that.
 
@@ -171,8 +171,10 @@ An **empty span** is the insertion: nothing is removed and `replacement` is spli
 }},
 ```
 
-`collect_fix_edits` merges byte-identical edits, so N findings asking for the same line still splice it exactly once — which is why the insertion must be computed identically for every finding in the file, not relative to the one being reported.
-[`qualified_primitive.cc`](../rules/cpp-style/qualified-primitive/qualified_primitive.cc) is the worked example; its `using_directive_insertion` also shows the other half of the job — deciding whether a safe offset exists at all.
+`collect_fix_edits` merges byte-identical edits, so N findings asking for the same line still splice it exactly once.
+That is why the insertion must be computed identically for every finding in the file, never relative to the one being reported.
+[`qualified_primitive.cc`](../rules/cpp-style/qualified-primitive/qualified_primitive.cc) is the worked example.
+Its `using_directive_insertion` also shows the other half of the job — deciding whether a safe offset exists at all.
 
 Spans are `{file_id, byte_begin, byte_end}` (half-open).
 Get text with `ctx.source.span_text(span)`; resolve to line/column happens later, in the reporter.
@@ -254,13 +256,15 @@ The split and the corpus format are specified in [coding-guidelines.md](coding-g
 
 * **Smoke tests** in `<your-rule>-test.cc`, in your rule's folder — ordinary `TEST` + `SECTION` with `run_rules_on_text("<snippet>")`, asserting on the findings (count, rule id, fix replacement).
   This is the scratchpad you build the rule in and where a regression gets pinned; keep it under ~200 lines.
-  The whole detect-and-fix path is `apply_edits(src, edits)` (see [`engine-test.cc`](../tests/rules/engine-test.cc)) — that is the layer that pins what the rewritten source *looks like*, which the corpus never does.
-* **A markdown corpus** at `<your-rule>.md`, in the same folder — ordinary prose with annotated `cpp` blocks (see [`default_init_assignment.md`](../rules/cpp-style/default-init-assignment/default_init_assignment.md)).
+  The whole detect-and-fix path is `apply_edits(src, edits)` — see [`engine-test.cc`](../tests/rules/engine-test.cc).
+  That is the layer that pins what the rewritten source *looks like*, which the corpus never does.
+* **A markdown corpus** at `<your-rule>.md`, in the same folder — ordinary prose with annotated `cpp` blocks.
+  [`default_init_assignment.md`](../rules/cpp-style/default-init-assignment/default_init_assignment.md) is the one to copy from.
   This is where breadth lives; adding a case is adding a fenced block, not writing C++.
 
-The corpus annotations, in short — the full specification is in [coding-guidelines.md](coding-guidelines.md):
+The annotation spellings, with the semantics specified in [coding-guidelines.md](coding-guidelines.md#the-corpus-format):
 
-```text
+````text
 ```cpp [your-rule] fix=" = {0}"        one finding, and that is the rewrite it offers
 ```py  [your-rule] path="x.py"         a Python case; `md` / `markdown` likewise
 ```cpp [your-rule] [your-rule]         two findings; their fixes are not pinned
@@ -268,25 +272,16 @@ The corpus annotations, in short — the full specification is in [coding-guidel
 ```cpp [your-rule] fix=" = {0}" hint=" = 0"             the same block, pinning both channels
 ```cpp ~[your-rule]                    must stay quiet
 ```cpp [your-rule] path="x.cc"         linted AS that file name, for a rule that reads it
-```
+````
 
-Inside a quoted value `\n` / `\t` / `\r` are the real characters, so a fix that splices in a whole line is still spellable on the single line a fence gets.
+`path=` is what picks the language, so a Python or markdown case needs one; the fence word alone does not dispatch.
+A markdown case also needs a four-backtick outer fence, so the block's own three-backtick fences stay content.
 
-Two things are easy to get wrong:
+Three things bite while writing cases:
 
-* **`fix=` binds to the rule annotation in front of it**, and a rule's fixes are pinned as a **set** — every replacement it produced, over every finding and every edit, duplicates merged.
-  So naming one fix for a rule means naming them all, and order never matters.
+* **Naming one fix for a rule means naming them all** — a rule's fixes are matched as a set, so a partial list fails.
 * **The finding count comes from the `[rule-id]` annotations alone.** A `fix=` never adds one.
-
-`hint=` is the same pin over the same rule's hint edits, tracked separately — a block may name only its fixes, only its hints, or both.
-A prose-only hint contributes no edit, so its wording is pinned by the smoke test rather than the corpus, and so is the *absence* of a hint.
-
-`path=` describes the **block**, not a rule, so it stands on its own and may appear anywhere in the info string — at most once.
-Only the name is used, never the contents: a rule that tells a header from a translation unit sees the extension and nothing else.
-**It is also what picks the language.** The fence word (`cpp`, `py`, `md`) says what the block *is* — for highlighting, and to mark it lintable at all — while the extension in `path=` is what the engine dispatches on. A block with no `path=` is linted as C++.
-A markdown case therefore needs a four-backtick outer fence, so its own ``` fences stay content.
-
-A block is linted with `all_rules()` and the total must match exactly, so a second rule firing on your case fails until the block names it too — that is deliberate, it surfaces cross-talk.
+* **A block is linted with `all_rules()`**, so a second rule firing on your case fails until the block names it too — deliberate, since it surfaces cross-talk.
 
 **Always add both a positive and a negative** — a case that must fire and a look-alike that must not.
 For a structural rule, the negatives are the point: prove it does *not* fire on the mem-initializer, the braced return, the call-site aggregate.
@@ -298,4 +293,6 @@ A new rule often needs the parser to recognize a construct it currently skips.
 Grow it rule-by-rule — add exactly what the rule needs, keep the rest opaque, and lock the new shape with a `parser-test.cc` case.
 The parser deliberately handles only what the rules use; that is a feature, not a gap to fill speculatively.
 
-Real-world inputs are the best tests: when a rule misfires on an actual repo file, reduce it to the smallest snippet that reproduces and add that snippet as a regression test (that is how the "directives before a namespace" and "static_assert before members" parser tests were born).
+Real-world inputs are the best tests.
+When a rule misfires on an actual repo file, reduce it to the smallest snippet that reproduces and add that snippet as a regression test.
+The "directives before a namespace" and "static_assert before members" parser tests were both born that way.

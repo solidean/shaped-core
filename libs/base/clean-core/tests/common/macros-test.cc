@@ -80,8 +80,8 @@
 #error "CC_HAS_THREADS must be exactly 0 or 1"
 #endif
 
-// Test: the CMake input forces the derived output. CC_SINGLE_THREADED (SC_THREADS=OFF) is one-directional
-// — it can force threads off, never on — so this is the only implication that holds.
+// Test: the CMake input forces the derived output.
+// CC_SINGLE_THREADED (SC_THREADS=OFF) is one-directional — it can force threads off, never on — so this is the only implication that holds.
 #if defined(CC_SINGLE_THREADED) && CC_HAS_THREADS != 0
 #error "CC_SINGLE_THREADED must force CC_HAS_THREADS to 0"
 #endif

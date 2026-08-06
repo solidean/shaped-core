@@ -2,10 +2,10 @@
 
 // SQLite backend, conditionally compiled.
 //
-// The public API in sqlite.hh is always present; only its implementation is gated. BABEL_HAS_SQLITE is a PRIVATE
-// define set by babel-serializer's CMakeLists — it is 1 when the fetched extern/sqlite target was linked, 0 otherwise.
-// When it is 0 we compile a stub: every entry point reports the backend as unavailable at runtime. The switch never
-// leaves this file (see docs/coding-guidelines.md).
+// BABEL_HAS_SQLITE is a PRIVATE define set by babel-serializer's CMakeLists: 1 when the fetched extern/sqlite
+// target was linked, 0 otherwise.
+// At 0 this file compiles a complete stub whose entry points report the backend unavailable at runtime.
+// The switch never leaves this file (see docs/coding-guidelines.md).
 
 #ifndef BABEL_HAS_SQLITE
 #define BABEL_HAS_SQLITE 0
@@ -345,8 +345,7 @@ namespace babel::sqlite
 {
 namespace
 {
-// The one message every entry point reports. IO is error-riddled anyway, so an absent backend is just one more
-// ordinary runtime failure, not a hole in the API surface.
+// The one message every entry point reports when the backend is absent.
 cc::string unavailable()
 {
     return cc::string("SQLite support was not compiled in (the extern/sqlite backend was not fetched; see "

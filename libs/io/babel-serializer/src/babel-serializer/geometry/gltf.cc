@@ -32,8 +32,9 @@ u32 load_le_u32(cc::span<byte const> bytes, isize offset)
     return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
 }
 
-// JSON member readers. All of them are kind-tolerant by design: a required property is checked explicitly at
-// its use site, and everything else falls back rather than failing, which is what makes exporter junk harmless.
+// JSON member readers.
+// All of them are kind-tolerant by design: a required property is checked explicitly at its use site.
+// Everything else falls back rather than failing, which is what makes exporter junk harmless.
 
 cc::string string_member(json::ref obj, cc::string_view key)
 {
@@ -102,8 +103,9 @@ void collect_strings(json::ref array, cc::vector<cc::string>& out)
             out.push_back(cc::string(array[i].as_string()));
 }
 
-// Enum mappers. The ones that decide how bytes are interpreted fail on an unknown value; the cosmetic ones
-// below hand back a nullopt instead, because a sampler we do not recognize still leaves the geometry readable.
+// Enum mappers.
+// The ones that decide how bytes are interpreted fail on an unknown value.
+// The cosmetic ones below hand back a nullopt instead: a sampler we do not recognize still leaves the geometry readable.
 
 cc::result<gltf::component_type> component_type_from(i64 value)
 {
@@ -259,7 +261,8 @@ struct gltf_parser
 
     // issues
 public:
-    /// Record something skipped, unresolvable or tolerated. Never fails the read — that is what cc::error is for.
+    /// Record something skipped, unresolvable or tolerated.
+    /// Never fails the read — that is what cc::error is for.
     void add_issue(gltf::issue_kind kind, cc::string message)
     {
         result.issues.push_back({.kind = kind, .message = cc::move(message)});
@@ -384,8 +387,8 @@ public:
             if (offset == 12 && type != glb_chunk_json)
                 return cc::error("GLB parse error: the first chunk must be the JSON chunk");
 
-            // The spec pads every chunk to 4 bytes from inside its own length. Exporters get this wrong, and it
-            // costs us nothing as long as the walk stays in bounds — so it is an issue, not an error.
+            // The spec pads every chunk to 4 bytes from inside its own length.
+            // Exporters get this wrong, and it costs us nothing as long as the walk stays in bounds — so it is an issue, not an error.
             if (length % 4 != 0)
                 add_issue(gltf::issue_kind::malformed,
                           cc::format("GLB chunk at offset {} has an unpadded length of {} bytes", offset, length));

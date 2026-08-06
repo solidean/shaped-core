@@ -7,12 +7,10 @@ allowed-tools: Bash mcp__repo_tools__build_diag mcp__repo_tools__test_diag Read
 
 ## Why this skill exists
 
-CI drives `dev.py`, which is **quiet by default** — a red job's console shows
-only `build failed - diagnose with: build_diag …`, never the actual compiler or
-test error. The real diagnostics live in the job's uploaded **`<platform>-diagnostics`
-artifact**, not the log. So diagnosing CI is: find the failing job → download its
-artifact → point `build_diag` / `test_diag` at the archive. Full background:
-[docs/guides/ci.md](../../../docs/guides/ci.md).
+CI drives `dev.py`, which is **quiet by default**: a red job's console shows only `build failed - diagnose with: build_diag …`, never the actual compiler or test error.
+The real diagnostics live in the job's uploaded **`<platform>-diagnostics` artifact**.
+So diagnosing CI is: find the failing job, download its artifact, point `build_diag` / `test_diag` at the archive.
+[docs/guides/ci.md](../../../docs/guides/ci.md) is the background — what each workflow runs, and what it uploads.
 
 ## 1. Orient — which job, which kind of failure
 
@@ -21,6 +19,8 @@ gh pr checks <pr>                    # pass/fail per workflow on a PR
 gh run list --branch <branch>        # recent runs on a branch
 gh run view <run-id>                 # job/step summary (which step failed)
 gh run view --job <job-id> --log-failed   # the failing step's console tail
+gh run watch <run-id> --exit-status  # follow an in-progress run live
+gh run rerun <run-id> --failed       # retry just the failed jobs
 ```
 
 The `--log-failed` tail tells you the **kind** of failure without the detail:
@@ -30,17 +30,17 @@ The `--log-failed` tail tells you the **kind** of failure without the detail:
 
 ## 2. Download the diagnostics artifact into `build/.tmp/<name>/`
 
-One artifact per workflow, named `<platform>-diagnostics` (matrix legs are
-suffixed with the preset). Always download into `build/.tmp/` — it's gitignored,
-keeps cloud artifacts out of your real `build/<preset>` trees, and is the agreed
-scratch location.
+One artifact per workflow, named `<platform>-diagnostics`, and matrix legs are suffixed with the preset.
+Always download into `build/.tmp/` — it is gitignored, keeps cloud artifacts out of your real `build/<preset>` trees, and is the agreed scratch location.
 
 ```bash
 gh run download <run-id> --name windows-msvc-vs2026-diagnostics --dir build/.tmp/msvc
-# leaves: build/.tmp/msvc/windows-msvc-vs2026-diagnostics/{ci-diag.zip,ci-logs.zip,ci-test-results.xml}
+# a single --name extracts straight into --dir:
+#   build/.tmp/msvc/{ci-diag.zip,ci-logs.zip,ci-test-results.xml}
 ```
 
-(Omit `--name` to grab every artifact; `gh run view <run-id>` lists their names.)
+Omit `--name` to grab every artifact — then each one *does* get its own subdirectory, named after the artifact.
+`gh run view <run-id>` lists the names.
 
 ## 3. Diagnose straight off the archive — no unzip
 
@@ -49,19 +49,19 @@ gh run download <run-id> --name windows-msvc-vs2026-diagnostics --dir build/.tmp
 
 ```text
 # build failures — grouped per-TU error tree, unique first-errors surfaced:
-build_diag base_path="build/.tmp/msvc/windows-msvc-vs2026-diagnostics/ci-diag.zip" show_tags=["error"]
+build_diag base_path="build/.tmp/msvc/ci-diag.zip" show_tags=["error"]
 
 # test failures — failure-first results tree, green collapsed, every failure expanded:
-test_diag  base_path="build/.tmp/msvc/windows-msvc-vs2026-diagnostics/ci-logs.zip" errors_only=true limit=120
+test_diag  base_path="build/.tmp/msvc/ci-logs.zip" errors_only=true limit=120
 ```
 
-What's in the artifact (see [docs/guides/ci.md](../../../docs/guides/ci.md) for detail):
-- **`ci-diag.zip`** — every `.diag.json` compile/link sidecar → feed to `build_diag`.
-- **`ci-logs.zip`** — raw run logs **plus the per-binary `*.results.xml`** → feed
-  to `test_diag` (or `build_diag` for the build logs).
-- **`ci-test-results.xml`** — the merged JUnit report. `test_diag` wants a
-  directory or archive, so prefer `ci-logs.zip`; pass this single file only if you
-  point a parser at it directly.
+Which archive feeds which tool:
+
+- **`ci-diag.zip`** — the per-compile/link `.diag.json` sidecars → `build_diag`.
+- **`ci-logs.zip`** — raw run logs **plus the per-binary `*.results.xml`** → `test_diag`, or `build_diag` for the build logs.
+- **`ci-test-results.xml`** — the merged JUnit report; `test_diag` wants a directory or archive, so prefer `ci-logs.zip` and reach for this only when pointing a parser at it directly.
+
+[ci.md](../../../docs/guides/ci.md) says what produces each one.
 
 ## 4. Clean up
 
@@ -83,6 +83,5 @@ rm -rf build/.tmp        # gitignored, but tidy so a later run sees no stale clo
   precisely so you don't grep `/showIncludes` noise — the unique first-error per
   TU is what you want, and `--keep-going` means one red run already captured
   *every* independent error.
-- **`base_path` accepts the archive directly** — never `unzip` first (the old
-  docs said to; they're updated). It also accepts nested archives
-  (`a.zip/b.tar.gz/dir`) and a plain extracted directory if you already have one.
+- **`base_path` accepts the archive directly** — never `unzip` first.
+  It also accepts nested archives (`a.zip/b.tar.gz/dir`), and a plain extracted directory if you already have one.

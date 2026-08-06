@@ -246,8 +246,10 @@ options:
   --no-color               the old spelling of --color never
   -h / --help              print this and exit
 
-Lints its own rules (starting with member-default-init-assignment) on shaped-core's
-libraries, using a lexer and parser built here — no LLVM or libclang.
+Everything after a `--` is taken as a file, even when it starts with a `-`.
+
+Lints our own rules (default-init-assignment, qualified-primitive, no-flow-prose,
+no-long-prose-line) using a lexer and parser built here — no LLVM or libclang.
 )";
 }
 
@@ -269,19 +271,22 @@ The plan names line spans and the prose to put there:
 
   ## libs/base/clean-core/src/clean-core/container/key_value_cache.hh
   [14-17]
-  | /// A thread-safe, tiered get-or-create cache.
-  | /// Providers are queried front-to-back, fastest first.
+  | /// A tiered get-or-create cache: key_value_cache over a stack of key_value_provider tiers.
+  | /// The tier interface is the extension seam for on-disk / networked caches.
   [49-50]
   [+52]
   | /// Eviction is deliberately crude — see apply_bookkeeping.
 
 `[a-b]` replaces those lines, `[a]` one line, `[+n]` inserts before line n, and a span
 with no `| ` lines deletes. Spans ascend and may not overlap. Everything after `| ` is
-verbatim, comment marker and indentation included — nothing is inferred.
+verbatim, comment marker and indentation included — nothing is inferred, and EVERY
+replacement line needs its own `| ` prefix.
 
 Applying is all-or-nothing. A file is rejected if the edit changed code rather than
 prose, or if a rule fires on a line the plan wrote. Every file is still judged after
 one fails, so a run reports every problem the plan has rather than only the first.
+
+The full grammar is in tools/shaped-linter/readme.md.
 )";
 }
 

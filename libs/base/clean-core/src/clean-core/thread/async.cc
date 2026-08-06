@@ -4,26 +4,28 @@
 
 using namespace cc::primitive_defines;
 
-// Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump,
-// and the node state machine / poll loop. See async_node.hh for the shape and invariants.
+// Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump, and the node state machine / poll loop.
+// See async_node.hh for the shape and invariants, and libs/base/clean-core/docs/systems/async.md for the model.
 //
 // Concurrency model (safe to drive from many threads):
 //   * a per-node spinlock (the low bit of the packed state/ops control word) serializes state transitions and
 //     continuation/subscription bookkeeping;
 //   * that word stays atomic for lock-free is_ready()/is_cold() reads;
-//   * at most one thread polls a node (try_begin_running); a completing dependency that wakes a running node
-//     sets the wake-pending bit instead of enqueuing a second copy, and the active poller re-polls;
+//   * at most one thread polls a node (try_begin_running), and a completing dependency that wakes a running
+//     node sets the wake-pending bit instead of enqueuing a second copy, so the active poller re-polls;
 //   * the lock is never held across the user compute frame;
 //   * continuations are weak_ptrs, so a wake can never touch a dependent torn down concurrently.
 
 namespace
 {
-// The scheduler bound to the calling thread (set by async_worker_scope). thread_local even without threads: a
-// single-threaded build just has one slot. nullptr => no worker scope active.
+// The scheduler bound to the calling thread, set by async_worker_scope.
+// thread_local even without threads: a single-threaded build just has one slot.
+// nullptr => no worker scope active.
 thread_local cc::async_scheduler* s_current_scheduler = nullptr;
 
-// Process-wide default scheduler for compute nodes that cannot run on the current thread. Read-mostly:
-// installed once at startup. Atomic so installation is visible to worker threads without extra synchronization.
+// Process-wide default scheduler for compute nodes that cannot run on the current thread.
+// Read-mostly, installed once at startup.
+// Atomic so installation is visible to worker threads without extra synchronization.
 cc::atomic<cc::async_scheduler*> s_default_scheduler = {nullptr};
 
 // spilled dependency-list nodes come from the node slab allocator (wait-free free, cross-thread safe): a node
@@ -63,8 +65,8 @@ void cont_free_cell(cc::impl::async_cont_cell* c)
     cc::node_allocation_free(reinterpret_cast<byte*>(c), cc::node_class_index_for<cc::impl::async_cont_cell>());
 }
 
-// Per-worker recursion depth of the eager depth-first dep drive (poll() calling a dependency's poll()). Caps
-// the native stack at graph-depth; past the cap we fall back to subscribe+park, which uses no extra stack.
+// Per-worker recursion depth of the eager depth-first dep drive, where poll() calls a dependency's poll().
+// Caps the native stack at graph depth; past the cap we fall back to subscribe+park, which uses no extra stack.
 thread_local int s_inline_depth = 0;
 constexpr int async_max_inline_depth = 128;
 
@@ -190,8 +192,8 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
 
 void cc::async_node_base::route_after_schedule()
 {
-    // State is `scheduled` and nobody else will enqueue it (schedule() is idempotent on `scheduled`), so we
-    // route exactly once: the current worker (hot) if a scope is active here, else the installed default pool.
+    // State is `scheduled` and nobody else will enqueue it, since schedule() is idempotent on `scheduled`.
+    // So we route exactly once: the current worker (hot) if a scope is active here, else the installed default pool.
     // The default-pool fallback is thread-independent, which is what makes cross-thread wakeups correct.
     auto self = async_node_ptr::from_alive(this); // strong > 0 throughout scheduling (our caller holds a handle)
     if (auto* sched = async_scheduler::current_or_null())
@@ -225,9 +227,9 @@ bool cc::async_node_base::try_begin_running()
 
 void cc::async_node_base::reschedule_self()
 {
-    // yield: the one legitimate self-driven running -> scheduled transition. Bypasses the wake-suppression in
-    // schedule() (which would leave a running node un-enqueued). A yield stays on the current, compatible
-    // worker, so route_after_schedule takes the local hot path.
+    // yield: the one legitimate self-driven running -> scheduled transition.
+    // Bypasses the wake-suppression in schedule(), which would leave a running node un-enqueued.
+    // A yield stays on the current, compatible worker, so route_after_schedule takes the local hot path.
     {
         lock_scope g(this);
         CC_ASSERT(load_state(cc::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
@@ -322,8 +324,8 @@ void cc::impl::async_dep_head::clear()
 
 void cc::impl::async_cont_head::spill_inline()
 {
-    // The inline slot cannot hold a 2nd entry or a latch, so its dependent moves into a cell first. adopt()
-    // takes over the weak count we were holding by hand — no inc/dec pair, and the cell owns it from here.
+    // The inline slot cannot hold a 2nd entry or a latch, so its dependent moves into a cell first.
+    // adopt() takes over the weak count we were holding by hand — no inc/dec pair, and the cell owns it from here.
     auto* c = cont_alloc_cell();
     c->_fn = nullptr;
     new (cc::placement_new, &c->_weak) async_node_weak(async_node_weak::adopt(inline_dep()));
@@ -338,8 +340,8 @@ void cc::impl::async_cont_head::normalize()
 
     if (list_head() == nullptr)
         _head = 0; // list emptied (remove() can leave a null list head, i.e. the bare tag)
-    // NOTE: a 1-entry list is deliberately NOT collapsed back to the inline slot. Unlike async_dep_head's
-    // normalize (on the poll loop's hot path), remove() is rare, and a latch cell cannot live inline at all.
+    // NOTE: a 1-entry list is deliberately NOT collapsed back to the inline slot.
+    // remove() is rare, unlike async_dep_head's normalize on the poll loop's hot path, and a latch cell cannot live inline at all.
 }
 
 void cc::impl::async_cont_head::clear()
@@ -486,10 +488,10 @@ void cc::async_node_base::drop_ready_pending_deps()
 
 void cc::async_node_base::schedule_pending_deps(async_node_base* except)
 {
-    // Only COLD deps: those are the ones nobody has taken responsibility for yet. A dep that is already
-    // scheduled/running is accounted for, and one that is `blocked` is parked on its OWN deps — schedule()
-    // would drag it back to `scheduled` and re-enqueue it, and it would just re-subscribe and re-park. Down a
-    // chain past the inline depth cap that turns every park into a re-poll storm.
+    // Only COLD deps: those are the ones nobody has taken responsibility for yet.
+    // A dep that is already scheduled or running is accounted for, and one that is `blocked` is parked on its OWN deps.
+    // schedule() would drag that back to `scheduled` and re-enqueue it, and it would just re-subscribe and re-park.
+    // Down a chain past the inline depth cap, that turns every park into a re-poll storm.
     deps().for_each(
         [except](impl::async_dep_entry e)
         {
@@ -562,8 +564,8 @@ cc::async_error cc::impl::async_error_propagate(async_error const& e)
     if (e.is_cancelled())
         return async_error::make_cancelled();
 
-    // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the
-    // message. The context chain is lost — a richer error-sharing scheme is a follow-up.
+    // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the message.
+    // The context chain is lost — a richer error-sharing scheme is a follow-up.
     return async_error::make_error(cc::any_error(e.underlying().to_string()));
 }
 
@@ -578,10 +580,10 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
 
 void cc::async_node_base::teardown_payload()
 {
-    // Strong-0 teardown (nothing races us — strong is already 0). If ready, the unresolved arm is already gone
-    // and the payload holds the resolved value/error — destroy that (typed, via the ops table); else the arm is
-    // live, so unsubscribe (the frame still pins the deps) then destroy the whole arm (frame + deps + conts). The
-    // intrusive counts and _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
+    // Strong-0 teardown, so nothing races us.
+    // If ready, the unresolved arm is already gone and the payload holds the resolved value/error, so destroy that, typed, via the ops table.
+    // Otherwise the arm is live: unsubscribe, since the frame still pins the deps, then destroy the whole arm of frame + deps + conts.
+    // The intrusive counts and _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
     auto const s = load_state(cc::memory_order_relaxed);
     if (s == async_node_state::ready_value)
     {
@@ -623,19 +625,19 @@ void cc::async_node_base::poll()
 
         if (!deps().empty())
         {
-            // Eager depth-first drive: rather than parking we try to satisfy one dependency right here — drive
-            // it inline on this stack (better locality, no scheduler round-trip, no wakeup). We only fall back
-            // to the subscribe+park path when the picked dep cannot be completed inline (a manual/push node,
-            // one already running on another worker, or one whose own deps aren't ready) or the recursion depth
-            // cap is hit. Subscription therefore becomes the exception, not the rule.
+            // Eager depth-first drive: rather than parking, satisfy one dependency right here by driving it
+            // inline on this stack -- better locality, no scheduler round-trip, no wakeup.
+            // We fall back to subscribe+park only when the picked dep cannot be completed inline, or the depth cap is hit.
+            // Inline-impossible means a manual/push node, one already running on another worker, or one whose own deps aren't ready.
+            // Subscription is therefore the exception, not the rule.
             if (s_inline_depth < async_max_inline_depth)
             {
                 async_node_base* const pick = deps().first(); // non-null: deps() is not empty
 
-                // Publish all-but-one: `pick` runs here, so enqueuing it would only churn — it would be popped
-                // later as a ready no-op, and until then the queue's strong ref pins it alive. The siblings are
-                // worth publishing only if someone could actually steal them; a singlethreaded scheduler has no
-                // peers, so it publishes nothing and drives the whole graph on this stack.
+                // Publish all-but-one: `pick` runs here, so enqueuing it would only churn.
+                // It would be popped later as a ready no-op, and until then the queue's strong ref pins it alive.
+                // The siblings are worth publishing only if someone could actually steal them, so a
+                // singlethreaded scheduler publishes nothing and drives the whole graph on this stack.
                 if (ctx.scheduler != nullptr && ctx.scheduler->has_steal_capable_peers)
                     schedule_pending_deps(pick);
 
@@ -648,9 +650,9 @@ void cc::async_node_base::poll()
                 // pick could not be completed inline -> fall through to subscribe + park on the not-ready set
             }
 
-            // About to park, so nothing on this stack will drive them: every remaining dep must be runnable
-            // now, or nobody ever wakes us. require() no longer does this, and the depth-cap path above skips
-            // the inline drive entirely.
+            // About to park, so nothing on this stack will drive them.
+            // Every remaining dep must be made runnable here, or nobody ever wakes us -- require() deliberately
+            // does not, and the depth-cap path above skips the inline drive entirely.
             schedule_pending_deps(nullptr);
 
             // Install wakeup continuations late, then decide whether to park.
@@ -672,15 +674,14 @@ void cc::async_node_base::poll()
             if (parked)
                 return; // continuations installed; a completing dependency will schedule us
 
-            // a dep became ready, or a wake raced in during subscription: unwind and re-evaluate. This is the
-            // block-vs-wake race; it cannot lose the wakeup.
+            // a dep became ready, or a wake raced in during subscription: unwind and re-evaluate.
+            // This is the block-vs-wake race, and it cannot lose the wakeup.
             unsubscribe_all();
             continue;
         }
 
-        // Run the compute step with the frame in place — it is never moved, so parking is free and a stateful
-        // (mutable) closure just picks up where it left off. If it resolves (value OR error) it has already
-        // destroyed itself: finish_value/finish_error builds the result over the frame's own slot.
+        // Run the compute step with the frame in place -- it is never moved, so parking is free and a stateful (mutable) closure picks up where it left off.
+        // If it resolves, with a value OR an error, it has already destroyed itself: finish_value / finish_error builds the result over the frame's own slot.
         CC_ASSERT(ops()->frame_invoke != nullptr, "polled a node without a compute frame");
         switch (ops()->frame_invoke(frame_storage(), ctx))
         {

@@ -44,8 +44,8 @@ void default_assert_handler(cc::impl::assertion_info const& info)
     std::cerr << "  Location: " << info.location.file_name() << ':' << info.location.line() << ':'
               << info.location.column() << " (" << info.location.function_name() << ")\n";
 
-    // Print stacktrace. Only the real std::stacktrace can render frames; on toolchains without
-    // <stacktrace> (Emscripten / WASI) cc::stacktrace is an empty stub, so say so instead.
+    // Print stacktrace.
+    // Only the real std::stacktrace can render frames; on toolchains without <stacktrace> (Emscripten / WASI) cc::stacktrace is an empty stub, so say so instead.
     std::cerr << "\nStacktrace:\n";
 #if CC_HAS_STACKTRACE
     auto trace = cc::stacktrace::current();

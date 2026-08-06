@@ -27,21 +27,22 @@ struct source_line
     u32 line = 0;
 };
 
-/// Why a symbol lookup failed. `candidates` is non-empty exactly when the spec was ambiguous.
+/// Why a symbol lookup failed.
+/// `candidates` is non-empty exactly when the spec was ambiguous.
 struct symbol_error
 {
     cc::string message;
     cc::vector<symbol_match> candidates;
 };
 
-/// dbghelp lifetime and queries against a live debuggee. All calls must happen on the debug-loop
-/// thread — dbghelp is not reentrant. Owns nothing but the dbghelp session; module storage lives in
-/// the registry passed at construction, which must outlive this.
+/// dbghelp lifetime and queries against a live debuggee.
+/// All calls must happen on the debug-loop thread — dbghelp is not reentrant.
+/// Owns nothing but the dbghelp session; module storage lives in the registry passed at construction, which must outlive this.
 class symbol_session
 {
 public:
-    /// `process` is the debuggee's HANDLE. Symbols are loaded per module, not by invading the
-    /// process, so this must be constructed while the debuggee is stopped at its first event.
+    /// `process` is the debuggee's HANDLE.
+    /// Must be constructed while the debuggee is stopped at its first event: symbols are loaded per module, not by invading the process.
     symbol_session(void* process, module_registry const& modules);
     ~symbol_session();
 
@@ -52,15 +53,15 @@ public:
     void on_module_loaded(module_info const& module, void* file_handle);
     void on_module_unloaded(u64 base);
 
-    /// Resolve a target to a runtime address. Tries an exact name first, then a substring sweep;
-    /// more than one distinct hit fails with every candidate listed.
+    /// Resolve a target to a runtime address.
+    /// Tries an exact name first, then a substring sweep; more than one distinct hit fails with every candidate listed.
     cc::result<u64, symbol_error> resolve(target_spec const& spec) const;
 
     cc::optional<symbol_match> symbol_at(u64 address) const;
     cc::optional<source_line> line_at(u64 address) const;
 
-    /// Physical frames only — inline frames are not expanded. `context` is a CONTEXT const*, copied
-    /// before the walk (StackWalk64 mutates it).
+    /// Physical frames only — inline frames are not expanded.
+    /// `context` is a CONTEXT const*, copied before the walk (StackWalk64 mutates it).
     cc::vector<stack_frame> walk_stack(void* thread_handle, void const* context) const;
 
     /// "module.exe!foo::bar+0x12", falling back to a bare address where no symbol is known.

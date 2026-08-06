@@ -1,7 +1,7 @@
 #pragma once
 
-/// Umbrella include for shaped-graphics' public surface (backends add their own headers). Prefer
-/// the specific header you need.
+/// Umbrella include for shaped-graphics' public surface; backends add their own headers.
+/// Prefer the specific header you need.
 
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>

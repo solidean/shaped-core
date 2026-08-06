@@ -26,6 +26,4 @@ template <int D, class T>
     return v.normalized();
 }
 
-// NOTE: cross(vec3, vec3) -> bivec3 is planned but needs the bivec type
-// (see libs/base/typed-geometry/docs/structure.md).
 } // namespace tg

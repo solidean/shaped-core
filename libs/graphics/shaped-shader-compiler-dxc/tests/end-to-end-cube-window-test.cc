@@ -10,18 +10,20 @@
 
 #include <cstddef> // offsetof
 
+using namespace cc::primitive_defines;
+
 // Interactive smoke test: opens a real window, creates a swapchain, and draws a spinning cube with a
 // different color per face, presenting every frame until the window is closed (or Esc / a safety timeout).
 //
-// nx::config::manual keeps it OUT of the default `dev.py test` sweep — it opens a window and needs a human
-// to watch it. Run it explicitly:  uv run dev.py test "ssc::dxc + dx12 - spinning cube in a window"
-// (or `dev.py test --manual`). It prefers a hardware GPU and falls back to WARP.
+// nx::config::manual keeps it OUT of the default `dev.py test` sweep — it opens a window and needs a human to watch it.
+// Run it explicitly:  uv run dev.py test "ssc::dxc + dx12 - spinning cube in a window" (or `dev.py test --manual`).
+// It prefers a hardware GPU and falls back to WARP.
 
 namespace
 {
-// Matches the HLSL vs_input: POSITION (float3) + COLOR (float4). tg::pos3f / tg::vec4f are standard-layout
-// (a single float[] member each), so offsetof + the tightly-packed 28-byte stride hold. position is a
-// tg::pos3f (a point), which lets tg::triangle3f corners drop straight in.
+// Matches the HLSL vs_input: POSITION (float3) + COLOR (float4).
+// tg::pos3f / tg::vec4f are standard-layout (a single float[] member each), so offsetof + the tightly-packed 28-byte stride hold.
+// position is a tg::pos3f (a point), which lets tg::triangle3f corners drop straight in.
 struct vertex
 {
     tg::pos3f position;
@@ -45,8 +47,8 @@ vs_output main_vs(vs_input input)
 float4 main_ps(vs_output input) : SV_Target { return input.color; }
 )";
 
-// 36 vertices (12 triangles): six faces of a unit cube centered at the origin, one solid color each. Each
-// face is a quad split into two tg::triangle3f; every triangle corner becomes a colored vertex.
+// 36 vertices (12 triangles): six faces of a unit cube centered at the origin, one solid color each.
+// Each face is a quad split into two tg::triangle3f; every triangle corner becomes a colored vertex.
 cc::vector<vertex> make_cube()
 {
     cc::vector<vertex> out;
@@ -115,7 +117,8 @@ LRESULT CALLBACK cube_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
     }
 }
 
-// Creates and shows a real overlapped window of the given client size. hwnd is null if creation fails.
+// Creates and shows a real overlapped window of the given client size.
+// hwnd is null if creation fails.
 HWND create_demo_window(int w, int h)
 {
     static ATOM const cls = []
@@ -216,7 +219,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         .index = 0,
         .count = 1,
         .type = sg::binding_type::uniform_buffer,
-        .block_size = cc::isize(sizeof(tg::mat4f)),
+        .block_size = isize(sizeof(tg::mat4f)),
     };
     auto pipeline_layout = ctx.uncached.create_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
@@ -237,7 +240,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
 
     // Upload the cube's vertices once, in their own list so the buffer decays to COMMON before draws read it.
     cc::vector<vertex> const cube = make_cube();
-    auto vbuf = ctx.persistent.create_raw_buffer(cc::isize(cube.size()) * cc::isize(sizeof(vertex)),
+    auto vbuf = ctx.persistent.create_raw_buffer(isize(cube.size()) * isize(sizeof(vertex)),
                                                  sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
     REQUIRE(vbuf != nullptr);
     {
@@ -308,7 +311,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
             cmd->raster.bind_pipeline(*pipeline);
             cmd->raster.set_inline_constants(mvp);
             cmd->raster.bind_vertex_buffers({sg::buffer<vertex>::from_raw(vbuf).as_vertex_buffer()});
-            cmd->raster.draw({.vertex_range = {.offset = 0, .size = cc::isize(cube.size())}});
+            cmd->raster.draw({.vertex_range = {.offset = 0, .size = isize(cube.size())}});
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch(sc->buffer_count()); // throttle CPU ahead of the GPU + retire finished frames

@@ -1,9 +1,9 @@
 # Requirements
 
-The toolchain shaped-core assumes. Many of these are *implicit* — encoded in
-[CMakePresets.json](../CMakePresets.json), the per-library `CMakeLists.txt`, and
-the CMake helper modules rather than stated anywhere — so they are collected here.
-`uv run dev.py doctor` validates the core ones (see the last section).
+The toolchain shaped-core assumes.
+Many of these are *implicit*, encoded in [CMakePresets.json](../CMakePresets.json), the per-library `CMakeLists.txt` and the CMake helper modules rather than stated anywhere.
+So they are collected here.
+`uv run dev.py doctor` validates the core ones; see the last section.
 
 For *how* to build and test, see
 [guides/building-and-testing.md](guides/building-and-testing.md).
@@ -20,88 +20,75 @@ For *how* to build and test, see
 
 ### Why CMake 3.28
 
-3.28 is the first release with **official C++ named-module support** (Ninja and
-Visual Studio generators). Keeping it as the floor lets a future module-based
-library land without bumping the minimum repo-wide.
+3.28 is the first release with **official C++ named-module support**, on the Ninja and Visual Studio generators.
+Keeping it as the floor lets a future module-based library land without bumping the minimum repo-wide.
 
-Nothing in the *current* sources actually needs that much — the highest feature
-in use is `target_sources(... FILE_SET TYPE HEADERS)`, which is CMake **3.23**;
-everything else (the `cxx_std_23` compile feature, presets schema v3) is
-satisfied by 3.21. So 3.28 is a deliberate forward-looking floor, not a
-present-day necessity. `dev.py doctor` reads this minimum straight from the
-top-level `CMakeLists.txt` and checks the installed `cmake` against it, so the
-two never drift.
+Nothing in the *current* sources actually needs that much.
+The highest feature in use is `target_sources(... FILE_SET TYPE HEADERS)`, which is CMake **3.23**; everything else — the `cxx_std_23` compile feature, presets schema v3 — is satisfied by 3.21.
+So 3.28 is a deliberate forward-looking floor, not a present-day necessity.
+`dev.py doctor` reads this minimum straight from the top-level `CMakeLists.txt` and checks the installed `cmake` against it, so the two never drift.
 
 ## C++ standard
 
-* **C++23**, enforced repo-wide (`CMAKE_CXX_STANDARD 23`, extensions off) and
-  required per-target via the `cxx_std_23` compile feature.
+* **C++23**, enforced repo-wide (`CMAKE_CXX_STANDARD 23`, extensions off) and required per-target via the `cxx_std_23` compile feature.
 * **64-bit only** — every preset targets x64 / arm64.
 * MSVC builds add `/Zc:preprocessor` (conforming preprocessor).
 
 ## Compilers
 
-Configured per platform via presets. "Known-good" means a preset exists and
-targets it; older versions may work but are untested.
+Configured per platform via presets.
+"Known-good" means a preset exists and targets it; older versions may work but are untested.
 
 | Platform | Compiler            | Notes                                                        |
 |----------|---------------------|-------------------------------------------------------------|
-| Windows  | `clang-cl`          | Default (`relwithdebinfo-clang`). LLVM 21 family — see below. |
+| Windows  | `clang-cl`          | Default (`relwithdebinfo-clang`). The version CI pins is in [guides/ci.md](guides/ci.md#toolchains). |
 | Windows  | `cl` (MSVC)         | VS 2022 (toolset 14.44) and VS 2026 (14.51); `*-msvc-*` presets. |
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
-| Linux    | `g++` / `gcc`       | `*-gcc-*` presets. GCC **13+** for `std::stacktrace`.        |
+| Linux    | `g++` / `gcc`       | `relwithdebinfo-linux-gcc`, the only GCC preset. GCC **13+** for `std::stacktrace`. |
 | macOS    | Homebrew LLVM       | Expects `/opt/homebrew/opt/llvm/bin/clang++` (arm64).        |
 | Android  | NDK (r27+)          | `android-ndk-arm64-*` presets; NDK located via `$ANDROID_NDK_ROOT`. |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
-See [platforms.md](platforms.md) for the full tier matrix (which platforms are actively tested vs
-supported vs planned).
+See [platforms.md](platforms.md) for the full tier matrix — which platforms are actively tested, which are supported, and which are planned.
 
 ### Emscripten / WASM
 
-WebAssembly builds use the [emsdk](https://github.com/emscripten-core/emsdk), which bundles `emcc`,
-the CMake toolchain file, and its own Node.js (so no separate Node install is needed). The
-`wasm-emscripten-*` configure presets reference the toolchain file via `$env{EMSDK}`.
+WebAssembly builds use the [emsdk](https://github.com/emscripten-core/emsdk), which bundles `emcc`, the CMake toolchain file, and its own Node.js — so no separate Node install is needed.
+The `wasm-emscripten-*` configure presets reference the toolchain file via `$env{EMSDK}`.
 
-You do **not** need to permanently/`--system` activate emsdk: `dev.py` locates it and applies its
-environment to each configure/build/test subprocess — point it at a checkout with `--emsdk-path`:
+You do **not** need to activate emsdk permanently or with `--system`: `dev.py` locates it and applies its environment to each configure, build and test subprocess.
+Point it at a checkout with `--emsdk-path`:
 
 ```bash
 uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
 ```
 
-Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` →
-`emcc` on `PATH`. Tests run under Node (`-s NODERAWFS=1` gives the binaries real-filesystem access so
-the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code). Only the
-single-threaded, no-WebGPU, `-fexceptions` combination is wired today; the `SC_THREADS=ON` /
-`SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear
-"not yet supported" message (Tier 3).
+Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH`.
+Tests run under Node: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
+Only the single-threaded, no-WebGPU, `-fexceptions` combination is wired today.
+The `SC_THREADS=ON` / `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear "not yet supported" message — Tier 3 in [platforms.md](platforms.md).
 
-Threads are the repo-wide `SC_THREADS` option (not a wasm-local knob): the `wasm-emscripten-*` presets
-set it `OFF`, and a hand-rolled wasm configure must too — leaving the `ON` default fails rather than
-silently building single-threaded. To develop that mode natively, use a `singlethreaded-*` preset
-instead of a wasm build; see [platforms.md](platforms.md#threading-sc_threads).
+Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and the `wasm-emscripten-*` presets set it `OFF`.
+A hand-rolled wasm configure must too: leaving the `ON` default fails rather than silently building single-threaded.
+To develop that mode natively, use a `singlethreaded-*` preset instead of a wasm build — the knob itself is [platforms.md](platforms.md#threading-sc_threads)'s.
 
 ### `std::stacktrace`
 
-clean-core uses `std::stacktrace`, and which link library provides it is
-detected at configure time ([DetectStacktraceLib.cmake](../libs/base/clean-core/cmake/DetectStacktraceLib.cmake)):
+clean-core uses `std::stacktrace`, and which link library provides it is detected at configure time by [DetectStacktraceLib.cmake](../libs/base/clean-core/cmake/DetectStacktraceLib.cmake):
 
 * MSVC / libc++ / newer toolchains — no extra library.
 * GCC 14+ libstdc++ — `-lstdc++exp`.
 * GCC 13 libstdc++ — `-lstdc++_libbacktrace`.
 
-On the GCC path this makes **GCC 13** the practical floor. Where `<stacktrace>` is unavailable
-altogether — notably Emscripten / WASI libc++ — the build does **not** fail: `clean-core`'s
-[stacktrace.hh](../libs/base/clean-core/src/clean-core/platform/stacktrace.hh) detects this via
-`__has_include` and falls back to an empty `cc::stacktrace` stub (`CC_HAS_STACKTRACE 0`), and the
-configure-time detection downgrades to a status message instead of an error.
+On the GCC path this makes **GCC 13** the practical floor.
+Where `<stacktrace>` is unavailable altogether — notably Emscripten and WASI libc++ — the build does **not** fail.
+clean-core's [stacktrace.hh](../libs/base/clean-core/src/clean-core/platform/stacktrace.hh) detects that via `__has_include` and falls back to an empty `cc::stacktrace` stub (`CC_HAS_STACKTRACE 0`).
+The configure-time detection downgrades to a status message instead of an error.
 
 ### Linkers
 
-On non-MSVC compilers the fastest available linker is auto-selected
-([DetectLinker.cmake](../libs/base/clean-core/cmake/DetectLinker.cmake)):
-**mold > lld > system default**. None are required; absence just falls back.
+On non-MSVC compilers the fastest available linker is auto-selected by [DetectLinker.cmake](../libs/base/clean-core/cmake/DetectLinker.cmake): **mold > lld > system default**.
+None are required, and absence just falls back.
 MSVC uses its own linker.
 
 ## Developer / IDE tooling
@@ -112,19 +99,15 @@ MSVC uses its own linker.
 | **clangd**       | 22 fam. | IDE code intelligence; `dev.py doctor` and `dev.py diagnose clangd` use it. clangd 21 crashes on this codebase. |
 | clang-tidy       | —       | Advisory only; still being calibrated. Not gating.                     |
 
-The repo's LLVM-based tooling tracks the **22** family — pair `clang-format`,
-`clangd`, and (on the clang path) the compiler from the same major version to
-avoid format churn and stale diagnostics.
+The repo's LLVM-based tooling tracks the **22** family.
+Pair `clang-format`, `clangd` and — on the clang path — the compiler from the same major version, to avoid format churn and stale diagnostics.
 
 ### diag-launcher
 
-Builds wrap the compiler and linker with
-[tools/bin/diag-launcher.exe](../tools/bin/diag-launcher.exe) (set as
-`CMAKE_<LANG>_COMPILER_LAUNCHER` / `..._LINKER_LAUNCHER` in the presets). It
-captures per-invocation diagnostics into `.diag.json` sidecars that the
-`repo_tools` `build_diag` MCP tool reads. It is checked into the repo, so no
-install step — but it is a Windows binary, so the launcher wiring is currently
-Windows-specific.
+Builds wrap the compiler and linker with [tools/bin/diag-launcher.exe](../tools/bin/diag-launcher.exe), set as `CMAKE_<LANG>_COMPILER_LAUNCHER` / `..._LINKER_LAUNCHER` in the presets.
+It captures per-invocation diagnostics into `.diag.json` sidecars that the `repo_tools` `build_diag` MCP tool reads.
+It is checked into the repo, so there is no install step.
+The `.exe` is Windows-only, so the POSIX presets wire `diag_launcher.sh` → `diag_launcher.py` instead — see [guides/ci.md](guides/ci.md) for which preset gets which.
 
 ## What `dev.py doctor` validates
 
@@ -132,15 +115,18 @@ Windows-specific.
 uv run dev.py doctor
 ```
 
-Checks, in order: **cmake** (present *and* >= the declared minimum), **ninja**,
-a usable **compiler** (MSVC env / `clang-cl` on Windows, `clang++`/`g++`
-elsewhere), that **presets parse** and the platform **default preset** exists,
-the **coverage** tools, the **emscripten** toolchain, and **clangd** (found, a
-published `compile_commands.json` exists, and it parses a real file cleanly). A
-red line names the fix.
+Checks, in order:
 
-The emscripten check is advisory: with no emsdk signal (`--emsdk-path` /
-`SC_EMSDK_PATH` / `EMSDK` / `emcc` on `PATH`) it reports a passing "not configured
-(optional)" line, so a native-only setup stays green. Once any signal is present
-it validates strictly — emsdk located, `emcc` runnable, toolchain file present,
-and emsdk's `node` reachable.
+- **cmake** — present, *and* at least the declared minimum
+- **ninja**
+- a usable **compiler** — the MSVC environment or `clang-cl` on Windows, `clang++` / `g++` elsewhere
+- that **presets parse**, and that the platform **default preset** exists
+- the **coverage** tools, `llvm-cov` and `llvm-profdata`, which coverage and PGO both need
+- the **emscripten** toolchain
+- **clangd** — found, a published `compile_commands.json` present, and a real file parsed cleanly
+
+A red line names the fix.
+
+The emscripten check is advisory.
+With no emsdk signal — `--emsdk-path`, `SC_EMSDK_PATH`, `EMSDK`, or `emcc` on `PATH` — it reports a passing "not configured (optional)" line, so a native-only setup stays green.
+Once any signal is present it validates strictly: emsdk located, `emcc` runnable, toolchain file present, and emsdk's `node` reachable.

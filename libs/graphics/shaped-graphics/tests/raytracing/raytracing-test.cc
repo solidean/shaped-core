@@ -7,14 +7,13 @@
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
-// Backend-agnostic ray-tracing acceleration-structure builds over the public sg API, run against every
-// available backend. These pin the build contract: a BLAS/TLAS builds without device loss, the returned
-// handles are valid + persistent across epochs, and the input validation asserts fire. Trace/correctness
-// needs a raytracing pipeline (deferred), so "builds with plausible sizes" is as far as tier 1 can check.
+// Backend-agnostic ray-tracing acceleration-structure builds over the public sg API, run against every available backend.
+// These pin the build contract: a BLAS or TLAS builds without device loss, the returned handles are valid and persistent across epochs, and the input validation asserts fire.
+// Build sizing is as far as this file goes.
+// The trace side is covered end to end by libs/graphics/shaped-shader-compiler-dxc/tests/, which is Windows-only and needs a fetched extern/dxc.
 //
-// Ray tracing is a device capability, so each test skips when cmd.raytracing.is_supported() is false (a
-// backend without RT, or an adapter that lacks DXR). Vulkan is stubbed + unregistered, so today these run
-// on dx12 (WARP, which implements DXR).
+// Ray tracing is a device capability, so each test skips when cmd.raytracing.is_supported() is false — a backend without RT, or an adapter that lacks DXR.
+// Vulkan is stubbed and unregistered, so today these run on dx12 against WARP, which implements DXR.
 
 namespace
 {
@@ -52,8 +51,8 @@ INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle con
     tri.vertices = verts;
     tri.vertex_count = 3;
 
-    // Build the BLAS then, in the SAME list, a TLAS referencing it — exercises the intra-list
-    // accel_write -> accel_read ordering between the two builds.
+    // Build the BLAS then, in the SAME list, a TLAS referencing it.
+    // That exercises the intra-list accel_write -> accel_read ordering between the two builds.
     auto cmd = ctx->create_command_list();
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
     REQUIRE(blas != nullptr);

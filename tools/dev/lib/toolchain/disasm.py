@@ -1,25 +1,19 @@
 """Symbol search and disassembly over built object files (a local godbolt).
 
-The linked release .exe on Windows is stripped of its COFF symbol table (symbols
-live in a PDB that release builds don't emit), so the reliable, config-independent
-place to find symbols is the **object files**: every .obj keeps a full mangled
-symbol table, and for a CC_FORCE_INLINE-heavy hot function the .obj already holds
-its real, fully-inlined codegen. We therefore scan objects, grouped by the CMake
-target that owns them (`.../CMakeFiles/<target>.dir/...`), falling back to the
-object's directory relative to the scan root for build trees that aren't CMake's.
+The linked release .exe on Windows is stripped of its COFF symbol table, since release builds put symbols in a PDB they do not emit.
+The reliable, config-independent place to find symbols is therefore the **object files**, since every .obj keeps a full mangled symbol table.
+For a CC_FORCE_INLINE-heavy hot function the .obj also already holds its real, fully-inlined codegen.
+So objects are what gets scanned, grouped by the CMake target that owns them (`.../CMakeFiles/<target>.dir/...`).
+A build tree that is not CMake's falls back to the object's directory relative to the scan root.
 
-Nothing here knows about presets or about this repo: a scan root is any directory
-holding object files, which is what lets `assembly` read another project's build.
+Nothing here knows about presets or about this repo: a scan root is any directory holding object files, which is what lets `assembly` read another project's build.
 
-Demangling uses `llvm-nm --demangle` rather than a standalone demangler: LLVM's
-built-in demangler handles both the Itanium and the MSVC ABI, while the
-`llvm-undname`/`llvm-cxxfilt` binaries are often not installed. A plain and a
-`--demangle` pass over the same files list symbols in identical order, so we zip
-them to pair every mangled name with its readable form.
+Demangling uses `llvm-nm --demangle` rather than a standalone demangler.
+LLVM's built-in demangler handles both the Itanium and the MSVC ABI, while the `llvm-undname` / `llvm-cxxfilt` binaries are often not installed.
+A plain and a `--demangle` pass over the same file list report symbols in identical order, so zipping them pairs every mangled name with its readable form.
 
-Caveat: object code is pre-link, so cross-object call targets are unresolved
-placeholders. Local control flow (loops, in-function branches) resolves fine —
-which is what reading a hot loop needs.
+Caveat: object code is pre-link, so a cross-object call target is an unresolved placeholder.
+Local control flow — loops, in-function branches — resolves fine, which is what reading a hot loop needs.
 """
 
 from __future__ import annotations
@@ -80,10 +74,9 @@ def find_tool(name: str, *build_dirs: Path) -> str:
 def _target_of(obj: Path, scan_root: Path) -> str:
     """Name the group an object belongs to — its CMake target, or a path-derived stand-in.
 
-    A CMake tree spells the target out in the path ('.../CMakeFiles/<target>.dir/...'), which is
-    exact and wins. Foreign build trees (MSBuild, a hand-rolled makefile, a bare obj/ directory)
-    carry no such marker, so the object's directory relative to the scan root stands in — enough
-    for --target filtering to still separate one component's objects from another's.
+    A CMake tree spells the target out in the path ('.../CMakeFiles/<target>.dir/...'), which is exact and wins.
+    A foreign build tree — MSBuild, a hand-rolled makefile, a bare obj/ directory — carries no such marker, so the object's directory relative to the scan root stands in.
+    That is enough for --target filtering to still separate one component's objects from another's.
     """
     for part in obj.parts:
         if part.endswith(".dir"):
@@ -98,8 +91,8 @@ def discover_objects(roots: Sequence[Path], target_patterns: list[str] | None) -
     """Map target -> its object files across the given roots, filtered by fnmatch patterns.
 
     A root is a directory to scan recursively, or a single object file to take as-is.
-    `target_patterns` None/empty means every target. Patterns are matched against the
-    derived target name (comma-splitting is the caller's job).
+    `target_patterns` None or empty means every target, and patterns are matched against the derived target name.
+    Comma-splitting is the caller's job.
     """
     by_target: dict[str, list[Path]] = {}
     for root in roots:
@@ -124,14 +117,14 @@ def _run_nm(nm: str, objs: list[Path], demangle: bool) -> dict[Path, list[str]]:
     cmd = [nm, "--defined-only", "--print-size"]
     if demangle:
         cmd.append("--demangle")
-    # a target's object list runs to hundreds of absolute paths, past the Windows
-    # command-line limit; response_file spills to `@rsp` when it would not fit.
+    # A target's object list runs to hundreds of absolute paths, past the Windows command-line limit.
+    # response_file spills to `@rsp` when it would not fit.
     try:
         with response_file([str(o) for o in objs], prefix="llvm-nm-") as tail:
             proc = subprocess.run(cmd + tail, capture_output=True, text=True, encoding="utf-8", errors="replace")
     except OSError as e:
         raise RuntimeError(f"could not run {nm}: {e}") from e
-    # nm exits non-zero if some file has no symbols; that's not fatal for a scan.
+    # nm exits non-zero if some file has no symbols, which is not fatal for a scan.
 
     per_file: dict[Path, list[str]] = {}
     current: Path | None = None
@@ -189,8 +182,8 @@ def match_symbols(
 ) -> list[Symbol]:
     """Filter symbols whose mangled OR demangled form matches `pattern`.
 
-    Substring (case-insensitive) by default; a full regex with --regex. `text_only`
-    keeps just code symbols (the disassemblable ones).
+    Substring and case-insensitive by default; a full regex with --regex.
+    `text_only` keeps just the code symbols, the disassemblable ones.
     """
     if regex:
         rx = re.compile(pattern, re.IGNORECASE)
@@ -212,10 +205,9 @@ def disassemble(
 ) -> str:
     """Disassemble a single symbol out of an object file; return objdump's text.
 
-    `-r` interleaves relocations so cross-object call/RIP targets (unresolved in
-    object code) show their real symbol. We can't add `-C` to demangle them:
-    `--disassemble-symbols` matches the raw table, so demangling it there makes the
-    lookup miss. Reloc targets therefore stay mangled (the function name still leads).
+    `-r` interleaves relocations, so a cross-object call or RIP target — unresolved in object code — shows its real symbol.
+    `-C` cannot be added to demangle those: `--disassemble-symbols` matches the raw table, so demangling there makes the lookup miss.
+    Reloc targets therefore stay mangled, and the function name still leads.
     """
     cmd = [objdump, "-d", "-r", f"--disassemble-symbols={mangled}"]
     cmd.append("--x86-asm-syntax=intel" if intel else "--x86-asm-syntax=att")

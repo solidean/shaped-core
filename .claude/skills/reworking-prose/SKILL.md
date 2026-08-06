@@ -5,6 +5,8 @@ when_to_use: "these files violate our doc policy", "fix the comments in", "rewor
 allowed-tools: Read Edit Write Bash Glob Grep mcp__repo_tools__repo_search mcp__repo_tools__repo_structure mcp__repo_tools__file_structure
 ---
 
+[docs/guides/prose.md](../../../docs/guides/prose.md) is the guide around this skill: when a pile of findings becomes a rework, and where each answer lives.
+
 ## What this is
 
 Fixing prose one finding at a time does not work.
@@ -46,25 +48,71 @@ A gap is a scope candidate like any other — this skill grows documentation as 
 
 Plain `Read`. A member doc is unrewritable without its signature, so there is no shortcut around reading the code the prose is attached to.
 
-### 3. Write the concept
+### 3. Write the documentation concept
 
 In-session and ephemeral — no file, and only an abridged version reaches the PR description.
-Three things, before any new text is written:
+This is the step that makes the rest mechanical, so it is never compressed into "and then I rewrote the comments".
+
+Work it out in this order, before any new text is written:
 
 - the **reader questions** this surface must answer, concrete and countable ("which allocator does this use", "is this safe to call twice");
-- **which level each answer lives at** — and therefore what gets deleted everywhere else;
-- a **line budget per surface**, which may be *higher* than today when the point is to document more.
+- **the one level that owns each answer** — the concept doc, the header, the cheat sheet, or an inline `//` at the pitfall itself;
+- **what every other level gets instead** — never a second full copy, and never silence.
+  A **mini-duplication** is the one-liner you repeat where making the reader jump would cost more than the repeat.
+  A **mini-hint** is a named symbol or a cited path that says where to look.
+  An answer that lives at exactly one level and is unreachable from the others is not documented.
+  **"Another level owns it" licenses a shorter line, not always no line** — deleting a whole section outright is the easy over-correction, and a landing page is where it hurts most;
+- a **word budget per surface**, which may be *higher* than today when the point is to document more.
+
+Verbosity is the enemy and so is missing documentation — the concept is what lets you cut hard without stranding a reader.
+Every line has to pull its weight, and a fringe concept documented at three levels is the same defect as an undocumented central one.
+
+**Before cutting a recap, name the level that owns the answer — then check that level exists.**
+Deleting a "what this already does" recap is right when a concept doc owns it, and wrong the moment none does.
+That failure is invisible downstream: every span validates, every rule passes, and the answer is simply gone from the tree.
+A missing owner is a step-1 gap that has just turned urgent — write the doc, or keep the recap until someone does.
+**A gap may be an unreachable owner rather than a missing one.**
+Before writing a new doc for a gap, grep for the answer outside the surface you scoped — a tool readme, a library-local doc, a `.cmake` comment.
+If it exists but nothing in the reader's reach links to it, the fix is a cross-link plus a short guide-level page, not a fourth copy of the mechanism.
+
+**Compression is where a rework introduces its own errors, and the tell is a word doing double duty.**
+Collapsing a list that mixes "what exists" with "what is intended" — tiers, roadmaps, support levels — reads afterwards as an assertion that all of it exists.
+When a sentence you are shortening carries a hedge, decide whether the hedge was the load-bearing half before dropping it.
+
+
+**Backstory is the first thing to cut**, per [Code Comments](../../../docs/coding-guidelines.md#code-comments).
+No narration of why an approach was chosen, and above all no cross-module causal annotation — "because *(some implementation fact three libraries over)*" reads as insight and ages into a lie.
+Delete it by default: a real Chesterton's fence is rare enough (roughly 20:1 against on this tree) to be the exception you argue for.
+A measurement narrative belongs in the concept doc — never next to the code it once explained.
+
+**Dangling references go too, and a rework is where they surface.**
+A discarded prototype, a removed subsystem, a plan, a handover note, "an earlier version pinned X".
+The reader cannot look any of it up, so it reads as a live part of the system that they simply cannot find.
+Where a removed approach still matters it is a constraint on the *current* design: keep the constraint, drop the history.
 
 The budget is the anti-bloat device.
 It is not a shrink rule.
+A surface that has been reworked or edited often is already dense: its duplication is compressed restatement, not verbose blocks.
+Deleting a one-liner repeated at three levels saves twenty words, where a first pass over a young header sheds a whole mechanism.
+So budget by surface age, and expect a mature surface to come back near flat — the win there is correctness and findability, not volume.
+Correcting a stale claim costs words too: the truth is almost always longer than the wrong version it replaces.
+
 
 Set it against the numbers `prose-stats` gave you in step 1, and check it with `--stats` in step 5.
+**Budget on words, not lines.** Un-reflowing a justified block adds lines by construction, so `+lines` is not a failure — `+words` on a surface you meant to trim is.
 The dry run reports the same lines and words a real run would, so the budget is tested before the plan lands.
 Do not reconstruct either figure with `wc` / `grep -c` pipelines; both come from the same extraction the linter uses.
 
 ### 4. Write the plan
 
 To `.tmp/prose-<topic>.plan` (gitignored, and easy for the user to read).
+
+**Keep a plan under ~800 lines, and split the surface into several when it would run over.**
+One concept still covers the whole surface — this is chunking the *landing*, not the scoping.
+A big surface as one plan means a long write before the first dry run, and one bad span rejects every file in it;
+a chunk per file, or per closely-related group, gets each one validated, budget-checked and applied while it is still fresh in mind.
+Name them for the chunk (`prose-async-doc.plan`, `prose-async-headers.plan`, …) and land them in sequence under one commit.
+Apply each chunk before writing the next: applying shifts line numbers, so a later chunk's spans must be read after the earlier ones land.
 
 ```
 ## libs/base/clean-core/src/clean-core/container/key_value_cache.hh
@@ -76,14 +124,22 @@ To `.tmp/prose-<topic>.plan` (gitignored, and easy for the user to read).
 | /// Eviction is deliberately crude — see apply_bookkeeping.
 ```
 
+The grammar is specified in full by [the shaped-linter readme](../../../tools/shaped-linter/readme.md).
+That includes the `| `-prefix rule: a replacement line missing it parses as a plan directive, which fails the plan before any file is read.
+Four things bite while writing a plan, so they are repeated here:
+
 - `[a-b]` replaces those lines, `[a]` one line, `[+n]` inserts before line n, and a span with no `| ` lines **deletes**.
-- Spans ascend and may not overlap; line numbers are the file as you read it.
-- Everything after `| ` is verbatim final text — comment marker and indentation included, and nothing is inferred.
-- A bare `|` is an empty line inside a block.
+- Spans ascend, may not overlap, and their line numbers are the file **as you read it**.
+- A markdown **fenced block is editable too**, so a stale status tree or table does not need a hand-edit.
+- A bare `|` is an **empty replacement line**, so a span may cover a blank line rather than being split in two around it.
 
 **Take every span's line numbers from a fresh read of that file, in the same session as writing the plan.**
 An off-by-one span silently swallows the declaration under the comment block, which is the one mistake this format makes easy.
 Reconstructing numbers from an earlier read, a search result or memory is how it happens.
+
+**Re-read the lines a span replaces, not just its numbers.**
+A wide span drops whatever it covered that the rewrite did not carry forward, and a trailing sentence on the span's last line is the one that goes.
+Nothing downstream notices: the span is in range, the dry run passes, the code-unchanged check sees no tokens, and `--stats` moves by a plausible amount.
 
 `prose apply` catches it every time — that is what the code-unchanged check is for — but read its message carefully:
 it reports where the *token streams diverge*, which is downstream of the span that is actually wrong.
@@ -104,6 +160,12 @@ Both are hard failures — fix the plan, do not work around the tool.
 **One dry run reports every problem the plan has**, so fix them as a batch rather than re-running per finding.
 Prose findings come back with carets over the *rewritten* text, which is the text to correct in the plan — not what is still on disk.
 
+**Budget two dry runs per markdown chunk, because your own rewrites will trip `no-long-prose-line`.**
+Joining a justified block into one semantic point routinely lands at 210–290 characters, over the 200 ceiling — structural, not carelessness.
+It is a markdown problem: a `///` block is already short, so code chunks nearly always pass first time and a reflowed markdown paragraph nearly always does not.
+So the rhythm is: write, dry-run, split each flagged line at its seam, dry-run again, apply.
+Do not hand-count characters while writing the plan; the dry run finds them for free and you will guess wrong.
+
 `--stats` prints the prose delta per file and in total, which is where step 3's budget gets checked.
 Read it on the dry run: a surface that was meant to shrink and came back `+40` is a plan to revise, not a result to land.
 A file whose delta is `+0 / +0` usually means the rewrite only moved words around, which is worth a second look before it lands as churn.
@@ -113,12 +175,25 @@ A file whose delta is `+0 / +0` usually means the rewrite only moved words aroun
 A fresh subagent, no session context: hand it the concept, the guidelines, the old prose, the new prose, and access to the code.
 It answers the reader questions from step 3.
 
-Instruct it **symmetrically** — flag dropped facts that mattered *and* added lines that do not earn their place.
+Instruct it **symmetrically**, weighting both directions equally:
+
+- can a reader **find, understand and apply** every important point — does each level carry a hint that leads there, or did a deletion strand them;
+- does **every remaining line pull its weight** — added lines that do not earn their place, a fringe concept documented at three levels, backstory that survived the cut.
+
 "Shorter and still answers everything" is a pass, not a regression.
+So is "one line longer, and now findable".
 
 Point it at the code as well as the prose, and ask it to check the claims:
 which exception types a scope actually throws, whether the stated preconditions match the `CC_ASSERT`s, whether a doc still describes a capability the type has since grown.
 A cold reader finds factual drift that no prose rule can see, and that is often the most valuable thing it returns.
+
+Three lines in the prompt raise the yield a lot:
+
+- **Name the two or three deletions you are least sure about**, and ask directly whether each stranded a reader.
+  "Did anything get lost" returns generalities; a named deletion returns a verdict.
+- **Say that factual errors have already been found and fixed in this pass**, so it assumes more survive instead of reading the prose as trustworthy.
+- **Ask it to separate what it verified against code from what it suspects.**
+  The verified half is actionable as-is; the suspected half is where its judgement calls sit, and you will decline some of them.
 
 ### 7. Correction pass
 

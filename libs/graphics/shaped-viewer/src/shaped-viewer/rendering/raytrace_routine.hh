@@ -31,7 +31,8 @@ struct trace_desc
 
 /// The basic flat-shaded PBR ray-tracing pass.
 ///
-/// A render routine (see the "everything that traces is a routine" rule): it owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on reload.
+/// A render routine (see the "everything that traces is a routine" rule).
+/// It owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on reload.
 /// `execute` (re)builds the frame's TLAS, binds the scene, and dispatches one ray per pixel into the output image.
 /// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
 class pbr_raytrace_routine : public sg::render_routine<pbr_raytrace_routine>

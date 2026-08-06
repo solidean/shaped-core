@@ -1,9 +1,8 @@
-// dx12_upload_inline_system: the inline UPLOAD ring buffer and its epoch-gated free watermark. The
-// ring is a linear u64 cursor mapped onto the physical buffer via modulo; a window never wraps, but a
-// copy that would straddle the seam is split at it — reserve hands back only up to the seam and the
-// driver loops the resumable recorder for the remainder, so no tail is wasted. Space is reclaimed per
-// epoch: at advance we snapshot the cursor for the closing epoch, and at retire we free everything up
-// to the highest finished epoch.
+// dx12_upload_inline_system: the inline UPLOAD ring buffer and its epoch-gated free watermark.
+// The ring is a linear u64 cursor mapped onto the physical buffer via modulo.
+// A window never wraps: a copy that would straddle the seam is split at it, so no tail is wasted.
+// Space is reclaimed per epoch — advance snapshots the closing epoch's cursor, retire frees up to the highest finished one.
+// See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md.
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/optional.hh>
@@ -68,12 +67,9 @@ void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
     dx12_texture_upload upload(dst, fp, data);
     upload.prepare(cmd); // no-op; the caller emitted the copy_dst layout barrier
 
-    // The job self-aligns each byte window and returns bytes-consumed-including-alignment; the ring stays a
-    // plain byte allocator. Reserve the whole region once, plus slack for the self-alignment (512) and the one
-    // partial row a seam wrap pushes past the boundary (padded) — so the job always gets a contiguous window
-    // big enough to make progress (a per-chunk reserve could hand it a sub-row tail and stall). Then hand it
-    // to-seam windows, walking the reserved span; a window too small for an aligned row returns 0 (skip to the
-    // seam).
+    // Reserve the whole region once, plus slack for the self-alignment (512) and the one padded row a seam wrap pushes past the boundary.
+    // A per-chunk reserve could hand the job a sub-row tail and stall it, so the window must always fit progress.
+    // Then walk the reserved span in to-seam windows; dx12_texture_upload owns the job's self-align contract.
     isize const total = upload.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
     CC_ASSERT(total <= _capacity, "an inline texture upload (with staging slack) exceeds the upload ring capacity");
 
@@ -101,9 +97,8 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
     dx12_buffer_upload upload(dst, dst_offset, data);
     upload.prepare(cmd);
 
-    // Reserve the whole upload once (the span may wrap the seam), then walk it with to-seam windows — the
-    // same reserve_span the texture path uses. A buffer consumes each window exactly (it splits at any byte),
-    // so it fits in one window unless it straddles the seam.
+    // Reserve the whole upload once (the span may wrap the seam), then walk it with to-seam windows.
+    // A buffer consumes each window exactly, so it fits one window unless it straddles the seam.
     u64 cursor = reserve_span(data.size());
     while (!upload.is_finished())
     {
@@ -151,9 +146,8 @@ void dx12_upload_inline_system::apply_pending_budget()
     if (pending <= 0)
         return;
 
-    // Drain every in-flight epoch so no GPU work still reads the ring, then retire them so their ring
-    // space is reclaimed. After this the ring is empty (only the freshly-opened epoch remains, with no
-    // uploads yet), so it is safe to drop and rebuild.
+    // Drain every in-flight epoch so no GPU work still reads the ring, then retire them to reclaim their space.
+    // The ring is empty afterwards — only the freshly-opened epoch remains, with no uploads yet.
     while (u64(_ctx.completed_epoch()) + 1 < u64(_ctx.current_epoch()))
         _ctx.wait_for_next_inflight_epoch();
     _ctx.process_completed_epochs();

@@ -15,9 +15,9 @@
 
 // Invocation glue for fuzz operations / preconditions.
 //
-// The generic callable reflection (cc::signature_of, arg_types_of, ...) lives in clean-core's
-// common/traits.hh, and the uniform "invoke a callable from a span of typed_value slots" glue lives
-// in nexus/tests/typed_invoke.hh. Here we add only the fuzz-specific precondition-arity dispatch.
+// The generic callable reflection (cc::signature_of, arg_types_of, ...) lives in clean-core's common/traits.hh.
+// The uniform "invoke a callable from a span of typed_value slots" glue lives in nexus/tests/typed_invoke.hh.
+// This file adds only the fuzz-specific precondition-arity dispatch.
 
 namespace nx::fuzz::impl
 {

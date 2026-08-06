@@ -8,7 +8,8 @@ namespace sv
 {
 /// Light types a view holds.
 ///
-/// A view keeps one typed list per kind (view::area_lights, and more as they land), rather than a single tagged list — so a consumer iterates exactly the type it handles without switching on a tag or partitioning by kind.
+/// A view keeps one typed list per kind (view::area_lights, and more as they land), rather than a single tagged list.
+/// So a consumer iterates exactly the type it handles, without switching on a tag or partitioning by kind.
 /// This is deliberately explicit, close-to-the-renderer API.
 /// The ergonomic scene-building layer sits on top of it.
 

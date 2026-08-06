@@ -1,7 +1,6 @@
-// dx12_command_list raster rendering scope: transition the color / depth-stencil targets to their
-// render-target / depth-stencil layouts, bind them to the output-merger, and apply each target's clear /
-// discard. There is
-// no graphics pipeline yet, so a scope only applies its begin-ops; draw recording lands with the pipeline.
+// dx12_command_list raster recording.
+// The rendering scope transitions the color / depth-stencil targets to their render-target / depth-stencil layouts, binds them to the output-merger, and applies each target's clear / discard.
+// Also the raster bind path: pipeline and groups, IA buffers, dynamic state, and draw recording.
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::move
@@ -26,8 +25,8 @@ namespace
 {
 [[nodiscard]] dx12_texture_handle as_dx12_texture(sg::raw_texture_handle const& tex)
 {
-    // Only dx12 textures ever reach a dx12 command list, so static_cast is sound; the dynamic_cast is the
-    // debug-only check (stripped in release, where CC_ASSERT leaves its condition unevaluated).
+    // Only dx12 textures ever reach a dx12 command list, so static_cast is sound.
+    // The dynamic_cast is the debug-only check, stripped in release where CC_ASSERT leaves its condition unevaluated.
     CC_ASSERT(std::dynamic_pointer_cast<dx12_texture const>(tex) != nullptr, "target texture is not a dx12 "
                                                                              "texture");
     return std::static_pointer_cast<dx12_texture const>(tex);
@@ -46,17 +45,15 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     CC_ASSERT(!info.color_targets.empty() || info.depth_stencil_target.has_value(),
               "a rendering scope needs at least one color or depth-stencil target");
 
-    // 1) Transition each target to its output layout (color -> render_target, depth -> depth_readwrite)
-    //    and register it with this list. Flush the barriers up-front: enhanced barriers are illegal once the
-    //    targets are bound / inside the pass, unlike a compute dispatch which flushes right before each op.
+    // 1) Transition each target to its output layout (color -> render_target, depth -> depth_readwrite) and register it with this list.
+    //    Flush the barriers up-front: enhanced barriers are illegal once the targets are bound, unlike a compute dispatch which flushes right before each op.
     for (auto const& ct : info.color_targets)
         track_texture_access(as_dx12_texture(ct.view.texture()), ct.view.range(), sg::pipeline_stage_flags::render_target,
                              sg::access_flags::color_write, sg::texture_layout::render_target);
     if (info.depth_stencil_target.has_value())
     {
-        // The depth_readwrite layout (LAYOUT_DEPTH_STENCIL_WRITE) permits only DEPTH_STENCIL_WRITE access —
-        // pairing it with depth_read is rejected. A read-only depth target (once draws exist) would use the
-        // depth_readonly layout + depth_read instead.
+        // The depth_readwrite layout (LAYOUT_DEPTH_STENCIL_WRITE) permits only DEPTH_STENCIL_WRITE access, so pairing it with depth_read is rejected.
+        // depth_read pairs with the depth_readonly layout; this scope binds every depth target read-write.
         auto const& dt = info.depth_stencil_target.value();
         track_texture_access(as_dx12_texture(dt.view.texture()), dt.view.range(),
                              sg::pipeline_stage_flags::depth_stencil_target, sg::access_flags::depth_write,
@@ -64,8 +61,8 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     }
     flush_barriers();
 
-    // 2) Create the RTV/DSV descriptors and collect the CPU handles the clears / OM bind use. The slots
-    //    outlive recording and are freed against this list's epoch in end_rendering.
+    // 2) Create the RTV/DSV descriptors and collect the CPU handles the clears / OM bind use.
+    //    The slots outlive recording and are freed against this list's epoch in end_rendering.
     cc::fixed_vector<D3D12_CPU_DESCRIPTOR_HANDLE, sg::max_color_targets> rtv_handles;
     for (auto const& ct : info.color_targets)
     {
@@ -152,14 +149,12 @@ void dx12_command_list::raster_end_rendering()
 {
     CC_ASSERT(_in_render_pass, "end_rendering called with no open rendering scope");
 
-    // Unbind the targets from the output-merger: a later copy / dispatch in this list transitions them to
-    // another layout, which D3D12 forbids while they are still bound as render / depth targets.
+    // Unbind the targets from the output-merger: a later copy / dispatch in this list transitions them to another layout, which D3D12 forbids while they are bound as render / depth targets.
     _list->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
-    // The RTV/DSV descriptor slots must outlive the list's GPU execution (the recorded commands read them
-    // when they run). Free them against the recording epoch — this list's submit epoch — so the finalizer
-    // runs only once that epoch retires, i.e. after the GPU finishes. RTV/DSV slots own no ID3D12Resource,
-    // so the expiring resource carries only finalizers.
+    // The RTV/DSV descriptor slots must outlive the list's GPU execution, since the recorded commands read them when they run.
+    // Free them against the recording epoch — this list's submit epoch — so the finalizer runs only once that epoch retires, i.e. after the GPU finishes.
+    // RTV/DSV slots own no ID3D12Resource, so the expiring resource carries only finalizers.
     if (!_rendering_rtv_slots.empty() || _rendering_dsv_slot != cpu_descriptor_slot::invalid)
     {
         dx12_expiring_resource expiring;

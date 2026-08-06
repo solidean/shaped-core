@@ -9,22 +9,21 @@ namespace
 {
 constexpr cc::string_view k_id = "default-init-assignment";
 
-// The rationale is Philip's stated reason, kept verbatim — the reporter prints it with every finding.
+// Kept verbatim: the reporter prints it with every finding, so rewording it changes what every user reads.
 constexpr cc::string_view k_rationale
     = "prefer a consistent assignment-form initialization `T v = value;` across the codebase; every "
       "variable initializer — data member, function local, or namespace-scope variable — must therefore "
       "use `=`, not brace form. Where the braces were doing real work — an explicit constructor, or a "
       "conversion that copy-initialization will not perform — name the type: `T v = T(value);`.";
 
-/// The replacement text (without the leading " = ") for a brace-form initializer: the `{…}` verbatim,
-/// always. `int v{}` -> `= {}`, `P p{a, b}` -> `= {a, b}`, `cc::atomic<int> x{0}` -> `= {0}`.
+/// The replacement text (without the leading " = ") for a brace-form initializer: the `{…}` verbatim, always.
+/// `int v{}` -> `= {}`, `P p{a, b}` -> `= {a, b}`, `cc::atomic<int> x{0}` -> `= {0}`.
 ///
-/// The braces STAY. Dropping them around a single value reads better, but it turns direct-list-init into
-/// copy-init, and a syntax-only linter cannot tell when that is legal: `Box a{10}` on an aggregate has no
-/// conversion from `int` to fall back on, and neither does an adapter whose constructor is explicit.
-/// Keeping them makes the rewrite copy-LIST-init, which every aggregate and every implicit constructor
-/// accepts. An explicit constructor still refuses it — there the rationale's `T v = T(value)` is the
-/// escape hatch, and no automatic rewrite can decide that for you.
+/// The braces stay.
+/// Dropping them around a single value reads better, but it turns direct-list-init into copy-init, and a syntax-only linter cannot tell when that is legal.
+/// `Box a{10}` on an aggregate has no conversion from `int` to fall back on, and neither does an adapter whose constructor is explicit.
+/// Keeping them makes the rewrite copy-*list*-init, which every aggregate and every implicit constructor accepts.
+/// An explicit constructor still refuses it — there the rationale's `T v = T(value)` is the escape hatch, and no automatic rewrite can decide that for you.
 ///
 /// That is why the nicer forms below are a `hint` and not part of this fix.
 cc::string fix_payload(lint_context const& ctx, node const& v)
@@ -34,43 +33,39 @@ cc::string fix_payload(lint_context const& ctx, node const& v)
 
 // ---- the hint: the form we actually want, which only a human can sign off on -------------------------
 //
-// `= {value}` is the safe rewrite, not the pretty one. Two better forms exist, and each is a judgement
-// call, so both ride along as a hint that `--fix` never applies:
+// `= {value}` is the safe rewrite, not the pretty one.
+// Two better forms exist, and each is a judgement call, so both ride along as a hint that `--fix` never applies:
 //
 //   * A data member wants plain `= value`, no braces: `cc::atomic<bool> _p{false}` -> `= false`.
-//     Two things can go wrong, and neither is decidable without types. It can stop compiling, because an
-//     explicit constructor refuses copy-init outright — a trade we accept deliberately, since an explicit
-//     constructor behind a default member initializer is suspect anyway, and saying so on the right-hand
-//     side is the answer (`cc::atomic<bool> _p = cc::atomic<bool>(false);`). It can also, for a type with
-//     an `initializer_list` constructor, silently select a DIFFERENT constructor: `T v{1}` prefers the
-//     init-list overload where `T v = 1` takes `T(int)`. That second one is why this cannot be a fix at
-//     all, and why k_brace_drop_safe below is a whitelist of types confirmed free of both hazards rather
-//     than a list of exceptions.
+//     Two things can go wrong, and neither is decidable without types.
+//     It can stop compiling, because an explicit constructor refuses copy-init outright.
+//     That is a trade we accept deliberately: an explicit constructor behind a default member initializer is suspect anyway.
+//     Saying so on the right-hand side is the answer — `cc::atomic<bool> _p = cc::atomic<bool>(false);`.
+//     It can also, for a type with an `initializer_list` constructor, silently select a *different* constructor.
+//     `T v{1}` prefers the init-list overload where `T v = 1` takes `T(int)`.
+//     That second one is why this cannot be a fix at all, and why k_brace_drop_safe below is a whitelist of types confirmed free of both hazards rather than a list of exceptions.
 //
-//     Narrowing is NOT among the hazards, though it looks like it should be: braces reject a narrowing
-//     conversion and `=` permits one, so `int x{1.5}` is ill-formed while `int x = 1.5` truncates. But a
-//     brace initializer that is in the tree already compiles, so no narrowing conversion is there to
-//     un-reject.
+//     Narrowing is not among the hazards, though it looks like it should be.
+//     Braces reject a narrowing conversion and `=` permits one, so `int x{1.5}` is ill-formed while `int x = 1.5` truncates.
+//     But a brace initializer that is in the tree already compiles, so no narrowing conversion is there to un-reject.
 //
 //   * A non-member wants the `auto` form: `cc::random rng{u64(seed)}` -> `auto rng = cc::random(u64(seed));`.
-//     This one is only a hint for a second, sharper reason: it rewrites `{…}` into `(…)`, and those are
-//     not the same call. `std::vector<int>{1, 2}` is a two-element vector; `std::vector<int>(1, 2)` is one
-//     element holding 2. Our own types are mostly free of that footgun — we consider it one — but `std::`
-//     is not, so no automatic rewrite may make this substitution. It also has to carry the declaration's
-//     specifiers across (`static`, `constexpr`, east-const, `alignas`), which is why the hint spells the
-//     form out in prose rather than shipping edits for it.
+//     This one is only a hint for a second, sharper reason: it rewrites `{…}` into `(…)`, and those are not the same call.
+//     `std::vector<int>{1, 2}` is a two-element vector; `std::vector<int>(1, 2)` is one element holding 2.
+//     Our own types are mostly free of that footgun — we consider it one — but `std::` is not, so no automatic rewrite may make this substitution.
+//     It also has to carry the declaration's specifiers across — `static`, `constexpr`, east-const, `alignas`.
+//     That is why the hint spells the form out in prose rather than shipping edits for it.
 
-/// Type spellings confirmed to take the braceless form: no explicit constructor, no `initializer_list`
-/// overload to switch to. The hint states those without a caveat.
+/// Type spellings confirmed to take the braceless form: no explicit constructor, no `initializer_list` overload to switch to.
+/// The hint states those without a caveat.
 /// Grows as types are checked; being absent means "we have not verified", not "known bad".
 constexpr cc::string_view k_brace_drop_safe[] = {"cc::atomic", "std::atomic"};
 
 /// The declaration text ahead of the declarator-id — `static cc::atomic<int>` for `static cc::atomic<int> s{1}`.
 ///
-/// Empty when that text cannot be a type. The case that matters is a multi-declarator statement: for `b` in
-/// `int a{1}, b{2}` the text ahead of the declarator is `int a{1},`, an earlier declarator rather than a
-/// type. A `{`, `}`, `=` or `;` in there is the tell — none of them appears in a type spelling, while a
-/// comma does (`cc::array<int, 3>`) and so cannot be used for this.
+/// Empty when that text cannot be a type.
+/// The case that matters is a multi-declarator statement: for `b` in `int a{1}, b{2}` the text ahead of the declarator is `int a{1},`, an earlier declarator rather than a type.
+/// A `{`, `}`, `=` or `;` in there is the tell — none of them appears in a type spelling, while a comma does (`cc::array<int, 3>`) and so cannot be used for this.
 cc::string_view type_text_of(lint_context const& ctx, node const& v)
 {
     if (v.declarator.byte_begin <= v.span.byte_begin)
@@ -111,13 +106,12 @@ bool is_brace_drop_confirmed(cc::string_view type_text)
     return false;
 }
 
-/// Whether the braces around `inner` can be dropped without rewriting the initializer's meaning: exactly
-/// one element, and not a designated initializer. `{}` cannot (`= ` is not valid), `{a, b}` cannot
-/// (`= a, b` is a comma expression), `{.a = 1}` cannot (a designator needs its braces). Commas inside a
-/// nested group are part of one element, so `{f(a, b)}` can.
+/// Whether the braces around `inner` can be dropped without rewriting the initializer's meaning: exactly one element, and not a designated initializer.
+/// `{}` cannot (`= ` is not valid), `{a, b}` cannot (`= a, b` is a comma expression), `{.a = 1}` cannot (a designator needs its braces).
+/// Commas inside a nested group are part of one element, so `{f(a, b)}` can.
 ///
-/// Only `(`/`[`/`{` count as grouping. Tracking `<`/`>` too would misread the comparison in `{a > b}`,
-/// and getting it wrong the other way — a comma inside template arguments — only costs a missing hint.
+/// Only `(`/`[`/`{` count as grouping.
+/// Tracking `<`/`>` too would misread the comparison in `{a > b}`, and getting it wrong the other way — a comma inside template arguments — only costs a missing hint.
 bool inner_is_single_value(cc::string_view inner)
 {
     if (inner.empty() || inner[0] == '.')
@@ -136,8 +130,8 @@ bool inner_is_single_value(cc::string_view inner)
     return true;
 }
 
-/// The hint for a data member: drop the braces. Carries the edit, and says whether we have confirmed the
-/// type takes it.
+/// The hint for a data member: drop the braces.
+/// Carries the edit, and says whether we have confirmed the type takes it.
 cc::optional<hint> member_hint(lint_context const& ctx, node const& v)
 {
     auto const inner = ctx.source.span_text(v.init_inner);
@@ -172,9 +166,9 @@ cc::optional<hint> member_hint(lint_context const& ctx, node const& v)
     };
 }
 
-/// The hint for a local or namespace-scope variable: the `auto` form, in prose only. Naming the type on
-/// the right turns `{…}` into `(…)`, which is a different call for some `std::` types, and the
-/// declaration's specifiers would have to move — neither is safe to spell as an edit.
+/// The hint for a local or namespace-scope variable: the `auto` form, in prose only.
+/// Naming the type on the right turns `{…}` into `(…)`, which is a different call for some `std::` types, and the declaration's specifiers would have to move.
+/// Neither is safe to spell as an edit.
 cc::optional<hint> non_member_hint(lint_context const& ctx, node const& v)
 {
     auto const inner = ctx.source.span_text(v.init_inner);

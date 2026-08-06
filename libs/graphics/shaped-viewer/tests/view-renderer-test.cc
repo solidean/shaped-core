@@ -5,10 +5,9 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
-// Headless end-to-end through the view_renderer routine: it path-traces one view into a transient target and
-// blits it into an offscreen render target, all on one command list. Beyond the per-routine tests, this
-// exercises the orchestration and — the part a real frame relies on — the trace -> blit transition on a single
-// command list, which the WARP debug layer validates for us.
+// Headless end-to-end through the view_renderer routine: it path-traces one view into a transient target and blits it into an offscreen render target, all on one command list.
+// Beyond the per-routine tests, this exercises the orchestration.
+// It also covers the part a real frame relies on — the trace -> blit transition on a single command list, which the WARP debug layer validates for us.
 //
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the whole frame
 // (trace + barrier + blit) recorded and ran.
@@ -72,9 +71,9 @@ TEST("sv - view renderer end to end (headless)")
     CHECK(true); // trace + blit recorded and ran on one command list without a device / barrier error
 }
 
-// The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]]
-// lookup. A Cornell box is the payload because its quads genuinely share vertices, so welding actually shrinks
-// the vertex buffer and the index buffer is not the identity sequence the non-indexed path would synthesize.
+// The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
+// A Cornell box is the payload because its quads genuinely share vertices, so welding actually shrinks the vertex buffer.
+// The index buffer is then not the identity sequence the non-indexed path would synthesize.
 TEST("sv - view renderer renders indexed geometry (headless)")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});

@@ -1,11 +1,13 @@
 # shaped-shader-compiler-dxc cheat sheet
 
-DXC wrapper: HLSL -> `sg::compiled_shader`. Namespace `ssc::dxc`. Windows-only. Depends on shaped-graphics.
+DXC wrapper: HLSL -> `sg::compiled_shader`.
+Namespace `ssc::dxc`.
+Windows-only, and depends on shaped-graphics.
 Headers are included by full path from `src/`: `#include <shaped-shader-compiler-dxc/<name>.hh>`.
 
-> **Scope note:** covers the small surface that exists today — compute shaders to DXIL, with reflection.
-> Fallible calls return `cc::result`. Format conventions live in
-> [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+> **Scope note:** DXIL only, for every `sg::shader_stage` — compute, raster and the six ray-tracing stages — with reflection.
+> Fallible calls return `cc::result`.
+> Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 How to read this: each block leads with the include; one symbol per line with a trailing comment.
 
@@ -71,9 +73,10 @@ D3D12_SHADER_INPUT_BIND_DESC        ->  sg::binding
   Name       -> name
   Type -> binding_type: CBUFFER->uniform_buffer(+block_size); STRUCTURED->readonly_structured;
           BYTEADDRESS->readonly_raw; UAV_RWSTRUCTURED->readwrite_structured; UAV_RWBYTEADDRESS->readwrite_raw;
-          TEXTURE->readonly_texture; UAV_RWTYPED->readwrite_texture; SAMPLER->sampler
+          TEXTURE->readonly_texture; UAV_RWTYPED->readwrite_texture; SAMPLER->sampler;
+          RTACCELERATIONSTRUCTURE->acceleration_structure
           (TEXTURE/RWTYPED with a BUFFER dimension = a typed/texel buffer -> unsupported, see below)
 // no remapping — each backend reinterprets (set,index,type). Recorded faithfully.
-// unsupported kinds (texel/typed buffers, append/consume/counter buffers, accel) -> cc::error until sg grows.
+// unsupported kinds (texel/typed buffers, append/consume/counter buffers) -> cc::error until sg grows.
 // GOTCHA: DXC's DXIL reflection drops declared-but-unused bindings (a SPIR-V pass would keep them).
 ```

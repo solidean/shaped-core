@@ -1,7 +1,7 @@
 """Doctor: lightweight, read-only environment sanity checks.
 
-Returns a list of (label, ok, detail) tuples so the caller decides how to print
-and what exit code to use. No side effects.
+Returns a list of (label, ok, detail) tuples, so the caller decides how to print and what exit code to use.
+No side effects.
 """
 
 from __future__ import annotations
@@ -32,9 +32,7 @@ def _parse_version(text: str) -> tuple[int, ...] | None:
 def required_cmake_version(root: Path) -> tuple[int, ...] | None:
     """The minimum CMake declared by the top-level CMakeLists.txt.
 
-    Single source of truth: parses `cmake_minimum_required(VERSION X.Y[...])`
-    so doctor enforces exactly what configure will require, with no second
-    constant to keep in sync.
+    Parsed from `cmake_minimum_required(VERSION X.Y[...])`, so doctor enforces exactly what configure will require with no second constant to keep in sync.
     """
     cml = root / "CMakeLists.txt"
     try:
@@ -48,9 +46,7 @@ def required_cmake_version(root: Path) -> tuple[int, ...] | None:
 def _cmake_check(root: Path) -> tuple[str, bool, str]:
     """Verify cmake is present and new enough to configure this project.
 
-    Reporting cmake as merely 'found' is not enough: a too-old cmake fails
-    configure with a cryptic 'CMake X required' error that the bare version
-    check never surfaced. Compare against the declared minimum here instead.
+    Reporting cmake as merely 'found' is not enough: a too-old cmake fails configure with a cryptic 'CMake X required' error that a bare version check never surfaced.
     """
     exe = shutil.which("cmake")
     if exe is None:
@@ -76,10 +72,8 @@ def _cmake_check(root: Path) -> tuple[str, bool, str]:
 def _pick_sample_source(entries: list[dict]) -> Path | None:
     """Pick a representative first-party TU for the clangd smoke test.
 
-    Prefers a clean-core source over vendored/extern code (e.g. mimalloc's
-    static.c): clangd diagnostics on third-party translation units aren't ours to
-    fix, so they must not drive the toolchain verdict. Falls back to any libs/
-    source, then anything in the database.
+    Prefers a clean-core source over vendored or extern code such as mimalloc's static.c, whose clangd diagnostics are not ours to fix and must not drive the toolchain verdict.
+    Falls back to any libs/ source, then to anything in the database.
     """
     files = [Path(e["file"]) for e in entries if "file" in e]
 
@@ -100,11 +94,8 @@ def _pick_sample_source(entries: list[dict]) -> Path | None:
 def _clangd_checks(root: Path) -> list[tuple[str, bool, str]]:
     """Check that clangd is installed and can parse the project.
 
-    Verifies, in order: clangd is found, the published compilation database
-    (build/compile_commands.json — what the editor's clangd reads) exists, and
-    clangd can `--check` a real file from it with no error diagnostics. The last
-    step is what catches a missing/stale database, which silently breaks IDE
-    code intelligence.
+    Verifies, in order: clangd is found, the published build/compile_commands.json exists — what the editor's clangd reads — and clangd can `--check` a real file from it cleanly.
+    That last step is what catches a missing or stale database, which silently breaks IDE code intelligence.
     """
     clangd_bin = clangd.find_clangd()
     if clangd_bin is None:
@@ -131,9 +122,8 @@ def _clangd_checks(root: Path) -> list[tuple[str, bool, str]]:
         checks.append(("clangd check", False, "could not pick a sample file from the database"))
         return checks
 
-    # Let clangd discover the database exactly as the editor does (via .clangd
-    # and its upward search) — don't force --compile-commands-dir, or a broken
-    # .clangd would be masked.
+    # Let clangd discover the database exactly as the editor does, through .clangd and its upward search.
+    # Forcing --compile-commands-dir would mask a broken .clangd.
     try:
         result = clangd.check_file(clangd_bin, sample, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -167,8 +157,7 @@ def _tool_version(name: str) -> tuple[bool, str]:
 
 
 def _exe_version(exe: str) -> tuple[bool, str]:
-    """`--version` banner for a compiler given by name OR absolute path (unlike _tool_version,
-    which only resolves PATH names)."""
+    """`--version` banner for a compiler given by name OR absolute path, unlike _tool_version, which only resolves PATH names."""
     if not (Path(exe).is_file() or shutil.which(exe)):
         return False, f"not found: {exe}"
     try:
@@ -182,17 +171,15 @@ def _exe_version(exe: str) -> tuple[bool, str]:
 def _compiler_check(root: Path, preset: Preset) -> tuple[str, bool, str]:
     """Report the compiler `preset` (plus any pinned --toolset) actually configures.
 
-    Resolves exactly what configure will use — a --toolset-pinned clang/gcc binary, the preset's
-    CMAKE_CXX_COMPILER cache variable (e.g. the Homebrew-LLVM path on macOS), or the MSVC env for
-    cl — and reports its path + --version. So a missing or wrong toolchain shows up here rather than
-    as a confusing configure failure, and the report reflects the build compiler, not whatever bare
-    clang++/g++ happens to sit on PATH.
+    Resolves exactly what configure will use — a --toolset-pinned clang/gcc binary, the preset's CMAKE_CXX_COMPILER cache variable, or the MSVC env for cl — and reports its path and --version.
+    So a missing or wrong toolchain shows up here rather than as a confusing configure failure.
+    The report reflects the build compiler, not whatever bare clang++/g++ happens to sit on PATH.
     """
-    from . import toolset as ts  # local import: avoids a module-load cycle
+    from . import toolset as ts
 
     if preset.family == "msvc":
-        # A pinned toolset must resolve to a real VS install — don't let an ambient cl/clang-cl on
-        # PATH mask its absence (that's exactly the silent fall-through --toolset exists to prevent).
+        # A pinned toolset must resolve to a real VS install.
+        # An ambient cl or clang-cl on PATH must not mask its absence, which is the silent fall-through --toolset exists to prevent.
         if preset.toolset and not ("/" in preset.toolset or "\\" in preset.toolset):
             inst = ts.find_msvc_instance(preset.toolset)
             if inst is None:
@@ -223,9 +210,8 @@ def _coverage_tool_check(
 ) -> tuple[str, bool, str]:
     """Check an llvm-* coverage tool, resolved exactly as `dev.py coverage` does.
 
-    Looks on PATH / via `env_var`, then beside the configured compiler (where
-    clang-cl ships them on Windows). Reports the version line so a mismatch with
-    the compiler — which silently corrupts `llvm-cov` mapping — is visible.
+    Looks on PATH and via `env_var`, then beside the configured compiler, where clang-cl ships them on Windows.
+    Reports the version line, so a mismatch with the compiler — which silently corrupts `llvm-cov` mapping — is visible.
     """
     resolved = resolve_tool(name, env_var, build_dir) if build_dir else find_tool(name, env_var)
     if resolved is None:
@@ -242,12 +228,10 @@ def _coverage_tool_check(
 def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, str]]:
     """Validate the Emscripten/emsdk toolchain used by the wasm-emscripten-* presets.
 
-    Emscripten is an optional (Tier 2) target, so this stays advisory: when nothing
-    signals intent to use it (no --emsdk-path, no SC_EMSDK_PATH/EMSDK, no emcc on
-    PATH) it reports a single passing "not configured" line rather than failing a
-    native-only developer's doctor run. Once any of those signals is present it
-    validates strictly: emsdk located, emcc runnable, toolchain file present, and
-    emsdk's node reachable — the things a WASM configure/build/test actually needs.
+    Emscripten is an optional (Tier 2) target, so this stays advisory.
+    With nothing signalling intent to use it — no --emsdk-path, no SC_EMSDK_PATH or EMSDK, no emcc on PATH — it reports a single passing "not configured" line.
+    That is so it never fails a native-only developer's doctor run.
+    Once any of those signals is present it validates strictly: emsdk located, emcc runnable, toolchain file present, emsdk's node reachable.
     """
     intent = bool(emsdk_path) or bool(os.environ.get("SC_EMSDK_PATH")) \
         or bool(os.environ.get("EMSDK")) or shutil.which("emcc") is not None
@@ -269,8 +253,7 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
          str(toolchain) if toolchain.is_file() else f"missing {toolchain} - run: emsdk install latest")
     )
 
-    # Resolve emcc/node through the emsdk environment (not just the ambient PATH),
-    # so an un-activated but present emsdk still validates green.
+    # Resolve emcc and node through the emsdk environment rather than the ambient PATH, so an un-activated but present emsdk still validates green.
     env = emsdk_env(emsdk_path)
     search_path = env.get("PATH") if env else None
     for tool, hint in (("emcc", "emsdk install/activate latest"), ("node", "bundled with emsdk")):
@@ -291,11 +274,10 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
 def _windows_pmu_check() -> tuple[str, bool | None, str]:
     """Report whether non-admin PMU profiling (nexus/bench hardware counters) is set up on Windows.
 
-    tools/setup-pmu-access.ps1 grants three things together — Performance Log Users membership,
-    SeSystemProfilePrivilege, and ETW session-GUID ACLs. The ACLs live under an admin-only registry key we
-    cannot read here, but the script grants all three atomically, so the group + privilege in the current
-    token are a faithful proxy for "the setup ran". PMU counters are optional (baseline timing/cycles work
-    without them), so a missing setup is advisory (SKIP), never a hard failure.
+    tools/setup-pmu-access.ps1 grants three things together: Performance Log Users membership, SeSystemProfilePrivilege, and ETW session-GUID ACLs.
+    The ACLs live under an admin-only registry key we cannot read here, but the script grants all three atomically.
+    So the group and privilege in the current token are a faithful proxy for "the setup ran".
+    PMU counters are optional, since baseline timing and cycles work without them, so a missing setup is advisory (SKIP) rather than a hard failure.
     """
     label = "PMU profiling (nexus/bench)"
     try:
@@ -327,12 +309,9 @@ def doctor(
 ) -> list[tuple[str, bool | None, str]]:
     """Run sanity checks and return (label, ok, detail) for each.
 
-    `ok` is True (pass), False (fail), or None for an advisory check that neither
-    passes nor fails — e.g. an optional toolchain that simply isn't configured.
-
-    `preset` (resolved, carrying any pinned `.toolset`) drives the compiler check so it reports the
-    toolchain the build will actually use. When None, the compiler check falls back to a generic
-    PATH probe.
+    `ok` is True (pass), False (fail), or None for an advisory check that neither passes nor fails — an optional toolchain that simply is not configured.
+    `preset`, resolved and carrying any pinned `.toolset`, drives the compiler check so it reports the toolchain the build will actually use.
+    When None, the compiler check falls back to a generic PATH probe.
     """
     checks: list[tuple[str, bool | None, str]] = []
 
@@ -342,8 +321,8 @@ def doctor(
     checks.append(("ninja", ok, detail))
 
     if preset is not None:
-        # Emscripten's real compiler is emcc, validated by _emscripten_checks below; skip the native
-        # compiler line for it so it doesn't misreport a host clang++/g++.
+        # Emscripten's real compiler is emcc, validated by _emscripten_checks below.
+        # Skip the native compiler line for it, so it does not misreport a host clang++/g++.
         if preset.family != "emscripten":
             checks.append(_compiler_check(root, preset))
     elif platform.system() == "Windows":
@@ -362,8 +341,7 @@ def doctor(
         checks.append(("presets parse", True, f"{len(presets)} build preset(s)"))
         if preset is not None:
             checks.append(("preset", True, f"{preset.name}" + (f" --toolset {preset.toolset}" if preset.toolset else "")))
-        # Any configured build dir lets us resolve the llvm tools beside the
-        # compiler, matching how `dev.py coverage` finds them.
+        # Any configured build dir lets the llvm tools be resolved beside the compiler, matching how `dev.py coverage` finds them.
         cov_build_dir = next(
             (p.build_dir for p in presets if (p.build_dir / "CMakeCache.txt").is_file()), None
         )

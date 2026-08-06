@@ -10,10 +10,9 @@ namespace sv
 {
 /// GPU-side pinhole camera constants, matching the `Camera` struct in shaders/common.hlsli.
 ///
-/// Each `float3` sits in its own 16-byte lane (the trailing pad scalars): that is the std140-ish cbuffer
-/// layout HLSL expects, so this struct uploads straight into a uniform buffer. `right_scaled` / `up_scaled`
-/// carry the aspect and field-of-view scaling pre-baked, so the raygen just forms
-/// `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
+/// Each `float3` sits in its own 16-byte lane (the trailing pad scalars), which is the std140-ish cbuffer layout HLSL expects.
+/// So this struct uploads straight into a uniform buffer.
+/// `right_scaled` / `up_scaled` carry the aspect and field-of-view scaling pre-baked, so the raygen just forms `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
 struct camera_gpu
 {
     tg::vec3f position;
@@ -31,8 +30,8 @@ struct camera_gpu
 
 /// A perspective projection: vertical field of view, aspect ratio (width / height), and near plane.
 ///
-/// This is the only projection kind for now. `aspect_ratio` is a property of the projection, not of the
-/// render target — set it from the target size before baking the GPU basis (the view renderer does this).
+/// This is the only projection kind for now.
+/// `aspect_ratio` is a property of the projection, not of the render target — set it from the target size before baking the GPU basis (the view renderer does this).
 struct perspective_projection
 {
     tg::angle_d vertical_fov = tg::angle_d::make_from_degree(60.0);

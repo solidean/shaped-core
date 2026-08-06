@@ -7,10 +7,9 @@
 namespace scl
 {
 /// A half-open byte range `[byte_begin, byte_end)` within one source file.
-/// Small value type: line/column are NEVER stored here — they are resolved lazily from the buffer
-/// only when a finding is reported. This is the backbone of macro-placement rules and future fix-its:
-/// every token and every syntax node carries a source_span, and a later macro-expansion table keys off
-/// the same spans (the span always stays the *spelling* location).
+/// Small value type: line/column are never stored here — they are resolved lazily from the buffer, only when a finding is reported.
+/// This is the backbone of macro-placement rules and future fix-its.
+/// Every token and every syntax node carries a source_span, and a later macro-expansion table keys off the same spans — the span always stays the *spelling* location.
 struct source_span
 {
     u32 file_id = 0;
@@ -33,7 +32,8 @@ struct source_span
     bool operator==(source_span const&) const = default;
 };
 
-/// A 1-based line and column. Column is byte-based (not UTF-8 codepoint-based) — fine for diagnostics.
+/// A 1-based line and column.
+/// Column is byte-based rather than UTF-8 codepoint-based, which is fine for diagnostics.
 struct line_col
 {
     u32 line = 1;

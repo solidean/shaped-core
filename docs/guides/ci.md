@@ -1,30 +1,23 @@
 # Continuous integration
 
-GitHub Actions gates the Tier-1 platforms on every push to `main` and every pull
-request (and on manual `workflow_dispatch`). This doc is about what CI actually
-does; for the support model (what *should* work, and the Tier-2/3 platforms) see
-[platforms.md](../platforms.md). (Back to [_index.md](_index.md).)
+GitHub Actions gates the Tier-1 platforms on every push to `main` and every pull request, plus manual `workflow_dispatch`.
+This doc is about what CI actually does; for the support model — what *should* work, and the Tier-2/3 platforms — see [platforms.md](../platforms.md).
+Back to [_index.md](_index.md).
 
 ## Philosophy
 
 Two ideas drive the layout:
 
-- **Lean on `dev.py`.** CI drives `dev.py` for everything it can — build, test,
-  doctor — rather than calling `cmake`/`ctest` directly or hand-rolling shell.
-  Explicit flags are fine (and preferred over implicit defaults): a step like
-  `uv run dev.py test --preset relwithdebinfo-linux-clang --merged-xml-report …`
-  is something a developer can paste verbatim and reproduce locally. The less CI
-  does that *isn't* just a `dev.py` invocation, the smaller the gap between
-  "green on CI" and "green on my machine". So workflows stay thin: provision the
-  toolchain, then drive `dev.py`.
+- **Lean on `dev.py`.** CI drives `dev.py` for everything it can — build, test, doctor — rather than calling `cmake` / `ctest` directly or hand-rolling shell.
+  Explicit flags are fine, and preferred over implicit defaults.
+  A step like `uv run dev.py test --preset relwithdebinfo-linux-clang --merged-xml-report …` is one a developer pastes verbatim and reproduces locally.
+  The less CI does that *isn't* just a `dev.py` invocation, the smaller the gap between "green on CI" and "green on my machine".
+  So workflows stay thin: provision the toolchain, then drive `dev.py`.
 
-- **Wide but shallow, with one deep punch.** Most workflows cover a *platform*
-  at a single config (RelWithDebInfo) — broad surface area, cheap. One workflow,
-  **Linux Clang**, runs the *deep* matrix (debug / relwithdebinfo / release) to
-  exercise the define interactions a single config can't — chiefly `CC_ASSERT`
-  on (debug, relwithdebinfo) vs off (release), plus optimization-level
-  differences. Linux clang carries the deep matrix because it's the fastest,
-  lowest-setup runner.
+- **Wide but shallow, with one deep punch.** Most workflows cover a *platform* at a single config, RelWithDebInfo — broad surface area, cheap.
+  One workflow, **Linux Clang**, runs the deep matrix (debug / relwithdebinfo / release) to exercise the define interactions a single config cannot.
+  Chiefly that is `CC_ASSERT` on versus off, plus optimization-level differences.
+  Linux clang carries the deep matrix because it is the fastest, lowest-setup runner.
 
 ## Setup
 
@@ -45,44 +38,31 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
 | [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
 
-Every workflow shares the same shape: provision the toolchain, then `doctor` →
-`build` → `test` through `dev.py`, always with an **explicit `--preset`** (CI
-never relies on the platform-default preset), and upload a **diagnostics
-artifact** (see below). The two **build-only** jobs (iOS, Android) cross-compile
-targets the runner can't execute, so they stop after `build` — no `test` step,
-and their diagnostics artifact carries only `ci-diag.zip` + `ci-logs.zip` (no
-merged test report). See [platforms.md](../platforms.md) for the build-only Tier-2
-status.
+Every workflow shares the same shape: provision the toolchain, then `doctor` → `build` → `test` through `dev.py`, always with an **explicit `--preset`**, since CI never relies on the platform default.
+Each also uploads a **diagnostics artifact**, described below.
+The two **build-only** jobs, iOS and Android, cross-compile targets the runner cannot execute, so they stop after `build`.
+They have no `test` step, and their artifact carries only `ci-diag.zip` and `ci-logs.zip` — no merged test report.
+[platforms.md](../platforms.md) has the build-only Tier-2 status.
 
 ### Diagnostics artifacts
 
-`dev.py` is quiet by default — it captures compiler/test output to files under
-`build/<preset>/` rather than the console — so a red CI job shows only a terse
-"build failed" line, not the actual error. Each job therefore uploads a
-`<platform>-diagnostics` artifact (always, even on failure) with three things:
+`dev.py` is quiet by default, capturing compiler and test output to files under `build/<preset>/` rather than the console.
+So a red CI job shows only a terse "build failed" line, not the actual error.
+Each job therefore uploads a `<platform>-diagnostics` artifact — always, even on failure — with three things:
 
-- **`ci-diag.zip`** — every `.diag.json` sidecar, one per compile/link, written
-  by the diag launcher (`diag-launcher.exe` on Windows, `diag_launcher.sh` →
-  `diag_launcher.py` on Linux/macOS, wired in as the CMake compiler/linker
-  launcher). This is the build-step analogue of the JUnit report. Produced by
-  `dev.py build --diag-archive`, even when the build fails. CI builds also pass
-  `--keep-going` (ninja `-k 0`) so a single failing run surfaces *every*
-  independent error, not just the first — otherwise each red run reveals only one
-  error and fixing portability becomes a slow one-at-a-time loop.
-- **`ci-test-results.xml`** — the merged JUnit test report
-  (`dev.py test --merged-xml-report`).
-- **`ci-logs.zip`** — the raw captured run logs and step sidecars, the last
-  resort when the structured sidecars don't explain it. Produced by the global
-  `dev.py --collect-logs`, which fires on exit regardless of pass/fail. It is set
-  on *both* the build and test steps so either failure mode is covered: the logs
-  under `build/<preset>/run-logs/` accumulate across configure→build→test, so the
-  test step's archive is a strict superset of the build step's, and when the
-  build fails the test step is skipped — leaving the build step's archive (with
-  the failure logs) as the uploaded one.
+- **`ci-diag.zip`** — every `.diag.json` sidecar, one per compile or link, written by the diag launcher wired in as the CMake compiler and linker launcher.
+  That is `diag-launcher.exe` on Windows, and `diag_launcher.sh` → `diag_launcher.py` on Linux and macOS.
+  This is the build-step analogue of the JUnit report, produced by `dev.py build --diag-archive` even when the build fails.
+  CI builds also pass `--keep-going` so one failing run surfaces *every* independent error rather than just the first; without it, fixing portability becomes a slow one-at-a-time loop.
+- **`ci-test-results.xml`** — the merged JUnit test report, from `dev.py test --merged-xml-report`.
+- **`ci-logs.zip`** — the raw captured run logs and step sidecars, the last resort when the structured sidecars don't explain it.
+  Produced by the global `dev.py --collect-logs`, which fires on exit regardless of pass or fail.
+  It is set on *both* the build and test steps so either failure mode is covered.
+  The logs under `build/<preset>/run-logs/` accumulate across configure → build → test, so the test step's archive is a strict superset of the build step's.
+  And when the build fails the test step is skipped, leaving the build step's archive — the one with the failure logs — as the uploaded artifact.
 
-To use them locally: download the artifact into `build/.tmp/<name>/` and point
-`build_diag` / `test_diag` **straight at the archive** — both tools read inside a
-`.zip` (decoded in memory, no extraction needed):
+To use them locally, download the artifact into `build/.tmp/<name>/` and point `build_diag` / `test_diag` **straight at the archive**.
+Both tools read inside a `.zip`, decoded in memory, with no extraction step:
 
 ```bash
 gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp/linux-gcc
@@ -100,9 +80,9 @@ Linux workflows install them with `apt-get`.
 Headers only — sr's window and input tests are headless, running on SDL's dummy video driver, so no display
 and no runtime windowing library is involved.
 
-The list is not just `libx11-dev`: with X11 enabled, SDL also requires every X extension it uses (XCURSOR,
-XDBE, XFIXES, XINPUT, XRANDR, XSCRNSAVER, XSHAPE, XSYNC, XTEST) and fails configure naming the first one
-missing. In Ubuntu terms that is
+The list is not just `libx11-dev`: with X11 enabled, SDL also requires every X extension it uses, and fails configure naming the first one missing.
+Those are XCURSOR, XDBE, XFIXES, XINPUT, XRANDR, XSCRNSAVER, XSHAPE, XSYNC and XTEST.
+In Ubuntu terms that is
 
     libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev
     libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols
@@ -120,116 +100,52 @@ it just has no `sr::window`.
 
 ### Toolchains
 
-Most jobs use the **runner's preinstalled toolchain** — clang/gcc, CMake, and
-Ninja all ship on the GitHub images — so the only provisioning is installing
-`uv` (the `dev.py` runner), plus SDL3's windowing headers on Linux (see
-[System packages](#system-packages)). Where a runner carries several versions of a
-compiler, the job **pins the one we expect with `dev.py`'s `--toolset`** rather
-than shimming `PATH` with symlinks: a missing toolset is then a hard, loud error
-instead of a silent fall-through to whatever the default is. `--toolset` also
-redirects the build directory (to `build/<preset>-<toolset>`), so a pinned job
-never shares a CMake cache with a default-toolset build. Per-platform specifics:
+Most jobs use the **runner's preinstalled toolchain**, since clang/gcc, CMake and Ninja all ship on the GitHub images.
+So the only provisioning is installing `uv`, plus SDL3's windowing headers on Linux (see [System packages](#system-packages)).
+Where a runner carries several versions of a compiler, the job **pins the one we expect with `dev.py`'s `--toolset`** rather than shimming `PATH` with symlinks.
+A missing toolset is then a hard, loud error instead of a silent fall-through to whatever the default is.
+`--toolset` also redirects the build directory to `build/<preset>-<toolset>`, so a pinned job never shares a CMake cache with a default-toolset build.
+Per-platform specifics:
 
 - **Linux** (`ubuntu-26.04`) ships clang 20/21/22 and gcc 13/14/15 side by side.
-  The jobs pass `--toolset 21` (clang, our [requirements.md](../requirements.md)
-  LLVM 21 target) and `--toolset 14` (gcc, ≥ the GCC 13 floor); dev.py resolves
-  `clang++-21` / `g++-14` on `PATH` and errors if they're absent. No symlinking.
+  The jobs pass `--toolset 21` (clang, the LLVM 21 target in [requirements.md](../requirements.md)) and `--toolset 14` (gcc, at or above the GCC 13 floor).
+  dev.py resolves `clang++-21` / `g++-14` on `PATH` and errors if they are absent, so no symlinking is involved.
 - **Windows MSVC** runs **two** jobs, one per toolset, each pinning it with
   `--toolset` so dev.py selects it via `vswhere` + `vcvars`: VS 2022's **14.44**
   on `windows-2025` ([ci-windows-msvc.yml](../../.github/workflows/ci-windows-msvc.yml)),
   and VS 2026's **14.51** on `windows-2025-vs2026`
   ([ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml)).
   `--toolset` searches prerelease installs too, so a preview VS is reachable.
-- **Windows clang** (`windows-latest`) uses the preinstalled **LLVM (clang 20)**
-  `clang-cl`; `dev.py` injects the MSVC environment via `vswhere`. `clang-cl` is a
-  single unversioned binary (no `clang++-N` to swap to), so `--toolset 20` here
-  *asserts* it is clang 20 rather than selecting it — a hard error if the base
-  image moves on. Riding clang 20 (a touch behind the 21 target) is fine because
-  the clang-format/tidy gate runs on Linux clang 21, so Windows clang only needs
-  to *compile* clean.
-- **macOS** (`macos-latest`, arm64) needs Homebrew LLVM — the `macos-arm-llvm-*`
-  presets point `CMAKE_CXX_COMPILER` at `/opt/homebrew/opt/llvm/bin/clang++` and
-  link Homebrew `libc++` — so it `brew install llvm ninja` (CMake ships on the
-  runner; this is a distinct toolchain from the image's system Apple clang).
-  Homebrew's `clang++` is unversioned, so `--toolset 22` *asserts* it is clang 22
-  — loud if a Homebrew bump changes it — rather than selecting it.
-- **WASM** uses the official `emscripten-core/setup-emsdk` action, pinned to a
-  fixed Emscripten version (`EMSCRIPTEN_VERSION`) with the emsdk cached across
-  runs. `dev.py` gets `--emsdk-path "$EMSDK"` on doctor/build/test; tests run
-  under Node.
-- **Windows ARM** (`windows-11-arm`, native arm64) uses VS 2022's MSVC pinned
-  with `--toolset 14.44`, like the x64 job. The `arm64-windows-msvc-*` preset
-  sets the CMake architecture/host toolset to arm64, and `dev.py` threads the
-  preset's arch into the vcvars `-arch` (so `cl` targets arm64, not x64). The
-  checked-in `diag-launcher.exe` is x64 and runs under the image's x64 emulation.
-- **Linux ARM** (`ubuntu-26.04-arm`, native arm64) is the x64 Linux clang job's
-  twin on arm: preinstalled clang, `--toolset 21`, no toolchain-install step.
-- **iOS / Android** are **build-only** (Tier 2). iOS (`macos-latest`) cross-
-  compiles with Apple Clang via the `ios-arm64-*` preset
-  (`CMAKE_SYSTEM_NAME=iOS`, `iphoneos` sysroot); Ninja comes from Homebrew.
-  Android (`ubuntu-26.04`) cross-compiles via the NDK with the
-  `android-ndk-arm64-*` preset, which reads the toolchain from
-  `$ANDROID_NDK_ROOT`; the job points that at the image's **NDK r29 (Clang 21)**
-  rather than the default r27 (Clang 18, too old for our C++23 — e.g.
-  `std::atomic_ref`). Both presets wire the POSIX `diag_launcher.sh` (the iOS and
-  Android hosts are macOS/Linux), so their `ci-diag.zip` carries real per-compile
-  sidecars (`build_diag`-readable). Neither runs tests — the runner can't execute
-  the produced binaries.
+- **Windows clang** (`windows-latest`) uses the preinstalled **LLVM (clang 20)** `clang-cl`, with `dev.py` injecting the MSVC environment via `vswhere`.
+  `clang-cl` is a single unversioned binary with no `clang++-N` to swap to, so `--toolset 20` here *asserts* it is clang 20 rather than selecting it — a hard error if the base image moves on.
+  Riding clang 20, a touch behind the 21 target, is fine because the clang-format and clang-tidy gates run on Linux clang 21, so Windows clang only needs to *compile* clean.
+- **macOS** (`macos-latest`, arm64) needs Homebrew LLVM: the `macos-arm-llvm-*` presets point `CMAKE_CXX_COMPILER` at `/opt/homebrew/opt/llvm/bin/clang++` and link Homebrew `libc++`.
+  So the job runs `brew install llvm ninja` — CMake ships on the runner, and this is a distinct toolchain from the image's system Apple clang.
+  Homebrew's `clang++` is unversioned, so `--toolset 22` *asserts* it is clang 22 rather than selecting it, which is loud if a Homebrew bump changes it.
+- **WASM** uses the official `emscripten-core/setup-emsdk` action, pinned to a fixed Emscripten version (`EMSCRIPTEN_VERSION`) with the emsdk cached across runs.
+  `dev.py` gets `--emsdk-path "$EMSDK"` on doctor, build and test; tests run under Node.
+- **Windows ARM** (`windows-11-arm`, native arm64) uses VS 2022's MSVC pinned with `--toolset 14.44`, like the x64 job.
+  The `arm64-windows-msvc-*` preset sets the CMake architecture and host toolset to arm64, and `dev.py` threads the preset's arch into the vcvars `-arch`, so `cl` targets arm64 rather than x64.
+  The checked-in `diag-launcher.exe` is x64 and runs under the image's x64 emulation.
+- **Linux ARM** (`ubuntu-26.04-arm`, native arm64) is the x64 Linux clang job's twin on arm: preinstalled clang, `--toolset 21`, no toolchain-install step.
+- **iOS and Android** are **build-only** (Tier 2).
+  iOS (`macos-latest`) cross-compiles with Apple Clang via the `ios-arm64-*` preset (`CMAKE_SYSTEM_NAME=iOS`, `iphoneos` sysroot), with Ninja from Homebrew.
+  Android (`ubuntu-26.04`) cross-compiles via the NDK with the `android-ndk-arm64-*` preset, which reads the toolchain from `$ANDROID_NDK_ROOT`.
+  The job points that at the image's **NDK r29 (Clang 21)** rather than the default r27, whose Clang 18 is too old for our C++23 — `std::atomic_ref`, for one.
+  Both presets wire the POSIX `diag_launcher.sh`, since the iOS and Android hosts are macOS and Linux, so their `ci-diag.zip` carries real per-compile sidecars that `build_diag` reads.
+  Neither runs tests: the runner cannot execute the produced binaries.
 
-`doctor` runs first on every job but is **informational, non-gating**
-(`continue-on-error`): it also probes clangd's compile database and
-`llvm-cov`/`llvm-profdata`, which aren't needed for a build+test gate and would
-otherwise fail a fresh runner. It runs purely so the toolchain state is visible
-in the log.
+`doctor` runs first on every job but is **informational and non-gating** (`continue-on-error`).
+It also probes clangd's compile database and `llvm-cov` / `llvm-profdata`, which a build-and-test gate does not need and which would otherwise fail a fresh runner.
+It runs purely so the toolchain state is visible in the log.
 
-## Diagnosing CI failures
+## Diagnosing a red run
 
-The `/debugging-ci` skill
-([.claude/skills/debugging-ci/SKILL.md](../../.claude/skills/debugging-ci/SKILL.md))
-drives this flow end to end; this section is the reference it builds on.
-
-The [GitHub CLI](https://cli.github.com/) reads runs without leaving the
-terminal. The orientation commands:
-
-```bash
-gh pr checks <pr>                              # pass/fail per workflow on a PR
-gh run list --branch <branch>                  # recent runs on a branch
-gh run view <run-id>                           # job/step summary
-gh run watch <run-id> --exit-status            # follow an in-progress run live
-gh run rerun <run-id> --failed                 # retry just the failed jobs
-```
-
-`gh run view <run-id> --log-failed` shows the failing step's console output —
-but remember **`dev.py` is quiet by default**: a failed build prints only
-`build failed - diagnose with: build_diag …`, *not* the compiler error. The
-errors live in the uploaded **diagnostics artifact**, not the console. So the
-real loop is download → `build_diag` / `test_diag` on the archive:
-
-```bash
-# 1. Grab the failing job's diagnostics into build/.tmp/<name>/ (per workflow;
-#    matrix legs are suffixed with the preset, e.g.
-#    linux-clang-debug-linux-clang-diagnostics).
-gh run download <run-id> --name linux-gcc-diagnostics --dir build/.tmp/linux-gcc
-
-# 2. Point the repo_tools MCP tools straight at the .zip — they decode it in
-#    memory, no extraction step:
-#    build failed → build_diag base_path="build/.tmp/linux-gcc/ci-diag.zip" show_tags=["error"]
-#    tests  failed → test_diag  base_path="build/.tmp/linux-gcc/ci-logs.zip"  errors_only=true
-```
-
-`build_diag` groups the captured `.diag.json` sidecars into a per-translation-
-unit error tree and surfaces unique first-errors, so a single call pinpoints the
-problem — e.g. the Linux GCC job's archive immediately showed one `-fpermissive`
-error in `hash-types-test.cc` (a `const` optional needing an initializer), and
-the macOS archive showed a block-scope `extern "C"` in `assert.cc`. For **test**
-failures (build green, tests red), point `test_diag` at `ci-logs.zip` (which
-carries the per-binary `*.results.xml`) or at the merged `ci-test-results.xml`;
-`errors_only=true` collapses the green and expands every failure — e.g. the MSVC
-job's archive pinpointed two `function_ref` / `unique_function` reference-return
-cases failing only under the runner's newer `cl` `/O2`.
-
-Remember to clean up afterward: `rm -rf build/.tmp` (it's gitignored under
-`build/`, but tidy it so a later run doesn't read stale cloud artifacts).
+That is the `/debugging-ci` skill's job ([SKILL.md](../../.claude/skills/debugging-ci/SKILL.md)), and it drives the flow end to end.
+Find the failing job, download its artifact, point the diag tools at the archive.
+The one thing worth carrying over from this page is *why* there is a flow at all.
+`gh run view <run-id> --log-failed` shows the failing step's console, and because `dev.py` is quiet that console holds only `build failed - diagnose with: build_diag …` — never the compiler error.
+Everything real is in the artifact above.
 
 ## Extending
 
@@ -238,9 +154,7 @@ presets (ASan/UBSan, Linux clang), the remaining WASM tiers (threads, WebGPU,
 WASI), running the iOS/Android binaries on a simulator/emulator (today they are
 build-only), and build caching (ccache/sccache).
 
-**Prefer Linux for additional checks.** Linux runners spin up faster and cost
-less than Windows/macOS, and the `ubuntu-26.04` job installs no toolchain (only
-SDL3's headers) — so it has the lowest end-to-end latency. New gates (extra presets, lint
-passes, coverage) are cheapest to add there unless they specifically require
-another platform — which is also why the deep config matrix lives on Linux
-clang.
+**Prefer Linux for additional checks.**
+Linux runners spin up faster and cost less than Windows and macOS, and the `ubuntu-26.04` job installs no toolchain beyond SDL3's headers, so it has the lowest end-to-end latency.
+New gates — extra presets, lint passes, coverage — are cheapest to add there unless they specifically require another platform.
+That is also why the deep config matrix lives on Linux clang.

@@ -9,11 +9,11 @@
 
 using namespace cc::primitive_defines;
 
-// Isolated tests for cc::shared_ptr / cc::weak_ptr. Two layouts are exercised: the default trailing-control
-// traits (cc::default_shared_traits, used by shared_ptr<T> with no Traits) and a custom INTRUSIVE traits whose
-// counts are members of the node — the shape cc::async will use. The intrusive test types deliberately tear
-// down only their payload in destroy_object and leave the count members alive until free_storage, because the
-// weak count must outlive the object's destruction (reading a destroyed atomic would be UB).
+// Isolated tests for cc::shared_ptr / cc::weak_ptr.
+// Two layouts are exercised: the default trailing-control traits (cc::default_shared_traits, used by shared_ptr<T> with no Traits), and a custom INTRUSIVE traits whose counts are members of the node.
+// The intrusive one is the shape cc::async uses.
+// The intrusive test types deliberately tear down only their payload in destroy_object, leaving the count members alive until free_storage.
+// The weak count must outlive the object's destruction, and reading a destroyed atomic would be UB.
 
 namespace
 {
@@ -184,9 +184,8 @@ TEST("shared_ptr - default traits: weak lock while alive, expired after last str
 
 TEST("shared_ptr - default traits: release/adopt round trip keeps the sole-owner path intact")
 {
-    // node_traits (below) pins count-neutrality on hand-rolled counts; this pins the same round trip through the
-    // DEFAULT traits, which are the ones built on cc::fused_refcount. Since release/adopt never touch the
-    // counter, the sole-owner (1,1) no-RMW fast path must still fire on the adopter's drop.
+    // node_traits (below) pins count-neutrality on hand-rolled counts; this pins the same round trip through the DEFAULT traits, the ones built on cc::fused_refcount.
+    // release/adopt never touch the counter, so the sole-owner (1,1) no-RMW fast path must still fire on the adopter's drop.
     tracked::reset();
     {
         auto p = cc::make_shared<tracked>(42);
@@ -211,10 +210,9 @@ TEST("shared_ptr - default traits: plain value type (shared_ptr<int>)")
     CHECK(*p == 7); // same object
 }
 
-// The fused control is 8-aligned, so control_offset rounds sizeof(T) up to 8 and the node grows by up to 4 B
-// over a split-u32 control. That never crosses a size class: the node goes from 8m+4 to 8m+8 bytes, and the
-// only power of two in [8m+4, 8m+8) would have to be 8m+8 itself. shared_ptr<int> is the tight case — a 16 B
-// node in the 16 B class, where a split control gave a 12 B node in the same class.
+// The fused control is 8-aligned, so control_offset rounds sizeof(T) up to 8 and the node grows by up to 4 B over a split-u32 control.
+// That never crosses a size class: the node goes from 8m+4 to 8m+8 bytes, and the only power of two in [8m+4, 8m+8) would have to be 8m+8 itself.
+// shared_ptr<int> is the tight case — a 16 B node in the 16 B class, where a split control gave a 12 B node in the same class.
 namespace
 {
 using int_traits = cc::default_shared_traits<int>;
@@ -305,10 +303,10 @@ TEST("shared_ptr - intrusive: from_alive mints an extra strong handle")
 }
 
 // --- release()/adopt(): moving a strong count into and out of hand-rolled storage ---------------------------
-// The twin of weak_ptr's pair. These exist so a count can live somewhere shared_ptr itself cannot (a lock-free
-// deque of raw node pointers, a tagged word), so the property that matters is COUNT-NEUTRALITY: the round trip
-// must not touch the refcount at all. Behavior alone would pass even if it did an inc/dec pair, hence the
-// explicit count assertions.
+// The twin of weak_ptr's pair.
+// These exist so a count can live somewhere shared_ptr itself cannot — a lock-free deque of raw node pointers, a tagged word.
+// So the property that matters is COUNT-NEUTRALITY: the round trip must not touch the refcount at all.
+// Behavior alone would pass even if it did an inc/dec pair, hence the explicit count assertions.
 
 TEST("shared_ptr - intrusive: release/adopt round trip is count-neutral")
 {
@@ -416,8 +414,8 @@ TEST("shared_ptr - strong-only traits: no weak, destroy + free together")
 // fused_refcount — white-box on the half arithmetic
 // ============================================================================
 
-// Windows has no sanitizer preset, so the half arithmetic is pinned directly rather than only through the
-// handles that use it. strong lives in the high 32 bits, weak in the low 32.
+// Windows has no sanitizer preset, so the half arithmetic is pinned directly rather than only through the handles that use it.
+// strong lives in the high 32 bits, weak in the low 32.
 namespace
 {
 u64 strong_of(cc::atomic<u64> const& c)
@@ -486,16 +484,16 @@ TEST("fused_refcount - release_strong reports destroy/free per the protocol")
 // the destroy-before-free ordering, under an actual race
 // ============================================================================
 
-// The end-to-end companion to the fused_refcount white-box tests: the last strong drop and a weak drop, on two
-// threads, must still destroy once and free once — and never free while destroy_object is running. teardown
-// holds a window open and free_storage reports if a free lands inside it. Statics, not members: a node freed
-// mid-teardown must not be read to detect that it was.
+// The end-to-end companion to the fused_refcount white-box tests.
+// The last strong drop and a weak drop, on two threads, must still destroy once and free once — and never free while destroy_object is running.
+// teardown holds a window open, and free_storage reports if a free lands inside it.
+// Statics, not members: a node freed mid-teardown must not be read to detect that it was.
 //
 // The deterministic guard against the rejected "each strong owns its own weak" design is the white-box
 // weak_of(c) == 2 check above, not this test — a thread race only samples the window.
 //
-// Gated, helpers and all: two threads ARE the subject here, so there is no single-threaded version of this
-// claim to fall back to. Without threads the drops cannot overlap and the window being pinned does not exist.
+// Gated, helpers and all: two threads ARE the subject here, so there is no single-threaded version of this claim to fall back to.
+// Without threads the drops cannot overlap and the window being pinned does not exist.
 // The white-box checks above carry the ordering on those platforms.
 #if CC_HAS_THREADS
 namespace

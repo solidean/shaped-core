@@ -161,7 +161,8 @@ protected:
 
 namespace
 {
-// Drive an unthreaded actor until it has no more work. Test agents go idle, so this terminates.
+// Drive an unthreaded actor until it has no more work.
+// Test agents go idle, so this terminates.
 template <class Actor>
 void pump_until_idle(Actor& actor)
 {

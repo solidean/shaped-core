@@ -13,19 +13,22 @@
 #include <cmath>
 #include <variant>
 
+using namespace cc::primitive_defines;
+
 // Interactive demo: the path-traced Cornell box (global illumination via next-event estimation + diffuse
 // bounces) driven straight through sv::pathtrace_routine and blitted into a window, with a free-fly camera.
 //
-// Progressive accumulation: the trace blends into a persistent target each frame, so a still camera converges
-// to a clean image within a second or two; any camera move restarts the average. Only a few samples are traced
-// per frame, keeping it responsive while moving.
+// Progressive accumulation: the trace blends into a persistent target each frame, so a still camera converges to a clean image within a second or two.
+// Any camera move restarts the average.
+// Only a few samples are traced per frame, keeping it responsive while moving.
 //
 // Controls:
 //   hold right mouse button + move mouse — look around
 //   W / S — forward / back      A / D — strafe      E / Q — up / down      Shift — move faster
 //   Esc — quit
 //
-// nx::config::manual keeps it out of the default sweep. Run it explicitly:
+// nx::config::manual keeps it out of the default sweep.
+// Run it explicitly:
 //   uv run dev.py test "sv - path-traced window (manual)" --manual --timeout 0
 // Prefers a hardware GPU, falls back to WARP (WARP path tracing is slow); SKIPs without RT or a window.
 
@@ -205,7 +208,7 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
     // Persistent accumulation target, (re)created to match the window; accum restarts on move / resize.
     auto target = sg::texture_2d{};
     auto target_size = tg::vec2i(0, 0);
-    auto accum = cc::u32(0);
+    auto accum = u32(0);
 
     auto last = std::chrono::steady_clock::now();
     auto const start = last;

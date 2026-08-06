@@ -5,11 +5,9 @@
 
 using namespace cc::primitive_defines;
 
-// End-to-end rendering-scope clears, driven through the backend-agnostic sg:: API (the WARP context is
-// only the vehicle): open a raster rendering scope over a render-target / depth-stencil texture, clear it,
-// read it back, and verify the clear value landed in every texel. Also covers the explicit
-// cmd.raster.manual path, a discard (contents undefined -> smoke only), and an explicit viewport /
-// scissor. There is no graphics pipeline yet, so a scope only applies its begin-ops.
+// End-to-end rendering-scope clears, driven through the backend-agnostic sg:: API — the WARP context is only the vehicle.
+// Open a raster rendering scope over a render-target / depth-stencil texture, clear it, read it back, and verify the clear value landed in every texel.
+// Also covers the explicit cmd.raster.manual path, a discard (contents undefined, so smoke only), and an explicit viewport / scissor.
 
 namespace
 {

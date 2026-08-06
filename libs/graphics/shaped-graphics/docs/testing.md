@@ -1,8 +1,7 @@
 # Testing shaped-graphics
 
-sg is strongly test-driven, and its tests are split into **two tiers** by what they pin down. Getting a
-new test into the right tier keeps the public contract validated *once* across all backends, and keeps
-backend-specific machinery tested where it actually lives.
+sg is strongly test-driven, and its tests split into **two tiers** by what they pin down.
+Getting a new test into the right tier is what keeps the public contract validated *once* across every backend, with backend-specific machinery tested where it lives.
 
 ```text
 libs/graphics/shaped-graphics/
@@ -38,51 +37,45 @@ INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::contex
 
 It becomes runnable against each backend by two pieces working together:
 
-- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context
-  (dx12 on WARP, …) and `nx::invoke_tests("<backend>", ctx)` every invocable against it. A backend that
-  can't come up (no device) `SKIP`s; a backend that isn't mature yet stays **unregistered** so it is
-  neither swept nor aliased (see [`vulkan-entry.cc`](../tests/backends/vulkan-entry.cc)).
-- **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, for each
-  invocable, an alias of the same name expanding to one scoped run per registered backend. So
-  `dev.py test "sg - <name>"` runs it on dx12, vulkan, … — whichever backends this binary was built with.
+- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context (dx12 on WARP, …) and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
+  A backend that cannot come up `SKIP`s.
+  A backend that is not mature yet stays **unregistered**, so it is neither swept nor aliased — see [`vulkan-entry.cc`](../tests/backends/vulkan-entry.cc).
+- **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, per invocable, an alias of the same name expanding to one scoped run per registered backend.
+  So `dev.py test "sg - <name>"` runs it on whichever backends this binary was built with.
 
 Full mechanism: [nexus/docs/invocable-tests.md](../../../base/nexus/docs/invocable-tests.md).
 
-**What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics,
-transfer round-trips, binding validation, the transient budget contract. Anything that should hold for
-dx12 *and* vulkan *and* a future cpu backend goes here, written once, not duplicated per backend. Complex
-and edge-case coverage lives here too; prefer this tier and only drop to tier 2 when you genuinely need
-backend internals or a backend-specific resource (e.g. an embedded shader blob).
+**What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics, transfer round-trips, binding validation, the transient budget contract.
+Anything that must hold for dx12 *and* vulkan *and* a future cpu backend goes here, written once rather than duplicated per backend.
+Complex and edge-case coverage belongs here too.
+Drop to tier 2 only when you genuinely need backend internals or a backend-specific resource, such as an embedded shader blob.
 
 Tests are split **per topic**, one `.cc` per area (`buffer/`, `transfer/`, `binding/`, `transient/`, …),
 and each topic file is added to the `if(_sg_backends)` block in the library
 [`CMakeLists.txt`](../CMakeLists.txt) (agnostic tests need at least one backend to run against).
 
-> A backend-agnostic test still needs *some* backend to execute. Until a always-available CPU/validation
-> backend exists (a documented TODO in `CMakeLists.txt`), tier 1 runs only where a real backend builds —
-> today that means dx12 on Windows.
+> A backend-agnostic test still needs *some* backend to execute.
+> Until an always-available CPU/validation backend exists (a TODO in `CMakeLists.txt`), tier 1 runs only where a real backend builds — today, dx12 on Windows.
 
 ---
 
 ## Tier 2 — per-backend suites (`backends/<backend>/tests/`)
 
-Each backend has its **own `*-test` binary**, built only where that backend builds, running on a software
-adapter where possible (dx12 → WARP) so it also runs on headless CI. Two kinds of test belong here:
+Each backend has its **own `*-test` binary**, built only where that backend builds, and running on a software adapter where possible (dx12 → WARP) so it also runs on headless CI.
+Two kinds of test belong here:
 
-1. **Feature smoke tests** — one straightforward end-to-end exercise per feature, confirming the backend's
-   own path works against a live device (not restating the full public semantics — tier 1 does that).
-2. **Backend-internal invariants** — behaviour invisible through the abstract surface: descriptor-ring and
-   ring-buffer reclaim, bump-allocator placement granularity, command-list/allocator pooling, epoch-gated
-   recycling. These `static_cast` the handle to the concrete context and inspect its guts — the legitimate
-   "here be dragons" escape hatch, valid precisely *because* the test is deliberately coupled to one backend.
+1. **Feature smoke tests** — one straightforward end-to-end exercise per feature, confirming the backend's own path works against a live device.
+   Not the full public semantics; tier 1 does that.
+2. **Backend-internal invariants** — behaviour invisible through the abstract surface.
+   Descriptor-ring and ring-buffer reclaim, bump-allocator placement granularity, command-list/allocator pooling, epoch-gated recycling.
+   These `static_cast` the handle to the concrete context and inspect its guts.
+   That is the legitimate "here be dragons" escape hatch, valid precisely *because* the test is deliberately coupled to one backend.
 
 ### Drive through the abstract API; cast only to inspect
 
-Even a tier-2 test **drives the work through the abstract `sg::context` API** — `ctx.uncached` /
-`ctx.persistent` / `ctx.cached` for resources and schemas, `ctx.create_command_list` /
-`ctx.submit_command_list` / `ctx.wait_for` for recording. Casting the handle to the concrete backend
-context is reserved for **reading internal state in an assertion** (case 2 above), never for driving the
-test.
+Even a tier-2 test **drives the work through the abstract `sg::context` API**.
+`ctx.uncached` / `ctx.persistent` / `ctx.cached` for resources and schemas; `ctx.create_command_list` / `ctx.submit_command_list` / `ctx.wait_for` for recording.
+Casting the handle to the concrete backend context is reserved for reading internal state in an assertion, never for driving the test.
 
 The anti-pattern is casting up front and then using the backend context as the main driver:
 
@@ -91,13 +84,11 @@ auto& c = static_cast<dx12::dx12_context&>(*ctx.value());   // WRONG as a driver
 auto buf = c.create_dx12_buffer(size, usage, {});           // bypasses the public contract
 c.submit_dx12_command_list(...);
 ```
-
-Written this way the test exercises the backend's private API instead of the contract every backend must
-honour, and silently stops being portable. Prefer the public form — `ctx.persistent.create_raw_buffer(...)`,
-`ctx.submit_command_list(...)` — and cast late and narrowly (`auto& c = static_cast<dx12_context&>(ctx);
-CHECK(c._descriptor_heap.watermark == ...)`) only where you must read backend guts. The same rule holds for
-integration tests in dependent libraries (e.g. `shaped-shader-compiler-dxc/tests`): create the concrete
-context as the entry point, then drive it as a plain `sg::context&`.
+Written this way the test exercises the backend's private API instead of the contract every backend must honour, and silently stops being portable.
+Prefer the public form — `ctx.persistent.create_raw_buffer(...)`, `ctx.submit_command_list(...)`.
+Cast late and narrowly, only where you must read backend guts: `auto& c = static_cast<dx12_context&>(ctx); CHECK(c._cmd_pool.free_allocator_count(...) == ...)`.
+Cast late and narrowly, only where you must read backend guts: `auto& c = static_cast<dx12_context&>(ctx); CHECK(c._descriptor_heap.watermark == ...)`.
+The same rule holds for integration tests in dependent libraries such as `shaped-shader-compiler-dxc/tests`: create the concrete context as the entry point, then drive it as a plain `sg::context&`.
 
 **A tier-2 test may name backend API in exactly three places — everything else routes through `sg::context`:**
 
@@ -109,9 +100,9 @@ context as the entry point, then drive it as a plain `sg::context&`.
 3. **Backend-exclusive resources** — features with no public `sg` entry point yet (e.g. dx12 RTV/DSV
    descriptors). Legitimately backend-typed end to end; keep the backend-typed span minimal and say why.
 
-Quick self-check when writing or reviewing a tier-2 test: every `create_<backend>_*` / `submit_<backend>_*`
-and every up-front `static_cast<…_context&>` used *as the driver* is the smell — grep the file for them and
-confirm each surviving one is case 1, 2, or 3 above. If a call is none of those, it has a public form; use it.
+Self-check when writing or reviewing a tier-2 test: every `create_<backend>_*` / `submit_<backend>_*`, and every up-front `static_cast<…_context&>` used *as the driver*, is the smell.
+Search the file for them and confirm each surviving one is case 1, 2 or 3 above.
+A call that is none of those has a public form — use it.
 
 See [concepts/backends.md](concepts/backends.md) for the backend-side rationale and the dx12 topic layout.
 

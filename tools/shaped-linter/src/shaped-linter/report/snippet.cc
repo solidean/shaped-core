@@ -27,7 +27,8 @@ struct mark
     cc::string_view text;
 };
 
-/// A line carrying at least one underline. Context lines are derived from these, never stored.
+/// A line carrying at least one underline.
+/// Context lines are derived from these, never stored.
 struct marked_line
 {
     u32 line = 1;
@@ -63,7 +64,8 @@ void add_unique(cc::vector<u32>& v, u32 value)
     v.push_back(value);
 }
 
-/// The entry for `line`, created if this is its first mark. Order is restored once, after collection.
+/// The entry for `line`, created if this is its first mark.
+/// Order is restored once, after collection.
 marked_line& line_entry(cc::vector<marked_line>& lines, u32 line)
 {
     for (auto& l : lines)

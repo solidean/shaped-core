@@ -10,21 +10,20 @@
 
 // Chase-Lev single-owner / multi-thief lock-free deque — the queue behind cc::async_thread_pool's workers.
 //
-// Implementation detail of the pool, not public API: it lives in impl/ and is not on the cheat sheet. It is
-// templated only so it can be tested without dragging in the async node; the pool instantiates it with a raw
-// async_node_base*.
+// An implementation detail of the pool, not public API: it lives in impl/ and is not on the cheat sheet.
+// It is templated only so it can be tested without dragging in the async node; the pool instantiates it with a raw async_node_base*.
 //
 // The orderings below are the Lê/Pop/Cohen/Nardelli formulation from "Correct and Efficient Work-Stealing for
-// Weak Memory Models" (PPoPP'13), which is machine-checked against C11. They are load-bearing and subtle:
-// DO NOT adjust one because it looks redundant on x86. TSO hides missing acquire/release; ARM64 is a shipping
-// target here and does not.
+// Weak Memory Models" (PPoPP'13), machine-checked against C11.
+// They are load-bearing and subtle: DO NOT adjust one because it looks redundant on x86.
+// TSO hides a missing acquire/release, and ARM64 is a shipping target here that does not.
 
 namespace cc::impl
 {
-/// Outcome of a steal attempt. The empty/abort split matters: `abort` means the deque had work but another
-/// thread won the race for it, so the thief should retry (a different victim is usually the better move),
-/// whereas `empty` means this victim has nothing and is worth skipping. Collapsing the two into "no value"
-/// makes a pool either spin on a contended victim or give up while work is available.
+/// Outcome of a steal attempt, and the empty/abort split matters.
+/// `abort` means the deque had work but another thread won the race for it, so the thief should retry — usually against a different victim.
+/// `empty` means this victim has nothing and is worth skipping.
+/// Collapsing the two into "no value" makes a pool either spin on a contended victim or give up while work is available.
 enum class steal_result
 {
     success, ///< `out` holds a stolen value
@@ -34,20 +33,18 @@ enum class steal_result
 
 /// Single-owner / multi-thief lock-free deque (Chase-Lev).
 ///
-/// The owner pushes and takes at the BOTTOM: LIFO, so freshly spawned children stay hot, and in the common case
-/// it costs no atomic RMW and no cross-thread traffic at all. Thieves take from the TOP: FIFO, so the oldest
-/// entry (the coldest, and usually the one rooting the biggest subtree) is the one that migrates.
+/// The owner pushes and takes at the BOTTOM, LIFO, so freshly spawned children stay hot and the common case costs no atomic RMW and no cross-thread traffic at all.
+/// Thieves take from the TOP, FIFO, so the entry that migrates is the oldest — the coldest, and usually the one rooting the biggest subtree.
 ///
-/// Stores VALUES only — any ownership an entry carries (a refcount, say) belongs to the caller, **including for
-/// entries still queued when the deque is destroyed**: the destructor frees its buffers and forgets the values.
+/// Stores VALUES only — any ownership an entry carries, a refcount say, belongs to the caller.
+/// That includes entries still queued when the deque is destroyed: the destructor frees its buffers and forgets the values.
 /// A pool holding strong handles must therefore drain every deque itself, or it leaks whatever they pin.
 ///
 /// `T` must be trivially copyable and lock-free as an atomic, because a thief reads a slot speculatively —
 /// before the CAS that decides whether it may have it (see try_steal).
 ///
-/// Threading contract, and it is not symmetric: push/try_take are **owner-only** and must all run on the same
-/// thread; try_steal is for every OTHER thread. Two threads calling push, or the owner calling try_steal on its
-/// own deque, breaks it.
+/// Threading contract, and it is not symmetric: push and try_take are **owner-only** and must all run on the same thread, while try_steal is for every OTHER thread.
+/// Two threads calling push, or the owner calling try_steal on its own deque, breaks it.
 template <class T>
 struct chase_lev_deque
 {
@@ -63,12 +60,13 @@ struct chase_lev_deque
         _ring.store(alloc_ring(cc::bit_ceil(u64(initial_capacity))), cc::memory_order_relaxed);
     }
 
-    /// Frees the live buffer and every buffer a grow retired. Queued VALUES are not touched — see the class note.
+    /// Frees the live buffer and every buffer a grow retired.
+    /// Queued VALUES are not touched — see the class note.
     ~chase_lev_deque()
     {
-        // Safe to free the retired buffers only because no thief can still be reading one. That is not a
-        // property of this class: it is the pool's destructor joining every worker before destroying any deque.
-        // See ~async_thread_pool.
+        // Safe to free the retired buffers only because no thief can still be reading one.
+        // That is not a property of this class -- it is the pool's destructor joining every worker before
+        // destroying any deque (see ~async_thread_pool).
         ring* r = _ring.load(cc::memory_order_relaxed);
         while (r != nullptr)
         {
@@ -83,7 +81,7 @@ struct chase_lev_deque
     chase_lev_deque& operator=(chase_lev_deque const&) = delete;
     chase_lev_deque& operator=(chase_lev_deque&&) = delete;
 
-    /// Owner only. Grows on demand.
+    /// Owner only; grows on demand.
     void push(T v)
     {
         i64 const b = _bottom.load(cc::memory_order_relaxed);
@@ -95,21 +93,22 @@ struct chase_lev_deque
 
         a->put(b, v);
         cc::atomic_thread_fence(cc::memory_order_release); // the slot store must land before the publish
-        _bottom.store(b + 1, cc::memory_order_relaxed);    // the publish. RELAXED -- see the note in the pool's
-                                                           // wake path, which needs its own fence because of it.
+        // The publish below is RELAXED, which is why the pool's wake path needs a fence of its own -- see it.
+        _bottom.store(b + 1, cc::memory_order_relaxed);
     }
 
-    /// Owner only. Takes the newest entry (LIFO). False if empty, or if a thief won the last one — `out` is only
-    /// meaningful when this returns true, and is clobbered otherwise.
+    /// Owner only; takes the newest entry (LIFO).
+    /// False if empty, or if a thief won the last one.
+    /// `out` is only meaningful when this returns true, and is clobbered otherwise.
     [[nodiscard]] bool try_take(T& out)
     {
         i64 const b = _bottom.load(cc::memory_order_relaxed) - 1;
         ring* const a = _ring.load(cc::memory_order_relaxed);
         _bottom.store(b, cc::memory_order_relaxed); // claim it speculatively
 
-        // Half of the Dekker against try_steal: we store _bottom then load _top; a thief stores _top then loads
-        // _bottom. Sequential consistency over the two fences means at least one side sees the other, which is
-        // exactly what stops the last element being taken twice -- or lost by both.
+        // Half of the Dekker against try_steal: we store _bottom then load _top, while a thief stores _top then loads _bottom.
+        // Sequential consistency over the two fences means at least one side sees the other, which is exactly
+        // what stops the last element being taken twice -- or lost by both.
         cc::atomic_thread_fence(cc::memory_order_seq_cst);
         i64 t = _top.load(cc::memory_order_relaxed);
 
@@ -129,7 +128,8 @@ struct chase_lev_deque
         return won;
     }
 
-    /// Any thread except the owner. Takes the oldest entry (FIFO). `out` is only meaningful on `success`.
+    /// Any thread except the owner; takes the oldest entry (FIFO).
+    /// `out` is only meaningful on `success`.
     [[nodiscard]] steal_result try_steal(T& out)
     {
         i64 t = _top.load(cc::memory_order_acquire);
@@ -143,9 +143,9 @@ struct chase_lev_deque
         // guarantees we do not read through a pointer older than the index we validated.
         ring* const a = _ring.load(cc::memory_order_acquire);
 
-        // Speculative: this slot may already belong to someone else. Only the CAS below decides. This read is
-        // why T must be trivially copyable -- reading a stale value must be harmless, and the caller must not
-        // look at `out` unless we return success.
+        // Speculative: this slot may already belong to someone else, and only the CAS below decides.
+        // This read is why T must be trivially copyable -- reading a stale value must be harmless, and the
+        // caller must not look at `out` unless we return success.
         out = a->get(t);
 
         if (!_top.compare_exchange_strong(t, t + 1, cc::memory_order_seq_cst, cc::memory_order_relaxed))
@@ -161,11 +161,13 @@ struct chase_lev_deque
         return b - t > 0 ? b - t : 0;
     }
 
-    /// Live buffer capacity. Test/diagnostic only; grows behind your back.
+    /// Live buffer capacity.
+    /// Test/diagnostic only; it grows behind your back.
     [[nodiscard]] i64 capacity() const { return _ring.load(cc::memory_order_relaxed)->mask + 1; }
 
 private:
-    // One heap block: this header followed by its slots. `older` chains retired buffers for the destructor.
+    // One heap block: this header followed by its slots.
+    // `older` chains retired buffers for the destructor.
     struct ring
     {
         i64 mask;
@@ -202,14 +204,14 @@ private:
                                                       cc::default_memory_resource->userdata);
     }
 
-    // Owner only, from push. Copies the live range into a buffer of twice the capacity and publishes it.
+    // Owner only, from push.
+    // Copies the live range into a buffer of twice the capacity and publishes it.
     //
-    // The old buffer is RETIRED, not freed: a thief may be between its `_ring` load and its slot read right now,
-    // and freeing under it would be a use-after-free. Retiring costs a bounded amount of memory -- capacity
-    // doubles, so the whole chain is under 2x the live buffer -- and it is what the destructor's walk cleans up.
-    // The alternative (a fixed ring plus an overflow list) buys that memory back by adding a branch to this hot
-    // path and a second claim path to the pool, i.e. by adding correctness surface to the code least worth
-    // hand-verifying. Not a trade worth making.
+    // The old buffer is RETIRED, not freed: a thief may be between its `_ring` load and its slot read right now, and freeing under it would be a use-after-free.
+    // Retiring costs a bounded amount of memory -- capacity doubles, so the whole chain is under 2x the live
+    // buffer -- and it is what the destructor's walk cleans up.
+    // Do not reclaim it instead with a fixed ring plus an overflow list: that adds a branch to this hot path and a
+    // second claim path to the pool, which is correctness surface on the code least worth hand-verifying.
     [[nodiscard]] ring* grow(ring* old, i64 b, i64 t)
     {
         ring* const fresh = alloc_ring((old->mask + 1) * 2);
@@ -221,9 +223,9 @@ private:
         return fresh;
     }
 
-    // Each on its own line. The owner writes _bottom on every push; thieves CAS _top on every steal; _ring is
-    // read by both and written almost never. Sharing a line between any two of these would turn every push into
-    // an invalidation of whatever the thieves are polling -- the exact traffic this deque exists to avoid.
+    // Each on its own line.
+    // The owner writes _bottom on every push, thieves CAS _top on every steal, and _ring is read by both but written almost never.
+    // Sharing a line between any two of these would turn every push into an invalidation of whatever the thieves are polling -- the exact traffic this deque exists to avoid.
     alignas(64) cc::atomic<i64> _top = {0};
     alignas(64) cc::atomic<i64> _bottom = {0};
     alignas(64) cc::atomic<ring*> _ring = {nullptr};

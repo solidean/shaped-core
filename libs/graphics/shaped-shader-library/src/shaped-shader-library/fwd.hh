@@ -4,8 +4,8 @@
 
 #include <memory>
 
-/// Forward declarations and handle typedefs for shaped-shader-library. Include when a forward decl is
-/// all you need.
+/// Forward declarations and handle typedefs for shaped-shader-library.
+/// Include when a forward decl is all you need.
 
 namespace slib
 {
@@ -30,12 +30,13 @@ class shader_compiler;
 class shader_asset;
 class shader_library;
 
-/// A shared filesystem. std::shared_ptr because the handle is polymorphic: cc::shared_ptr's default
-/// traits place the refcount at an offset derived from sizeof(T), so it cannot hold a derived object
-/// through a base handle. Matches shaped-graphics, which uses std::shared_ptr for the same reason.
+/// A shared filesystem.
+/// std::shared_ptr because the handle is polymorphic: cc::shared_ptr's default traits place the refcount at an offset derived from sizeof(T), so it cannot hold a derived object through a base handle.
+/// A base-keyed Traits would fix that, and libs/base/clean-core/docs/systems/shared-ptr.md says why writing one is not worth it yet.
 using filesystem_handle = std::shared_ptr<filesystem>;
 
-/// A shared shader asset. This is what a generated package symbol holds, so it is the handle call sites
-/// see. std::shared_ptr to keep one ownership vocabulary with filesystem_handle and shaped-graphics.
+/// A shared shader asset.
+/// This is what a generated package symbol holds, so it is the handle call sites see.
+/// std::shared_ptr to keep one ownership vocabulary with filesystem_handle.
 using shader_asset_handle = std::shared_ptr<shader_asset>;
 } // namespace slib

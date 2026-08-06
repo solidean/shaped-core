@@ -24,19 +24,20 @@
 // into one array plus per-owner runs — the same shape babel::obj uses for face corners.
 // NO mesh building, NO triangulation, NO pixel decoding, NO flattening of the node hierarchy.
 //
-// UNLIKE every other babel reader this one takes bytes, not a cc::read_stream, and zero copy is the reason:
-// a .glb carries its vertex / index / texture payload inline, so each buffer comes back as a
-// cc::pinned_data SUBVIEW of the input that shares its owner. No bulk data is copied, and the views stay
-// valid after the caller drops its own handle.
+// UNLIKE every other babel reader this one takes bytes, not a cc::read_stream, and zero copy is the reason.
+// A .glb carries its vertex / index / texture payload inline, so each buffer comes back as a cc::pinned_data
+// SUBVIEW of the input that shares its owner.
+// No bulk data is copied, and the views stay valid after the caller drops its own handle.
 // The JSON part costs nothing extra — the JSON chunk is a subspan handed to babel::json::read, whose span
 // stream is unbuffered, so the parse runs directly against the input bytes.
 //
-// Reading is strict where bytes are at stake and lenient everywhere else: an unknown componentType, a sparse
-// accessor and a non-empty extensionsRequired all fail the read, while unknown members, morph targets and the
-// skin / animation / camera arrays are skipped.
-// Skipped is not silent — everything the reader did not implement, could not resolve, or chose to tolerate is
-// recorded in `data::issues`. A successful read with a non-empty issue list is the normal case for a
-// real-world asset, so check it before assuming you got everything the file described.
+// Reading is strict where bytes are at stake and lenient everywhere else.
+// An unknown componentType, a sparse accessor and a non-empty extensionsRequired all fail the read, while
+// unknown members, morph targets and the skin / animation / camera arrays are skipped.
+// Skipped is not silent: everything the reader did not implement, could not resolve, or chose to tolerate is
+// recorded in `data::issues`.
+// A successful read with a non-empty issue list is the normal case for a real-world asset.
+// Check it before assuming you got everything the file described.
 //
 //   auto const doc = babel::gltf::read(bytes).value();
 //   for (auto const& prim : doc.primitives_of(doc.meshes[0]))
@@ -51,7 +52,8 @@ namespace babel::gltf
 // indices
 // -------------------------------------------------------------------------------------------------
 // glTF is index-heavy and its indices are bare JSON integers, so an accessor index and a material index
-// would silently swap as plain ints. One strong enum per role, `invalid` meaning "the file left it out".
+// would silently swap as plain ints.
+// One strong enum per role, with `invalid` meaning "the file left it out".
 // Cross into the underlying int with an explicit `int(x)` at the use site.
 
 enum class buffer_index : int
@@ -184,7 +186,8 @@ enum class wrap_mode : u16
 // document elements
 // -------------------------------------------------------------------------------------------------
 
-/// The document's `asset` block. Named asset_info because `data` already has a member called `asset`.
+/// The document's `asset` block.
+/// Named asset_info because `data` already has a member called `asset`.
 /// `version` is the one property glTF requires of every file.
 struct asset_info
 {
@@ -308,7 +311,8 @@ struct accessor
     }
 };
 
-/// One `attributes` entry of a primitive. The semantic is kept verbatim, custom `_NAME` ones included.
+/// One `attributes` entry of a primitive.
+/// The semantic is kept verbatim, custom `_NAME` ones included.
 struct attribute
 {
     cc::string semantic; // "POSITION", "NORMAL", "TEXCOORD_0", "_CUSTOM", ...
@@ -361,7 +365,8 @@ struct scene
     cc::string name;
 };
 
-/// A material's reference to a texture. `texture == invalid` means the reference itself is absent.
+/// A material's reference to a texture.
+/// `texture == invalid` means the reference itself is absent.
 struct texture_ref
 {
     texture_index texture = texture_index::invalid;
@@ -446,7 +451,8 @@ struct accessor_view
     accessor_type type = accessor_type::invalid;
     bool normalized = false;
 
-    /// The i-th element's bytes. Non-owning, valid as long as THIS view lives (it holds the pin).
+    /// The i-th element's bytes.
+    /// Non-owning, valid as long as THIS view lives, since it holds the pin.
     /// Deliberately not a pinned_data: that would be a refcount bump per element.
     /// Precondition: 0 <= i < count.
     [[nodiscard]] cc::span<byte const> element(i64 i) const
@@ -480,9 +486,9 @@ struct accessor_view
         return cc::strided_span<T const>(reinterpret_cast<T const*>(bytes.data()), count, stride);
     }
 
-    /// Copy the elements out as tightly-packed T — the always-safe path: it works misaligned and
-    /// de-interleaves a strided bufferView. No component conversion happens, so sizeof(T) must equal
-    /// element_size.
+    /// Copy the elements out as tightly-packed T — the always-safe path.
+    /// It works misaligned and de-interleaves a strided bufferView.
+    /// No component conversion happens, so sizeof(T) must equal element_size.
     template <class T>
     [[nodiscard]] cc::result<cc::vector<T>> read_elements() const
     {
@@ -510,10 +516,12 @@ enum class issue_kind : u8
     /// Nothing is wrong with the file; the gap is ours.
     unsupported,
     /// A reference the reader could not follow: an external URI with no read_options::resolve_uri,
-    /// or an image whose backing buffer stayed unresolved. The data is simply absent.
+    /// or an image whose backing buffer stayed unresolved.
+    /// The data is simply absent.
     unresolved,
     /// The file violates the spec in a way the reader chose to tolerate — an unknown enumerant, a
-    /// half-stated bound, sloppy GLB padding. The named property fell back to its default.
+    /// half-stated bound, sloppy GLB padding.
+    /// The named property fell back to its default.
     malformed,
 };
 
@@ -528,7 +536,8 @@ struct issue
 // the document
 // -------------------------------------------------------------------------------------------------
 
-/// The faithful parse of a glTF 2.0 document. Read-once; every vector mirrors the file's array order.
+/// The faithful parse of a glTF 2.0 document.
+/// Read-once; every vector mirrors the file's array order.
 /// The `*_of` helpers resolve the flattened runs, and `find` resolves a typed index (nullptr for `invalid`).
 struct data
 {
@@ -660,7 +669,8 @@ private:
 /// file reports a JSON parse error with a byte offset instead of a useless "unrecognized container".
 [[nodiscard]] container detect_container(cc::span<byte const> bytes);
 
-/// Reader knobs. Every default means "touch nothing outside the input bytes".
+/// Reader knobs.
+/// Every default means "touch nothing outside the input bytes".
 struct read_options
 {
     /// Called once per buffer / image carrying an external (non-`data:`) URI, in declaration order.
@@ -683,7 +693,8 @@ struct read_options
 [[nodiscard]] cc::result<data> read(cc::read_stream& in, read_options opts = {});
 
 /// Convenience: COPIES the input into an owned pin first, so the returned buffers stay valid independently
-/// of the caller's memory. Pass a cc::pinned_data to avoid that copy.
+/// of the caller's memory.
+/// Pass a cc::pinned_data to avoid that copy.
 [[nodiscard]] cc::result<data> read(cc::span<byte const> bytes, read_options opts = {});
 [[nodiscard]] cc::result<data> read(cc::string_view text, read_options opts = {});
 } // namespace babel::gltf

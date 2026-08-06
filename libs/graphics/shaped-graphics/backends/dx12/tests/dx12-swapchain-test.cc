@@ -3,18 +3,18 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
-// Swapchain smoke tests driven through the sg:: API against the WARP context. A swapchain needs a real
-// OS window, so these create a hidden top-level window and SKIP when that isn't possible (a headless /
-// session-0 host with no interactive window station, where either window or swapchain creation fails) —
-// so the suite still runs clean on CI. Win32 windowing is reached through the sanitized <Windows.h> that
-// dx12-test-common.hh pulls in.
+// Swapchain smoke tests driven through the sg:: API against the WARP context.
+// A swapchain needs a real OS window, so these create a hidden top-level window and SKIP when that isn't possible.
+// That is a headless / session-0 host with no interactive window station, where either window or swapchain creation fails, so the suite still runs clean on CI.
+// Win32 windowing is reached through the sanitized <Windows.h> that dx12-test-common.hh pulls in.
 
 namespace
 {
 namespace dx12 = sg::backend::dx12;
 
-// A hidden overlapped window for swapchain tests. Message-only (HWND_MESSAGE) windows cannot back a
-// swapchain, so this is a real window that is simply never shown. `hwnd` is null when creation fails.
+// A hidden overlapped window for swapchain tests.
+// Message-only (HWND_MESSAGE) windows cannot back a swapchain, so this is a real window that is simply never shown.
+// `hwnd` is null when creation fails.
 struct test_window
 {
     HWND hwnd = nullptr;
@@ -102,9 +102,10 @@ TEST("sg dx12 - swapchain create, describe, and present on a hidden window")
     CHECK(!sc->is_hdr_enabled());
     CHECK(sc->native_window_handle() == win.hwnd);
 
-    // A few frames: acquire -> clear the back buffer -> present. The acquired view carries this frame's
-    // size (the swapchain has no size getter). buffer_count 2 means the third frame exercises the
-    // present-fence reuse wait. WARP's debug behaviour is the oracle — a bad barrier / present would fault.
+    // A few frames: acquire -> clear the back buffer -> present.
+    // The acquired view carries this frame's size, since the swapchain has no size getter.
+    // buffer_count 2 means the third frame exercises the present-fence reuse wait.
+    // WARP's debug behaviour is the oracle — a bad barrier or present would fault.
     for (int frame = 0; frame < 3; ++frame)
     {
         auto rt = sc->acquire_backbuffer();

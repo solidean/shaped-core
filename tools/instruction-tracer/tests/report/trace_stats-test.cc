@@ -5,8 +5,8 @@ using namespace itrace;
 
 namespace
 {
-/// One instruction owned by `owner`, falling through by default. rip is arbitrary but distinct —
-/// stats charge by owner_symbol, never by address.
+/// One instruction owned by `owner`, falling through by default.
+/// rip is arbitrary but distinct — stats charge by owner_symbol, never by address.
 recorded_instruction insn_in(cc::string_view owner, u64 rip = 0x1000, insn_category category = insn_category::other)
 {
     recorded_instruction insn;
@@ -69,9 +69,8 @@ TEST("stats - ties break by symbol so the table is stable")
 
 TEST("stats - a tail call is charged to where the code is, not to who jumped")
 {
-    // The trap a text-parsing stack walk has to hand-code around: a `jmp` to another symbol replaces
-    // the frame rather than pushing one, and missing that desynchronizes every later attribution.
-    // Charging by owner_symbol cannot get this wrong — there is no stack to keep in sync.
+    // A tail-call `jmp` replaces the frame rather than pushing one, so anything tracking a call stack desynchronizes from here on.
+    // Charging by owner_symbol is immune to that: there is no stack to keep in sync.
     auto jump = insn_in("teardown_payload", 0x1000, insn_category::unconditional_branch);
     jump.next_rip = 0x9000; // diverges into another function, and never returns here
 

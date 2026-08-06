@@ -6,17 +6,20 @@
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
-// Full DXR pipeline path end to end on WARP: compile a raygen + miss + closest-hit library each, build a
-// raytracing pipeline (state object) and shader table, trace against a one-triangle TLAS, and read back the
-// per-ray result. Proves the whole chain — compile -> reflect -> pipeline -> table -> dispatch_rays -> trace.
+using namespace cc::primitive_defines;
+
+// Full DXR pipeline path end to end on WARP.
+// It compiles a raygen + miss + closest-hit library each, then builds a raytracing pipeline (state object) and shader table.
+// It traces against a one-triangle TLAS and reads back the per-ray result.
+// That proves the whole chain — compile -> reflect -> pipeline -> table -> dispatch_rays -> trace.
 //
 // The scene is one z=0 triangle (0,0,0)-(1,0,0)-(0,1,0). Two rays: ray 0 aims at (0.25,0.25) inside the
 // triangle (closest-hit writes 1), ray 1 at (0.9,0.9) outside it (miss writes 0).
 
 namespace
 {
-// Reads DispatchRaysIndex to pick which ray to shoot, traces it, and stores the payload result. Binds the
-// TLAS (t0) and the output buffer (u0) through the global root signature.
+// Reads DispatchRaysIndex to pick which ray to shoot, traces it, and stores the payload result.
+// Binds the TLAS (t0) and the output buffer (u0) through the global root signature.
 constexpr char const* raygen_hlsl = R"(
 RaytracingAccelerationStructure scene : register(t0);
 RWStructuredBuffer<uint> Out : register(u0);
@@ -139,7 +142,7 @@ TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays"
     // Build the pipeline: register each shader, keeping the returned handles for the shader table.
     sg::raytracing_pipeline_description rpd;
     rpd.layout = pipeline_layout;
-    rpd.max_payload_size = sizeof(sg::u32); // one uint payload
+    rpd.max_payload_size = sizeof(u32); // one uint payload
     auto const raygen_h = rpd.add_raygen_shader(cc::move(raygen));
     auto const miss_h = rpd.add_miss_shader(cc::move(miss));
     sg::hit_shader hs;
@@ -158,13 +161,13 @@ TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays"
     auto table = ctx.uncached.create_raytracing_shader_table(stbd);
     REQUIRE(table != nullptr);
 
-    auto out_buf = ctx.persistent.create_raw_buffer(cc::isize(2 * sizeof(sg::u32)),
+    auto out_buf = ctx.persistent.create_raw_buffer(isize(2 * sizeof(u32)),
                                                     sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(out_buf != nullptr);
 
     sg::named_view const views[] = {
         {.name = "scene", .view = tlas->as_view()},
-        {.name = "Out", .view = sg::buffer<sg::u32>::from_raw(out_buf).as_readwrite_buffer()},
+        {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()},
     };
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
     REQUIRE(group != nullptr);
@@ -176,11 +179,11 @@ TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays"
     ctx.submit_command_list(cc::move(disp));
 
     auto down = ctx.create_command_list();
-    auto future = down->download.data_from_buffer<sg::u32>(out_buf, 0, 2);
+    auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
     auto const data = ctx.wait_for(future);
     REQUIRE(data.has_value());
-    cc::vector<sg::u32> result;
+    cc::vector<u32> result;
     for (auto const v : data.value())
         result.push_back(v);
     REQUIRE(result.size() == 2);

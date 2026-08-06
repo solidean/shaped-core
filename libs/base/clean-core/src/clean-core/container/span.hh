@@ -13,6 +13,7 @@
 /// Stores a pointer and runtime size.
 /// Trivially copyable regardless of T's triviality.
 /// Does not own the underlying memory; caller must ensure the referenced data outlives the span.
+/// See [containers](../../../docs/containers.md) for the bounds-checking and lifetime contracts shared with the other views.
 template <class T>
 struct cc::span
 {
@@ -226,9 +227,10 @@ public:
 
     // reinterpretation
 public:
-    /// Reinterprets the viewed bytes as a span of U. U and T must be trivially copyable.
-    /// sizeof(T) must be divisible by sizeof(U), so the element count is always exact; for
-    /// the general case use try_reinterpret_as. Must not cast away const (T const -> U const).
+    /// Reinterprets the viewed bytes as a span of U.
+    /// U and T must be trivially copyable, and sizeof(T) must be divisible by sizeof(U) so the element count is always exact.
+    /// Must not cast away const: `T const` reinterprets only to `U const`.
+    /// Use try_reinterpret_as for the general case.
     template <class U>
     [[nodiscard]] cc::span<U> reinterpret_as() const
     {
