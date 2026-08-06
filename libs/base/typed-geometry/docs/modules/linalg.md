@@ -94,4 +94,5 @@ The [coding-guidelines](../coding-guidelines.md) carry the rationale.
 
 - [coding-guidelines](../coding-guidelines.md) — the cross-cutting rules (storage, qualification, factories, statics, no-assert-normalize) these types follow.
 - [cheat-sheet](../../cheat-sheet.md) — the linalg API at a glance.
-- source: [vec.hh](../../src/typed-geometry/linalg/vec.hh), [pos.hh](../../src/typed-geometry/linalg/pos.hh), [bivec.hh](../../src/typed-geometry/linalg/bivec.hh), [cross.hh](../../src/typed-geometry/linalg/cross.hh), [mat.hh](../../src/typed-geometry/linalg/mat.hh), [quat.hh](../../src/typed-geometry/linalg/quat.hh).
+- source: [vec.hh](../../src/typed-geometry/linalg/vec.hh), [pos.hh](../../src/typed-geometry/linalg/pos.hh), [bivec.hh](../../src/typed-geometry/linalg/bivec.hh),
+  [cross.hh](../../src/typed-geometry/linalg/cross.hh), [mat.hh](../../src/typed-geometry/linalg/mat.hh), [quat.hh](../../src/typed-geometry/linalg/quat.hh).

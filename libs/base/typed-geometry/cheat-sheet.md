@@ -343,13 +343,17 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 - **Factories are `make_*`** (`make_from_values`, `make_unit`, `make_rotation_z`, …). Distinguished values are static constants (`vec::zero`, `mat::identity`, …) — runtime consts, not `constexpr`.
 - **`mat`'s multi-arg `m[c, r]` needs parentheses inside macros**: `CHECK((m[0,0]) == 1)`, else the comma is read as a macro-argument separator.
 - **`mat` default is the ZERO matrix, not identity** — use `tg::matNf::identity`. A **transform**, by contrast, defaults to the **identity**: a zero-filled transform would be singular.
-- **Transform containment is `tg::impl::transform_is_subclass`, NEVER `has_all`.** `transform_canonical()` clears bits — `affine` drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is `false` even though every similarity is affine.
+- **Transform containment is `tg::impl::transform_is_subclass`, NEVER `has_all`.**
+  `transform_canonical()` clears bits — `affine` drops `uniform_scaling` because `non_uniform_scaling` subsumes it.
+  So `has_all(affine, similarity)` is `false` even though every similarity is affine.
   Reaching for either means you are in the flag machinery; day to day you name a class through its alias and let the widening constructor answer the containment question.
 - **Widening a transform is explicit**: `tg::affine_transform3f(rigid)`, not an implicit conversion.
   An implicit one would make two registrations at different classes an ambiguous overload set.
   Narrowing is not a constructor at all.
 - **A normal is a `bivec`, not a `vec`.** It transforms by the cofactor matrix, not the linear part — the difference only shows up under a non-uniform scaling, which is what makes it a silent bug.
-- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a rotated `aabb` is not an `aabb`). It is not probeable — the return type is `auto`, so asking trips the `static_assert`; test the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
+- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a rotated `aabb` is not an `aabb`).
+  It is not probeable — the return type is `auto`, so asking trips the `static_assert`.
+  Test the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
 - **Transform scale factors are POSITIVE** unless the class carries `negative_scaling` (`tg::signed_scaling_transform3f`, `signed_similarity_transform3f`, …); the factories assert it.
   `linear`/`affine`/`projective` include it by nature.
 - **A transform has TWO dimension parameters** (`homogeneous_transform<DSource, DTarget, T, Flags>`), so lifting and projecting can be typed.

@@ -26,7 +26,8 @@ This library is at an **early stage**: `scalar/`, the whole `linalg/` core, the 
 - **Raw storage, indexed access only.** Components live in a public C array member `data`, reached through `data` or `operator[]` — there are **no `.x/.y/.z`** members.
 - **Extensible scalars.** Scalar capabilities route through `tg::scalar_traits<T>` rather than `std::`, so an expression tree, a double-double or a bigint can opt in.
   `length()`/`normalized()`/`distance()` exist only for scalars whose trait declares `has_sqrt`.
-- **Transforms carry their capabilities in the type.** `tg::rigid_transform3f` and `tg::affine_transform3f` are the same `homogeneous_transform<DSource, DTarget, T, Flags>` at different points of a 19-class lattice.
+- **Transforms carry their capabilities in the type.**
+  `tg::rigid_transform3f` and `tg::affine_transform3f` are the same `homogeneous_transform<DSource, DTarget, T, Flags>` at different points of a 19-class lattice.
   The representation follows from the flags, and so does the result of `obj.transformed(t)` — a sphere stays a sphere under a similarity and becomes an ellipsoid under an affine map.
   The type also names the source and target dimension, so lifting and projecting between spaces can eventually be typed; only the square case is implemented today, and every named alias is square.
   `mat` remains linear-algebra data: there is no `mat * pos`.

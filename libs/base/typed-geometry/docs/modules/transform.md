@@ -1,6 +1,6 @@
 # Module: transform
 
-> Module docs answer **"what belongs here?"** and **"why is it this way?"** — the load-bearing decisions, not the full API (that's the [cheat-sheet](../../cheat-sheet.md)) and not the roadmap (that's [structure.md](../structure.md)). They capture the rationale behind choices that would otherwise trip up a reader.
+> Module docs answer **"what belongs here?"** and **"why is it this way?"** — [docs/_index.md](../_index.md#module-docs) states the contract they follow.
 
 ## What this module is
 
@@ -61,7 +61,8 @@ Every named alias is square, so `tg::rigid_transform3f` and `tg::affine_transfor
 ### One type over a lattice, not a family of types
 
 `rigid_transform` and `affine_transform` as separate hand-written types would mean writing `composed`, `inverse`, `to_mat` and every conversion once per pair.
-Making the capability set a template parameter collapses that to one implementation with an `if constexpr` over the representation kinds, and it makes the *result class of a composition* computable rather than hand-maintained.
+Making the capability set a template parameter collapses that to one implementation with an `if constexpr` over the representation kinds.
+It also makes the *result class of a composition* computable rather than hand-maintained.
 
 The price is that the flags need real algebra behind them, which is the next three sections.
 
@@ -81,7 +82,8 @@ Three rules carry the weight:
 This is exact rather than conservative: by the SVD every invertible `A` is `U Σ Vᵀ` — a rotation, a signed diagonal, a rotation — so the closure of `SO(D)` and the diagonals really is all of `GL(D)`.
 
 **Scale factors are positive unless `negative_scaling` says otherwise.** That is what keeps the narrow classes cheap — see the section on it below.
-In 3D `signed_similarity` is then the *full* conformal group, since a negative uniform scale composed with a half-turn is a plane reflection; it is precisely the class under which a sphere still maps to a sphere.
+In 3D `signed_similarity` is then the *full* conformal group, since a negative uniform scale composed with a half-turn is a plane reflection.
+It is precisely the class under which a sphere still maps to a sphere.
 
 ### `negative_scaling` is a flag, so the narrow classes stay cheap
 
@@ -123,14 +125,16 @@ constexpr bool transform_is_subclass(transform_flags sub, transform_flags super)
 A corollary worth remembering: `transform_canonical` is **not monotone** under bit-subset.
 Every ordering question has to go through `transform_is_subclass`.
 
-The lattice laws — idempotence, commutativity, and that the join is the *least* upper bound — are proven exhaustively by a `consteval` sweep in `tests/transform/transform-flags-test.cc`. That test is the foundation the widening constructor and every dispatch branch rest on.
+The lattice laws — idempotence, commutativity, and that the join is the *least* upper bound — are proven exhaustively by a `consteval` sweep in `tests/transform/transform-flags-test.cc`.
+That test is the foundation the widening constructor and every dispatch branch rest on.
 
 ### Widening is explicit, and that is load-bearing
 
 Converting a `rigid_transform` to an `affine_transform` is lossless, so an implicit conversion looks harmless.
 It is not.
 
-With implicit widening, every class would convert to every wider one silently, so `requires { tg::similarity_transform<D, T>(t); }` would be true for a projective transform too and an object's chain could no longer tell the classes apart.
+With implicit widening, every class would convert to every wider one silently.
+`requires { tg::similarity_transform<D, T>(t); }` would then be true for a projective transform too, and an object's chain could no longer tell the classes apart.
 Explicit widening makes the question exact.
 
 Narrowing is not a constructor at all: it is lossy, and letting it into overload resolution would reintroduce the same problem.
@@ -150,11 +154,14 @@ A representation base class would have been the obvious alternative, but it lose
 `[[no_unique_address]]` was likewise rejected: it is a no-op under the MSVC ABI, i.e. under both Windows compilers this repo targets.
 A pure translation gets its own layout instead of an identity linear part next to a vector, since an empty member still occupies a byte that alignment then rounds up to a whole scalar.
 
-Every representation member carries an explicit default initializer, because `vec`, `mat` and `quat` all default to **zero** — without them a default-constructed transform would be singular rather than the identity.
+Every representation member carries an explicit default initializer, because `vec`, `mat` and `quat` all default to **zero**.
+Without them a default-constructed transform would be singular rather than the identity.
 
 The member is **private**, and `tg::impl::transform_representation_of(t)` is the one way to it.
-The accessors answer in geometric terms and pay a conversion where the class does not store that form — `linear_mat()` on a rigid transform builds a matrix out of a quaternion — so an object that knows the layout can take the shorter route.
-Routing that through a named `impl` function rather than a public member keeps it greppable and keeps the layout out of the API: it follows the class and changes with it, so a caller has to branch on `linear_part(Flags)` exactly as the transform does.
+The accessors answer in geometric terms and pay a conversion where the class does not store that form: `linear_mat()` on a rigid transform builds a matrix out of a quaternion.
+An object that knows the layout can take the shorter route.
+Routing that through a named `impl` function rather than a public member keeps it greppable and keeps the layout out of the API.
+The layout follows the class and changes with it, so a caller has to branch on `linear_part(Flags)` exactly as the transform does.
 
 ### Uniform scale is NOT folded into the quaternion
 
@@ -163,7 +170,9 @@ It is the wrong trade.
 
 - `|q|²` is a sum of squares, so it is never negative.
   A **signed** scale is outside the image of the map entirely — and per the section above, the signed scale is exactly what makes `similarity` the full sphere-preserving group in 3D.
-- Folding forfeits **renormalization**. With `{quat, T}` the invariant `|q| ≡ 1` can be restored after a long chain of compositions; folded, drift in `|q|` is indistinguishable from a legitimate change of scale, so there is nothing left to restore.
+- Folding forfeits **renormalization**.
+  With `{quat, T}` the invariant `|q| ≡ 1` can be restored after a long chain of compositions.
+  Folded, drift in `|q|` is indistinguishable from a legitimate change of scale, so there is nothing left to restore.
 - At `s → 0` the folded quaternion loses the rotation irrecoverably.
 - `tg::quat`'s own `operator*(quat, vec)` is written in the unit-only form, correct only when `w² + |u|² = 1`. A folded value would be a different thing wearing `quat`'s clothes.
 
@@ -199,9 +208,11 @@ The priority order is literally the order of the branches, in the object's own h
 There is no registry, no ranking and nothing for a reader to hold in their head — which is why this replaced an earlier design that ranked registrations against a precomputed ladder of every class.
 
 There is no library-side machinery at all beyond the widening constructor the type already needs.
-It is gated on `is_subclass`, so `tg::similarity_transform<D, T>(t)` compiles exactly when `t` really is a similarity — which is what makes it a meaningful question to ask in a `requires`. The narrower-or-equal case is covered too, since a same-class conversion goes through the copy constructor.
+It is gated on `is_subclass`, so `tg::similarity_transform<D, T>(t)` compiles exactly when `t` really is a similarity — which is what makes it a meaningful question to ask in a `requires`.
+The narrower-or-equal case is covered too, since a same-class conversion goes through the copy constructor.
 
-One branch therefore covers many inputs: `aabb` asks only for `scaling_translation_transform<D, T>`, and thereby handles the identity, a pure translation and both scalings, because each of those *is* a scaling-plus-translation.
+One branch therefore covers many inputs: `aabb` asks only for `scaling_translation_transform<D, T>`.
+That one question handles the identity, a pure translation and both scalings, because each of those *is* a scaling-plus-translation.
 
 ### Applying and composing are the same operation, spelled three ways
 
@@ -216,7 +227,8 @@ The first two identities are free.
 The third is the one with content: `composed` must produce a transform whose action is "b, then a", which is what `compose_same` computes on the join class.
 
 The equivalence extends to the **return type**, not just the value.
-Composing a similarity with a per-axis scaling gives an affine transform, under which a sphere is an ellipsoid — and the chained spelling reaches an ellipsoid too, because the sphere becomes one at the scaling step and an ellipsoid stays an ellipsoid under the similarity.
+Composing a similarity with a per-axis scaling gives an affine transform, under which a sphere is an ellipsoid.
+The chained spelling reaches an ellipsoid too, because the sphere becomes one at the scaling step and an ellipsoid stays an ellipsoid under the similarity.
 Where a pair is unsupported, both spellings fail: a rotation composed with a translation is rigid, which an `aabb` rejects, and so does the chain at its rotation step.
 
 ### Composition is opt-in, and `composed` is the opt-in
@@ -247,7 +259,9 @@ else
 
 `composed_transform` stores the two and applies `inner` first, then `outer`.
 It answers for every object through a **public** `custom_transform` — the first branch of every object's chain — which simply does `obj.transformed(inner).transformed(outer)`.
-Public is right here, and not a violation of the private-plus-friend rule below: that rule exists so a transform cannot quietly override the answer for an object it was not written for, and `composed_transform` gives exactly the answer its parts give, for anything they can answer for.
+Public is right here, and not a violation of the private-plus-friend rule below.
+That rule exists so a transform cannot quietly override the answer for an object it was not written for.
+`composed_transform` gives exactly the answer its parts give, for anything they can answer for.
 
 The return type is the whole point: it says at compile time whether you got a fused transform or a pair.
 The cost of the pair is real — an object is transformed twice and passes through whatever intermediate type the inner step produced — so `compose` reaches for the fused form first, always.
@@ -275,7 +289,8 @@ private:
 };
 ```
 
-The object's chain asks for `requires { t.custom_transform(*this); }` first, and access checking is part of that question — an object that was not befriended does not see the branch at all and falls through to the normal chain.
+The object's chain asks for `requires { t.custom_transform(*this); }` first, and access checking is part of that question.
+An object that was not befriended does not see the branch at all, and falls through to the normal chain.
 So the special case stays out of the public API, and the transform states exactly which objects it is allowed to answer for.
 
 ### `pos`, `vec` and `bivec` are applied by the transform, not by themselves
@@ -284,13 +299,15 @@ They are in `linalg`, below this module, and they do **not** branch on the trans
 Their `transformed(t)` is one line: `return t.transform(*this);`.
 
 There is deliberately no `custom_transform` probe in front of it.
-That mechanism exists so a transform can special-case an object whose `transformed` it does not control; here the transform already owns the answer outright, so a second way in would only be a second place for the same decision.
+That mechanism exists so a transform can special-case an object whose `transformed` it does not control.
+Here the transform already owns the answer outright, so a second way in would only be a second place for the same decision.
 
 The transform answers them through three overloads of `transform`, one per base type, which sit alongside the template that routes every other object back to `obj.transformed(*this)`.
 Overload resolution picks the exact match, so a `vec` never reaches the template and the routing never cycles.
 
 That split is deliberate.
-Only the transform knows whether its linear part is a quaternion, a scalar or a matrix, and the narrow classes want the cheap answer — a pure translation leaves a `vec` and a `bivec` untouched and moves a `pos` by one addition, with no linear part read at all.
+Only the transform knows whether its linear part is a quaternion, a scalar or a matrix, and the narrow classes want the cheap answer.
+A pure translation leaves a `vec` and a `bivec` untouched and moves a `pos` by one addition, with no linear part read at all.
 Deciding that on the linalg side would mean going through `linear_mat()`, which builds a 3x3 for what may be a single quat.
 `bivec` has a second reason: the cofactor it needs lives in `cross.hh`, which includes `bivec.hh`.
 
@@ -315,21 +332,25 @@ Which registrations exist is a statement about geometry, not about effort:
 The affine image of an *embedded* `sphere` is the one gap left in that table.
 It is an ellipse in the ambient space, but naming it needs an orthonormal basis of the circle's plane, which `linalg` has no routine for yet.
 
-A finite convex primitive given by its vertices does survive a projection: `w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
+A finite convex primitive given by its vertices does survive a projection.
+`w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
 An unbounded primitive generally does not.
 
 ### An unsupported pair is a compile error on purpose
 
-A rotated `aabb` is not an `aabb`. Returning the enclosing box instead would be a silent, lossy answer to a question the caller did not ask, so the chain falls through to its `static_assert` and says so.
+A rotated `aabb` is not an `aabb`.
+Returning the enclosing box instead would be a silent, lossy answer to a question the caller did not ask, so the chain falls through to its `static_assert` and says so.
 The same holds for a projected `ray` (its point at infinity maps to a finite point, so the image is a bounded segment) and a projected `sphere` (a general quadric).
 
 Each of those gaps names a type tg does not have yet — `obb`, a clipped segment, `quadric`.
 
-The cost of that design is that "can X be transformed by Y" is not separately probeable: the member's return type is `auto`, so asking would instantiate the body and trip the `static_assert`. Probe the branch condition instead — `requires { tg::scaling_translation_transform<D, T>(t); }` is exactly why an `aabb` accepts or rejects a given transform.
+The cost of that design is that "can X be transformed by Y" is not separately probeable: the member's return type is `auto`, so asking would instantiate the body and trip the `static_assert`.
+Probe the branch condition instead — `requires { tg::scaling_translation_transform<D, T>(t); }` is exactly why an `aabb` accepts or rejects a given transform.
 
 ### A normal is a `bivec`, not a `vec`
 
 A bivector does not transform by the linear part.
-It transforms by that map's **second exterior power**, so in 3D its dual — a normal — picks up the cofactor matrix `det(A)·A⁻ᵀ`. Under a rigid or similarity transform this collapses back to the rotation up to a positive factor, which is why the bug hides until someone applies a non-uniform scaling.
+It transforms by that map's **second exterior power**, so in 3D its dual — a normal — picks up the cofactor matrix `det(A)·A⁻ᵀ`.
+Under a rigid or similarity transform this collapses back to the rotation up to a positive factor, which is why the bug hides until someone applies a non-uniform scaling.
 
 `transform/` is where linalg's `bivec` finally pays for itself: the type system makes the distinction unavoidable instead of a comment nobody reads.

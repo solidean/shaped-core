@@ -30,7 +30,8 @@ Add one when a module lands, and cover the big rationales there; the small ones 
 
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
 - [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos` translation rule and the `bivec != vec` decision.
-- [modules/transform](modules/transform.md) — one transform type over a capability lattice; why containment is not a bit test, why widening is explicit, and how an object's `.transformed(t)` picks its return type.
+- [modules/transform](modules/transform.md) — one transform type over a capability lattice.
+  Why containment is not a bit test, why widening is explicit, and how an object's `.transformed(t)` picks its return type.
 - [modules/geometry](modules/geometry.md) — the primitive types and the `object_traits` point-set seam (`intrinsic_dim`/`ambient_dim`/`is_finite`); representation vs. interpretation.
 
 ## Topics
@@ -47,5 +48,6 @@ Add one when a module lands, and cover the big rationales there; the small ones 
 ## Conventions
 
 - Namespace `tg`; depends on clean-core (vocabulary types + assertions).
-- Code follows the repo [coding-guidelines](../../../../docs/coding-guidelines.md) plus the tg-specific [coding-guidelines](coding-guidelines.md) (scalar traits, raw `data` storage, generic-over-`D` types, …).
+- Code follows the repo [coding-guidelines](../../../../docs/coding-guidelines.md) plus the tg-specific [coding-guidelines](coding-guidelines.md).
+  Those cover scalar traits, raw `data` storage and generic-over-`D` types.
   `.clang-format` is authoritative for formatting.

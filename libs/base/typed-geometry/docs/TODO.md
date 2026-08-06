@@ -25,8 +25,10 @@ Add entries as we discover them, and remove them as they land.
 ## transform
 
 - **Transforms between two different dimensions.**
-  `homogeneous_transform` carries a source and a target dimension, and every signature is written in terms of the pair — but the type `static_assert`s that they are equal, so lifting and projecting are not implemented.
-  What is missing: a representation that carries both dimensions (`transform_representation` still takes one), the rectangular cases of `composed` and `linear_mat`, and a decision on which capability classes even make sense off the diagonal.
+  `homogeneous_transform` carries a source and a target dimension, and every signature is written in terms of the pair.
+  But the type `static_assert`s that they are equal, so lifting and projecting are not implemented.
+  What is missing: a representation that carries both dimensions (`transform_representation` still takes one), and the rectangular cases of `composed` and `linear_mat`.
+  Off the diagonal it also needs a decision on which capability classes even make sense.
   A rotation and a scaling are square by nature, `linear` / `affine` / `projective` are not.
 - **Faster rigid/similarity paths for `plane`.**
   The plane registration goes through the cofactor matrix for every class.

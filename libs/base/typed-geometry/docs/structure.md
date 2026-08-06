@@ -51,8 +51,9 @@ symbolic, calculus, sampling are cross-cutting but should avoid depending on mes
 `geometry` depends on `transform`, not the other way round and not as a sibling: a geometric object carries a `.transformed(t)` member, so its header needs the transform type.
 Nothing in `transform` names a geometric type — each object writes its own `transformed` in `geometry/`, so the direction stays one-way.
 
-`pos`, `vec` and `bivec` carry a `.transformed(t)` member too, and branch on the transform's class exactly as the geometric objects do — so a pure translation moves a point by one addition and leaves a displacement or a bivector untouched, with no linear part consulted.
-That needs the class names, so the linalg headers include `transform/fwd.hh`. That is forward declarations only: `transform/fwd.hh` pulls in nothing from linalg, and the complete transform type is only required at the call site, so the module dependency stays one-way.
+`pos`, `vec` and `bivec` carry a `.transformed(t)` member too, but they decide nothing: it is the one line `return t.transform(*this);`.
+Only the transform knows whether its linear part is a quaternion, a scalar or a matrix, so it owns the answer for all three.
+The linalg headers therefore name no transform class and include nothing from `transform/`.
 
 ## Header Convention
 
@@ -166,22 +167,28 @@ tg::projective_transform3f  // + a non-trivial homogeneous row
 `tg::impl::transform_representation_of(t)` is the one way to it, for an object that can beat the public accessors by reading the members directly.
 Default construction is the identity, not a zero-filled value.
 
-The **source and target dimensions** are what will make lifting and projecting typed: a `pos<DSource, T>` goes in, a `pos<DTarget, T>` comes out, the linear part is a `mat<DSource, DTarget, T>` and the translation lives in the target space.
+The **source and target dimensions** are what will make lifting and projecting typed.
+A `pos<DSource, T>` goes in and a `pos<DTarget, T>` comes out, the linear part is a `mat<DSource, DTarget, T>`, and the translation lives in the target space.
 `t.inverse()` swaps the pair, and `composed` chains it.
 Only the square case is implemented — the type `static_assert`s `DSource == DTarget` — so the parameter is in place and the mixed-dimension maths is not.
 
 ### The flag lattice
 
-Several bit patterns denote the same set of transforms, so `tg::impl::transform_canonical` reduces each to one representative; there are exactly **13** classes.
+Several bit patterns denote the same set of transforms, so `tg::impl::transform_canonical` reduces each to one representative.
+There are exactly **19** classes: the nine linear ones with and without translation, plus projective.
 The whole lattice lives in `tg::impl`: it is machinery, and a class is named through its alias.
 Two of its rules are worth knowing:
 
-- rotation together with non-uniform scaling is a **general linear map**. `R1 S1 R2 S2` is not of the form `R S`, and by the SVD the closure really is all of `GL(D)` — so the class widens rather than pretending to stay separable.
-- scale factors are **positive** unless the class carries `negative_scaling`. That keeps the narrow classes simple: under a positive scaling an aabb's corners stay in order and a sphere's radius is just multiplied.
+- rotation together with non-uniform scaling is a **general linear map**.
+  `R1 S1 R2 S2` is not of the form `R S`, and by the SVD the closure really is all of `GL(D)` — so the class widens rather than pretending to stay separable.
+- scale factors are **positive** unless the class carries `negative_scaling`.
+  That keeps the narrow classes simple: under a positive scaling an aabb's corners stay in order and a sphere's radius is just multiplied.
   The `signed_*` classes opt in, and the factories assert the promise.
   In 3D `signed_similarity` is the full conformal group, since a negative uniform scale composed with a half-turn is a plane reflection — which is why a sphere still maps to a sphere under it.
 
-**Containment is `tg::impl::transform_is_subclass`, never `has_all`.** Canonicalization *clears* bits — affine drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is false even though every similarity is affine.
+**Containment is `tg::impl::transform_is_subclass`, never `has_all`.**
+Canonicalization *clears* bits — affine drops `uniform_scaling` because `non_uniform_scaling` subsumes it.
+So `has_all(affine, similarity)` is false even though every similarity is affine.
 `transform_canonical(a | b)` is the join, so containment is "the join is already the wider class".
 
 Widening between classes is lossless but **explicit**, and narrowing is not a constructor at all.
@@ -241,12 +248,14 @@ template <class TransformT>
 The priority order is literally the order of the branches, written in the object's own header next to the maths it selects.
 The library side is nothing beyond the widening constructor: it is gated on `is_subclass`, so `tg::similarity_transform<D, T>(t)` compiles exactly when `t` really is a similarity.
 `obj.transformed(t)`, `t.transform(obj)` and `t(obj)` are all public and mean the same thing — the last two route straight back to the first, so only the object ever decides.
-A transform special-cases an object with a **private** `custom_transform(ObjT const&)` plus a friend declaration for it, which is the first branch every object checks; access checking is part of that `requires`, so a non-befriended object never sees the branch.
+A transform special-cases an object with a **private** `custom_transform(ObjT const&)` plus a friend declaration for it, which is the first branch every object checks.
+Access checking is part of that `requires`, so a non-befriended object never sees the branch.
 
 One branch covers many inputs: `aabb` asks only for `scaling_translation_transform<D, T>` and thereby handles the identity, a pure translation and both scalings.
 
 An unsupported pair is a **compile error**, deliberately — a rotated `aabb` is not an `aabb`, and returning an enlarged one silently would be worse.
-Since the member's return type is `auto`, asking "is this supported?" would instantiate the body and trip the `static_assert`; probe the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
+Since the member's return type is `auto`, asking "is this supported?" would instantiate the body and trip the `static_assert`.
+Probe the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
 
 ## geometry/ [in progress]
 
@@ -344,7 +353,8 @@ b.closest(p)
 
 ## mesh/ [planned]
 
-Mesh data structures and mesh-domain algorithms (`core/`, `polygon/`, `triangle/`, `halfedge/`, `attributes/`, `algorithms/`, `io/`). Mesh-specific algorithms (triangulate, rasterize, remesh, simplify, repair, weld, smooth, subdivide, boolean support, parameterize) live here, not at the top level.
+Mesh data structures and mesh-domain algorithms (`core/`, `polygon/`, `triangle/`, `halfedge/`, `attributes/`, `algorithms/`, `io/`).
+Mesh-specific algorithms (triangulate, rasterize, remesh, simplify, repair, weld, smooth, subdivide, boolean support, parameterize) live here, not at the top level.
 
 ## Umbrella Include Policy
 
