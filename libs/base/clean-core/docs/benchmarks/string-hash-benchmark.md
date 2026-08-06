@@ -1,24 +1,23 @@
 # string hash benchmark
 
-Throughput of the production string hash, `cc::make_hash_of_bytes`
-([hash.hh](../../src/clean-core/common/hash.hh)) — the XXH3-64 path that `cc::string` and `cc::string_view`
-hash through — against two hand-rolled "small string" hashers, over a length sweep. The question: does XXH3's
-fixed setup cost make it a poor default for the short keys that dominate hash-table workloads, and where is
-the crossover?
+Throughput of the production string hash, [`cc::make_hash_of_bytes`](../../src/clean-core/common/hash.hh) — the XXH3-64 path that `cc::string` and `cc::string_view` hash through.
+It is measured against two hand-rolled "small string" hashers, over a length sweep.
+The question: does XXH3's fixed setup cost make it a poor default for the short keys that dominate hash-table workloads, and where is the crossover?
 
 Source: [tests/benchmarks/string-hash-bench.cc](../../tests/benchmarks/string-hash-bench.cc).
 
-> **Re-measured after two fixes.** An earlier revision showed XXH3 under ~1 GB/s for all short/mid keys in
-> RelWithDebInfo — a `clang-cl /Ob1` inlining artifact, now fixed project-wide (RelWithDebInfo is `/Ob2`), and
-> `cc::make_hash_of_bytes` now carries `CC_PURE`. The full story is in the
-> [byte-hash benchmark](hash-benchmark.md).
+> **Re-measured after two fixes.**
+> An earlier revision showed XXH3 under ~1 GB/s for all short and mid keys in RelWithDebInfo.
+> That was a `clang-cl /Ob1` inlining artifact, now fixed project-wide — RelWithDebInfo is `/Ob2`.
+> `cc::make_hash_of_bytes` now carries `CC_PURE` as well.
+> The full story is in the [byte-hash benchmark](hash-benchmark.md).
 
 ## What is measured
 
 GB/s while hashing a large corpus of **distinct** keys back to back — the hash-table insert/lookup scenario.
-For each length the corpus is an ~8 MB working set of random printable-ASCII keys (key count capped at 200k
-for tiny lengths), hashed in a tight loop repeated until ≥ 50 ms elapses. Two corpora: `string_view` (views
-into one buffer; pure hash cost) and `string` (owning `cc::string`; ≤ 39 bytes inline via SSO).
+For each length the corpus is an ~8 MB working set of random printable-ASCII keys, with the key count capped at 200k for tiny lengths.
+Each corpus is hashed in a tight loop, repeated until ≥ 50 ms elapses.
+Two corpora: `string_view` (views into one buffer, so pure hash cost) and `string` (owning `cc::string`, ≤ 39 bytes inline via SSO).
 
 The length sweep is 1..32 (every length), then +8 up to 64, then ×1.5 up to ~100k.
 
@@ -31,15 +30,15 @@ The length sweep is 1..32 (every length), then +8 up to 64, then ×1.5 up to ~10
 | OS | Windows 11 |
 | Compiler | Clang/`clang-cl` (`relwithdebinfo-clang` / `release-clang` presets) |
 
-Single-run numbers; short-key/small-block rows are sub-millisecond and noisy (~10%). Read trends, not third
-decimals.
+Single-run numbers; short-key and small-block rows are sub-millisecond and noisy (~10%).
+Read trends, not third decimals.
 
 ## Reproducing
 
-These full tables are the manual `bench-string-hash (… full sweep)` benchmarks. Lean `GUIDE_BENCHMARK`s of the
-same base names record just the representative points (≈8 B and ≈64 KiB) via `nx::guide` for `dev.py pgo` —
-the full sweep regenerates a multi-MB corpus per length, so it is far slower. Both are excluded from normal
-sweeps; the `"bench-string-hash"` filter matches both — name them explicitly:
+These full tables are the manual `bench-string-hash (… full sweep)` benchmarks.
+Lean `GUIDE_BENCHMARK`s of the same base names record just the representative points (≈8 B and ≈64 KiB) via `nx::guide`, for `dev.py pgo`.
+The full sweep regenerates a multi-MB corpus per length, so it is far slower.
+Both are excluded from normal sweeps, and the `"bench-string-hash"` filter matches both — so name them explicitly:
 
 ```bash
 uv run dev.py test "bench-string-hash" --target clean-core-test --preset release-clang --timeout 0
@@ -51,9 +50,11 @@ See [docs/guides/perf-results.md](../../../../../docs/guides/perf-results.md).
 ## Hashers
 
 - **xxh3** — `cc::make_hash_of_bytes` (XXH3-64).
-- **fnv1a** — classic FNV-1a, one multiply per byte. Trivial setup; byte-at-a-time.
-- **mul** — a word-at-a-time multiply/xor mixer with overlapping fixed-size tail reads (wyhash-style). Almost
-  no fixed setup. Not a vetted hash — a competent speed foil for the small-string regime.
+- **fnv1a** — classic FNV-1a, one multiply per byte.
+  Trivial setup, but byte-at-a-time.
+- **mul** — a word-at-a-time multiply/xor mixer with overlapping fixed-size tail reads (wyhash-style).
+  Almost no fixed setup.
+  Not a vetted hash — a competent speed foil for the small-string regime.
 
 ## Results
 

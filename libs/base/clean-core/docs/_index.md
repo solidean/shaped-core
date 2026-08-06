@@ -1,8 +1,8 @@
 # clean-core docs
 
-Documentation hub for clean-core. For the library overview, public types, and how
-to include headers, start at the [readme](../readme.md). For repo-wide docs see
-[docs/_index.md](../../../../docs/_index.md).
+Documentation hub for clean-core.
+For the library overview, public types, and how to include headers, start at the [readme](../readme.md).
+For repo-wide docs see [docs/_index.md](../../../../docs/_index.md).
 
 ## Source organization
 
@@ -23,37 +23,33 @@ clean-core/
   thread/       # mutex
 ```
 
-`impl/` subfolders are private implementation details. The
-[readme](../readme.md#file-organization) has the full per-folder table.
+`impl/` subfolders are private implementation details.
+The [readme](../readme.md#file-organization) has the full per-folder table.
 
 ## Topics
 
-- [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers
-  clean-core is allowed to depend on directly, and why.
-- [customization-points](customization-points.md) — the `cc::custom::` trait +
-  hidden-friend protocol that operations like hashing use to let types opt in.
-- [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter:
-  the `cc::seek_dir` / flush contract, a minimal worked example, and the buffered /
-  write / read_write cases.
-- [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) — XXH3 vs
-  hand-rolled short-string hashers across a length sweep (the small-key cost in hash maps).
-- [benchmarks/hash-benchmark](benchmarks/hash-benchmark.md) — raw xxHash 64/128 vs the
-  wrappers; the `clang-cl /Ob1` inlining trap that crippled short-key hashing in dev builds, and
-  the `CC_PURE` attribute that frees the wrapper.
-- [benchmarks/allocation-benchmark](benchmarks/allocation-benchmark.md) — mimalloc vs the
-  system allocator across sizes; mimalloc leads at every size and is only mildly `/Ob1`-sensitive.
-- [benchmarks/file-stream-benchmark](benchmarks/file-stream-benchmark.md) — the file stream
-  adapters vs `std::fstream` across a granularity sweep: ~11×/16× faster single-byte via the
-  buffer window, narrowing to parity as records grow.
+- [containers](containers.md) — the contracts every container type shares: how to choose one, what `T` must be,
+  what indexing checks, and when references and iterators die.
+- [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers clean-core is allowed to depend on directly, and why.
+- [customization-points](customization-points.md) — the `cc::custom::` trait + hidden-friend protocol that operations like hashing use to let types opt in.
+- [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter.
+  The `cc::seek_dir` / flush contract, a minimal worked example, and the buffered / write / read_write cases.
+- [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) — XXH3 vs hand-rolled short-string hashers across a length sweep,
+  which is the small-key cost in hash maps.
+- [benchmarks/hash-benchmark](benchmarks/hash-benchmark.md) — raw xxHash 64/128 vs the wrappers.
+  The `clang-cl /Ob1` inlining trap that crippled short-key hashing in dev builds, and the `CC_PURE` attribute that frees the wrapper.
+- [benchmarks/allocation-benchmark](benchmarks/allocation-benchmark.md) — mimalloc vs the system allocator across sizes.
+  mimalloc leads at every size and is only mildly `/Ob1`-sensitive.
+- [benchmarks/file-stream-benchmark](benchmarks/file-stream-benchmark.md) — the file stream adapters vs `std::fstream` across a granularity sweep.
+  ~11×/16× faster single-byte via the buffer window, narrowing to parity as records grow.
 
-Add further deep-dive docs here as kebab-case `.md` files and link them from this
-list.
+Add further deep-dive docs here as kebab-case `.md` files and link them from this list.
 
 ## Systems
 
 Deep dives on the internal machinery, including holes and gotchas not obvious from the headers:
 
-- [systems/allocation](systems/allocation.md) — `cc::allocation<T>`, the owning storage handle under `array`/`vector`/`devector`, and the `memory_resource` interface.
+- [systems/allocation](systems/allocation.md) — `cc::allocation<T>`, the owning storage handle under `array` and `vector`, and the `memory_resource` interface.
   The extract/adopt escape hatch across container types works today; `retype` and the ergonomic API around it do not yet.
 - [systems/node-allocation](systems/node-allocation.md) — the slab allocator for small nodes: size classes, wait-free cross-thread free, and the slab lifecycle across thread exit and adoption.
 - [systems/shared-ptr](systems/shared-ptr.md) — `cc::shared_ptr` / `cc::weak_ptr`, the 8 B intrusive-refcount handle pair over one slab node.

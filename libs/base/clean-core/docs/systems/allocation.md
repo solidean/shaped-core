@@ -54,8 +54,8 @@ Pass the latter as a custom resource to bypass mimalloc for one allocation.
 
 - **The adopt/release escape hatch works today; the convenience API and `retype` do not.**
   Zero-copy transfer between container types is already possible, through a pair defined in `allocating_container.hh` and re-exported by every container.
-  [`extract_allocation()`](../../src/clean-core/container/impl/allocating_container.hh#L1292) moves the `cc::allocation<T>` out.
-  [`create_from_allocation(cc::move(alloc))`](../../src/clean-core/container/impl/allocating_container.hh#L1184) adopts one.
+  [`extract_allocation()`](../../src/clean-core/container/impl/allocating_container.hh#L1284) moves the `cc::allocation<T>` out.
+  [`create_from_allocation(cc::move(alloc))`](../../src/clean-core/container/impl/allocating_container.hh#L1176) adopts one.
   So `array::create_from_allocation(vec.extract_allocation())` re-homes storage with no element copy.
   What is missing is sugar around that round-trip, and `retype`: the fallible reinterpretation to a different element type for trivially copyable payloads.
   There is **no method anywhere**, and no declaration either.

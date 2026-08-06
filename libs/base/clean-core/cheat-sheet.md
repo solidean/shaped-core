@@ -1,17 +1,18 @@
 # clean-core cheat sheet
 
-Foundational C++23 building blocks that replace most `std::` usage: primitives,
-assertions, owning containers and views, strings, fallible value types,
-callables, memory, and low-level utilities. Namespace `cc`. **No dependencies.**
+Foundational C++23 building blocks that replace most `std::` usage.
+Primitives, assertions, owning containers and views, strings, fallible value types, callables, memory, and low-level utilities.
+Namespace `cc`.
+**No dependencies.**
 
-Headers are included by full path from `src/`:
-`#include <clean-core/<topic>/<name>.hh>`. `fwd.hh` forward-declares the public
-types. This is a fast-recall map — for the *why*, read the header `///` docs and
-[coding-guidelines](../../../docs/coding-guidelines.md).
+Headers are included by full path from `src/`: `#include <clean-core/<topic>/<name>.hh>`.
+`fwd.hh` forward-declares the public types.
 
-How to read this: each block leads with the include; one symbol per line with a
-trailing comment giving the return type / intuition. Format conventions live in
-[docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+This is a fast-recall map — for the *why*, read the header `///` docs and [coding-guidelines](../../../docs/coding-guidelines.md).
+[docs/containers.md](docs/containers.md) has the contracts every container shares: choosing one, what `T` must be, bounds checking, and invalidation.
+
+How to read this: each block leads with the include; one symbol per line with a trailing comment giving the return type / intuition.
+Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ---
 
@@ -84,6 +85,11 @@ cc::small_vector<int, 4> sv;                       // 48 B here; N is a MINIMUM 
 sv.push_back(1); sv.emplace_back(2);               // push_back/emplace_back/pop_back/clear/resize/reserve
 sv.is_inline();                                    // true while still on the inline buffer (no heap held)
 sv.inline_capacity();                              // actual inline cap >= N (auto-grows to fill footprint; 9 here)
+
+#include <clean-core/container/fixed_vector.hh>  // cc::fixed_vector<T, N> — inline, N is a HARD capacity cap
+cc::fixed_vector<int, 4> fv;                       // never allocates; pushing past N ASSERTS (no heap spill)
+fv.push_back(1); fv.emplace_back(2);               // mirrors vector, minus reserve*/shrink_to_fit/extract_allocation
+fv.full();  fv.capacity();                         // -> bool;  -> N (static constexpr)
 ```
 
 ## Associative
@@ -365,6 +371,7 @@ cc::hash_finalize(x);                      // u64 bijective avalanche (moremur)
 cc::make_hash_of_bytes(bytes, seed=0);     // u64 XXH3-64 of a span<byte const>
 cc::make_hash_range(r);  cc::make_hash_range_unordered(r); // structural fold over a range (ordered / set-like)
 // customize a type: 'friend u64 hash(T const&)' (common) OR specialize cc::custom::hash_trait<T> (override; rare)
+//   the protocol, the tier order and the reasoning: docs/customization-points.md
 // built-in: string/string_view (bytes, equal across both); vector/array/span/fixed_array/pair/optional (structural);
 //           unique_* containers structural; unique_ptr by pointer identity
 
@@ -602,11 +609,11 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 
 ## Gotchas
 
-- **Assertions are on in debug & relwithdebinfo, off in release.** The default
-  presets are `relwithdebinfo-*` (asserts ON). If you touch assert-gated code,
-  also build a `release-*` preset. `CC_ASSERT`'s message argument is mandatory.
-- **`isize` is signed `i64`, not `size_t`** — intentional, to avoid unsigned
-  underflow. `find`/`rfind` return **`-1`** (not a huge unsigned) on no-match.
+- **Assertions are on in debug & relwithdebinfo, off in release.**
+  The default presets are `relwithdebinfo-*`, so asserts are ON; if you touch assert-gated code, also build a `release-*` preset.
+  `CC_ASSERT`'s message argument is mandatory.
+- **`isize` is signed `i64`, not `size_t`** — intentional, to avoid unsigned underflow.
+  `find`/`rfind` return **`-1`** (not a huge unsigned) on no-match.
 - **`string` / `string_view` are NOT null-terminated.** `data()` is not a C
   string — use `str.c_str_materialize()` (valid only until the next mutation).
 - **`string` SSO holds ≤ 39 bytes inline** (on 64-bit; fewer where pointers are smaller, e.g. wasm32) before it heap-allocates.
@@ -622,8 +629,7 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
   state alive.
 - **`create_uninitialized` requires a trivial `T`.**
-- **Not yet implemented (stubs — don't reach for these):** `ringbuffer`,
-  `fixed_vector`, `bitset`, `tuple`, `variant`, `disjoint_set`, and `flags`.
+- **Not yet implemented (stubs — don't reach for these):** `ringbuffer`, `bitset`, `fixed_bitset`, `tuple`, `variant`, `disjoint_set`, and `flags`.
   Check the header before relying on one.
 - **Streams are move-only real types (private-inheritance wrappers over one engine).**
   Conversions only ever NARROW (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write` never).

@@ -1,8 +1,7 @@
 # clean-core
 
-Foundational C++23 building blocks: data structures, memory utilities, assertions,
-and low-level primitives. Namespace `cc`. **No dependencies** — this is the bottom
-of the shaped-core stack.
+Foundational C++23 building blocks: data structures, memory utilities, assertions, and low-level primitives.
+Namespace `cc`. **No dependencies** — this is the bottom of the shaped-core stack.
 
 ```cpp
 #include <clean-core/container/vector.hh>
@@ -26,7 +25,7 @@ Source lives in `src/clean-core/`, grouped by topic:
 | `platform/`  | compiler/OS introspection — `native` (symbol demangling), `source_location`, `stacktrace` |
 | `math/`      | bedrock math helpers (`bit`) needed before the dedicated math library exists |
 | `memory/`    | allocation handles (`allocation`, `node_allocation`) over memory resources |
-| `container/` | owning containers (`array`/`vector` + `fixed_`/`unique_` variants, `map`, `set`, `ringbuffer`, `bitset`, `disjoint_set`, `pair`, `tuple`, `variant`) and views (`span`, `strided_span`) |
+| `container/` | owning containers (`array`/`vector` + `fixed_`/`unique_`/`small_` variants, `map`, `set`, `pair`) and views (`span`, `strided_span`, `pinned_data`) |
 | `sequence/`  | the lazy ranges API (`sequence`) |
 | `string/`    | `string`, `string_view`, `char_predicates`, `to_string`, `to_debug_string` |
 | `function/`  | type-erased callables (`function_ref`, `unique_function`) |
@@ -53,6 +52,7 @@ full workflow.
 ## More
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance (symbols, signatures, gotchas).
+- [docs/containers.md](docs/containers.md) — choosing a container, and the contracts they all share.
 - [docs/_index.md](docs/_index.md) — clean-core's documentation hub.
-- [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all
-  shaped-core code follows (`.clang-format` is authoritative for formatting).
+- [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.
+  `.clang-format` is authoritative for formatting.

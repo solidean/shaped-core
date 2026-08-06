@@ -9,7 +9,7 @@
 #include <clean-core/thread/mutex.hh>
 
 #include <memory>        // std::shared_ptr, std::make_shared
-#include <unordered_map> // TODO: migrate to cc::map once clean-core's own hash map lands
+#include <unordered_map> // TODO: migrate to cc::map
 
 /// A tiered get-or-create cache: key_value_cache over a stack of key_value_provider tiers.
 /// The tier interface is the extension seam for on-disk / networked caches; only an in-memory tier ships today.
@@ -48,7 +48,7 @@ struct cc_key_hash
 /// Eviction is crude: apply_bookkeeping clears the whole map once it exceeds max_entries.
 /// Subclass for a smarter policy.
 ///
-/// TODO: migrate std::unordered_map -> cc::map once clean-core's own hash map lands.
+/// TODO: migrate std::unordered_map -> cc::map.
 template <class K, class V, class Hash = impl::cc_key_hash<K>>
 struct in_memory_key_value_provider final : key_value_provider<K, V>
 {

@@ -15,7 +15,8 @@
 /// span is expected; use .span() for the explicit view.
 /// Copying shares ownership (refcount bump); it does not deep-copy the elements.
 ///
-/// std::shared_ptr is used deliberately for now: clean-core has no shared-ownership pointer yet.
+/// The owner is std::shared_ptr, not cc::shared_ptr: it has to type-erase an arbitrary owner and alias a separate span.
+/// cc::shared_ptr supports neither — it requires cc::make_shared, and projection to a subobject is deferred.
 template <class T>
 struct cc::pinned_data
 {

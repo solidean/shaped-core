@@ -6,7 +6,7 @@
 
 // cc::allocation<T> is the owning storage handle underneath every contiguous heap container.
 // It tracks two ranges independently: the bytes owned from a cc::memory_resource, and the live objects inside them.
-// cc::array<T>, cc::vector<T> and cc::devector<T> differ only in policy — how obj_start / obj_end move, and when growth happens.
+// cc::array<T> and cc::vector<T> differ only in policy — how obj_start / obj_end move, and when growth happens.
 //
 // The model, the resource interface, the member meanings and the current gaps are in libs/base/clean-core/docs/systems/allocation.md.
 //
