@@ -19,12 +19,18 @@ static_assert(std::is_same_v<decltype(tg::sphere3f().transformed(tg::rotation_tr
 static_assert(std::is_same_v<decltype(tg::sphere3f().transformed(tg::rigid_transform3f())), tg::sphere3f>);
 static_assert(std::is_same_v<decltype(tg::sphere3f().transformed(tg::similarity_transform3f())), tg::sphere3f>);
 
-// ... and becomes an ellipsoid the moment it does not (3D only — the 2D image is an ellipse, which tg lacks)
+// ... and becomes an ellipsoid the moment it does not — in every dimension, the 2D image being an ellipse
 static_assert(std::is_same_v<decltype(tg::sphere3f().transformed(tg::scaling_transform3f())), tg::ellipsoid3f>);
 static_assert(std::is_same_v<decltype(tg::sphere3f().transformed(tg::linear_transform3f())), tg::ellipsoid3f>);
 static_assert(std::is_same_v<decltype(tg::sphere3f().transformed(tg::affine_transform3f())), tg::ellipsoid3f>);
+static_assert(std::is_same_v<decltype(tg::sphere2f().transformed(tg::affine_transform2f())), tg::ellipsoid2f>);
 
 static_assert(std::is_same_v<decltype(tg::ellipsoid3f().transformed(tg::rigid_transform3f())), tg::ellipsoid3f>);
+static_assert(std::is_same_v<decltype(tg::ellipsoid2f().transformed(tg::affine_transform2f())), tg::ellipsoid2f>);
+
+// an embedded object is transformed by a map of its AMBIENT space, and keeps its own dimension
+static_assert(std::is_same_v<decltype(tg::sphere2in3f().transformed(tg::rigid_transform3f())), tg::sphere2in3f>);
+static_assert(std::is_same_v<decltype(tg::ellipsoid2in3f().transformed(tg::affine_transform3f())), tg::ellipsoid2in3f>);
 
 // the other primitives keep their type
 static_assert(std::is_same_v<decltype(tg::triangle3f().transformed(tg::affine_transform3f())), tg::triangle3f>);
@@ -222,7 +228,7 @@ namespace
 struct sphere_squasher
 {
 private:
-    template <int D, class T>
+    template <int D, int DAmbient, class T>
     friend struct tg::sphere;
 
     [[nodiscard]] tg::sphere3f custom_transform(tg::sphere3f const& s) const

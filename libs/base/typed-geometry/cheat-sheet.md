@@ -269,19 +269,25 @@ tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
 tg::line<D,T>     {pos origin; vec dir}       // {origin + t*dir : t in R}, 1D                 — infinite
 tg::plane<D,T>    {vec normal; T dist}        // hyperplane {x : dot(normal,x) == dist}        — infinite
-tg::sphere<D,T>   {pos center; T radius}      // SURFACE {x : distance(x,center) == radius}    — finite
-tg::ellipsoid<T>  {pos center; vec semi_axes[3]} // SURFACE {center + sum_i u_i*semi_axes[i] : |u| == 1} — finite
-//   3D ONLY (no D parameter): the 2D counterpart is an ellipse, which does not exist yet.
-//   ctor takes the three axis vectors: tg::ellipsoid3f(center, axis0, axis1, axis2). Axes need not be orthogonal.
+tg::sphere<D,DA,T>    {pos center; T radius}          // SURFACE {x : distance(x,center) == radius}    — finite
+tg::ellipsoid<D,DA,T> {pos center; vec semi_axes[D]}  // SURFACE {center + sum_i u_i*semi_axes[i] : |u| == 1} — finite
+// sphere/ellipsoid take TWO dims: D = the flat the object curves in, DA = the space that flat sits in.
+//   equal for the everyday case (sphere3f == sphere<3,3,f32>); apart when EMBEDDED: sphere2in3f is a circle in 3D.
+//   ellipsoid ctor takes D axis vectors (or a vec[D] array): tg::ellipsoid3f(center, axis0, axis1, axis2).
+//     the axes need not be orthogonal, and they span the flat — so the embedded case stores nothing extra.
+//   sphere's {center,radius} does NOT pin down the plane, so what it stores depends on the pair: the PRIMARY
+//     template is undefined and each pair is a specialization — sphere<D,D,T> is {center,radius},
+//     sphere<2,3,T> adds the plane's normal: tg::sphere2in3f(center, radius, normal).
+//     A pair with no specialization (a circle in 4D) is an incomplete type, not a silently wrong encoding.
 // members are public + named (pos0/min/normal/…), not data[]; default-ctor zero-inits; explicit ctors;
 //   defaulted operator==. No queries/measures/factories yet (representations still settling).
 // dimensional aliases: aabb2/3, triangle2/3, …   concrete: aabb3f triangle3f segment2i ray3f plane3d
 //   (aabb/triangle/segment get f/d/i; ray/line/plane/sphere/ellipsoid get f/d — they carry real values)
-//   ellipsoid keeps the 3 in ellipsoid3/ellipsoid3f/ellipsoid3d, though it has no D to vary
+//   the embedded pair spells both dims: sphere2in3/ellipsoid2in3 (+ …2in3f / …2in3d)
 
 obj.transformed(t);   // every primitive; which transforms it accepts is a geometric statement:
-//   sphere              similarity -> sphere      |  affine (3D only) -> ELLIPSOID
-//   ellipsoid           affine     -> ellipsoid
+//   sphere              similarity -> sphere      |  affine -> ELLIPSOID (unless embedded: needs a basis of the flat)
+//   ellipsoid           affine     -> ellipsoid   (embedded or not — the map is one of the ambient space)
 //   aabb                scaling + translation ONLY (a rotated aabb needs obb, which does not exist)
 //   triangle, segment   affine, projective
 //   plane               affine, projective        (normal picks up the cofactor, not the linear part)

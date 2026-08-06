@@ -257,9 +257,9 @@ template <class TransformT>
 {
     if constexpr (requires { t.custom_transform(*this); })   // the transform special-cases this object
         return t.custom_transform(*this);
-    else if constexpr (requires { tg::similarity_transform<D, T>(t); })   // angles preserved -> still a sphere
+    else if constexpr (requires { tg::similarity_transform<DAmbient, T>(t); })   // angles preserved -> still a sphere
         ...
-    else if constexpr (requires { tg::affine_transform<D, T>(t); })       // ... otherwise an ellipsoid
+    else if constexpr (requires { tg::affine_transform<DAmbient, T>(t); })       // ... otherwise an ellipsoid
         ...
     else
         static_assert(false, "...");
@@ -292,9 +292,9 @@ geometry/
     line.hh         [done]     {origin + t*dir : t in R}
     plane.hh        [done]     hyperplane {x : dot(normal,x) == dist}
     sphere.hh       [done]     sphere surface {x : distance(x, center) == radius}
-    ellipsoid.hh    [done]     ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}, 3D only
+    ellipsoid.hh    [done]     ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}
     primitives.hh   [done]
-    # planned: obb, ball, ellipse, quadric, polygon, ...
+    # planned: obb, ball, quadric, polygon, ...
   query/            [planned]  # distance, projection, closest, intersection, intersects, containment, ...
   measure/          [planned]  # area, volume, centroid, bounds, moments
   construct/        [planned]  # hull, fitting, primitives_from_points
@@ -305,12 +305,18 @@ geometry/
 Every primitive denotes a **set of points** and is classified by `object_traits` (specialized in its own header, colocated with the type): `intrinsic_dim` (the object's manifold dimension — a 3D triangle is a 2D object, so 2), `ambient_dim` (the surrounding space — 3 for that triangle), and `is_finite` (triangle/segment/aabb yes; ray/line/plane no). Representation is not interpretation: `plane` and the planned `halfspace` will share the `{normal, dist}` encoding but denote the points *on* vs. *on one side of* the hyperplane.
 `sphere` and the planned `ball` are the same pairing — `sphere` is the surface, so its `intrinsic_dim` is `D - 1`. See [modules/geometry.md](modules/geometry.md).
 
+`sphere` and `ellipsoid` take **two** dimensions, `<D, DAmbient, T>`: the flat the object curves in, and the space that flat sits in.
+They coincide for the everyday cases (`sphere3f`, `ellipsoid2f`) and part when the object is embedded above its own dimension — `sphere2in3f` is a circle lying in 3D, `ellipsoid2in3f` an ellipse.
+An `ellipsoid`'s semi-axes span its flat, so one general template covers every pair — the embedded case stores nothing extra.
+A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so what it stores depends on the pair: its primary template is left undefined and each supported pair is a specialization (`sphere<D, D, T>` is `{center, radius}`, `sphere<2, 3, T>` adds the plane's normal).
+A pair with no specialization is an incomplete type, which is the same "opt in per case, never a silent default" stance `object_traits` takes.
+
 Each primitive also registers what it becomes under a transform; see the `transform/` section above.
 Which registrations exist is a statement about geometry, not about effort:
 
 | primitive | registered at | result |
 |---|---|---|
-| `sphere` | similarity / affine (3D only) | `sphere` / **`ellipsoid`** |
+| `sphere` | similarity / affine (unless embedded) | `sphere` / **`ellipsoid`** |
 | `ellipsoid` | affine | `ellipsoid` |
 | `aabb` | scaling + translation **only** | `aabb` |
 | `triangle`, `segment` | affine, projective | unchanged |
@@ -319,8 +325,8 @@ Which registrations exist is a statement about geometry, not about effort:
 
 The gaps are where a type is missing, not where work was skipped.
 A rotated `aabb` is an oriented box (`obb`); a projected `ray` is a bounded segment, because its point at infinity maps to a finite point; a projected `sphere` is a general quadric.
-An affinely mapped 2D `sphere` is an ellipse, and `ellipsoid` is 3D only — it stores three semi-axis vectors, and the 2D case wants its own two-axis type.
-Each of those is a compile error until the type that would hold the answer exists.
+The affine image of an *embedded* `sphere` is the one gap left in that table: it is an ellipse in the ambient space, but naming it needs an orthonormal basis of the circle's plane, which `linalg` has no routine for yet.
+Each of those is a compile error until the type — or the routine — that would hold the answer exists.
 
 A finite convex primitive given by its vertices does survive a projection: `w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
 An unbounded primitive generally does not.

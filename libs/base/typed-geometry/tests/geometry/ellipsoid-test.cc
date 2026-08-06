@@ -14,8 +14,18 @@ static_assert(tg::traits::intrinsic_dim<tg::ellipsoid3f> == 2);
 static_assert(tg::traits::ambient_dim<tg::ellipsoid3f> == 3);
 static_assert(tg::traits::is_finite<tg::ellipsoid3f>);
 
-// 3D only: an ellipsoid<2, T> does not exist, and tg::ellipsoid3 names the single dimension it has
+// an ellipse is the 2D case, and it keeps its own dimension when it is embedded in 3D
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2f> == 1);
+static_assert(tg::traits::ambient_dim<tg::ellipsoid2f> == 2);
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2in3f> == 1);
+static_assert(tg::traits::ambient_dim<tg::ellipsoid2in3f> == 3);
+
 static_assert(std::is_same_v<tg::ellipsoid3<float>, tg::ellipsoid3f>);
+static_assert(std::is_same_v<tg::ellipsoid2in3<float>, tg::ellipsoid2in3f>);
+
+// the embedded case stores its semi-axes in ambient coordinates, so it is wider than the flat one
+static_assert(sizeof(tg::ellipsoid2f) == sizeof(float) * (2 + 2 * 2));
+static_assert(sizeof(tg::ellipsoid2in3f) == sizeof(float) * (3 + 2 * 3));
 } // namespace
 
 TEST("tg ellipsoid - construction")
@@ -69,4 +79,32 @@ TEST("tg ellipsoid - transformation maps every semi-axis")
         CHECK(tgtest::approx(r.center, tg::pos3f(1, 2, 3), 1e-4f));
         CHECK(tgtest::approx(r.semi_axes[0], tg::vec3f(2, 0, 0), 1e-4f));
     }
+}
+
+TEST("tg ellipsoid - an ellipse in 2D")
+{
+    auto const e = tg::ellipsoid2f(tg::pos2f(1, 0), tg::vec2f(2, 0), tg::vec2f(0, 1));
+
+    CHECK(e.center == tg::pos2f(1, 0));
+    CHECK(e.semi_axes[1] == tg::vec2f(0, 1));
+
+    auto const r = e.transformed(tg::scaling_transform2f::make_scaling(tg::vec2f(2, 5)));
+    static_assert(std::is_same_v<decltype(r), tg::ellipsoid2f const>);
+
+    CHECK(tgtest::approx(r.center, tg::pos2f(2, 0), 1e-4f));
+    CHECK(tgtest::approx(r.semi_axes[0], tg::vec2f(4, 0), 1e-4f));
+    CHECK(tgtest::approx(r.semi_axes[1], tg::vec2f(0, 5), 1e-4f));
+}
+
+TEST("tg ellipsoid - an ellipse embedded in 3D stays 2D")
+{
+    // the flat is the xy-plane; a rotation about x tilts it into the xz-plane, and the object dimension never changes
+    auto const e = tg::ellipsoid2in3f(tg::pos3f(0, 0, 0), tg::vec3f(2, 0, 0), tg::vec3f(0, 1, 0));
+
+    auto const t = tg::rigid_transform3f::make_rotation(tg::quat_f::make_rotation_x(tg::angle_f::make_from_degree(90)));
+    auto const r = e.transformed(t);
+    static_assert(std::is_same_v<decltype(r), tg::ellipsoid2in3f const>);
+
+    CHECK(tgtest::approx(r.semi_axes[0], tg::vec3f(2, 0, 0), 1e-4f));
+    CHECK(tgtest::approx(r.semi_axes[1], tg::vec3f(0, 0, 1), 1e-4f));
 }

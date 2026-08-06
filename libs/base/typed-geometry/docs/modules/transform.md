@@ -175,16 +175,18 @@ template <class TransformT>
     if constexpr (requires { t.custom_transform(*this); })   // the transform special-cases this object
         return t.custom_transform(*this);
 
-    else if constexpr (requires { tg::similarity_transform<D, T>(t); })   // angles preserved -> still a sphere
+    else if constexpr (requires { tg::similarity_transform<DAmbient, T>(t); })   // angles preserved -> still a sphere
     { ... return sphere(...); }
 
-    else if constexpr (requires { tg::affine_transform<D, T>(t); } && D == 3)   // ... otherwise an ellipsoid
-    { ... return ellipsoid<T>(...); }
+    else if constexpr (requires { tg::affine_transform<DAmbient, T>(t); } && D == DAmbient)   // ... otherwise an ellipsoid
+    { ... return ellipsoid<D, DAmbient, T>(...); }
 
     else
-        static_assert(false, "tg: a sphere only survives a similarity or, in 3D, an affine map");
+        static_assert(false, "tg: a sphere only survives a similarity or, when it spans its space, an affine map");
 }
 ```
+
+A `sphere` carries two dimensions — the flat it curves in and the space that flat sits in — and it is the **ambient** one the transform has to match, since that is the space the map acts on.
 
 The priority order is literally the order of the branches, in the object's own header, next to the maths it selects.
 There is no registry, no ranking and nothing for a reader to hold in their head — which is why this replaced an earlier design that ranked registrations against a precomputed ladder of every class.
