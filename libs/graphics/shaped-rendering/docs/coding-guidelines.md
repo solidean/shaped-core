@@ -1,13 +1,12 @@
 # shaped-rendering coding guidelines
 
-These build on the repo-wide [coding-guidelines](../../../../docs/coding-guidelines.md) — read
-that first; everything there still applies. Because shaped-rendering is built directly on
-shaped-graphics, its [coding-guidelines](../../shaped-graphics/docs/coding-guidelines.md) (handles,
-resource model, backend model) are also relevant background.
+These build on the repo-wide [coding-guidelines](../../../../docs/coding-guidelines.md) — read that first; everything there still applies.
+shaped-rendering is built directly on shaped-graphics, so its [coding-guidelines](../../shaped-graphics/docs/coding-guidelines.md) are relevant background too.
+Those cover handles, the resource model and the backend model.
 
-This document is intentionally near-empty for now. **Extend it as we go:** whenever you catch
-yourself making a "style mistake" by following generic advice that turns out to be wrong for sr
-(for a reason that isn't obvious from the code), that's the signal to add the rule here.
+**Extend this as we go.**
+Whenever you catch yourself making a "style mistake" by following generic advice that turns out to be wrong for sr, that is the signal to add the rule here.
+The bar is a reason that is not obvious from the code.
 
 ## SDL stays inside `impl/`
 
@@ -48,17 +47,16 @@ Three things fall out of that one seam, none of them obvious from the code:
 SDL3 is fetched on demand, so sr must build without it — but the window and input **types are unconditional**.
 Without a backend, `window_system::try_create` fails with a reason instead of the type ceasing to exist.
 
-That is deliberate. A caller writes the same code in both builds and learns the answer from a `cc::result`
-it was already obliged to handle, rather than from a macro it has to remember to `#if` on. The failure also
-carries a message that says what to do; a missing type only produces a compile error about `sr::window`.
+That is deliberate.
+A caller writes the same code in both builds and learns the answer from a `cc::result` it was already obliged to handle, rather than from a macro it has to remember to `#if` on.
+The failure also carries a message that says what to do; a missing type only produces a compile error about `sr::window`.
 
-`SR_HAS_WINDOW` is still defined to `1` or `0` — always defined, never defined-vs-undefined — but it now
-answers a narrower question: *is a backend compiled in*. Reach for it only when you need that at compile
-time, such as a test that asserts which way `try_create` will go. Never to decide whether the API exists.
+`SR_HAS_WINDOW` is still defined to `1` or `0` — always defined, never defined-vs-undefined — but it answers the narrower question *is a backend compiled in*.
+Reach for it only when you need that at compile time, such as a test that asserts which way `try_create` will go.
+Never to decide whether the API exists.
 
-Anything new that needs SDL goes in `impl/`, behind the same CMake branch that picks `window_sdl.cc` or
-`window_null.cc`. Never add a second flag: two gates that can disagree is a build configuration nobody tests.
+Anything new that needs SDL goes in `impl/`, behind the same CMake branch that picks `window_sdl.cc` or `window_null.cc`.
+Never add a second flag: two gates that can disagree is a build configuration nobody tests.
 
-The null backend fails at `try_create` and asserts everywhere else, because no `window_system` can exist
-without a backend, so nothing downstream of it is reachable. A window method running there means a failed
-`try_create` went unchecked — worth an assert rather than a silent no-op.
+The null backend fails at `try_create` and asserts everywhere else: no `window_system` can exist without a backend, so nothing downstream of it is reachable.
+A window method running there means a failed `try_create` went unchecked — worth an assert rather than a silent no-op.

@@ -61,8 +61,12 @@ struct pt_trace_desc
 
 /// The global-illumination path-tracing pass.
 ///
-/// A render routine, structured exactly like pbr_raytrace_routine: it owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired path-tracing shaders and rebuilt on reload.
-/// Where the flat PBR routine shades a single direct-lit sample, this one integrates global illumination — the raygen bounces each ray diffusely and estimates direct light at every hit with next-event estimation toward the rectangular ceiling light, accumulating `samples_per_pixel` paths per pixel in one dispatch.
+/// A render routine, structured exactly like pbr_raytrace_routine.
+/// It owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired path-tracing shaders and rebuilt on reload.
+/// Where the flat PBR routine shades a single direct-lit sample, this one integrates global illumination.
+/// The raygen bounces each ray diffusely and estimates direct light at every hit by next-event estimation toward two sources: the rectangular area light and the SH environment.
+/// The environment is gathered by multiple importance sampling (balance heuristic) between that NEE ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
+/// `samples_per_pixel` paths per pixel accumulate in one dispatch; `shaders/pathtrace.hlsl` carries the estimators themselves.
 /// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
 class pathtrace_routine : public sg::render_routine<pathtrace_routine>
 {

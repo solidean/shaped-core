@@ -1,11 +1,13 @@
 # Render routines (in shaped-rendering)
 
-shaped-rendering (`sr`) is the home for **concrete render routines** — the actual GPU algorithms (mipmap generation, tonemapping, texture compression, …), each built on the render-routine framework.
+shaped-rendering (`sr`) is the home for **concrete render routines** — the actual GPU algorithms, each built on the render-routine framework.
+`sr::blit_routine` is the one that exists today; mipmap generation, tonemapping and texture compression are the intended set.
 
 The **framework itself lives in shaped-graphics** — `sg::render_routine`, the per-context `ctx.routines` registry, and the `sg::reload_generation` hot-reload counter.
 Read its front-door doc first:
 
-- **[shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md)** — the routine base, three-phase init, by-type `acquire` / `prewarm` / `evict`, `ctx.routines.clear()`, and hot reload, end to end.
+- **[shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md)** — the routine base and its three-phase init, end to end.
+  Also by-type `acquire` / `prewarm` / `evict`, `ctx.routines.clear()`, and hot reload.
 
 ## Writing a concrete routine
 

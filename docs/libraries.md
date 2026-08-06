@@ -132,7 +132,8 @@ Compilers are a registered seam (HLSL→DXIL today), and shader sources are reac
 
 [readme](../libs/graphics/shaped-rendering/readme.md) · [docs](../libs/graphics/shaped-rendering/docs/_index.md)
 
-Render routines and helpers on top of sg: the reusable building blocks of a renderer — mipmap generation, texture compression, tonemapping — still an early-stage skeleton.
+Render routines and helpers on top of sg: the reusable building blocks of a renderer — mipmap generation, texture compression, tonemapping.
+Of those `sr::blit_routine` exists today, alongside the Dear ImGui renderer and the SDL3-backed window abstraction.
 Concrete routines acquire their shaders through shaped-shader-library, which is why sr depends on it, and it also links the vendored Dear ImGui + ImPlot + ImGuizmo bundle.
 Home to the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [imgui.md](../libs/graphics/shaped-rendering/docs/imgui.md).
 Also home to the **window abstraction** (`sr::window_system` / `sr::window`), backed by SDL3 and exposing none of it, whose native handle feeds `sg::swapchain_description`.
@@ -143,6 +144,6 @@ The API is always present: without a backend, because SDL3 was not fetched, `win
 [readme](../libs/graphics/shaped-viewer/readme.md) · [docs](../libs/graphics/shaped-viewer/docs/_index.md)
 
 The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, serving Shaped Code's visualization needs.
-The top of the graphics stack, and an early-stage skeleton.
+The top of the graphics stack, with a first vertical slice: path-traced views blitted into a window.
 
 For the build and test workflow shared by all libraries, see [guides/building-and-testing.md](guides/building-and-testing.md).

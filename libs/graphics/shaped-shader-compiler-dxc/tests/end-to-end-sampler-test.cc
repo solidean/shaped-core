@@ -3,20 +3,23 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-shader-compiler-dxc/all.hh>
 
-// The whole chain, end to end: HLSL through the DXC wrapper (which now reflects texture + sampler
-// bindings), a binding_group_layout + pipeline_layout built straight from that reflection, a real texture + a dynamic sampler
-// bound to a compute dispatch on WARP, and the sampled result read back and verified. Everything is driven
-// through the backend-agnostic sg::context API — the dx12 WARP device is only how the context is created.
+using namespace cc::primitive_defines;
+
+// The whole chain, end to end: HLSL through the DXC wrapper, which reflects the texture + sampler bindings.
+// A binding_group_layout + pipeline_layout are built straight from that reflection.
+// A real texture and a dynamic sampler are bound to a compute dispatch on WARP, and the sampled result is read back and verified.
+// Everything is driven through the backend-agnostic sg::context API — the dx12 WARP device is only how the context is created.
 //
-// Two passes, because texture upload isn't implemented yet: pass 1 writes a known pattern into the texture
-// as a storage image (UAV); pass 2 samples it as a sampled texture (SRV) through a point/clamp sampler.
+// Two passes: pass 1 writes a known pattern into the texture as a storage image (UAV), pass 2 samples it as a sampled texture (SRV) through a point/clamp sampler.
+// Writing the pattern on the GPU is what makes the test device-only, with no upload path in the picture.
 // The barrier system inserts the storage -> shader_read transition between them.
 
 namespace
 {
 constexpr int N = 8; // 8x8 texture / dispatch
 
-// Pass 1: write Dst[x,y] = y*N + x. RWTexture2D<float> -> an R32_FLOAT storage texture (typed UAV store).
+// Pass 1: write Dst[x,y] = y*N + x.
+// RWTexture2D<float> -> an R32_FLOAT storage texture (typed UAV store).
 constexpr char const* fill_hlsl = R"(
 RWTexture2D<float> Dst : register(u0);
 [numthreads(8, 8, 1)]
@@ -93,7 +96,7 @@ TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample on WARP, r
     REQUIRE(tex_h != nullptr);
     auto const tex = sg::texture_2d::from_raw(tex_h);
 
-    auto buf = ctx.persistent.create_raw_buffer(cc::isize(count) * cc::isize(sizeof(float)),
+    auto buf = ctx.persistent.create_raw_buffer(isize(count) * isize(sizeof(float)),
                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
 

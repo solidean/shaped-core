@@ -15,11 +15,13 @@ namespace sv
 {
 /// The per-frame view renderer — itself a render routine, and the orchestrator that composes the leaf routines.
 ///
-/// It resolves each view's scene items to GPU resources through the managers, path-traces the view into a transient target (driving sv::pathtrace_routine), then binds the caller's output target, opens the raster scope, and blits the view across it (driving sr::blit_routine).
+/// It resolves each view's scene items to GPU resources through the managers, then path-traces the view into a transient target by driving sv::pathtrace_routine.
+/// It then binds the caller's output target, opens the raster scope, and blits the view across it by driving sr::blit_routine.
 /// It never records a trace / draw itself — that rule stays in the leaf routines.
 /// This one only sequences them and owns the per-view persistent cache.
 ///
-/// Being a routine, that persistent cache — keyed by view_id, the temporal-accumulation seam — lives on the per-context instance under the routine's own lock, rather than in a value the caller has to keep around.
+/// Being a routine, that persistent cache lives on the per-context instance under the routine's own lock, rather than in a value the caller has to keep around.
+/// It is keyed by view_id, which is the temporal-accumulation seam.
 ///
 /// It is the only one of the three that takes a guard: both leaves it drives read-only, so driving them under its own guard nests no lock.
 /// Should a leaf ever need one, the order is view_renderer before leaf — matching init_declare, which prewarms the same leaves.

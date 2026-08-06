@@ -1,6 +1,7 @@
 # shaped-rendering TODO
 
-Running list of known follow-ups. Bigger design intent lives in [structure.md](structure.md).
+Running list of known follow-ups.
+Bigger design intent lives in [structure.md](structure.md).
 
 - First routines on the framework: mipmap generation, texture compression, tonemapping.
 - Get imgui off stb.
@@ -11,7 +12,8 @@ Running list of known follow-ups. Bigger design intent lives in [structure.md](s
   while a detached viewport window is dragged over another, the dock-target markers drawn inside it lag the window, snapping back into place the moment it stops moving.
   Reproduced with **stock imgui** — upstream `example_win32_directx12` built from the tag we vendor (`v1.92.8-docking`, `b61e5634`) with upstream's own win32 + dx12 backends and none of our code —
   so nothing in `sr` causes it and nothing in `sr` can fix it.
-  Matches [ocornut/imgui#7664](https://github.com/ocornut/imgui/issues/7664) ("docking markers move with window"), reported there against glfw + vulkan on X11: two unrelated backend stacks, same symptom.
+  Matches [ocornut/imgui#7664](https://github.com/ocornut/imgui/issues/7664) ("docking markers move with window").
+  That one is reported against glfw + vulkan on X11: two unrelated backend stacks, same symptom.
   Unresolved upstream, no maintainer response.
   Ruled out along the way, each by measurement rather than argument, so nobody repeats it:
   the input translation to desktop space,
@@ -53,7 +55,8 @@ Windowing:
   So **Linux presentation needs the tagged struct whether or not wayland is in the picture** — X11 already needs two values.
 
   The part that shapes the design: on Linux, X11-vs-wayland is a **runtime** choice, not a build-time one.
-  A single SDL build can carry both and picks per session (`SDL_GetCurrentVideoDriver`), so the tag has to be a runtime discriminant that sg switches on — not a `#if` the way Windows and macOS could be.
+  A single SDL build can carry both and picks per session (`SDL_GetCurrentVideoDriver`).
+  So the tag has to be a runtime discriminant that sg switches on, not a `#if` the way Windows and macOS could be.
   SDL already exposes the pieces as window properties (`SDL_PROP_WINDOW_X11_DISPLAY_POINTER` / `..._X11_WINDOW_NUMBER`, `..._WAYLAND_DISPLAY_POINTER` / `..._WAYLAND_SURFACE_POINTER`).
 
 - **wayland is currently off in practice.**

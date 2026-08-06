@@ -30,7 +30,8 @@ They live in its [coding guidelines](../libs/graphics/shaped-graphics/docs/codin
 
 ### shaped-rendering — `sr::`
 
-Render routines and helpers built on sg: the common building blocks of a renderer — mipmap generation, texture compression, tonemapping.
+Render routines and helpers built on sg: the common building blocks of a renderer, such as mipmap generation, texture compression and tonemapping.
+Which of them exist yet is sr's [structure doc](../libs/graphics/shaped-rendering/docs/structure.md)'s to say.
 The **render-routine framework** itself lives in **shaped-graphics**, documented in its [render-routines doc](../libs/graphics/shaped-graphics/docs/render-routines.md).
 sr hosts the *concrete* routines built on it, and acquires their shaders through shaped-shader-library.
 
@@ -56,12 +57,12 @@ Multiple windows are supported today, which is the groundwork for imgui docking 
 ### shaped-viewer — `sv::`
 
 The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, serving Shaped Code's visualization needs.
-Built on sr, and an early-stage skeleton today — see the [shaped-viewer readme](../libs/graphics/shaped-viewer/readme.md).
+Built on sr — the [shaped-viewer readme](../libs/graphics/shaped-viewer/readme.md) says how far it has got.
 
 ### shaped-shader-compiler-dxc — `ssc::dxc::`
 
 A side utility rather than part of the sv → sr → sg chain.
-It is a lean wrapper over the DirectX Shader Compiler, turning HLSL into an `sg::compiled_shader`: bytecode, reflected bindings, compute workgroup size.
+It is a lean wrapper over the DirectX Shader Compiler, turning HLSL into an `sg::compiled_shader` — bytecode plus reflected bindings, and a workgroup size for compute.
 It depends only on **shaped-graphics**.
 Two-step API: `preprocess` resolves `#include`s via a caller-supplied resolver, then `compile` turns already-flattened source into DXIL plus reflection.
 **Windows-only** today, since it links DXC and uses the Windows SDK's `d3d12shader.h` reflection.

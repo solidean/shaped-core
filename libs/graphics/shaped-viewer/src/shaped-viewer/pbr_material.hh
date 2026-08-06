@@ -19,7 +19,8 @@ struct pbr_material_gpu
 };
 
 /// A basic metallic-roughness PBR material.
-/// Flat per-primitive for now: the closest-hit shader indexes one of these per triangle by `PrimitiveIndex()`, so a single mesh can carry a different material on every triangle without any texture lookups.
+/// Flat per-primitive for now: the closest-hit shader indexes one of these per triangle by `PrimitiveIndex()`.
+/// A single mesh can therefore carry a different material on every triangle without any texture lookups.
 struct pbr_material
 {
     tg::vec3f base_color = tg::vec3f(0.8f, 0.8f, 0.8f);

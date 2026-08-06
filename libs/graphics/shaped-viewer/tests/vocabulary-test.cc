@@ -15,6 +15,8 @@
 
 #include <type_traits>
 
+using namespace cc::primitive_defines;
+
 // CPU-only invariants of the viewer's vocabulary — no GPU, so these run in every configuration.
 
 TEST("sv - view_id from_string is stable and distinct")
@@ -43,7 +45,7 @@ TEST("sv - view_id keys a map")
 
 TEST("sv - resource ids compare and key a map")
 {
-    CHECK(sv::mesh_id::invalid == sv::mesh_id(cc::u32(-1)));
+    CHECK(sv::mesh_id::invalid == sv::mesh_id(u32(-1)));
     CHECK(sv::mesh_id::invalid != sv::mesh_id(0)); // 0 is a usable id now, not the sentinel
     CHECK(sv::mesh_id(1) != sv::mesh_id(2));
 
@@ -89,8 +91,8 @@ TEST("sv - triangle_data pins its positions")
 TEST("sv - indexed_triangle_data hashes both buffers")
 {
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    auto const indices = cc::vector<cc::u32>{0, 1, 2};
-    auto const rewound = cc::vector<cc::u32>{0, 2, 1};
+    auto const indices = cc::vector<u32>{0, 1, 2};
+    auto const rewound = cc::vector<u32>{0, 2, 1};
 
     auto const base = sv::indexed_triangle_data::create(positions, indices);
     CHECK(base.hash == sv::indexed_triangle_data::create(positions, indices).hash);

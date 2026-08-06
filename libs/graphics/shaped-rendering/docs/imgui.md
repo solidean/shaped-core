@@ -13,17 +13,24 @@ ImGui is vendored in-tree at `extern/imgui/`, tracking the **docking** branch at
 Every header is namespaced under `imgui/`, so includes read `<imgui/imgui.h>`, `<imgui/implot.h>`, `<imgui/imguizmo.h>` (lowercased for consistency).
 
 - **Dear ImGui** — the core, pinned at a docking-branch release tag.
-- **ImPlot** — immediate-mode plotting. Pinned at a `master` commit: its latest release (v0.16) predates ImGui 1.92's draw/texture API, and only `master` tracks it.
-- **ImGuizmo** — 3D manipulation gizmos. Pinned at a `master` commit (it cuts no release tags).
+- **ImPlot** — immediate-mode plotting.
+  Pinned at a `master` commit: its latest release (v0.16) predates ImGui 1.92's draw/texture API, and only `master` tracks it.
+- **ImGuizmo** — 3D manipulation gizmos.
+  Pinned at a `master` commit (it cuts no release tags).
 
 Neither addon has an `sr` wrapper yet — they are there to include and draw through the same imgui frame.
 
 shaped-code's own additions live in `extern/imgui/shaped/imgui/`, outside `include/` and `src/` so a re-vendor leaves them alone:
 
 - `<imgui/imgui_fwd.hh>` — forward declarations, for a header that only *names* an imgui type.
-- `<imgui/imgui_config.hh>` — imgui's injected user config (`IMGUI_USER_CONFIG`). Adds the implicit `ImVec2`/`ImVec4` ↔ `tg::vec2f`/`tg::vec4f` casts. Baked into every translation unit, and includes nothing — tg is only forward-declared, so the imgui target never depends upward on typed-geometry.
-- `<imgui/imgui_sc.hh>` — the shaped-code interop umbrella. Pulls in both sides (the `impl/` headers under it); include one directly for just one side:
-  - clean-core: `ImGui::TextUnformatted(cc::string_view)` displays zero-copy through imgui's `[begin, end)` overload; `ImGui::InputText(label, cc::string*, …)` (plus the multiline and hint variants) edits a `cc::string`, growing and shrinking it as the user types — the imgui_stdlib `std::string` contract.
+- `<imgui/imgui_config.hh>` — imgui's injected user config (`IMGUI_USER_CONFIG`).
+  Adds the implicit `ImVec2`/`ImVec4` ↔ `tg::vec2f`/`tg::vec4f` casts.
+  Baked into every translation unit, and includes nothing — tg is only forward-declared, so the imgui target never depends upward on typed-geometry.
+- `<imgui/imgui_sc.hh>` — the shaped-code interop umbrella.
+  It pulls in both sides (the `impl/` headers under it); include one directly for just one side:
+  - clean-core: `ImGui::TextUnformatted(cc::string_view)` displays zero-copy through imgui's `[begin, end)` overload.
+    `ImGui::InputText(label, cc::string*, …)` edits a `cc::string`, growing and shrinking it as the user types — the imgui_stdlib `std::string` contract.
+    The multiline and hint variants come with it.
   - typed-geometry: the definitions behind the `ImVec2`/`ImVec4` ↔ `tg` casts declared in `imgui_config.hh`.
 
   Header-only, so the interop stays available to any imgui consumer without the imgui target depending upward on clean-core or typed-geometry.
@@ -76,7 +83,8 @@ See the multi-viewport section for the two viewport calls it sequences for you.
 
 The split is imgui's own platform-backend / renderer-backend line, not an arbitrary one.
 
-Everything the routine mutates — atlas textures, pipelines, and the shader-derived layouts — sits in plain members, reached through the guard `acquire_exclusive(cmd)` returns at the top of `execute()`.
+Everything the routine mutates — atlas textures, pipelines, and the shader-derived layouts — sits in plain members.
+They are reached through the guard `acquire_exclusive(cmd)` returns at the top of `execute()`.
 That is the contract `sg::render_routine` sets out: the same instance is handed to every caller on the context, so the framework's per-routine lock is what makes writing it safe.
 See [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md#threading).
 
@@ -89,7 +97,9 @@ with multi-viewport imgui calls it once per viewport per frame, and geometry cac
 
 ## Theming
 
-The Solidean dark theme — the brand violet (`#6830FF`) and its lit variant (`#A37BFF`) as accents down to the separators, borders and resize grips, code cyan (`#5FC0D0`) for the highlights that must read against the violet, all on the near-black `#0b0d12` ground.
+The Solidean dark theme, on the near-black `#0b0d12` ground.
+The brand violet (`#6830FF`) and its lit variant (`#A37BFF`) are the accents, down to the separators, borders and resize grips.
+Code cyan (`#5FC0D0`) carries the highlights that must read against the violet.
 
 `sr::imgui_context::create()` applies it by default, so nothing is needed to get the brand look:
 
@@ -114,7 +124,8 @@ A backend sets `ImGuiBackendFlags_RendererHasTextures` and drains `ImDrawData::T
 servicing `WantCreate` / `WantUpdates` / `WantDestroy` and reporting back through `SetTexID` / `SetStatus`.
 Skipping any of it wedges the atlas.
 
-`sr::impl::imgui_texture_registry` implements it. Three things worth knowing:
+`sr::impl::imgui_texture_registry` implements it.
+Three things worth knowing:
 
 - Uploads go through **`ctx.upload`**, the async copy queue, not a command list.
   A font atlas is bulk asset data, and a later command list that samples the texture waits on the copy automatically.
@@ -136,9 +147,9 @@ Skipping any of it wedges the atlas.
 
 ## Input
 
-`process_events` maps `sr::input_event` onto imgui's event queue. Keyboard, text, mouse buttons, motion and
-wheel all go through; `sr::scancode` to `ImGuiKey` and the mouse-button reorder live in
-`impl/imgui_input_translation.hh` and are unit-tested there.
+`process_events` maps `sr::input_event` onto imgui's event queue.
+Keyboard, text, mouse buttons, motion and wheel all go through.
+`sr::scancode` to `ImGuiKey` and the mouse-button reorder live in `impl/imgui_input_translation.hh` and are unit-tested there.
 
 Three things are worth knowing:
 
@@ -192,7 +203,8 @@ This is the ordering imgui's own examples use, and the order `render_imgui` runs
 **Both changes are load-bearing, and neither is optional once the flag is on.**
 
 - **Every imgui coordinate becomes desktop-space.**
-  Mouse positions and `ImGui::SetNextWindowPos` are no longer relative to the main window, because imgui hit-tests a position against every viewport's rectangle to decide which one the pointer is over.
+  Mouse positions and `ImGui::SetNextWindowPos` are no longer relative to the main window.
+  imgui hit-tests a position against every viewport's rectangle to decide which one the pointer is over.
   `process_event` translates by the event's window position, which is why an `input_event` must name its window.
   Code that hardcodes `SetNextWindowPos(ImVec2(0, 0))` has to offset by `ImGui::GetMainViewport()->Pos` instead.
 - **`update_viewports` must run every frame.**

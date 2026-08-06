@@ -6,8 +6,9 @@
 
 namespace
 {
-// Output[i] = i * 2 — mirrors the dx12 backend's double_compute smoke shader. One RWStructuredBuffer
-// at register u0 (space 0), a 64-thread group. Self-contained (no includes).
+// Output[i] = i * 2 — mirrors the dx12 backend's double_compute smoke shader.
+// One RWStructuredBuffer at register u0 (space 0), a 64-thread group.
+// Self-contained (no includes).
 constexpr char const* double_compute_hlsl = R"(
 RWStructuredBuffer<uint> Output : register(u0);
 
@@ -60,8 +61,8 @@ TEST("ssc::dxc compile - compute shader -> DXIL + reflection")
 
 namespace
 {
-// Samples a texture through a sampler and writes a storage texture — exercises the texture-SRV, sampler,
-// and storage-texture (UAV) reflection kinds. SampleLevel (not Sample) so it is valid in compute.
+// Samples a texture through a sampler and writes a storage texture — exercises the texture-SRV, sampler, and storage-texture (UAV) reflection kinds.
+// SampleLevel (not Sample) so it is valid in compute.
 constexpr char const* sampled_compute_hlsl = R"(
 Texture2D<float4> Tex     : register(t0);
 SamplerState      Samp    : register(s0);

@@ -1,11 +1,13 @@
 # shaped-viewer cheat sheet
 
-Professional, RTX-enabled visualization renderer. Namespace `sv`. Depends on shaped-rendering.
+Professional, RTX-enabled visualization renderer.
+Namespace `sv`.
+Depends on shaped-rendering.
 Headers are included by full path from `src/`: `#include <shaped-viewer/<name>.hh>`.
 
-> **Scope note:** first vertical slice — a single path-traced view, blitted into a window by the
-> `view_renderer` routine. Rendering needs a ray-tracing backend (dx12 + DXR on Windows today; vulkan RT is
-> stubbed upstream). The API is present everywhere; without a backend a routine just draws nothing.
+> **Scope note:** first vertical slice — a single path-traced view, blitted into a window by the `view_renderer` routine.
+> Rendering needs a ray-tracing backend: dx12 + DXR on Windows today, since vulkan RT is stubbed upstream.
+> The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
@@ -29,7 +31,7 @@ sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; materi
 sv::area_light                   // { pos3f center; vec3f half_extent_u, half_extent_v; vec3f emission; } — a world-space rect emitting along cross(half_extent_u, half_extent_v); one typed list per light kind on the view
                                  //   emission has no default (it is -1): set it, or the first use warns to stderr
 sv::area_light_gpu::from(light)  // -> area_light_gpu { vec3f center, u, v, emission, normal; } — the rect in GPU lane layout (u/v are the half-extents, normal = cross(u, v))
-sv::background                   // { vec3f sh[16]; } — order-3 RGB spherical-harmonics environment a missed ray sees (both misses reconstruct radiance from it)
+sv::background                   // { vec3f sh[16]; } — order-3 RGB SH environment a missed ray sees (the flat and pt misses both reconstruct radiance from it)
 sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
 sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — flat, per-triangle
 ```
@@ -58,12 +60,11 @@ scene_resources.begin_frame(epoch)                  // reclaim + advance; view_r
 sv::mesh_id / material_set_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
 ```
 
-The managers ride on `sv::impl::lru_pool<Id, Record>` (the reusable id-pool): it mints ids, tracks each
-record's byte size + last-used epoch, and evicts on an idle timeout or a byte budget (least-recently-used
-first, never this frame's working set). It is content-addressed — records go in under a caller-supplied
-`cc::hash128`, and `find_by_hash` resolves that hash to a resident id in O(1) — so `acquire` never re-hashes or
-re-uploads for content it already holds. A manager never hashes anything itself, so hash load stays where the
-caller schedules it and never lands inside a per-frame acquire.
+The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
+It mints ids, tracks each record's byte size and last-used epoch, and evicts on the idle timeout or the byte budget, least-recently-used first.
+It never evicts this frame's working set; `begin_frame` in its header states that rule exactly.
+It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
+A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
 
 ## Rendering — the view_renderer + routines
 
@@ -85,15 +86,14 @@ sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + 
 sv::shader_package()                                 // register once on an slib::shader_library before rendering
 ```
 
-The path tracer bounces each ray diffusely (cosine-weighted) and does next-event estimation toward two sources
-— the rectangular area light and the SH environment — a shadow ray each per bounce, so it converges at far
-fewer samples than a naive integrator. The environment is gathered by MIS (balance heuristic) between the NEE
-ray and the escaped bounce ray, keeping a bright, non-uniform sky low-variance.
-The view_renderer builds `pt_frame_constants_gpu` from the view's first `area_light` plus
-`render_settings::samples_per_pixel` / `max_bounces`. A view with an empty `area_lights` list falls back to an
-overhead rect facing down, so the scene is lit even without matching emissive geometry (unlike a Cornell box,
-whose light rect must match the emitter). The view's `background` (RGB SH) is packed to `background_gpu` and bound at
-b1; both misses (flat + pt) reconstruct the environment radiance an escaped ray sees via `background_radiance`.
+[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward both the area light and the SH environment.
+That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
+What a caller supplies is a view.
+The `view_renderer` builds `pt_frame_constants_gpu` from the view's first `area_light` plus `render_settings::samples_per_pixel` / `max_bounces`.
+A view with an empty `area_lights` list falls back to an overhead rect facing down, so the scene is lit even without matching emissive geometry.
+That is unlike a Cornell box, whose light rect must match the emitter.
+The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
+The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
 ## Typical frame
 
@@ -129,9 +129,8 @@ ctx.submit_command_list_and_present(*sc, cc::move(cmd));
   per-instance indexing (a flagged extension). The TLAS is still built from every item.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
-- **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is
-  synthesized. `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through
-  `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed` (a `gpu_boolean`, so the
-  plain `bool` off the record assigns straight into it). The `view_renderer` sets
-  it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it
-  were real. A non-indexed record binds the manager's stand-in there, which no shader reads.
+- **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
+  `mesh_record::is_indexed` says which a record is, and it must reach the closest-hit through `frame_constants_gpu::mesh_is_indexed` / `pt_frame_constants_gpu::mesh_is_indexed`.
+  That field is a `gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  The `view_renderer` sets it for you; a test driving a routine directly must set it, or the flat path will read `Indices` as if it were real.
+  A non-indexed record binds the manager's stand-in there, which no shader reads.

@@ -6,10 +6,12 @@
 
 #include <cstddef> // offsetof
 
-// Raster pipeline + draw end to end on WARP: compile a vertex + pixel shader, build an sg::raster_pipeline,
-// upload a triangle's vertices, then render_to a cleared rgba8 target and draw. The read-back target shows
-// the triangle's color over the center and the clear color in the corner — proving pipeline creation,
-// vertex-buffer bind + input layout, the rendering scope, and the draw all execute.
+using namespace cc::primitive_defines;
+
+// Raster pipeline + draw end to end on WARP.
+// It compiles a vertex + pixel shader, builds an sg::raster_pipeline, uploads a triangle's vertices, then render_to a cleared rgba8 target and draws.
+// The read-back target shows the triangle's color over the center and the clear color in the corner.
+// That proves pipeline creation, vertex-buffer bind + input layout, the rendering scope, and the draw all execute.
 //
 // Driven through the backend-agnostic sg::context API; the dx12 WARP device is only how the context exists.
 
@@ -109,7 +111,7 @@ TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target")
         {{-0.8f, -0.8f, 0.0f}, {1, 0, 0, 1}},
         {{0.8f, -0.8f, 0.0f}, {1, 0, 0, 1}},
     };
-    auto vbuf = ctx.persistent.create_raw_buffer(cc::isize(sizeof(verts)),
+    auto vbuf = ctx.persistent.create_raw_buffer(isize(sizeof(verts)),
                                                  sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
     REQUIRE(vbuf != nullptr);
 
@@ -132,10 +134,10 @@ TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target")
 
     auto const bytes = ctx.wait_for(future);
     REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == cc::isize(W) * cc::isize(H) * 4);
-    auto const* px = reinterpret_cast<cc::u8 const*>(bytes.value().data());
+    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
 
-    auto texel = [&](int x, int y) { return px + (cc::isize(y) * W + x) * 4; };
+    auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     // Center is inside the triangle -> the red vertex color; a top corner is above the apex -> the blue clear.
     auto const* center = texel(W / 2, H / 2);

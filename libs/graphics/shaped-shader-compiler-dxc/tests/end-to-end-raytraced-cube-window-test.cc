@@ -18,7 +18,8 @@
 // The blit exists because DXR writes a UAV while flip-model back buffers are render-target-only.
 // Different color + simple shading per face.
 //
-// nx::config::manual keeps it out of the default sweep. Run it explicitly:
+// nx::config::manual keeps it out of the default sweep.
+// Run it explicitly:
 //   uv run dev.py test "raytraced spinning cube in a window"
 // Prefers a hardware GPU, falls back to WARP; SKIPs if the device has no ray tracing.
 

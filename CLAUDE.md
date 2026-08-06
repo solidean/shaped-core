@@ -56,7 +56,7 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`. Depends on shaped-rendering.
-  Early-stage skeleton.
+  A first vertical slice today: path-traced views blitted into a window, dx12 + DXR.
 
 Supporting directories:
 
