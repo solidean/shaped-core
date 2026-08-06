@@ -4,11 +4,6 @@
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
-// transformed() names the transform classes to branch on them.
-// This is forward declarations only — transform/fwd.hh pulls in nothing from linalg, so the
-// dependency stays one-way; the complete type is needed at the call site, not here.
-#include <typed-geometry/transform/fwd.hh>
-
 #include <initializer_list>
 
 namespace tg
@@ -142,26 +137,13 @@ public:
 public:
     /// the image of this displacement under `t` — the translation does not apply to it.
     ///
-    /// A projective transform is rejected: a free vector has no base point, so it has no projective image.
-    /// Transform the two endpoints and subtract instead.
+    /// The transform does the work, unconditionally: it is the only thing that knows whether its linear part is
+    /// a quaternion, a scalar or a matrix, so there is nothing to decide here.
+    /// A transform that wants to answer for a vec writes that answer in its own `transform`.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
-        if constexpr (requires { t.custom_transform(*this); })
-            return t.custom_transform(*this);
-
-        // a displacement is blind to the translation, so the identity and a pure translation both leave it alone
-        else if constexpr (requires { tg::translation_transform<D, T>(t); })
-            return *this;
-
-        // the transform applies its own linear part: it is the only thing that knows whether that is
-        // a quaternion, a scalar or a matrix
-        else if constexpr (requires { tg::affine_transform<D, T>(t); })
-            return t.apply_linear(*this);
-        else
-            static_assert(false,
-                          "tg: this transform cannot be applied to a displacement. A projective transform has no "
-                          "linear part in this sense — transform the endpoints and subtract instead.");
+        return t.transform(*this);
     }
 
     // comparison

@@ -1,19 +1,20 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/macros.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>
+#include <typed-geometry/scalar/traits.hh>
 
 namespace tg
 {
 /// Column-major matrix with C columns and R rows.
 ///
-/// mat is a linear-algebra object, not a transform type (there is no mat * pos). It is stored as
-/// C column vectors (`vec<R, T> cols[C]`), so col(i) is a real reference and matrix/vector products
-/// fall out as column combinations. Element access uses the C++23 multi-argument subscript
-/// `m[col, row]`.
+/// mat is a linear-algebra object, not a transform type — there is no mat * pos.
+/// It is stored as C column vectors (`vec<R, T> cols[C]`), so col(i) is a real reference and matrix/vector products fall out as column combinations.
+/// Element access uses the C++23 multi-argument subscript `m[col, row]`.
 ///
 /// The only constructor is the default one (all entries zero); everything else is a make_ factory.
 /// In particular there is no "default is identity" — use mat::identity for that.
@@ -45,9 +46,11 @@ public:
 
     // special values
 public:
-    /// the zero matrix. Runtime constant, not usable in constant expressions.
+    /// the zero matrix.
+    /// Runtime constant, not usable in constant expressions.
     static mat const zero;
-    /// the identity matrix (rectangular identity if C != R). Runtime constant.
+    /// the identity matrix (rectangular identity if C != R).
+    /// Runtime constant.
     static mat const identity;
 
     // rotations (3x3 only; require a scalar with trigonometry)
@@ -132,6 +135,170 @@ public:
         CC_ASSERT(0 <= c && c < C, "column index out of range");
         CC_ASSERT(0 <= r && r < R, "row index out of range");
         return cols[c].data[r];
+    }
+
+    // operations
+public:
+    /// the R x C matrix whose columns are this matrix's rows.
+    [[nodiscard]] constexpr mat<R, C, T> transposed() const
+    {
+        mat<R, C, T> t;
+        for (int c = 0; c < C; ++c)
+            for (int r = 0; r < R; ++r)
+                t[r, c] = (*this)[c, r];
+        return t;
+    }
+
+    /// the determinant, for a square matrix.
+    [[nodiscard]] constexpr T determinant() const
+        requires(C == R)
+    {
+        static_assert(C <= 4, "only implemented up to the 4x4 case — larger matrices are not out of scope, the "
+                              "expansions are simply not written yet");
+
+        auto const& m = *this;
+
+        if constexpr (C == 1)
+        {
+            return m[0, 0];
+        }
+        else if constexpr (C == 2)
+        {
+            return m[0, 0] * m[1, 1] - m[1, 0] * m[0, 1];
+        }
+        else if constexpr (C == 3)
+        {
+            // expansion along row 0; cij is the 2x2 minor over rows 1 and 2 of columns i and j
+            T const c12 = m[1, 1] * m[2, 2] - m[2, 1] * m[1, 2];
+            T const c02 = m[0, 1] * m[2, 2] - m[2, 1] * m[0, 2];
+            T const c01 = m[0, 1] * m[1, 2] - m[1, 1] * m[0, 2];
+            return m[0, 0] * c12 - m[1, 0] * c02 + m[2, 0] * c01;
+        }
+        else
+        {
+            // lij / rij are the 2x2 minors over rows i and j, taken from columns 0 and 1 / columns 2 and 3
+            T const l01 = m[0, 0] * m[1, 1] - m[1, 0] * m[0, 1];
+            T const l02 = m[0, 0] * m[1, 2] - m[1, 0] * m[0, 2];
+            T const l03 = m[0, 0] * m[1, 3] - m[1, 0] * m[0, 3];
+            T const l12 = m[0, 1] * m[1, 2] - m[1, 1] * m[0, 2];
+            T const l13 = m[0, 1] * m[1, 3] - m[1, 1] * m[0, 3];
+            T const l23 = m[0, 2] * m[1, 3] - m[1, 2] * m[0, 3];
+
+            T const r01 = m[2, 0] * m[3, 1] - m[3, 0] * m[2, 1];
+            T const r02 = m[2, 0] * m[3, 2] - m[3, 0] * m[2, 2];
+            T const r03 = m[2, 0] * m[3, 3] - m[3, 0] * m[2, 3];
+            T const r12 = m[2, 1] * m[3, 2] - m[3, 1] * m[2, 2];
+            T const r13 = m[2, 1] * m[3, 3] - m[3, 1] * m[2, 3];
+            T const r23 = m[2, 2] * m[3, 3] - m[3, 2] * m[2, 3];
+
+            return l01 * r23 - l02 * r13 + l03 * r12 + l12 * r03 - l13 * r02 + l23 * r01;
+        }
+    }
+
+    /// the adjugate: the transposed cofactor matrix, satisfying m.adjugate() * m == m.determinant() * identity.
+    /// Defined for singular matrices too, which is what makes it the division-free building block.
+    [[nodiscard]] CC_FORCE_INLINE constexpr mat adjugate() const
+        requires(C == R)
+    {
+        static_assert(C <= 4, "only implemented up to the 4x4 case — larger matrices are not out of scope, the "
+                              "expansions are simply not written yet");
+
+        auto const& m = *this;
+        mat a;
+
+        if constexpr (C == 1)
+        {
+            a[0, 0] = tg::one<T>();
+        }
+        else if constexpr (C == 2)
+        {
+            a[0, 0] = m[1, 1];
+            a[1, 0] = -m[1, 0];
+            a[0, 1] = -m[0, 1];
+            a[1, 1] = m[0, 0];
+        }
+        else if constexpr (C == 3)
+        {
+            // row r holds the cross product of the two columns other than r
+            a[0, 0] = m[1, 1] * m[2, 2] - m[2, 1] * m[1, 2];
+            a[1, 0] = m[2, 0] * m[1, 2] - m[1, 0] * m[2, 2];
+            a[2, 0] = m[1, 0] * m[2, 1] - m[2, 0] * m[1, 1];
+
+            a[0, 1] = m[2, 1] * m[0, 2] - m[0, 1] * m[2, 2];
+            a[1, 1] = m[0, 0] * m[2, 2] - m[2, 0] * m[0, 2];
+            a[2, 1] = m[2, 0] * m[0, 1] - m[0, 0] * m[2, 1];
+
+            a[0, 2] = m[0, 1] * m[1, 2] - m[1, 1] * m[0, 2];
+            a[1, 2] = m[1, 0] * m[0, 2] - m[0, 0] * m[1, 2];
+            a[2, 2] = m[0, 0] * m[1, 1] - m[1, 0] * m[0, 1];
+        }
+        else
+        {
+            // lij / rij are the 2x2 minors over rows i and j, taken from columns 0 and 1 / columns 2 and 3
+            T const l01 = m[0, 0] * m[1, 1] - m[1, 0] * m[0, 1];
+            T const l02 = m[0, 0] * m[1, 2] - m[1, 0] * m[0, 2];
+            T const l03 = m[0, 0] * m[1, 3] - m[1, 0] * m[0, 3];
+            T const l12 = m[0, 1] * m[1, 2] - m[1, 1] * m[0, 2];
+            T const l13 = m[0, 1] * m[1, 3] - m[1, 1] * m[0, 3];
+            T const l23 = m[0, 2] * m[1, 3] - m[1, 2] * m[0, 3];
+
+            T const r01 = m[2, 0] * m[3, 1] - m[3, 0] * m[2, 1];
+            T const r02 = m[2, 0] * m[3, 2] - m[3, 0] * m[2, 2];
+            T const r03 = m[2, 0] * m[3, 3] - m[3, 0] * m[2, 3];
+            T const r12 = m[2, 1] * m[3, 2] - m[3, 1] * m[2, 2];
+            T const r13 = m[2, 1] * m[3, 3] - m[3, 1] * m[2, 3];
+            T const r23 = m[2, 2] * m[3, 3] - m[3, 2] * m[2, 3];
+
+            // a 3x3 minor drops one column, so it expands along that pair's leftover column against the other pair's minors
+            a[0, 0] = m[1, 1] * r23 - m[1, 2] * r13 + m[1, 3] * r12;
+            a[1, 0] = m[1, 2] * r03 - m[1, 0] * r23 - m[1, 3] * r02;
+            a[2, 0] = m[1, 0] * r13 - m[1, 1] * r03 + m[1, 3] * r01;
+            a[3, 0] = m[1, 1] * r02 - m[1, 0] * r12 - m[1, 2] * r01;
+
+            a[0, 1] = m[0, 2] * r13 - m[0, 1] * r23 - m[0, 3] * r12;
+            a[1, 1] = m[0, 0] * r23 - m[0, 2] * r03 + m[0, 3] * r02;
+            a[2, 1] = m[0, 1] * r03 - m[0, 0] * r13 - m[0, 3] * r01;
+            a[3, 1] = m[0, 0] * r12 - m[0, 1] * r02 + m[0, 2] * r01;
+
+            a[0, 2] = m[3, 1] * l23 - m[3, 2] * l13 + m[3, 3] * l12;
+            a[1, 2] = m[3, 2] * l03 - m[3, 0] * l23 - m[3, 3] * l02;
+            a[2, 2] = m[3, 0] * l13 - m[3, 1] * l03 + m[3, 3] * l01;
+            a[3, 2] = m[3, 1] * l02 - m[3, 0] * l12 - m[3, 2] * l01;
+
+            a[0, 3] = m[2, 2] * l13 - m[2, 1] * l23 - m[2, 3] * l12;
+            a[1, 3] = m[2, 0] * l23 - m[2, 2] * l03 + m[2, 3] * l02;
+            a[2, 3] = m[2, 1] * l03 - m[2, 0] * l13 - m[2, 3] * l01;
+            a[3, 3] = m[2, 0] * l12 - m[2, 1] * l02 + m[2, 2] * l01;
+        }
+
+        return a;
+    }
+
+    /// the cofactor matrix, equal to m.determinant() * m.inverse().transposed() but without the division.
+    ///
+    /// This is what a normal transforms by: a normal is a covector, so it picks up the inverse transpose.
+    [[nodiscard]] constexpr mat cofactor() const
+        requires(C == R)
+    {
+        return this->adjugate().transposed();
+    }
+
+    /// the inverse of a square matrix.
+    /// A singular matrix has no inverse and yields the zero matrix — check the determinant if you must tell the two apart.
+    [[nodiscard]] constexpr mat inverse() const
+        requires(C == R)
+    {
+        auto const a = this->adjugate();
+
+        // row 0 expanded against the adjugate's cofactors is the determinant, so the minors are only computed once
+        T d = (*this)[0, 0] * a[0, 0];
+        for (int c = 1; c < C; ++c)
+            d += (*this)[c, 0] * a[0, c];
+
+        if (tg::traits::is_zero(d))
+            return {};
+
+        return a * (tg::one<T>() / d);
     }
 
     // comparison

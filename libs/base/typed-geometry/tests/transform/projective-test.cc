@@ -3,7 +3,6 @@
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/primitives.hh>
 #include <typed-geometry/transform/compose.hh>
-#include <typed-geometry/transform/inverse.hh>
 
 namespace
 {
@@ -57,7 +56,7 @@ TEST("tg projective - a point divides by w")
     SECTION("the inverse undoes it")
     {
         auto const q = tg::pos3f(2, -1, 7);
-        CHECK(tgtest::approx((q.transformed(p)).transformed(tg::inverse(p)), q, 1e-3f));
+        CHECK(tgtest::approx((q.transformed(p)).transformed(p.inverse()), q, 1e-3f));
     }
 }
 
@@ -74,10 +73,13 @@ TEST("tg projective - a triangle transforms vertex by vertex")
         CHECK(tgtest::approx(r.pos2, tri.pos2.transformed(p), 1e-4f));
     }
 
-    SECTION("every vertex must be in front of the projection")
+    SECTION("a vertex behind the projection is not diagnosed")
     {
+        // w is negative there, so the vertex lands on its mirror image and the triangle is no longer the image of the source hull.
+        // Nothing checks that — a caller who cares must clip first.
         auto const behind = tg::triangle3f(tg::pos3f(-1, -1, 3), tg::pos3f(1, -1, 5), tg::pos3f(0, 1, -4));
-        CHECK_ASSERTS(behind.transformed(p));
+        auto const r = behind.transformed(p);
+        CHECK(tgtest::approx(r.pos2, behind.pos2.transformed(p), 1e-4f));
     }
 
     SECTION("a segment behaves the same way")

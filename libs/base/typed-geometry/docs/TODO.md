@@ -19,7 +19,7 @@ Add entries as we discover them; remove them as they land.
 ## transform
 
 - **Transforms between two different dimensions.** `homogeneous_transform` carries a source and a target dimension, and every signature is written in terms of the pair — but the type `static_assert`s that they are equal, so lifting and projecting are not implemented.
-  What is missing: a storage that carries both dimensions (`transform_storage` still takes one), the rectangular cases of `composed` and `linear_mat`, and a decision on which capability classes even make sense off the diagonal — a rotation and a scaling are square by nature, `linear` / `affine` / `projective` are not.
+  What is missing: a representation that carries both dimensions (`transform_representation` still takes one), the rectangular cases of `composed` and `linear_mat`, and a decision on which capability classes even make sense off the diagonal — a rotation and a scaling are square by nature, `linear` / `affine` / `projective` are not.
 - **Faster rigid/similarity paths for `plane`.** The plane registration goes through the cofactor matrix for every class.
   That is correct everywhere and exact for a rigid transform, but a rigid one could just rotate the normal.
   Add the fast path if it ever shows up in a profile.

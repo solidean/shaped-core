@@ -86,7 +86,7 @@ static_assert(widens_to<tg::affine_transform3f, tg::rigid_transform3f>);
 
 // a point falls through to the transform, which owns the perspective divide
 static_assert(widens_to<tg::projective_transform3f, tg::projective_transform3f>);
-static_assert(requires(tg::pos3f const& p, tg::projective_transform3f const& t) { t.apply_pos(p); });
+static_assert(requires(tg::pos3f const& p, tg::projective_transform3f const& t) { t.transform(p); });
 } // namespace
 
 TEST("tg transformed - a vector has no projective image")

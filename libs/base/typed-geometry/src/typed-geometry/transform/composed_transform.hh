@@ -46,16 +46,18 @@ public:
         return obj.transformed(inner).transformed(outer);
     }
 
+    /// Applies the parts directly rather than routing back through `obj.transformed(*this)`.
+    /// vec, pos and bivec delegate their transformed() straight to this, so routing back would not terminate.
     template <class ObjT>
     [[nodiscard]] constexpr auto transform(ObjT const& obj) const
     {
-        return obj.transformed(*this);
+        return this->custom_transform(obj);
     }
 
     template <class ObjT>
     [[nodiscard]] constexpr auto operator()(ObjT const& obj) const
     {
-        return obj.transformed(*this);
+        return this->custom_transform(obj);
     }
 
     // comparison

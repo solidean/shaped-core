@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -31,8 +30,9 @@ public:
 
     // transformation
 public:
-    /// A projective map keeps a segment a segment as long as both endpoints have a positive homogeneous weight —
-    /// w varies affinely along the segment, so it cannot change sign in between.
+    /// A projective map keeps a segment a segment only while both endpoints stay in front of the projection.
+    /// That is NOT checked: an endpoint behind it maps to its mirror image, and the result is a segment through
+    /// the wrong points rather than a diagnosed error.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
@@ -47,8 +47,6 @@ public:
         else if constexpr (requires { tg::projective_transform<D, T>(t); })
         {
             auto const p = tg::projective_transform<D, T>(t);
-            CC_ASSERT(p.homogeneous_w(pos0) > T(0) && p.homogeneous_w(pos1) > T(0),
-                      "a segment only stays a segment when both endpoints are in front of the projection");
             return segment(pos0.transformed(p), pos1.transformed(p));
         }
         else

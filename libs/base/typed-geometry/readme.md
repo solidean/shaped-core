@@ -26,7 +26,7 @@ See [docs/structure.md](docs/structure.md) for the full roadmap and what is `[do
   Dimension-specific behavior is gated with `requires`.
 - **Extensible scalars.** Scalar capabilities (`sqrt`, trigonometry) route through `tg::scalar_traits<T>`, not `std::` directly, so custom scalar types (expression trees, double-double, bigint, …) can opt in.
   `length()`/`normalized()`/`distance()` are available only for scalars whose trait declares `has_sqrt`.
-- **Transforms carry their capabilities in the type.** `tg::rigid_transform3f` and `tg::affine_transform3f` are the same `homogeneous_transform<DSource, DTarget, T, Flags>` at different points of a 19-class lattice; the storage follows from the flags, and so does the result of `obj.transformed(t)` — a sphere stays a sphere under a similarity and becomes an ellipsoid under an affine map.
+- **Transforms carry their capabilities in the type.** `tg::rigid_transform3f` and `tg::affine_transform3f` are the same `homogeneous_transform<DSource, DTarget, T, Flags>` at different points of a 19-class lattice; the representation follows from the flags, and so does the result of `obj.transformed(t)` — a sphere stays a sphere under a similarity and becomes an ellipsoid under an affine map.
   The type also names the source and target dimension, so lifting and projecting between spaces can eventually be typed; only the square case is implemented today, and every named alias is square.
   `mat` remains linear-algebra data: there is no `mat * pos`.
 

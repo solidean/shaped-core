@@ -29,7 +29,7 @@ tg::projective_transform3f  // + a non-trivial homogeneous row
 ## What belongs here
 
 - The transform type, its factories and accessors, `composed` / `inverse` / `to_mat`.
-- `apply_pos` / `apply_linear` / `apply_bivec`, the pieces only the transform can compute because they depend on its storage.
+- The `transform` overloads for `pos`, `vec` and `bivec`, the pieces only the transform can compute because they depend on its representation.
 - The explicit widening constructor a geometric object branches on to decide what it becomes.
 
 ## What does NOT belong here
@@ -46,14 +46,14 @@ tg::projective_transform3f  // + a non-trivial homogeneous row
 A transform is a map between two spaces, and the type says which two.
 That is what lifting a 2D object into 3D, or projecting a 3D one onto a plane, needs from the type system: the shapes follow from the pair.
 
-- `apply_pos` takes a `pos<DSource, T>` and returns a `pos<DTarget, T>`; likewise `apply_linear` and `apply_bivec`.
+- `transform` takes a `pos<DSource, T>` and returns a `pos<DTarget, T>`; likewise for `vec` and `bivec`.
 - the linear part is a `mat<DSource, DTarget, T>` — one column per source axis, one row per target axis, matching tg's `mat<C, R>` convention.
 - the translation lives in the **target** space, so `to_mat()` is a `mat<DSource + 1, DTarget + 1, T>`.
-- `tg::inverse` swaps them: the inverse of a `<DSource, DTarget>` map is a `<DTarget, DSource>` one.
+- `inverse()` swaps them: the inverse of a `<DSource, DTarget>` map is a `<DTarget, DSource>` one.
 - `composed` chains them: `a.composed(b)` needs `b` to land in `a`'s source space, and runs from `b`'s source to `a`'s target.
 
 **Only the square case is implemented**, and the type `static_assert`s `DSource == DTarget`.
-The parameter and every signature above are in place; the lifting and projecting maths is not, and neither is the storage — `transform_storage` still carries a single dimension.
+The parameter and every signature above are in place; the lifting and projecting maths is not, and neither is the representation — `transform_representation` still carries a single dimension.
 
 The cost of the parameter is one more template argument on a type almost nobody spells directly.
 Every named alias is square, so `tg::rigid_transform3f` and `tg::affine_transform<D, T>` are unchanged, and so is every object's `transformed` chain, which asks about those aliases and nothing else.
@@ -61,7 +61,7 @@ Every named alias is square, so `tg::rigid_transform3f` and `tg::affine_transfor
 ### One type over a lattice, not a family of types
 
 `rigid_transform` and `affine_transform` as separate hand-written types would mean writing `composed`, `inverse`, `to_mat` and every conversion once per pair.
-Making the capability set a template parameter collapses that to one implementation with an `if constexpr` over the storage kinds, and it makes the *result class of a composition* computable rather than hand-maintained.
+Making the capability set a template parameter collapses that to one implementation with an `if constexpr` over the representation kinds, and it makes the *result class of a composition* computable rather than hand-maintained.
 
 The price is that the flags need real algebra behind them, which is the next three sections.
 
@@ -69,8 +69,11 @@ The price is that the flags need real algebra behind them, which is the next thr
 
 Several bit patterns denote the same set of transforms.
 If both spellings were allowed as template arguments, the same capability would have two distinct types.
-So `tg::canonical` reduces each to one representative, and the transform `static_assert`s that its flags are canonical.
+So `tg::impl::transform_canonical` reduces each to one representative, and the transform `static_assert`s that its flags are canonical.
 There are exactly **19** classes.
+
+All of it — the enum, `transform_class`, `transform_canonical`, `transform_is_canonical`, `transform_is_subclass` — lives in `tg::impl`.
+It is machinery for building the type, not a vocabulary callers reach for: a class is named through its alias, and containment is asked by attempting the widening conversion.
 
 Three rules carry the weight:
 
@@ -95,30 +98,30 @@ The factories enforce the promise: `similarity_transform3f::make_uniform_scaling
 `linear`, `affine` and `projective` carry the flag by nature — "a general invertible linear map" has no sign restriction, and tg does not model `GL+(D)` separately.
 Canonicalization also clears the flag when there is no scaling at all, since there would be nothing for it to apply to.
 
-The flag does **not** change storage: `linear_part()` strips it alongside translation and projection, so a signed similarity stores exactly what a similarity stores.
-That is why the storage table and the `if constexpr` chains key on `tg::impl::linear_kind::*` rather than on `transform_class::*` — the latter would silently mismatch for `linear`.
+The flag does **not** change the representation: `linear_part()` strips it alongside translation and projection, so a signed similarity stores exactly what a similarity stores.
+That is why the representation table and the `if constexpr` chains key on `tg::impl::linear_kind::*` rather than on `transform_class::*` — the latter would silently mismatch for `linear`.
 
-### Containment is `is_subclass`, never `has_all`
+### Containment is `transform_is_subclass`, never `has_all`
 
 This is the module's easiest mistake, so it is worth stating plainly.
 
 Canonicalization **clears** bits — `affine` drops `uniform_scaling`, because `non_uniform_scaling` subsumes it — which means:
 
 ```cpp
-tg::has_all(transform_class::affine, transform_class::similarity)   // FALSE
-tg::is_subclass(transform_class::similarity, transform_class::affine) // true
+tg::impl::has_all(transform_class::affine, transform_class::similarity)         // FALSE
+tg::impl::transform_is_subclass(transform_class::similarity, transform_class::affine) // true
 ```
 
 even though every similarity *is* an affine map.
-`canonical(a | b)` is the join in the class lattice, so containment is "the join is already the wider class":
+`transform_canonical(a | b)` is the join in the class lattice, so containment is "the join is already the wider class":
 
 ```cpp
-constexpr bool is_subclass(transform_flags sub, transform_flags super)
-{ return tg::canonical(sub | super) == super; }
+constexpr bool transform_is_subclass(transform_flags sub, transform_flags super)
+{ return tg::impl::transform_canonical(sub | super) == super; }
 ```
 
-A corollary worth remembering: `canonical` is **not monotone** under bit-subset.
-Every ordering question has to go through `is_subclass`.
+A corollary worth remembering: `transform_canonical` is **not monotone** under bit-subset.
+Every ordering question has to go through `transform_is_subclass`.
 
 The lattice laws — idempotence, commutativity, and that the join is the *least* upper bound — are proven exhaustively by a `consteval` sweep in `tests/transform/transform-flags-test.cc`. That test is the foundation the widening constructor and every dispatch branch rest on.
 
@@ -132,9 +135,9 @@ Explicit widening makes the question exact.
 
 Narrowing is not a constructor at all: it is lossy, and letting it into overload resolution would reintroduce the same problem.
 
-### Storage is chosen from the flags and is never exposed
+### The representation is chosen from the flags and is private
 
-| class | storage |
+| class | representation |
 |---|---|
 | translation | `vec` |
 | rotation | a unit complex number (2D) or a `quat` (3D) |
@@ -142,12 +145,16 @@ Narrowing is not a constructor at all: it is lossy, and letting it into overload
 | affine | `mat<D,D>` + `vec` |
 | projective | `mat<D+1,D+1>` |
 
-The transform holds exactly **one** member, a storage type selected by a small trait.
-A storage base class would have been the obvious alternative, but it loses standard-layout the moment both halves carry members — which is every common case.
+The transform holds exactly **one** member, a representation type selected by a small trait.
+A representation base class would have been the obvious alternative, but it loses standard-layout the moment both halves carry members — which is every common case.
 `[[no_unique_address]]` was likewise rejected: it is a no-op under the MSVC ABI, i.e. under both Windows compilers this repo targets.
 A pure translation gets its own layout instead of an identity linear part next to a vector, since an empty member still occupies a byte that alignment then rounds up to a whole scalar.
 
-Every storage member carries an explicit default initializer, because `vec`, `mat` and `quat` all default to **zero** — without them a default-constructed transform would be singular rather than the identity.
+Every representation member carries an explicit default initializer, because `vec`, `mat` and `quat` all default to **zero** — without them a default-constructed transform would be singular rather than the identity.
+
+The member is **private**, and `tg::impl::transform_representation_of(t)` is the one way to it.
+The accessors answer in geometric terms and pay a conversion where the class does not store that form — `linear_mat()` on a rigid transform builds a matrix out of a quaternion — so an object that knows the layout can take the shorter route.
+Routing that through a named `impl` function rather than a public member keeps it greppable and keeps the layout out of the API: it follows the class and changes with it, so a caller has to branch on `linear_part(Flags)` exactly as the transform does.
 
 ### Uniform scale is NOT folded into the quaternion
 
@@ -271,21 +278,26 @@ private:
 The object's chain asks for `requires { t.custom_transform(*this); }` first, and access checking is part of that question — an object that was not befriended does not see the branch at all and falls through to the normal chain.
 So the special case stays out of the public API, and the transform states exactly which objects it is allowed to answer for.
 
-### `pos`, `vec` and `bivec` branch on the class too
+### `pos`, `vec` and `bivec` are applied by the transform, not by themselves
 
-They are in `linalg`, below this module, but they use the same chain — because the class is what decides the answer, not which members the transform happens to have:
+They are in `linalg`, below this module, and they do **not** branch on the transform class.
+Their `transformed(t)` is one line: `return t.transform(*this);`.
 
-- a **translation** moves a `pos` by one addition, and leaves a `vec` or a `bivec` completely alone.
-  Neither the linear part nor a matrix is touched.
-- everything wider falls through to the transform's own `apply_pos` / `apply_linear` / `apply_bivec`,
-  which is where the linear part, the translation and any perspective divide belong.
-- `vec` and `bivec` stop at the affine branch, so a projective transform never reaches them at all.
+There is deliberately no `custom_transform` probe in front of it.
+That mechanism exists so a transform can special-case an object whose `transformed` it does not control; here the transform already owns the answer outright, so a second way in would only be a second place for the same decision.
 
-Naming the classes means the linalg headers include `transform/fwd.hh`. That is forward declarations only — it pulls in nothing from linalg, and the complete transform type is only needed at the call site, so the module dependency still runs one way.
+The transform answers them through three overloads of `transform`, one per base type, which sit alongside the template that routes every other object back to `obj.transformed(*this)`.
+Overload resolution picks the exact match, so a `vec` never reaches the template and the routing never cycles.
 
-What the linalg types do *not* do is re-derive the maths.
-`apply_pos`, `apply_linear` and `apply_bivec` stay on the transform, because only it knows whether the linear part is a quaternion, a scalar or a matrix; going through `linear_mat()` would build a 3x3 for what may be a single quat.
+That split is deliberate.
+Only the transform knows whether its linear part is a quaternion, a scalar or a matrix, and the narrow classes want the cheap answer — a pure translation leaves a `vec` and a `bivec` untouched and moves a `pos` by one addition, with no linear part read at all.
+Deciding that on the linalg side would mean going through `linear_mat()`, which builds a 3x3 for what may be a single quat.
 `bivec` has a second reason: the cofactor it needs lives in `cross.hh`, which includes `bivec.hh`.
+
+Because the linalg types no longer name the transform classes, they no longer include `transform/fwd.hh` at all — the module dependency is now one call, not a set of `requires` probes.
+
+A projective transform has no answer for a `vec` or a `bivec`, and says so: those overloads `static_assert` rather than quietly applying something.
+`composed_transform` applies its two parts directly in `transform` rather than routing back through `obj.transformed`, since a base type delegating into it would otherwise not terminate.
 
 ### An unsupported pair is a compile error on purpose
 

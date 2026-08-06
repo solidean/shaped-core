@@ -17,16 +17,16 @@ namespace tg::impl
 /// The type that should eventually replace it is a real tg::rotor<D, T> in linalg,
 /// which would also give the 2D rotation a public name.
 template <int D, class T>
-struct rotation_storage;
+struct rotation_representation;
 
 template <class T>
-struct rotation_storage<2, T>
+struct rotation_representation<2, T>
 {
     // unit complex number cos + i*sin
     T cos = tg::one<T>();
     T sin = {};
 
-    [[nodiscard]] static rotation_storage make_rotation(angle<T> a)
+    [[nodiscard]] static rotation_representation make_rotation(angle<T> a)
         requires(tg::traits::has_trigonometry<T>)
     {
         auto const [s, c] = tg::sin_cos(a);
@@ -45,56 +45,45 @@ struct rotation_storage<2, T>
     }
 
     /// the rotation that applies `b` first, then this one.
-    [[nodiscard]] constexpr rotation_storage compose(rotation_storage const& b) const
+    [[nodiscard]] constexpr rotation_representation compose(rotation_representation const& b) const
     {
         return {.cos = cos * b.cos - sin * b.sin, .sin = sin * b.cos + cos * b.sin};
     }
 
-    [[nodiscard]] constexpr rotation_storage inverse() const { return {.cos = cos, .sin = -sin}; }
+    [[nodiscard]] constexpr rotation_representation inverse() const { return {.cos = cos, .sin = -sin}; }
 
-    [[nodiscard]] constexpr mat<2, 2, T> to_mat() const
+    [[nodiscard]] constexpr mat<2, 2, T> to_rotation_matrix() const
     {
         return mat<2, 2, T>::make_from_cols(vec<2, T>(cos, sin), vec<2, T>(-sin, cos));
     }
 
-    [[nodiscard]] friend constexpr bool operator==(rotation_storage const&, rotation_storage const&) = default;
+    [[nodiscard]] friend constexpr bool operator==(rotation_representation const&, rotation_representation const&)
+        = default;
 };
 
 template <class T>
-struct rotation_storage<3, T>
+struct rotation_representation<3, T>
 {
     quat<T> rotation = quat<T>::make_identity();
 
-    [[nodiscard]] static constexpr rotation_storage make_rotation(quat<T> const& q) { return {.rotation = q}; }
+    [[nodiscard]] static constexpr rotation_representation make_rotation(quat<T> const& q) { return {.rotation = q}; }
 
     [[nodiscard]] constexpr quat<T> to_quat() const { return rotation; }
 
     [[nodiscard]] constexpr vec<3, T> apply(vec<3, T> const& v) const { return rotation * v; }
 
     /// the rotation that applies `b` first, then this one.
-    [[nodiscard]] constexpr rotation_storage compose(rotation_storage const& b) const
+    [[nodiscard]] constexpr rotation_representation compose(rotation_representation const& b) const
     {
         return {.rotation = rotation * b.rotation};
     }
 
-    [[nodiscard]] constexpr rotation_storage inverse() const { return {.rotation = rotation.conjugate()}; }
+    [[nodiscard]] constexpr rotation_representation inverse() const { return {.rotation = rotation.conjugate()}; }
 
-    [[nodiscard]] constexpr mat<3, 3, T> to_mat() const
-    {
-        T const x = rotation.data[0];
-        T const y = rotation.data[1];
-        T const z = rotation.data[2];
-        T const w = rotation.data[3];
-        T const two = T(2);
-        T const one = tg::one<T>();
+    [[nodiscard]] constexpr mat<3, 3, T> to_rotation_matrix() const { return rotation.to_rotation_matrix(); }
 
-        return mat<3, 3, T>::make_from_cols(
-            vec<3, T>(one - two * (y * y + z * z), two * (x * y + z * w), two * (x * z - y * w)), //
-            vec<3, T>(two * (x * y - z * w), one - two * (x * x + z * z), two * (y * z + x * w)), //
-            vec<3, T>(two * (x * z + y * w), two * (y * z - x * w), one - two * (x * x + y * y)));
-    }
-
-    [[nodiscard]] friend constexpr bool operator==(rotation_storage const&, rotation_storage const&) = default;
+    [[nodiscard]] friend constexpr bool operator==(rotation_representation const&, rotation_representation const&)
+        = default;
 };
 
 } // namespace tg::impl

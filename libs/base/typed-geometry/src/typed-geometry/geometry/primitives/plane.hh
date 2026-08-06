@@ -3,7 +3,6 @@
 #include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
-#include <typed-geometry/linalg/mat_ops.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
@@ -60,10 +59,10 @@ public:
         else if constexpr (requires { tg::affine_transform<D, T>(t); } && tg::traits::has_sqrt<T>)
         {
             auto const a = tg::affine_transform<D, T>(t);
-            auto const n = tg::normalize(tg::cofactor(a.linear_mat()) * normal);
+            auto const n = tg::normalize(a.linear_mat().cofactor() * normal);
 
             // dist is recovered from the image of `dist * normal`, a point known to be on the plane
-            auto const on_plane = a.apply_linear(normal * dist) + a.translation();
+            auto const on_plane = (normal * dist).transformed(a) + a.translation();
             return plane(n, tg::dot(n, on_plane));
         }
         else if constexpr (requires { tg::projective_transform<D, T>(t); } && tg::traits::has_sqrt<T>)
@@ -75,7 +74,7 @@ public:
                 h.data[i] = normal.data[i];
             h.data[D] = -dist;
 
-            auto const image = tg::transpose(tg::inverse(p.to_mat())) * h;
+            auto const image = p.to_mat().inverse().transposed() * h;
 
             vec<D, T> n;
             for (int i = 0; i < D; ++i)

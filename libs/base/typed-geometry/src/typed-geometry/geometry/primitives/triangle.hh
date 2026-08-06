@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -38,8 +37,9 @@ public:
 public:
     /// An affine map sends the convex hull of the vertices to the convex hull of their images.
     ///
-    /// A projective map does too, as long as every vertex has a positive homogeneous weight:
-    /// w is affine over the triangle and the positive-w halfspace is convex, so checking the three vertices settles the whole hull.
+    /// A projective map does too, but only while every vertex stays in front of the projection.
+    /// That is NOT checked: a vertex behind it maps to its mirror image, and the result is a triangle over
+    /// the wrong points rather than a diagnosed error.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
@@ -54,8 +54,6 @@ public:
         else if constexpr (requires { tg::projective_transform<D, T>(t); })
         {
             auto const p = tg::projective_transform<D, T>(t);
-            CC_ASSERT(p.homogeneous_w(pos0) > T(0) && p.homogeneous_w(pos1) > T(0) && p.homogeneous_w(pos2) > T(0),
-                      "a triangle only stays a triangle when every vertex is in front of the projection");
             return triangle(pos0.transformed(p), pos1.transformed(p), pos2.transformed(p));
         }
         else

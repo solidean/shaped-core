@@ -123,3 +123,44 @@ TEST("tg quat - measures")
         CHECK(tgtest::approx(q.conjugate() * (q * v), v));
     }
 }
+
+TEST("tg quat - to_mat")
+{
+    auto const quarter = tg::angle_f::make_from_degree(90);
+
+    SECTION("the identity maps to the identity matrix")
+    {
+        CHECK(tg::quat_f::make_identity().to_rotation_matrix() == tg::mat3f::identity);
+    }
+
+    SECTION("it agrees with mat's own rotations")
+    {
+        for (auto const a : {tg::angle_f::make_from_degree(37), quarter, tg::angle_f::make_from_degree(-115)})
+        {
+            CHECK(tgtest::approx(tg::quat_f::make_rotation_x(a).to_rotation_matrix(), tg::mat3f::make_rotation_x(a),
+                                 1e-5f));
+            CHECK(tgtest::approx(tg::quat_f::make_rotation_y(a).to_rotation_matrix(), tg::mat3f::make_rotation_y(a),
+                                 1e-5f));
+            CHECK(tgtest::approx(tg::quat_f::make_rotation_z(a).to_rotation_matrix(), tg::mat3f::make_rotation_z(a),
+                                 1e-5f));
+        }
+    }
+
+    SECTION("the matrix and the sandwich agree on vectors")
+    {
+        auto const q
+            = tg::quat_f::make_rotation_axis_angle(tg::vec3f(1, 2, -1).normalized(), tg::angle_f::make_from_degree(63));
+        auto const m = q.to_rotation_matrix();
+
+        for (auto const& v : {tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0), tg::vec3f(2, -3, 1)})
+            CHECK(tgtest::approx(m * v, q * v, 1e-5f));
+    }
+
+    SECTION("it is a rotation: orthonormal and orientation preserving")
+    {
+        auto const m
+            = tg::quat_f::make_rotation_axis_angle(tg::vec3f(0, 1, 1).normalized(), quarter).to_rotation_matrix();
+        CHECK(tgtest::approx(m.transposed() * m, tg::mat3f::identity, 1e-5f));
+        CHECK(tgtest::approx(m.determinant(), 1.0f, 1e-5f));
+    }
+}

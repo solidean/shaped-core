@@ -36,20 +36,19 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/bivec.hh
     src/typed-geometry/linalg/cross.hh
     src/typed-geometry/linalg/mat.hh
-    src/typed-geometry/linalg/mat_ops.hh
     src/typed-geometry/linalg/quat.hh
     src/typed-geometry/linalg/linalg.hh
     src/typed-geometry/linalg/all.hh
 
     src/typed-geometry/transform/fwd.hh
     src/typed-geometry/transform/transform_flags.hh
-    src/typed-geometry/transform/impl/rotation_storage.hh
-    src/typed-geometry/transform/impl/transform_storage.hh
+    src/typed-geometry/transform/impl/rotation_representation.hh
+    src/typed-geometry/transform/impl/transform_representation.hh
+    src/typed-geometry/transform/impl/transform_representation_access.hh
     src/typed-geometry/transform/homogeneous_transform.hh
 
     src/typed-geometry/transform/composed_transform.hh
     src/typed-geometry/transform/compose.hh
-    src/typed-geometry/transform/inverse.hh
     src/typed-geometry/transform/transform.hh
     src/typed-geometry/transform/all.hh
 
@@ -102,7 +101,6 @@ if(SC_BUILD_TESTS)
         tests/linalg/pos-test.cc
         tests/linalg/bivec-test.cc
         tests/linalg/mat-test.cc
-        tests/linalg/mat-ops-test.cc
         tests/linalg/quat-test.cc
 
         tests/transform/transform-flags-test.cc

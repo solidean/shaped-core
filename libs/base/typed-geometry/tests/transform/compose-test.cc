@@ -2,7 +2,6 @@
 
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/primitives.hh>
-#include <typed-geometry/linalg/mat_ops.hh>
 #include <typed-geometry/transform/compose.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
@@ -53,14 +52,17 @@ static_assert(!composes_with<rotation_t, tg::pos3f>);
 static_assert(!multiplies_with<rotation_t, translation_t>);
 
 /// A transform that is not a homogeneous_transform and has no `composed`, so tg::compose has to nest it.
+///
+/// The base types delegate straight to `transform`, so a transform answering for pos or vec writes those
+/// overloads — custom_transform is for geometric objects, which decide for themselves.
 struct swap_xy
 {
-    [[nodiscard]] constexpr tg::pos3f custom_transform(tg::pos3f const& p) const
+    [[nodiscard]] constexpr tg::pos3f transform(tg::pos3f const& p) const
     {
         return tg::pos3f(p.data[1], p.data[0], p.data[2]);
     }
 
-    [[nodiscard]] constexpr tg::vec3f custom_transform(tg::vec3f const& v) const
+    [[nodiscard]] constexpr tg::vec3f transform(tg::vec3f const& v) const
     {
         return tg::vec3f(v.data[1], v.data[0], v.data[2]);
     }
@@ -124,7 +126,7 @@ TEST("tg compose - falls back to a composed_transform when the two cannot fuse")
         auto const c = tg::compose(swap_xy(), rt);
         auto const p = tg::pos3f(4, -1, 2);
 
-        CHECK(tgtest::approx(c(p), swap_xy().custom_transform(rt(p)), 1e-4f));
+        CHECK(tgtest::approx(c(p), swap_xy().transform(rt(p)), 1e-4f));
         CHECK(tgtest::approx(c(p), p.transformed(rt).transformed(swap_xy()), 1e-4f));
         CHECK(tgtest::approx(c.transform(p), c(p), 1e-4f));
         CHECK(tgtest::approx(p.transformed(c), c(p), 1e-4f));
@@ -135,7 +137,7 @@ TEST("tg compose - falls back to a composed_transform when the two cannot fuse")
         auto const c = tg::compose(rt, swap_xy());
         auto const p = tg::pos3f(4, -1, 2);
 
-        CHECK(tgtest::approx(c(p), rt(swap_xy().custom_transform(p)), 1e-4f));
+        CHECK(tgtest::approx(c(p), rt(swap_xy().transform(p)), 1e-4f));
         CHECK(tgtest::approx(c(p), p.transformed(swap_xy()).transformed(rt), 1e-4f));
     }
 

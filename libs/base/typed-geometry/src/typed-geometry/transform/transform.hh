@@ -4,5 +4,4 @@
 
 #include <typed-geometry/transform/compose.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
-#include <typed-geometry/transform/inverse.hh>
 #include <typed-geometry/transform/transform_flags.hh>

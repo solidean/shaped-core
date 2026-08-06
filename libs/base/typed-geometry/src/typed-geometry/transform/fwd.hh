@@ -6,11 +6,11 @@
 namespace tg
 {
 /// a transform of the capability class `Flags`, mapping DSource-dimensional space to DTarget-dimensional space.
-/// Flags must be canonical; the storage is chosen from them and is not part of the API.
+/// Flags must be canonical; the representation is chosen from them and is not part of the API.
 ///
 /// The two dimensions are what lets a transform lift or project between spaces.
 /// Only the square case is implemented today — the type asserts DSource == DTarget.
-template <int DSource, int DTarget, class T, transform_flags Flags>
+template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
 struct homogeneous_transform;
 
 /// two arbitrary transforms held side by side, applied inner first — what tg::compose falls back to.
@@ -28,38 +28,39 @@ struct composed_transform;
 //
 
 template <int D, class T>
-using identity_transform = homogeneous_transform<D, D, T, transform_class::identity>;
+using identity_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::identity>;
 template <int D, class T>
-using translation_transform = homogeneous_transform<D, D, T, transform_class::translation>;
+using translation_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::translation>;
 template <int D, class T>
-using rotation_transform = homogeneous_transform<D, D, T, transform_class::rotation>;
+using rotation_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::rotation>;
 template <int D, class T>
-using scaling_transform = homogeneous_transform<D, D, T, transform_class::scaling>;
+using scaling_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::scaling>;
 template <int D, class T>
-using scaling_translation_transform = homogeneous_transform<D, D, T, transform_class::scaling_translation>;
+using scaling_translation_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::scaling_translation>;
 template <int D, class T>
-using linear_transform = homogeneous_transform<D, D, T, transform_class::linear>;
+using linear_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::linear>;
 template <int D, class T>
-using rigid_transform = homogeneous_transform<D, D, T, transform_class::rigid>;
+using rigid_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::rigid>;
 template <int D, class T>
-using similarity_transform = homogeneous_transform<D, D, T, transform_class::similarity>;
+using similarity_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::similarity>;
 
 // the signed variants, which may reverse orientation
 template <int D, class T>
-using signed_scaling_transform = homogeneous_transform<D, D, T, transform_class::signed_scaling>;
+using signed_scaling_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::signed_scaling>;
 template <int D, class T>
-using signed_scaling_translation_transform = homogeneous_transform<D, D, T, transform_class::signed_scaling_translation>;
+using signed_scaling_translation_transform
+    = homogeneous_transform<D, D, T, tg::impl::transform_class::signed_scaling_translation>;
 template <int D, class T>
-using signed_similarity_transform = homogeneous_transform<D, D, T, transform_class::signed_similarity>;
+using signed_similarity_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::signed_similarity>;
 template <int D, class T>
-using affine_transform = homogeneous_transform<D, D, T, transform_class::affine>;
+using affine_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::affine>;
 template <int D, class T>
-using projective_transform = homogeneous_transform<D, D, T, transform_class::projective>;
+using projective_transform = homogeneous_transform<D, D, T, tg::impl::transform_class::projective>;
 
 /// canonicalizing spelling, for return types and other non-deduced positions only.
 /// Never use this in a function parameter or a partial specialization — Flags would not deduce.
-template <int DSource, int DTarget, class T, transform_flags Flags>
-using transform_for = homogeneous_transform<DSource, DTarget, T, tg::canonical(Flags)>;
+template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
+using transform_for = homogeneous_transform<DSource, DTarget, T, tg::impl::transform_canonical(Flags)>;
 
 //
 // Concrete typedefs (suffix: f = f32, d = f64)

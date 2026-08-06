@@ -4,11 +4,6 @@
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-// transformed() names the transform classes to branch on them.
-// This is forward declarations only — transform/fwd.hh pulls in nothing from linalg, so the
-// dependency stays one-way; the complete type is needed at the call site, not here.
-#include <typed-geometry/transform/fwd.hh>
-
 #include <initializer_list>
 
 namespace tg
@@ -105,28 +100,15 @@ public:
 
     // transformation
 public:
-    /// the image of this point under `t`, branching on what the transform's class actually is.
+    /// the image of this point under `t`, including the perspective divide if the transform has one.
     ///
-    /// The narrow classes get the cheap answer directly: the identity returns the point, and a pure
-    /// translation is a single addition, with no linear part touched at all.
+    /// The transform does the work, unconditionally: going through linear_mat() here would build a matrix for
+    /// what may be a single quaternion, and only the transform knows which.
+    /// A transform that wants to answer for a pos writes that answer in its own `transform`.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
-        if constexpr (requires { t.custom_transform(*this); })
-            return t.custom_transform(*this);
-
-        else if constexpr (requires { tg::identity_transform<D, T>(t); })
-            return *this;
-        else if constexpr (requires { tg::translation_transform<D, T>(t); })
-            return *this + t.translation();
-
-        // everything else — linear, affine, projective — is applied by the transform, which is the only
-        // thing that knows its storage: going through linear_mat() here would build a matrix for what may be a single quaternion.
-        // Every class widens to projective, so this is the general case.
-        else if constexpr (requires { tg::projective_transform<D, T>(t); })
-            return t.apply_pos(*this);
-        else
-            static_assert(false, "tg: this transform cannot be applied to a point");
+        return t.transform(*this);
     }
 
     // comparison

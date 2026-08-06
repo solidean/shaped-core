@@ -140,6 +140,15 @@ m * v;                                           // vec<C> -> vec<R>
 a * b;                                           // mat<C,R> * mat<K,C> -> mat<K,R>
 // rotations (3x3, requires has_trigonometry<T>):
 tg::mat3f::make_rotation_x(a);  ..._y(a);  ..._z(a);  ..._axis_angle(axis_vec3, a);
+
+m.transposed();                                  // mat<R,C> — works for rectangular m too
+m.determinant();                                 // T   — square only
+m.inverse();                                     // mat — zero matrix if m is singular
+m.adjugate();                                    // mat — m.adjugate() * m == m.determinant() * identity
+m.cofactor();                                    // mat — det(m) * m.inverse().transposed(), division-free
+// determinant/adjugate/cofactor/inverse are written out to 4x4 only; larger N is not out of scope,
+// the expansions are simply not there yet and a bigger matrix static_asserts.
+// cofactor is what a NORMAL transforms by; adjugate stays defined for singular matrices.
 ```
 
 ## quat — quaternion rotation
@@ -157,39 +166,20 @@ q.length();  q.normalized();                      // requires has_sqrt;  q.lengt
 q.axis();                                         // vec3 — unit axis (zero vec if no rotation), requires has_sqrt
 q.angle();                                        // angle — requires has_sqrt + has_trigonometry
 q.conjugate();                                    // inverse rotation for a unit quat
-```
-
-## mat_ops — square-matrix operations
-
-```cpp
-#include <typed-geometry/linalg/mat_ops.hh>
-tg::transpose(m);                          // mat<R,C> — works for rectangular m too
-tg::determinant(m);                        // T        — square only, N <= 4
-tg::inverse(m);                            // mat      — zero matrix if m is singular
-tg::adjugate(m);                           // mat      — adjugate(m) * m == determinant(m) * identity
-tg::cofactor(m);                           // mat      — det(m) * transpose(inverse(m)), division-free
-// N <= 4 because tg is 2D/3D: the linear part tops out at mat3, the homogeneous matrix at mat4.
-// cofactor is what a NORMAL transforms by; adjugate stays defined for singular matrices.
+q.to_rotation_matrix();                           // mat3 — q must be UNIT; a non-unit one folds |q|^2 in
 ```
 
 ## transform — one type over a capability lattice
 
 ```cpp
-#include <typed-geometry/transform/transform_flags.hh>
-tg::transform_flags;                       // enum class: translation, uniform_scaling,
-                                           //   non_uniform_scaling, negative_scaling, rotation,
-                                           //   general_linear, projection
-tg::transform_class::identity;             // ... translation, uniform_scaling, scaling, rotation,
-                                           //     rigid, scaled_rotation, similarity, linear, affine,
-                                           //     scaling_translation, uniform_scaling_translation, projective
-                                           // + signed_ variants that allow a NEGATIVE factor:
-                                           //     signed_uniform_scaling, signed_scaling, signed_scaled_rotation,
-                                           //     signed_scaling_translation, signed_uniform_scaling_translation,
-                                           //     signed_similarity   (linear/affine/projective include it already)
-tg::canonical(f);                          // transform_flags — the class representative (19 classes)
-tg::is_canonical(f);                       // bool
-tg::is_subclass(sub, super);               // bool — USE THIS, not has_all. See the Gotchas.
-tg::has_any(f);  tg::has_all(f, part);  tg::without(f, x);  f | g;  f & g;  ~f
+// The flag machinery lives in tg::impl and is NOT how you name a class — use the aliases below.
+// tg::impl::transform_flags        enum class: translation, uniform_scaling, non_uniform_scaling,
+//                                  negative_scaling, rotation, general_linear, projection
+// tg::impl::transform_class::rigid ... identity, translation, uniform_scaling, scaling, rotation,
+//                                  scaled_rotation, similarity, linear, affine, scaling_translation,
+//                                  uniform_scaling_translation, projective, and signed_ variants
+// tg::impl::transform_canonical(f) / transform_is_canonical(f) / transform_is_subclass(sub, super)
+// tg::impl::has_any / has_all / without   — the flag-set stand-in, until cc::flags exists
 ```
 
 ```cpp
@@ -215,38 +205,42 @@ t.translation();  t.rotation();  t.uniform_scale();  t.scale();   // gated on th
                                            // translation() is in TARGET space; scale() indexes SOURCE axes
 t.linear_mat();                            // mat<DSource,DTarget> — not for a projective transform
 t.to_mat();                                // mat<DSource+1,DTarget+1> — translation in the last column
-t.apply_linear(v);                         // vec<DSource> -> vec<DTarget> — the linear part only
-t.apply_bivec(b);                          // bivec — the 2nd exterior power of the linear part
-t.apply_pos(p);                            // pos<DSource> -> pos<DTarget> — linear part, translation, any divide
-t.homogeneous_w(p);                        // T   — projective only; positive means "in front"
 auto a = tg::affine_transform3f(rigid);    // widening: lossless but EXPLICIT, and only compiles if
                                            //   the source class really IS a member of the target one.
                                            //   That is also the dispatch mechanism — see obj.transformed
+tg::impl::transform_representation_of(t);  // the members themselves — the back door for an object that
+                                           //   can beat the accessors. Layout follows the class, so branch
+                                           //   on tg::impl::linear_part(Flags) exactly as the transform does.
 ```
 
 ```cpp
-p.transformed(t);                          // pos   — incl. the projective divide (asserts w != 0)
+t.transform(v);  t(v);                     // vec<DSource> -> vec<DTarget> — the linear part only
+t.transform(b);  t(b);                     // bivec — the 2nd exterior power of the linear part
+t.transform(p);  t(p);                     // pos<DSource> -> pos<DTarget> — linear part, translation, any divide
+p.transformed(t);                          // pos   — delegates to t.transform(p); asserts w != 0
 v.transformed(t);                          // vec   — NOT available for a projective transform
 b.transformed(t);                          // bivec — by the 2nd exterior power, i.e. cofactor in 3D
+// vec, pos and bivec are applied BY the transform: only it knows whether its linear part is a
+// quaternion, a scalar or a matrix. Their transformed() is a bare delegation — no custom_transform
+// probe, since the transform already owns the answer. A non-tg transform answers them the same way.
 ```
 
 ```cpp
 a.composed(b);                             // applies b FIRST, then a — NO operator*
-                                           // result class = canonical(FA | FB), so it can widen
+                                           // result class = the join of FA and FB, so it can widen
                                            // opt-in per type; probe with requires { a.composed(b); }
 #include <typed-geometry/transform/compose.hh>
 tg::compose(a, b);                         // a.composed(b) if that exists, else tg::composed_transform<A,B>
                                            // — a compile-time choice, so the return type says which
 tg::composed_transform<A, B>(outer, inner);  // stores both; applies `inner` first, then `outer`
                                            // composes ANY two transforms, at the cost of not fusing
-#include <typed-geometry/transform/inverse.hh>
-tg::inverse(t);                            // same class — every canonical class is closed under it
+t.inverse();                               // same class — every canonical class is closed under it
                                            // dimensions swap: <DSource,DTarget> inverts to <DTarget,DSource>
 ```
 
 ```cpp
 obj.transformed(t);   // the return type depends on the object AND the transform class
-t.transform(obj);     // the mirror spelling; routes straight back to obj.transformed(t)
+t.transform(obj);     // the mirror spelling; routes back to obj.transformed(t) for everything but vec/pos/bivec
 t(obj);               // the call spelling of t.transform(obj) — application, NOT composition
 // These three are the same value, by construction:
 //   a(b(obj))  ==  a.composed(b).transform(obj)  ==  obj.transformed(b).transformed(a)
@@ -348,7 +342,8 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 - **Factories are `make_*`** (`make_from_values`, `make_unit`, `make_rotation_z`, …). Distinguished values are static constants (`vec::zero`, `mat::identity`, …) — runtime consts, not `constexpr`.
 - **`mat`'s multi-arg `m[c, r]` needs parentheses inside macros**: `CHECK((m[0,0]) == 1)`, else the comma is read as a macro-argument separator.
 - **`mat` default is the ZERO matrix, not identity** — use `tg::matNf::identity`. A **transform**, by contrast, defaults to the **identity**: a zero-filled transform would be singular.
-- **Transform containment is `tg::is_subclass`, NEVER `tg::has_all`.** `canonical()` clears bits — `affine` drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is `false` even though every similarity is affine.
+- **Transform containment is `tg::impl::transform_is_subclass`, NEVER `has_all`.** `transform_canonical()` clears bits — `affine` drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is `false` even though every similarity is affine.
+  Reaching for either means you are in the flag machinery; day to day you name a class through its alias and let the widening constructor answer the containment question.
 - **Widening a transform is explicit**: `tg::affine_transform3f(rigid)`, not an implicit conversion.
   An implicit one would make two registrations at different classes an ambiguous overload set.
   Narrowing is not a constructor at all.

@@ -124,8 +124,7 @@ linalg/
   comp_ops.hh      [done]     component-wise min/max
   bivec.hh         [done]     + zero; C(D,2) components (3D order {yz, zx, xy})
   cross.hh         [done]     cross, dual, undual (3D; the {yz,zx,xy} order makes dual the identity)
-  mat.hh           [done]     col-major, zero/identity, rotations, products
-  mat_ops.hh       [done]     transpose, determinant, adjugate, cofactor, inverse (N <= 4)
+  mat.hh           [done]     col-major, zero/identity, rotations, products, transposed/determinant/adjugate/cofactor/inverse
   quat.hh          [done]     zero/identity, rotations, products, axis()/angle()
   linalg.hh        [done]
   all.hh           [done]
@@ -135,8 +134,9 @@ linalg/
   decomposition.hh [planned]
 ```
 
-`mat_ops` stops at 4x4 because tg is 2D/3D: the linear part tops out at `mat3` and the homogeneous matrix at `mat4`, so there is no general-N path to write.
-`cofactor` — `determinant(m) * transpose(inverse(m))`, without the division — is what a normal transforms by; `adjugate` is its transpose and stays defined for singular matrices.
+`determinant`, `adjugate`, `cofactor` and `inverse` are written out per dimension and stop at 4x4 today.
+That is the state of the implementation, not a scope decision: `N > 4` may well land, and until it does a larger matrix `static_assert`s rather than silently misbehaving.
+`cofactor` — `m.determinant() * m.inverse().transposed()`, without the division — is what a normal transforms by; `adjugate` is its transpose and stays defined for singular matrices.
 `inverse` returns the zero matrix for a singular input instead of asserting — degenerate data is common enough that failing on it is the worse default.
 
 Important semantic rules:
@@ -173,14 +173,13 @@ Semantic transformation types.
 
 ```txt
 transform/
-  transform_flags.hh          [done]  the capability lattice: canonical(), is_subclass(), transform_class::*
-  homogeneous_transform.hh    [done]  the one transform type, <DSource, DTarget, T, Flags>; storage chosen from the flags, plus composed / transform / operator()
-  impl/rotation_storage.hh    [done]  2D unit complex / 3D quat, identity by default
-  impl/transform_storage.hh   [done]  the flags -> layout table
-  composed_transform.hh       [done]  two arbitrary transforms held side by side, applied in order
-  compose.hh                  [done]  tg::compose(a, b): fuse via composed() if possible, else nest
-  inverse.hh                  [done]  tg::inverse(t)
-  fwd.hh, transform.hh, all.hh  [done]
+  transform_flags.hh              [done]  the capability lattice, all of it in tg::impl
+  homogeneous_transform.hh        [done]  the one transform type, <DSource, DTarget, T, Flags>; representation chosen from the flags, plus composed / inverse / transform / operator()
+  impl/rotation_representation.hh [done]  2D unit complex / 3D quat, identity by default
+  impl/transform_representation.hh [done] the flags -> layout table
+  composed_transform.hh           [done]  two arbitrary transforms held side by side, applied in order
+  compose.hh                      [done]  tg::compose(a, b): fuse via composed() if possible, else nest
+  fwd.hh, transform.hh, all.hh    [done]
 ```
 
 There is **one** transform type, `homogeneous_transform<DSource, DTarget, T, Flags>`, and the named classes are aliases over it — all of them square:
@@ -192,16 +191,18 @@ tg::affine_transform3f      // a general linear part | translation
 tg::projective_transform3f  // + a non-trivial homogeneous row
 ```
 
-`Flags` selects the storage and is never exposed — a rigid transform is a quat plus a vec, an affine one a mat plus a vec, a pure translation just a vec.
+`Flags` selects the representation, which is a private member — a rigid transform is a quat plus a vec, an affine one a mat plus a vec, a pure translation just a vec.
+`tg::impl::transform_representation_of(t)` is the one way to it, for an object that can beat the public accessors by reading the members directly.
 Default construction is the identity, not a zero-filled value.
 
 The **source and target dimensions** are what will make lifting and projecting typed: a `pos<DSource, T>` goes in, a `pos<DTarget, T>` comes out, the linear part is a `mat<DSource, DTarget, T>` and the translation lives in the target space.
-`tg::inverse` swaps the pair, and `composed` chains it.
+`t.inverse()` swaps the pair, and `composed` chains it.
 Only the square case is implemented — the type `static_assert`s `DSource == DTarget` — so the parameter is in place and the mixed-dimension maths is not.
 
 ### The flag lattice
 
-Several bit patterns denote the same set of transforms, so `tg::canonical` reduces each to one representative; there are exactly **13** classes.
+Several bit patterns denote the same set of transforms, so `tg::impl::transform_canonical` reduces each to one representative; there are exactly **13** classes.
+The whole lattice lives in `tg::impl`: it is machinery, and a class is named through its alias.
 Two of its rules are worth knowing:
 
 - rotation together with non-uniform scaling is a **general linear map**. `R1 S1 R2 S2` is not of the form `R S`, and by the SVD the closure really is all of `GL(D)` — so the class widens rather than pretending to stay separable.
@@ -209,8 +210,8 @@ Two of its rules are worth knowing:
   The `signed_*` classes opt in, and the factories assert the promise.
   In 3D `signed_similarity` is the full conformal group, since a negative uniform scale composed with a half-turn is a plane reflection — which is why a sphere still maps to a sphere under it.
 
-**Containment is `tg::is_subclass`, never `has_all`.** Canonicalization *clears* bits — affine drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is false even though every similarity is affine.
-`canonical(a | b)` is the join, so containment is "the join is already the wider class".
+**Containment is `tg::impl::transform_is_subclass`, never `has_all`.** Canonicalization *clears* bits — affine drops `uniform_scaling` because `non_uniform_scaling` subsumes it — so `has_all(affine, similarity)` is false even though every similarity is affine.
+`transform_canonical(a | b)` is the join, so containment is "the join is already the wider class".
 
 Widening between classes is lossless but **explicit**, and narrowing is not a constructor at all.
 That widening constructor is also the dispatch mechanism — see the object handshake below.
@@ -226,7 +227,7 @@ t.transform(obj)        // the mirror spelling; t(obj) is the call spelling of i
 
 a.composed(b)           // applies b FIRST, fusing into one transform of the join class. NO operator*
 tg::compose(a, b)       // a.composed(b) where that exists, else a composed_transform holding both
-tg::inverse(t)          // every canonical class is closed under it, so the class is unchanged
+t.inverse()             // every canonical class is closed under it, so the class is unchanged
 t.to_mat()              // the homogeneous matrix
 ```
 

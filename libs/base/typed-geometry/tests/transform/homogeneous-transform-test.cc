@@ -6,7 +6,7 @@
 
 #include <type_traits>
 
-namespace tc = tg::transform_class;
+namespace tc = tg::impl::transform_class;
 
 static_assert(std::is_trivially_copyable_v<tg::rigid_transform3f>, "a transform should be trivially copyable");
 static_assert(std::is_trivially_copyable_v<tg::affine_transform3f>, "a transform should be trivially copyable");
@@ -14,7 +14,7 @@ static_assert(std::is_trivially_copyable_v<tg::projective_transform3f>, "a trans
 static_assert(std::is_standard_layout_v<tg::similarity_transform3f>,
               "a transform holds exactly one member and stays standard-layout");
 
-// the storage really is chosen from the flags, not a matrix everywhere
+// the representation really is chosen from the flags, not a matrix everywhere
 static_assert(sizeof(tg::identity_transform3f) == 1);
 static_assert(sizeof(tg::translation_transform3f) == 3 * sizeof(float), "a pure translation is just a vector");
 static_assert(sizeof(tg::rotation_transform3f) == 4 * sizeof(float));
@@ -37,8 +37,8 @@ static_assert(tg::rotation_transform2f::source_dimension == 2);
 // the shapes the two dimensions pin down: a source vector in, a target vector out
 static_assert(std::is_same_v<decltype(tg::affine_transform3f().linear_mat()), tg::mat<3, 3, float>>);
 static_assert(std::is_same_v<decltype(tg::affine_transform3f().to_mat()), tg::mat<4, 4, float>>);
-static_assert(std::is_same_v<decltype(tg::affine_transform3f().apply_pos(tg::pos3f())), tg::pos3f>);
-static_assert(std::is_same_v<decltype(tg::affine_transform3f().apply_linear(tg::vec3f())), tg::vec3f>);
+static_assert(std::is_same_v<decltype(tg::affine_transform3f().transform(tg::pos3f())), tg::pos3f>);
+static_assert(std::is_same_v<decltype(tg::affine_transform3f().transform(tg::vec3f())), tg::vec3f>);
 static_assert(std::is_same_v<decltype(tg::rigid_transform3f().translation()), tg::vec3f>);
 
 // widening is explicit, so the ladder can rank registrations
@@ -203,5 +203,38 @@ TEST("tg homogeneous_transform - to_mat")
         for (int c = 0; c < 3; ++c)
             for (int rr = 0; rr < 3; ++rr)
                 CHECK(tgtest::approx((m[c, rr]), (l[c, rr])));
+    }
+}
+
+// the representation is private, so tg::impl::transform_representation_of is the only way in.
+// That it is unreachable is not expressible as a static_assert: the access failure is a hard error, not a
+// substitution failure, so a requires-expression naming it does not compile at all.
+TEST("tg homogeneous_transform - the impl representation accessor")
+{
+    SECTION("it hands back the members the public accessors are derived from")
+    {
+        auto const q = tg::quat_f::make_rotation_y(tg::angle_f::make_from_degree(40));
+        auto const t = tg::rigid_transform3f::make_translation(tg::vec3f(1, -2, 4))
+                           .composed(tg::rigid_transform3f::make_rotation(q));
+
+        auto const& r = tg::impl::transform_representation_of(t);
+        CHECK(r.translation == t.translation());
+        CHECK(r.linear.rot.to_quat() == t.rotation());
+    }
+
+    SECTION("it aliases the transform rather than copying it")
+    {
+        auto const t = tg::similarity_transform3f::make_uniform_scaling(3.0f);
+        auto const& r = tg::impl::transform_representation_of(t);
+        CHECK(r.linear.scale == t.uniform_scale());
+        CHECK(static_cast<void const*>(&r) == static_cast<void const*>(&t));
+    }
+
+    SECTION("a projective transform hands back its matrix")
+    {
+        auto const m = tg::mat4f::make_from_cols(tg::vec4f(1, 0, 0, 0), tg::vec4f(0, 1, 0, 0), tg::vec4f(0, 0, 1, -1),
+                                                 tg::vec4f(0, 0, 0, 2));
+        auto const p = tg::projective_transform3f::make_from_mat(m);
+        CHECK(tg::impl::transform_representation_of(p).m == m);
     }
 }
