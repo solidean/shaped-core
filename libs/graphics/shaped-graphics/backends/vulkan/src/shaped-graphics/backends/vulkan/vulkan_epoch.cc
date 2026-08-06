@@ -1,7 +1,5 @@
-// vulkan epoch system: advance/retire, waits, and deferred-deletion staging. The epoch *concept*
-// (counter + contract) is defined in sg::; this is vulkan's concrete realization on a pair of timeline
-// semaphores. See libs/graphics/shaped-graphics/docs/concepts/epochs.md. Device-level teardown
-// (shutdown) lives in vulkan_context.cc.
+// vulkan epoch system: advance/retire, waits, and deferred-deletion staging.
+// The per-epoch bookkeeping types live in vulkan_epoch.hh, device-level teardown in vulkan_context.cc.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -10,8 +8,8 @@ namespace sg::backend::vulkan
 {
 sg::epoch vulkan_context::completed_epoch() const
 {
-    // The epoch timeline's counter *is* the last fully-finished epoch — we signal the epoch value at
-    // end-of-epoch. Its initial value is first-1, so before the first advance it reports first-1.
+    // The epoch timeline's counter *is* the last fully-finished epoch, since the epoch value is signaled at end-of-epoch.
+    // It starts at first-1, so before the first advance it reports first-1.
     u64 const first_minus_one = u64(sg::epoch::first) - 1;
     if (_epoch_timeline == VK_NULL_HANDLE)
         return sg::epoch(first_minus_one);
@@ -51,8 +49,8 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
         CC_ASSERT(false, "vkQueueSubmit (epoch signal) failed");
     }
 
-    // Package everything `last` owns and push it onto the in-flight FIFO. (Externally synchronized, so
-    // no submit races the pool drain; the lock is for correctness, not contention.)
+    // Package everything `last` owns and push it onto the in-flight FIFO.
+    // Advance is externally synchronized, so the pool drain races no submit — but the deletion staging below is fed from any thread.
     vulkan_epoch_data data;
     data.epoch_id = last;
     data.command_pools = _command_pools.lock(

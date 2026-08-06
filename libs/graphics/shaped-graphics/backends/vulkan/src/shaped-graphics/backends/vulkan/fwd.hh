@@ -2,8 +2,7 @@
 
 #include <memory>
 
-/// Forward declarations for the Vulkan backend. Types are smurf-named (vulkan_*) and live in
-/// sg::backend::vulkan so backend symbols stay greppable and never collide across backends.
+/// Forward declarations for the Vulkan backend.
 
 namespace sg::backend::vulkan
 {
@@ -12,8 +11,9 @@ class vulkan_command_list;
 class vulkan_buffer;
 class vulkan_texture;
 
-/// Backend-typed resource handles (shared, like raw_buffer_handle). No command-list handle — those are
-/// move-only, held by std::unique_ptr<vulkan_command_list>.
+/// Backend-typed resource handles.
+/// Mutable, where sg's `*_handle` typedefs and dx12's backend-typed ones are `shared_ptr<T const>` — an inconsistency to settle, not a design.
+/// No command-list handle: a list is move-only, held by std::unique_ptr<vulkan_command_list>.
 using vulkan_buffer_handle = std::shared_ptr<vulkan_buffer>;
 using vulkan_texture_handle = std::shared_ptr<vulkan_texture>;
 } // namespace sg::backend::vulkan

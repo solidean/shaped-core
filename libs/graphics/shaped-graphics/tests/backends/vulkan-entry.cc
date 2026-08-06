@@ -6,7 +6,7 @@
 // When a device is present it invokes every sg::context_handle API test against it.
 // Compiled only where the vulkan backend builds, so where the SDK is present.
 //
-// Disabled + unregistered for now, because the vulkan backend is stubbed and its epoch/transfer ops abort.
+// Disabled + unregistered for now, because the vulkan backend's transfer ops abort.
 // So it must not run in a sweep (disabled), and must not be aliased into the per-invocable runs (unregistered).
 // Otherwise naming an sg API test by its alias, which enables disabled tests, would dispatch into the stub and abort.
 // When the backend is real, restore the register_backend call below and drop nx::config::disabled.

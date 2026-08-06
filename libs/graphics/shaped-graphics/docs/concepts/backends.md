@@ -58,5 +58,4 @@ Keep the per-backend suites to smoke coverage and internal invariants.
 
 - [coding-guidelines](../coding-guidelines.md) — the concrete backend rules this narrates.
 - [epochs](epochs.md) — the lifetime/synchronization model backend invariant tests lean on.
-- [inline upload](upload.inline.md) / [inline download](download.inline.md) — backend features with
-  their own smoke tests.
+- [inline upload](upload.inline.md) / [inline download](download.inline.md) — backend features with their own smoke tests.

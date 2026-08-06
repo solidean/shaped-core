@@ -9,7 +9,8 @@ dx12 and vulkan are tier 1; metal and webgpu tier 2; opengl and webgl legacy.
 Only the two tier-1 backends exist — nothing is written for the others yet.
 
 The library is at an **early stage**, though not a stub: the sg core and the **dx12** backend are real across transfer, barriers, bindings, pipelines, raytracing, queries and presentation.
-**vulkan** brings up the device, queues and epochs, and creates buffers and textures — every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
+**vulkan** brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
+Every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
 [docs/structure.md](docs/structure.md) is the per-module `[done]` / `[in progress]` / `[planned]` roadmap.
 
 ## Design at a glance

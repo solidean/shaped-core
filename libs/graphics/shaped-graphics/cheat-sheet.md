@@ -10,7 +10,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.
 > The sg core API and the **dx12** backend are real.
-> The **vulkan** backend implements device / buffer creation, and its recording, barrier, raster and raytracing paths are still stubs.
+> The **vulkan** backend brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
+> Every other `try_create_*`, both async transfer scopes, and all recording are stubs.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
@@ -20,8 +21,7 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 > Those are bugs, not runtime failures.
 > Device loss is sticky — `is_device_lost()` / `device_loss_reason()` — and submit / advance / fence waits throw `sg::device_lost_exception`.
 
-How to read this: each block leads with the include; one symbol per line with a trailing
-comment giving the return type / intuition.
+How to read this: each block leads with the include, then one symbol per line with a trailing comment giving the return type or intuition.
 
 ---
 

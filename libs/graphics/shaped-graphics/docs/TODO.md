@@ -43,6 +43,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   sg's resources are polymorphic, so `default_shared_traits`' `sizeof(T)`-derived control offset cannot find the counts through a base-typed handle — the same blocker slib hits.
   They also derive from `std::enable_shared_from_this`, with 30+ `shared_from_this()` call sites and no `cc::shared_ptr` equivalent.
   See the [coding-guidelines](coding-guidelines.md) note.
+- **Backend-typed handles are inconsistently const:** `vulkan_buffer_handle` / `vulkan_texture_handle` are `shared_ptr<T>`.
+  sg's `*_handle` typedefs and dx12's backend-typed ones are `shared_ptr<T const>`.
+  Nothing needs the mutability — `add_finalizer` is `const` — so vulkan should follow dx12.
 - **`cc::atomic`:** sg still names `std::atomic` / `std::memory_order` directly.
   About 110 occurrences, across the dx12 and vulkan backends, `raw_buffer`, `raw_texture`, `bytes_future` and `acceleration_structure`.
   clean-core has migrated to [`cc::atomic`](../../../base/clean-core/src/clean-core/thread/atomic.hh), and `<atomic>` is no longer blessed to call into directly.

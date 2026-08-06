@@ -1,5 +1,5 @@
-// vulkan_command_list: allocation, submission, drop, and teardown. The list type is header-only
-// (ctor + fields); its create/submit/drop bodies and destructor live here.
+// vulkan_command_list: allocation, submission, drop, and teardown.
+// The list type itself is header-only, so its create / submit / drop bodies and its destructor live here.
 
 #include <clean-core/string/print.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -21,8 +21,8 @@ vulkan_command_list::~vulkan_command_list()
     if (_consumed)
         return; // submitted or dropped explicitly — nothing to reclaim
 
-    // Safety net: a list left neither submitted nor dropped. Reclaim it like a drop so the open-list
-    // count, its slot, and its pool don't leak — but warn, since the explicit call is required.
+    // Safety net: a list left neither submitted nor dropped.
+    // Reclaim it like a drop so the open-list count, the slot and the pool don't leak — but warn, since the explicit call is required.
     cc::eprintln("[sg] command list destroyed without submit or drop — auto-dropping. Submit or drop every "
                  "command list explicitly through the context.");
     _ctx.reclaim_unsubmitted_command_list(*this);
@@ -30,8 +30,8 @@ vulkan_command_list::~vulkan_command_list()
 
 cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_command_list()
 {
-    // Reuse a pooled command pool if one is free (it re-entered the pool only once idle), else make
-    // one. The pool + its single buffer are recycled as a unit, epoch-gated like dx12's allocator.
+    // Reuse a pooled command pool if one is free — a pool re-enters the free set only once idle.
+    // The pool and its single buffer are recycled as a unit.
     vulkan_command_pool const reused = _command_pools.lock(
         [](vulkan_command_pool_set& p) -> vulkan_command_pool
         {
@@ -50,7 +50,7 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
     }
     else
     {
-        // A pool per list mirrors dx12's per-list allocator: simple ownership, recycled by epoch.
+        // A pool per list: simple ownership, recycled by epoch.
         auto const pool_info = VkCommandPoolCreateInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
@@ -97,9 +97,8 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     VkResult const end = vkEndCommandBuffer(cmd->_buffer);
     CC_ASSERT(end == VK_SUCCESS, "vkEndCommandBuffer failed");
 
-    // Take a monotonic completion token and submit — all under one lock so token order equals queue
-    // submission + signal order. (The queue is free-threaded, but out-of-order signals would move the
-    // submission timeline backwards and break is_submission_complete.)
+    // Take a monotonic completion token and submit, all under one lock, so token order equals queue submission + signal order.
+    // The queue is free-threaded, but out-of-order signals would move the submission timeline backwards and break is_submission_complete.
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next)
         {
@@ -127,13 +126,13 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             return t;
         });
 
-    // The submit above may have observed device loss (marked, not thrown, inside the lock). Surface it now
-    // that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
+    // The submit above may have observed device loss, marked rather than thrown inside the lock.
+    // Surface it now that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
     if (is_device_lost())
         throw sg::device_lost_exception(device_loss_reason());
 
-    // The pool is in flight until this epoch retires — hand it to the current epoch. Null the list's
-    // handles so its dtor doesn't destroy the pool we just handed off.
+    // The pool is in flight until this epoch retires, so hand it to the current epoch.
+    // Null the list's handles so its destructor cannot destroy the pool just handed off.
     _command_pools.lock([&](vulkan_command_pool_set& p) { p.in_epoch.push_back({cmd->_pool, cmd->_buffer}); });
     cmd->_pool = VK_NULL_HANDLE;
     cmd->_buffer = VK_NULL_HANDLE;
@@ -156,8 +155,8 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
     cmd._consumed = true;
 
-    // Never submitted, so the GPU never touched this pool — return it straight to the free set (reset
-    // happens at reuse). Null the handles so nothing double-frees them.
+    // Never submitted, so the GPU never touched this pool — return it straight to the free set, where reset happens at reuse.
+    // Null the handles so nothing double-frees them.
     _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd._pool, cmd._buffer}); });
     cmd._pool = VK_NULL_HANDLE;
     cmd._buffer = VK_NULL_HANDLE;

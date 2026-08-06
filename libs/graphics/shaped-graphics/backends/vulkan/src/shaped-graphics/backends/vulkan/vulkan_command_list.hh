@@ -9,8 +9,10 @@
 
 namespace sg::backend::vulkan
 {
-/// Vulkan implementation of sg::command_list. Owns its command pool and the single command buffer
-/// allocated from it, handed out already recording. Buffer transfer is not implemented yet.
+/// Vulkan implementation of sg::command_list.
+/// Owns its command pool and the single command buffer allocated from it, handed out already recording.
+/// Recording is not implemented: every recording call below aborts.
+/// The exceptions are the raytracing / query support queries, which honestly answer false, and record_gpu_timestamp, which returns an invalid query.
 class vulkan_command_list final : public sg::command_list
 {
 public:
@@ -21,8 +23,9 @@ public:
                         VkCommandPool pool,
                         VkCommandBuffer buffer);
 
-    // Auto-drops (with a warning) a list left neither submitted nor dropped; no-op once either has run
-    // (they mark it consumed). Body in vulkan_command_list.cc.
+    // Auto-drops, with a warning, a list left neither submitted nor dropped.
+    // A no-op once either has run, since both mark the list consumed.
+    // Body in vulkan_command_list.cc.
     ~vulkan_command_list() override;
 
     /// The access-tracking slot this list holds for its lifetime (a backend helper, not sg API).
@@ -124,9 +127,8 @@ protected:
         CC_UNREACHABLE("vulkan raster draw is not implemented yet");
     }
 
-    // Ray tracing (reached through cmd.raytracing) — not implemented yet. is_supported() returns false, so a
-    // correct caller never reaches the build stubs; and the vulkan backend stays unregistered in the tier-1
-    // API tests until its raytracing milestone lands.
+    // Ray tracing (reached through cmd.raytracing) — not implemented yet.
+    // is_supported() returns false, so a correct caller never reaches the build stubs below.
     [[nodiscard]] bool raytracing_is_supported() const override { return false; }
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const>,
                                                                   sg::accel_build_flags) override
@@ -154,8 +156,8 @@ protected:
         CC_UNREACHABLE("vulkan raytracing dispatch is not implemented yet");
     }
 
-    // GPU queries (reached through cmd.query) — not implemented yet. Timestamps report unsupported, so
-    // record_gpu_timestamp always returns an invalid query (record is always callable).
+    // GPU queries (reached through cmd.query) — not implemented yet.
+    // Timestamps report unsupported, and record_gpu_timestamp stays callable but always returns an invalid query.
     [[nodiscard]] bool query_timestamps_supported() const override { return false; }
     [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override { return {}; }
 };

@@ -132,7 +132,8 @@ backends/                                       # each subclasses the abstract s
 
 - **Tier 1 (now):** dx12, vulkan.
   dx12 is real across the surface.
-  vulkan brings up the device, queues and epochs, and creates buffers and textures — every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
+  vulkan brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
+  Every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
 - **Tier 2 (soon):** metal, webgpu.
 - **Legacy compat (planned):** opengl, webgl.
 

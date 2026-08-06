@@ -1,10 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 project(shaped-graphics-vulkan LANGUAGES CXX)
 
-# The vulkan backend is its own static library that links the shaped-graphics core. It creates a
-# live Vulkan instance/device, command lists, and GPU buffers, so it links the Vulkan loader from
-# the SDK. The enclosing CMakeLists only adds this subdirectory when find_package(Vulkan) succeeds,
-# so Vulkan::Vulkan is guaranteed available here.
+# The vulkan backend is its own static library over the shaped-graphics core.
+# The enclosing CMakeLists only adds this subdirectory when find_package(Vulkan) succeeds, so Vulkan::Vulkan is guaranteed available here.
 add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_context.cc
     src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
@@ -45,9 +43,8 @@ target_compile_options(shaped-graphics-vulkan
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# Backend-specific test binary. Home for real vulkan-specific tests (device creation, command lists,
-# buffers). Named *-test so the dev.py runner discovers it. It only exists where this subdirectory is
-# added (the sg CMakeLists gates that on a Vulkan SDK being found).
+# Backend-specific test binary: device creation, command lists, buffers, epochs.
+# Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-vulkan-test
         tests/main.cc
