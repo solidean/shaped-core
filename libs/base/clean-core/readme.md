@@ -22,11 +22,11 @@ Source lives in `src/clean-core/`, grouped by topic:
 | Folder       | What's in it |
 |--------------|--------------|
 | `common/`    | compiler macros, type/meta `utility`, `flags`, `hash`, and the assertion suite (`assert`, `asserts`, `assertf`, `assert-handler`) |
-| `platform/`  | compiler/OS introspection — `native` (symbol demangling), `source_location`, `stacktrace` |
-| `math/`      | bedrock math helpers (`bit`) needed before the dedicated math library exists |
+| `platform/`  | OS-facing utilities — `console` (color), `native` (demangling), `source_location`, `stacktrace`, and `win32_sanitized`, the sanctioned route to `<Windows.h>` |
+| `math/`      | bedrock math helpers needed before the dedicated math library exists — `bit`, the `random` PRNG, and `wide_arith`'s 128-bit primitives |
 | `memory/`    | allocation handles (`allocation`, `node_allocation`) over memory resources |
 | `container/` | owning containers (`array`/`vector` + `fixed_`/`unique_`/`small_` variants, `map`, `set`, `pair`) and views (`span`, `strided_span`, `pinned_data`) |
-| `sequence/`  | the lazy ranges API (`sequence`) |
+| `sequence/`  | the lazy ranges API (`sequence`) — an early prototype, see [docs/sequence.md](docs/sequence.md) |
 | `string/`    | `string`, `string_view`, `char_predicates`, the compile-time-checked `format` / `print`, `to_string` / `to_debug_string`, and UTF-16 `conversion` |
 | `function/`  | type-erased callables (`function_ref`, `unique_function`) |
 | `error/`     | fallible value types (`optional`, `result`) and the crash handler |
@@ -55,6 +55,7 @@ full workflow.
 - [docs/containers.md](docs/containers.md) — choosing a container, and the contracts they all share.
 - [docs/strings.md](docs/strings.md) — `cc::string` / `cc::string_view`: null-termination, invalidation, SSO, and hashing.
 - [docs/formatting.md](docs/formatting.md) — `cc::format`, the placeholder grammar, and making a type formattable.
+- [docs/sequence.md](docs/sequence.md) — `cc::sequence`, the lazy forward cursor: what the prototype does today, and the design the rest is intended to follow.
 - [docs/_index.md](docs/_index.md) — clean-core's documentation hub.
 - [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.
   `.clang-format` is authoritative for formatting.

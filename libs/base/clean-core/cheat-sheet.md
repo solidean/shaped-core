@@ -389,14 +389,15 @@ cc::hash128::create(bytes, seed);          // XXH3 128-bit of a span<byte const>
 hash(h128);                                // hidden-friend customization point -> low limb (u64)
 ```
 
-## Sequence (lazy ranges — emerging API)
+## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))
 
 ```cpp
 #include <clean-core/sequence/sequence.hh>   // cc::sequence<RangeT> — single-pass; non-copy/non-move
 cc::sequence{some_range}.count();            // use as a temporary; terminal ops consume the range
-cc::sequence{v}.count_if(pred);  .any(pred);  .all(pred);  .index_of(pred);  .find(pred);  .sum();
+cc::sequence{v}.count_if(pred);  .any(pred);  .all(pred);  .index_of(pred);  .find(pred);  // find needs stable elements
 cc::sequence{v}.accumulate(init, fn);  .each(fn);
-cc::sequence{v}.to_vector();  .to_array();  .to_container<C>();  .push_to(existing);
+cc::sequence{v}.to_vector();  .to_container<C>();  .push_to(existing);
+// NOT implemented despite being declared: .sum() and .to_array(). map/filter/take/zip and the factories do not exist yet.
 ```
 
 ## Threading

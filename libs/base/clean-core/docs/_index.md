@@ -12,11 +12,11 @@ clean-core's headers live in `src/clean-core/`, grouped by topic:
 clean-core/
   fwd.hh        # forward declarations of the public types
   common/       # macros, utility/meta, flags, hash, assertions
-  platform/     # native (demangling), source_location, stacktrace
-  math/         # bit utilities
+  platform/     # console (color), native (demangling), source_location, stacktrace, win32_sanitized
+  math/         # bit utilities, the random PRNG, wide_arith's 128-bit primitives
   memory/       # allocation, node_allocation, shared_ptr (+ impl/)
   container/    # array/vector families, map, set, span, strided_span, … (+ impl/)
-  sequence/     # the lazy ranges API
+  sequence/     # the lazy ranges API (early prototype)
   string/       # string, string_view, char_predicates, format, formatter, print, to_string, to_debug_string, conversion
   function/     # function_ref, unique_function
   error/        # optional, result, crash_handler
@@ -34,6 +34,8 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   how storage moves between inline and heap, and what hashes equal to what.
 - [formatting](formatting.md) — `cc::format` and the `to_string` / `to_debug_string` alternatives.
   The placeholder grammar, the `cc::custom::formatter<T>` protocol, and what the compile-time check does and does not cover.
+- [sequence](sequence.md) — `cc::sequence`, the lazy forward cursor over a range.
+  An early prototype: the doc separates the reductions that work today from the design the rest of the API is intended to follow.
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers clean-core is allowed to depend on directly, and why.
 - [customization-points](customization-points.md) — the `cc::custom::` trait + hidden-friend protocol that operations like hashing use to let types opt in.
 - [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter.

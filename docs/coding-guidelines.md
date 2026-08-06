@@ -466,6 +466,18 @@ Each explicit UB usage must be heavily documented and justified.
   Don't use a sized type like `i32` there just because it looks more precise — `int` is the intent-carrying choice and the sized alias adds noise.
 - Use explicitly sized types (`i32`, `u64`, `f32`, etc.) only when bit width or precision actually matters: serialized/ABI layout, hashing, bit manipulation,
   values that can straddle the 32-bit limit, or GPU/interop structs.
+- **Sizes and indices are signed** (`isize`, an alias for `i64`).
+  Deliberate, and against std's convention, for reasons that compound:
+  - size arithmetic routinely subtracts, and unsigned turns `size - 1` on an empty container into a huge positive number instead of letting it go negative;
+  - mixed signed/unsigned arithmetic is a standing source of bugs and confusing implicit conversions;
+  - negative values are useful as error returns, sentinels and relative offsets;
+  - we target 64-bit only, so `i64` has range to spare, and bounds are checked at runtime anyway — the "extra range" unsigned buys is illusory;
+  - as a greenfield standard library that rarely interoperates with `std::`, we pay none of the backwards-compatibility friction that keeps unsigned sizes alive elsewhere.
+
+  The deepest reason is algebraic.
+  Signed integers model a proper subset of the integers, with the arithmetic and ordering you expect; overflow being UB is what lets us assume that, as long as we stay in bounds.
+  Unsigned integers model a modulo ring, where `a < b` does not imply `a + c < b + c` — so out of bounds they silently become a different algebraic structure rather than failing.
+  Stroustrup's P1428R0 reaches the same verdict: unsigned sizes were a historical mistake.
 - **Never write `cc::isize` / `cc::u64` / … inside a library.** The sized aliases are vocabulary — as close to language-provided as we get — and a `cc::` prefix on them is noise, not information.
   Pull them into your own namespace once, in your `fwd.hh`, and then write them bare everywhere:
   ```cpp
