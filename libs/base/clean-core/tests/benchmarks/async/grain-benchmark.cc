@@ -5,15 +5,12 @@
 
 // cc::async_thread_pool grain sweep — at what leaf size does fork-join overhead stop dominating?
 //
-// pool-benchmark.cc pins one grain per case (8192) and sweeps worker count, so it answers "does it scale" but
-// by construction never shows the region that grain was chosen to avoid.
+// pool-benchmark.cc pins one grain per case -- 8192 for parallel-for and reduction, 1024, 4096 and 65536 for the others -- and sweeps worker count.
+// So it answers "does it scale", but by construction never shows the region those grains were chosen to avoid.
 // At 8192 elements per leaf, per-node scheduling cost is ~1/8192 of the leaf and simply invisible.
-// This file sweeps the other axis -- grain and n, both by powers of two, at a single P-worker pool -- so that cost IS the measurement.
+// This file sweeps the other axis -- grain and n, both by powers of two, on one default-sized pool -- so that cost IS the measurement.
 //
-// Read the output as ns per INPUT element.
-// For leaf work costing X ns/elem and per-node scheduling cost C, a grain-g bisection lands near X + C/g.
-// So each grain line is flat where n is large, with the overhead amortized, and rises toward small n, where the blocking_get round-trip is spread over too few elements.
-// The vertical spread between lines at a fixed n is C/g -- the thing this file exists to show.
+// How to read the output, and the fork floor its small-n end runs into, are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
 // Three constraints that are not obvious and will quietly corrupt the numbers if broken:
 //
@@ -234,7 +231,7 @@ void run_all()
 
 // The fork floor: what does the SECOND thread cost?
 //
-// The grain sweep's total-time view says an un-split single node costs ~0.3 us, but a graph that forks even once jumps to ~11 us and stays on that plateau out to ~2^12 elements.
+// The grain sweep's total-time view shows a graph that forks even once jumping to a plateau far above an un-split single node, and holding it out to a few thousand elements.
 // That plateau, not per-node cost, is what makes small graphs expensive, and it should be the pool waking a worker to take a published sibling.
 //
 // This sweeps the two axes that tell those apart, at grain 1 so every element is its own node:
@@ -279,7 +276,7 @@ void run_fork_floor()
     std::fflush(stdout);
 }
 
-// Why every grain line in the sweep converges to the same ~21 us at n == 1: that is not per-node cost, since a node is ~50-100 ns inline.
+// Why every grain line in the sweep converges on the same cost at small n: that is not per-node cost, since a node is ~50-100 ns inline.
 // It is the foreign-thread round trip -- submit, wake a worker, run, wake the caller.
 // Sweeping the worker count separates the two candidate explanations, which is the whole point of the probe.
 // Two context switches would be a constant, whereas contention on the shared injection mutex grows with the number of idle workers scanning it.

@@ -1,14 +1,11 @@
 # Blessed stdlib headers
 
-clean-core sits at the bottom of the library stack and otherwise avoids `std::`
-(see the repo [Standard Library & Dependencies](../../../../docs/coding-guidelines.md)
-guideline — almost everything has a `cc::` equivalent). A small set of standard
-headers is **blessed**: re-creating them is infeasible or pointless because they
-are thin wrappers around compiler/runtime machinery, not data structures we want
-to own.
+clean-core sits at the bottom of the library stack and otherwise avoids `std::` — almost everything has a `cc::` equivalent.
+The repo guideline is [Standard Library & Dependencies](../../../../docs/coding-guidelines.md).
+A small set of standard headers is **blessed**: re-creating them is infeasible or pointless.
+They are thin wrappers around compiler/runtime machinery rather than data structures we want to own.
 
-Blessing has two tiers, because "we will not reimplement this" and "call it
-directly" are different claims:
+Blessing has two tiers, because "we will not reimplement this" and "call it directly" are different claims:
 
 | Header               | Direct use | Why                                                                     |
 |----------------------|-----------|-------------------------------------------------------------------------|
@@ -21,17 +18,14 @@ directly" are different claims:
 
 **Tier 1 — blessed to include and call.** Use them directly.
 
-**Tier 2 — blessed to appear, not to call.** The header may leak through our
-public includes (`clean-core/thread/atomic.hh` includes `<atomic>`, and that is
-fine), but code outside its `cc::` wrapper must not name the `std::` facility.
-`cc::atomic` / `cc::atomic_ref` / `cc::atomic_flag` / `cc::atomic_thread_fence` /
-`cc::memory_order` cover every use clean-core has.
+**Tier 2 — blessed to appear, not to call.**
+The header may leak through our public includes — `clean-core/thread/atomic.hh` includes `<atomic>`, and that is fine.
+But code outside its `cc::` wrapper must not name the `std::` facility.
+`cc::atomic` / `cc::atomic_ref` / `cc::atomic_flag` / `cc::atomic_thread_fence` / `cc::memory_order` cover every use clean-core has.
 
-This is not enforced by tooling — it is a review rule. The tell is that
-`std::atomic` in a diff compiles and passes on every threaded preset, and only
-the single-threaded preset (which `dev.py check` runs) would notice, and only if
-the type is on a path that build exercises.
+This is not enforced by tooling — it is a review rule.
+The tell is that `std::atomic` in a diff compiles and passes on every threaded preset.
+Only the single-threaded preset that `dev.py check` runs would notice, and only if the type is on a path that build exercises.
 
-The list grows by **targeted addition only**: add a header here (with its
-justification, and which tier) when a concrete need arises, not pre-emptively.
+The list grows by **targeted addition only**: add a header here, with its justification and its tier, when a concrete need arises rather than pre-emptively.
 Anything not listed should go through a `cc::` equivalent.

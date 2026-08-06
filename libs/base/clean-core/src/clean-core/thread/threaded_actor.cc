@@ -48,8 +48,8 @@ void cc::threaded_actor_base::shutdown()
 
     if (_is_unthreaded)
     {
-        // Drain everything queued before shutdown, synchronously on the caller. Loop until a cycle
-        // dispatches no messages (mirrors the threaded loop's "exit once the inbox is empty").
+        // Drain everything queued before shutdown, synchronously on the caller.
+        // Loop until a cycle dispatches no messages, mirroring the threaded loop's "exit once the inbox is empty".
         auto& impl = get_impl();
         while (true)
         {
@@ -129,9 +129,8 @@ void cc::threaded_actor_base::execute_actor_thread()
             drain_inbox_messages(false);
             bool const made_progress = impl.on_process();
 
-            // Exit only when shutdown is requested AND the inbox drains empty, so every message
-            // enqueued before shutdown() is still processed. If a message arrives between the
-            // on_process() call and here, the second drain finds it and we loop again.
+            // Exit only when shutdown is requested AND the inbox drains empty, so every message enqueued before shutdown() is still processed.
+            // If a message arrives between the on_process() call and here, the second drain finds it and we loop again.
             bool const should_exit = is_shutting_down() && !drain_inbox_messages(false);
             if (should_exit)
                 break;

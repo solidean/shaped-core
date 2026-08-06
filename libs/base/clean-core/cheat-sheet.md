@@ -414,7 +414,12 @@ auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold
                                           // for the critical section that cannot be one call (spans your statements / handed to a caller)
 
 #include <clean-core/thread/thread.hh>
-cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux)
+cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; ≤15 bytes on Linux; no-op where unavailable)
+int p = cc::num_hardware_threads();       // >= 1 always; a "don't know" (0) from the platform becomes 1
+
+#include <clean-core/thread/spin.hh>
+cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
+                                          // not a scheduling yield: nothing goes to the OS, and it is a no-op where unsupported
 
 #include <clean-core/thread/threaded_actor.hh> // actor with its own thread + typed message mailbox;
                                                 // messages processed one-at-a-time in global send order
@@ -496,7 +501,8 @@ cc::async_thread_pool pool;                              // >=1 workers; default
 cc::install_default_async_pool(pool);                    // compute nodes route here when off-worker
 int v = pool.blocking_get(root);                         // caller PARTICIPATES (runs the graph, steals), then blocks
 // ^ hence the -1 default: the calling thread is a worker for the duration. A graph that never forks stays on it
-//   entirely (~27 ns, no cross-thread round trip). Never call blocking_get from inside a worker of that pool.
+//   entirely — tens of ns, no cross-thread round trip (docs/systems/async.md "Driving").
+//   Never call blocking_get from inside a worker of that pool.
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
 // WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.

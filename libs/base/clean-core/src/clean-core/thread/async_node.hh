@@ -149,7 +149,8 @@ protected:
     explicit async_scheduler(bool steal_capable_peers) : has_steal_capable_peers(steal_capable_peers) {}
 
 public:
-    /// The scheduler bound to the current thread. Asserts if no async_worker_scope is active.
+    /// The scheduler bound to the current thread.
+    /// Asserts if no async_worker_scope is active.
     [[nodiscard]] static async_scheduler& current();
     [[nodiscard]] static async_scheduler* current_or_null();
 

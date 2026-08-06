@@ -353,29 +353,13 @@ The producer still passes through the wait mutex on the wake path — only `wait
 Workers **spin ~64 rounds before sleeping** — a condvar round-trip is ~1–10 µs against fork-join tasks that cost ~100 ns, so this is worth ~25% on a spawn tree rather than being a micro-optimization.
 Steal victims are **randomized** with bounded attempts: a linear scan points every idle worker at worker 0, which is both a contention hotspot and unfair.
 
-### Measured (i9-12900H, 6P+8E, `relwithdebinfo-clang`)
+### Measured
 
 Scaling is pool-at-P vs pool-at-1-worker, so it is independent of leaf cost.
-Judge it against the **6 P-cores**, not the 20 threads — the curve bends at the E-core and SMT boundaries by design.
-
-| case | scaling | note |
-|---|---|---|
-| reduction | **6.08x** | at/near the machine's ceiling |
-| parallel quicksort | **5.42x** | irregular subproblems — the steal-quality case |
-| spawn tree (131k nodes, trivial leaves) | **4.97x** | 60.7 → 12.2 ns/node over 1..20 workers |
-| nested parallel-for | 4.73x | |
-| parallel-for transform | 4.51x | |
-
-The spawn tree is the pure-overhead metric — its leaves do nothing, so its ns/node *is* the pool's cost.
-Reproduce with [pool-benchmark.cc](../../tests/benchmarks/async/pool-benchmark.cc): `dev.py --mirror-test-output test "bench-async-pool (worker sweep)"`.
-
-Two things the table will not tell you:
-
-* **This is a laptop, and sustained all-core load throttles it.**
-  The benchmark re-measures its serial baseline on *every row* and prints it as a contamination canary — flat is clean, drifting means that case's cross-row numbers are not comparable.
-  Absolute ns is only comparable within one run.
-* **`vs serial` is an adjacent pair and survives throttling; `vs 1w` spans rows and does not.**
-  Trust `vs 1w` only where the canary is flat.
+Judge it against the machine's **performance** cores rather than its thread count — the curve bends at the E-core and SMT boundaries by design.
+On an i9-12900H (6P+8E) the five fork-join shapes land between **4.51x and 6.08x**, the reduction at the top and the parallel-for transform at the bottom.
+The spawn tree is the pure-overhead metric — its leaves do nothing, so its ns/node *is* the pool's per-node cost, and it falls to **12.2 ns/node** across the worker sweep.
+[benchmarks/async-benchmark](../benchmarks/async-benchmark.md) owns the full table, the method behind it, and which columns of a run survive a throttling laptop.
 
 ### Routing to a specific pool
 There is no task-class or affinity system: every worker in every pool serves all compute work, and steals are always eligible.
@@ -421,23 +405,13 @@ The node layout is not, and can change under the hood as the system matures with
 
 ## Cost
 
-Measured on an i9-12900H, `relwithdebinfo-clang`.
+Per-node instruction counts, the ladder that decomposes them, and the pinned disassembly probes behind them live in [benchmarks/async-benchmark](../benchmarks/async-benchmark.md).
+The headline, on an i9-12900H: `make_async_manual<int>` created and dropped is **128 instructions, zero locked RMW**.
+A fully driven `make_async_lazy<i64>` leaf is **509 instructions, 8 atomics**.
+The raw slab alloc + free of the same node class is ~3 ns.
 These are a snapshot of where the time goes, not a contract — re-measure before quoting one as fact.
 
-| case | cost |
-|---|---|
-| `make_async_manual<int>` created and dropped — no frame, no scheduler | **128 instructions, zero locked RMW** |
-| driven `make_async_lazy<i64>` leaf — the full create → drive → destroy cycle | **509 instructions, 8 atomics** |
-| raw slab alloc + free of the same node class | ~3 ns |
-
 For 64 B of storage plus an alloc *and* a dealloc, that is not alarming.
-Two benchmarks carry pinned probes for exactly this ladder.
-[born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) covers the floor, [async-benchmark.cc](../../tests/benchmarks/async/async-benchmark.cc) the driven leaf:
-
-```bash
-dev.py assembly trace --target clean-core-test --symbol make_async_manual_probe --stats
-dev.py assembly trace --target clean-core-test --symbol single_lazy_probe --skip 2 -- "bench-async (single-thread drive)"
-```
 
 Three properties of the shape constrain what can be changed:
 

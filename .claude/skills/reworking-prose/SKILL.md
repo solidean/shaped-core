@@ -126,15 +126,20 @@ Apply each chunk before writing the next: applying shifts line numbers, so a lat
 
 The grammar is specified in full by [the shaped-linter readme](../../../tools/shaped-linter/readme.md).
 That includes the `| `-prefix rule: a replacement line missing it parses as a plan directive, which fails the plan before any file is read.
-Three things bite while writing a plan, so they are repeated here:
+Four things bite while writing a plan, so they are repeated here:
 
 - `[a-b]` replaces those lines, `[a]` one line, `[+n]` inserts before line n, and a span with no `| ` lines **deletes**.
 - Spans ascend, may not overlap, and their line numbers are the file **as you read it**.
 - A markdown **fenced block is editable too**, so a stale status tree or table does not need a hand-edit.
+- A bare `|` is an **empty replacement line**, so a span may cover a blank line rather than being split in two around it.
 
 **Take every span's line numbers from a fresh read of that file, in the same session as writing the plan.**
 An off-by-one span silently swallows the declaration under the comment block, which is the one mistake this format makes easy.
 Reconstructing numbers from an earlier read, a search result or memory is how it happens.
+
+**Re-read the lines a span replaces, not just its numbers.**
+A wide span drops whatever it covered that the rewrite did not carry forward, and a trailing sentence on the span's last line is the one that goes.
+Nothing downstream notices: the span is in range, the dry run passes, the code-unchanged check sees no tokens, and `--stats` moves by a plausible amount.
 
 `prose apply` catches it every time — that is what the code-unchanged check is for — but read its message carefully:
 it reports where the *token streams diverge*, which is downstream of the span that is actually wrong.

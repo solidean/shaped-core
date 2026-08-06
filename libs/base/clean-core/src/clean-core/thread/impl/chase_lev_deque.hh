@@ -93,8 +93,8 @@ struct chase_lev_deque
 
         a->put(b, v);
         cc::atomic_thread_fence(cc::memory_order_release); // the slot store must land before the publish
-        _bottom.store(b + 1, cc::memory_order_relaxed);    // the publish. RELAXED -- see the note in the pool's
-                                                           // wake path, which needs its own fence because of it.
+        // The publish below is RELAXED, which is why the pool's wake path needs a fence of its own -- see it.
+        _bottom.store(b + 1, cc::memory_order_relaxed);
     }
 
     /// Owner only; takes the newest entry (LIFO).

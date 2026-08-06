@@ -8,19 +8,17 @@
 #include <condition_variable>
 #include <mutex>
 
-/// Thread-safe wrapper for data T protected by a mutex
-/// Rust-style mutex that encapsulates both the data and the mutex protecting it
-/// Access to the protected data is only possible through scoped lock operations
+/// Rust-style mutex: it owns both the data and the lock protecting it, so the value is reachable only through a scoped lock operation.
 ///
-/// Without threads (CC_HAS_THREADS == 0) the API is unchanged but there is no mutex member and no locking:
-/// nothing can contend, so lock() just invokes and try_lock() always succeeds. That is 80 bytes per instance
-/// on Windows, and it matters — the async pool holds one per injection queue. wait() is the exception; see it.
+/// Without threads (CC_HAS_THREADS == 0) the API is unchanged, but there is no mutex member and no locking.
+/// Nothing can contend, so lock() just invokes and try_lock() always succeeds.
+/// That saves 80 bytes per instance on Windows, and it matters — the async pool holds one per injection queue.
+/// wait() is the exception; see it.
 template <class T>
 struct cc::mutex
 {
-    /// Acquire lock, invoke function with protected value, and return result
-    /// The mutex is held for the duration of the function call
-    /// Returns: The result of invoking f with the protected value (auto to prevent reference leaks)
+    /// Acquire the lock, invoke `f` with the protected value, and return its result.
+    /// The lock is held for the duration of the call, and the `auto` return is what keeps a reference to the value from leaking out.
     /// Usage:
     ///   cc::mutex<int> counter;
     ///   counter.lock([](int& val) { val++; });
@@ -34,11 +32,8 @@ struct cc::mutex
         return cc::invoke(cc::forward<F>(f), _value);
     }
 
-    /// Attempt to acquire lock without blocking
-    /// If lock is acquired, invokes function with protected value and returns result wrapped in optional
-    /// If lock cannot be acquired, returns nullopt (or false for void functions) immediately without blocking
-    /// Returns: optional containing the result of f, or nullopt if lock was not acquired
-    ///          For void functions, returns bool indicating whether lock was acquired
+    /// Acquire the lock without blocking, and on success invoke `f` with the protected value.
+    /// Returns its result in an optional, nullopt if the lock was not acquired — or, for a void `f`, a plain bool saying whether it was.
     /// Usage:
     ///   cc::mutex<int> counter;
     ///   if (auto result = counter.try_lock([](int& val) { return val++; }); result.has_value())
@@ -50,8 +45,8 @@ struct cc::mutex
     {
         using result_t = decltype(cc::invoke(cc::forward<F>(f), _value));
 #if !CC_HAS_THREADS
-        // Nobody to lose the race to, so the acquire cannot fail. Callers keep their has_value() branch; it is
-        // simply never taken.
+        // Nobody to lose the race to, so the acquire cannot fail.
+        // Callers keep their has_value() branch; it is simply never taken.
         if constexpr (std::is_void_v<result_t>)
         {
             cc::invoke(cc::forward<F>(f), _value);
@@ -106,16 +101,12 @@ struct cc::mutex
 #endif
     }
 
-    /// Wait on condition variable with predicate, then invoke function with protected value
-    /// Atomically unlocks the mutex and waits on the condition variable until the predicate returns true
-    /// Once awakened and predicate is satisfied, invokes f with the protected value
-    /// The mutex is held during predicate checks and the function call
-    /// Returns: The result of invoking f with the protected value
+    /// Atomically unlock and wait on `cv` until `pred` holds, then invoke `f` with the protected value.
+    /// The mutex is held during every predicate check and during the call.
     ///
-    /// Without threads the predicate must ALREADY hold — only another thread could make it true, so an
-    /// unsatisfied wait is a deadlock, not a slow path, and it asserts instead of hanging. This is the one
-    /// operation with no honest fallback: if you need to wait for work, drive that work yourself rather than
-    /// block on it (see cc::threaded_actor's unthreaded mode).
+    /// Without threads the predicate must ALREADY hold — only another thread could make it true.
+    /// An unsatisfied wait is then a deadlock rather than a slow path, and it asserts instead of hanging.
+    /// This is the one operation with no honest fallback: to wait for work, drive that work yourself rather than block on it (see cc::threaded_actor's unthreaded mode).
     /// Usage:
     ///   cc::mutex<int> counter;
     ///   std::condition_variable cv;

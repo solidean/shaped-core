@@ -21,7 +21,8 @@
 
 // cc::async_thread_pool — a work-stealing scheduler that actually runs cc::async graphs concurrently.
 // It implements the async_scheduler seam, so schedule() and completion routing place nodes here (see async_node.hh).
-// The design, the wake protocol and the measured scaling are documented in libs/base/clean-core/docs/systems/async.md.
+// The design and the wake protocol are documented in libs/base/clean-core/docs/systems/async.md.
+// The measured scaling, and the four benchmarks behind it, are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
 //   cc::async_thread_pool pool;                           // hardware concurrency - 1; see the constructor
 //   cc::install_default_async_pool(pool);                 // compute nodes now route here

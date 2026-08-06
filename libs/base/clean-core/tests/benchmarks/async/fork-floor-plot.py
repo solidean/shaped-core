@@ -11,9 +11,8 @@ Drives `bench-async-fork-floor (thread sweep)` through dev.py in release, parses
 one PNG: x = element count, y = total ns for the whole graph, both log; one line per pool worker count on a
 viridis gradient.
 
-The question it answers: a graph that forks even once costs ~11 us regardless of size, while an un-split single
-node costs ~0.3 us. Is that a FIXED handoff cost (lines flat across worker counts) or contention (lines fan out
-as the pool grows)?
+The question it answers: a graph that forks even once costs far more than an un-split single node, whatever its size.
+Is that a FIXED handoff cost (lines flat across worker counts) or contention (lines fan out as the pool grows)?
 
 Usage:
     uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
@@ -43,7 +42,7 @@ ROW_RE = re.compile(r"^FLOORCSV\s+(\d+),(\d+),([0-9.eE+-]+)\s*$")
 
 
 def run_benchmark(preset: str) -> str:
-    """Run the sweep via dev.py and return its stdout. Raises if dev.py reports failure."""
+    """Run the sweep via dev.py and return its stdout — raises if dev.py reports failure."""
     cmd = [
         "uv",
         "run",

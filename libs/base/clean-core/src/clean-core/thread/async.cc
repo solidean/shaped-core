@@ -324,8 +324,8 @@ void cc::impl::async_dep_head::clear()
 
 void cc::impl::async_cont_head::spill_inline()
 {
-    // The inline slot cannot hold a 2nd entry or a latch, so its dependent moves into a cell first. adopt()
-    // takes over the weak count we were holding by hand — no inc/dec pair, and the cell owns it from here.
+    // The inline slot cannot hold a 2nd entry or a latch, so its dependent moves into a cell first.
+    // adopt() takes over the weak count we were holding by hand — no inc/dec pair, and the cell owns it from here.
     auto* c = cont_alloc_cell();
     c->_fn = nullptr;
     new (cc::placement_new, &c->_weak) async_node_weak(async_node_weak::adopt(inline_dep()));
@@ -340,8 +340,8 @@ void cc::impl::async_cont_head::normalize()
 
     if (list_head() == nullptr)
         _head = 0; // list emptied (remove() can leave a null list head, i.e. the bare tag)
-    // NOTE: a 1-entry list is deliberately NOT collapsed back to the inline slot. Unlike async_dep_head's
-    // normalize (on the poll loop's hot path), remove() is rare, and a latch cell cannot live inline at all.
+    // NOTE: a 1-entry list is deliberately NOT collapsed back to the inline slot.
+    // remove() is rare, unlike async_dep_head's normalize on the poll loop's hot path, and a latch cell cannot live inline at all.
 }
 
 void cc::impl::async_cont_head::clear()

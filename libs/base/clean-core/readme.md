@@ -29,8 +29,8 @@ Source lives in `src/clean-core/`, grouped by topic:
 | `sequence/`  | the lazy ranges API (`sequence`) |
 | `string/`    | `string`, `string_view`, `char_predicates`, `to_string`, `to_debug_string` |
 | `function/`  | type-erased callables (`function_ref`, `unique_function`) |
-| `error/`     | fallible value types (`optional`, `result`) |
-| `thread/`    | concurrency primitives (`mutex`) |
+| `error/`     | fallible value types (`optional`, `result`) and the crash handler |
+| `thread/`    | `async` and its work-stealing pool, `threaded_actor`, and the primitives under them (`atomic`, `mutex`, `spin`, `thread`) |
 
 `impl/` subfolders hold private implementation details (e.g.
 `container/impl/allocating_container.hh`, `memory/impl/object_lifetime_util.hh`) —

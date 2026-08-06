@@ -12,10 +12,10 @@
 
 namespace cc
 {
-/// Tell the CPU this iteration is a spin-wait: it yields pipeline resources to the other SMT thread on the same
-/// core and softens the memory-order-violation penalty when the loop finally exits. Not a scheduling yield —
-/// the thread stays runnable and nothing is handed to the OS, so this belongs in short bounded spins, never as
-/// a substitute for blocking.
+/// Tell the CPU this iteration is a spin-wait.
+/// It yields pipeline resources to the other SMT thread on the same core, and softens the memory-order-violation penalty when the loop finally exits.
+/// Not a scheduling yield — the thread stays runnable and nothing is handed to the OS.
+/// So this belongs in short bounded spins, never as a substitute for blocking.
 ///
 /// A no-op on architectures with no such hint; correctness must never depend on it.
 CC_FORCE_INLINE void spin_pause()

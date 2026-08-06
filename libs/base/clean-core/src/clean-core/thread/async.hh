@@ -65,14 +65,16 @@ struct alignas(64) async_typed_node : cc::async_node_base
     // The constraint is applied per-path, only where a value is actually moved: finish_value, push_value, make_async_from_value, into_result.
     // Payload teardown is not a member here: it lives in impl::async_typed_teardown, keyed on one type, so the ops descriptor collapses (see async_type_ops_for).
 
-    /// Pointer to the produced value; null unless ready with a value. Stable while the node is alive.
+    /// Pointer to the produced value; null unless ready with a value.
+    /// Stable while the node is alive.
     [[nodiscard]] T const* value_ptr() const
     {
         return this->has_value() ? reinterpret_cast<T const*>(this->payload()) : nullptr;
     }
     [[nodiscard]] T* value_ptr() { return this->has_value() ? reinterpret_cast<T*>(this->payload()) : nullptr; }
 
-    /// Pointer to the produced error; null unless ready with an error. Stable while the node is alive.
+    /// Pointer to the produced error; null unless ready with an error.
+    /// Stable while the node is alive.
     [[nodiscard]] E const* error_ptr() const
     {
         return this->has_error() ? reinterpret_cast<E const*>(this->payload()) : nullptr;

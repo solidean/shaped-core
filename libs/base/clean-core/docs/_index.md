@@ -19,8 +19,8 @@ clean-core/
   sequence/     # the lazy ranges API
   string/       # string, string_view, char_predicates, to_string, to_debug_string
   function/     # function_ref, unique_function
-  error/        # optional, result
-  thread/       # mutex
+  error/        # optional, result, crash_handler
+  thread/       # async + its work-stealing pool, threaded_actor, atomic, mutex, spin, thread
 ```
 
 `impl/` subfolders are private implementation details.
@@ -42,6 +42,8 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   mimalloc leads at every size and is only mildly `/Ob1`-sensitive.
 - [benchmarks/file-stream-benchmark](benchmarks/file-stream-benchmark.md) — the file stream adapters vs `std::fstream` across a granularity sweep.
   ~11×/16× faster single-byte via the buffer window, narrowing to parity as records grow.
+- [benchmarks/async-benchmark](benchmarks/async-benchmark.md) — the four `cc::async` benchmarks: the per-node tax on one thread, and where a born-ready node's ~40 ns goes.
+  Plus pool scaling across five fork-join shapes, and the leaf size at which fork-join overhead stops dominating.
 
 Add further deep-dive docs here as kebab-case `.md` files and link them from this list.
 

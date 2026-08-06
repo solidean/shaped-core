@@ -18,9 +18,8 @@
 #include <tlhelp32.h> // CreateToolhelp32Snapshot — and the only way to enumerate this process's threads
 #endif
 
-// Sanitizers (ASan/TSan/MSan) install their own fault handlers and print far richer diagnostics;
-// overriding them would suppress those reports. Detect an active sanitizer and make installation a
-// no-op there, leaving the runtime's handlers in place.
+// Sanitizers (ASan/TSan/MSan) install their own fault handlers and print far richer diagnostics, so overriding them would suppress those reports.
+// Detect an active sanitizer and make installation a no-op there, leaving the runtime's handlers in place.
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
 #define CC_CRASH_HANDLER_SANITIZED 1
 #elif defined(__has_feature)
@@ -40,23 +39,21 @@ cc::crash_context_hook g_hooks[k_max_hooks] = {};
 int g_hook_count = 0;
 bool g_installed = false;
 
-// Everything below is the actual fault-reporting machinery, compiled out under sanitizers
-// (see CC_CRASH_HANDLER_SANITIZED) so the runtime's own handlers stay in place.
+// Everything below is the actual fault-reporting machinery, compiled out under sanitizers (see CC_CRASH_HANDLER_SANITIZED) so the runtime's own handlers stay in place.
 #if !CC_CRASH_HANDLER_SANITIZED
 
 #ifdef CC_OS_WINDOWS
 
 // Every OTHER thread's stack, walked one thread at a time.
 //
-// The faulting thread reports itself through std::stacktrace; this covers the rest, which is what a
-// deadlock or a hung test actually needs — there the interesting stack is never the one that noticed.
-// std::stacktrace can only capture the calling thread, so this drops to DbgHelp: snapshot the thread
-// list, then per thread suspend / GetThreadContext / StackWalk64 / resume.
+// The faulting thread reports itself through std::stacktrace; this covers the rest, which is what a deadlock or a hung test actually needs.
+// There, the interesting stack is never the one that noticed.
+// std::stacktrace can only capture the calling thread, so this drops to DbgHelp: snapshot the thread list, then per thread suspend / GetThreadContext / StackWalk64 / resume.
 //
-// Deliberately one at a time. Suspending every thread up front and then symbolizing would deadlock the
-// moment a suspended thread held the heap or loader lock that DbgHelp needs; holding at most one
-// suspension at a time keeps that window as small as it can be. It is not zero — this is a diagnostic on
-// an already-dying process, and the header says as much — so every step is best-effort and bounded.
+// Deliberately one at a time.
+// Suspending every thread up front and then symbolizing would deadlock the moment a suspended thread held the heap or loader lock that DbgHelp needs.
+// Holding at most one suspension at a time keeps that window as small as it can be.
+// It is not zero — this is a diagnostic on an already-dying process, as the header says — so every step is best-effort and bounded.
 constexpr int k_max_threads = 64; // a runaway thread count must not turn a crash report into a flood
 constexpr int k_max_frames = 64;
 
@@ -81,9 +78,9 @@ void report_frame(DWORD64 address, SYMBOL_INFO* sym, IMAGEHLP_LINE64* line) noex
     }
     else
     {
-        // No symbol — a release build without a PDB, or a module we have no symbols for. `module+offset`
-        // is still enough to find the frame in a disassembly, and is the difference between a usable
-        // report and a column of bare addresses, which is exactly the case a release-build hang produces.
+        // No symbol — a release build without a PDB, or a module we have no symbols for.
+        // `module+offset` still finds the frame in a disassembly, which is the difference between a usable report and a column of bare addresses.
+        // That is exactly the case a release-build hang produces.
         IMAGEHLP_MODULE64 module;
         std::memset(&module, 0, sizeof(module));
         module.SizeOfStruct = sizeof(module);
@@ -216,9 +213,9 @@ void report_other_thread_stacks() noexcept
 
 #else
 
-// Walking a thread that is not the calling one has no portable equivalent here: backtrace() captures only
-// the caller, and reaching the others means signalling each in turn — machinery this diagnostic does not
-// justify. The faulting thread's stack is still reported, and a core dump has the rest.
+// Walking a thread that is not the calling one has no portable equivalent here: backtrace() captures only the caller.
+// Reaching the others means signalling each in turn — machinery this diagnostic does not justify.
+// The faulting thread's stack is still reported, and a core dump has the rest.
 void report_other_thread_stacks() noexcept
 {
     std::fputs("\n<other threads' stacks are Windows-only; the core dump has them>\n", stderr);

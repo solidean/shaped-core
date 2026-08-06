@@ -22,8 +22,8 @@ int cc::num_hardware_threads()
 
 #include <clean-core/string/conversion.hh>
 
-// Declared here (not via <windows.h>) to keep this TU light, mirroring how assert.cc imports
-// IsDebuggerPresent. char16_t and Windows wchar_t are both 16-bit, so the wide buffer maps directly.
+// Declared here (not via <windows.h>) to keep this TU light, mirroring how assert.cc imports IsDebuggerPresent.
+// char16_t and Windows wchar_t are both 16-bit, so the wide buffer maps directly.
 extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread() noexcept;
 extern "C" __declspec(dllimport) long __stdcall SetThreadDescription(void*, wchar_t const*) noexcept;
 
