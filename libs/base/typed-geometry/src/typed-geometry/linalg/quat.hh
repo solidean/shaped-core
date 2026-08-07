@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/fwd.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>
@@ -35,6 +36,11 @@ public:
     /// the identity rotation (0, 0, 0, 1).
     /// Runtime constant, not usable in constant expressions.
     static quat const identity;
+
+    /// the identity rotation, as a constant expression.
+    /// Needed where quat::identity cannot be used: a static data member of incomplete type cannot be constexpr,
+    /// so it is not a constant expression.
+    [[nodiscard]] static constexpr quat make_identity() { return quat(T{}, T{}, T{}, tg::one<T>()); }
 
     // rotations
 public:
@@ -157,6 +163,25 @@ public:
     /// the conjugate (negated vector part); the inverse rotation for a unit quaternion.
     [[nodiscard]] constexpr quat conjugate() const { return quat(-data[0], -data[1], -data[2], data[3]); }
 
+    /// this rotation as a 3x3 matrix.
+    ///
+    /// The quaternion must be unit length: the sandwich q v q̄ scales by |q|², so a non-unit one yields
+    /// that scaling folded into the matrix rather than a pure rotation.
+    [[nodiscard]] constexpr mat<3, 3, T> to_rotation_matrix() const
+    {
+        T const x = data[0];
+        T const y = data[1];
+        T const z = data[2];
+        T const w = data[3];
+        T const two = T(2);
+        T const one = tg::one<T>();
+
+        return mat<3, 3, T>::make_from_cols(
+            vec<3, T>(one - two * (y * y + z * z), two * (x * y + z * w), two * (x * z - y * w)), //
+            vec<3, T>(two * (x * y - z * w), one - two * (x * x + z * z), two * (y * z + x * w)), //
+            vec<3, T>(two * (x * z + y * w), two * (y * z - x * w), one - two * (x * x + y * y)));
+    }
+
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(quat const&, quat const&) = default;
@@ -193,6 +218,6 @@ public:
 template <class T>
 inline quat<T> const quat<T>::zero = quat<T>{};
 template <class T>
-inline quat<T> const quat<T>::identity = quat<T>(T{}, T{}, T{}, tg::one<T>());
+inline quat<T> const quat<T>::identity = quat<T>::make_identity();
 
 } // namespace tg

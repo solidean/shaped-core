@@ -63,6 +63,17 @@ Two objects can share an encoding yet denote different sets.
 The planned `halfspace` will reuse the **exact same** `{normal, dist}` representation but denote `{x : dot(normal, x) <= dist}`, one side of the plane.
 The point-set framing is what makes that distinction explicit instead of accidental.
 So the interpretation lives in the type and its `object_traits`, never implicitly in the storage.
+`sphere` and the planned `ball` are the same pairing — `sphere` is the surface, so its `intrinsic_dim` is `D - 1`.
+
+### `sphere` and `ellipsoid` carry an embedding dimension
+
+Both take **two** dimensions, `<D, DAmbient, T>`: the flat the object curves in, and the space that flat sits in.
+They coincide for the everyday cases (`sphere3f`, `ellipsoid2f`) and part when the object is embedded above its own dimension — `sphere2in3f` is a circle lying in 3D, `ellipsoid2in3f` an ellipse.
+
+An `ellipsoid`'s semi-axes span its flat, so one general template covers every pair and the embedded case stores nothing extra.
+A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so what it stores depends on the pair.
+Its primary template is therefore left undefined and each supported pair is a specialization: `sphere<D, D, T>` is `{center, radius}`, and `sphere<2, 3, T>` adds the plane's normal.
+A pair with no specialization is an incomplete type, which is the same "opt in per case, never a silent default" stance `object_traits` takes.
 
 ### Minimal surface, no queries yet
 

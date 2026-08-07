@@ -40,6 +40,18 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/linalg.hh
     src/typed-geometry/linalg/all.hh
 
+    src/typed-geometry/transform/fwd.hh
+    src/typed-geometry/transform/transform_flags.hh
+    src/typed-geometry/transform/impl/rotation_representation.hh
+    src/typed-geometry/transform/impl/transform_representation.hh
+    src/typed-geometry/transform/impl/transform_representation_access.hh
+    src/typed-geometry/transform/homogeneous_transform.hh
+
+    src/typed-geometry/transform/composed_transform.hh
+    src/typed-geometry/transform/compose.hh
+    src/typed-geometry/transform/transform.hh
+    src/typed-geometry/transform/all.hh
+
     src/typed-geometry/geometry/fwd.hh
     src/typed-geometry/geometry/traits.hh
     src/typed-geometry/geometry/primitives/aabb.hh
@@ -48,6 +60,8 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/primitives/ray.hh
     src/typed-geometry/geometry/primitives/line.hh
     src/typed-geometry/geometry/primitives/plane.hh
+    src/typed-geometry/geometry/primitives/sphere.hh
+    src/typed-geometry/geometry/primitives/ellipsoid.hh
     src/typed-geometry/geometry/primitives/primitives.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
@@ -89,7 +103,17 @@ if(SC_BUILD_TESTS)
         tests/linalg/mat-test.cc
         tests/linalg/quat-test.cc
 
+        tests/transform/transform-flags-test.cc
+        tests/transform/homogeneous-transform-test.cc
+        tests/transform/compose-test.cc
+        tests/transform/inverse-test.cc
+        tests/transform/transform-ops-test.cc
+        tests/transform/dispatch-test.cc
+        tests/transform/projective-test.cc
+
         tests/geometry/aabb-test.cc
+        tests/geometry/sphere-test.cc
+        tests/geometry/ellipsoid-test.cc
         tests/geometry/triangle-test.cc
         tests/geometry/segment-test.cc
         tests/geometry/ray-test.cc

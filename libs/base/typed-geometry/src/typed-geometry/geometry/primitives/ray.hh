@@ -4,6 +4,7 @@
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/transform/homogeneous_transform.hh>
 
 namespace tg
 {
@@ -28,6 +29,29 @@ public:
     ray() = default;
 
     explicit constexpr ray(pos<D, T> const& origin, vec<D, T> const& dir) : origin(origin), dir(dir) {}
+
+    // transformation
+public:
+    /// An affine map sends a ray to a ray.
+    /// dir is transformed as a displacement and is NOT renormalized, so a non-uniform scaling rescales the ray's parameter.
+    ///
+    /// A projective map is deliberately not handled:
+    /// a ray's point at infinity maps to a finite point, so the projective image of a ray is a bounded segment, not a ray.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+
+        else if constexpr (requires { tg::affine_transform<D, T>(t); })
+        {
+            auto const a = tg::affine_transform<D, T>(t);
+            return ray(origin.transformed(a), dir.transformed(a));
+        }
+        else
+            static_assert(false, "tg: a ray only survives an affine map. Its projective image is a bounded segment, "
+                                 "so transform the endpoints of the piece you care about instead.");
+    }
 
     // comparison
 public:

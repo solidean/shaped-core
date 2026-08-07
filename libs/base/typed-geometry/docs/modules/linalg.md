@@ -10,16 +10,15 @@ It depends only on `scalar/`.
 
 ## What belongs here
 
-- Algebraic *data* types and their **intrinsic** members (cheap, local, discoverable):
-  `v.length()`, `m.col(i)`, `q.conjugate()`.
-- **Symmetric / cross-type** operations as free functions: `dot`, `cross`, `distance`, matrix
-  products, …, split into `<type>_ops.hh` where they aren't operators.
+- Algebraic *data* types and their **intrinsic** members (cheap, local, discoverable): `v.length()`, `m.col(i)`, `q.conjugate()`.
+- **Symmetric / cross-type** operations as free functions: `dot`, `cross`, `distance`, matrix products, …, split into `<type>_ops.hh` where they aren't operators.
 - Pure linear algebra and the small set of "escape hatch" conversions (`dual`/`undual`).
 
 ## What does NOT belong here
 
 - **Transforms.** A `mat` is linear-algebra data, not a semantic transformation.
-  `rigid_transform`, `affine_transform` and the `transform(t, x)` machinery live in the planned `transform/` module, and there is intentionally no `mat * pos`.
+  `rigid_transform`, `affine_transform` and the `obj.transformed(t)` machinery live in the [`transform/`](transform.md) module.
+  There is intentionally no `mat * pos`, and no `t * p` either.
 - Geometry primitives (aabb, ray, triangle, …), acceleration structures, and shape algorithms —
   those are higher modules.
 
@@ -87,18 +86,13 @@ Every factory is named `make_*` (`make_unit`, `make_from_values`, `make_rotation
 The [coding-guidelines](../coding-guidelines.md) carry both rules, including why such a static member is a runtime constant rather than `constexpr`.
 
 ### `normalized()` returns zero instead of asserting
-`vec`/`quat` `normalized()` return the zero value for a degenerate length rather than asserting, with the test going through `tg::traits::is_zero`.
+
 `vec`/`quat` `normalized()` return the zero value for a (near-)zero length rather than asserting, with the degeneracy test going through `tg::traits::is_zero`.
 The [coding-guidelines](../coding-guidelines.md) carry the rationale.
 
 ## See also
 
-- [coding-guidelines](../coding-guidelines.md) — the cross-cutting rules (storage, qualification,
-  factories, statics, no-assert-normalize) these types follow.
+- [coding-guidelines](../coding-guidelines.md) — the cross-cutting rules (storage, qualification, factories, statics, no-assert-normalize) these types follow.
 - [cheat-sheet](../../cheat-sheet.md) — the linalg API at a glance.
-- source: [vec.hh](../../src/typed-geometry/linalg/vec.hh),
-  [pos.hh](../../src/typed-geometry/linalg/pos.hh),
-  [bivec.hh](../../src/typed-geometry/linalg/bivec.hh),
-  [cross.hh](../../src/typed-geometry/linalg/cross.hh),
-  [mat.hh](../../src/typed-geometry/linalg/mat.hh),
-  [quat.hh](../../src/typed-geometry/linalg/quat.hh).
+- source: [vec.hh](../../src/typed-geometry/linalg/vec.hh), [pos.hh](../../src/typed-geometry/linalg/pos.hh), [bivec.hh](../../src/typed-geometry/linalg/bivec.hh),
+  [cross.hh](../../src/typed-geometry/linalg/cross.hh), [mat.hh](../../src/typed-geometry/linalg/mat.hh), [quat.hh](../../src/typed-geometry/linalg/quat.hh).

@@ -76,6 +76,22 @@ public:
         return data[i];
     }
 
+    // transformation
+public:
+    /// the image of this bivector under `t`, by the linear map's second exterior power.
+    ///
+    /// In 3D the dual — a normal — therefore picks up the cofactor matrix, which is why a normal must be a bivec and not a vec.
+    /// The result is not renormalized; a non-uniform scaling changes its magnitude.
+    ///
+    /// The transform does the work, unconditionally: the exterior power needs cross.hh, which includes bivec,
+    /// so it cannot be computed here.
+    /// A transform that wants to answer for a bivec writes that answer in its own `transform`.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        return t.transform(*this);
+    }
+
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(bivec const&, bivec const&) = default;

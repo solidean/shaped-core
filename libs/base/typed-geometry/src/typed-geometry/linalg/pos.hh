@@ -97,6 +97,19 @@ public:
         return data[i];
     }
 
+    // transformation
+public:
+    /// the image of this point under `t`, including the perspective divide if the transform has one.
+    ///
+    /// The transform does the work, unconditionally: going through linear_mat() here would build a matrix for
+    /// what may be a single quaternion, and only the transform knows which.
+    /// A transform that wants to answer for a pos writes that answer in its own `transform`.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        return t.transform(*this);
+    }
+
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(pos const&, pos const&) = default;

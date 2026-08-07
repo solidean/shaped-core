@@ -3,6 +3,7 @@
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/transform/homogeneous_transform.hh>
 
 namespace tg
 {
@@ -26,6 +27,31 @@ public:
     segment() = default;
 
     explicit constexpr segment(pos<D, T> const& pos0, pos<D, T> const& pos1) : pos0(pos0), pos1(pos1) {}
+
+    // transformation
+public:
+    /// A projective map keeps a segment a segment only while both endpoints stay in front of the projection.
+    /// That is NOT checked: an endpoint behind it maps to its mirror image, and the result is a segment through
+    /// the wrong points rather than a diagnosed error.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+
+        else if constexpr (requires { tg::affine_transform<D, T>(t); })
+        {
+            auto const a = tg::affine_transform<D, T>(t);
+            return segment(pos0.transformed(a), pos1.transformed(a));
+        }
+        else if constexpr (requires { tg::projective_transform<D, T>(t); })
+        {
+            auto const p = tg::projective_transform<D, T>(t);
+            return segment(pos0.transformed(p), pos1.transformed(p));
+        }
+        else
+            static_assert(false, "tg: a segment can be transformed by an affine or a projective map");
+    }
 
     // comparison
 public:

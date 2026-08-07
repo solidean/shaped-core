@@ -25,5 +25,4 @@ template <int D, class T>
 {
     return v.normalized();
 }
-
 } // namespace tg

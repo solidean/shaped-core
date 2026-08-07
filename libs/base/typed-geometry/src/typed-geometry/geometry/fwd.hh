@@ -34,6 +34,17 @@ struct line;
 template <int D, class T>
 struct plane;
 
+/// sphere surface {x : distance(x, center) == radius}. Finite, intrinsic_dim D-1.
+/// D is the dimension of the flat it curves in, DAmbient the space that flat sits in.
+/// The primary template is undefined — each supported pair is a specialization, since the embedded case also has to name its flat.
+template <int D, int DAmbient, class T>
+struct sphere;
+
+/// ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}. Finite, intrinsic_dim D-1.
+/// Same dimension pair as sphere — the D semi-axes span the flat, so nothing else is stored when embedded.
+template <int D, int DAmbient, class T>
+struct ellipsoid;
+
 //
 // Dimensional aliases
 //
@@ -67,6 +78,23 @@ template <class T>
 using plane2 = plane<2, T>;
 template <class T>
 using plane3 = plane<3, T>;
+
+template <class T>
+using sphere2 = sphere<2, 2, T>;
+template <class T>
+using sphere3 = sphere<3, 3, T>;
+
+template <class T>
+using ellipsoid2 = ellipsoid<2, 2, T>;
+template <class T>
+using ellipsoid3 = ellipsoid<3, 3, T>;
+
+// sphere and ellipsoid also come embedded above their own dimension, spelled "<D>in<DAmbient>":
+// a circle or an ellipse lying in 3D.
+template <class T>
+using sphere2in3 = sphere<2, 3, T>;
+template <class T>
+using ellipsoid2in3 = ellipsoid<2, 3, T>;
 
 //
 // Concrete typedefs (2D and 3D; suffix f = f32, d = f64, i = i32)
@@ -108,5 +136,22 @@ using plane2f = plane<2, f32>;
 using plane3f = plane<3, f32>;
 using plane2d = plane<2, f64>;
 using plane3d = plane<3, f64>;
+
+// sphere/ellipsoid carry a radius or a semi-axis map, so only the real-scalar suffixes f/d.
+using sphere2f = sphere<2, 2, f32>;
+using sphere3f = sphere<3, 3, f32>;
+using sphere2d = sphere<2, 2, f64>;
+using sphere3d = sphere<3, 3, f64>;
+
+using sphere2in3f = sphere<2, 3, f32>;
+using sphere2in3d = sphere<2, 3, f64>;
+
+using ellipsoid2f = ellipsoid<2, 2, f32>;
+using ellipsoid3f = ellipsoid<3, 3, f32>;
+using ellipsoid2d = ellipsoid<2, 2, f64>;
+using ellipsoid3d = ellipsoid<3, 3, f64>;
+
+using ellipsoid2in3f = ellipsoid<2, 3, f32>;
+using ellipsoid2in3d = ellipsoid<2, 3, f64>;
 
 } // namespace tg

@@ -7,3 +7,4 @@
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/scalar/fwd.hh>
+#include <typed-geometry/transform/fwd.hh>

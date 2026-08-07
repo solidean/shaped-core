@@ -130,6 +130,19 @@ public:
         return *this / l;
     }
 
+    // transformation
+public:
+    /// the image of this displacement under `t` — the translation does not apply to it.
+    ///
+    /// The transform does the work, unconditionally: it is the only thing that knows whether its linear part is
+    /// a quaternion, a scalar or a matrix, so there is nothing to decide here.
+    /// A transform that wants to answer for a vec writes that answer in its own `transform`.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        return t.transform(*this);
+    }
+
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(vec const&, vec const&) = default;

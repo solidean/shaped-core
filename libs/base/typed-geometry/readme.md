@@ -15,7 +15,7 @@ auto const dist = d.length();       // 5
 Headers are included by their full path from `src/`, e.g. `#include <typed-geometry/linalg/vec.hh>`.
 The root `fwd.hh` forward-declares the public types and defines the dimensional/typed aliases.
 
-This library is at an **early stage**: `scalar/`, the whole `linalg/` core and the first `geometry/` primitives exist, and everything above them is still planned.
+This library is at an **early stage**: `scalar/`, the whole `linalg/` core, the `transform/` module and the first `geometry/` primitives exist, and everything above them is still planned.
 [docs/structure.md](docs/structure.md) is the roadmap, with a `[done]` / `[in progress]` / `[planned]` tag per module.
 
 ## Design at a glance
@@ -26,6 +26,11 @@ This library is at an **early stage**: `scalar/`, the whole `linalg/` core and t
 - **Raw storage, indexed access only.** Components live in a public C array member `data`, reached through `data` or `operator[]` — there are **no `.x/.y/.z`** members.
 - **Extensible scalars.** Scalar capabilities route through `tg::scalar_traits<T>` rather than `std::`, so an expression tree, a double-double or a bigint can opt in.
   `length()`/`normalized()`/`distance()` exist only for scalars whose trait declares `has_sqrt`.
+- **Transforms carry their capabilities in the type.**
+  `tg::rigid_transform3f` and `tg::affine_transform3f` are the same `homogeneous_transform<DSource, DTarget, T, Flags>` at different points of a 19-class lattice.
+  The representation follows from the flags, and so does the result of `obj.transformed(t)` — a sphere stays a sphere under a similarity and becomes an ellipsoid under an affine map.
+  The type also names the source and target dimension, so lifting and projecting between spaces can eventually be typed; only the square case is implemented today, and every named alias is square.
+  `mat` remains linear-algebra data: there is no `mat * pos`.
 
 [docs/coding-guidelines.md](docs/coding-guidelines.md) carries each of these as a rule, and [docs/modules/](docs/modules/linalg.md) the reasoning behind it.
 
@@ -33,12 +38,13 @@ This library is at an **early stage**: `scalar/`, the whole `linalg/` core and t
 
 Source lives in `src/typed-geometry/`, grouped by module:
 
-| Folder      | What's in it |
-|-------------|--------------|
-| (root)      | `fwd.hh` (forward decls + aliases), `all.hh` (full umbrella) |
-| `scalar/`   | the `scalar_traits<T>` seam, `tg::sqrt` and the trig functions, `angle`, `pi` |
-| `linalg/`   | `vec`, `pos`, `comp`, `bivec`, `mat`, `quat` and their `_ops` free functions |
-| `geometry/` | the `object_traits` seam and the primitives (`aabb`, `triangle`, `segment`, `ray`, `line`, `plane`) |
+| Folder       | What's in it |
+|--------------|--------------|
+| (root)       | `fwd.hh` (forward decls + aliases), `all.hh` (full umbrella) |
+| `scalar/`    | the `scalar_traits<T>` seam, `tg::sqrt` and the trig functions, `angle`, `pi` |
+| `linalg/`    | `vec`, `pos`, `comp`, `bivec`, `mat`, `quat` and their `_ops` free functions |
+| `transform/` | `homogeneous_transform<DSource, DTarget, T, Flags>`, `composed`/`inverse`, and the object handshake |
+| `geometry/`  | the `object_traits` seam and the primitives (`aabb`, `triangle`, `segment`, `ray`, `line`, `plane`) |
 
 ## Building & testing
 
@@ -55,10 +61,7 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
 - [docs/_index.md](docs/_index.md) — typed-geometry's documentation hub.
-- [docs/modules/](docs/modules/scalar.md) — per-module "what belongs here / why is it this way"
-  docs (e.g. the `pos + pos` translation rule, why `bivec != vec`).
+- [docs/modules/](docs/modules/scalar.md) — per-module "what belongs here / why is it this way" docs (e.g. the `pos + pos` translation rule, why `bivec != vec`).
 - [docs/structure.md](docs/structure.md) — the full module roadmap.
-- [docs/coding-guidelines.md](docs/coding-guidelines.md) — tg-specific conventions (scalar
-  traits, `data` storage, generic-over-`D` types), on top of the repo-wide ones.
-- [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code
-  follows (`.clang-format` is authoritative for formatting).
+- [docs/coding-guidelines.md](docs/coding-guidelines.md) — tg-specific conventions (scalar traits, `data` storage, generic-over-`D` types), on top of the repo-wide ones.
+- [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows (`.clang-format` is authoritative for formatting).

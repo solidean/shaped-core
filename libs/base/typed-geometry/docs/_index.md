@@ -7,7 +7,7 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
 ## Source organization
 
 typed-geometry's headers live in `src/typed-geometry/`, grouped by module.
-`scalar/`, `linalg/` and the first `geometry/` primitives exist today; every other module in the roadmap is planned.
+`scalar/`, `linalg/`, `transform/` and the first `geometry/` primitives exist today; every other module in the roadmap is planned.
 
 ```text
 typed-geometry/
@@ -15,10 +15,11 @@ typed-geometry/
   all.hh        # complete umbrella (expensive)
   scalar/       # scalar_traits<T> seam, tg::sqrt + trig, angle, pi (complex/interval/... planned)
   linalg/       # vec, pos, comp, bivec, mat, quat (+ ops)
-  geometry/     # object_traits seam + primitives (aabb/triangle/segment/ray/line/plane); queries planned
+  transform/    # homogeneous_transform<DSource, DTarget, T, Flags> + composed/inverse + the object handshake
+  geometry/     # object_traits seam + primitives (aabb/triangle/segment/ray/line/plane/sphere/ellipsoid); queries planned
 ```
 
-Forward declarations and the dimensional/typed aliases live in a per-module `fwd.hh` — `scalar/fwd.hh`, `linalg/fwd.hh`, `geometry/fwd.hh` — chained along the dependency order.
+Forward declarations and the dimensional/typed aliases live in a per-module `fwd.hh` — `scalar/fwd.hh`, `linalg/fwd.hh`, `transform/fwd.hh`, `geometry/fwd.hh` — chained along the dependency order.
 The top-level `fwd.hh` only aggregates them, so include a single module's when that is all you need.
 
 ## Module docs
@@ -28,10 +29,10 @@ Motivation, scope, and the load-bearing decisions, in the spirit of an ADR — n
 Add one when a module lands, and cover the big rationales there; the small ones stay in source comments.
 
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
-- [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos`
-  translation rule and the `bivec != vec` decision.
-- [modules/geometry](modules/geometry.md) — the primitive types and the `object_traits`
-  point-set seam (`intrinsic_dim`/`ambient_dim`/`is_finite`); representation vs. interpretation.
+- [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos` translation rule and the `bivec != vec` decision.
+- [modules/transform](modules/transform.md) — one transform type over a capability lattice.
+  Why containment is not a bit test, why widening is explicit, and how an object's `.transformed(t)` picks its return type.
+- [modules/geometry](modules/geometry.md) — the primitive types and the `object_traits` point-set seam (`intrinsic_dim`/`ambient_dim`/`is_finite`); representation vs. interpretation.
 
 ## Topics
 
@@ -47,6 +48,6 @@ Add one when a module lands, and cover the big rationales there; the small ones 
 ## Conventions
 
 - Namespace `tg`; depends on clean-core (vocabulary types + assertions).
-- Code follows the repo [coding-guidelines](../../../../docs/coding-guidelines.md) plus the
-  tg-specific [coding-guidelines](coding-guidelines.md) (scalar traits, raw `data` storage,
-  generic-over-`D` types, …). `.clang-format` is authoritative for formatting.
+- Code follows the repo [coding-guidelines](../../../../docs/coding-guidelines.md) plus the tg-specific [coding-guidelines](coding-guidelines.md).
+  Those cover scalar traits, raw `data` storage and generic-over-`D` types.
+  `.clang-format` is authoritative for formatting.
