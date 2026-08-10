@@ -374,9 +374,14 @@ public:
     /// transforms it is able to absorb, and this one absorbs every class of the same scalar that chains onto it.
     /// A pair with no `composed` is not an error — tg::compose falls back to a tg::composed_transform holding both.
     /// Probe it with `requires { a.composed(b); }`.
+    ///
+    /// Returns transform_for<DB, DTarget, T, Flags | FB> — the join of the two classes, canonicalized.
+    /// That return type must stay DEDUCED rather than spelled out.
+    /// A function template mangles its return type, and gcc cannot mangle `Flags | FB` once the flags are a
+    /// class-type non-type template parameter: it reports "sorry, unimplemented: mangling view_convert_expr".
+    /// `auto` mangles as a placeholder instead, which keeps the expression out of the name entirely.
     template <int DB, cc::flags<tg::impl::transform_flags> FB>
-    [[nodiscard]] constexpr transform_for<DB, DTarget, T, Flags | FB> composed(
-        homogeneous_transform<DB, DSource, T, FB> const& b) const
+    [[nodiscard]] constexpr auto composed(homogeneous_transform<DB, DSource, T, FB> const& b) const
     {
         using result_t = transform_for<DB, DTarget, T, Flags | FB>;
         constexpr auto lf = result_t::linear_flags;
