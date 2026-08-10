@@ -279,7 +279,7 @@ class file_read_write_stream_adapter;
 // Utilities
 //
 
-template <class EnumT, isize Bits = 8 * sizeof(EnumT)>
+template <class EnumT>
 struct flags;
 
 struct unit;

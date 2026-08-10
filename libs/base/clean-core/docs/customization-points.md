@@ -1,6 +1,6 @@
 # Customization points
 
-How a clean-core operation lets a type opt into custom behavior — hashing and formatting today.
+How a clean-core operation lets a type opt into custom behavior — hashing, formatting and enum traits today.
 The mechanism centers on the `cc::custom::` namespace and is broadly uniform across operations, so learning it for one teaches you most of the rest.
 The per-operation variations are small, and the note under "The tiers" has them.
 (Hub: [_index.md](_index.md).)
@@ -78,6 +78,29 @@ struct point
 ```
 
 clean-core ships `cc::custom::hash_trait` specializations for the fundamentals — integers, enums, floats and pointers — so they work without any per-type friend.
+
+## Worked example: enum traits
+
+`cc::custom::enum_traits<EnumT>` in [common/enum_traits.hh](../src/clean-core/common/enum_traits.hh) is what an enum tells clean-core about itself.
+Today that is whether it is a flag enum, and which integer its flags pack into.
+
+It uses **tier 1 only**, and not by preference: an enum can carry neither a hidden friend nor a member, so tiers 2 and 3 do not exist for it.
+Unlike hashing's trait, its primary IS defined — it answers `is_flag_enum = false` — so `cc::flag_enum<E>` is a plain read rather than a detection idiom.
+That is also what keeps an enum which later declares something else about itself from becoming a flag enum by accident.
+
+Tier 1 has a consequence here that it does not have elsewhere.
+An explicit specialization must be written at a namespace enclosing `cc`, so it can never sit next to the enum.
+`operator|` on that enum is reachable only through ADL, so it must sit *inside* the enum's namespace.
+The two halves of the opt-in cannot share a scope, which is why `CC_FLAG_ENUM` in [common/flags.hh](../src/clean-core/common/flags.hh) takes the namespace as an argument and opens it itself:
+
+```cpp
+namespace app { enum class shape : u32 { none = 0, visible = 1u << 0, selected = 1u << 1 }; }
+CC_FLAG_ENUM(app, shape, u32);
+```
+
+One macro at one site, and the enum's own header never stays open around the operators.
+That is the direction the codebase wants generally: forward-declare, then define as `struct cc::flags` rather than reopening a namespace.
+Writing the specialization by hand, with no macro at all, is the supported path for an enum you cannot annotate at its definition.
 
 ## Adding a new customizable operation
 

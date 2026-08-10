@@ -11,7 +11,7 @@ clean-core's headers live in `src/clean-core/`, grouped by topic:
 ```text
 clean-core/
   fwd.hh        # forward declarations of the public types
-  common/       # macros, utility/meta, flags, hash, assertions
+  common/       # macros, utility/meta, enum traits + flags, hash, assertions
   platform/     # console (color), native (demangling), source_location, stacktrace, win32_sanitized
   math/         # bit utilities, the random PRNG, wide_arith's 128-bit primitives
   memory/       # allocation, node_allocation, shared_ptr (+ impl/)
@@ -38,6 +38,7 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   An early prototype: the doc separates the reductions that work today from the design the rest of the API is intended to follow.
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers clean-core is allowed to depend on directly, and why.
 - [customization-points](customization-points.md) — the `cc::custom::` trait + hidden-friend protocol that operations like hashing use to let types opt in.
+  Enum traits are the tier-1-only case, and why `CC_FLAG_ENUM` takes the enum's namespace as an argument.
 - [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter.
   The `cc::seek_dir` / flush contract, a minimal worked example, and the buffered / write / read_write cases.
 - [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) — XXH3 vs hand-rolled short-string hashers across a length sweep,
@@ -52,6 +53,8 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   Plus pool scaling across five fork-join shapes, and the leaf size at which fork-join overhead stops dominating.
 
 Add further deep-dive docs here as kebab-case `.md` files and link them from this list.
+
+Known follow-ups are collected in [TODO](TODO.md).
 
 ## Systems
 
