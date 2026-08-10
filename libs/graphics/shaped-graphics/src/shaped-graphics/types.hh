@@ -30,7 +30,7 @@ enum class thread_model
 
 /// How a buffer may be used across the pipeline.
 /// Bit flags — combine with `|`, test with `has_flag`.
-/// Migrates to `cc::flags` once that clean-core type lands.
+/// Migrates to `cc::flags`, which has landed.
 ///
 /// Names describe the *operation the buffer serves* at draw/dispatch time, not any one backend's flag.
 /// Each value's trailing comment gives that per-backend mapping.
@@ -81,7 +81,7 @@ enum class buffer_usage : u32
 
 /// How a texture may be used across the pipeline.
 /// Bit flags — combine with `|`, test with `has_flag`.
-/// Migrates to `cc::flags` once that clean-core type lands, like `buffer_usage`.
+/// Migrates to `cc::flags`, like `buffer_usage`.
 ///
 /// Modeled at Vulkan's granularity, one flag per `VkImageUsageFlagBit`, since Vulkan needs every usage declared at creation and D3D12 is coarser.
 /// Vulkan-only `INPUT_ATTACHMENT` / `TRANSIENT_ATTACHMENT` are omitted deliberately, having no D3D12 analogue.

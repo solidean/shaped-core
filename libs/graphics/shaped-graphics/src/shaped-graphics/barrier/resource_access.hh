@@ -15,7 +15,7 @@ namespace sg
 {
 /// What a GPU operation does to a resource.
 /// Bit flags — combine with `|`, test with `has_all` / `has_any`.
-/// Migrates to `cc::flags` once that clean-core type lands (same status as `buffer_usage`).
+/// Migrates to `cc::flags` (same status as `buffer_usage`).
 ///
 /// Read vs write is explicit in the suffix.
 /// `is_unordered_write` marks the accesses that create a hazard needing a barrier — shader, transfer and accel writes.
