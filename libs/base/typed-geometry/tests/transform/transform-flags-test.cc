@@ -1,3 +1,4 @@
+#include <clean-core/common/flags.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/transform/transform_flags.hh>
 
@@ -9,7 +10,7 @@ namespace tc = tg::impl::transform_class;
 /// the distinct canonical classes, in the order canonical() first produces them.
 struct class_list
 {
-    transform_flags data[32] = {};
+    cc::flags<transform_flags> data[32] = {};
     int count = 0;
 };
 
@@ -60,24 +61,43 @@ consteval bool verify_transform_flag_lattice()
     auto const& classes = list.data;
     int const n = list.count;
 
+    // Tabulated first, because the least-upper-bound loop below asks the same n^2 questions n times over.
+    // Every join is itself one of the classes, which is what lets the tables be indexed rather than searched.
+    bool is_sub[32][32] = {};
+    int join_index[32][32] = {};
+
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
         {
-            auto const join = tg::impl::transform_canonical(classes[i] | classes[j]);
+            is_sub[i][j] = tg::impl::transform_is_subclass(classes[i], classes[j]);
 
-            if (tg::impl::transform_canonical(classes[j] | classes[i]) != join)
-                return false; // commutative
+            auto const join = tg::impl::transform_canonical(classes[i] | classes[j]);
             if (!tg::impl::transform_is_canonical(join))
                 return false; // closed
-            if (!tg::impl::transform_is_subclass(classes[i], join) || !tg::impl::transform_is_subclass(classes[j], join))
+
+            join_index[i][j] = -1;
+            for (int k = 0; k < n; ++k)
+                if (classes[k] == join)
+                    join_index[i][j] = k;
+
+            if (join_index[i][j] < 0)
+                return false; // and lands on a class we know
+        }
+
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            if (join_index[i][j] != join_index[j][i])
+                return false; // commutative
+
+            int const join = join_index[i][j];
+            if (!is_sub[i][join] || !is_sub[j][join])
                 return false; // an upper bound
 
             for (int k = 0; k < n; ++k)
             {
                 // the LEAST upper bound: nothing containing both may fail to contain the join
-                if (tg::impl::transform_is_subclass(classes[i], classes[k])
-                    && tg::impl::transform_is_subclass(classes[j], classes[k])
-                    && !tg::impl::transform_is_subclass(join, classes[k]))
+                if (is_sub[i][k] && is_sub[j][k] && !is_sub[join][k])
                     return false;
             }
         }
@@ -118,7 +138,7 @@ TEST("tg transform_flags - canonicalization")
         // R1 S1 R2 S2 is not of the form R S, so the class is not closed without general_linear
         CHECK(tg::impl::transform_canonical(transform_flags::rotation | transform_flags::non_uniform_scaling)
               == tc::linear);
-        CHECK(tg::impl::has_all(tc::linear, transform_flags::general_linear));
+        CHECK(tc::linear.has_all(transform_flags::general_linear));
     }
 
     SECTION("projection is the top of the lattice")
@@ -139,7 +159,7 @@ TEST("tg transform_flags - is_subclass is not a bit-subset test")
     // so affine does not contain similarity's bits even though every similarity IS an affine map.
     SECTION("the bit test gets it wrong")
     {
-        CHECK(!tg::impl::has_all(tc::affine, tc::similarity));
+        CHECK(!tc::affine.has_all(tc::similarity));
     }
 
     SECTION("the class test gets it right")
@@ -167,19 +187,21 @@ TEST("tg transform_flags - is_subclass is not a bit-subset test")
     }
 }
 
-TEST("tg transform_flags - bit operations")
+TEST("tg transform_flags - set operations")
 {
-    SECTION("complement stays inside the defined bits")
+    SECTION("subtraction is what replaced the masked complement")
     {
-        CHECK(~transform_flags::none == transform_flags::all);
-        CHECK(~transform_flags::all == transform_flags::none);
+        CHECK(tc::projective.without(transform_flags::all).is_empty());
+        CHECK(tc::projective.without(tc::rigid)
+              == (transform_flags::uniform_scaling | transform_flags::non_uniform_scaling
+                  | transform_flags::negative_scaling | transform_flags::general_linear | transform_flags::projection));
     }
 
     SECTION("has_any / has_all / without")
     {
-        CHECK(tg::impl::has_any(tc::rigid));
-        CHECK(!tg::impl::has_any(tc::identity));
-        CHECK(tg::impl::has_all(tc::rigid, transform_flags::rotation));
-        CHECK(tg::impl::without(tc::rigid, transform_flags::rotation) == transform_flags::translation);
+        CHECK(!tc::rigid.is_empty());
+        CHECK(tc::identity.is_empty());
+        CHECK(tc::rigid.has_all(transform_flags::rotation));
+        CHECK(tc::rigid.without(transform_flags::rotation) == transform_flags::translation);
     }
 }

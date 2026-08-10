@@ -10,7 +10,7 @@ It depends only on `scalar/` and `linalg/`.
 There is one transform type that does maths:
 
 ```cpp
-template <int DSource, int DTarget, class T, transform_flags Flags>
+template <int DSource, int DTarget, class T, cc::flags<transform_flags> Flags>
 struct homogeneous_transform;
 ```
 
@@ -110,7 +110,7 @@ This is the module's easiest mistake, so it is worth stating plainly.
 Canonicalization **clears** bits — `affine` drops `uniform_scaling`, because `non_uniform_scaling` subsumes it — which means:
 
 ```cpp
-tg::impl::has_all(transform_class::affine, transform_class::similarity)         // FALSE
+transform_class::affine.has_all(transform_class::similarity)                          // FALSE
 tg::impl::transform_is_subclass(transform_class::similarity, transform_class::affine) // true
 ```
 
@@ -118,7 +118,7 @@ even though every similarity *is* an affine map.
 `transform_canonical(a | b)` is the join in the class lattice, so containment is "the join is already the wider class":
 
 ```cpp
-constexpr bool transform_is_subclass(transform_flags sub, transform_flags super)
+constexpr bool transform_is_subclass(cc::flags<transform_flags> sub, cc::flags<transform_flags> super)
 { return tg::impl::transform_canonical(sub | super) == super; }
 ```
 

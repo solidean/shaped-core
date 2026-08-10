@@ -179,7 +179,8 @@ q.to_rotation_matrix();                           // mat3 — q must be UNIT; a 
 //                                  scaled_rotation, similarity, linear, affine, scaling_translation,
 //                                  uniform_scaling_translation, projective, and signed_ variants
 // tg::impl::transform_canonical(f) / transform_is_canonical(f) / transform_is_subclass(sub, super)
-// tg::impl::has_any / has_all / without   — the flag-set stand-in, until cc::flags exists
+// A flag set is a cc::flags<transform_flags>, so the set operations are f.has_any / f.has_all / f.without.
+// transform_class::* and the Flags template argument are that type, NOT the bare enum.
 ```
 
 ```cpp

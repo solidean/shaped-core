@@ -15,7 +15,7 @@ namespace tg::impl
 ///
 /// Every member carries a default initializer, because vec, mat and quat all default to ZERO —
 /// a transform built from their defaults would be singular instead of the identity.
-template <int D, class T, transform_flags LinearFlags>
+template <int D, class T, cc::flags<transform_flags> LinearFlags>
 struct linear_representation;
 
 template <int D, class T>
@@ -70,10 +70,10 @@ struct linear_representation<D, T, linear_kind::general_linear>
 /// homogeneous_transform holds exactly one of these as its only non-static data member, which keeps it standard-layout.
 /// Splitting the linear part into a base class instead would forfeit that as soon as both halves carry members —
 /// that is, for rigid, similarity and affine, the common cases.
-template <int D, class T, transform_flags LinearFlags, transform_layout Layout>
+template <int D, class T, cc::flags<transform_flags> LinearFlags, transform_layout Layout>
 struct transform_representation;
 
-template <int D, class T, transform_flags LinearFlags>
+template <int D, class T, cc::flags<transform_flags> LinearFlags>
 struct transform_representation<D, T, LinearFlags, transform_layout::linear_only>
 {
     linear_representation<D, T, LinearFlags> linear;
@@ -82,7 +82,7 @@ struct transform_representation<D, T, LinearFlags, transform_layout::linear_only
         = default;
 };
 
-template <int D, class T, transform_flags LinearFlags>
+template <int D, class T, cc::flags<transform_flags> LinearFlags>
 struct transform_representation<D, T, LinearFlags, transform_layout::translation_only>
 {
     vec<D, T> translation;
@@ -91,7 +91,7 @@ struct transform_representation<D, T, LinearFlags, transform_layout::translation
         = default;
 };
 
-template <int D, class T, transform_flags LinearFlags>
+template <int D, class T, cc::flags<transform_flags> LinearFlags>
 struct transform_representation<D, T, LinearFlags, transform_layout::linear_and_translation>
 {
     linear_representation<D, T, LinearFlags> linear;
@@ -101,7 +101,7 @@ struct transform_representation<D, T, LinearFlags, transform_layout::linear_and_
         = default;
 };
 
-template <int D, class T, transform_flags LinearFlags>
+template <int D, class T, cc::flags<transform_flags> LinearFlags>
 struct transform_representation<D, T, LinearFlags, transform_layout::projective>
 {
     mat<D + 1, D + 1, T> m = tg::impl::make_identity<D + 1, D + 1, T>();

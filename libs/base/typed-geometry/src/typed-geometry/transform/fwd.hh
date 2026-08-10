@@ -10,7 +10,7 @@ namespace tg
 ///
 /// The two dimensions are what lets a transform lift or project between spaces.
 /// Only the square case is implemented today — the type asserts DSource == DTarget.
-template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
+template <int DSource, int DTarget, class T, cc::flags<tg::impl::transform_flags> Flags>
 struct homogeneous_transform;
 
 /// two arbitrary transforms held side by side, applied inner first — what tg::compose falls back to.
@@ -59,7 +59,7 @@ using projective_transform = homogeneous_transform<D, D, T, tg::impl::transform_
 
 /// canonicalizing spelling, for return types and other non-deduced positions only.
 /// Never use this in a function parameter or a partial specialization — Flags would not deduce.
-template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
+template <int DSource, int DTarget, class T, cc::flags<tg::impl::transform_flags> Flags>
 using transform_for = homogeneous_transform<DSource, DTarget, T, tg::impl::transform_canonical(Flags)>;
 
 //
