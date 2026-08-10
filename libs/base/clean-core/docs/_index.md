@@ -38,7 +38,7 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
   An early prototype: the doc separates the reductions that work today from the design the rest of the API is intended to follow.
 - [blessed-stdlib-headers](blessed-stdlib-headers.md) — the standard headers clean-core is allowed to depend on directly, and why.
 - [customization-points](customization-points.md) — the `cc::custom::` trait + hidden-friend protocol that operations like hashing use to let types opt in.
-  Enum traits are the tier-1-only case, and why `CC_FLAG_ENUM` takes the enum's namespace as an argument.
+  Enum traits are the tier-1-only case, and why the `CC_FLAG_ENUM_*` macros take the enum's namespace as an argument.
 - [writing-a-stream](writing-a-stream.md) — how to add your own byte-stream adapter.
   The `cc::seek_dir` / flush contract, a minimal worked example, and the buffered / write / read_write cases.
 - [benchmarks/string-hash-benchmark](benchmarks/string-hash-benchmark.md) — XXH3 vs hand-rolled short-string hashers across a length sweep,

@@ -30,6 +30,21 @@ enum class overflowing : u32
     high = 1u << 8,
 };
 
+/// a PLAIN enum, written with no bit patterns in mind — the case CC_FLAG_ENUM_INDEXED exists for.
+enum class plain_indexed
+{
+    e1,
+    e2,
+    e3,
+};
+
+/// indexed, but names a value at or beyond the declared storage's bit count.
+enum class indexed_overflowing
+{
+    low = 0,
+    high = 8,
+};
+
 /// opted in by hand rather than by macro, and therefore without operators.
 enum class manual : u16
 {
@@ -45,14 +60,17 @@ enum class plain : u32
 };
 } // namespace flags_test
 
-CC_FLAG_ENUM(flags_test, shape, u32);
-CC_FLAG_ENUM(flags_test, narrow, u8);
-CC_FLAG_ENUM(flags_test, overflowing, u8);
+CC_FLAG_ENUM_BITMASK(flags_test, shape, u32);
+CC_FLAG_ENUM_BITMASK(flags_test, narrow, u8);
+CC_FLAG_ENUM_BITMASK(flags_test, overflowing, u8);
+CC_FLAG_ENUM_INDEXED(flags_test, plain_indexed, u32);
+CC_FLAG_ENUM_INDEXED(flags_test, indexed_overflowing, u8);
 
 template <>
 struct cc::custom::enum_traits<flags_test::manual>
 {
     static constexpr bool is_flag_enum = true;
+    static constexpr cc::flag_encoding flag_encoding = cc::flag_encoding::bit_mask;
     using flag_storage_type = u16;
 };
 
@@ -65,9 +83,54 @@ static_assert(cc::flag_enum<flags_test::manual>, "a hand-written enum_traits spe
 static_assert(!cc::flag_enum<flags_test::plain>, "an enum that never opted in is not a flag enum");
 static_assert(!cc::flag_enum<int>);
 
+static_assert(cc::flag_enum<flags_test::plain_indexed>);
+
 static_assert(sizeof(cc::flags<flags_test::shape>) == 4);
 static_assert(sizeof(cc::flags<flags_test::narrow>) == 1, "storage comes from the traits, not from the underlying type");
 static_assert(sizeof(cc::flags<flags_test::manual>) == 2);
+
+static_assert(cc::flags<flags_test::shape>::encoding == cc::flag_encoding::bit_mask);
+static_assert(cc::flags<flags_test::plain_indexed>::encoding == cc::flag_encoding::bit_index);
+
+// =========================================================================================================
+// bit_index — a plain enum, one bit per value
+// =========================================================================================================
+
+namespace
+{
+using flags_test::plain_indexed;
+using indexed_flags = cc::flags<plain_indexed>;
+
+consteval bool verify_indexed_encoding()
+{
+    // the value IS the bit position, so e1 == 0 lands on bit 0 rather than on nothing
+    if (indexed_flags(plain_indexed::e1).bits != 0b001)
+        return false;
+    if (indexed_flags(plain_indexed::e2).bits != 0b010)
+        return false;
+    if (indexed_flags(plain_indexed::e3).bits != 0b100)
+        return false;
+
+    auto f = plain_indexed::e1 | plain_indexed::e3;
+    if (f.bits != 0b101 || f.set_bit_count() != 2)
+        return false;
+    if (!f.has(plain_indexed::e1) || f.has(plain_indexed::e2))
+        return false;
+
+    f.set(plain_indexed::e2);
+    if (f.bits != 0b111)
+        return false;
+    f.remove(plain_indexed::e1);
+    if (f != (plain_indexed::e2 | plain_indexed::e3))
+        return false;
+    f.toggle(plain_indexed::e2);
+    if (f != indexed_flags(plain_indexed::e3))
+        return false;
+
+    return f.without(plain_indexed::e3).is_empty();
+}
+static_assert(verify_indexed_encoding());
+} // namespace
 
 // =========================================================================================================
 // The default state, and what guaranteeing it costs
@@ -246,8 +309,31 @@ TEST("flags - narrow storage keeps the enum's bit positions")
 
 TEST("flags - a value wider than the declared storage asserts")
 {
-    CHECK(cc::flags<flags_test::overflowing>(flags_test::overflowing::low).bits == 1);
-    CHECK_ASSERTS(cc::flags<flags_test::overflowing>(flags_test::overflowing::high));
+    SECTION("bit_mask: the pattern must fit the storage")
+    {
+        CHECK(cc::flags<flags_test::overflowing>(flags_test::overflowing::low).bits == 1);
+        CHECK_ASSERTS(cc::flags<flags_test::overflowing>(flags_test::overflowing::high));
+    }
+
+    SECTION("bit_index: the index must be below the storage's bit count")
+    {
+        CHECK(cc::flags<flags_test::indexed_overflowing>(flags_test::indexed_overflowing::low).bits == 1);
+        CHECK_ASSERTS(cc::flags<flags_test::indexed_overflowing>(flags_test::indexed_overflowing::high));
+    }
+}
+
+TEST("flags - bit_index gives a plain enum one bit per value")
+{
+    auto f = flags_test::plain_indexed::e1 | flags_test::plain_indexed::e3;
+
+    CHECK(f.bits == 0b101);
+    CHECK(f.has(flags_test::plain_indexed::e3));
+    CHECK(!f.has(flags_test::plain_indexed::e2));
+    CHECK(f.set_bit_count() == 2);
+
+    f.set(flags_test::plain_indexed::e2, true);
+    CHECK(f.bits == 0b111);
+    CHECK(f.without(flags_test::plain_indexed::e1).bits == 0b110);
 }
 
 TEST("flags - hand-written traits need no macro")

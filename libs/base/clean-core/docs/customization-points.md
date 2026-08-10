@@ -82,7 +82,10 @@ clean-core ships `cc::custom::hash_trait` specializations for the fundamentals �
 ## Worked example: enum traits
 
 `cc::custom::enum_traits<EnumT>` in [common/enum_traits.hh](../src/clean-core/common/enum_traits.hh) is what an enum tells clean-core about itself.
-Today that is whether it is a flag enum, and which integer its flags pack into.
+Today that is whether it is a flag enum, which integer its flags pack into, and how its values map onto bits.
+
+That last one has to be declared because it cannot be detected: nothing about `e = 4` says whether it means bit 4 or bit 2.
+So `cc::flag_encoding` has no default, and each opt-in macro names one outright — `CC_FLAG_ENUM_INDEXED` for a plain enum, `CC_FLAG_ENUM_BITMASK` for one whose values already are bit patterns.
 
 It uses **tier 1 only**, and not by preference: an enum can carry neither a hidden friend nor a member, so tiers 2 and 3 do not exist for it.
 Unlike hashing's trait, its primary IS defined — it answers `is_flag_enum = false` — so `cc::flag_enum<E>` is a plain read rather than a detection idiom.
@@ -91,11 +94,11 @@ That is also what keeps an enum which later declares something else about itself
 Tier 1 has a consequence here that it does not have elsewhere.
 An explicit specialization must be written at a namespace enclosing `cc`, so it can never sit next to the enum.
 `operator|` on that enum is reachable only through ADL, so it must sit *inside* the enum's namespace.
-The two halves of the opt-in cannot share a scope, which is why `CC_FLAG_ENUM` in [common/flags.hh](../src/clean-core/common/flags.hh) takes the namespace as an argument and opens it itself:
+The two halves of the opt-in cannot share a scope, which is why the macros in [common/flags.hh](../src/clean-core/common/flags.hh) take the namespace as an argument and open it themselves:
 
 ```cpp
-namespace app { enum class shape : u32 { none = 0, visible = 1u << 0, selected = 1u << 1 }; }
-CC_FLAG_ENUM(app, shape, u32);
+namespace app { enum class shape { visible, selected, locked }; }
+CC_FLAG_ENUM_INDEXED(app, shape, u32);
 ```
 
 One macro at one site, and the enum's own header never stays open around the operators.

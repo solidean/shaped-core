@@ -372,17 +372,24 @@ rng.clone();                              // independent generator at the same s
 One macro at global scope, taking the enum's namespace separately — it emits the `cc::custom::enum_traits` specialization,
 which is only legal outside the namespace, and reopens the namespace itself for the `|` `&` `^` that ADL can only find inside it.
 
+Two macros, one per encoding, because the choice is not detectable from the enum: nothing about `e = 4` says whether it means bit 4 or bit 2.
+
 ```cpp
 #include <clean-core/common/flags.hh>
 
-namespace app { enum class shape : u32 { none = 0, visible = 1u << 0, selected = 1u << 1, locked = 1u << 2 }; }
-CC_FLAG_ENUM(app, shape, u32);                     // namespace, enum, flag storage
+// a PLAIN enum — each value gets a bit of its own, `e` taking bit `e`
+namespace app { enum class shape { visible, selected, locked }; }
+CC_FLAG_ENUM_INDEXED(app, shape, u32);             // namespace, enum, flag storage
+
+// values that ALREADY ARE bit patterns, so one value may name several bits
+namespace app { enum class usage : u32 { vertex = 1u << 0, index = 1u << 1, both = 0b11 }; }
+CC_FLAG_ENUM_BITMASK(app, usage, u32);
 
 cc::flags<app::shape> f = app::shape::visible;     // a single flag converts implicitly
 f = app::shape::visible | app::shape::locked;      // cc::flags<app::shape>
 f.bits;                                            // the raw storage; public, so cc::flags works as a template parameter
 
-f.has(app::shape::locked);                         // bool; a subset test for a value naming several bits
+f.has(app::shape::locked);                         // bool; under bit_mask, a subset test for a value naming several bits
 f.has_any(other);  f.has_all(other);               // bool; `other` may be a single flag
 f.is_empty();  f.set_bit_count();                  // bool / i32 (popcount of bits, NOT of enumerators)
 f.without(other);                                  // cc::flags; there is no operator~
@@ -391,10 +398,11 @@ f.set(v);  f.set(v, on);  f.remove(v);  f.toggle(v);  f.clear();
 f |= other;  f &= other;  f ^= other;              // also | & ^, ==, and cc::make_hash
 cc::flags<app::shape>::create_from_bits(0b101);
 cc::flag_enum<app::shape>;                         // concept: did this enum opt in?
+cc::flags<app::shape>::encoding;                   // cc::flag_encoding::bit_index or ::bit_mask
 ```
 
-The storage is stated, never inferred — `CC_FLAG_ENUM(app, shape, u8)` packs into one byte whatever the enum's own underlying type is.
-A value that does not fit the declared storage asserts.
+The storage is stated, never inferred — `CC_FLAG_ENUM_BITMASK(app, usage, u8)` packs into one byte whatever the enum's own underlying type is.
+It also bounds the values: a bit_mask pattern that does not fit asserts, as does a bit_index at or beyond the storage's bit count.
 
 ## Hashing
 
@@ -675,8 +683,10 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **`create_uninitialized` requires a trivial `T`.**
 - **Not yet implemented (stubs — don't reach for these):** `ringbuffer`, `bitset`, `fixed_bitset`, `tuple`, `variant`, and `disjoint_set`.
   Check the header before relying on one.
-- **`CC_FLAG_ENUM` goes at GLOBAL scope and takes the namespace as its first argument** — it opens that namespace itself.
+- **`CC_FLAG_ENUM_INDEXED` / `CC_FLAG_ENUM_BITMASK` go at GLOBAL scope and take the namespace as their first argument** — they open that namespace themselves.
   The enum must therefore live in one, and there is no `operator~`: `without()` is the set subtraction every complement was being used for.
+- **Pick the encoding deliberately — nothing detects it for you.**
+  `INDEXED` on an enum whose values are already bit patterns, or `BITMASK` on a plain one, shifts every flag silently; only a value that overruns the storage asserts.
 - **Streams are move-only real types (private-inheritance wrappers over one engine).**
   Conversions only ever NARROW (`seekable_* -> plain`, `read_write -> read`/`write`; `read <-> write` never).
   An adapter converts to any legal narrowing; a stream narrows to another stream only **from an rvalue**, consuming it, so one backend never has two live views.

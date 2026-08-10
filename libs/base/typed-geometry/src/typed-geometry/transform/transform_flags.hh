@@ -34,7 +34,7 @@ enum class transform_flags : u32
 };
 } // namespace tg::impl
 
-CC_FLAG_ENUM(tg::impl, transform_flags, u32);
+CC_FLAG_ENUM_BITMASK(tg::impl, transform_flags, u32);
 
 namespace tg::impl
 {
