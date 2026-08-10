@@ -44,7 +44,7 @@ namespace tg
 ///
 /// Equality is representational, not geometric: a quaternion and its negation denote the same
 /// rotation but do not compare equal, exactly as for tg::quat.
-template <int DSource, int DTarget, class T, cc::flags<tg::impl::transform_flags> Flags>
+template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
 struct homogeneous_transform
 {
     static_assert(DSource == 2 || DSource == 3,
@@ -55,7 +55,7 @@ struct homogeneous_transform
                   "a transform between two different dimensions is not implemented yet — the "
                   "source/target parameters are in place, the lifting and projecting maths is not");
     static_assert(Flags == tg::impl::transform_canonical(Flags),
-                  "transform_flags must be canonical — name the class through one of the tg aliases "
+                  "the transform_flag set must be canonical — name the class through one of the tg aliases "
                   "(tg::rigid_transform3f, "
                   "tg::affine_transform<D, T>, ...) or use tg::transform_for<DSource, DTarget, T, Flags>, which "
                   "canonicalizes for you");
@@ -64,13 +64,13 @@ struct homogeneous_transform
     static constexpr int source_dimension = DSource;
     static constexpr int target_dimension = DTarget;
 
-    static constexpr cc::flags<tg::impl::transform_flags> flags = Flags;
-    static constexpr cc::flags<tg::impl::transform_flags> linear_flags = tg::impl::linear_part(Flags);
+    static constexpr tg::impl::transform_flags flags = Flags;
+    static constexpr tg::impl::transform_flags linear_flags = tg::impl::linear_part(Flags);
 
-    static constexpr bool has_translation = Flags.has_any(tg::impl::transform_flags::translation);
-    static constexpr bool has_projection = Flags.has_any(tg::impl::transform_flags::projection);
+    static constexpr bool has_translation = Flags.has_any(tg::impl::transform_flag::translation);
+    static constexpr bool has_projection = Flags.has_any(tg::impl::transform_flag::projection);
     /// false means every scale factor is positive, so the map preserves orientation and ordering.
-    static constexpr bool has_negative_scaling = Flags.has_any(tg::impl::transform_flags::negative_scaling);
+    static constexpr bool has_negative_scaling = Flags.has_any(tg::impl::transform_flag::negative_scaling);
 
 private:
     /// layout depends on Flags and is not API — reach for the accessors, or tg::impl::transform_representation_of.
@@ -79,11 +79,11 @@ private:
 
     /// a wider or narrower class of the same family reads the members directly — that is what the widening
     /// constructor and composed() are doing, and neither can go through the public accessors without a conversion.
-    template <int, int, class, cc::flags<tg::impl::transform_flags>>
+    template <int, int, class, tg::impl::transform_flags>
     friend struct homogeneous_transform;
 
     /// the return type stays deduced on both sides — see transform_representation_access.hh.
-    template <int DS, int DT, class U, cc::flags<tg::impl::transform_flags> F>
+    template <int DS, int DT, class U, tg::impl::transform_flags F>
     friend constexpr auto const& tg::impl::transform_representation_of(homogeneous_transform<DS, DT, U, F> const&);
 
     // construction
@@ -105,7 +105,7 @@ public:
     ///
     /// A same-class conversion goes through the copy constructor, so the requires-clause excludes it
     /// and `similarity_transform<D, T>(t)` works whether t is narrower or already a similarity.
-    template <cc::flags<tg::impl::transform_flags> FS>
+    template <tg::impl::transform_flags FS>
         requires(FS != Flags && tg::impl::transform_is_subclass(FS, Flags))
     explicit constexpr homogeneous_transform(homogeneous_transform<DSource, DTarget, T, FS> const& src)
     {
@@ -148,7 +148,7 @@ public:
                     _representation.linear = src._representation.linear;
             }
 
-            if constexpr (has_translation && FS.has_any(tg::impl::transform_flags::translation))
+            if constexpr (has_translation && FS.has_any(tg::impl::transform_flag::translation))
                 _representation.translation = src._representation.translation;
         }
     }
@@ -380,7 +380,7 @@ public:
     /// A function template mangles its return type, and gcc cannot mangle `Flags | FB` once the flags are a
     /// class-type non-type template parameter: it reports "sorry, unimplemented: mangling view_convert_expr".
     /// `auto` mangles as a placeholder instead, which keeps the expression out of the name entirely.
-    template <int DB, cc::flags<tg::impl::transform_flags> FB>
+    template <int DB, tg::impl::transform_flags FB>
     [[nodiscard]] constexpr auto composed(homogeneous_transform<DB, DSource, T, FB> const& b) const
     {
         using result_t = transform_for<DB, DTarget, T, Flags | FB>;
@@ -660,7 +660,7 @@ private:
     }
 };
 
-template <int DSource, int DTarget, class T, cc::flags<tg::impl::transform_flags> Flags>
+template <int DSource, int DTarget, class T, tg::impl::transform_flags Flags>
 inline homogeneous_transform<DSource, DTarget, T, Flags> const homogeneous_transform<DSource, DTarget, T, Flags>::identity
     = homogeneous_transform<DSource, DTarget, T, Flags>{};
 

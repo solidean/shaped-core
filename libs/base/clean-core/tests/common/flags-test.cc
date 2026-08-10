@@ -159,7 +159,7 @@ static_assert(std::is_trivially_destructible_v<cc::flags<flags_test::shape>>);
 static_assert(!std::is_trivially_default_constructible_v<cc::flags<flags_test::shape>>);
 
 // =========================================================================================================
-// Structural type — a flag set as a non-type template parameter, which is what tg::transform_flags needs
+// Structural type — a flag set as a non-type template parameter, which is what tg::transform_flag needs
 // =========================================================================================================
 
 template <cc::flags<flags_test::shape> F>

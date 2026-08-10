@@ -5,8 +5,8 @@
 
 namespace tg::impl
 {
-/// What a transform is allowed to contain.
-/// Bit flags — combine with `|`, and hold the result in a cc::flags<transform_flags>, which is what every function here takes.
+/// One thing a transform is allowed to contain.
+/// A set of them is a transform_flags, which is what every function here takes — combine with `|`.
 ///
 /// These select the capability class of tg::homogeneous_transform, which picks its representation from them and never exposes it.
 /// This is machinery, not API: name a class through one of the tg aliases (tg::rigid_transform3f, tg::affine_transform<D, T>, ...)
@@ -18,26 +18,35 @@ namespace tg::impl
 /// Scaling factors are POSITIVE unless `negative_scaling` says otherwise.
 /// That is what lets narrow classes stay simple: an aabb under a positive scaling keeps its min and max in order,
 /// and a sphere's radius is just multiplied by the factor.
-enum class transform_flags : u32
+///
+/// The empty and full sets have no enumerator: the empty one is a default-constructed cc::flags, and the full one is transform_flag_all.
+enum class transform_flag
 {
-    none = 0,
-
-    translation = 1u << 0,         // an additive offset
-    uniform_scaling = 1u << 1,     // one factor applied to every axis
-    non_uniform_scaling = 1u << 2, // one factor per axis
-    negative_scaling = 1u << 3,    // a scale factor may be negative, so the map may reverse orientation
-    rotation = 1u << 4,            // a proper rotation, SO(D)
-    general_linear = 1u << 5,      // an arbitrary invertible linear part, GL(D)
-    projection = 1u << 6,          // a non-trivial homogeneous bottom row
-
-    all = (1u << 7) - 1,
+    translation,         // an additive offset
+    uniform_scaling,     // one factor applied to every axis
+    non_uniform_scaling, // one factor per axis
+    negative_scaling,    // a scale factor may be negative, so the map may reverse orientation
+    rotation,            // a proper rotation, SO(D)
+    general_linear,      // an arbitrary invertible linear part, GL(D)
+    projection,          // a non-trivial homogeneous bottom row
 };
 } // namespace tg::impl
 
-CC_FLAG_ENUM_BITMASK(tg::impl, transform_flags, u32);
+CC_FLAG_ENUM_INDEXED(tg::impl, transform_flag, u32);
 
 namespace tg::impl
 {
+/// A SET of transform_flag, which is what everything below takes and returns.
+/// It is also the type of transform_class::*, and of homogeneous_transform's Flags argument — never the bare enum.
+using transform_flags = cc::flags<transform_flag>;
+
+/// Every flag, so the top of the class lattice.
+/// This is the one place that has to name them all — a new transform_flag belongs here too.
+inline constexpr transform_flags transform_flag_all = transform_flag::translation | transform_flag::uniform_scaling
+                                                    | transform_flag::non_uniform_scaling
+                                                    | transform_flag::negative_scaling | transform_flag::rotation
+                                                    | transform_flag::general_linear | transform_flag::projection;
+
 /// Reduce a flag set to the canonical representative of its transform class.
 ///
 /// Several bit patterns denote the same set of transforms, and each such set must have exactly one type.
@@ -53,28 +62,28 @@ namespace tg::impl
 ///   5. a negative factor needs a factor to sit on, so the flag means nothing without scaling
 ///
 /// There are 19 canonical classes: nine linear ones with and without translation, plus projective.
-[[nodiscard]] constexpr cc::flags<transform_flags> transform_canonical(cc::flags<transform_flags> f)
+[[nodiscard]] constexpr transform_flags transform_canonical(transform_flags f)
 {
-    if (f.has_any(transform_flags::projection))
-        return transform_flags::all;
+    if (f.has_any(transform_flag::projection))
+        return tg::impl::transform_flag_all;
 
-    if (f.has_all(transform_flags::rotation | transform_flags::non_uniform_scaling))
-        f |= transform_flags::general_linear;
+    if (f.has_all(transform_flag::rotation | transform_flag::non_uniform_scaling))
+        f |= transform_flag::general_linear;
 
-    if (f.has_any(transform_flags::general_linear))
-        f |= transform_flags::rotation | transform_flags::non_uniform_scaling | transform_flags::negative_scaling;
+    if (f.has_any(transform_flag::general_linear))
+        f |= transform_flag::rotation | transform_flag::non_uniform_scaling | transform_flag::negative_scaling;
 
-    if (f.has_any(transform_flags::non_uniform_scaling))
-        f = f.without(transform_flags::uniform_scaling);
+    if (f.has_any(transform_flag::non_uniform_scaling))
+        f = f.without(transform_flag::uniform_scaling);
 
-    if (!f.has_any(transform_flags::uniform_scaling | transform_flags::non_uniform_scaling))
-        f = f.without(transform_flags::negative_scaling);
+    if (!f.has_any(transform_flag::uniform_scaling | transform_flag::non_uniform_scaling))
+        f = f.without(transform_flag::negative_scaling);
 
     return f;
 }
 
 /// is this flag set already the representative of its class?
-[[nodiscard]] constexpr bool transform_is_canonical(cc::flags<transform_flags> f)
+[[nodiscard]] constexpr bool transform_is_canonical(transform_flags f)
 {
     return tg::impl::transform_canonical(f) == f;
 }
@@ -86,7 +95,7 @@ namespace tg::impl
 /// transform_canonical() CLEARS bits — affine drops uniform_scaling because non_uniform_scaling subsumes it —
 /// so has_all(affine, similarity) is false even though every similarity is affine.
 /// transform_canonical(a | b) is the join in the class lattice, so containment is "the join is already `super`".
-[[nodiscard]] constexpr bool transform_is_subclass(cc::flags<transform_flags> sub, cc::flags<transform_flags> super)
+[[nodiscard]] constexpr bool transform_is_subclass(transform_flags sub, transform_flags super)
 {
     return tg::impl::transform_canonical(sub | super) == super;
 }
@@ -96,45 +105,45 @@ namespace tg::impl
 namespace transform_class
 {
 // linear only; scale factors are positive
-inline constexpr cc::flags<transform_flags> identity = transform_flags::none;
-inline constexpr cc::flags<transform_flags> uniform_scaling = transform_flags::uniform_scaling;
-inline constexpr cc::flags<transform_flags> scaling = transform_flags::non_uniform_scaling;
-inline constexpr cc::flags<transform_flags> rotation = transform_flags::rotation;
-inline constexpr cc::flags<transform_flags> scaled_rotation
-    = tg::impl::transform_canonical(transform_flags::rotation | transform_flags::uniform_scaling);
+inline constexpr transform_flags identity = {};
+inline constexpr transform_flags uniform_scaling = transform_flag::uniform_scaling;
+inline constexpr transform_flags scaling = transform_flag::non_uniform_scaling;
+inline constexpr transform_flags rotation = transform_flag::rotation;
+inline constexpr transform_flags scaled_rotation
+    = tg::impl::transform_canonical(transform_flag::rotation | transform_flag::uniform_scaling);
 
 /// any invertible linear map, so orientation-reversing ones included — see canonicalization rule 3.
-inline constexpr cc::flags<transform_flags> linear = tg::impl::transform_canonical(transform_flags::general_linear);
+inline constexpr transform_flags linear = tg::impl::transform_canonical(transform_flag::general_linear);
 
 // with a translation
-inline constexpr cc::flags<transform_flags> translation = transform_flags::translation;
-inline constexpr cc::flags<transform_flags> uniform_scaling_translation
+inline constexpr transform_flags translation = transform_flag::translation;
+inline constexpr transform_flags uniform_scaling_translation
     = tg::impl::transform_canonical(uniform_scaling | translation);
-inline constexpr cc::flags<transform_flags> scaling_translation = tg::impl::transform_canonical(scaling | translation);
-inline constexpr cc::flags<transform_flags> rigid = tg::impl::transform_canonical(rotation | translation);
-inline constexpr cc::flags<transform_flags> similarity = tg::impl::transform_canonical(scaled_rotation | translation);
-inline constexpr cc::flags<transform_flags> affine = tg::impl::transform_canonical(linear | translation);
+inline constexpr transform_flags scaling_translation = tg::impl::transform_canonical(scaling | translation);
+inline constexpr transform_flags rigid = tg::impl::transform_canonical(rotation | translation);
+inline constexpr transform_flags similarity = tg::impl::transform_canonical(scaled_rotation | translation);
+inline constexpr transform_flags affine = tg::impl::transform_canonical(linear | translation);
 
 /// The same classes with a signed scale factor, so they may reverse orientation.
 ///
 /// `signed_similarity` is the one that earns its keep: in 3D a negative uniform scale composed with a
 /// half-turn is a plane reflection, so it is the FULL conformal group — and a sphere still maps to a
 /// sphere under it, only the radius takes the magnitude.
-inline constexpr cc::flags<transform_flags> signed_uniform_scaling
-    = tg::impl::transform_canonical(uniform_scaling | transform_flags::negative_scaling);
-inline constexpr cc::flags<transform_flags> signed_scaling
-    = tg::impl::transform_canonical(scaling | transform_flags::negative_scaling);
-inline constexpr cc::flags<transform_flags> signed_scaled_rotation
-    = tg::impl::transform_canonical(scaled_rotation | transform_flags::negative_scaling);
-inline constexpr cc::flags<transform_flags> signed_uniform_scaling_translation
-    = tg::impl::transform_canonical(uniform_scaling_translation | transform_flags::negative_scaling);
-inline constexpr cc::flags<transform_flags> signed_scaling_translation
-    = tg::impl::transform_canonical(scaling_translation | transform_flags::negative_scaling);
-inline constexpr cc::flags<transform_flags> signed_similarity
-    = tg::impl::transform_canonical(similarity | transform_flags::negative_scaling);
+inline constexpr transform_flags signed_uniform_scaling
+    = tg::impl::transform_canonical(uniform_scaling | transform_flag::negative_scaling);
+inline constexpr transform_flags signed_scaling
+    = tg::impl::transform_canonical(scaling | transform_flag::negative_scaling);
+inline constexpr transform_flags signed_scaled_rotation
+    = tg::impl::transform_canonical(scaled_rotation | transform_flag::negative_scaling);
+inline constexpr transform_flags signed_uniform_scaling_translation
+    = tg::impl::transform_canonical(uniform_scaling_translation | transform_flag::negative_scaling);
+inline constexpr transform_flags signed_scaling_translation
+    = tg::impl::transform_canonical(scaling_translation | transform_flag::negative_scaling);
+inline constexpr transform_flags signed_similarity
+    = tg::impl::transform_canonical(similarity | transform_flag::negative_scaling);
 
 // the top of the lattice
-inline constexpr cc::flags<transform_flags> projective = transform_flags::all;
+inline constexpr transform_flags projective = tg::impl::transform_flag_all;
 } // namespace transform_class
 
 /// the linear part of a class, as far as the REPRESENTATION is concerned.
@@ -142,9 +151,9 @@ inline constexpr cc::flags<transform_flags> projective = transform_flags::all;
 /// negative_scaling is dropped along with translation and projection: whether a factor may be
 /// negative is a promise about its value, not a change of layout, so a signed similarity stores
 /// exactly what a similarity stores.
-[[nodiscard]] constexpr cc::flags<transform_flags> linear_part(cc::flags<transform_flags> f)
+[[nodiscard]] constexpr transform_flags linear_part(transform_flags f)
 {
-    return f.without(transform_flags::translation | transform_flags::projection | transform_flags::negative_scaling);
+    return f.without(transform_flag::translation | transform_flag::projection | transform_flag::negative_scaling);
 }
 
 /// The six representation kinds — the canonical linear classes with negative_scaling stripped.
@@ -155,12 +164,12 @@ inline constexpr cc::flags<transform_flags> projective = transform_flags::all;
 /// negative_scaling, so it is NOT equal to its own linear part.
 namespace linear_kind
 {
-inline constexpr cc::flags<transform_flags> identity = tg::impl::linear_part(transform_class::identity);
-inline constexpr cc::flags<transform_flags> uniform_scaling = tg::impl::linear_part(transform_class::uniform_scaling);
-inline constexpr cc::flags<transform_flags> scaling = tg::impl::linear_part(transform_class::scaling);
-inline constexpr cc::flags<transform_flags> rotation = tg::impl::linear_part(transform_class::rotation);
-inline constexpr cc::flags<transform_flags> scaled_rotation = tg::impl::linear_part(transform_class::scaled_rotation);
-inline constexpr cc::flags<transform_flags> general_linear = tg::impl::linear_part(transform_class::linear);
+inline constexpr transform_flags identity = tg::impl::linear_part(transform_class::identity);
+inline constexpr transform_flags uniform_scaling = tg::impl::linear_part(transform_class::uniform_scaling);
+inline constexpr transform_flags scaling = tg::impl::linear_part(transform_class::scaling);
+inline constexpr transform_flags rotation = tg::impl::linear_part(transform_class::rotation);
+inline constexpr transform_flags scaled_rotation = tg::impl::linear_part(transform_class::scaled_rotation);
+inline constexpr transform_flags general_linear = tg::impl::linear_part(transform_class::linear);
 } // namespace linear_kind
 
 /// how a class lays out its representation.
@@ -175,12 +184,12 @@ enum class transform_layout
     projective,
 };
 
-[[nodiscard]] constexpr transform_layout layout_of(cc::flags<transform_flags> f)
+[[nodiscard]] constexpr transform_layout layout_of(transform_flags f)
 {
-    if (f.has_any(transform_flags::projection))
+    if (f.has_any(transform_flag::projection))
         return transform_layout::projective;
 
-    if (f.has_any(transform_flags::translation))
+    if (f.has_any(transform_flag::translation))
         return tg::impl::linear_part(f) == transform_class::identity ? transform_layout::translation_only
                                                                      : transform_layout::linear_and_translation;
 

@@ -2,24 +2,36 @@
 #include <nexus/test.hh>
 #include <typed-geometry/transform/transform_flags.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
+using tg::impl::transform_flag;
 using tg::impl::transform_flags;
 namespace tc = tg::impl::transform_class;
+
+/// every bit pattern the seven flags can form.
+/// The enum is INDEXED, so a raw pattern is built with create_from_bits — transform_flag(bits) would mean bit number `bits`.
+constexpr int flag_pattern_count = 1 << 7;
+
+[[nodiscard]] consteval transform_flags flag_set_from_pattern(int bits)
+{
+    return transform_flags::create_from_bits(u32(bits));
+}
 
 /// the distinct canonical classes, in the order canonical() first produces them.
 struct class_list
 {
-    cc::flags<transform_flags> data[32] = {};
+    transform_flags data[32] = {};
     int count = 0;
 };
 
 consteval class_list canonical_classes()
 {
     class_list r;
-    for (int bits = 0; bits <= int(transform_flags::all); ++bits)
+    for (int bits = 0; bits < flag_pattern_count; ++bits)
     {
-        auto const c = tg::impl::transform_canonical(transform_flags(bits));
+        auto const c = tg::impl::transform_canonical(flag_set_from_pattern(bits));
 
         bool known = false;
         for (int i = 0; i < r.count; ++i)
@@ -39,9 +51,9 @@ consteval class_list canonical_classes()
 consteval bool verify_transform_flag_lattice()
 {
     // canonical() is a closure operator on the raw bit patterns
-    for (int a = 0; a <= int(transform_flags::all); ++a)
+    for (int a = 0; a < flag_pattern_count; ++a)
     {
-        auto const fa = transform_flags(a);
+        auto const fa = flag_set_from_pattern(a);
         auto const ca = tg::impl::transform_canonical(fa);
 
         if (tg::impl::transform_canonical(ca) != ca)
@@ -129,27 +141,26 @@ TEST("tg transform_flags - canonicalization")
 {
     SECTION("non-uniform scaling subsumes uniform scaling")
     {
-        CHECK(tg::impl::transform_canonical(transform_flags::uniform_scaling | transform_flags::non_uniform_scaling)
-              == transform_flags::non_uniform_scaling);
+        CHECK(tg::impl::transform_canonical(transform_flag::uniform_scaling | transform_flag::non_uniform_scaling)
+              == transform_flag::non_uniform_scaling);
     }
 
     SECTION("rotation with non-uniform scaling is a general linear map")
     {
         // R1 S1 R2 S2 is not of the form R S, so the class is not closed without general_linear
-        CHECK(tg::impl::transform_canonical(transform_flags::rotation | transform_flags::non_uniform_scaling)
-              == tc::linear);
-        CHECK(tc::linear.has_all(transform_flags::general_linear));
+        CHECK(tg::impl::transform_canonical(transform_flag::rotation | transform_flag::non_uniform_scaling) == tc::linear);
+        CHECK(tc::linear.has_all(transform_flag::general_linear));
     }
 
     SECTION("projection is the top of the lattice")
     {
-        CHECK(tg::impl::transform_canonical(transform_flags::projection) == transform_flags::all);
-        CHECK(tc::projective == transform_flags::all);
+        CHECK(tg::impl::transform_canonical(transform_flag::projection) == tg::impl::transform_flag_all);
+        CHECK(tc::projective == tg::impl::transform_flag_all);
     }
 
     SECTION("a rigid transform is exactly rotation plus translation")
     {
-        CHECK(tc::rigid == (transform_flags::rotation | transform_flags::translation));
+        CHECK(tc::rigid == (transform_flag::rotation | transform_flag::translation));
     }
 }
 
@@ -191,17 +202,17 @@ TEST("tg transform_flags - set operations")
 {
     SECTION("subtraction is what replaced the masked complement")
     {
-        CHECK(tc::projective.without(transform_flags::all).is_empty());
+        CHECK(tc::projective.without(tg::impl::transform_flag_all).is_empty());
         CHECK(tc::projective.without(tc::rigid)
-              == (transform_flags::uniform_scaling | transform_flags::non_uniform_scaling
-                  | transform_flags::negative_scaling | transform_flags::general_linear | transform_flags::projection));
+              == (transform_flag::uniform_scaling | transform_flag::non_uniform_scaling
+                  | transform_flag::negative_scaling | transform_flag::general_linear | transform_flag::projection));
     }
 
     SECTION("has_any / has_all / without")
     {
         CHECK(!tc::rigid.is_empty());
         CHECK(tc::identity.is_empty());
-        CHECK(tc::rigid.has_all(transform_flags::rotation));
-        CHECK(tc::rigid.without(transform_flags::rotation) == transform_flags::translation);
+        CHECK(tc::rigid.has_all(transform_flag::rotation));
+        CHECK(tc::rigid.without(transform_flag::rotation) == transform_flag::translation);
     }
 }
