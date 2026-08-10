@@ -1,10 +1,23 @@
+#include <clean-core/common/flags.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/transform/transform_flags.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
+using tg::impl::transform_flag;
 using tg::impl::transform_flags;
 namespace tc = tg::impl::transform_class;
+
+/// every bit pattern the seven flags can form.
+/// The enum is INDEXED, so a raw pattern is built with create_from_bits — transform_flag(bits) would mean bit number `bits`.
+constexpr int flag_pattern_count = 1 << 7;
+
+[[nodiscard]] consteval transform_flags flag_set_from_pattern(int bits)
+{
+    return transform_flags::create_from_bits(u32(bits));
+}
 
 /// the distinct canonical classes, in the order canonical() first produces them.
 struct class_list
@@ -16,9 +29,9 @@ struct class_list
 consteval class_list canonical_classes()
 {
     class_list r;
-    for (int bits = 0; bits <= int(transform_flags::all); ++bits)
+    for (int bits = 0; bits < flag_pattern_count; ++bits)
     {
-        auto const c = tg::impl::transform_canonical(transform_flags(bits));
+        auto const c = tg::impl::transform_canonical(flag_set_from_pattern(bits));
 
         bool known = false;
         for (int i = 0; i < r.count; ++i)
@@ -38,9 +51,9 @@ consteval class_list canonical_classes()
 consteval bool verify_transform_flag_lattice()
 {
     // canonical() is a closure operator on the raw bit patterns
-    for (int a = 0; a <= int(transform_flags::all); ++a)
+    for (int a = 0; a < flag_pattern_count; ++a)
     {
-        auto const fa = transform_flags(a);
+        auto const fa = flag_set_from_pattern(a);
         auto const ca = tg::impl::transform_canonical(fa);
 
         if (tg::impl::transform_canonical(ca) != ca)
@@ -60,24 +73,43 @@ consteval bool verify_transform_flag_lattice()
     auto const& classes = list.data;
     int const n = list.count;
 
+    // Tabulated first, because the least-upper-bound loop below asks the same n^2 questions n times over.
+    // Every join is itself one of the classes, which is what lets the tables be indexed rather than searched.
+    bool is_sub[32][32] = {};
+    int join_index[32][32] = {};
+
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
         {
-            auto const join = tg::impl::transform_canonical(classes[i] | classes[j]);
+            is_sub[i][j] = tg::impl::transform_is_subclass(classes[i], classes[j]);
 
-            if (tg::impl::transform_canonical(classes[j] | classes[i]) != join)
-                return false; // commutative
+            auto const join = tg::impl::transform_canonical(classes[i] | classes[j]);
             if (!tg::impl::transform_is_canonical(join))
                 return false; // closed
-            if (!tg::impl::transform_is_subclass(classes[i], join) || !tg::impl::transform_is_subclass(classes[j], join))
+
+            join_index[i][j] = -1;
+            for (int k = 0; k < n; ++k)
+                if (classes[k] == join)
+                    join_index[i][j] = k;
+
+            if (join_index[i][j] < 0)
+                return false; // and lands on a class we know
+        }
+
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            if (join_index[i][j] != join_index[j][i])
+                return false; // commutative
+
+            int const join = join_index[i][j];
+            if (!is_sub[i][join] || !is_sub[j][join])
                 return false; // an upper bound
 
             for (int k = 0; k < n; ++k)
             {
                 // the LEAST upper bound: nothing containing both may fail to contain the join
-                if (tg::impl::transform_is_subclass(classes[i], classes[k])
-                    && tg::impl::transform_is_subclass(classes[j], classes[k])
-                    && !tg::impl::transform_is_subclass(join, classes[k]))
+                if (is_sub[i][k] && is_sub[j][k] && !is_sub[join][k])
                     return false;
             }
         }
@@ -109,27 +141,26 @@ TEST("tg transform_flags - canonicalization")
 {
     SECTION("non-uniform scaling subsumes uniform scaling")
     {
-        CHECK(tg::impl::transform_canonical(transform_flags::uniform_scaling | transform_flags::non_uniform_scaling)
-              == transform_flags::non_uniform_scaling);
+        CHECK(tg::impl::transform_canonical(transform_flag::uniform_scaling | transform_flag::non_uniform_scaling)
+              == transform_flag::non_uniform_scaling);
     }
 
     SECTION("rotation with non-uniform scaling is a general linear map")
     {
         // R1 S1 R2 S2 is not of the form R S, so the class is not closed without general_linear
-        CHECK(tg::impl::transform_canonical(transform_flags::rotation | transform_flags::non_uniform_scaling)
-              == tc::linear);
-        CHECK(tg::impl::has_all(tc::linear, transform_flags::general_linear));
+        CHECK(tg::impl::transform_canonical(transform_flag::rotation | transform_flag::non_uniform_scaling) == tc::linear);
+        CHECK(tc::linear.has_all(transform_flag::general_linear));
     }
 
     SECTION("projection is the top of the lattice")
     {
-        CHECK(tg::impl::transform_canonical(transform_flags::projection) == transform_flags::all);
-        CHECK(tc::projective == transform_flags::all);
+        CHECK(tg::impl::transform_canonical(transform_flag::projection) == tg::impl::transform_flag_all);
+        CHECK(tc::projective == tg::impl::transform_flag_all);
     }
 
     SECTION("a rigid transform is exactly rotation plus translation")
     {
-        CHECK(tc::rigid == (transform_flags::rotation | transform_flags::translation));
+        CHECK(tc::rigid == (transform_flag::rotation | transform_flag::translation));
     }
 }
 
@@ -139,7 +170,7 @@ TEST("tg transform_flags - is_subclass is not a bit-subset test")
     // so affine does not contain similarity's bits even though every similarity IS an affine map.
     SECTION("the bit test gets it wrong")
     {
-        CHECK(!tg::impl::has_all(tc::affine, tc::similarity));
+        CHECK(!tc::affine.has_all(tc::similarity));
     }
 
     SECTION("the class test gets it right")
@@ -167,19 +198,21 @@ TEST("tg transform_flags - is_subclass is not a bit-subset test")
     }
 }
 
-TEST("tg transform_flags - bit operations")
+TEST("tg transform_flags - set operations")
 {
-    SECTION("complement stays inside the defined bits")
+    SECTION("subtraction is what replaced the masked complement")
     {
-        CHECK(~transform_flags::none == transform_flags::all);
-        CHECK(~transform_flags::all == transform_flags::none);
+        CHECK(tc::projective.without(tg::impl::transform_flag_all).is_empty());
+        CHECK(tc::projective.without(tc::rigid)
+              == (transform_flag::uniform_scaling | transform_flag::non_uniform_scaling
+                  | transform_flag::negative_scaling | transform_flag::general_linear | transform_flag::projection));
     }
 
     SECTION("has_any / has_all / without")
     {
-        CHECK(tg::impl::has_any(tc::rigid));
-        CHECK(!tg::impl::has_any(tc::identity));
-        CHECK(tg::impl::has_all(tc::rigid, transform_flags::rotation));
-        CHECK(tg::impl::without(tc::rigid, transform_flags::rotation) == transform_flags::translation);
+        CHECK(!tc::rigid.is_empty());
+        CHECK(tc::identity.is_empty());
+        CHECK(tc::rigid.has_all(transform_flag::rotation));
+        CHECK(tc::rigid.without(transform_flag::rotation) == transform_flag::translation);
     }
 }

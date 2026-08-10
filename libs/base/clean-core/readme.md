@@ -21,7 +21,7 @@ Source lives in `src/clean-core/`, grouped by topic:
 
 | Folder       | What's in it |
 |--------------|--------------|
-| `common/`    | compiler macros, type/meta `utility`, `flags`, `hash`, and the assertion suite (`assert`, `asserts`, `assertf`, `assert-handler`) |
+| `common/`    | compiler macros, type/meta `utility`, `enum_traits` + `flags`, `hash`, and the assertion suite (`assert`, `asserts`, `assertf`, `assert-handler`) |
 | `platform/`  | OS-facing utilities — `console` (color), `native` (demangling), `source_location`, `stacktrace`, and `win32_sanitized`, the sanctioned route to `<Windows.h>` |
 | `math/`      | bedrock math helpers needed before the dedicated math library exists — `bit`, the `random` PRNG, and `wide_arith`'s 128-bit primitives |
 | `memory/`    | allocation handles (`allocation`, `node_allocation`) over memory resources |

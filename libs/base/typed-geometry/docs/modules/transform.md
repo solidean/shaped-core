@@ -110,7 +110,7 @@ This is the module's easiest mistake, so it is worth stating plainly.
 Canonicalization **clears** bits — `affine` drops `uniform_scaling`, because `non_uniform_scaling` subsumes it — which means:
 
 ```cpp
-tg::impl::has_all(transform_class::affine, transform_class::similarity)         // FALSE
+transform_class::affine.has_all(transform_class::similarity)                          // FALSE
 tg::impl::transform_is_subclass(transform_class::similarity, transform_class::affine) // true
 ```
 

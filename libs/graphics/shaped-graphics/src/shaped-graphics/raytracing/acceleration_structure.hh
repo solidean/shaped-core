@@ -21,7 +21,7 @@ namespace sg
 /// Trade-offs baked into a structure at build time, which cannot change afterward.
 /// Bit flags — combine with `|`, test with `has_flag`.
 /// `fast_trace` and `fast_build` must not both be set.
-/// Migrates to `cc::flags` once that lands, same status as buffer_usage.
+/// Migrates to `cc::flags`, same status as buffer_usage.
 enum class accel_build_flags : u32
 {
     none = 0,

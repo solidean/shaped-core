@@ -173,13 +173,16 @@ q.to_rotation_matrix();                           // mat3 — q must be UNIT; a 
 
 ```cpp
 // The flag machinery lives in tg::impl and is NOT how you name a class — use the aliases below.
-// tg::impl::transform_flags        enum class: translation, uniform_scaling, non_uniform_scaling,
+// tg::impl::transform_flag         enum class: translation, uniform_scaling, non_uniform_scaling,
 //                                  negative_scaling, rotation, general_linear, projection
+//                                  Plain and INDEXED — no `none` / `all` value; the empty set is {},
+//                                  the full one is tg::impl::transform_flag_all.
 // tg::impl::transform_class::rigid ... identity, translation, uniform_scaling, scaling, rotation,
 //                                  scaled_rotation, similarity, linear, affine, scaling_translation,
 //                                  uniform_scaling_translation, projective, and signed_ variants
 // tg::impl::transform_canonical(f) / transform_is_canonical(f) / transform_is_subclass(sub, super)
-// tg::impl::has_any / has_all / without   — the flag-set stand-in, until cc::flags exists
+// tg::impl::transform_flags       = cc::flags<transform_flag>, the SET type: f.has_any / f.has_all / f.without.
+// transform_class::* and the Flags template argument are that type, NOT the bare enum.
 ```
 
 ```cpp
